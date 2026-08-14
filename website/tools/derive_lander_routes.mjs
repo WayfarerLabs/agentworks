@@ -4,10 +4,17 @@ import { createHash } from "node:crypto";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { classifyRouteSweep, routeHull } from "./lander_route_collision.mjs";
+import { canonical, canonicalBytes, fixtureDigest as digest, fixturePose } from "./lander_route_fixture.mjs";
 
-const DERIVER_VERSION = "agw-lander-route-deriver/v8";
+const DERIVER_VERSION = "agw-lander-route-deriver/v9";
 const SYNTHESIZER_VERSION = "agw-lander-corridor-synthesizer/v1";
-const DERIVED_SCHEMA = "agw-lander-route-derived/v7";
+const DERIVED_SCHEMA = "agw-lander-route-derived/v8";
+const BOOTSTRAP_SCHEMA = "agw-lander-route-derived/v7";
+const BOOTSTRAP_SHA = "c5800497182045dbf664fd50abd6cfd79cc4293bdadbfd4afa526e72f7d71b12";
+const BOOTSTRAP_OUTPUT = "dea7263fe5b01ea1c0a442a1f2fefb3f4dad472cbe8668b8bf00793cde5afef7";
+const BOOTSTRAP_PROOF = "ca09ed720e3e752745af046cbb2013c99c36227963e9799b1f1cd8961b49f354";
+const COLLISION_VERSION = "agw-lander-swept-collision/v2";
 const POSE_DECIMALS = 9;
 const STATIC_WORLD_SEED = 0x41475731;
 const WORLD_SEEDS = [11, 39, 41, STATIC_WORLD_SEED];
@@ -28,6 +35,7 @@ const CONSTANTS = Object.freeze({
     ANGULAR_ASSIST_DIFFERENTIAL: 0.12,
     ANGULAR_ASSIST_FULL_SPEED: 15,
     COLLISION_MARGIN: 0.02,
+    COLLISION_ANGLE_KNOT_DEGREES: 1,
     ENGINE_ACCELERATION: 9,
     FUEL_FLOW: 1,
     FUEL_QUANTUM,
@@ -36,12 +44,14 @@ const CONSTANTS = Object.freeze({
     MAX_LANDING_ANGULAR_SPEED: 26,
     MAX_LANDING_DESCENT_SPEED: 3.6,
     MAX_LANDING_HORIZONTAL_SPEED: 2.2,
-    MAX_PLAYABLE_Y: 56,
     MAX_THRUST_VECTOR: 30,
     STEP_SECONDS,
+    TERMINUS_WIDTH: 0.2,
     TORQUE_ACCELERATION: 80,
     TURN_DIFFERENTIAL: 0.375,
     TURNING_TOTAL: 0.8,
+    WORLD_MAX_X: 393216,
+    WORLD_MIN_X: -393216,
 });
 const PREFIX = Object.freeze([
     [1, 90],
@@ -58,61 +68,28 @@ const PREFIX = Object.freeze([
     [0, 120],
     [2, 34],
 ]);
-const PROFILE_ORDER = ["H0", "H1", "H2", "H3", "L0", "L1", "L2", "L3"];
+const PROFILE_ORDER = ["S0", "S1", "S2", "S3", "S4", "S5", "S6", "S7"];
 const OPENING_COUNTS = Object.freeze({
-    H0: [126, 72],
-    H1: [114, 72],
-    H2: [132, 72],
-    H3: [102, 72],
-    L0: [396, 120],
-    L1: [402, 120],
-    L2: [384, 114],
-    L3: [408, 120],
+    S0: [162, 72],
+    S1: [348, 102],
+    S2: [378, 114],
+    S3: [264, 72],
+    S4: [168, 72],
+    S5: [378, 102],
+    S6: [258, 72],
+    S7: [378, 114],
 });
 
-function canonical(value) {
-    if (Array.isArray(value)) return value.map(canonical);
-    if (value && typeof value === "object") {
-        return Object.fromEntries(
-            Object.keys(value)
-                .sort()
-                .map((key) => [key, canonical(value[key])]),
-        );
-    }
-    return value;
-}
-function canonicalBytes(value) {
-    return JSON.stringify(canonical(value));
-}
-function digest(value) {
-    return createHash("sha256").update(canonicalBytes(value), "utf8").digest("hex");
-}
-function poseForFixture(pose) {
-    return Object.fromEntries(
-        ["x", "y", "vx", "vy", "angle", "angularVelocity"].map((key) => [
-            key,
-            Number(pose[key].toFixed(POSE_DECIMALS)),
-        ]),
-    );
-}
-function clamp(value, minimum, maximum) {
-    return Math.min(maximum, Math.max(minimum, value));
-}
-function positiveModulo(value, modulus) {
-    return ((value % modulus) + modulus) % modulus;
-}
-function normalizeDegrees(value) {
-    return positiveModulo(value + 180, 360) - 180;
-}
+const clamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, value));
+const positiveModulo = (value, modulus) => ((value % modulus) + modulus) % modulus;
+const normalizeDegrees = (value) => positiveModulo(value + 180, 360) - 180;
 function mixUint32(input) {
     let value = Number(input) >>> 0;
     value = Math.imul(value ^ (value >>> 16), 0x7feb352d);
     value = Math.imul(value ^ (value >>> 15), 0x846ca68b);
     return (value ^ (value >>> 16)) >>> 0;
 }
-function normalizeSeed(seed) {
-    return Number(seed) >>> 0 || 0x6d2b79f5;
-}
+const normalizeSeed = (seed) => Number(seed) >>> 0 || 0x6d2b79f5;
 function sampleUnit(seed, stream, index) {
     return (
         mixUint32(
@@ -121,20 +98,18 @@ function sampleUnit(seed, stream, index) {
         2 ** 32
     );
 }
-export function quantumCeil(value) {
-    return Math.ceil(value / FUEL_QUANTUM) * FUEL_QUANTUM;
-}
+export const quantumCeil = (value) => Math.ceil(value / FUEL_QUANTUM) * FUEL_QUANTUM;
 export function millimeterDeltaCensus(assignments) {
-    return new Set(
-        assignments.map(({ originMillimeters, targetMillimeters }) => targetMillimeters - originMillimeters),
-    ).size;
+    return new Set(assignments.map(({ originMillimeters, targetMillimeters }) => targetMillimeters - originMillimeters))
+        .size;
 }
 
 function validateGeometry(geometry) {
     if (
-        geometry.schema !== "agw-lander-route-geometry/v7" ||
+        geometry.schema !== "agw-lander-route-geometry/v8" ||
         geometry.synthesizer.recipe !== SYNTHESIZER_VERSION ||
-        geometry.terrain.blockWidth !== 128 ||
+        geometry.terrain.superblockWidth !== 512 ||
+        geometry.terrain.epochSuperblocks !== 8 ||
         geometry.terrain.cadence !== 16 ||
         geometry.sites.formula !== "36+96*i" ||
         geometry.sites.spacing !== 96 ||
@@ -146,44 +121,49 @@ function validateGeometry(geometry) {
         geometry.synthesizer.maxContactStep !== 4320 ||
         canonicalBytes(Object.keys(geometry.terrain.profiles).sort()) !== canonicalBytes([...PROFILE_ORDER].sort())
     ) {
-        throw new Error("Unsupported or incomplete geometry-v7 fixture");
+        throw new Error("Unsupported or incomplete geometry-v8 fixture");
     }
 }
 function worldY(geometry, normalized) {
     return geometry.terrain.mapping.worldScale * normalized + geometry.terrain.mapping.worldOffset;
 }
-function profileFor(geometry, parity, blockIndex, variant) {
-    const family = positiveModulo(blockIndex + parity, 2) === 0 ? "H" : "L";
-    const profile = `${family}${variant}`;
-    return { profile, samples: geometry.terrain.profiles[profile] };
-}
 function assignedHeight(geometry, assignment, x) {
-    const blockIndex = Math.floor(x / 128);
-    const variant = assignment.variants[blockIndex + 1];
-    if (variant === undefined) throw new RangeError(`Assignment ${assignment.assignmentId} misses block ${blockIndex}`);
-    const samples = profileFor(geometry, assignment.parity, blockIndex, variant).samples;
-    const local = x - blockIndex * 128;
-    const segment = Math.min(7, Math.floor(local / 16));
+    const blockIndex = Math.floor(x / 512);
+    const profile = blockIndex === assignment.leftBlock ? assignment.leftProfile : assignment.rightProfile;
+    if (profile === undefined) throw new RangeError(`Assignment ${assignment.assignmentId} misses block ${blockIndex}`);
+    const samples = geometry.terrain.profiles[`S${profile}`];
+    const local = x - blockIndex * 512;
+    const segment = Math.min(31, Math.floor(local / 16));
     const fraction = (local - segment * 16) / 16;
     return worldY(geometry, samples[segment] + (samples[segment + 1] - samples[segment]) * fraction);
 }
 function seededBlock(geometry, seed, blockIndex) {
-    const parity = Math.floor(2 * sampleUnit(seed, geometry.terrain.parityStream, 0));
-    const variant = Math.floor(4 * sampleUnit(seed, geometry.terrain.variantStream, blockIndex >>> 0));
-    const selected = profileFor(geometry, parity, blockIndex, variant);
+    const epoch = Math.floor(blockIndex / 8),
+        slot = positiveModulo(blockIndex, 8),
+        offset = Math.floor(8 * sampleUnit(seed, 15, 0)),
+        first = positiveModulo(offset + epoch, 8),
+        last = positiveModulo(first + 2, 8),
+        middle = Array.from({ length: 8 }, (_, index) => index).filter((index) => index !== first && index !== last);
+    for (let index = 5; index >= 1; index -= 1) {
+        const exchange = Math.floor((index + 1) * sampleUnit(seed, 16, (Math.imul(epoch, 6) + 5 - index) >>> 0));
+        [middle[index], middle[exchange]] = [middle[exchange], middle[index]];
+    }
+    const profile = [first, ...middle, last][slot],
+        samples = geometry.terrain.profiles[`S${profile}`];
     return {
+        epoch,
         index: blockIndex,
-        variant,
-        profile: selected.profile,
-        vertices: selected.samples.map((height, index) => [blockIndex * 128 + index * 16, worldY(geometry, height)]),
+        profile,
+        slot,
+        vertices: samples.map((height, index) => [blockIndex * 512 + index * 16, worldY(geometry, height)]),
     };
 }
 function seededHeight(geometry, seed, x) {
-    const block = seededBlock(geometry, seed, Math.floor(x / 128));
-    const segment = Math.min(7, Math.floor((x - block.index * 128) / 16));
-    const left = block.vertices[segment];
-    const right = block.vertices[segment + 1];
-    return left[1] + ((right[1] - left[1]) * (x - left[0])) / 16;
+    const block = seededBlock(geometry, seed, Math.floor(x / 512));
+    const segment = Math.min(31, Math.floor((x - block.index * 512) / 16));
+    const samples = geometry.terrain.profiles[`S${block.profile}`];
+    const fraction = (x - block.index * 512 - segment * 16) / 16;
+    return worldY(geometry, samples[segment] + (samples[segment + 1] - samples[segment]) * fraction);
 }
 function siteDescriptor(heightAt, index, center) {
     const closedFootprint = [center - 4.8, center + 13.8];
@@ -209,35 +189,31 @@ function millimeters(deck) {
 
 function assignmentsFor(geometry) {
     const assignments = [];
-    for (const phase of [4, 36, 68, 100])
-        for (const parity of [0, 1]) {
-            for (let vm1 = 0; vm1 < 4; vm1 += 1)
-                for (let v0 = 0; v0 < 4; v0 += 1)
-                    for (let v1 = 0; v1 < 4; v1 += 1)
-                        for (let v2 = 0; v2 < 4; v2 += 1) {
-                            const variants = [vm1, v0, v1, v2];
-                            const assignmentId = `p${phase}-q${parity}-v${variants.join("")}`;
-                            const partial = { assignmentId, phase, parity, variants };
-                            const heightAt = (x) => assignedHeight(geometry, partial, x);
-                            const originDeck = siteDescriptor(heightAt, 0, phase).platformTop;
-                            const targetDeck = siteDescriptor(heightAt, 1, phase + 96).platformTop;
-                            const originMillimeters = millimeters(originDeck);
-                            const targetMillimeters = millimeters(targetDeck);
-                            assignments.push({
-                                assignmentId,
-                                phase,
-                                parity,
-                                variants,
-                                originDeck,
-                                targetDeck,
-                                originMillimeters,
-                                targetMillimeters,
-                                deckDelta: targetDeck - originDeck,
-                                pairKey: `d:${originMillimeters}:${targetMillimeters}`,
-                            });
-                        }
-        }
-    if (assignments.length !== 2048) throw new Error(`Expected 2048 assignments, got ${assignments.length}`);
+    for (const phase of geometry.sites.spatialPhases) {
+        const leftBlock = Math.floor((phase - 4.8) / 512),
+            rightBlock = Math.floor((phase + 109.8) / 512);
+        for (let leftProfile = 0; leftProfile < 8; leftProfile += 1)
+            for (let rightProfile = 0; rightProfile < 8; rightProfile += 1) {
+                if ((leftBlock === rightBlock) !== (leftProfile === rightProfile)) continue;
+                const assignmentId = `p${phase}-a${leftProfile}-b${rightProfile}`;
+                const partial = { assignmentId, phase, leftBlock, rightBlock, leftProfile, rightProfile };
+                const heightAt = (x) => assignedHeight(geometry, partial, x);
+                const originDeck = siteDescriptor(heightAt, 0, phase).platformTop;
+                const targetDeck = siteDescriptor(heightAt, 1, phase + 96).platformTop;
+                const originMillimeters = millimeters(originDeck),
+                    targetMillimeters = millimeters(targetDeck);
+                assignments.push({
+                    ...partial,
+                    originDeck,
+                    targetDeck,
+                    originMillimeters,
+                    targetMillimeters,
+                    deckDelta: targetDeck - originDeck,
+                    pairKey: `d:${originMillimeters}:${targetMillimeters}`,
+                });
+            }
+    }
+    if (assignments.length !== 320) throw new Error(`Expected 320 assignments, got ${assignments.length}`);
     return assignments;
 }
 
@@ -276,9 +252,9 @@ function groupAssignments(assignments) {
             left.assignments[0].originMillimeters - right.assignments[0].originMillimeters ||
             left.assignments[0].targetMillimeters - right.assignments[0].targetMillimeters,
     );
-    if (groupsOrdered.length !== 100) throw new Error(`Expected 100 pair keys, got ${groupsOrdered.length}`);
-    if (millimeterDeltaCensus(groupsOrdered.map(([, group]) => group.assignments[0])) !== 75) {
-        throw new Error("Expected 75 exact deck deltas");
+    if (groupsOrdered.length !== 243) throw new Error(`Expected 243 pair keys, got ${groupsOrdered.length}`);
+    if (millimeterDeltaCensus(groupsOrdered.map(([, group]) => group.assignments[0])) !== 224) {
+        throw new Error("Expected 224 exact deck deltas");
     }
     return groupsOrdered;
 }
@@ -307,83 +283,27 @@ function integrate(pose, engines, fuel = Infinity) {
     const vx = pose.vx + total * Math.sin(radians) * STEP_SECONDS;
     const vy = pose.vy + (total * Math.cos(radians) - CONSTANTS.GRAVITY) * STEP_SECONDS;
     const angularVelocity = pose.angularVelocity + CONSTANTS.TORQUE_ACCELERATION * (left - right) * STEP_SECONDS;
+    const angularTravel = angularVelocity * STEP_SECONDS;
     return {
         pose: {
             x: pose.x + vx * STEP_SECONDS,
             y: pose.y + vy * STEP_SECONDS,
             vx,
             vy,
-            angle: normalizeDegrees(pose.angle + angularVelocity * STEP_SECONDS),
+            angle: normalizeDegrees(pose.angle + angularTravel),
             angularVelocity,
         },
+        angularTravel,
         fuel: exhausts ? 0 : Math.max(0, fuel - requestedBurn),
         burn: requestedBurn * scale,
     };
 }
-function transform(pose, x, y) {
-    const radians = (pose.angle * Math.PI) / 180;
-    return {
-        x: pose.x + x * Math.cos(radians) + y * Math.sin(radians),
-        y: pose.y - x * Math.sin(radians) + y * Math.cos(radians),
-    };
-}
-function hull(pose) {
-    return [transform(pose, -1.6, 0), transform(pose, 1.6, 0), transform(pose, 1.6, 6.5), transform(pose, -1.6, 6.5)];
-}
-function hullBottom(pose) {
-    return Math.min(...hull(pose).map((point) => point.y));
-}
-function interpolatePose(left, right, fraction) {
-    const lerp = (a, b) => a + (b - a) * fraction;
-    return {
-        x: lerp(left.x, right.x),
-        y: lerp(left.y, right.y),
-        vx: lerp(left.vx, right.vx),
-        vy: lerp(left.vy, right.vy),
-        angle: normalizeDegrees(left.angle + normalizeDegrees(right.angle - left.angle) * fraction),
-        angularVelocity: lerp(left.angularVelocity, right.angularVelocity),
-    };
-}
-function segmentDistanceSquared(a, b, c, d) {
-    const pointDistance = (p, s, e) => {
-        const dx = e.x - s.x,
-            dy = e.y - s.y,
-            length = dx * dx + dy * dy;
-        const t = length === 0 ? 0 : clamp(((p.x - s.x) * dx + (p.y - s.y) * dy) / length, 0, 1);
-        return (p.x - s.x - t * dx) ** 2 + (p.y - s.y - t * dy) ** 2;
-    };
-    const cross = (p, q, r) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
-    const on = (p, q, r) =>
-        q.x >= Math.min(p.x, r.x) &&
-        q.x <= Math.max(p.x, r.x) &&
-        q.y >= Math.min(p.y, r.y) &&
-        q.y <= Math.max(p.y, r.y);
-    const v = [cross(a, b, c), cross(a, b, d), cross(c, d, a), cross(c, d, b)];
-    if (
-        (v[0] === 0 && on(a, c, b)) ||
-        (v[1] === 0 && on(a, d, b)) ||
-        (v[2] === 0 && on(c, a, d)) ||
-        (v[3] === 0 && on(c, b, d)) ||
-        (v[0] > 0 !== v[1] > 0 && v[2] > 0 !== v[3] > 0)
-    )
-        return 0;
-    return Math.min(pointDistance(a, c, d), pointDistance(b, c, d), pointDistance(c, a, b), pointDistance(d, a, b));
-}
-function polygonSegmentDistanceSquared(polygon, start, end) {
-    let minimum = Infinity;
-    for (let i = 0; i < polygon.length; i += 1)
-        minimum = Math.min(minimum, segmentDistanceSquared(polygon[i], polygon[(i + 1) % polygon.length], start, end));
-    return minimum;
-}
-function rectangleSegments(left, right, bottom, top) {
-    const p = [
-        { x: left, y: bottom },
-        { x: right, y: bottom },
-        { x: right, y: top },
-        { x: left, y: top },
-    ];
-    return p.map((point, index) => [point, p[(index + 1) % 4]]);
-}
+const rectangle = (left, right, bottom, top) => [
+    { x: left, y: bottom },
+    { x: right, y: bottom },
+    { x: right, y: top },
+    { x: left, y: top },
+];
 function siteSolids(site, isOrigin) {
     const platformLeft = site.center - 4.8,
         platformRight = site.center + 4.8,
@@ -415,104 +335,70 @@ function siteSolids(site, isOrigin) {
         mast: { left: buildingLeft + 3.25, right: buildingLeft + 3.75, bottom: roof, top: roof + 3.2 },
     };
 }
-function solidSegments(world, ignoreOriginTop) {
-    const result = [];
+function collisionCandidates(world, ignoreOriginTop) {
+    const result = [],
+        target = world.sites[1] ?? world.sites[0];
     for (const site of world.sites) {
         const s = siteSolids(site, site.index === world.originSiteId);
         const p = s.platform;
-        if (s.isOrigin && !ignoreOriginTop)
-            result.push([
-                { x: p.left, y: p.top },
-                { x: p.right, y: p.top },
-            ]);
-        result.push(
-            [
-                { x: p.left, y: p.top },
-                { x: p.left, y: p.bottom },
-            ],
-            [
-                { x: p.left, y: p.bottom },
-                { x: p.right, y: p.bottom },
-            ],
-            [
-                { x: p.right, y: p.bottom },
-                { x: p.right, y: p.top },
-            ],
-        );
-        for (const r of [s.truss, ...s.supports, s.noc, s.mast])
-            result.push(...rectangleSegments(r.left, r.right, r.bottom, r.top));
+        if (site === target || (s.isOrigin && ignoreOriginTop))
+            result.push(
+                {
+                    cause: "platform",
+                    priority: 1,
+                    segment: [
+                        { x: p.left, y: p.top },
+                        { x: p.left, y: p.bottom },
+                    ],
+                },
+                {
+                    cause: "platform",
+                    priority: 1,
+                    segment: [
+                        { x: p.left, y: p.bottom },
+                        { x: p.right, y: p.bottom },
+                    ],
+                },
+                {
+                    cause: "platform",
+                    priority: 1,
+                    segment: [
+                        { x: p.right, y: p.bottom },
+                        { x: p.right, y: p.top },
+                    ],
+                },
+            );
+        else result.push({ cause: "platform", priority: 1, polygon: rectangle(p.left, p.right, p.bottom, p.top) });
+        for (const box of [s.truss, ...s.supports, s.noc, s.mast])
+            result.push({
+                cause: box === s.noc ? "noc" : box === s.mast ? "mast" : box === s.truss ? "truss" : "column",
+                priority: box === s.noc || box === s.mast ? 0 : 2,
+                polygon: rectangle(box.left, box.right, box.bottom, box.top),
+            });
     }
-    return result;
-}
-function terrainSegments(world) {
-    return world.vertices.slice(1).map((right, index) => [
-        { x: world.vertices[index][0], y: world.vertices[index][1] },
-        { x: right[0], y: right[1] },
-    ]);
-}
-function collides(pose, world, ignoreOriginTop) {
-    const margin2 = CONSTANTS.COLLISION_MARGIN ** 2,
-        polygon = hull(pose);
-    const bounds = {
-        left: Math.min(...polygon.map((p) => p.x)),
-        right: Math.max(...polygon.map((p) => p.x)),
-        bottom: Math.min(...polygon.map((p) => p.y)),
-        top: Math.max(...polygon.map((p) => p.y)),
+    for (let index = 1; index < world.vertices.length; index += 1)
+        result.push({
+            cause: "terrain",
+            priority: 4,
+            segment: [
+                { x: world.vertices[index - 1][0], y: world.vertices[index - 1][1] },
+                { x: world.vertices[index][0], y: world.vertices[index][1] },
+            ],
+            solidBelow: true,
+        });
+    result.push({
+        cause: "target",
+        priority: 5,
+        segment: [
+            { x: target.center - 4.8, y: target.platformTop },
+            { x: target.center + 4.8, y: target.platformTop },
+        ],
+        target: true,
+    });
+    return {
+        candidates: result,
+        target: { ...target, platformLeft: target.center - 4.8, platformRight: target.center + 4.8 },
     };
-    const near = ([a, b]) =>
-        Math.max(a.x, b.x) >= bounds.left - 0.02 &&
-        Math.min(a.x, b.x) <= bounds.right + 0.02 &&
-        Math.max(a.y, b.y) >= bounds.bottom - 0.02 &&
-        Math.min(a.y, b.y) <= bounds.top + 0.02;
-    if (
-        solidSegments(world, ignoreOriginTop).some(
-            ([a, b]) => near([a, b]) && polygonSegmentDistanceSquared(polygon, a, b) <= margin2,
-        )
-    )
-        return true;
-    return terrainSegments(world).some(
-        ([a, b]) =>
-            (near([a, b]) && polygonSegmentDistanceSquared(polygon, a, b) <= margin2) ||
-            polygon.some((p) => p.x >= a.x && p.x <= b.x && p.y <= a.y + ((b.y - a.y) * (p.x - a.x)) / (b.x - a.x)),
-    );
-}
-function sweptCollision(previous, next, world, ignoreOriginTop) {
-    const rotation = Math.hypot(1.6, 6.5) * Math.abs((normalizeDegrees(next.angle - previous.angle) * Math.PI) / 180);
-    const intervals = Math.ceil((Math.hypot(next.x - previous.x, next.y - previous.y) + rotation) / 0.02);
-    if (intervals > 64) return true;
-    for (let i = 0; i <= Math.max(1, intervals); i += 1)
-        if (collides(interpolatePose(previous, next, i / Math.max(1, intervals)), world, ignoreOriginTop)) return true;
-    return false;
-}
-function contactPose(previous, next, deck) {
-    let clear = previous,
-        hit = next,
-        a = 0,
-        b = 1;
-    for (let i = 0; i < 12; i += 1) {
-        const m = (a + b) / 2,
-            p = interpolatePose(previous, next, m);
-        if (hullBottom(p) <= deck) {
-            hit = p;
-            b = m;
-        } else {
-            clear = p;
-            a = m;
-        }
-    }
-    void clear;
-    return hit;
-}
-function safeContact(pose, site) {
-    const feet = [transform(pose, -1.6, 0), transform(pose, 1.6, 0)];
-    return (
-        feet.every((f) => f.x >= site.center - 4.8 && f.x <= site.center + 4.8) &&
-        pose.vy <= 0 &&
-        Math.abs(pose.vx) <= 2.2 &&
-        Math.abs(pose.vy) <= 3.6 &&
-        Math.abs(normalizeDegrees(pose.angle)) <= 18 &&
-        Math.abs(pose.angularVelocity) <= 26
-    );
 }
 
 function mergeRun(runs, command, count) {
@@ -526,8 +412,10 @@ function replay(runs, world, initialPose, fuel, maxSteps = 4320) {
         burn = 0,
         stepIndex = 0,
         launchCleared = initialPose.y > world.sites[0].platformTop + 0.05;
-    let maxHullTop = Math.max(...hull(pose).map((p) => p.y));
-    const used = [];
+    let maxHullTop = Math.max(...routeHull(pose).map((p) => p.y));
+    const used = [],
+        ordinaryCollision = collisionCandidates(world, false),
+        launchCollision = collisionCandidates(world, true);
     for (const [command, count] of runs) {
         let runCount = 0;
         for (let i = 0; i < count; i += 1) {
@@ -539,52 +427,32 @@ function replay(runs, world, initialPose, fuel, maxSteps = 4320) {
             burn += result.burn;
             stepIndex += 1;
             runCount += 1;
-            maxHullTop = Math.max(maxHullTop, ...hull(pose).map((p) => p.y));
-            const ignoreOriginTop = !launchCleared && pose.vy > 0;
-            if (sweptCollision(previous, pose, world, ignoreOriginTop))
-                return {
-                    classification: "unsafe",
-                    cause: "collision",
-                    contactStep: stepIndex,
+            maxHullTop = Math.max(maxHullTop, ...routeHull(pose).map((p) => p.y));
+            const ignoreOriginTop = !launchCleared;
+            const collision = ignoreOriginTop ? launchCollision : ordinaryCollision,
+                contact = classifyRouteSweep(
+                    previous,
                     pose,
-                    burn,
-                    reserve: remaining,
-                    maxHullTop,
-                    runs: used,
-                };
-            launchCleared ||= [transform(pose, -1.6, 0), transform(pose, 1.6, 0)].every(
-                (f) => f.y > world.sites[0].platformTop + 0.05,
-            );
-            const target = world.sites[1] ?? world.sites[0];
-            if (
-                hullBottom(previous) > target.platformTop &&
-                hullBottom(pose) <= target.platformTop &&
-                Math.max(transform(pose, -1.6, 0).x, transform(pose, 1.6, 0).x) >= target.center - 4.8 &&
-                Math.min(transform(pose, -1.6, 0).x, transform(pose, 1.6, 0).x) <= target.center + 4.8
-            ) {
+                    result.angularTravel,
+                    collision.candidates,
+                    collision.target,
+                );
+            if (contact) {
                 mergeRun(used, command, runCount);
-                const contact = contactPose(previous, pose, target.platformTop);
                 return {
-                    classification: safeContact(contact, target) ? "safe" : "unsafe",
+                    classification: contact.classification,
+                    cause: contact.cause,
                     contactStep: stepIndex,
-                    pose: contact,
+                    pose: contact.pose,
                     burn,
                     reserve: remaining,
                     maxHullTop,
                     runs: used,
                 };
             }
-            if (pose.y > 56)
-                return {
-                    classification: "unsafe",
-                    cause: "ceiling",
-                    contactStep: stepIndex,
-                    pose,
-                    burn,
-                    reserve: remaining,
-                    maxHullTop,
-                    runs: used,
-                };
+            launchCleared ||= routeHull(pose)
+                .slice(0, 2)
+                .every((f) => f.y > world.sites[0].platformTop + 0.05);
         }
         mergeRun(used, command, runCount);
     }
@@ -611,14 +479,11 @@ function envelopeWorld(originDeck, targetDeck) {
             supportFeet: [left, left + 1, left + 8.8, left + 9.8, left + 17.6, left + 18.6].map((x) => at(x - 36)),
         };
     };
-    const vertices = [];
-    for (let x = 5; x <= 107; x += 2) vertices.push([x + 36, at(x)]);
-    if (vertices.at(-1)[0] < 143) vertices.push([143, at(107)]);
     return {
         relativeEnvelope: relative,
         originSiteId: 0,
         sites: [make(0, 36, originDeck), make(1, 132, targetDeck)],
-        vertices,
+        vertices: relative.map(([x, y]) => [x + 36, y]),
     };
 }
 function assignmentWorld(geometry, assignment) {
@@ -726,10 +591,15 @@ function desired(layer, delta, prefixX, poseX) {
         const q = clamp((layer - 120) / 140, 0, 1);
         y = cruiseY + (delta + 0.7 - cruiseY) * q;
         if (q < 1) vy = (delta + 0.7 - cruiseY) / 14;
-    } else if (poseX >= 91.2 && delta < 0) {
-        const q = clamp((layer - 150) / 110, 0, 1);
-        y = cruiseY + (delta + 0.7 - cruiseY) * q;
-        if (q < 1) vy = (delta + 0.7 - cruiseY) / 11;
+    } else if (delta < 0) {
+        if (poseX >= 91.2) {
+            const q = clamp((layer - 150) / 110, 0, 1);
+            y = cruiseY + (delta + 0.7 - cruiseY) * q;
+            if (q < 1) vy = (delta + 0.7 - cruiseY) / 11;
+        } else {
+            y = cruiseY;
+            vy = 0;
+        }
     }
     return { x, y, vx, vy };
 }
@@ -778,7 +648,6 @@ function synthesize(originDeck, targetDeck) {
                 if (
                     !Object.values(p).every(Number.isFinite) ||
                     advanced.fuel < 0 ||
-                    advanced.maxTop > 56 - originDeck ||
                     advanced.minY < Math.min(-0.5, delta - 0.5) ||
                     p.x < 5 ||
                     p.x > 107 ||
@@ -818,7 +687,9 @@ function synthesize(originDeck, targetDeck) {
                 };
         }
     }
-    throw new Error(`No exact route for ${originDeck}/${targetDeck}`);
+    throw new Error(
+        `No exact route for ${originDeck}/${targetDeck}; beam=${beam.length} expansions=${macroExpansions} terminalReplays=${terminalReplays} sample=${JSON.stringify(beam.slice(0, 3).map(({ pose }) => pose))}`,
+    );
 }
 
 function scheduleDigest(runs) {
@@ -827,11 +698,36 @@ function scheduleDigest(runs) {
         for (const byte of [command, count & 255, (count >>> 8) & 255]) value = Math.imul(value ^ byte, 16777619) >>> 0;
     return value;
 }
+let bootstrapSchedules;
+
+function replayBootstrap(originDeck, targetDeck) {
+    const world = envelopeWorld(originDeck, targetDeck);
+    let terminalReplays = 0;
+    for (const certified of bootstrapSchedules) {
+        terminalReplays += 1;
+        const replayed = replay(
+            certified.runs,
+            world,
+            { x: 36, y: originDeck, vx: 0, vy: 0, angle: 0, angularVelocity: 0 },
+            30,
+        );
+        if (replayed.classification === "safe") {
+            return {
+                runs: replayed.runs,
+                search: { selectedLayer: certified.selectedLayer, macroExpansions: 0, terminalReplays },
+                replayed,
+                world,
+            };
+        }
+    }
+    return null;
+}
+
 function recordFor(group) {
     const first = group.assignments[0],
         originDeck = first.originDeck,
         targetDeck = first.targetDeck;
-    const result = synthesize(originDeck, targetDeck),
+    const result = replayBootstrap(originDeck, targetDeck) ?? synthesize(originDeck, targetDeck),
         delta = targetDeck - originDeck;
     for (const assignment of group.assignments) {
         const concrete = assignmentWorld(currentGeometry, assignment);
@@ -858,11 +754,14 @@ function recordFor(group) {
         success: {
             classification: "safe",
             contactStep: result.replayed.contactStep,
-            pose: poseForFixture({
-                ...result.replayed.pose,
-                x: result.replayed.pose.x - 36,
-                y: result.replayed.pose.y - originDeck,
-            }),
+            pose: fixturePose(
+                {
+                    ...result.replayed.pose,
+                    x: result.replayed.pose.x - 36,
+                    y: result.replayed.pose.y - originDeck,
+                },
+                POSE_DECIMALS,
+            ),
         },
         controllerBurn,
         baseBurn: controllerBurn - climbSurcharge,
@@ -874,14 +773,14 @@ function recordFor(group) {
 function openingWorld(geometry, profile) {
     const samples = geometry.terrain.profiles[profile],
         at = (x) => {
-            const local = positiveModulo(x, 128),
-                segment = Math.min(7, Math.floor(local / 16)),
+            const local = positiveModulo(x, 512),
+                segment = Math.min(31, Math.floor(local / 16)),
                 q = (local - segment * 16) / 16;
             return worldY(geometry, samples[segment] + (samples[segment + 1] - samples[segment]) * q);
         };
     const site = siteDescriptor(at, 0, 36),
         vertices = [];
-    for (let x = 0; x <= 128; x += 16) vertices.push([x, at(x)]);
+    for (let x = 0; x <= 160; x += 16) vertices.push([x, at(x)]);
     return { originSiteId: null, sites: [site], vertices };
 }
 function openingFor(geometry, profile) {
@@ -899,7 +798,7 @@ function openingFor(geometry, profile) {
         deck: world.sites[0].platformTop,
         runs: result.runs,
         contactStep: result.contactStep,
-        pose: poseForFixture(result.pose),
+        pose: fixturePose(result.pose, POSE_DECIMALS),
         burn: result.burn,
         reserve: result.reserve,
         classification: "safe",
@@ -909,17 +808,16 @@ function worldWitness(geometry, seed, siteIndex) {
     const center = 36 + 96 * siteIndex,
         left = center - 4.8,
         right = center + 13.8;
-    const firstBlock = Math.floor(left / 128),
-        lastBlock = Math.floor(right / 128),
-        blocks = [];
-    for (let index = firstBlock; index <= lastBlock; index += 1) blocks.push(seededBlock(geometry, seed, index));
+    const firstBlock = Math.floor(left / 512),
+        lastBlock = Math.floor(right / 512),
+        superblocks = [];
+    for (let index = firstBlock; index <= lastBlock; index += 1) superblocks.push(seededBlock(geometry, seed, index));
     const site = siteDescriptor((x) => seededHeight(geometry, seed, x), siteIndex, center);
     const descriptor = {
         seed: normalizeSeed(seed),
         siteIndex,
-        directionlessPhase: positiveModulo(center, 128),
-        terrainParity: Math.floor(2 * sampleUnit(seed, geometry.terrain.parityStream, 0)),
-        blocks,
+        directionlessPhase: positiveModulo(center, 512),
+        superblocks,
         site,
     };
     return { descriptor, digest: digest(descriptor) };
@@ -929,13 +827,80 @@ let currentGeometry;
 function parseArguments(args) {
     const result = {};
     for (let i = 0; i < args.length; i += 2) {
-        if (!["--geometry", "--output", "--verify"].includes(args[i]) || args[i + 1] === undefined)
-            throw new TypeError("Usage: derive_lander_routes.mjs --geometry PATH --output PATH [--verify PATH]");
+        if (!["--geometry", "--bootstrap", "--output", "--verify"].includes(args[i]) || args[i + 1] === undefined)
+            throw new TypeError(
+                "Usage: derive_lander_routes.mjs --geometry PATH --bootstrap PATH --output PATH [--verify PATH]",
+            );
         result[args[i].slice(2)] = args[i + 1];
     }
-    if (!result.geometry || !result.output || (result.verify && resolve(result.output) === resolve(result.verify)))
-        throw new TypeError("Usage: derive_lander_routes.mjs --geometry PATH --output PATH [--verify PATH]");
+    if (
+        !result.geometry ||
+        !result.bootstrap ||
+        !result.output ||
+        (result.verify && resolve(result.output) === resolve(result.verify))
+    )
+        throw new TypeError(
+            "Usage: derive_lander_routes.mjs --geometry PATH --bootstrap PATH --output PATH [--verify PATH]",
+        );
     return result;
+}
+async function readBootstrap(path) {
+    const bytes = await readFile(path),
+        bootstrapDigest = createHash("sha256").update(bytes).digest("hex"),
+        source = JSON.parse(bytes.toString("utf8"));
+    if (
+        bootstrapDigest !== BOOTSTRAP_SHA ||
+        source.schema !== BOOTSTRAP_SCHEMA ||
+        source.outputDigest !== BOOTSTRAP_OUTPUT ||
+        source.proofDigest !== BOOTSTRAP_PROOF ||
+        source.records?.length !== 100
+    )
+        throw new Error("Bootstrap fixture authority mismatch");
+    const distinct = new Map();
+    for (const record of source.records) {
+        const match = /^d:(-?\d+):(-?\d+)$/.exec(record.pairKey),
+            runs = record.runs,
+            steps = Array.isArray(runs) ? runs.reduce((sum, run) => sum + (run?.[1] ?? NaN), 0) : NaN;
+        if (
+            !match ||
+            !Array.isArray(runs) ||
+            runs.length === 0 ||
+            !Number.isInteger(record.search?.selectedLayer) ||
+            record.search.selectedLayer < 1 ||
+            !runs.every(
+                (run, index) =>
+                    Array.isArray(run) &&
+                    run.length === 2 &&
+                    SEARCH_COMMANDS.includes(run[0]) &&
+                    Number.isInteger(run[1]) &&
+                    run[1] > 0 &&
+                    (index === 0 || runs[index - 1][0] !== run[0]),
+            ) ||
+            steps > 4320 ||
+            scheduleDigest(runs) !== record.scheduleDigest
+        )
+            throw new Error(`Malformed bootstrap schedule ${record.pairKey}`);
+        const candidate = {
+                digest: record.scheduleDigest >>> 0,
+                origin: Number(match[1]),
+                target: Number(match[2]),
+                runs: runs.map((run) => [...run]),
+                selectedLayer: record.search.selectedLayer,
+            },
+            key = canonicalBytes(candidate.runs),
+            existing = distinct.get(key);
+        if (
+            !existing ||
+            candidate.origin < existing.origin ||
+            (candidate.origin === existing.origin && candidate.target < existing.target)
+        )
+            distinct.set(key, candidate);
+    }
+    const schedules = [...distinct.values()].sort(
+        (a, b) => a.digest - b.digest || a.origin - b.origin || a.target - b.target,
+    );
+    if (schedules.length !== 75) throw new Error(`Expected 75 bootstrap schedules, got ${schedules.length}`);
+    return { bootstrapDigest, schedules };
 }
 async function main() {
     let options;
@@ -949,21 +914,50 @@ async function main() {
     try {
         currentGeometry = JSON.parse(await readFile(options.geometry, "utf8"));
         validateGeometry(currentGeometry);
+        const bootstrap = await readBootstrap(options.bootstrap);
+        bootstrapSchedules = bootstrap.schedules;
         const assignments = assignmentsFor(currentGeometry),
             groups = groupAssignments(assignments),
             provisionalRecords = [];
         for (let index = 0; index < groups.length; index += 1) {
             const [, group] = groups[index];
             provisionalRecords.push(recordFor(group));
-            console.error(`derived ${index + 1}/100 ${provisionalRecords.at(-1).pairKey}`);
+            console.error(`derived ${index + 1}/243 ${provisionalRecords.at(-1).pairKey}`);
         }
-        const controllerBase = quantumCeil(Math.max(...provisionalRecords.map((record) => record.baseBurn)));
-        if (controllerBase !== 12.65) throw new Error(`Controller base drift: ${controllerBase}`);
+        const maximumBaseRecord = provisionalRecords.reduce((left, right) =>
+                right.baseBurn > left.baseBurn ? right : left,
+            ),
+            controllerBase = quantumCeil(maximumBaseRecord.baseBurn);
+        console.error(
+            `diagnostic controllerBase=${controllerBase} maximum=${maximumBaseRecord.baseBurn} key=${maximumBaseRecord.pairKey} bootstrap=${provisionalRecords.filter((record) => record.search.macroExpansions === 0).length}`,
+        );
+        if (
+            provisionalRecords.filter((record) => record.search.macroExpansions === 0).length !== 205 ||
+            provisionalRecords.filter((record) => record.search.macroExpansions !== 0).length !== 38 ||
+            maximumBaseRecord.pairKey !== "d:12364:9460" ||
+            maximumBaseRecord.baseBurn !== 12.50091666666676 ||
+            controllerBase !== 12.55
+        )
+            throw new Error("Route feasibility authority mismatch");
+        const approvedBase = 12.55;
         const records = provisionalRecords.map((record) => ({
             ...record,
-            allowance: quantumCeil(controllerBase + record.climbSurcharge),
+            allowance: quantumCeil(approvedBase + record.climbSurcharge),
         }));
         const openings = PROFILE_ORDER.map((profile) => openingFor(currentGeometry, profile));
+        const terminal = {
+            siteIndex: 4095,
+            deckDelta: 0,
+            allowance: approvedBase,
+            ratio: 1,
+            award: approvedBase,
+            completedSites: 4096,
+            generatorCursor: 4096,
+            activeSiteId: 4095,
+            targetSiteId: null,
+            targetRouteProof: null,
+            cueDirection: null,
+        };
         const worldWitnesses = [];
         for (const seed of WORLD_SEEDS)
             for (const direction of [-1, 1])
@@ -973,14 +967,17 @@ async function main() {
             schema: DERIVED_SCHEMA,
             deriverVersion: DERIVER_VERSION,
             synthesizerVersion: SYNTHESIZER_VERSION,
+            collisionVersion: COLLISION_VERSION,
             canonicalPoseDecimals: POSE_DECIMALS,
+            bootstrapDigest: bootstrap.bootstrapDigest,
             geometryDigest: digest(currentGeometry),
-            physicsDigest: digest({ commands: COMMANDS, constants: CONSTANTS }),
+            physicsDigest: digest({ collisionVersion: COLLISION_VERSION, commands: COMMANDS, constants: CONSTANTS }),
             assignments,
             assignmentDigest: digest(assignments),
             records,
             openings,
-            proofDigest: digest({ records, openings }),
+            terminal,
+            proofDigest: digest({ records, openings, terminal }),
             worldWitnesses,
             worldDigest: digest(worldWitnesses),
         };

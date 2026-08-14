@@ -27,14 +27,13 @@ import {
     targetDirectionForViewport,
     terrainHeightAt,
     terrainHeightFromVertices,
-    terrainParityForSeed,
     terrainProfileForBlock,
     terrainSurfacePath,
     terrainVerticesForRange,
     terrainVerticesForWindow,
 } from "../static/lander-world.js";
 
-const GEOMETRY_URL = new URL("fixtures/lander-route-geometry-v7.json", import.meta.url);
+const GEOMETRY_URL = new URL("fixtures/lander-route-geometry-v8.json", import.meta.url);
 const TEMPLATE_URL = new URL("../templates/lander-game.html", import.meta.url);
 
 function canonical(value) {
@@ -52,21 +51,19 @@ function close(actual, expected, tolerance = 1e-12) {
     assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} differs from ${expected}`);
 }
 
-test("global terrain is a deterministic signed 16/128 metre straight polyline", () => {
+test("global terrain is a deterministic signed 16/512 metre straight polyline", () => {
     assert.equal(TERRAIN_VERTEX_CADENCE, 16);
-    assert.equal(TERRAIN_BLOCK_WIDTH, 128);
+    assert.equal(TERRAIN_BLOCK_WIDTH, 512);
     assert.equal(TERRAIN_GRADE_LIMIT, 0.36);
     assert.equal(TERRAIN_GRADE_CHANGE_LIMIT, 0.4);
     for (const seed of [11, 39, 41, STATIC_WORLD_SEED]) {
-        assert.ok([0, 1].includes(terrainParityForSeed(seed)));
         const profileIds = new Set();
         for (let block = -100; block <= 100; block += 1) {
             const selected = terrainProfileForBlock(seed, block);
             profileIds.add(selected.id);
-            assert.equal(selected.id[0], (((block + terrainParityForSeed(seed)) % 2) + 2) % 2 === 0 ? "H" : "L");
             const points = selected.samples.map((_, index) => [
-                block * 128 + index * 16,
-                terrainHeightAt(seed, block * 128 + index * 16),
+                block * 512 + index * 16,
+                terrainHeightAt(seed, block * 512 + index * 16),
             ]);
             const grades = points.slice(1).map((point, index) => (point[1] - points[index][1]) / 16);
             assert.ok(grades.every((grade) => Math.abs(grade) <= TERRAIN_GRADE_LIMIT + 1e-12));
@@ -96,7 +93,7 @@ test("route-only site X and closed native footprint produce exact local decks", 
             );
         }
     }
-    close(createFirstSite(STATIC_WORLD_SEED).platformTop, 6.356);
+    close(createFirstSite(STATIC_WORLD_SEED).platformTop, 26.228);
 });
 
 test("one exact keyed lookup terminates and is mutation sensitive", () => {
@@ -145,7 +142,7 @@ test("terrain surface is one open mitered straight path", async () => {
     assert.equal(surface.match(/M/g)?.length, 1);
     const template = await readFile(TEMPLATE_URL, "utf8");
     const layer = template.match(/<g id="terrain-layer">([\s\S]*?)<\/g>/)?.[1] ?? "";
-    assert.equal((layer.match(/<path/g) ?? []).length, 2);
+    assert.equal((layer.match(/<path/g) ?? []).length, 3);
     assert.match(layer, /class="terrain-surface"[\s\S]*?stroke-linejoin="miter"[\s\S]*?stroke-miterlimit="2"/);
 });
 
@@ -163,7 +160,7 @@ test("integrated truss and three unbounded supports reach their native feet", ()
     assert.equal(siteScaffoldPath(site).match(/M/g)?.length, members.length);
 });
 
-test("camera, retention, sky, and geometry-v7 remain bounded and deterministic", async () => {
+test("camera, retention, sky, and geometry-v8 remain bounded and deterministic", async () => {
     const site = createFirstSite(STATIC_WORLD_SEED);
     assert.deepEqual(
         [cameraLeftForPose({ x: 34 }), cameraLeftForPose({ x: 80 }), cameraLeftForPose({ x: -20 })],
@@ -178,8 +175,8 @@ test("camera, retention, sky, and geometry-v7 remain bounded and deterministic",
     const sky = skyProjectionForCamera(STATIC_WORLD_SEED, 0);
     assert.equal(sky.chunks.length, 5);
     const geometry = JSON.parse(await readFile(GEOMETRY_URL, "utf8"));
-    assert.equal(geometry.schema, "agw-lander-route-geometry/v7");
-    assert.equal(geometry.terrain.profiles.L1[4], 0.1);
+    assert.equal(geometry.schema, "agw-lander-route-geometry/v8");
+    assert.equal(geometry.terrain.profiles.S1[6], 0.1);
     assert.equal(
         createHash("sha256")
             .update(JSON.stringify(canonical(geometry)))

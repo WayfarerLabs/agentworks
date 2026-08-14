@@ -8,7 +8,6 @@ import { FakeElement, controllerClasses, controllerFixture, descendantCount, foc
 import {
     ENGINE_ACCELERATION,
     MAX_THRUST_VECTOR,
-    MAX_PLAYABLE_Y,
     FAILURE_STATUS,
     STEP_SECONDS,
     TURN_DIFFERENTIAL,
@@ -46,10 +45,11 @@ import {
     terrainSurfacePath as terrainPath,
     terrainVerticesForRange,
     terrainVerticesForWindow,
-    terrainSiteForIndex,
 } from "../static/lander-world.js";
 
 const ROOT = new URL("../", import.meta.url).pathname;
+const sweepContact = (model, previous, next, options = {}) =>
+    classifySweptContact(model, previous, next, { angularTravel: 0, ...options });
 
 function close(actual, expected, tolerance = 1e-10) {
     assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} differs from ${expected}`);
@@ -176,7 +176,7 @@ test("safe target top is inclusive and epsilon excess is unsafe", () => {
         angularVelocity: 26,
     };
     const next = { ...previous, y: target.platformTop + 0.2 };
-    assert.equal(classifySweptContact(model, previous, next).kind, "safe");
+    assert.equal(sweepContact(model, previous, next).kind, "safe");
     const limits = [
         ["vx", 2.2],
         ["vy", -3.6],
@@ -186,7 +186,7 @@ test("safe target top is inclusive and epsilon excess is unsafe", () => {
     for (const [field, limit] of limits) {
         const excess = limit + Math.sign(limit) * 1e-9;
         assert.equal(
-            classifySweptContact(model, { ...previous, [field]: excess }, { ...next, [field]: excess }).kind,
+            sweepContact(model, { ...previous, [field]: excess }, { ...next, [field]: excess }).kind,
             "unsafe",
             `${field} beyond the inclusive limit must crash`,
         );
@@ -197,21 +197,22 @@ test("safe target top is inclusive and epsilon excess is unsafe", () => {
         ["angularVelocity", -26],
     ]) {
         assert.equal(
-            classifySweptContact(model, { ...previous, [field]: value }, { ...next, [field]: value }).kind,
+            sweepContact(model, { ...previous, [field]: value }, { ...next, [field]: value }).kind,
             "safe",
             `${field} mirrors through absolute value`,
         );
     }
     assert.equal(
-        classifySweptContact(model, { ...previous, vy: 1e-9 }, { ...next, vy: 1e-9 }).kind,
+        sweepContact(model, { ...previous, vy: 1e-9 }, { ...next, vy: 1e-9 }).kind,
         "unsafe",
         "upward contact is unsafe",
     );
     const tangent = { x: target.center, y: target.platformTop, vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
-    assert.equal(classifySweptContact(model, tangent, { ...tangent, x: tangent.x + 0.01 }).cause, "grazing");
+    assert.equal(sweepContact(model, tangent, { ...tangent, x: tangent.x + 0.01 }).cause, "target");
 
     const isolated = {
         ...model,
+        terrainAuthority: "context",
         terrainVertices: [
             [-100, -20],
             [200, -20],
@@ -219,39 +220,39 @@ test("safe target top is inclusive and epsilon excess is unsafe", () => {
     };
     for (const x of [target.platformLeft - 20, target.platformRight + 20]) {
         const clear = { x, y: target.platformTop + 0.1, vx: 0, vy: -1, angle: 0, angularVelocity: 0 };
-        assert.equal(classifySweptContact(isolated, clear, { ...clear, y: target.platformTop - 0.1 }), null);
+        assert.equal(sweepContact(isolated, clear, { ...clear, y: target.platformTop - 0.1 }), null);
     }
 });
 
 test("closed unsafe geometry catches slopes, platform equality, scaffold, mast, and precedence", () => {
     const base = createRun({ seed: 1 });
     const site = base.retainedSites[0];
-    const slopeModel = {
-        ...base,
-        retainedSites: [],
-        targetSiteId: null,
-        terrainVertices: [
-            [0, 0],
-            [10, 10],
-        ],
+    const slopeModel = { ...base, retainedSites: [], targetSiteId: null };
+    const slopeX = 70;
+    const slopePose = {
+        x: slopeX,
+        y: terrainHeightAt(base.seed, slopeX) - 0.25,
+        vx: 0,
+        vy: 0,
+        angle: 0,
+        angularVelocity: 0,
     };
-    const slopePose = { x: 5, y: 6.62, vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
-    assert.equal(classifySweptContact(slopeModel, slopePose, slopePose).cause, "terrain");
+    assert.equal(sweepContact(slopeModel, slopePose, slopePose).cause, "terrain");
     const sidePose = {
-        x: site.platformLeft - 1.6 - 0.02,
+        x: site.platformLeft - 1.6,
         y: site.platformTop - 0.1,
         vx: 0,
         vy: 0,
         angle: 0,
         angularVelocity: 0,
     };
-    assert.equal(classifySweptContact(base, sidePose, sidePose).cause, "platform");
+    assert.equal(sweepContact(base, sidePose, sidePose).cause, "platform");
     const riserPose = { x: site.center, y: site.platformTop - 0.6, vx: 0, vy: 0, angle: 180, angularVelocity: 0 };
-    assert.equal(classifySweptContact(base, riserPose, riserPose).cause, "truss");
+    assert.equal(sweepContact(base, riserPose, riserPose).cause, "truss");
     const buildingLeft = site.platformRight + 2;
     const roof = site.platformTop + 7.2;
     const mastPose = { x: buildingLeft + 3.5, y: roof + 0.1, vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
-    assert.equal(classifySweptContact(base, mastPose, mastPose).cause, "mast");
+    assert.equal(sweepContact(base, mastPose, mastPose).cause, "mast");
     const earlierUnsafe = {
         x: site.platformRight - 0.8,
         y: site.platformTop + 0.7,
@@ -261,26 +262,22 @@ test("closed unsafe geometry catches slopes, platform equality, scaffold, mast, 
         angularVelocity: 0,
     };
     const laterTop = { ...earlierUnsafe, y: site.platformTop + 0.1 };
-    assert.equal(classifySweptContact(base, earlierUnsafe, laterTop).cause, "noc");
+    assert.equal(sweepContact(base, earlierUnsafe, laterTop).cause, "noc");
 });
 
-test("collision uses the exact retained terrain chain and rejects an absent authority", () => {
+test("collision reconstructs global terrain independently of the retained render chain", () => {
     const model = createRun({ seed: 1 });
     const [x, y] = model.terrainVertices[0];
     assert.equal(y, terrainHeightAt(model.seed, x));
     const cornerPose = { x, y: y - 0.25, vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
-    assert.equal(classifySweptContact(model, cornerPose, cornerPose).cause, "terrain");
-    assert.throws(
-        () => classifySweptContact({ ...model, terrainVertices: null }, cornerPose, cornerPose),
-        /requires retained terrain vertices/,
-    );
+    assert.equal(sweepContact(model, cornerPose, cornerPose).cause, "terrain");
+    assert.equal(sweepContact({ ...model, terrainVertices: null }, cornerPose, cornerPose).cause, "terrain");
     const chain = Array.from({ length: 72 }, (_, index) => [index * 2, 3 + (index % 5) / 10]);
     const chainModel = { ...model, retainedSites: [], targetSiteId: null, terrainVertices: chain };
     for (let index = 1; index < chain.length; index += 1) {
         const x = (chain[index - 1][0] + chain[index][0]) / 2;
-        const y = (chain[index - 1][1] + chain[index][1]) / 2;
-        const pose = { x, y: y - 0.25, vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
-        assert.equal(classifySweptContact(chainModel, pose, pose).cause, "terrain");
+        const pose = { x, y: 35, vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
+        assert.equal(sweepContact(chainModel, pose, pose), null);
     }
 });
 
@@ -626,14 +623,14 @@ test("live reduced-motion changes persist into crash behavior in both directions
     assert.equal(controller.model.reducedMotion, true);
     const impact = {
         ...controller.model,
-        pose: { x: 12, y: MAX_PLAYABLE_Y, vx: 0, vy: 10, angle: 0, angularVelocity: 0 },
+        pose: { x: 12, y: 56, vx: 0, vy: 10, angle: 0, angularVelocity: 0 },
     };
-    assert.equal(stepFlight(impact, { left: 0, right: 0 }).state, "failed");
+    assert.equal(stepFlight(impact, { left: 0, right: 0 }).state, "flying");
     controller.model = createRun({ seed: 7, reducedMotion: true });
     controller.onMotionChange({ matches: false });
     assert.equal(controller.model.reducedMotion, false);
     const animated = { ...controller.model, pose: impact.pose };
-    assert.equal(stepFlight(animated, { left: 0, right: 0 }).state, "crashing");
+    assert.equal(stepFlight(animated, { left: 0, right: 0 }).state, "flying");
     controller.destroy();
 });
 
@@ -688,7 +685,7 @@ test("intermediate NOC battery stages project from model to the retained site DO
         angle: 0,
         angularVelocity: 0,
     };
-    assert.equal(classifySweptContact(model, foundationPose, foundationPose).cause, "noc");
+    assert.equal(sweepContact(model, foundationPose, foundationPose).cause, "noc");
 
     const { LanderGameController } = await controllerClasses();
     const fixture = controllerFixture();
@@ -738,7 +735,7 @@ test("static and dynamic scaffold, battery, signal, and collider geometry stay i
         angle: 180,
         angularVelocity: 0,
     };
-    assert.equal(classifySweptContact(model, riserPose, riserPose).cause, "truss");
+    assert.equal(sweepContact(model, riserPose, riserPose).cause, "truss");
 
     const battery = group.querySelector(".noc-battery");
     assert.deepEqual(
@@ -752,7 +749,7 @@ test("static and dynamic scaffold, battery, signal, and collider geometry stay i
         ],
     );
     const buildingLeft = right + 20;
-    const roof = 548 - structure.roof * 10;
+    const roof = Math.round((548 - structure.roof * 10) * 1e9) / 1e9;
     const rectangle = battery.children[0];
     assert.deepEqual(
         ["x", "y", "width", "height"].map((name) => rectangle.attributes.get(name)),
@@ -772,7 +769,7 @@ test("static and dynamic scaffold, battery, signal, and collider geometry stay i
 
 test("vacuum crash has exactly eight deterministic fragments and finite duration", () => {
     let model = createRun({ seed: 7 });
-    model = { ...model, pose: { x: 30, y: 55.99, vx: 0, vy: 10, angle: 0, angularVelocity: 0 } };
+    model = { ...model, pose: { x: 70, y: terrainHeightAt(7, 70) - 1, vx: 0, vy: -10, angle: 0, angularVelocity: 0 } };
     model = stepFlight(model, { left: 0, right: 0 });
     assert.equal(model.state, "crashing");
     assert.equal(model.crash.fragments.length, 8);
@@ -784,7 +781,7 @@ test("vacuum crash has exactly eight deterministic fragments and finite duration
 
 test("reduced motion crashes atomically with zero debris", () => {
     let model = createRun({ seed: 7, reducedMotion: true });
-    model = { ...model, pose: { x: 30, y: 55.99, vx: 0, vy: 10, angle: 0, angularVelocity: 0 } };
+    model = { ...model, pose: { x: 70, y: terrainHeightAt(7, 70) - 1, vx: 0, vy: -10, angle: 0, angularVelocity: 0 } };
     model = stepFlight(model, { left: 0, right: 0 });
     assert.equal(model.state, "failed");
     assert.equal(model.crash, null);
@@ -900,6 +897,7 @@ test("retention and DOM reconciliation change only at bounded window keys", asyn
         [
             terrainFillPath(terrainVerticesForRange(crossing, 0, 100)),
             terrainPath(terrainVerticesForRange(crossing, 0, 100)),
+            "M-3932160 0V416M3932160 0V416",
         ],
     );
     controller.model = changed;
@@ -958,10 +956,10 @@ test("worst-case world projection stays within eighty descendants during a crash
     );
     controller.model = model;
     controller.render();
-    assert.equal(fixture.elements["terrain-layer"].children.length, 2);
+    assert.equal(fixture.elements["terrain-layer"].children.length, 3);
     assert.equal(fixture.elements["site-layer"].children.length, 3);
     assert.equal(fixture.elements["debris-layer"].children.length, 8);
-    assert.equal(descendantCount(world), 75);
+    assert.equal(descendantCount(world), 76);
     assert.ok(descendantCount(world) <= 80);
     controller.destroy();
 });

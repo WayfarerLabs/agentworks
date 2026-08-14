@@ -13,7 +13,7 @@ import {
     MAX_LANDING_ANGULAR_SPEED,
     MAX_LANDING_DESCENT_SPEED,
     MAX_LANDING_HORIZONTAL_SPEED,
-    MAX_PLAYABLE_Y,
+    MAX_SITE_INDEX,
     mixUint32,
     normalizeDegrees,
     normalizeSeed,
@@ -26,6 +26,7 @@ import {
     terrainVerticesForWindow,
     transformLocalPoint,
     unsafeFeatures,
+    worldTermini,
 } from "./lander-world.js";
 import { REFERENCE_PROOF_CATALOG } from "./lander-route-proofs.generated.js";
 
@@ -36,7 +37,6 @@ export {
     MAX_LANDING_ANGULAR_SPEED,
     MAX_LANDING_DESCENT_SPEED,
     MAX_LANDING_HORIZONTAL_SPEED,
-    MAX_PLAYABLE_Y,
     normalizeDegrees,
     transformLocalPoint,
 } from "./lander-world.js";
@@ -54,6 +54,7 @@ export const TURNING_TOTAL = 0.8;
 export const MAX_THRUST_VECTOR = 30;
 export const ANGULAR_ASSIST_DIFFERENTIAL = 0.12;
 export const ANGULAR_ASSIST_FULL_SPEED = 15;
+export const BASE_ROUTE_ALLOWANCE = 12.55;
 
 export const FAILURE_STATUS = "Crashed!";
 export const GENERATION_ERROR_STATUS = "Mission generation failed. Use Exit mission to start a new run.";
@@ -75,7 +76,6 @@ export const REFERENCE_COMMANDS = Object.freeze([
     Object.freeze([0, 0]),
     Object.freeze([0.72, 0.72]),
 ]);
-
 
 const STEP_MILLISECONDS = STEP_SECONDS * 1000;
 const ZERO = Object.freeze({ left: 0, right: 0, vectorAngle: 0 });
@@ -177,16 +177,18 @@ export function integratePose(pose, requested, fuel, seconds = STEP_SECONDS) {
     const vx = pose.vx + total * Math.sin(radians) * seconds;
     const vy = pose.vy + (total * Math.cos(radians) - GRAVITY) * seconds;
     const angularVelocity = pose.angularVelocity + TORQUE_ACCELERATION * (thrust.left - thrust.right) * seconds;
+    const angularTravel = angularVelocity * seconds;
     return {
         pose: {
             x: pose.x + vx * seconds,
             y: pose.y + vy * seconds,
             vx,
             vy,
-            angle: normalizeDegrees(pose.angle + angularVelocity * seconds),
+            angle: normalizeDegrees(pose.angle + angularTravel),
             angularVelocity,
         },
         thrust,
+        angularTravel,
     };
 }
 
@@ -260,6 +262,7 @@ export function createRun({ seed, reducedMotion = false } = {}) {
         failureCause: null,
         crashOrdinal: 0,
         crash: null,
+        termini: worldTermini(runSeed),
         status: "Mission underway.",
         launchStarted: false,
         launchCleared: false,
@@ -302,11 +305,18 @@ function replayRouteProof(proof, fuel, suppliedContext = null) {
         seed: context.seed,
         retainedSites,
         targetSiteId: targetSite.id,
+        terrainAuthority: "context",
         terrainVertices,
     };
     const target = targetSite;
     const ordinaryFeatures = unsafeFeatures(collisionModel, pose, target);
     const launchFeatures = unsafeFeatures(collisionModel, pose, target, originSite.id);
+    collisionModel.collisionMaximumTop = Math.max(
+        29.2,
+        target.platformTop,
+        ...ordinaryFeatures.map((feature) => feature.bounds.top),
+        ...launchFeatures.map((feature) => feature.bounds.top),
+    );
     for (const [commandIndex, count] of proof.runs) {
         for (let index = 0; index < count; index += 1) {
             const previous = pose;
@@ -320,8 +330,9 @@ function replayRouteProof(proof, fuel, suppliedContext = null) {
             const nextBounds = hullBounds(pose);
             reserve = result.thrust.fuel;
             step += 1;
-            const ignoreTopSiteId = !launchCleared && pose.vy > 0 ? originSite.id : null;
+            const ignoreTopSiteId = !launchCleared ? originSite.id : null;
             const contact = classifySweptContactFromBounds(collisionModel, previous, pose, previousBounds, nextBounds, {
+                angularTravel: result.angularTravel,
                 ignoreTopSiteId,
                 features: ignoreTopSiteId === null ? ordinaryFeatures : launchFeatures,
             });
@@ -414,14 +425,38 @@ function prepareService(model, contactPose) {
         const poweredBaseNumber = model.completedSites + 1;
         const ratio = refuelRatioForBase(poweredBaseNumber);
         if (model.refuelRatio !== ratio) throw new Error("Stored refuel ratio does not match mission progress");
+        if (contacted.id === MAX_SITE_INDEX) {
+            const serviced = { ...contacted, canCollected: true };
+            const award = BASE_ROUTE_ALLOWANCE * ratio;
+            const fromLevel = model.fuelGaugeReference > 0 ? clamp(model.fuel / model.fuelGaugeReference, 0, 1) : 0;
+            const fuelGaugeReference = model.fuel + award;
+            return {
+                ...model,
+                state: "landed",
+                pose: checkpointPoseForContact(contacted, contactPose),
+                commanded: { ...ZERO },
+                fuel: fuelGaugeReference,
+                fuelGaugeReference,
+                completedSites: model.completedSites + 1,
+                refuelRatio: refuelRatioForBase(poweredBaseNumber + 1),
+                generatorCursor: MAX_SITE_INDEX + 1,
+                activeSiteId: contacted.id,
+                targetSiteId: null,
+                targetRouteProof: null,
+                retainedSites: model.retainedSites.map((site) => (site.id === contacted.id ? serviced : site)),
+                touchdownPose: checkpointPoseForContact(contacted, contactPose),
+                sequenceSeconds: 0,
+                refuel: model.reducedMotion ? null : freeze({ siteId: contacted.id, fromLevel, progress: 0 }),
+                nocStage: 0,
+                agent: null,
+                status: "Touchdown confirmed. Fuel collected. Deploying agent.",
+            };
+        }
         const candidate = createSiteForIndex(model.seed, model.generatorCursor);
         const selectedProof = selectRouteProof(contacted, candidate, REFERENCE_PROOF_CATALOG);
         const nextSite = freeze({ ...candidate, pairKey: selectedProof.pairKey, originSiteId: contacted.id });
         const serviced = { ...contacted, canCollected: true };
-        const proof = proveRouteProof(
-            selectedProof,
-            provisionalProofContext(model, serviced, nextSite, contactPose),
-        );
+        const proof = proveRouteProof(selectedProof, provisionalProofContext(model, serviced, nextSite, contactPose));
         const award = proof.allowance * ratio;
         const sites = model.retainedSites
             .filter((site) => site.id !== contacted.id)
@@ -531,8 +566,11 @@ export function stepFlight(model, requested, options = {}) {
     if (model.state === "launching") {
         stepped = { ...stepped, launchStarted: true, status: "" };
         const active = siteById(model, model.activeSiteId);
-        const ignoreTopSiteId = !model.launchCleared && result.pose.vy > 0 ? (active?.id ?? null) : null;
-        const contact = classifySweptContact(model, previous, result.pose, { ignoreTopSiteId });
+        const ignoreTopSiteId = !model.launchCleared ? (active?.id ?? null) : null;
+        const contact = classifySweptContact(model, previous, result.pose, {
+            angularTravel: result.angularTravel,
+            ignoreTopSiteId,
+        });
         if (contact) return beginCrash(stepped, contact.cause, contact.pose);
         const feet = [transformLocalPoint(result.pose, -1.6, 0), transformLocalPoint(result.pose, 1.6, 0)];
         const cleared = model.launchCleared || (active && feet.every((foot) => foot.y > active.platformTop + 0.05));
@@ -540,14 +578,12 @@ export function stepFlight(model, requested, options = {}) {
         if (cleared) return { ...stepped, state: "flying", launchCleared: true };
         return stepped;
     }
-    const contact = classifySweptContact(model, previous, result.pose);
+    const contact = classifySweptContact(model, previous, result.pose, { angularTravel: result.angularTravel });
     if (contact?.kind === "safe") {
         const serviced = prepareService(stepped, contact.pose);
         return model.reducedMotion ? advanceMissionSequence(serviced, 3.1, true) : serviced;
     }
-    if (contact || result.pose.y > MAX_PLAYABLE_Y) {
-        return beginCrash(stepped, contact?.cause ?? "ceiling", contact?.pose ?? result.pose);
-    }
+    if (contact) return beginCrash(stepped, contact.cause, contact.pose);
     return stepped;
 }
 

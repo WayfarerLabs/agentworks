@@ -79,29 +79,32 @@ use the same bounded mixer: press for collective, drag horizontally to steer, an
 retains a 140 ms pulse. Safe landing limits are inclusive at 2.2 m/s horizontal speed, 3.6 m/s
 descent, 18 degrees of tilt, and 26 degrees/s rotation.
 
-Terrain is deterministic per run. A seed-selected global stream alternates high and low 128 m
-blocks, each made only from eight straight 16 m segments and one of four angular profiles. Every
-height stays within the normalized 0.1-0.6 scene band, with absolute grade at most 0.36 and adjacent
-grade change at most 0.4. Sites use the terrain-independent formula `36+96*i` for positive and
-negative indexes. One strict-X polyline is the collision, support-foot, fixture, and rendering
-authority; it projects as one closed fill without a stroke and one open miter-joined stroked
-surface. Each 9.6 m deck is derived exactly 2.5 m above the maximum native terrain over the complete
-closed platform-to-NOC footprint, without a global datum, scan, retry, shelf, or terrain-shaped
-exception. A continuous 18.6 m, 0.75 m-deep twelve-bay Warren truss reaches from the deck's left
-edge through the NOC's right edge. Three one-metre, two-rail lattice columns extend from its
-underside to six independently interpolated native-terrain feet. Their ties and alternating braces
-use the truss member style. Exact closed colliders cover the truss and each complete column; the NOC
-begins at the deck underside. The NOC battery fills four colored bars bottom-to-top, then three
-symmetric signal arches power outward; its fixed mast and antenna head remain graphite at every
-stage. The parallax sky uses recognizable crescent moons and circular planets with one or two
-restrained elliptical rings. Each ring keeps its foreground arc while the planet hides its rear
-center. These shapes, fills, and outlines preserve their meaning without relying on color alone.
+Terrain is deterministic per run. A seed-selected global stream chooses from eight asymmetric 512 m
+superblock profiles, each made only from 32 straight 16 m segments. Every height stays within the
+normalized 0.1-0.6 scene band, with absolute grade at most 0.32 and adjacent grade change at most
+0.4; seeded profile selection and asymmetric facets prevent a short repeating silhouette. Sites use
+the terrain-independent formula `36+96*i` for indexes 0 through 4095. One strict-X polyline is the
+collision, support-foot, fixture, and rendering authority; it projects as one closed fill without a
+stroke and one open miter-joined stroked surface. Each 9.6 m deck is derived exactly 2.5 m above the
+maximum native terrain over the complete closed platform-to-NOC footprint, without a global datum,
+scan, retry, shelf, or terrain-shaped exception. A continuous 18.6 m, 0.75 m-deep twelve-bay Warren
+truss reaches from the deck's left edge through the NOC's right edge. Three one-metre, two-rail
+lattice columns extend from its underside to six independently interpolated native-terrain feet.
+Their ties and alternating braces use the truss member style. Exact closed colliders cover the truss
+and each complete column; the NOC begins at the deck underside. The NOC battery fills four colored
+bars bottom-to-top, then three symmetric signal arches power outward; its fixed mast and antenna
+head remain graphite at every stage. The parallax sky uses recognizable crescent moons and circular
+planets with one or two restrained elliptical rings. Each ring keeps its foreground arc while the
+planet hides its rear center. These shapes, fills, and outlines preserve their meaning without
+relying on color alone.
 
-Flight has no horizontal world edge: the lander can pass a target or explore in either direction
-until it collides or crosses the vertical ceiling. The camera follows both directions with a stable
-dead zone, and the target cue switches sides from live viewport geometry. Five deterministic sky
-chunks supply twenty stars and one or two crescent or ringed-planet landmarks. That fixed two-path
-sky moves at 24 percent of terrain motion and reconstructs exactly after reversal.
+Flight may pass a target and explore in either direction between the visible physical rails at
+`x=-393216` and `x=393216`. Only swept contact with terrain, a platform, a support, a NOC, or either
+rail causes failure; speed, altitude, empty fuel, and retained render-window edges never synthesize
+a crash. The camera follows both directions with a stable dead zone, and the target cue switches
+sides from live viewport geometry. Five deterministic sky chunks supply twenty stars and one or two
+crescent or ringed-planet landmarks. That fixed two-path sky moves at 24 percent of terrain motion
+and reconstructs exactly after reversal.
 
 The scene itself is always a fixed `25:16` projection with no vertical camera. Viewport width and
 height may only scale it uniformly. The stage and normal-flow controls rail fit within a bounded
@@ -133,42 +136,46 @@ This is the builder's only output shape. The manifest is explicit in `build.py`;
 recursively copies source directories or permits a generated local link outside the manifest.
 
 The game keeps its route catalog reviewable and independent from runtime generation. Geometry lives
-in `tests/fixtures/lander-route-geometry-v7.json`; it contains no schedule or fuel result.
+in `tests/fixtures/lander-route-geometry-v8.json`; it contains no schedule or fuel result.
 Regenerate to a temporary path and verify the reviewed fixture with:
 
 ```bash
 node website/tools/derive_lander_routes.mjs \
-  --geometry website/tests/fixtures/lander-route-geometry-v7.json \
-  --output /tmp/lander-route-derived-v7.json \
-  --verify website/tests/fixtures/lander-route-derived-v7.json
+  --geometry website/tests/fixtures/lander-route-geometry-v8.json \
+  --bootstrap website/tests/fixtures/lander-route-derived-v7.json \
+  --output /tmp/lander-route-derived-v8.json \
+  --verify website/tests/fixtures/lander-route-derived-v8.json
 
 node website/tools/project_lander_route_proofs.mjs \
-  --fixture website/tests/fixtures/lander-route-derived-v7.json \
+  --fixture website/tests/fixtures/lander-route-derived-v8.json \
   --output website/static/lander-route-proofs.generated.js
 ```
 
-The v8 deriver uses Node built-ins and independent copies of the terrain, physics, collision,
-structure, and proof authorities. It exhaustively enumerates 2,048 terrain assignments into 100
-exact ordered deck-pair keys, then applies the bounded 269-layer, 6,000-state four-phase corridor
+The v9 deriver uses Node built-ins and independent copies of the terrain, physics, collision,
+structure, and proof authorities. It exhaustively enumerates 320 terrain assignments into 243 exact
+ordered deck-pair keys, then applies the bounded 269-layer, 6,000-state four-phase corridor
 synthesizer. Every selected route is replayed against its conservative envelope and all concrete
-member assignments. Derived v7 also records all eight opening profiles and signed 100-site world
+member assignments. Derived v8 also records all eight opening profiles and signed 100-site world
 witnesses for four seeds. Runtime performs one exact keyed proof lookup and one defensive replay; it
 never imports the tool, scans a catalog, searches commands, retries a route, or conditions site X on
-terrain. Fuel uses the sufficient `12.65 + max(0, deckDelta)/3` allowance rounded upward to the 0.05
-quantum; it does not claim that one quantum less makes the physical route impossible.
+terrain. The immutable v7 fixture contributes only its reviewed schedule projection: 205 keys select
+13 distinct bootstrap schedules and the bounded synthesizer derives the remaining 38. Fuel uses the
+sufficient `12.55 + max(0, deckDelta)/3` allowance rounded upward to the 0.05 quantum; it does not
+claim that one quantum less makes the physical route impossible.
 
 The projection command deterministically converts the reviewed record order into a compact,
 source-only generated module. The builder verifies its provenance, composes it into
 `static/lander-model.js`, and still emits the exact 13-file artifact; no fourteenth module ships.
 
 During a run, the model retains at most five terrain chunk indexes while the DOM always uses exactly
-two terrain paths, the active and target sites plus one previous powered site, one input queue of at
-most 64 records, and eight crash fragments. The worst-case world projection has at most 80
-descendants. Fuel has no capacity cap: unused reserve carries forward. At one-indexed powered base
-`n`, each collected can adds the next route's sufficient allowance multiplied by the direct
-constant-time ratio `1 + 0.5 ** (n - 1)`. Runtime number precision reaches exactly 1 at base 54 and
-remains 1 through base 100. Exit and reload discard the in-memory run; crash Retry restores the last
-powered pad without recollecting fuel or advancing progress.
+two terrain paths plus one permanent physical-terminus path, the active and target sites plus one
+previous powered site, one input queue of at most 64 records, and eight crash fragments. The
+worst-case world projection has at most 80 descendants. Fuel has no capacity cap: unused reserve
+carries forward. At one-indexed powered base `n`, each collected can adds the next route's
+sufficient allowance multiplied by the direct constant-time ratio `1 + 0.5 ** (n - 1)`. Runtime
+number precision reaches exactly 1 at base 54 and remains 1 through base 100. Exit and reload
+discard the in-memory run; crash Retry restores the last powered pad without recollecting fuel or
+advancing progress.
 
 The left vertical gauge is visual-only. A new run starts with 15 units against an honest 30-unit
 reference, so its fill begins exactly half full. After each award, the uncapped carried reserve

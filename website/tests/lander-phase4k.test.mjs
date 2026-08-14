@@ -17,12 +17,13 @@ import { FakeElement, controllerClasses, controllerFixture } from "./lander-test
 
 const ROOT = new URL("../", import.meta.url);
 const EXPECTED_DIGESTS = Object.freeze({
-    assignmentDigest: "82dec99b18672c2c5dd45bac43d19530cd4680e456f7329d183adbed3f9a4102",
-    geometryDigest: "17af6e4d762acc6dfee5f170d19b2f2952ac86e0844b49837b9f1a848255e8d8",
-    outputDigest: "dea7263fe5b01ea1c0a442a1f2fefb3f4dad472cbe8668b8bf00793cde5afef7",
-    physicsDigest: "e08f8260b723dd245db88de9ae2cdbac54bf9a97cb0bed1b6f170eda362c48dc",
-    proofDigest: "ca09ed720e3e752745af046cbb2013c99c36227963e9799b1f1cd8961b49f354",
-    worldDigest: "ab4348a78e029553b659e99c14bc3b447b3f6a018943b77c179cf21664445d8f",
+    assignmentDigest: "597c7ffe9cba6ce2d95dd1204e40ff8562bea22088ca13fa9b930656992a918b",
+    bootstrapDigest: "c5800497182045dbf664fd50abd6cfd79cc4293bdadbfd4afa526e72f7d71b12",
+    geometryDigest: "6c3e4bc4a18ca5bb2bf4d82aed124f2e55aef1d3517349efc2fc70b4de56a206",
+    outputDigest: "562de8434513923e150a5db0198afeed168b992f877372e171de4a00fb1ed2cd",
+    physicsDigest: "e3af9abd8ba3677f67b6aee8fea1c6b46b2592799640469f76dd674e1f04406c",
+    proofDigest: "f49f06e1353684df36604e6f476380a9a58d5d97ddb478b24d35c69b4dd4e93f",
+    worldDigest: "2a4bf5e7b780c82b5161a3e42c64ba2d429483f4c74cd5e211892a1f28114500",
 });
 
 async function controllerAt(model = createRun({ seed: 1 })) {
@@ -70,8 +71,8 @@ test("landing profile and the finite route catalog remain exact", () => {
         [2.2, 3.6, 18, 26],
     );
     assert.deepEqual(ROUTE_DIGESTS, EXPECTED_DIGESTS);
-    assert.equal(REFERENCE_PROOFS.length, 100);
-    assert.equal(new Set(REFERENCE_PROOFS.map(({ pairKey }) => pairKey)).size, 100);
+    assert.equal(REFERENCE_PROOFS.length, 243);
+    assert.equal(new Set(REFERENCE_PROOFS.map(({ pairKey }) => pairKey)).size, 243);
     assert.ok(
         REFERENCE_PROOFS.every((proof) => proof.success.classification === "safe" && !("smallerFailure" in proof)),
     );

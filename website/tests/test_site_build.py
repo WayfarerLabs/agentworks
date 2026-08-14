@@ -271,11 +271,11 @@ class BuildAndInstallTests(RepositoryFixture):
 
     def test_authored_lander_modules_and_tests_stay_below_the_review_ceiling(self) -> None:
         authored = [
+            WEBSITE / "static/lander-collision-source.js",
             WEBSITE / "static/lander-game.js",
             WEBSITE / "static/lander-model.js",
             WEBSITE / "static/lander-world.js",
-            WEBSITE / "tools/derive_lander_routes.mjs",
-            WEBSITE / "tools/project_lander_route_proofs.mjs",
+            *sorted((WEBSITE / "tools").glob("*.mjs")),
             *sorted((WEBSITE / "tests").glob("*.test.mjs")),
         ]
         for path in authored:

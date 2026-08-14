@@ -1,46 +1,53 @@
-export const STATIC_WORLD_SEED = 0x41475731;
-export const CHUNK_WIDTH = 50;
-export const PLATFORM_WIDTH = 9.6;
-export const PLATFORM_THICKNESS = 0.35;
-export const PLATFORM_CLEARANCE = 2.5;
+import { compareExactRoots, exactRootNumber, exactSegmentContact, exactZeroRoot } from "./lander-collision-source.js";
+
+export const STATIC_WORLD_SEED = 0x41475731,
+    CHUNK_WIDTH = 50;
+export const PLATFORM_WIDTH = 9.6,
+    PLATFORM_THICKNESS = 0.35,
+    PLATFORM_CLEARANCE = 2.5;
 export const SCAFFOLD_MEMBER_WIDTH = 0.2;
 export const SCAFFOLD_MEMBER_HALF = SCAFFOLD_MEMBER_WIDTH / 2;
-export const TRUSS_BAY_COUNT = 12;
-export const TRUSS_BAY_HEIGHT = 0.75;
-export const TRUSS_BAY_WIDTH = 1.55;
-export const COLUMN_WIDTH = 1;
-export const COLUMN_BAY_HEIGHT = 0.8;
-export const NOC_CONNECTOR_WIDTH = 2;
-export const NOC_WIDTH = 7;
-export const NOC_ROOF_OFFSET = 7.2;
-export const NOC_MAST_WIDTH = 0.5;
-export const NOC_MAST_HEIGHT = 3.2;
+export const TRUSS_BAY_COUNT = 12,
+    TRUSS_BAY_HEIGHT = 0.75,
+    TRUSS_BAY_WIDTH = 1.55;
+export const COLUMN_WIDTH = 1,
+    COLUMN_BAY_HEIGHT = 0.8;
+export const NOC_CONNECTOR_WIDTH = 2,
+    NOC_WIDTH = 7,
+    NOC_ROOF_OFFSET = 7.2,
+    NOC_MAST_WIDTH = 0.5,
+    NOC_MAST_HEIGHT = 3.2;
 
-export const TERRAIN_VERTEX_CADENCE = 16;
-export const TERRAIN_BLOCK_WIDTH = 128;
-export const TERRAIN_GRADE_LIMIT = 0.36;
-export const TERRAIN_GRADE_CHANGE_LIMIT = 0.4;
-export const TERRAIN_NORMALIZED_MINIMUM = 0.1;
-export const TERRAIN_NORMALIZED_MAXIMUM = 0.6;
-export const SITE_SPACING = 96;
+export const TERRAIN_VERTEX_CADENCE = 16,
+    TERRAIN_BLOCK_WIDTH = 512,
+    TERRAIN_EPOCH_BLOCKS = 8,
+    TERRAIN_GRADE_LIMIT = 0.36,
+    TERRAIN_GRADE_CHANGE_LIMIT = 0.4,
+    TERRAIN_NORMALIZED_MINIMUM = 0.1,
+    TERRAIN_NORMALIZED_MAXIMUM = 0.6,
+    SITE_SPACING = 96;
+export const WORLD_MIN_X = -393216,
+    WORLD_MAX_X = 393216,
+    MIN_SITE_INDEX = -4095,
+    MAX_SITE_INDEX = 4095,
+    TERMINUS_WIDTH = 0.2;
 
-export const TERRAIN_PROFILES = freeze({
-    H0: [0.35, 0.4, 0.48, 0.55, 0.58, 0.54, 0.46, 0.38, 0.35],
-    H1: [0.35, 0.42, 0.5, 0.56, 0.59, 0.53, 0.44, 0.37, 0.35],
-    H2: [0.35, 0.39, 0.47, 0.54, 0.57, 0.52, 0.45, 0.39, 0.35],
-    H3: [0.35, 0.41, 0.49, 0.57, 0.6, 0.55, 0.47, 0.39, 0.35],
-    L0: [0.35, 0.29, 0.21, 0.15, 0.12, 0.17, 0.25, 0.32, 0.35],
-    L1: [0.35, 0.28, 0.2, 0.14, 0.1, 0.16, 0.24, 0.31, 0.35],
-    L2: [0.35, 0.3, 0.23, 0.16, 0.13, 0.18, 0.26, 0.33, 0.35],
-    L3: [0.35, 0.27, 0.19, 0.13, 0.11, 0.15, 0.23, 0.3, 0.35],
-});
+const TERRAIN_PROFILE_ROWS = [
+    ".35 .40 .45 .51 .55 .58 .59 .60 .60 .60 .59 .56 .54 .54 .55 .56 .57 .58 .59 .59 .59 .57 .52 .45 .38 .37 .37 .35 .37 .29 .31 .35 .35",
+    ".35 .33 .29 .24 .18 .11 .10 .10 .12 .14 .15 .15 .15 .14 .13 .11 .10 .10 .10 .13 .17 .21 .25 .28 .31 .27 .26 .23 .26 .29 .36 .39 .35",
+    ".35 .30 .24 .17 .11 .11 .12 .12 .12 .14 .16 .16 .15 .14 .13 .11 .10 .10 .12 .15 .17 .21 .23 .23 .21 .27 .35 .38 .40 .32 .28 .31 .35",
+    ".35 .38 .40 .41 .42 .42 .41 .40 .36 .29 .21 .14 .10 .10 .11 .12 .13 .13 .12 .11 .11 .12 .15 .21 .28 .27 .24 .27 .28 .28 .24 .30 .35",
+    ".35 .39 .44 .50 .56 .58 .60 .60 .59 .57 .56 .56 .57 .57 .55 .53 .52 .51 .50 .48 .47 .47 .48 .48 .46 .40 .41 .35 .31 .23 .24 .30 .35",
+    ".35 .30 .25 .20 .14 .10 .10 .10 .11 .11 .14 .18 .22 .26 .30 .32 .32 .31 .29 .29 .30 .33 .37 .40 .42 .45 .38 .36 .33 .34 .40 .39 .35",
+    ".35 .35 .37 .41 .47 .51 .56 .60 .60 .60 .59 .56 .53 .51 .50 .50 .49 .48 .48 .48 .49 .49 .49 .46 .42 .35 .28 .24 .30 .33 .32 .38 .35",
+    ".35 .30 .24 .20 .14 .11 .10 .10 .11 .12 .13 .14 .14 .13 .12 .11 .10 .10 .11 .13 .16 .21 .26 .31 .37 .35 .43 .45 .50 .48 .40 .40 .35",
+];
+export const TERRAIN_PROFILES = freeze(
+    Object.fromEntries(TERRAIN_PROFILE_ROWS.map((row, index) => [`S${index}`, row.split(" ").map(Number)])),
+);
 
 function freeze(value) {
-    if (Array.isArray(value)) {
-        value.forEach(freeze);
-    } else if (value && typeof value === "object") {
-        Object.values(value).forEach(freeze);
-    }
+    if (value && typeof value === "object") Object.values(value).forEach(freeze);
     return Object.freeze(value);
 }
 
@@ -66,23 +73,30 @@ export function positiveModulo(value, modulus) {
     return ((value % modulus) + modulus) % modulus;
 }
 
-export function terrainParityForSeed(seed) {
-    return Math.floor(2 * sampleUnit(seed, 13, 0));
-}
-
 export function terrainProfileForBlock(seed, blockIndex) {
     if (!Number.isSafeInteger(blockIndex)) throw new TypeError("Terrain block index must be a safe integer");
-    const family = positiveModulo(blockIndex + terrainParityForSeed(seed), 2) === 0 ? "H" : "L";
-    const variant = Math.floor(4 * sampleUnit(seed, 14, blockIndex >>> 0));
-    const id = `${family}${variant}`;
-    return freeze({ blockIndex, family, id, samples: TERRAIN_PROFILES[id], variant });
+    const epoch = Math.floor(blockIndex / TERRAIN_EPOCH_BLOCKS);
+    const slot = positiveModulo(blockIndex, TERRAIN_EPOCH_BLOCKS);
+    const offset = Math.floor(8 * sampleUnit(seed, 15, 0));
+    const first = positiveModulo(offset + epoch, 8);
+    const last = positiveModulo(first + 2, 8);
+    const middle = Array.from({ length: 8 }, (_, index) => index).filter((index) => index !== first && index !== last);
+    for (let index = 5; index >= 1; index -= 1) {
+        const sampleIndex = (Math.imul(epoch, 6) + (5 - index)) >>> 0;
+        const exchange = Math.floor((index + 1) * sampleUnit(seed, 16, sampleIndex));
+        [middle[index], middle[exchange]] = [middle[exchange], middle[index]];
+    }
+    const profile = [first, ...middle, last][slot];
+    const id = `S${profile}`;
+    return freeze({ blockIndex, epoch, id, profile, samples: TERRAIN_PROFILES[id], slot });
 }
 
 export function terrainHeightAt(seed, x) {
     if (!Number.isFinite(x)) throw new TypeError("Terrain X must be finite");
+    if (x < WORLD_MIN_X || x > WORLD_MAX_X) throw new RangeError(`Terrain X ${x} is outside the generated world`);
     const blockIndex = Math.floor(x / TERRAIN_BLOCK_WIDTH);
     const localX = x - blockIndex * TERRAIN_BLOCK_WIDTH;
-    const segment = Math.min(7, Math.floor(localX / TERRAIN_VERTEX_CADENCE));
+    const segment = Math.min(31, Math.floor(localX / TERRAIN_VERTEX_CADENCE));
     const fraction = (localX - segment * TERRAIN_VERTEX_CADENCE) / TERRAIN_VERTEX_CADENCE;
     const samples = terrainProfileForBlock(seed, blockIndex).samples;
     const normalized = samples[segment] + (samples[segment + 1] - samples[segment]) * fraction;
@@ -228,6 +242,9 @@ export function siteScaffoldPath(site) {
 
 export function createSiteForIndex(seed, siteIndex, state = {}) {
     if (!Number.isSafeInteger(siteIndex)) throw new TypeError("Site index must be a safe integer");
+    if (siteIndex < MIN_SITE_INDEX || siteIndex > MAX_SITE_INDEX) {
+        throw new RangeError(`Site index ${siteIndex} is outside the generated world`);
+    }
     const normalized = normalizeSeed(seed);
     const center = 36 + SITE_SPACING * siteIndex;
     const platformLeft = center - PLATFORM_WIDTH / 2;
@@ -254,7 +271,6 @@ export function createSiteForIndex(seed, siteIndex, state = {}) {
         id: siteIndex,
         seed: normalized,
         center,
-        deckLevel: platformTop * 10,
         localNativeMaximum,
         supportFeet: supportXs.map((x) => terrainHeightAt(normalized, x)),
         platformLeft,
@@ -293,24 +309,13 @@ export function selectRouteProof(originSite, targetSite, proofCatalog) {
     return proof;
 }
 
-
-export function terrainSiteForIndex(seed, siteIndex) {
-    const site = createSiteForIndex(seed, siteIndex);
-    return freeze({
-        index: siteIndex,
-        center: site.center,
-        deckLevel: site.deckLevel,
-        platformTop: site.platformTop,
-        localNativeMaximum: site.localNativeMaximum,
-        centerDelta: SITE_SPACING,
-        phase: positiveModulo(site.center, TERRAIN_BLOCK_WIDTH),
-    });
-}
-
 export function terrainVerticesForWindow(seed, sites, left, right) {
     if (!Number.isFinite(left) || !Number.isFinite(right) || right < left) {
         throw new RangeError("Terrain range must be finite and ordered");
     }
+    left = Math.max(WORLD_MIN_X, left);
+    right = Math.min(WORLD_MAX_X, right);
+    if (right < left) return freeze([]);
     const points = new Set([left, right]);
     for (
         let x = Math.ceil(left / TERRAIN_VERTEX_CADENCE) * TERRAIN_VERTEX_CADENCE;
@@ -341,8 +346,10 @@ export function terrainVerticesForWindow(seed, sites, left, right) {
 }
 
 export function retainedChunkIndexes(cameraLeft) {
-    const left = cameraLeft - 40;
-    const right = cameraLeft + 140;
+    const visibleLeft = Math.max(WORLD_MIN_X, cameraLeft);
+    const visibleRight = Math.min(WORLD_MAX_X, cameraLeft + 100);
+    const left = Math.max(WORLD_MIN_X, visibleLeft - 40);
+    const right = Math.min(WORLD_MAX_X, visibleRight + 40);
     const first = Math.floor(left / CHUNK_WIDTH);
     const last = Math.ceil(right / CHUNK_WIDTH) - 1;
     return freeze(Array.from({ length: last - first + 1 }, (_, offset) => first + offset));
@@ -363,9 +370,16 @@ export function retainedSiteDescriptors(sites, activeSiteId, targetSiteId) {
 }
 
 export function cameraLeftForPose(pose) {
-    if (pose.x < 5) return pose.x - 5;
-    if (pose.x > 35) return pose.x - 35;
-    return 0;
+    const raw = pose.x < 5 ? pose.x - 5 : pose.x > 35 ? pose.x - 35 : 0;
+    return collisionClamp(raw, WORLD_MIN_X - TERMINUS_WIDTH, WORLD_MAX_X - 100 + TERMINUS_WIDTH);
+}
+
+export function worldTermini(seed) {
+    return freeze({
+        left: { foot: terrainHeightAt(seed, WORLD_MIN_X), x: WORLD_MIN_X },
+        right: { foot: terrainHeightAt(seed, WORLD_MAX_X), x: WORLD_MAX_X },
+        width: TERMINUS_WIDTH,
+    });
 }
 
 export function targetDirectionForViewport(targetSite, cameraLeft) {
@@ -451,14 +465,13 @@ export function terrainFillPath(vertices) {
     return `${terrainSurfacePath(vertices)}L${vertices.at(-1)[0] * 10} 648L${vertices[0][0] * 10} 648Z`;
 }
 
-export const MAX_PLAYABLE_Y = 56;
 export const MAX_LANDING_HORIZONTAL_SPEED = 2.2;
 export const MAX_LANDING_DESCENT_SPEED = 3.6;
 export const MAX_LANDING_ANGLE = 18;
 export const MAX_LANDING_ANGULAR_SPEED = 26;
 export const COLLISION_MARGIN = 0.02;
+export const COLLISION_ANGLE_KNOT_DEGREES = 1;
 
-const COLLISION_STEP_SECONDS = 1 / 120;
 export const LANDER_HULL = Object.freeze([
     [-1.6, 0],
     [1.6, 0],
@@ -469,9 +482,7 @@ const HULL_RADIUS = Math.hypot(1.6, 6.5);
 const collisionClamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, value));
 const collisionSiteById = (model, id) => model.retainedSites.find((site) => site.id === id) ?? null;
 
-export function normalizeDegrees(degrees) {
-    return ((((degrees + 180) % 360) + 360) % 360) - 180;
-}
+export const normalizeDegrees = (degrees) => ((((degrees + 180) % 360) + 360) % 360) - 180;
 
 export function transformLocalPoint(pose, localX, localY) {
     const radians = (pose.angle * Math.PI) / 180;
@@ -579,6 +590,12 @@ function rectangle(left, right, bottom, top) {
     ];
 }
 
+const boxedFeature = (cause, priority, box) => ({
+    cause,
+    priority,
+    polygon: rectangle(box.left, box.right, box.bottom, box.top),
+});
+
 function pointInPolygon(point, polygon) {
     let inside = false;
     for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index, index += 1) {
@@ -603,48 +620,6 @@ function polygonDistanceSquared(left, right) {
     return minimum;
 }
 
-function terrainSegments(model, bounds) {
-    const vertices = model.terrainVertices;
-    if (!vertices) throw new TypeError("Collision classification requires retained terrain vertices");
-    const segments = [];
-    const first = firstTerrainSegmentIndex(vertices, bounds.left - COLLISION_MARGIN);
-    for (let index = first; index < vertices.length; index += 1) {
-        const left = { x: vertices[index - 1][0], y: vertices[index - 1][1] };
-        const right = { x: vertices[index][0], y: vertices[index][1] };
-        if (left.x > bounds.right + COLLISION_MARGIN) break;
-        segments.push([left, right]);
-    }
-    return segments;
-}
-
-function firstTerrainSegmentIndex(vertices, minimumRight) {
-    let low = 1;
-    let high = vertices.length;
-    while (low < high) {
-        const middle = Math.floor((low + high) / 2);
-        if (vertices[middle][0] < minimumRight) low = middle + 1;
-        else high = middle;
-    }
-    return low;
-}
-
-function terrainOverlaps(model, bounds) {
-    const vertices = model.terrainVertices;
-    if (!vertices) throw new TypeError("Collision classification requires retained terrain vertices");
-    const first = firstTerrainSegmentIndex(vertices, bounds.left - COLLISION_MARGIN);
-    for (let index = first; index < vertices.length; index += 1) {
-        const left = vertices[index - 1];
-        const right = vertices[index];
-        if (left[0] > bounds.right + COLLISION_MARGIN) break;
-        if (
-            Math.max(left[1], right[1]) >= bounds.bottom - COLLISION_MARGIN &&
-            Math.min(left[1], right[1]) <= bounds.top + COLLISION_MARGIN
-        )
-            return true;
-    }
-    return false;
-}
-
 function belowTerrain(hull, segment) {
     const [left, right] = segment;
     return hull.some((point) => {
@@ -662,237 +637,334 @@ export function unsafeFeatures(model, pose, target, ignoredTopSiteId = null) {
         const bottomLeft = { x: site.platformLeft, y: site.platformBottom };
         const bottomRight = { x: site.platformRight, y: site.platformBottom };
         if (site.id === target?.id || site.id === ignoredTopSiteId) {
-            features.push({ cause: "platform", priority: 2, segment: [topLeft, bottomLeft] });
-            features.push({ cause: "platform", priority: 2, segment: [bottomLeft, bottomRight] });
-            features.push({ cause: "platform", priority: 2, segment: [bottomRight, topRight] });
+            features.push({ cause: "platform", priority: 1, segment: [topLeft, bottomLeft] });
+            features.push({ cause: "platform", priority: 1, segment: [bottomLeft, bottomRight] });
+            features.push({ cause: "platform", priority: 1, segment: [bottomRight, topRight] });
         } else {
-            features.push({
-                cause: "platform",
-                priority: 2,
-                polygon: rectangle(site.platformLeft, site.platformRight, site.platformBottom, site.platformTop),
-            });
+            const platform = {
+                left: site.platformLeft,
+                right: site.platformRight,
+                bottom: site.platformBottom,
+                top: site.platformTop,
+            };
+            features.push(boxedFeature("platform", 1, platform));
         }
         const structure = siteStructure(site);
-        features.push({
-            cause: "truss",
-            priority: 2,
-            polygon: rectangle(
-                structure.truss.left,
-                structure.truss.right,
-                structure.truss.bottom,
-                structure.truss.top,
-            ),
-        });
+        features.push(boxedFeature("truss", 2, structure.truss));
         for (const column of structure.supportColumns) {
-            features.push({
-                cause: "column",
-                priority: 2,
-                polygon: rectangle(
-                    column.collider.left,
-                    column.collider.right,
-                    column.collider.bottom,
-                    column.collider.top,
-                ),
-            });
+            features.push(boxedFeature("column", 2, column.collider));
         }
-        features.push({
-            cause: "noc",
-            priority: 1,
-            polygon: rectangle(structure.noc.left, structure.noc.right, structure.noc.bottom, structure.noc.top),
-        });
-        features.push({
-            cause: "mast",
-            priority: 1,
-            polygon: rectangle(structure.mast.left, structure.mast.right, structure.mast.bottom, structure.mast.top),
-        });
+        features.push(boxedFeature("noc", 0, structure.noc), boxedFeature("mast", 0, structure.mast));
     }
-    return features.map((feature) => {
-        const points = feature.polygon ?? feature.segment;
-        return {
-            ...feature,
-            bounds: {
-                left: Math.min(...points.map((point) => point.x)),
-                right: Math.max(...points.map((point) => point.x)),
-                bottom: Math.min(...points.map((point) => point.y)),
-                top: Math.max(...points.map((point) => point.y)),
-            },
-        };
+    return features.map((feature) => ({
+        ...feature,
+        bounds: collisionBounds(feature.polygon ?? feature.segment),
+    }));
+}
+
+function terrainCandidates(seed, bounds) {
+    const left = Math.max(WORLD_MIN_X, bounds.left - COLLISION_MARGIN);
+    const right = Math.min(WORLD_MAX_X, bounds.right + COLLISION_MARGIN);
+    if (right < left) return [];
+    const first = Math.floor(left / TERRAIN_VERTEX_CADENCE);
+    const last = Math.ceil(right / TERRAIN_VERTEX_CADENCE);
+    const result = [];
+    for (let index = first; index < last; index += 1) {
+        const x = index * TERRAIN_VERTEX_CADENCE;
+        if (x < WORLD_MIN_X || x + TERRAIN_VERTEX_CADENCE > WORLD_MAX_X) continue;
+        const segment = [
+            { x, y: terrainHeightAt(seed, x) },
+            { x: x + TERRAIN_VERTEX_CADENCE, y: terrainHeightAt(seed, x + TERRAIN_VERTEX_CADENCE) },
+        ];
+        const bottom = Math.min(segment[0].y, segment[1].y);
+        const top = Math.max(segment[0].y, segment[1].y);
+        if (top >= bounds.bottom - COLLISION_MARGIN && bottom <= bounds.top + COLLISION_MARGIN) {
+            result.push({ cause: "terrain", priority: 4, segment, solidBelow: true });
+        }
+    }
+    return result;
+}
+
+function contextTerrainCandidates(vertices, bounds) {
+    return vertices.slice(1).flatMap((_, offset) => {
+        const index = offset + 1;
+        const segment = [
+                { x: vertices[index - 1][0], y: vertices[index - 1][1] },
+                { x: vertices[index][0], y: vertices[index][1] },
+            ],
+            candidate = { cause: "terrain", priority: 4, segment, solidBelow: true };
+        candidate.bounds = candidateBounds(candidate);
+        return overlaps(candidate.bounds, bounds, COLLISION_MARGIN) ? [candidate] : [];
     });
 }
+const contextTerrainCache = new WeakMap();
 
-function unsafeCauseAtPose(model, pose, target, ignoredTopSiteId = null, suppliedFeatures = null) {
-    const hull = hullForPose(pose);
-    const bounds = {
-        left: Math.min(...hull.map((point) => point.x)),
-        right: Math.max(...hull.map((point) => point.x)),
-        bottom: Math.min(...hull.map((point) => point.y)),
-        top: Math.max(...hull.map((point) => point.y)),
+function collisionBounds(...groups) {
+    const points = groups.flat();
+    return {
+        left: Math.min(...points.map(({ x }) => x)),
+        right: Math.max(...points.map(({ x }) => x)),
+        bottom: Math.min(...points.map(({ y }) => y)),
+        top: Math.max(...points.map(({ y }) => y)),
     };
-    const marginSquared = COLLISION_MARGIN ** 2;
-    const hits = [];
-    for (const feature of suppliedFeatures ?? unsafeFeatures(model, pose, target, ignoredTopSiteId)) {
-        const featureBounds = feature.bounds;
-        if (
-            featureBounds.right < bounds.left - COLLISION_MARGIN ||
-            featureBounds.left > bounds.right + COLLISION_MARGIN ||
-            featureBounds.top < bounds.bottom - COLLISION_MARGIN ||
-            featureBounds.bottom > bounds.top + COLLISION_MARGIN
-        )
-            continue;
-        const distance = feature.polygon
-            ? polygonDistanceSquared(hull, feature.polygon)
-            : polygonSegmentDistanceSquared(hull, feature.segment[0], feature.segment[1]);
-        if (distance <= marginSquared) hits.push(feature);
-    }
-    for (const segment of terrainSegments(model, bounds)) {
-        if (
-            belowTerrain(hull, segment) ||
-            polygonSegmentDistanceSquared(hull, segment[0], segment[1]) <= marginSquared
-        ) {
-            hits.push({ cause: "terrain", priority: 3 });
-        }
-    }
-    hits.sort((left, right) => left.priority - right.priority);
-    return hits[0]?.cause ?? null;
 }
 
-function targetTopSweptContact(previous, next, target, initialLeftBounds, initialRightBounds) {
-    const topLeft = { x: target.platformLeft, y: target.platformTop };
-    const topRight = { x: target.platformRight, y: target.platformTop };
-    function search(leftPose, rightPose, leftBounds, rightBounds, leftTime, rightTime, depth) {
-        const translation = Math.hypot(rightPose.x - leftPose.x, rightPose.y - leftPose.y);
-        const rotation = HULL_RADIUS * Math.abs((normalizeDegrees(rightPose.angle - leftPose.angle) * Math.PI) / 180);
-        const bound = translation + rotation;
-        const enclosure = {
-            left: Math.min(leftBounds.left, rightBounds.left) - bound,
-            right: Math.max(leftBounds.right, rightBounds.right) + bound,
-            bottom: Math.min(leftBounds.bottom, rightBounds.bottom) - bound,
-            top: Math.max(leftBounds.top, rightBounds.top) + bound,
-        };
-        if (
-            enclosure.right < target.platformLeft ||
-            enclosure.left > target.platformRight ||
-            enclosure.bottom > target.platformTop ||
-            enclosure.top < target.platformTop
-        )
-            return null;
-        if (leftBounds.bottom > target.platformTop && rightBounds.bottom <= target.platformTop) {
-            let clear = leftPose;
-            let hit = rightPose;
-            let clearTime = leftTime;
-            let hitTime = rightTime;
-            for (let iteration = 0; iteration < 12; iteration += 1) {
-                const middleTime = (clearTime + hitTime) / 2;
-                const middle = interpolatePose(previous, next, middleTime);
-                if (hullBounds(middle).bottom <= target.platformTop) {
-                    hit = middle;
-                    hitTime = middleTime;
-                } else {
-                    clear = middle;
-                    clearTime = middleTime;
-                }
-            }
-            void clear;
-            if (polygonSegmentDistanceSquared(hullForPose(hit), topLeft, topRight) <= Number.EPSILON) {
-                return { pose: hit, time: hitTime, grazing: false };
-            }
-        }
-        if (depth >= 20 || (rightTime - leftTime) * COLLISION_STEP_SECONDS <= 1e-7) {
-            return {
-                pose: interpolatePose(previous, next, (leftTime + rightTime) / 2),
-                time: (leftTime + rightTime) / 2,
-                grazing: true,
-            };
-        }
-        const middleTime = (leftTime + rightTime) / 2;
-        const middle = interpolatePose(previous, next, middleTime);
-        const middleBounds = hullBounds(middle);
-        return (
-            search(leftPose, middle, leftBounds, middleBounds, leftTime, middleTime, depth + 1) ??
-            search(middle, rightPose, middleBounds, rightBounds, middleTime, rightTime, depth + 1)
-        );
-    }
-    return search(previous, next, initialLeftBounds, initialRightBounds, 0, 1, 0);
+function expandedEnclosure(left, right, expansion = 0) {
+    const bounds = collisionBounds(left, right);
+    return Object.fromEntries(
+        Object.entries(bounds).map(([key, value]) => [
+            key,
+            value + (key === "left" || key === "bottom" ? -expansion : expansion),
+        ]),
+    );
 }
 
-export function classifySweptContactFromBounds(model, previous, next, previousBounds, nextBounds, options) {
-    const target = collisionSiteById(model, model.targetSiteId);
-    const travel =
-        Math.hypot(next.x - previous.x, next.y - previous.y) +
-        HULL_RADIUS * Math.abs((normalizeDegrees(next.angle - previous.angle) * Math.PI) / 180);
-    const intervals = Math.max(1, Math.ceil(travel / COLLISION_MARGIN));
-    if (intervals > 64) return { kind: "unsafe", cause: "overspeed", pose: next };
-    const swept = {
-        left: Math.min(previousBounds.left, nextBounds.left) - travel,
-        right: Math.max(previousBounds.right, nextBounds.right) + travel,
-        bottom: Math.min(previousBounds.bottom, nextBounds.bottom) - travel,
-        top: Math.max(previousBounds.top, nextBounds.top) + travel,
-    };
-    const overlaps = (bounds) =>
-        bounds.right >= swept.left - COLLISION_MARGIN &&
-        bounds.left <= swept.right + COLLISION_MARGIN &&
-        bounds.top >= swept.bottom - COLLISION_MARGIN &&
-        bounds.bottom <= swept.top + COLLISION_MARGIN;
-    const features = options.features ?? unsafeFeatures(model, previous, target, options.ignoreTopSiteId);
-    const topPossible =
+function overlaps(left, right, margin = 0) {
+    return (
+        left.right >= right.left - margin &&
+        left.left <= right.right + margin &&
+        left.top >= right.bottom - margin &&
+        left.bottom <= right.top + margin
+    );
+}
+
+const candidateBounds = (candidate) => candidate.bounds ?? collisionBounds(candidate.polygon ?? candidate.segment);
+
+function candidateDistanceSquared(hull, candidate) {
+    if (candidate.solidBelow && belowTerrain(hull, candidate.segment)) return 0;
+    return candidate.polygon
+        ? polygonDistanceSquared(hull, candidate.polygon)
+        : polygonSegmentDistanceSquared(hull, candidate.segment[0], candidate.segment[1]);
+}
+
+function mixHull(left, right, amount) {
+    return left.map((point, index) => ({
+        x: point.x + (right[index].x - point.x) * amount,
+        y: point.y + (right[index].y - point.y) * amount,
+    }));
+}
+
+const maximumHullDisplacement = (left, right) =>
+    Math.max(...left.map((point, index) => Math.hypot(right[index].x - point.x, right[index].y - point.y)));
+
+function contactForCandidate(leftHull, rightHull, candidate) {
+    if (candidateDistanceSquared(leftHull, candidate) === 0) return { hull: leftHull, root: exactZeroRoot(), time: 0 };
+    const segments = candidate.polygon
+        ? candidate.polygon.map((point, index) => [point, candidate.polygon[(index + 1) % candidate.polygon.length]])
+        : [candidate.segment];
+    let earliest = null;
+    for (const segment of segments) {
+        const root = exactSegmentContact(leftHull, rightHull, segment);
+        if (root && (!earliest || compareExactRoots(root, earliest.root) < 0)) {
+            const time = exactRootNumber(root);
+            earliest = { hull: mixHull(leftHull, rightHull, time), root, time };
+        }
+    }
+    return earliest;
+}
+
+function candidatesForBounds(model, bounds, fixed, target, terrainIsFixed) {
+    const candidates = fixed.filter((candidate) => overlaps(candidateBounds(candidate), bounds, COLLISION_MARGIN));
+    if (!terrainIsFixed) candidates.push(...terrainCandidates(model.seed, bounds));
+    if (
         target &&
-        target.platformRight >= swept.left &&
-        target.platformLeft <= swept.right &&
-        target.platformTop >= swept.bottom &&
-        target.platformTop <= swept.top;
-    const featurePossible = features.some((feature) => overlaps(feature.bounds));
-    const terrainPossible = terrainOverlaps(model, swept);
-    if (!topPossible && !featurePossible && !terrainPossible) return null;
-    const topContact = topPossible ? targetTopSweptContact(previous, next, target, previousBounds, nextBounds) : null;
-    let unsafeContact = null;
-    let clearPose = previous;
-    let clearTime = 0;
-    for (let index = 0; index <= intervals; index += 1) {
-        const time = index / intervals;
-        const pose = interpolatePose(previous, next, time);
-        const cause = unsafeCauseAtPose(model, pose, target, options.ignoreTopSiteId, features);
-        if (cause) {
-            let hitPose = pose;
-            let hitTime = time;
-            let hitCause = cause;
-            for (let iteration = 0; index > 0 && iteration < 12; iteration += 1) {
-                const middleTime = (clearTime + hitTime) / 2;
-                const middle = interpolatePose(previous, next, middleTime);
-                const middleCause = unsafeCauseAtPose(model, middle, target, options.ignoreTopSiteId, features);
-                if (middleCause) {
-                    hitPose = middle;
-                    hitTime = middleTime;
-                    hitCause = middleCause;
-                } else {
-                    clearPose = middle;
-                    clearTime = middleTime;
-                }
-            }
-            void clearPose;
-            unsafeContact = { kind: "unsafe", cause: hitCause, pose: hitPose, time: hitTime };
-            break;
-        }
-        clearPose = pose;
-        clearTime = time;
+        target.platformTop >= bounds.bottom - COLLISION_MARGIN &&
+        target.platformTop <= bounds.top + COLLISION_MARGIN
+    ) {
+        candidates.push({
+            cause: "target",
+            priority: 5,
+            segment: horizontalSegment(target.platformLeft, target.platformRight, target.platformTop),
+            target: true,
+        });
     }
-    if (unsafeContact && (!topContact || unsafeContact.time <= topContact.time + 1e-12)) return unsafeContact;
-    if (topContact) {
-        const pose = topContact.pose;
-        const feet = [transformLocalPoint(pose, -1.6, 0), transformLocalPoint(pose, 1.6, 0)];
-        const safe =
-            !topContact.grazing &&
-            pose.vy <= 0 &&
-            feet.every((foot) => foot.x >= target.platformLeft && foot.x <= target.platformRight) &&
-            Math.abs(pose.vx) <= MAX_LANDING_HORIZONTAL_SPEED &&
-            Math.abs(pose.vy) <= MAX_LANDING_DESCENT_SPEED &&
-            Math.abs(normalizeDegrees(pose.angle)) <= MAX_LANDING_ANGLE &&
-            Math.abs(pose.angularVelocity) <= MAX_LANDING_ANGULAR_SPEED;
-        return {
-            kind: safe ? "safe" : "unsafe",
-            cause: safe ? "target" : topContact.grazing ? "grazing" : "target-envelope",
-            pose,
-            time: topContact.time,
+    return candidates;
+}
+
+const horizontalSegment = (left, right, y) => [
+    { x: left, y },
+    { x: right, y },
+];
+
+function terminusCandidate(x, foot) {
+    return {
+        cause: "terminus",
+        priority: 3,
+        segment: [
+            { x, y: foot },
+            { x, y: 2 ** 38 },
+        ],
+    };
+}
+
+function contactPose(previous, next, angularTravel, time) {
+    const pose = interpolatePose(previous, next, time);
+    pose.angle = normalizeDegrees(previous.angle + angularTravel * time);
+    return pose;
+}
+
+function classifyContact(contact, target, previous, next, angularTravel) {
+    const pose = contactPose(previous, next, angularTravel, contact.time);
+    if (!contact.candidate.target) {
+        return { kind: "unsafe", cause: contact.candidate.cause, pose, time: contact.time };
+    }
+    const feet = contact.hull.slice(0, 2);
+    const safe =
+        pose.vy <= 0 &&
+        feet.every((foot) => foot.x >= target.platformLeft && foot.x <= target.platformRight) &&
+        Math.abs(pose.vx) <= MAX_LANDING_HORIZONTAL_SPEED &&
+        Math.abs(pose.vy) <= MAX_LANDING_DESCENT_SPEED &&
+        Math.abs(normalizeDegrees(pose.angle)) <= MAX_LANDING_ANGLE &&
+        Math.abs(pose.angularVelocity) <= MAX_LANDING_ANGULAR_SPEED;
+    return { kind: safe ? "safe" : "unsafe", cause: safe ? "target" : "target-envelope", pose, time: contact.time };
+}
+
+function sweepSlab(model, slab, fixed, target, previous, next, angularTravel, instrumentation, terrainIsFixed) {
+    const stack = [
+        { left: slab.left, right: slab.right, leftHull: slab.leftHull, rightHull: slab.rightHull, depth: 0 },
+    ];
+    while (stack.length) {
+        instrumentation.maxStack = Math.max(instrumentation.maxStack, stack.length);
+        const interval = stack.pop();
+        const displacement = maximumHullDisplacement(interval.leftHull, interval.rightHull);
+        const bounds = expandedEnclosure(interval.leftHull, interval.rightHull, displacement);
+        const candidates = candidatesForBounds(model, bounds, fixed, target, terrainIsFixed);
+        if (!candidates.length) continue;
+        if (displacement > COLLISION_MARGIN) {
+            const middle = (interval.left + interval.right) / 2;
+            if (middle === interval.left || middle === interval.right)
+                throw new Error("Collision midpoint did not progress");
+            const middleHull = mixHull(interval.leftHull, interval.rightHull, 0.5);
+            const depth = interval.depth + 1;
+            if (depth > 20) throw new Error("Collision displacement invariant exceeded derived depth");
+            stack.push(
+                { left: middle, right: interval.right, leftHull: middleHull, rightHull: interval.rightHull, depth },
+                { left: interval.left, right: middle, leftHull: interval.leftHull, rightHull: middleHull, depth },
+            );
+            continue;
+        }
+        const middleHull = mixHull(interval.leftHull, interval.rightHull, 0.5);
+        const detected = candidates.filter((candidate) =>
+            [interval.leftHull, middleHull, interval.rightHull].some(
+                (hull) => candidateDistanceSquared(hull, candidate) <= COLLISION_MARGIN ** 2,
+            ),
+        );
+        const contacts = [];
+        for (const candidate of detected) {
+            const local = contactForCandidate(interval.leftHull, interval.rightHull, candidate);
+            if (!local) continue;
+            contacts.push({
+                candidate,
+                hull: local.hull,
+                root: local.root,
+                time: interval.left + (interval.right - interval.left) * local.time,
+            });
+        }
+        contacts.sort((a, b) => compareExactRoots(a.root, b.root) || a.candidate.priority - b.candidate.priority);
+        if (contacts.length) return classifyContact(contacts[0], target, previous, next, angularTravel);
+    }
+    return null;
+}
+
+function* collisionKnots(previous, angularTravel) {
+    yield { angle: previous.angle, time: 0 };
+    const endpoint = previous.angle + angularTravel;
+    if (angularTravel > 0) {
+        for (let angle = Math.floor(previous.angle) + 1; angle <= Math.ceil(endpoint) - 1; angle += 1) {
+            yield { angle, time: (angle - previous.angle) / angularTravel };
+        }
+    } else if (angularTravel < 0) {
+        for (let angle = Math.ceil(previous.angle) - 1; angle >= Math.floor(endpoint) + 1; angle -= 1) {
+            yield { angle, time: (angle - previous.angle) / angularTravel };
+        }
+    }
+    yield { angle: endpoint, time: 1 };
+}
+
+function hasInteriorAngleKnot(previousAngle, angularTravel) {
+    const endpoint = previousAngle + angularTravel;
+    if (angularTravel > 0) return Math.floor(previousAngle) + 1 <= Math.ceil(endpoint) - 1;
+    if (angularTravel < 0) return Math.ceil(previousAngle) - 1 >= Math.floor(endpoint) + 1;
+    return false;
+}
+
+export function classifySweptContactFromBounds(model, previous, next, previousBounds, nextBounds, options = {}) {
+    const target = collisionSiteById(model, model.targetSiteId);
+    if (!Number.isFinite(options.angularTravel)) throw new TypeError("Swept contact requires explicit angularTravel");
+    const angularTravel = options.angularTravel;
+    const swept = hasInteriorAngleKnot(previous.angle, angularTravel)
+        ? {
+              left: Math.min(previous.x, next.x) - HULL_RADIUS,
+              right: Math.max(previous.x, next.x) + HULL_RADIUS,
+              bottom: Math.min(previous.y, next.y) - HULL_RADIUS,
+              top: Math.max(previous.y, next.y) + HULL_RADIUS,
+          }
+        : {
+              left: Math.min(previousBounds.left, nextBounds.left),
+              right: Math.max(previousBounds.right, nextBounds.right),
+              bottom: Math.min(previousBounds.bottom, nextBounds.bottom),
+              top: Math.max(previousBounds.top, nextBounds.top),
+          };
+    const features = options.features ?? unsafeFeatures(model, previous, target, options.ignoreTopSiteId);
+    const reachesTerminus = swept.left <= WORLD_MIN_X || swept.right >= WORLD_MAX_X;
+    const maximumTop =
+        model.collisionMaximumTop ??
+        Math.max(29.2, target?.platformTop ?? -Infinity, ...features.map((feature) => candidateBounds(feature).top));
+    if (!reachesTerminus && swept.bottom > maximumTop + COLLISION_MARGIN) return null;
+    const fixed = [...features];
+    const terrainSegmentCount = Math.ceil((swept.right - swept.left) / TERRAIN_VERTEX_CADENCE);
+    const contextTerrain = model.terrainAuthority === "context";
+    const terrainIsFixed = contextTerrain || terrainSegmentCount <= 64;
+    if (contextTerrain) {
+        let terrainFeatures = contextTerrainCache.get(model);
+        if (!terrainFeatures) {
+            terrainFeatures = contextTerrainCandidates(model.terrainVertices, {
+                left: -Infinity,
+                right: Infinity,
+                bottom: -Infinity,
+                top: Infinity,
+            });
+            contextTerrainCache.set(model, terrainFeatures);
+        }
+        fixed.push(...terrainFeatures.filter((candidate) => overlaps(candidate.bounds, swept, COLLISION_MARGIN)));
+    } else if (terrainIsFixed) fixed.push(...terrainCandidates(model.seed, swept));
+    let termini;
+    if (swept.left <= WORLD_MIN_X + COLLISION_MARGIN) {
+        termini = worldTermini(model.seed);
+        fixed.push(terminusCandidate(WORLD_MIN_X, termini.left.foot));
+    }
+    if (swept.right >= WORLD_MAX_X - COLLISION_MARGIN) {
+        termini ??= worldTermini(model.seed);
+        fixed.push(terminusCandidate(WORLD_MAX_X, termini.right.foot));
+    }
+    const instrumentation = options.instrumentation ?? {};
+    instrumentation.visitedKnots = 0;
+    instrumentation.maxKnotHulls = 0;
+    instrumentation.maxStack = 0;
+    let prior = null;
+    for (const knot of collisionKnots(previous, angularTravel)) {
+        instrumentation.visitedKnots += 1;
+        const center = {
+            ...interpolatePose(previous, next, knot.time),
+            angle: knot.angle,
         };
+        const current = { ...knot, hull: hullForPose(center) };
+        instrumentation.maxKnotHulls = Math.max(instrumentation.maxKnotHulls, prior ? 2 : 1);
+        if (prior) {
+            const contact = sweepSlab(
+                model,
+                { left: prior.time, right: current.time, leftHull: prior.hull, rightHull: current.hull },
+                fixed,
+                target,
+                previous,
+                next,
+                angularTravel,
+                instrumentation,
+                terrainIsFixed,
+            );
+            if (contact) return contact;
+        }
+        prior = current;
     }
     return null;
 }

@@ -21,8 +21,8 @@ from site_test_support import RepositoryFixture
 
 PROBE = r"""
 import { landerGameController as controller } from "/static/lander-game.js";
-import { advanceMissionSequence, createRun, stepFlight, updateRetention } from "/static/lander-model.js";
-import { STATIC_WORLD_SEED, terrainSiteForIndex } from "/static/lander-world.js";
+import { advanceMissionSequence, classifySweptContact, createRun, stepFlight, updateRetention } from "/static/lander-model.js";
+import { STATIC_WORLD_SEED, WORLD_MAX_X, WORLD_MIN_X, hullForPose, terrainHeightAt } from "/static/lander-world.js";
 
 if (controller.frameId !== null) cancelAnimationFrame(controller.frameId);
 controller.frameId = null;
@@ -50,6 +50,9 @@ const landmarkNodes = () => [...document.querySelectorAll(
 const snapshot = (label = "") => ({
     label,
     state: controller.model.state,
+    failureCause: controller.model.failureCause,
+    fuel: controller.model.fuel,
+    pose: controller.model.pose,
     viewport: {innerWidth, innerHeight},
     document: {clientWidth: document.documentElement.clientWidth,
         scrollWidth: document.documentElement.scrollWidth,
@@ -88,10 +91,34 @@ const service = () => {
 };
 const fail = () => {
     let model = createRun({seed: 41, reducedMotion: true});
-    model = stepFlight({...model, pose: {...model.pose, y: 56, vy: 10}}, zero);
+    model = stepFlight({...model, pose: {...model.pose, x: 70, y: terrainHeightAt(41, 70) - 1, vy: -10}}, zero);
     controller.model = updateRetention(model);
     controller.render();
     return snapshot("crash");
+};
+const ballistic = () => {
+    let model = createRun({seed: 41, reducedMotion: true});
+    const target = model.retainedSites.find((site) => site.id === model.targetSiteId);
+    model = stepFlight({...model, fuel: 0, pose: {x: target.center + 125, y: 70,
+        vx: 500, vy: 10, angle: 0, angularVelocity: 0}}, {left: .72, right: .72});
+    controller.model = updateRetention(model); controller.render();
+    const clear = snapshot("past-target-ballistic");
+    for (let step = 0; step < 2000 && model.state === "flying"; step += 1) {
+        model = stepFlight(model, zero);
+    }
+    controller.model = updateRetention(model); controller.render();
+    return [clear, snapshot("ballistic-contact")];
+};
+const edge = (direction) => {
+    const boundary = direction > 0 ? WORLD_MAX_X : WORLD_MIN_X;
+    let model = createRun({seed: 11, reducedMotion: true});
+    model = updateRetention({...model, pose: {...model.pose, x: boundary - direction * 10, y: 50,
+        vx: direction * 2000, vy: 0}});
+    controller.model = model; controller.render();
+    const visible = snapshot(direction > 0 ? "right-terminus-visible" : "left-terminus-visible");
+    model = stepFlight(model, zero);
+    controller.model = updateRetention(model); controller.render();
+    return [visible, snapshot(direction > 0 ? "right-terminus-contact" : "left-terminus-contact")];
 };
 const retry = () => { restart.click(); return snapshot("retry"); };
 const leave = () => { exit.click(); return snapshot("exit"); };
@@ -101,6 +128,40 @@ const timingSummary = (values) => {
     const ordered = values.toSorted((left, right) => left - right);
     return {samples: ordered.length, p95: ordered[Math.ceil(ordered.length * .95) - 1],
         maximum: ordered.at(-1)};
+};
+const maximumKnotSweep = (direction) => {
+    const model = {...createRun({seed: 41}), retainedSites: [], targetSiteId: null,
+        terrainAuthority: "context", terrainVertices: []};
+    const pose = {x: 0, y: 35.8, vx: 0, vy: 0, angle: 0.9, angularVelocity: 0};
+    const angularTravel = direction * 50552;
+    const finalAngle = direction * Math.atan2(6.5, 1.6) * 180 / Math.PI;
+    const previous = {...pose, angle: finalAngle - direction * 152};
+    const next = {...previous, x: direction * 5687.1066666666675, angle: finalAngle};
+    const corner = hullForPose({...next, angle: previous.angle + angularTravel})
+        .reduce((selected, candidate) => direction * candidate.x > direction * selected.x ? candidate : selected);
+    const features = [{cause: "terminus", priority: 3,
+        segment: [{x: corner.x, y: corner.y - .01}, {x: corner.x, y: corner.y + .01}]}];
+    const classify = () => {
+        const instrumentation = {};
+        const contact = classifySweptContact(model, previous, next, {angularTravel, instrumentation, features});
+        if (contact?.cause !== "terminus" || contact.kind !== "unsafe" || contact.time <= .9999 ||
+            instrumentation.visitedKnots !== 50554 || instrumentation.maxKnotHulls > 2 ||
+            instrumentation.maxStack > 20) throw new Error("maximum knot sweep contract drifted");
+        return instrumentation;
+    };
+    classify();
+    const values = [];
+    let instrumentation;
+    for (let repetition = 0; repetition < 10; repetition += 1) {
+        const started = performance.now(); instrumentation = classify(); values.push(performance.now() - started);
+    }
+    return {direction, timing: timingSummary(values), instrumentation};
+};
+const maximumKnotWitness = () => {
+    const beforeDom = domCounts(); const beforeCleanup = controller.cleanups.length;
+    const directions = [-1, 1].map(maximumKnotSweep);
+    return {directions, beforeDom, afterDom: domCounts(), beforeCleanup,
+        afterCleanup: controller.cleanups.length};
 };
 const domCounts = () => ({document: document.querySelectorAll("*").length,
     world: world.querySelectorAll("*").length, worldChildren: world.children.length,
@@ -185,8 +246,10 @@ const longevity = (seed) => {
         frames: timingSummary(frameValues), frameStates,
         maxima, stabilizedDom, finalDom: domCounts(), cleanupCount: controller.cleanups.length};
 };
-const valleyX = (seed) => (terrainSiteForIndex(seed, 0).center + terrainSiteForIndex(seed, 1).center) / 2;
-window.phase4q = {snapshot, useSeed, service, fail, retry, leave, focusFooter, longevity,
+const valleyX = (seed) => Array.from({length: 33}, (_, index) => index * 16)
+    .reduce((lowest, x) => terrainHeightAt(seed, x) < terrainHeightAt(seed, lowest) ? x : lowest, 0);
+window.phase4q = {snapshot, useSeed, service, fail, ballistic, edge, retry, leave, focusFooter, longevity,
+    maximumKnotWitness,
     valleyX, STATIC_WORLD_SEED, listenerTargets: {motion: controller.motion}};
 document.documentElement.dataset.phase4qReady = "true";
 """
@@ -273,7 +336,7 @@ def browser_phase4q_contract(
         screenshot_directory = output / "_phase4q-screenshots"
         screenshot_directory.mkdir(exist_ok=True)
         result: dict[str, object] = {"viewports": {}, "screenshots": [], "longevity": [],
-                                    "listeners": []}
+                                    "listeners": [], "maximumKnot": None}
         viewports = (
             ("narrow", 320, 780, False),
             ("zoomEquivalent", 320, 240, False),
@@ -300,6 +363,9 @@ def browser_phase4q_contract(
             stages.append(connection.evaluate("phase4q.useSeed(41, -40, 30, 'reverse-left')"))
             stages.append(connection.evaluate("phase4q.useSeed(41, 160, 30, 'reverse-right')"))
             stages.extend(connection.evaluate("phase4q.service()"))
+            stages.extend(connection.evaluate("phase4q.ballistic()"))
+            stages.extend(connection.evaluate("phase4q.edge(-1)"))
+            stages.extend(connection.evaluate("phase4q.edge(1)"))
             stages.append(connection.evaluate("phase4q.fail()"))
             stages.append(connection.evaluate("phase4q.retry()"))
             stages.append(connection.evaluate("phase4q.focusFooter()"))
@@ -334,6 +400,8 @@ def browser_phase4q_contract(
                 for seed in (11, 39, 41, 1095194417):
                     result["longevity"].append(connection.evaluate(f"phase4q.longevity({seed})"))
                     result["listeners"].append(_listener_counts(connection))
+                result["maximumKnot"] = connection.evaluate("phase4q.maximumKnotWitness()")
+                result["listeners"].append(_listener_counts(connection))
         return result
     finally:
         if connection is not None:
@@ -359,7 +427,7 @@ class Phase4QBrowserTests(RepositoryFixture):
         witnesses = result["longevity"]
         self.assertEqual([witness["seed"] for witness in witnesses], [11, 39, 41, 1095194417])
         listener_snapshots = result["listeners"]
-        self.assertEqual(len(listener_snapshots), 5)
+        self.assertEqual(len(listener_snapshots), 6)
         self.assertTrue(all(snapshot == listener_snapshots[0] for snapshot in listener_snapshots))
         self.assertEqual(listener_snapshots[0], {
             "window": {"blur": 1, "resize": 1},
@@ -402,9 +470,21 @@ class Phase4QBrowserTests(RepositoryFixture):
                 self.assertEqual(witness["maxima"]["world"], witness["finalDom"]["world"])
                 self.assertEqual(witness["stabilizedDom"], witness["finalDom"])
                 self.assertEqual(witness["finalDom"]["worldChildren"], 5)
-                self.assertEqual(witness["finalDom"]["terrainPaths"], 2)
+                self.assertEqual(witness["finalDom"]["terrainPaths"], 3)
                 self.assertEqual(witness["finalDom"]["siteGroups"], 3)
                 self.assertEqual(witness["cleanupCount"], listener_count + 1)
+
+        maximum_knot = result["maximumKnot"]
+        self.assertEqual(maximum_knot["beforeDom"], maximum_knot["afterDom"])
+        self.assertEqual(maximum_knot["beforeCleanup"], maximum_knot["afterCleanup"])
+        self.assertEqual([row["direction"] for row in maximum_knot["directions"]], [-1, 1])
+        for row in maximum_knot["directions"]:
+            self.assertEqual(row["timing"]["samples"], 10)
+            self.assertLess(row["timing"]["p95"], 100)
+            self.assertLess(row["timing"]["maximum"], 250)
+            self.assertEqual(row["instrumentation"]["visitedKnots"], 50554)
+            self.assertLessEqual(row["instrumentation"]["maxKnotHulls"], 2)
+            self.assertLessEqual(row["instrumentation"]["maxStack"], 20)
 
     def test_fixed_scene_has_no_page_growth_or_scroll_across_lifecycle(self) -> None:
         result = browser_phase4q_contract(self.build())
@@ -417,7 +497,8 @@ class Phase4QBrowserTests(RepositoryFixture):
         expected_labels = [
             "preflight", "seed11-summit", "seed11-low-valley", "seed41-summit", "static-valley",
             "ceiling-flight", "reverse-left", "reverse-right", "service-landed", "service-powered",
-            "crash", "retry", "focus-footer", "wheel",
+            "past-target-ballistic", "ballistic-contact", "left-terminus-visible", "left-terminus-contact",
+            "right-terminus-visible", "right-terminus-contact", "crash", "retry", "focus-footer", "wheel",
         ]
         for name, stages in result["viewports"].items():
             width, height = expected[name]
@@ -426,8 +507,18 @@ class Phase4QBrowserTests(RepositoryFixture):
             self.assertEqual(stages[0]["state"], "preflight")
             self.assertEqual(stages[8]["state"], "landed")
             self.assertEqual(stages[9]["state"], "launching")
-            self.assertEqual(stages[10]["state"], "failed")
-            self.assertEqual(stages[11]["state"], "flying")
+            self.assertEqual(stages[10]["state"], "flying")
+            self.assertEqual(stages[10]["fuel"], 0)
+            self.assertGreater(stages[10]["pose"]["x"], 132)
+            self.assertGreater(stages[10]["pose"]["y"], 56)
+            self.assertEqual(stages[11]["state"], "failed")
+            self.assertEqual(stages[11]["failureCause"], "terrain")
+            self.assertEqual(stages[12]["state"], "flying")
+            self.assertEqual(stages[13]["failureCause"], "terminus")
+            self.assertEqual(stages[14]["state"], "flying")
+            self.assertEqual(stages[15]["failureCause"], "terminus")
+            self.assertEqual(stages[16]["state"], "failed")
+            self.assertEqual(stages[17]["state"], "flying")
             self.assertEqual(stages[-1]["state"], "preflight")
             first_height = stages[0]["stage"]["height"]
             first_width = stages[0]["stage"]["width"]

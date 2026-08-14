@@ -7,7 +7,7 @@ import { siteScaffoldMembers, siteScaffoldPath, siteStructure } from "../static/
 import { controllerClasses, controllerFixture } from "./lander-test-dom.mjs";
 
 const ROOT = new URL("../", import.meta.url);
-const DERIVED_URL = new URL("fixtures/lander-route-derived-v7.json", import.meta.url);
+const DERIVED_URL = new URL("fixtures/lander-route-derived-v8.json", import.meta.url);
 
 function checkpointRun() {
     let model = createRun({ seed: 1, reducedMotion: true });

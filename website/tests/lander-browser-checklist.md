@@ -35,11 +35,11 @@ projection evidence, not the qualitative or cross-engine signoff below.
 
 The Phase 4Q Chromium witness runs exact `320 by 780`, `320 by 240` 400-percent-equivalent,
 `667 by 320` touch-landscape, and `1000 by 780` viewports. It observes actual preflight; seed 11,
-seed 41, and static summit/valley windows; ceiling and bidirectional flight; normal-motion service;
-crash; Retry; Exit; footer focus; wheel; and touch transitions. Every stage records width and height
-client/scroll metrics for the document, body, header, main, game, shell, stage, rail, footer, footer
-navigation, and every header/footer/action descendant. It requires exact viewport and document
-equality, zero scroll, fixed stage dimensions and `25:16` ratio, zero world Y translation,
+seed 41, and static summit/valley windows; high-altitude and bidirectional flight; normal-motion
+service; crash; Retry; Exit; footer focus; wheel; and touch transitions. Every stage records width
+and height client/scroll metrics for the document, body, header, main, game, shell, stage, rail,
+footer, footer navigation, and every header/footer/action descendant. It requires exact viewport and
+document equality, zero scroll, fixed stage dimensions and `25:16` ratio, zero world Y translation,
 in-viewport descendants, and 44-pixel native actions. The witness also emits 12 distinct PNG
 artifacts across the three terrain seeds and four viewports without asserting authored prose or
 golden pixels. Inside Chromium it also services 100 real powered sites for each of seeds 11, 39, 41,
@@ -51,11 +51,21 @@ must remain unchanged across all four runs. Run
 automated Chromium evidence; it does not replace the qualitative terrain or cross-engine acceptance
 below.
 
-The Phase 4R witness adds the shipped seed corpus for the global 16/128 m straight-polyline terrain,
-all eight opening profiles, closed-footprint 2.5 m deck clearance, independently native-footed
-supports, the 100-key proof catalog, sufficient climb allowance, and unchanged fixed-height metrics
-at the same four viewports. Its screenshots are qualitative artifacts for operator inspection; no
-test approves wording or golden pixels.
+The Phase 4S witness supersedes the Phase 4R terrain corpus with global 16/512 m asymmetric
+straight-polyline superblock profiles, the visible physical world termini, concrete-contact-only
+failure, and the terminal site-4095 service lifecycle. It verifies that former ceiling and
+excessive-speed vectors remain ballistic, empty fuel removes thrust without creating failure,
+retained-window edges never collide, and large finite sweeps stream global procedural terrain
+without giant retained arrays. The route witness covers all 243 exact keys and 320 concrete
+assignments, including 205 bootstrap selections over 13 distinct schedules and 38 bounded syntheses,
+with the sufficient 12.55 base allowance. The 12 viewport/seed screenshots remain qualitative
+artifacts for operator inspection; no test approves wording or golden pixels.
+
+The earlier Phase 4R witness added the shipped seed corpus for the global 16/128 m straight-polyline
+terrain, all eight opening profiles, closed-footprint 2.5 m deck clearance, independently
+native-footed supports, the 100-key proof catalog, sufficient climb allowance, and unchanged
+fixed-height metrics at the same four viewports. Its screenshots are qualitative artifacts for
+operator inspection; no test approves wording or golden pixels.
 
 ## Arcade presentation acceptance
 
@@ -119,10 +129,11 @@ test approves wording or golden pixels.
       return; the solid arrow changes right, left, then right and hides whenever any target edge is
       visible. It blinks only while offscreen, is static with reduced motion, and has equivalent
       visually hidden direction text.
-- [ ] Fly through both former horizontal world-edge coordinates and continue beyond the target in
-      either direction. Confirm that neither position nor zero fuel causes a crash; collision,
-      excessive contact speed, and the vertical ceiling still do. The camera follows continuously
-      left and right without clamping or changing mission progress.
+- [ ] Continue beyond the target in either direction and through the former synthetic altitude and
+      speed thresholds. Confirm that neither position, speed, altitude, nor zero fuel causes a
+      crash. At each finite world end, confirm the rail is visible before the lander reaches it and
+      that only reconstructed physical contact with that rail causes failure. The camera follows
+      continuously left and right without retained-window crashes or changing mission progress.
 - [ ] Watch the stars and occasional crescent or ringed planet while traversing and reversing. They
       move with the landscape at visibly slower 24-percent parallax, never affect collision or
       accessibility, and reconstruct without a pop when returning. Confirm crescents read as moons,
@@ -153,9 +164,9 @@ test approves wording or golden pixels.
       sequence. Depart from the launch-ready pad with ordinary keyboard, vi, pointer, and touch
       flight controls; confirm no native Launch action exists.
 - [ ] Fly far enough for the camera and rolling window to move in both directions. At every sampled
-      point, count exactly two terrain paths, at most three site groups, eight debris nodes, and no
-      more than 75 descendants under `#lander-world`; discarded sites do not return as retained
-      history.
+      point, count exactly three terrain-layer paths (fill, surface, and physical termini), at most
+      three site groups, eight debris nodes, and no more than 76 descendants under `#lander-world`;
+      discarded sites do not return as retained history.
 - [ ] Exercise straight, turn-only, and combined keyboard thrust plus pointer/touch at half and full
       drag. Confirm steering visibly gimbals both plumes, reduces forward thrust, never exceeds
       straight collective, and keyboard steer owns direction during simultaneous pointer input.
@@ -171,7 +182,7 @@ test approves wording or golden pixels.
       resets timing.
 - [ ] Keep the network panel open for the complete three-site run. After initial same-origin HTML,
       CSS, three modules, and SVG loads, the game makes no request and creates no durable storage.
-- [ ] Record active frame p95, 100-site retention counts, and direct generation plus two-proof
+- [ ] Record active frame p95, 100-site retention counts, and direct generation plus one-proof
       replay p95/max on the pre-merge Chromium machine. Required ceilings are 4 ms frame p95, 25 ms
       generation p95, and 50 ms generation maximum.
 

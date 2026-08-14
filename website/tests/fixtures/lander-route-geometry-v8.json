@@ -1,0 +1,120 @@
+{
+  "schema": "agw-lander-route-geometry/v8",
+  "collision": {
+    "angleKnotDegrees": 1,
+    "margin": 0.02,
+    "recipe": "agw-lander-swept-collision/v2"
+  },
+  "siteGeometry": {
+    "member": { "cap": "butt", "join": "round", "width": 0.2 },
+    "noc": { "mastHeight": 3.2, "mastWidth": 0.5, "roofOffset": 7.2, "width": 7 },
+    "platform": { "clearance": 2.5, "thickness": 0.35, "width": 9.6 },
+    "supportColumns": {
+      "alternation": "top-left-to-bottom-right-first",
+      "bayMaximum": { "height": 0.8, "width": 1 },
+      "bottomTie": "max-rail-foot",
+      "collisionExpansion": 0.1,
+      "count": 3,
+      "feet": "independent-native-terrain-interpolation",
+      "railPairOffsets": [
+        [0, 1],
+        [8.8, 9.8],
+        [17.6, 18.6]
+      ],
+      "railTieBraceWidth": 0.2,
+      "terrainWedgeMaximum": { "height": 0.36, "width": 1 },
+      "top": "platform-bottom"
+    },
+    "truss": {
+      "alternation": "top-left-to-bottom-right-first",
+      "bayCount": 12,
+      "bayHeight": 0.75,
+      "bayWidth": 1.55,
+      "chordCount": 2,
+      "collisionEnvelope": { "bottom": -1.2, "left": -4.9, "right": 13.9, "top": -0.25 },
+      "clearApertureMaximum": { "diameter": 3.1894356867634124, "height": 0.75, "width": 3.1 },
+      "diagonalsPerBay": 1,
+      "span": 18.6
+    }
+  },
+  "terrain": {
+    "cadence": 16,
+    "epochSuperblocks": 8,
+    "gradeChangeLimit": 0.4,
+    "gradeLimit": 0.36,
+    "mapping": { "normalizedMaximum": 0.6, "normalizedMinimum": 0.1, "worldOffset": -9.2, "worldScale": 64 },
+    "profiles": {
+      "S0": [
+        0.35, 0.4, 0.45, 0.51, 0.55, 0.58, 0.59, 0.6, 0.6, 0.6, 0.59, 0.56, 0.54, 0.54, 0.55, 0.56, 0.57, 0.58, 0.59,
+        0.59, 0.59, 0.57, 0.52, 0.45, 0.38, 0.37, 0.37, 0.35, 0.37, 0.29, 0.31, 0.35, 0.35
+      ],
+      "S1": [
+        0.35, 0.33, 0.29, 0.24, 0.18, 0.11, 0.1, 0.1, 0.12, 0.14, 0.15, 0.15, 0.15, 0.14, 0.13, 0.11, 0.1, 0.1, 0.1,
+        0.13, 0.17, 0.21, 0.25, 0.28, 0.31, 0.27, 0.26, 0.23, 0.26, 0.29, 0.36, 0.39, 0.35
+      ],
+      "S2": [
+        0.35, 0.3, 0.24, 0.17, 0.11, 0.11, 0.12, 0.12, 0.12, 0.14, 0.16, 0.16, 0.15, 0.14, 0.13, 0.11, 0.1, 0.1, 0.12,
+        0.15, 0.17, 0.21, 0.23, 0.23, 0.21, 0.27, 0.35, 0.38, 0.4, 0.32, 0.28, 0.31, 0.35
+      ],
+      "S3": [
+        0.35, 0.38, 0.4, 0.41, 0.42, 0.42, 0.41, 0.4, 0.36, 0.29, 0.21, 0.14, 0.1, 0.1, 0.11, 0.12, 0.13, 0.13, 0.12,
+        0.11, 0.11, 0.12, 0.15, 0.21, 0.28, 0.27, 0.24, 0.27, 0.28, 0.28, 0.24, 0.3, 0.35
+      ],
+      "S4": [
+        0.35, 0.39, 0.44, 0.5, 0.56, 0.58, 0.6, 0.6, 0.59, 0.57, 0.56, 0.56, 0.57, 0.57, 0.55, 0.53, 0.52, 0.51, 0.5,
+        0.48, 0.47, 0.47, 0.48, 0.48, 0.46, 0.4, 0.41, 0.35, 0.31, 0.23, 0.24, 0.3, 0.35
+      ],
+      "S5": [
+        0.35, 0.3, 0.25, 0.2, 0.14, 0.1, 0.1, 0.1, 0.11, 0.11, 0.14, 0.18, 0.22, 0.26, 0.3, 0.32, 0.32, 0.31, 0.29,
+        0.29, 0.3, 0.33, 0.37, 0.4, 0.42, 0.45, 0.38, 0.36, 0.33, 0.34, 0.4, 0.39, 0.35
+      ],
+      "S6": [
+        0.35, 0.35, 0.37, 0.41, 0.47, 0.51, 0.56, 0.6, 0.6, 0.6, 0.59, 0.56, 0.53, 0.51, 0.5, 0.5, 0.49, 0.48, 0.48,
+        0.48, 0.49, 0.49, 0.49, 0.46, 0.42, 0.35, 0.28, 0.24, 0.3, 0.33, 0.32, 0.38, 0.35
+      ],
+      "S7": [
+        0.35, 0.3, 0.24, 0.2, 0.14, 0.11, 0.1, 0.1, 0.11, 0.12, 0.13, 0.14, 0.14, 0.13, 0.12, 0.11, 0.1, 0.1, 0.11,
+        0.13, 0.16, 0.21, 0.26, 0.31, 0.37, 0.35, 0.43, 0.45, 0.5, 0.48, 0.4, 0.4, 0.35
+      ]
+    },
+    "selection": {
+      "firstAdvancePerEpoch": 1,
+      "lastOffset": 2,
+      "offsetStream": 15,
+      "shuffleOrder": [5, 4, 3, 2, 1],
+      "shuffleStream": 16
+    },
+    "superblockWidth": 512
+  },
+  "sites": {
+    "closedFootprint": [-4.8, 13.8],
+    "firstCenter": 36,
+    "formula": "36+96*i",
+    "spatialPhases": [4, 36, 68, 100, 132, 164, 196, 228, 260, 292, 324, 356, 388, 420, 452, 484],
+    "spacing": 96
+  },
+  "synthesizer": {
+    "beamWidth": 6000,
+    "commands": [0, 1, 2, 3, 4, 5],
+    "macroSteps": 12,
+    "maxContactStep": 4320,
+    "maxLayers": 269,
+    "prefix": [
+      [1, 90],
+      [0, 218],
+      [1, 21],
+      [0, 94],
+      [2, 12],
+      [5, 6],
+      [3, 41],
+      [0, 119],
+      [2, 23],
+      [0, 180],
+      [1, 129],
+      [0, 120],
+      [2, 34]
+    ],
+    "recipe": "agw-lander-corridor-synthesizer/v1"
+  },
+  "world": { "maxSiteIndex": 4095, "maxX": 393216, "minSiteIndex": -4095, "minX": -393216, "terminusWidth": 0.2 }
+}

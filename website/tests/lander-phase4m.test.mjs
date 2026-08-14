@@ -53,7 +53,7 @@ test("opening and post-award fuel use honest uncapped gauge references", async (
     assert.equal(powered.checkpoint.fuelGaugeReference, powered.fuelGaugeReference);
 });
 test("half-tank opening lands for every global terrain profile", async () => {
-    const derived = JSON.parse(await readFile(new URL("tests/fixtures/lander-route-derived-v7.json", ROOT), "utf8"));
+    const derived = JSON.parse(await readFile(new URL("tests/fixtures/lander-route-derived-v8.json", ROOT), "utf8"));
     const seeds = new Map();
     for (let seed = 1; seeds.size < 8; seed += 1) {
         const profile = terrainProfileForBlock(seed, 0).id;
@@ -75,7 +75,7 @@ test("half-tank opening lands for every global terrain profile", async () => {
     }
 });
 
-test("horizontal exploration is unbounded while the ceiling remains a failure", () => {
+test("exploration has no synthetic viewport, speed, fuel, or ceiling failure", () => {
     const run = createRun({ seed: 1 });
     for (const [x, vx] of [
         [-5.01, -1],
@@ -92,12 +92,12 @@ test("horizontal exploration is unbounded while the ceiling remains a failure", 
             .state,
         "flying",
     );
-    const ceiling = stepFlight(
+    const aboveFormerCeiling = stepFlight(
         { ...run, reducedMotion: true, pose: { x: 12, y: 56, vx: 0, vy: 10, angle: 0, angularVelocity: 0 } },
         ZERO,
     );
-    assert.equal(ceiling.state, "failed");
-    assert.equal(ceiling.failureCause, "ceiling");
+    assert.equal(aboveFormerCeiling.state, "flying");
+    assert.equal(aboveFormerCeiling.failureCause, null);
 });
 
 test("camera, bidirectional target cue, and deterministic bounded sky cover both directions", () => {
@@ -214,7 +214,7 @@ test("deployment travel is 0.9 seconds while refuel and power timings remain ind
 });
 
 test("three native-foot lattice columns integrate with the one-path scaffold and honest colliders", async () => {
-    const derived = JSON.parse(await readFile(new URL("tests/fixtures/lander-route-derived-v7.json", ROOT), "utf8"));
+    const derived = JSON.parse(await readFile(new URL("tests/fixtures/lander-route-derived-v8.json", ROOT), "utf8"));
     for (const witness of derived.worldWitnesses.filter((_, index) => index % 101 === 0)) {
         const site = witness.descriptor.site;
         const descriptor = {
@@ -254,7 +254,7 @@ test("three native-foot lattice columns integrate with the one-path scaffold and
 });
 
 test("independent planar overlay derives every connected clear-face maximum and kills member mutations", async () => {
-    const derived = JSON.parse(await readFile(new URL("tests/fixtures/lander-route-derived-v7.json", ROOT), "utf8"));
+    const derived = JSON.parse(await readFile(new URL("tests/fixtures/lander-route-derived-v8.json", ROOT), "utf8"));
     for (const witness of derived.worldWitnesses.filter((_, index) => index % 101 === 0)) {
         const canonical = witness.descriptor.site;
         const descriptor = {

@@ -254,7 +254,8 @@ test("independent static and dynamic site geometry stays inside exact colliders 
     const structure = siteStructure(site); const expected = expectedScaffold(site);
     assert.ok(expected.length >= 41 && expected.length <= 95);
     const template = await readFile(join(ROOT, "templates/lander-game.html"), "utf8");
-    const staticTag = template.match(/<path class="site-scaffold"[^>]+>/)?.[0];
+    const compactTemplate = template.replace(/\s+/g, " ");
+    const staticTag = template.match(/<path\s+class="site-scaffold"[^>]+>/)?.[0];
     assert.ok(staticTag); assert.match(staticTag, /stroke-width="2"/); assert.match(staticTag, /stroke-linecap="butt"/);
     assert.match(staticTag, /stroke-linejoin="round"/);
     const staticPath = staticTag.match(/d="([^"]+)"/)?.[1]; assert.ok(staticPath);
@@ -277,7 +278,8 @@ test("independent static and dynamic site geometry stays inside exact colliders 
     assert.equal(memberIndex, expected.length);
     for (const [width, height] of [[1,0.8],[1,0.7],[3.1,0.75]]) assert.ok(Math.hypot(width, height) < 3.2);
 
-    const buildingLeft = site.platformRight * 10 + 20; const roof = 548 - structure.roof * 10;
+    const buildingLeft = site.platformRight * 10 + 20;
+    const roof = Math.round((548 - structure.roof * 10) * 1e9) / 1e9;
     const battery = group.querySelector(".noc-battery"); const barTops = [46, 38, 30, 22];
     const dynamicBars = barTops.map((offset, index) => battery.querySelector(`.battery-bar-${index + 1}`).attributes.get("d"));
     const expectedBars = barTops.map((offset) => `M${buildingLeft + 29} ${roof + offset}h12v5h-12Z`);
@@ -296,7 +298,9 @@ test("independent static and dynamic site geometry stays inside exact colliders 
         const path = `M${centerX - halfWidth} ${antennaY - endpointRise}Q${centerX} ${antennaY - controlRise} ` +
             `${centerX + halfWidth} ${antennaY - endpointRise}`;
         assert.equal(group.querySelector(`.antenna-signal-${index + 1}`).attributes.get("d"), path);
-        assert.ok(template.includes(`class="noc-antenna antenna-signal antenna-signal-${index + 1}" d="${path}"`));
+        assert.ok(
+            compactTemplate.includes(`class="noc-antenna antenna-signal antenna-signal-${index + 1}" d="${path}"`),
+        );
         const [startX, startY, controlX, , endX, endY] = path.match(/-?\d+(?:\.\d+)?/g).map(Number);
         assert.equal(startX + endX, 2 * controlX); assert.equal(startY, endY);
     });

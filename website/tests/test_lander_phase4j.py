@@ -101,7 +101,7 @@ class ArcadeMarkupTests(unittest.TestCase):
         mutations = (
             self.fragment.replace('<span id="lander-fuel-value"', '<output id="lander-fuel-value"', 1),
             self.fragment.replace('<span id="lander-fuel-gauge"', '<meter id="lander-fuel-gauge"', 1),
-            self.fragment.replace('data-agent="absent" ', "", 1),
+            self.fragment.replace('data-agent="absent"', "", 1),
             wrong_parent,
             self.fragment.replace('aria-live="polite"', 'aria-live="polite"></p><p aria-live="polite"', 1),
         )
@@ -147,12 +147,14 @@ class ArcadeMarkupTests(unittest.TestCase):
 
     def test_control_line_sources_reject_empty_duplicate_and_moved_structure(self) -> None:
         keyboard = re.search(
-            r'<span class="lander-controls-line lander-controls-keyboard">[^<]+</span>',
+            r'<span class="lander-controls-line lander-controls-keyboard"\s*>\s*[^<]+</span\s*>',
             self.fragment,
+            re.DOTALL,
         )
         touch = re.search(
-            r'<span class="lander-controls-line lander-controls-touch">[^<]+</span>',
+            r'<span class="lander-controls-line lander-controls-touch"\s*>\s*[^<]+</span\s*>',
             self.fragment,
+            re.DOTALL,
         )
         self.assertIsNotNone(keyboard)
         self.assertIsNotNone(touch)

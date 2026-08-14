@@ -7,8 +7,8 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+    BASE_ROUTE_ALLOWANCE,
     FUEL_QUANTUM,
-    MAX_PLAYABLE_Y,
     checkpointPoseForContact,
     createRun,
     proveRouteProof,
@@ -16,7 +16,7 @@ import {
     updateRetention,
 } from "../static/lander-model.js";
 import { REFERENCE_PROOF_CATALOG, REFERENCE_PROOFS, ROUTE_DIGESTS } from "../static/lander-route-proofs.generated.js";
-import { STATIC_WORLD_SEED, terrainSiteForIndex } from "../static/lander-world.js";
+import { STATIC_WORLD_SEED, createSiteForIndex, terrainProfileForBlock } from "../static/lander-world.js";
 import { millimeterDeltaCensus, quantumCeil } from "../tools/derive_lander_routes.mjs";
 
 const ROOT = new URL("../", import.meta.url).pathname;
@@ -26,8 +26,9 @@ function close(actual, expected, tolerance = 1e-10) {
 }
 
 test("route arithmetic uses exact quantum ceiling and integer-millimeter delta keys", () => {
-    assert.equal(quantumCeil(12.65 + 4.800000000000001), 17.5);
-    assert.equal(quantumCeil(12.65 + 4.8), 17.45);
+    assert.equal(quantumCeil(17.450000000000003), 17.5);
+    assert.equal(quantumCeil(17.45), 17.45);
+    assert.equal(BASE_ROUTE_ALLOWANCE, 12.55);
     assert.equal(
         millimeterDeltaCensus([
             { originMillimeters: 5_716, targetMillimeters: 20_116 },
@@ -68,13 +69,12 @@ function heightFromVertices(vertices, x) {
 
 function assignmentContext(geometry, assignment) {
     const heightAt = (x) => {
-        const blockIndex = Math.floor(x / 128);
-        const variant = assignment.variants[blockIndex + 1];
-        assert.notEqual(variant, undefined);
-        const family = (((blockIndex + assignment.parity) % 2) + 2) % 2 === 0 ? "H" : "L";
-        const samples = geometry.terrain.profiles[`${family}${variant}`];
-        const local = x - blockIndex * 128;
-        const segment = Math.min(7, Math.floor(local / 16));
+        const blockIndex = Math.floor(x / 512);
+        const profile = blockIndex === assignment.leftBlock ? assignment.leftProfile : assignment.rightProfile;
+        assert.notEqual(profile, undefined);
+        const samples = geometry.terrain.profiles[`S${profile}`];
+        const local = x - blockIndex * 512;
+        const segment = Math.min(31, Math.floor(local / 16));
         const fraction = (local - segment * 16) / 16;
         const normalized = samples[segment] + (samples[segment + 1] - samples[segment]) * fraction;
         return 64 * normalized - 9.2;
@@ -129,21 +129,21 @@ function assignmentContext(geometry, assignment) {
     };
 }
 
-test("all 100 keyed proof records replay every concrete terrain assignment", async () => {
-    const fixture = JSON.parse(await readFile(join(ROOT, "tests/fixtures/lander-route-derived-v7.json"), "utf8"));
-    const geometry = JSON.parse(await readFile(join(ROOT, "tests/fixtures/lander-route-geometry-v7.json"), "utf8"));
-    assert.equal(REFERENCE_PROOFS.length, 100);
-    assert.equal(Object.keys(REFERENCE_PROOF_CATALOG).length, 100);
-    assert.equal(fixture.assignments.length, 2048);
-    assert.equal(fixture.records.length, 100);
-    assert.equal(new Set(fixture.assignments.map(({ pairKey }) => pairKey)).size, 100);
+test("all 243 keyed proof records replay every concrete terrain assignment", async () => {
+    const fixture = JSON.parse(await readFile(join(ROOT, "tests/fixtures/lander-route-derived-v8.json"), "utf8"));
+    const geometry = JSON.parse(await readFile(join(ROOT, "tests/fixtures/lander-route-geometry-v8.json"), "utf8"));
+    assert.equal(REFERENCE_PROOFS.length, 243);
+    assert.equal(Object.keys(REFERENCE_PROOF_CATALOG).length, 243);
+    assert.equal(fixture.assignments.length, 320);
+    assert.equal(fixture.records.length, 243);
+    assert.equal(new Set(fixture.assignments.map(({ pairKey }) => pairKey)).size, 243);
     assert.equal(
         new Set(
             fixture.assignments.map(
                 ({ originMillimeters, targetMillimeters }) => targetMillimeters - originMillimeters,
             ),
         ).size,
-        75,
+        224,
     );
     assert.ok(
         fixture.assignments.every(
@@ -170,10 +170,10 @@ test("all 100 keyed proof records replay every concrete terrain assignment", asy
         });
         assert.deepEqual(proof.runs[0], [1, 90]);
         assert.ok(proof.success.contactStep <= 4320);
-        assert.ok(proof.maxHullTop <= MAX_PLAYABLE_Y);
+        assert.ok(Number.isFinite(proof.maxHullTop));
         assert.equal(
             proof.allowance,
-            Math.ceil((12.65 + proof.climbSurcharge) / FUEL_QUANTUM) * FUEL_QUANTUM,
+            Math.ceil((BASE_ROUTE_ALLOWANCE + proof.climbSurcharge) / FUEL_QUANTUM) * FUEL_QUANTUM,
         );
     }
     for (const assignment of fixture.assignments) {
@@ -183,21 +183,28 @@ test("all 100 keyed proof records replay every concrete terrain assignment", asy
     }
     const branchCounts = Object.fromEntries(
         [
-            ["deep", (assignment) => assignment.deckDelta < -10],
-            ["shallow", (assignment) => assignment.deckDelta >= -10 && assignment.deckDelta < 0],
-            ["rising", (assignment) => assignment.deckDelta >= 0],
+            ["deep", (assignment) => assignment.targetMillimeters - assignment.originMillimeters < -10_000],
+            [
+                "shallow",
+                (assignment) => {
+                    const delta = assignment.targetMillimeters - assignment.originMillimeters;
+                    return delta >= -10_000 && delta < 0;
+                },
+            ],
+            ["rising", (assignment) => assignment.targetMillimeters - assignment.originMillimeters >= 0],
         ].map(([key, predicate]) => [
             key,
             new Set(fixture.assignments.filter(predicate).map(({ pairKey }) => pairKey)).size,
         ]),
     );
-    assert.deepEqual(branchCounts, { deep: 36, shallow: 12, rising: 52 });
+    assert.deepEqual(branchCounts, { deep: 41, shallow: 78, rising: 124 });
     close(
         Math.ceil(Math.max(...REFERENCE_PROOFS.map(({ baseBurn }) => baseBurn)) / FUEL_QUANTUM) * FUEL_QUANTUM,
-        12.65,
+        BASE_ROUTE_ALLOWANCE,
     );
     assert.deepEqual(ROUTE_DIGESTS, {
         assignmentDigest: fixture.assignmentDigest,
+        bootstrapDigest: fixture.bootstrapDigest,
         geometryDigest: fixture.geometryDigest,
         outputDigest: fixture.outputDigest,
         physicsDigest: fixture.physicsDigest,
@@ -207,8 +214,8 @@ test("all 100 keyed proof records replay every concrete terrain assignment", asy
 });
 
 test("accepted touchdown margins settle to one centered immutable checkpoint", async () => {
-    const fixture = JSON.parse(await readFile(join(ROOT, "tests/fixtures/lander-route-derived-v7.json"), "utf8"));
-    const geometry = JSON.parse(await readFile(join(ROOT, "tests/fixtures/lander-route-geometry-v7.json"), "utf8"));
+    const fixture = JSON.parse(await readFile(join(ROOT, "tests/fixtures/lander-route-derived-v8.json"), "utf8"));
+    const geometry = JSON.parse(await readFile(join(ROOT, "tests/fixtures/lander-route-geometry-v8.json"), "utf8"));
     for (const assignment of fixture.assignments.filter((_, index) => index % 257 === 0)) {
         const context = assignmentContext(geometry, assignment);
         for (const x of [
@@ -230,30 +237,83 @@ test("accepted touchdown margins settle to one centered immutable checkpoint", a
 });
 
 test("checked v7 authority has exact schemas, ordering, digests, and CLI rejection", async () => {
-    const geometryPath = join(ROOT, "tests/fixtures/lander-route-geometry-v7.json");
-    const fixturePath = join(ROOT, "tests/fixtures/lander-route-derived-v7.json");
+    const geometryPath = join(ROOT, "tests/fixtures/lander-route-geometry-v8.json");
+    const fixturePath = join(ROOT, "tests/fixtures/lander-route-derived-v8.json");
     const geometry = JSON.parse(await readFile(geometryPath, "utf8"));
     const derived = JSON.parse(await readFile(fixturePath, "utf8"));
-    assert.equal(derived.schema, "agw-lander-route-derived/v7");
-    assert.equal(derived.deriverVersion, "agw-lander-route-deriver/v8");
+    assert.equal(derived.schema, "agw-lander-route-derived/v8");
+    assert.equal(derived.deriverVersion, "agw-lander-route-deriver/v9");
     assert.equal(derived.synthesizerVersion, "agw-lander-corridor-synthesizer/v1");
+    assert.equal(derived.collisionVersion, "agw-lander-swept-collision/v2");
     assert.equal(derived.canonicalPoseDecimals, 9);
     assert.equal(digest(geometry), derived.geometryDigest);
     assert.equal(digest(derived.assignments), derived.assignmentDigest);
-    assert.equal(digest({ records: derived.records, openings: derived.openings }), derived.proofDigest);
+    assert.equal(
+        digest({ records: derived.records, openings: derived.openings, terminal: derived.terminal }),
+        derived.proofDigest,
+    );
     assert.equal(digest(derived.worldWitnesses), derived.worldDigest);
     const { outputDigest, ...unsignedDerived } = derived;
     assert.equal(digest(unsignedDerived), outputDigest);
     assert.equal(derived.openings.length, 8);
     assert.equal(derived.worldWitnesses.length, 808);
+    assert.equal(derived.records.filter((record) => record.search.macroExpansions === 0).length, 205);
+    assert.equal(derived.records.filter((record) => record.search.macroExpansions !== 0).length, 38);
+    assert.equal(
+        new Set(
+            derived.records
+                .filter((record) => record.search.macroExpansions === 0)
+                .map((record) => record.search.terminalReplays),
+        ).size,
+        13,
+    );
+    assert.deepEqual(derived.terminal, {
+        siteIndex: 4095,
+        deckDelta: 0,
+        allowance: 12.55,
+        ratio: 1,
+        award: 12.55,
+        completedSites: 4096,
+        generatorCursor: 4096,
+        activeSiteId: 4095,
+        targetSiteId: null,
+        targetRouteProof: null,
+        cueDirection: null,
+    });
     assert.deepEqual(
         [...new Set(derived.worldWitnesses.map(({ descriptor }) => descriptor.seed))],
         [11, 39, 41, STATIC_WORLD_SEED],
     );
+    for (const { descriptor, digest: descriptorDigest } of derived.worldWitnesses) {
+        const runtimeSite = createSiteForIndex(descriptor.seed, descriptor.siteIndex);
+        assert.deepEqual(descriptor.site, {
+            index: runtimeSite.id,
+            center: runtimeSite.center,
+            closedFootprint: [runtimeSite.platformLeft, runtimeSite.center + 13.8],
+            localNativeMaximum: runtimeSite.localNativeMaximum,
+            platformTop: runtimeSite.platformTop,
+            supportFeet: runtimeSite.supportFeet,
+        });
+        for (const block of descriptor.superblocks) {
+            const runtimeBlock = terrainProfileForBlock(descriptor.seed, block.index);
+            assert.deepEqual(block, {
+                epoch: runtimeBlock.epoch,
+                index: block.index,
+                profile: runtimeBlock.profile,
+                slot: runtimeBlock.slot,
+                vertices: runtimeBlock.samples.map((height, index) => [
+                    block.index * 512 + index * 16,
+                    64 * height - 9.2,
+                ]),
+            });
+        }
+        assert.equal(digest(descriptor), descriptorDigest);
+    }
     assert.equal(spawnSync(process.execPath, [join(ROOT, "tools/derive_lander_routes.mjs"), "--bogus"]).status, 2);
 
     const directory = await mkdtemp(join(tmpdir(), "agw-route-test-"));
     const changedGeometry = join(directory, "geometry.json");
+    const bootstrapPath = join(ROOT, "tests/fixtures/lander-route-derived-v7.json");
     geometry.sites.spacing = 95;
     await writeFile(changedGeometry, JSON.stringify(geometry) + "\n", "utf8");
     assert.equal(
@@ -261,6 +321,8 @@ test("checked v7 authority has exact schemas, ordering, digests, and CLI rejecti
             join(ROOT, "tools/derive_lander_routes.mjs"),
             "--geometry",
             changedGeometry,
+            "--bootstrap",
+            bootstrapPath,
             "--output",
             join(directory, "output.json"),
         ]).status,
@@ -285,8 +347,8 @@ test("checked v7 authority has exact schemas, ordering, digests, and CLI rejecti
 });
 
 test("production route proof rejects a weak or inexact launch prefix before collision replay", async () => {
-    const fixture = JSON.parse(await readFile(join(ROOT, "tests/fixtures/lander-route-derived-v7.json"), "utf8"));
-    const geometry = JSON.parse(await readFile(join(ROOT, "tests/fixtures/lander-route-geometry-v7.json"), "utf8"));
+    const fixture = JSON.parse(await readFile(join(ROOT, "tests/fixtures/lander-route-derived-v8.json"), "utf8"));
+    const geometry = JSON.parse(await readFile(join(ROOT, "tests/fixtures/lander-route-geometry-v8.json"), "utf8"));
     const proof = REFERENCE_PROOFS[0];
     const context = assignmentContext(
         geometry,
@@ -327,7 +389,10 @@ test("four seeded 100-site powered missions keep lifecycle and generation timing
             assert.ok(model.retainedSites.length <= 3);
             assert.ok(model.retainedChunks.length <= 5);
             assert.ok(model.terrainVertices.length <= 48);
-            assert.equal(terrainSiteForIndex(seed, completed + 4).phase, terrainSiteForIndex(seed, completed).phase);
+            assert.equal(
+                (((36 + 96 * (completed + 16)) % 512) + 512) % 512,
+                (((36 + 96 * completed) % 512) + 512) % 512,
+            );
         }
         assert.equal(model.completedSites, 100);
         assert.ok(model.refuelRatio >= 1);
