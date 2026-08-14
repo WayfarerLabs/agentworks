@@ -107,6 +107,7 @@ Implementation uses these permanent names:
 | `website/tools/derive_lander_routes.mjs`               | Independent, deterministic route-fixture derivation CLI         |
 | `website/tools/project_lander_route_proofs.mjs`        | Deterministic derived-fixture-to-source projection CLI          |
 | `website/tools/lander_clear_faces.mjs`                 | Independent scaffold-overlay and clear-face enumeration         |
+| `website/tests/fixtures/lander-route-derived-v7.json`  | Immutable reviewed corridor-schedule bootstrap input            |
 | `website/tests/fixtures/lander-route-geometry-v8.json` | Canonical global terrain, site, structure, and envelope input   |
 | `website/tests/fixtures/lander-route-derived-v8.json`  | Reviewed 243-pair schedules, openings, and witness output       |
 | `website/tests/lander-world.test.mjs`                  | Seeded world, window, site, and proof-key vectors               |
@@ -1459,16 +1460,45 @@ contact. Stop after the first layer with a selected record. A contact after 4,32
 unsafe contact is not a candidate. If no layer succeeds, derivation fails. Hull top is recorded but
 has no acceptance ceiling.
 
-The deterministic ceiling per pair is 269 layers, 6 commands, 6,000 retained states, at most
-9,684,000 macro expansions, and at most 1,614,000 exact terminal replays. No random restart,
-wall-clock cutoff, worker-dependent merge, recipe widening, or early acceptance before exact replay
-exists. The schedule digest uses the existing FNV-1a command/low-count-byte/high-count-byte fold.
-The v9 derivation tool independently implements the integrator and complete swept-contact classifier
-and imports no production or test module. Its selected replay is necessary but not sufficient:
-permanent model verification replays every stored run against production `classifySweptContact` on
-both its conservative envelope and every concrete member assignment. Independent and production
-classification, first-contact step, canonical pose, burn, and hull maximum must agree before a
-record is usable. Runtime then performs the one defensive production replay already required above.
+Before residual synthesis, v9 consumes the checked
+`website/tests/fixtures/lander-route-derived-v7.json` as one explicit immutable bootstrap input. Its
+complete file bytes, including the single trailing LF, must hash to
+`c5800497182045dbf664fd50abd6cfd79cc4293bdadbfd4afa526e72f7d71b12` with SHA-256. The parsed fixture
+must have schema `agw-lander-route-derived/v7`, `outputDigest`
+`dea7263fe5b01ea1c0a442a1f2fefb3f4dad472cbe8668b8bf00793cde5afef7`, `proofDigest`
+`ca09ed720e3e752745af046cbb2013c99c36227963e9799b1f1cd8961b49f354`, and exactly 100 records; any
+byte, schema, digest, or count mismatch fails before derivation. This fixture is permanent reviewed
+input, not a disposable file, an implicit prior-Git dependency, or runtime authority.
+
+From each bootstrap record read only `pairKey`, `runs`, `scheduleDigest`, and
+`search.selectedLayer`. Recompute the FNV-1a digest from `runs`, require it to equal
+`scheduleDigest`, and reject malformed, empty, adjacent-equal, non-positive-count, unknown-command,
+or over-4,320-step runs. Deduplicate only byte-identical canonical `runs`; for a duplicate retain
+the source having the numerically least `(originMillimeters,targetMillimeters)` parsed from
+`pairKey`. Sort distinct candidates by unsigned numeric `scheduleDigest`, then that same numeric
+source-pair tuple; the pinned bootstrap yields exactly 75 distinct candidates. For each new
+numeric-sorted v8 key, independently exact-replay every candidate in this order against the key's
+conservative envelope. The first safe replay in the tuple
+`(scheduleDigest,sourceOriginMillimeters,sourceTargetMillimeters)` is selected and then replayed
+against every concrete member assignment. Its new record stores
+`search={selectedLayer:source.search.selectedLayer,macroExpansions:0,terminalReplays:n}`, where `n`
+is the one-based count of bootstrap candidates replayed through the selected safe result. An unsafe
+or incomplete replay continues to the next candidate; no approximate clearance, profile read,
+carried-fuel read, or source-record success claim is trusted. Only a key with no safe bootstrap
+candidate enters the synthesizer below.
+
+The deterministic residual-synthesis ceiling per pair is 269 layers, 6 commands, 6,000 retained
+states, at most 9,684,000 macro expansions, and at most 1,614,000 exact terminal replays. No random
+restart, wall-clock cutoff, worker-dependent merge, recipe widening, or early acceptance before
+exact replay exists. The schedule digest uses the existing FNV-1a
+command/low-count-byte/high-count-byte fold. The v9 derivation tool independently implements the
+integrator and complete swept-contact classifier and imports no production or test module. Reading
+the explicit bootstrap data file through the pinned narrow projection above is not a module import.
+Its selected replay is necessary but not sufficient: permanent model verification replays every
+stored run against production `classifySweptContact` on both its conservative envelope and every
+concrete member assignment. Independent and production classification, first-contact step, canonical
+pose, burn, and hull maximum must agree before a record is usable. Runtime then performs the one
+defensive production replay already required above.
 
 For an ordered pair with origin deck `D0` and target deck `D1`, set `O=D0-2.5`, `T=D1-2.5`,
 `a=13.8`, and `b=91.2`. Its exact conservative envelope is `O` for `x<=a`, `T` for `x>=b`, and
@@ -1485,16 +1515,18 @@ envelope.
 The disposable feasibility corpus covers all 243 keys without filtering: 41 use the deep-fall
 branch, 78 use the shallow-fall branch, and 124 are flat or rising. No key has exactly `delta=-10`,
 but the inclusive shallow tie remains mutation-protected. Exact production replay accepts 208 keys
-with 33 distinct already-certified corridor schedules; the same deterministic recipe synthesizes and
-exactly replays all 35 residual geometries. Across the complete 243-record witness, maximum
-target-contact step is `4,247`, maximum controller burn is `12.81125000000022`, maximum swept hull
-top is `53.4231353132934 m`, and maximum base burn after subtracting only the positive-delta
-potential surcharge is `12.604750000001879`, which quantum-ceils to the unchanged `B=12.65`.
-Residual synthesis uses at most 9,098,124 macro expansions, one terminal replay, and selected layer
-262, all within the declared ceilings. Permanent v9 derivation must synthesize or independently
-replay every record from declared inputs, then reproduce counts and maxima at least as strict as
-these witnesses; it may not import the disposable files or a prior derived fixture. A mismatch is a
-feasibility failure, not permission to relax collision, terrain, or controls.
+with 33 distinct bootstrap corridor schedules; the same deterministic recipe synthesizes and exactly
+replays all 35 residual geometries. Across the complete 243-record witness, maximum target-contact
+step is `4,247`, maximum controller burn is `12.81125000000022`, maximum swept hull top is
+`53.4231353132934 m`, and maximum base burn after subtracting only the positive-delta potential
+surcharge is `12.604750000001879`, which quantum-ceils to the unchanged `B=12.65`. Residual
+synthesis uses at most 9,098,124 macro expansions, one terminal replay, and selected layer 262, all
+within the declared ceilings. Permanent v9 derivation must synthesize or independently replay every
+record from declared inputs, then reproduce counts and maxima at least as strict as these witnesses;
+it may not import disposable files or any undeclared prior output. The immutable v7 bootstrap above
+is the sole permitted prior derived-data input and contributes schedules only through its pinned
+narrow projection. A mismatch is a feasibility failure, not permission to relax collision, terrain,
+or controls.
 
 ### 10.2 Opening proof, fixture authority, and digests
 
@@ -1550,19 +1582,20 @@ pairKey,envelope,assignmentIds,assignmentMembershipDigest,runs,scheduleDigest,
 search,success,controllerBurn,baseBurn,climbSurcharge,allowance,maxHullTop
 ```
 
-`search` contains `selectedLayer,macroExpansions,terminalReplays`. `selectedLayer` is one-based;
-`macroExpansions` counts every attempted 12-step child before pruning or deduplication;
-`terminalReplays` counts every post-truncation terminal candidate sent to exact replay. `success`
-contains `classification,contactStep,pose`. Each opening contains exactly
+`search` contains `selectedLayer,macroExpansions,terminalReplays`. `selectedLayer` is one-based. For
+a residual-synthesis record, `macroExpansions` counts every attempted 12-step child before pruning
+or deduplication and `terminalReplays` counts every post-truncation terminal candidate sent to exact
+replay. For a bootstrap-selected record, the exact zero/count/source-layer meanings in section 10.1
+apply. `success` contains `classification,contactStep,pose`. Each opening contains exactly
 `profile,deck,runs,contactStep,pose,burn,reserve,classification`. Object key order is immaterial
 only because canonical JSON sorts it; no optional field, null placeholder, duplicated derived value,
 or prose label is permitted.
 
-Bump the permanent inputs to geometry schema `agw-lander-route-geometry/v8`, derived schema
-`agw-lander-route-derived/v8`, deriver `agw-lander-route-deriver/v9`, collision recipe
-`agw-lander-swept-collision/v2`, and the unchanged synthesizer recipe
-`agw-lander-corridor-synthesizer/v1`. Geometry v8 preserves v7's top-level and structure objects,
-replaces `terrain` with exact keys
+Bump the permanent inputs to the immutable bootstrap fixture `agw-lander-route-derived/v7` plus
+geometry schema `agw-lander-route-geometry/v8`, derived schema `agw-lander-route-derived/v8`,
+deriver `agw-lander-route-deriver/v9`, collision recipe `agw-lander-swept-collision/v2`, and the
+unchanged synthesizer recipe `agw-lander-corridor-synthesizer/v1`. Geometry v8 preserves v7's
+top-level and structure objects, replaces `terrain` with exact keys
 `cadence,epochSuperblocks,gradeChangeLimit,gradeLimit,mapping,profiles,selection,superblockWidth`,
 sets `epochSuperblocks=8` and `superblockWidth=512`, and gives `selection` exactly
 `{firstAdvancePerEpoch:1,lastOffset:2,offsetStream:15,shuffleOrder:[5,4,3,2,1],shuffleStream:16}`.
@@ -1598,7 +1631,7 @@ The derived top-level payload contains exactly
 
 ```text
 schema,deriverVersion,synthesizerVersion,collisionVersion,canonicalPoseDecimals,
-geometryDigest,physicsDigest,assignments,assignmentDigest,records,openings,terminal,
+bootstrapDigest,geometryDigest,physicsDigest,assignments,assignmentDigest,records,openings,terminal,
 proofDigest,worldWitnesses,worldDigest,outputDigest
 ```
 
@@ -1606,6 +1639,9 @@ Canonical JSON recursively sorts object keys, preserves the pinned array orders,
 `JSON.stringify`, and hashes UTF-8 bytes with lowercase SHA-256. Hash payloads never include a
 trailing LF; fixture files add exactly one unhashed trailing LF. Digest scopes are exhaustive:
 
+- `bootstrapDigest` is the lowercase SHA-256 of the complete immutable v7 bootstrap file bytes,
+  including its one trailing LF; it must equal
+  `c5800497182045dbf664fd50abd6cfd79cc4293bdadbfd4afa526e72f7d71b12`.
 - `geometryDigest` hashes the complete geometry-v8 input object.
 - `physicsDigest` hashes exactly `{collisionVersion,commands,constants}`. `commands` is the
   unchanged ordered eight-row pre-assist table. `constants` contains exactly these sorted names:
@@ -1631,19 +1667,20 @@ termini do not alter terrain, sites, or the 320-member closure:
 assignmentDigest 597c7ffe9cba6ce2d95dd1204e40ff8562bea22088ca13fa9b930656992a918b
 ```
 
-The corrected geometry, physics, proof, world, and output digests all change and must be emitted
-together by the first independent v9 derivation, reviewed as one atomic fixture change, and then
-copied into the generated proof projection. The pre-correction Phase 4R/4S literals are forbidden;
-the LLD does not invent pre-derivation output hashes. The fixture remains primary authority.
-Verification recomputes every digest and fails on partial regeneration, an old v7 reader, missing
-assignment/pair/profile/terminal authority, ordering drift, payload-scope drift, or changed
-collision/physics digest.
+The pinned bootstrap digest and corrected geometry, physics, proof, world, and output digests must
+be emitted together by the first independent v9 derivation, reviewed as one atomic fixture change,
+and then copied into the generated proof projection. The pre-correction Phase 4R/4S literals are
+forbidden; the LLD does not invent pre-derivation output hashes. The fixture remains primary
+authority. Verification recomputes every digest and fails on partial regeneration, a v7 output
+reader, missing assignment/pair/profile/terminal authority, ordering drift, payload-scope drift, or
+changed collision/physics digest.
 
 The exact CLI remains standard-library Node and accepts only:
 
 ```text
 node website/tools/derive_lander_routes.mjs \
   --geometry website/tests/fixtures/lander-route-geometry-v8.json \
+  --bootstrap website/tests/fixtures/lander-route-derived-v7.json \
   --output PATH [--verify PATH]
 ```
 
@@ -1668,6 +1705,10 @@ record order, and emits one compact row per record after the exact shared prefix
 projection to a temporary path and require byte equality with the reviewed generated source; build
 tests mutation-kill a missing/renamed import or provenance marker and prove the final artifact still
 has exactly 13 entries.
+
+`ROUTE_DIGESTS` contains exactly `assignmentDigest,bootstrapDigest,geometryDigest,outputDigest,`
+`physicsDigest,proofDigest,worldDigest`, copied from derived v8 without recomputation by the
+projection tool.
 
 ### 10.3 Honest sufficient allowance and award
 
@@ -2302,7 +2343,7 @@ six-template/smaller-failure data are absent, not aliases.
 | `node --test website/tests/lander-phase4s.test.mjs`                     | Mutation-sensitive independent reconstruction of the `.02 m` detection-only candidate invariant and unexpanded linear/quadratic contact equations. Kill expansion-as-impact, endpoint-only contact, discriminant-sign rounding, repeated-root loss, collinear-overlap loss, a Number midpoint that stops progressing, shortest-arc knots, retained knot arrays, work-budget impact, retained-edge impact, invisible/moved rails, final-site route lookup, terminal award/cursor/null-target drift, or a 14th artifact. Exercise both signed maximum-reachable streams, assert exactly 50,828 visited knots and final-slab actual contact, and preserve stable model/listener/DOM counts through repeated Retry/lifecycle calls. Keep this focused test and every authored module below 1,000 lines.                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `node --test website/tests/lander-phase4l.test.mjs`                     | Mutation-sensitive controller/DOM tests pin exactly two controls-line children in keyboard/touch order, Retry label-source and hint structure without asserting text, internal `RESTART` dispatch, crash focus stability, click/`r` teardown-render-focus order, shell focus with `preventScroll`, and no synthesized input. Existing outside-shell and native-button rejection coverage remains exact.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `node --test website/tests/lander-phase4m.test.mjs`                     | Mutation-sensitive controller/DOM tests pin five sky chunks, 20 stars, one or two deterministic landmarks in exactly two paths, the complete two-arc crescent, all three one/two-ring profiles, exact circle/ellipse intersections, omitted rear-center arcs, and complete foreground arcs. They retain static/dynamic descriptor equality, bounded reconciliation, `.24` parallax transforms, negative/positive camera following, bidirectional cue changes, pass/reverse/return, and the historical rejection of a generic horizontal-bound failure; Phase 4S's focused test owns the exact two-rail contact and camera-clamp exception. They also pin the exact opening half-gauge, post-award full reference without cap, `.9 s` deploy travel, unchanged refuel/power timing, hidden-time freeze, reduced-motion atomic projection, and structural copy/link/accessibility sources without embedding authored wording.                                                                                                                                                                                                                                                                                              |
-| Derivation CLI fixture verification                                     | Generate temporary v8 output with v9 deriver, collision v2, and synthesizer v1; review the canonical delta; update geometry/physics/assignment/proof/world/output digests atomically; then run ordinary `--verify`. Enumerate exact 16-phase/profile closure into 320 assignments and 243 numeric-sorted exact pair keys. Regenerate with pinned prefix, `12/269/6000` bounds, command order, integer-millimeter key, cost/tie tuple, first-safe-layer selection, and 4,320-step ceiling; exact independent and production replays agree for all 243 routes, eight openings, and terminal vector. No early-success omission, profile rejection, runtime fallback, fuel-wasting schedule, scope/order drift, or partial fixture is permitted.                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Derivation CLI fixture verification                                     | Verify the immutable v7 bootstrap byte hash/schema/count/internal digests, extract its narrow schedule projection, and generate temporary v8 output with v9 deriver, collision v2, and synthesizer v1; review the canonical delta; update bootstrap/geometry/physics/assignment/proof/world/output digests atomically; then run ordinary `--verify`. Enumerate exact 16-phase/profile closure into 320 assignments and 243 numeric-sorted exact pair keys. Regenerate with pinned bootstrap order/selection, prefix, `12/269/6000` bounds, command order, integer-millimeter key, cost/tie tuple, first-safe-layer selection, and 4,320-step ceiling; exact independent and production replays agree for all 243 routes, eight openings, and terminal vector. No early-success omission, profile rejection, runtime fallback, fuel-wasting schedule, scope/order drift, undeclared input, or partial fixture is permitted.                                                                                                                                                                                                                                                                                               |
 | `python -m unittest discover -s website/tests -p 'test_*.py'`           | The validator pins one shared fragment, structure, accessible-name sources, v8 fixture/schema names, and absence of old v7 production authority, Phase 4P, smootherstep, curve, global-datum, site-conditioned terrain, vertical-camera, ceiling, and overspeed fields. Exact artifact, DOM budget, privacy, module DAG, route uniqueness, recovery, and static/dynamic parity remain. It does not assert authored prose.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | Automated Chromium projection witness                                   | At exact `1000 by 780`, `320 by 780`, real `320 by 240`, and touch `667 by 320`, first assert requested inner dimensions and exact client/scroll equality with zero scroll. Every action/landmark stays inside the viewport through wheel/touch/focus/game transitions. Keep the `25/16` stage across preflight, low valley, summit, clear flight above former ceiling, empty-fuel ballistic return, concrete crash, service, Retry, reversal, and both edge approaches, with world Y transform zero and no vertical-camera state. Capture seed `11`, `41`, static broad/jagged windows, each visible terminus before contact, actual rail-contact crash, and the final-site null cue. After one unmeasured production-identical warmup per direction, run ten maximum-knot classifications in each signed direction. Every run visits exactly 50,828 streamed knots; nearest-rank p95 over the 20 runs stays below 100 ms and maximum below 250 ms on the pre-merge Chromium machine; instrumented knot-hull retention stays at most two and the slab stack at most 20; DOM/listener counts equal their baseline after Retry. Retain focus, cue, parallax, gauge, deployment, reduced-motion, and checkpoint witnesses. |
 | Pseudo-can computed-style and screenshot witness                        | For `getComputedStyle(stage,"::after")`, assert `width=20px`, `height=22px`, `pointer-events=none`, `image-rendering=pixelated`, transparent background color, exactly six gradient images, sizes `6px 2px,10px 6px,2px 4px,4px 8px,12px 14px,16px 18px`, positions `6px 2px,4px 0px,16px 10px,16px 8px,2px 6px,0px 4px`, `no-repeat` six times, and alternating normalized paints `rgb(217,74,30)`/`rgb(41,43,48)` in the pinned top-to-bottom order. At DPR 1 and an integer transfer center, take exact `20 by 22` CSS-pixel crops with refueling on and off: on-crop probes `(5,1)`, `(7,3)`, `(18,9)`, `(16,11)`, `(1,5)`, and `(3,7)` prove the six graphite/orange parts; `(0,0)` and `(19,21)` are byte-equal to the off-crop background, proving transparency. The crop visibly reads as one block can. No golden asset ships.                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -2508,15 +2549,17 @@ of 243 success, eight opening replays, or the terminal record, any `smallerFailu
 fuel-wasting/loitering schedule, base allowance other than 12.65, terminal delta other than zero,
 terminal route lookup, descriptor `4096`, descent credit, partial route/world regeneration, witness
 seeds other than `[11,39,41,STATIC_WORLD_SEED]`, wrong witness nesting, derivation-tool imports, or
-reviewed digest drift. Derivation mutations additionally reject any prefix run/count/state drift;
-phase, `12/269/6000`, candidate, expansion, or replay ceiling drift; command-order, `Math.round`
-key, waypoint, cost, comparison-tuple, first-safe-layer, or run-merging drift; a non-numeric
-pair-key sort; assignment loop/ID/member-order drift; a world-witness field/order drift; or any
-digest payload that adds, removes, rounds, or reorders authority outside its pinned scope. Closed
-unsafe collision, unexpanded target-top handling, transactional initialization, fixed retention,
-reversible camera motion, normal crash debris, ballistic fragments, non-animated direction meaning,
-vacuum presentation, lifecycle cleanup, privacy, and zero-runtime-network constraints remain
-mutation-protected.
+reviewed digest drift. Derivation mutations additionally reject bootstrap byte/schema/digest/count
+drift, reading bootstrap authority beyond its pinned narrow fields, failure to recompute a schedule
+digest, run deduplication/order/source-pair/first-safe-selection drift, or any prefix
+run/count/state drift; phase, `12/269/6000`, candidate, expansion, or replay ceiling drift;
+command-order, `Math.round` key, waypoint, cost, comparison-tuple, first-safe-layer, or run-merging
+drift; a non-numeric pair-key sort; assignment loop/ID/member-order drift; a world-witness
+field/order drift; or any digest payload that adds, removes, rounds, or reorders authority outside
+its pinned scope. Closed unsafe collision, unexpanded target-top handling, transactional
+initialization, fixed retention, reversible camera motion, normal crash debris, ballistic fragments,
+non-animated direction meaning, vacuum presentation, lifecycle cleanup, privacy, and
+zero-runtime-network constraints remain mutation-protected.
 
 Phase 4S projection mutations additionally reject any world Y translation, `--camera-y`, vertical
 camera state/helper/import, pose-dependent viewBox or stage size, stage min-height growth, terrain-
