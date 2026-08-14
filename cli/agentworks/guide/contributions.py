@@ -222,7 +222,7 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             None,
             "MANIFEST_PATH contains one resource rewritten against the live sample and field reference for "
             "MANIFEST_KIND and, when present, the separate field reference for CAPABILITY_TARGET. "
-            "Any retired presence shape uses the exact hard-error rewrite, including the outer-null mode mapping. "
+            "Any retired presence shape uses the documented field mapping, including the outer-null mode mapping. "
             "A git-credential token uses the canonical tagged secret arm, while an existing scalar's secret "
             "name is preserved. "
             "EXPECTED_IDENTITIES remains byte-for-byte unchanged.",
@@ -230,9 +230,10 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             "Keep the last validated manifest set and do not remove any retired TOML section.",
             "Edit only MANIFEST_PATH, whether it is pre-existing or TOML-derived. Use the live sample and "
             "field-reference topic for MANIFEST_KIND. When tagged capability config is present, also use the "
-            "separate field-reference topic for CAPABILITY_TARGET. If validation reports a retired "
-            "service_principal, credentials, or vm_host shape, apply that hard error's exact rewrite in "
-            "MANIFEST_PATH. For an outer explicit null, delete the retired line and write auth ambient, auth "
+            "separate field-reference topic for CAPABILITY_TARGET. Replace a retired service_principal, "
+            "credentials, or vm_host shape with auth service-principal, auth access-key, or placement ssh, "
+            "respectively, moving the retired value's fields into the selected arm. For an outer explicit null, "
+            "delete the retired line and write auth ambient, auth "
             "ambient, or placement local, respectively. For a git-credential, consult its provider reference. "
             "Omission still selects the secret default, and a scalar token remains accepted shorthand, but write "
             "the canonical tagged secret arm. Preserve a scalar's secret name as token: {mode: secret, secret: "
@@ -241,23 +242,6 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             "MANIFEST_PATH to equal the selected "
             "EXPECTED_IDENTITIES entry's pre-recorded file. Never add, remove, or change a baseline entry. Do "
             "not copy a schema from this migration topic.",
-        ),
-        GuideAction(
-            ActionId("validate-manifest-set"),
-            "One manifest has been added or changed while all retired TOML sections remain in place.",
-            (),
-            ConsentBoundary.EXAMINE_WORKSTATION,
-            ("agw", "doctor", "--output", "json"),
-            "The command must exit 1 for this retained-section checkpoint and emit one JSON document. Before recording "
-            "VERIFIED, require schema_version is the integer 1, command is exactly doctor, data is an object, "
-            "data.groups contains the Configuration group, that group contains Config file with status ok and "
-            "Config with status fail. That Config message must be the expected migration hard error: it says "
-            "config.toml declares resources, says config.toml is settings only now, and names the retained "
-            "sections. Use the Manifest and Resource registry facts for precise diagnostics, and require no check "
-            "with either name to have status warn or fail. Any such hard error leaves this action unverified and "
-            "returns the selected manifest to edit-one-manifest; repeat this validation after the edit.",
-            None,
-            "Leave the edit unverified, keep every retired TOML section, and block cutover.",
         ),
         GuideAction(
             ActionId("review-null-secret-fields"),
@@ -274,7 +258,7 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             None,
             "Each current auth and placement mode plus each token_secret, service-principal auth.secret, and "
             "access-key auth.access_key_secret occurrence has a recorded default, custom-name, ambient, or "
-            "local intent. Every remaining retired shape has its required exact rewrite recorded for the earlier "
+            "local intent. Every remaining retired shape has its required field mapping recorded for the earlier "
             "edit-one-manifest action, and no file changed during review.",
             None,
             "Leave the site manifests unchanged and block cutover until the intent can be established.",
@@ -283,13 +267,13 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             "the live implementation field references. Omitted auth selects ambient; omitted placement selects "
             "local. An outer explicit null means auth ambient, auth ambient, or placement local, respectively. "
             "Inside a credential arm, an omitted or null secret reference selects its well-known default name. "
-            "If a retired service_principal, credentials, or vm_host shape remains, record the hard error's exact "
-            "required rewrite and return it to edit-one-manifest. Do not modify a manifest during this review.",
+            "If a retired service_principal, credentials, or vm_host shape remains, record its required current "
+            "field mapping and return it to edit-one-manifest. Do not modify a manifest during this review.",
         ),
         GuideAction(
             ActionId("remove-retired-sections"),
-            "Every manifest validates individually and all authentication, placement, and secret-reference "
-            "choices have been reviewed.",
+            "Every manifest has been rewritten against the live references and all authentication, placement, "
+            "and secret-reference choices have been reviewed.",
             (
                 ActionInput("CONFIG_PATH", "The config.toml file selected for final cutover.", True),
                 ActionInput(
@@ -303,11 +287,27 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             "CONFIG_PATH has no retired resource sections, every desired non-default secret backend has an "
             "operator-declared secret-source, and [secret_config].sources names sources in precedence order.",
             None,
-            "Restore or retain the untouched config and accept its hard retired-section error.",
+            "Leave CONFIG_PATH unchanged and keep the verified backups available.",
             "In one edit, remove every retired resource section and every [secret_backends.*] declaration "
             "from CONFIG_PATH. Keep implied env-var and prompt names as-is. Declare a secret-source for each "
             "desired non-default backend, move backend config to its tagged spec.backend block, update every "
             "secret mapping key to the source name, and update [secret_config].sources with source names.",
+        ),
+        GuideAction(
+            ActionId("validate-manifest-set"),
+            "The retired TOML sections have been removed and the rewritten manifest set is ready for validation.",
+            (),
+            ConsentBoundary.EXAMINE_WORKSTATION,
+            ("agw", "doctor", "--output", "json"),
+            "The command emits one JSON document. Before recording VERIFIED, require schema_version is the integer "
+            "1, command is exactly doctor, data is an object, and data.groups contains the Configuration group. "
+            "That group contains Config file with status ok and no Config failure; a clean manifest load adds Config "
+            "is valid with status ok. Use the Manifest and Resource registry facts for precise diagnostics, and "
+            "require no check with either name to have status warn or fail. Any such validation error leaves this "
+            "action unverified and returns the selected manifest to "
+            "edit-one-manifest; repeat this validation after the edit without restoring retired TOML sections.",
+            None,
+            "Leave the manifest set unverified, keep the cutover config unchanged, and block inventory comparison.",
         ),
         GuideAction(
             ActionId("compare-operator-inventory"),

@@ -22,6 +22,13 @@ Accepted. Supersedes the "Dual-path: deprecate, don't break" stance of
 > naming rule and the graduate-when-real clause), the Kubernetes envelope and auto-load, and the
 > slash ban. This ADR narrows the resource-declaration frontend from two paths to one; it does not
 > reopen the model.
+>
+> Amended 2026-08-14 (operator ruling): the release-scoped resource-section rewrite and
+> settings-only escape hatch have been retired. The old section roots are ordinary unexpected
+> top-level keys now. Commands that load config, including doctor and the write forms of resource
+> sample and schema, require a valid settings-only file. The permanent migration guide still records
+> the section-to-kind mapping, while stdout `resource sample` and `resource describe-kind` remain
+> config-independent.
 
 ## Context
 

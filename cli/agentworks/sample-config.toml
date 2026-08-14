@@ -8,9 +8,9 @@
 # git credentials, vm-sites, and apt / install-command entries live in the
 # resources/ directory next to this file (`agw resource sample <kind>`
 # prints a commented starter; --all for every kind). Legacy TOML resource
-# sections are no longer supported: a config.toml that still declares
-# resources is a hard error at load now (they were previously deprecated
-# with a warning); the resources guide walks through rewriting them. This
+# sections are no longer supported: their roots are ordinary unexpected
+# top-level keys now (they were previously deprecated with a warning); the
+# resources guide walks through rewriting them. This
 # file is the permanent home for SETTINGS: operator identity, paths,
 # defaults, database safety, enabled plugins, and the secret source chain.
 #

@@ -308,7 +308,7 @@ def test_the_graph_routes_a_capability_node_to_its_own_kinds_verdict() -> None:
 
 def test_manifest_sections_match_the_decoders_host_surfaces() -> None:
     """Decode's host dispatch is exactly the four host surfaces, with the
-    capability kind and the field pair each one names.
+    capability kind and the field each one names.
 
     Spelled out rather than recomputed from the descriptors, because decode
     now DERIVES this map from them: comparing the derivation against itself
@@ -318,14 +318,14 @@ def test_manifest_sections_match_the_decoders_host_surfaces() -> None:
     this is a literal.
     """
     assert {
-        host: (d.kind, d.manifest_section.naming_field, d.manifest_section.config_field)
+        host: (d.kind, d.manifest_section.naming_field)
         for host, d in _hosting_descriptors().items()
         if d.manifest_section is not None
     } == {
-        "vm-site": ("vm-platform", "platform", "platform_config"),
-        "git-credential": ("git-credential-provider", "provider", "provider_config"),
-        "session-template": ("harness-integration", "harness_integration", "harness_integration_config"),
-        "secret-source": ("secret-backend", "backend", None),
+        "vm-site": ("vm-platform", "platform"),
+        "git-credential": ("git-credential-provider", "provider"),
+        "session-template": ("harness-integration", "harness_integration"),
+        "secret-source": ("secret-backend", "backend"),
     }
 
     hosted = [d.manifest_section for d in _descriptors() if d.manifest_section is not None]
@@ -337,10 +337,9 @@ def test_manifest_sections_match_the_decoders_host_surfaces() -> None:
     )
     source_host = descriptor_for("secret-backend").manifest_section
     assert source_host is not None
-    assert (source_host.host_kind, source_host.naming_field, source_host.config_field) == (
+    assert (source_host.host_kind, source_host.naming_field) == (
         "secret-source",
         "backend",
-        None,
     )
 
 

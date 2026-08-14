@@ -125,6 +125,10 @@ config at the reference site.
 > - **The capability is not invoked.** It DECLARES its config as a model, and the core derives both
 >   the validation and the implied references from that declaration, reading the model and the raw
 >   blob and running no capability code. The config is no longer an opaque blob to the framework.
+>
+> Amended 2026-08-14: the release-scoped sibling-shape rewrite named above has been retired. An old
+> sibling pair now reaches ordinary closed-world model validation. `HostSurface` records only the
+> live host kind and tagged naming field; it no longer carries the retired sibling field name.
 
 The INTERNAL resource representation follows the nested shape too
 (`GitCredentialConfig.provider_config`) as this represents the best representation available. For

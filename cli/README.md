@@ -164,9 +164,9 @@ Configuration splits into two surfaces:
 - **Resources** (secrets, templates, git credentials, vm-sites, apt / install-command entries) are
   declared as YAML manifests under `~/.config/agentworks/resources/`, auto-loaded whenever a command
   needs them. `agw resource sample <kind>` prints a commented starter (`--all` for every kind). The
-  classic TOML resource sections are no longer supported: a `config.toml` that still declares
-  resources is a hard error at load (they were previously deprecated with a warning). Rewriting
-  those sections as manifests is a manual step, walked through by
+  classic TOML resource sections are no longer supported: their roots are ordinary unexpected
+  top-level keys (they were previously deprecated with a warning). Rewriting those sections as
+  manifests is a manual step, walked through by
   [docs/guides/upgrading-to-0.14.md](../docs/guides/upgrading-to-0.14.md).
 
 Settings sections (`config.toml`, permanent):

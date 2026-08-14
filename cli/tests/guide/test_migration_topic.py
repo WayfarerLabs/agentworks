@@ -35,9 +35,9 @@ def test_migration_actions_pin_order_consent_operations_and_no_execution_authori
         ("backup-resources", ConsentBoundary.MUTATE_AGENTWORKS),
         ("verify-migration-inputs", ConsentBoundary.READ_CONFIGURED_STATE),
         ("edit-one-manifest", ConsentBoundary.MUTATE_AGENTWORKS),
-        ("validate-manifest-set", ConsentBoundary.EXAMINE_WORKSTATION),
         ("review-null-secret-fields", ConsentBoundary.READ_CONFIGURED_STATE),
         ("remove-retired-sections", ConsentBoundary.MUTATE_AGENTWORKS),
+        ("validate-manifest-set", ConsentBoundary.EXAMINE_WORKSTATION),
         ("compare-operator-inventory", ConsentBoundary.EXAMINE_WORKSTATION),
         ("finish-doctor", ConsentBoundary.EXAMINE_WORKSTATION),
         ("restore-database-backup", ConsentBoundary.MUTATE_AGENTWORKS),
@@ -45,8 +45,8 @@ def test_migration_actions_pin_order_consent_operations_and_no_execution_authori
     ]
     assert action_block.actions[0].command is None
     assert action_block.actions[0].manual_steps is not None
-    assert action_block.actions[5].command == ("agw", "doctor", "--output", "json")
-    assert action_block.actions[5].verification is None
+    assert action_block.actions[7].command == ("agw", "doctor", "--output", "json")
+    assert action_block.actions[7].verification is None
     assert action_block.actions[8].command == (
         "agw",
         "resource",
@@ -117,7 +117,6 @@ def test_migration_actions_make_inventory_backups_and_verification_distinct() ->
     assert "pre-existing or TOML-derived expected identity" in edit.required_inputs[0].description
     assert "separate field-reference topic" in edit.manual_steps
     assert "whether it is pre-existing or TOML-derived" in edit.manual_steps
-    assert "apply that hard error's exact rewrite" in edit.manual_steps
     assert "delete the retired line and write auth ambient, auth ambient, or placement local" in edit.manual_steps
     assert "No minted arm exists" in edit.manual_steps
     assert "MANIFEST_PATH to equal" in edit.manual_steps
@@ -128,19 +127,6 @@ def test_migration_actions_make_inventory_backups_and_verification_distinct() ->
     validation = by_id["validate-manifest-set"]
     assert validation.command == ("agw", "doctor", "--output", "json")
     assert validation.verification is None
-    assert "config.toml declares resources" in validation.expected_state
-    assert "config.toml is settings only now" in validation.expected_state
-    assert "names the retained sections" in validation.expected_state
-    assert "command must exit 1" in validation.expected_state
-    assert "one JSON document" in validation.expected_state
-    assert "data.groups contains the Configuration group" in validation.expected_state
-    assert "Config file with status ok" in validation.expected_state
-    assert "Config with status fail" in validation.expected_state
-    assert "require no check with either name" in validation.expected_state
-    assert "status warn or fail" in validation.expected_state
-    assert "Use the Manifest and Resource registry facts for precise diagnostics" in validation.expected_state
-    assert "hard error leaves this action unverified" in validation.expected_state
-    assert "returns the selected manifest to edit-one-manifest" in validation.expected_state
 
     comparison = by_id["compare-operator-inventory"]
     assert comparison.consent is ConsentBoundary.EXAMINE_WORKSTATION
@@ -387,9 +373,7 @@ def test_migration_review_action_covers_all_sites_and_distinguishes_outer_from_i
     assert "omitted placement selects local" in manual
     assert "outer explicit null means auth ambient, auth ambient, or placement local" in manual
     assert "Inside a credential arm, an omitted or null secret reference" in manual
-    assert "record the hard error's exact required rewrite and return it to edit-one-manifest" in manual
     assert "Do not modify a manifest during this review" in manual
-    assert "apply that hard error's exact rewrite" not in manual
     assert "delete the retired line" not in manual
     assert "provider.token" not in manual
     assert "token: null" not in manual
@@ -413,15 +397,8 @@ def test_migration_teaching_covers_cutover_validation_backends_and_auth_choices(
         "pre-recorded intended path",
         "without changing the baseline",
         "one manifest at a time",
-        "after each edit",
-        "must say that `config.toml` declares resources",
-        "`config.toml` is settings only now",
-        "name the retained sections",
-        "`Resource registry` facts for precise diagnostics",
-        "retained-section checkpoint exits `1`",
-        "`Config file` with status `ok`",
-        "`Config` with status `fail`",
-        "no check with either name to have status `warn` or `fail`",
+        "ordinary top-level validation",
+        "Validation begins after the one-time TOML cutover",
         "`[secret_backends.*]`",
         "Inspect every pre-existing and TOML-derived site manifest",
         "Omitted `auth` defaults to ambient authentication",
@@ -439,7 +416,7 @@ def test_migration_teaching_covers_cutover_validation_backends_and_auth_choices(
         "strict types",
         "`spec.platform.name: azure-vm`",
         "`spec.provider`",
-        "Any manifest validation hard error returns that manifest to this edit loop",
+        "Any validation error returns the selected manifest to `edit-one-manifest`",
     ):
         assert required in flowed
     for stale in ("`service_principal.secret`", "`credentials.access_key_secret`"):

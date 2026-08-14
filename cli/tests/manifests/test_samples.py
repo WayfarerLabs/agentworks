@@ -20,7 +20,6 @@ from pathlib import Path
 import pytest
 
 from agentworks.errors import ValidationError
-from agentworks.manifests.decode import KIND_SECTIONS
 from agentworks.manifests.emit import MODELINE_PREFIX
 from agentworks.manifests.loader import load_manifests
 from agentworks.manifests.samples import _SEPARATOR, sample_text, write_sample
@@ -48,14 +47,9 @@ def _registered_kinds() -> list[str]:
 
 
 def test_every_declarable_kind_renders() -> None:
-    # secret-backend is a capability descriptor post-collapse
-    # (2026-07-07): in KIND_SECTIONS as a retired section name, not
-    # declarable, no sample. That sampling it reports the capability-kind
-    # error rather than crashing is one case of
-    # `test_capability_kinds_report_no_sample`, which sweeps the category.
+    # secret-backend is a capability descriptor, not declarable, so it has
+    # no sample. Its error is covered by the category-wide test below.
     assert "secret-backend" not in declarable_kinds()
-    # secret-source was born as YAML and has no retired TOML section.
-    assert (set(declarable_kinds()) - {"secret-source"}) | {"secret-backend"} == set(KIND_SECTIONS)
     for kind in declarable_kinds():
         assert sample_text(kind).strip()
 
