@@ -1126,7 +1126,8 @@ changes only terrain variety and the two non-contact failure classifications.
 - [ ] Regenerate terrain/world/route fixtures and proof projections atomically as required. Prove
       every concrete route geometry, opening, Retry checkpoint, static scene, and retained-world
       bound against the new terrain without changing controls, physics, landing tolerance, fuel,
-      mission pacing, sky, site geometry, copy, or routes.
+      mission pacing, sky, site geometry, copy, route spacing, or route behavior. Generated
+      reference schedules may change only as required to certify the new terrain geometries.
 - [ ] Add mutation-sensitive model, world, derivation, static, and real-browser witnesses for former
       ceiling and excessive-speed crossings, zero-fuel ballistic contact, less-periodic seeded
       angular terrain, exact height/grade limits, local decks/supports, collision/render parity, and
