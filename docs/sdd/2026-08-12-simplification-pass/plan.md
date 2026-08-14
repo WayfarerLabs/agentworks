@@ -54,19 +54,23 @@ actively changing.
       deletion (R2.4). May land as several PRs. Done when: delete rows are gone at HEAD, convert
       rows point at the landed structural replacement, and keep rows name the invariant that earns
       the assertion.
-- [ ] Delete guide dead surface and interior re-validation (G8, G2); fix the vacuous monkeypatch
-      test and add the persisted-enum parity test (G11, R2.3). This item owns
-      `cli/tests/guide/test_contract_catalog.py` and `cli/tests/guide/test_assessment.py` in full,
-      their prose pins included (both excluded from the sweep above; `test_assessment.py` directly
-      tests the G8 surfaces this item deletes). Done when: suite green, `parse_topic_contribution`
-      accepts only decoded data, the parity test fails on a synthetic new member.
+- [ ] Delete guide dead surface and interior re-validation (G8's guide-module members and G2;
+      `JsonScalar` and `VMIssueCode` live in `machine_output.py` and belong to the G6 item below);
+      fix the vacuous monkeypatch test and add the persisted-enum parity test (G11, R2.3). This item
+      owns `cli/tests/guide/test_contract_catalog.py` and `cli/tests/guide/test_assessment.py` in
+      full, their prose pins included (both excluded from the sweep above; `test_assessment.py`
+      directly tests the G8 surfaces this item deletes). Done when: suite green,
+      `parse_topic_contribution` accepts only decoded data, the parity test fails on a synthetic new
+      member, no reference to this item's deleted G8 members remains at HEAD, and the two owned
+      files' prose pins carry the same delete/convert/justified-keep outcomes the sweep requires.
 - [ ] Delete inert descriptor generality (C1, C5): `RegistryPolicy`, `kind_strategy`,
       `contract_version` plumbing, unreachable fallbacks, their pinning tests. Done when: suite
       green, four descriptors construct without the deleted fields.
 - [ ] Delete `machine_output` defensive surface (G6): assert-guards on frozen dataclasses, double
       projections, identity comprehensions, the stdout retry loop; `schema_version` becomes a named
-      constant. Done when: suite green, JSON output byte-identical for a fixture corpus captured
-      before the change.
+      constant. This item owns `machine_output.py` wholesale, so G8's `JsonScalar` and `VMIssueCode`
+      deletions land here. Done when: suite green, JSON output byte-identical for a fixture corpus
+      captured before the change, and no reference to the two deleted types remains at HEAD.
 - [ ] Delete clearly-interior secrets validation (per-call type checks on in-repo backend returns
       and the annotation-equality plus forbidden-override halves of conformance, S2; lookalike and
       re-scrub checks on our own parsers' outputs, S7), keeping the constructibility and call-shape
