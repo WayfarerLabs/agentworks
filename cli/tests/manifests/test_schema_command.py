@@ -40,9 +40,8 @@ def _run(monkeypatch: pytest.MonkeyPatch, *argv: str) -> int:
 
 @pytest.fixture
 def configured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A minimal config directory, which is all ``--write`` needs: it
-    loads settings only, so it works against a config that still fails
-    resource validation.
+    """A minimal valid config directory, which ``--write`` requires to locate
+    the resources directory.
 
     ``CONFIG_PATH`` as well as ``CONFIG_DIR``: the loader re-imports the
     former by name, and the two are independent module attributes rather

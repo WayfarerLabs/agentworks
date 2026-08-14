@@ -18,6 +18,8 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
+import pytest
+
 SAMPLE_PATH = Path(__file__).resolve().parent.parent / "agentworks" / "sample-config.toml"
 
 
@@ -39,13 +41,28 @@ def _uncomment_examples(src: str) -> str:
     return "\n".join(out)
 
 
-def test_sample_config_parses_as_shipped() -> None:
-    """The file as shipped (active sections + commented examples) is valid TOML."""
+def _install_sample_keys(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    ssh_dir = tmp_path / ".ssh"
+    ssh_dir.mkdir()
+    (ssh_dir / "id_ed25519.pub").write_text("ssh-ed25519 AAAA...")
+    (ssh_dir / "id_ed25519").write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
+
+
+def test_sample_config_parses_and_loads_as_shipped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The active sample is valid, settings-only input to the production loader."""
+    from agentworks.config import EXPECTED_TOP_LEVEL_KEYS, load_config
+
     src = SAMPLE_PATH.read_text()
-    tomllib.loads(src)  # raises on any parse error
+    parsed = tomllib.loads(src)
+    assert set(parsed) <= EXPECTED_TOP_LEVEL_KEYS
+
+    _install_sample_keys(tmp_path, monkeypatch)
+    config = load_config(SAMPLE_PATH, warn_issues=False, warn_deprecations=False, raise_errors=True)
+    assert config.source_path == SAMPLE_PATH
 
 
-def test_sample_config_examples_uncomment_cleanly() -> None:
+def test_sample_config_examples_uncomment_cleanly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Stripping a single `#` from every `#<toml>` line produces valid TOML.
 
     Pins the `#<toml>` convention for commented-out examples. A contributor
@@ -68,14 +85,15 @@ def test_sample_config_examples_uncomment_cleanly() -> None:
             f"line (extra space) is the usual culprit.\n  {e}{ctx}"
         ) from e
 
-    # Spot-check the settings sections all exist after uncommenting.
-    expected_top = {
-        "operator",
-        "paths",
-        "defaults",
-        "secret_config",
-        "plugins",
-        "session",
-    }
-    missing = expected_top - set(parsed.keys())
-    assert not missing, f"missing top-level sections after uncomment: {missing}"
+    from agentworks.config import EXPECTED_TOP_LEVEL_KEYS, load_config
+
+    # Fully uncommented, the sample contains exactly the live settings roots:
+    # no retired resource root can sneak in and no settings section can drift
+    # out of the discovery surface.
+    assert set(parsed) == EXPECTED_TOP_LEVEL_KEYS
+
+    _install_sample_keys(tmp_path, monkeypatch)
+    candidate_path = tmp_path / "config.toml"
+    candidate_path.write_text(candidate)
+    config = load_config(candidate_path, warn_issues=False, warn_deprecations=False, raise_errors=True)
+    assert config.source_path == candidate_path
