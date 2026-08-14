@@ -165,6 +165,14 @@ def dispatch_key(connection: DevToolsConnection, code: str, *, down: bool = True
         connection.call("Input.dispatchKeyEvent", {"type": "keyUp", **parameters})
 
 
+def _readiness_expression(url: str) -> str:
+    return (
+        f"location.href === {json.dumps(url)} && "
+        "document.readyState === 'complete' && "
+        "document.documentElement?.dataset.phase4kReady === 'true'"
+    )
+
+
 def _probe_source() -> str:
     return r'''
 import { landerGameController as controller } from "/static/lander-game.js";
@@ -416,9 +424,11 @@ def browser_phase4k_contract(
         connection = connection_factory(target)
         for domain in ("Runtime", "Page", "Accessibility"):
             connection.call(f"{domain}.enable")
-        connection.call("Page.navigate", {"url": f"http://127.0.0.1:{server.server_address[1]}/lander/"})
+        loaded_url = f"http://127.0.0.1:{server.server_address[1]}/lander/"
+        connection.call("Page.navigate", {"url": loaded_url})
+        readiness = _readiness_expression(loaded_url)
         for _ in range(200):
-            if connection.evaluate("document.documentElement.dataset.phase4kReady === 'true'"):
+            if connection.evaluate(readiness):
                 break
             time.sleep(0.025)
         else:

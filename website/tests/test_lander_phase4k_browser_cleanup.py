@@ -46,6 +46,26 @@ class _HandshakeEofSocket:
         self.closed = True
 
 
+class _NullRootRaceConnection:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object] | None]] = []
+        self.expressions: list[str] = []
+        self.closed = False
+
+    def call(self, method: str, params: dict[str, object] | None = None) -> dict[str, object]:
+        self.calls.append((method, params))
+        return {}
+
+    def evaluate(self, expression: str) -> bool:
+        self.expressions.append(expression)
+        if "document.documentElement?.dataset" not in expression:
+            raise RuntimeError("null document root was accessed without a guard")
+        return False
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class Phase4KBrowserCleanupTests(RepositoryFixture):
     def setUp(self) -> None:
         super().setUp()
@@ -164,6 +184,32 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
             )
         self.assertIs(caught.exception, connection_sentinel)
         self.assertTrue(processes[-1].terminated)
+        self.assert_harness_clean()
+
+    def test_null_root_navigation_race_times_out_without_evaluation_or_cleanup_failure(self) -> None:
+        process = _FakeProcess()
+        connection = _NullRootRaceConnection()
+        with (
+            mock.patch.object(phase4k_browser.time, "sleep", return_value=None),
+            self.assertRaisesRegex(AssertionError, "browser probe did not initialize"),
+        ):
+            phase4k_browser.browser_phase4k_contract(
+                self.output,
+                connection_factory=lambda url: connection,
+                popen_factory=lambda *args, **kwargs: process,
+                tempdir_factory=self.profile_factory,
+                target_factory=lambda profile, owned: "ws://phase4k.invalid",
+                chromium_path="chromium-test",
+            )
+        navigation = next(params for method, params in connection.calls if method == "Page.navigate")
+        loaded_url = str(navigation["url"])
+        self.assertEqual(connection.expressions, [phase4k_browser._readiness_expression(loaded_url)] * 200)
+        readiness = connection.expressions[0]
+        self.assertIn(f'location.href === "{loaded_url}"', readiness)
+        self.assertIn("document.readyState === 'complete'", readiness)
+        self.assertIn("document.documentElement?.dataset.phase4kReady", readiness)
+        self.assertTrue(connection.closed)
+        self.assertTrue(process.terminated)
         self.assert_harness_clean()
 
     def test_probe_uses_browser_events_instead_of_controller_input_shortcuts(self) -> None:
