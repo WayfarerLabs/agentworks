@@ -60,8 +60,11 @@ Settled inputs, recorded for traceability:
   prose alone; when two artifacts must agree, derive one from the other and test the derivation. No
   new rule file.
 - R1.3: Wave 0 merges before any wave 1 PR, and wave 1 delegation charters cite both amendments, so
-  the deletion criteria are on main before deletions are judged against them (and reach worktree
-  subagents regardless of what R1.0 concludes).
+  the deletion criteria are on main before deletions are judged against them. Citation is a
+  supplement, never delivery: R1.0 completes only on one of two measurable branches, (a) the twelve
+  rules verified delivered unconditionally per target, or (b) a recorded operator disposition whose
+  fallback places the full criteria text into every affected lane (for example, carried verbatim in
+  each charter). Until one branch holds, wave 1 does not start.
 
 ### R2 (Wave 1): deletion
 
@@ -98,9 +101,10 @@ justification for a new production contract.
 
 ### R4: stop and reassess
 
-- R4.1: After waves 1 and 2, the lead writes a reassessment: what measurably got simpler (fewer
-  concepts, paths, and contracts is the test; line and test counts are retrospective evidence, not
-  targets), what findings survive, and which are worth promoting.
+- R4.1: After waves 1 and 2 and after the CLI grammar rewrite lands (the saga's `phasing.md` places
+  the rewrite between wave 1 and this reassessment), the lead writes a reassessment: what measurably
+  got simpler (fewer concepts, paths, and contracts is the test; line and test counts are
+  retrospective evidence, not targets), what findings survive, and which are worth promoting.
 - R4.2: Surviving subsystem findings are proposed as separate, bounded, per-subsystem efforts on
   their own merits. Nothing is pre-authorized by this SDD.
 

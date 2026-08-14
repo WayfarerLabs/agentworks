@@ -40,11 +40,14 @@ actively changing.
       as focused checks over a proper YAML load. Done when: suite green, no hardcoded workflow text
       beyond the keys each check reads.
 - [ ] Prose/form-policing sweep across the estate (absorbed survey list plus G12, C10, D4, P6, and
-      the #470 manifesto pin; W4 and W6 belong to the contained-trims item below, not here): keep
-      behavioral, structural, and security tests; delete the rest; convert to structural form only
-      where a real invariant would lose its only guard. Sentence-only observables are decided case
-      by case, mostly by deletion (R2.4). May land as several PRs. Done when: the survey's
-      pure-policing class is empty at HEAD.
+      the #470 manifesto pin). Files owned by other items are excluded here: W1's workflow test,
+      S1's corpus and wording-pin trims, and W4/W6 in contained trims. The sweep's first step
+      commits an exact per-file decision inventory (delete, convert, or keep, with the file list)
+      derived from the absorbed survey, and that inventory is the auditable baseline for completion.
+      Keep behavioral, structural, and security tests; delete the rest; convert to structural form
+      only where a real invariant would lose its only guard. Sentence-only observables are decided
+      case by case, mostly by deletion (R2.4). May land as several PRs. Done when: every inventory
+      row carries its decision and the delete rows are gone at HEAD.
 - [ ] Delete guide dead surface and interior re-validation (G8, G2); fix the vacuous monkeypatch
       test and add the persisted-enum parity test (G11, R2.3). Done when: suite green,
       `parse_topic_contribution` accepts only decoded data, the parity test fails on a synthetic new

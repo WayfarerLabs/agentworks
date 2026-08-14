@@ -101,9 +101,12 @@ deliberately narrow `cli-conventions.md`.
 - **S4** `OUTCOME_RULES` stores derived fields and validates self-agreement: `category` and
   `remediation` are total functions of `detail`, stored redundantly, checked in `__post_init__`,
   with `_outcome` existing to copy the derivation back in.
-- **S5** `[secret_config].backends` names sources, not backends. Four files carry reconciling prose;
-  `SourceMapping` emits both `source` and `backend` keys into the JSON contract. Free to fix only
-  while 0.14 is unreleased.
+- **S5** `[secret_config].backends` names sources, not backends. Four files carry reconciling prose.
+  Free to fix only while 0.14 is unreleased. Correction (2026-08-14, integration review): the scope
+  is the configuration key only. `SourceMapping`'s `source` and `backend` JSON fields looked like
+  the same fact spelled twice but are two facts (the configured source instance and its implementing
+  backend capability), divergent whenever a source is backed by a differently named backend; both
+  stay, per the locked secret-sources design.
 - **S6** Two post-boundary resolve paths: `resolve_late_repair` (the documented "ONLY sanctioned"
   path, one caller) vs `resolve_for_command` at seven production call sites each carrying an
   exception-claiming comment; `power.py:91` re-implements the sanctioned method the long way. Stale

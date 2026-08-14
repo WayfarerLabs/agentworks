@@ -47,8 +47,10 @@ Wave 0 first resolves rule delivery (issue #511), then amends the two existing r
 mechanisms. The expected delivery resolution is subtraction-shaped: the `globs`/`paths:` frontmatter
 is what forces lazy loading, so after the probes confirm the emission shape, the twelve broad
 always-on rules drop the filter and load eagerly, as the frontmatter-free `always-consider-*` rules
-already do. Wave 1 delegation charters cite the two amended rules regardless, which costs a sentence
-per charter and covers any delivery edge the probes miss.
+already do. Wave 0 completes on one of two measurable branches (FRD R1.3): verified unconditional
+delivery, or an operator-approved fallback that places the full criteria text into every affected
+lane; a citation alone cannot supply the contents of a rule a target never loads. Wave 1 delegation
+charters cite the two amended rules regardless, which costs a sentence per charter.
 
 ## Waves and vehicle
 

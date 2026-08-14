@@ -34,12 +34,12 @@ this SDD's acceptance it requires an explicit operator decision with a recorded 
 
 ## Inventory: the candidate breaks (saga routing)
 
-| Change                     | Current                                                                                             | Target                                                 |
-| -------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| Secret mapping key (S5)    | `[secret_config].backends`, an ordered list of source names; JSON emits both `source` and `backend` | key and JSON name say sources; one name for one fact   |
-| Token config (C3)          | five spellings via a one-arm tagged union                                                           | the concrete stored-token shape, one spelling per fact |
-| Env entry compat flag (C4) | `canonicalize_null_companions` re-accepts and advertises a retired spelling                         | retired spelling rejected; schema stops advertising it |
-| Compat layers (C7)         | four layers plus two uninventoried objects, no expiry                                               | deleted now, or quarantined with a recorded expiry     |
+| Change                     | Current                                                                                     | Target                                                   |
+| -------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| Secret mapping key (S5)    | `[secret_config].backends`, an ordered list of source names: the key misnames what it holds | the key says `sources`; the config name matches the fact |
+| Token config (C3)          | five spellings via a one-arm tagged union                                                   | the concrete stored-token shape, one spelling per fact   |
+| Env entry compat flag (C4) | `canonicalize_null_companions` re-accepts and advertises a retired spelling                 | retired spelling rejected; schema stops advertising it   |
+| Compat layers (C7)         | four layers plus two uninventoried objects, no expiry                                       | deleted now, or quarantined with a recorded expiry       |
 
 Each change's PR carries its footer per the pipeline above and updates
 `docs/guides/upgrading-to-0.14.md` in the same PR, which remains the single consolidated
@@ -52,10 +52,20 @@ Footer shape the convention requires:
 ```text
 BREAKING CHANGE: [secret_config].backends is renamed to sources; the
 ordered precedence list always held source names. Rename the key in
-config.toml. Before: [secret_config] backends = ["env-var", "prompt"].
-After: [secret_config] sources = ["env-var", "prompt"]. The secret
-inspection JSON emits source instead of backend.
+config.toml. Before:
+
+    [secret_config]
+    backends = ["env-var", "prompt"]
+
+After:
+
+    [secret_config]
+    sources = ["env-var", "prompt"]
 ```
+
+The rename is the configuration key only. The inspection JSON's `source` and `backend` fields name
+two different facts (the configured source instance and its implementing backend capability) and
+both stay, per the locked secret-sources design.
 
 What an operator or agent sees after upgrading: `agw guide concept-release-notes/v0-14-0` renders
 that text verbatim as packaged evidence; the assistance flow relays the rename and the one-line
