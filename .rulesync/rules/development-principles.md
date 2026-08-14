@@ -212,7 +212,7 @@ owner's decision, it is blocked on another change. "It is tedious" and "my part 
 reasons. When you do defer, defer loudly: a tracked issue or plan item with the reason attached,
 never a silent TODO.
 
-### 13. Lead with the principled option; price the break
+### 13. Lead with the principled option; price the break; admit what you don't know
 
 When principle and expedience diverge, present the principled path first and state plainly what the
 shortcut would cost. Never hedge silently into the expedient option. The same candor applies to your
