@@ -7,7 +7,7 @@
 <!-- cspell:ignore substep underframe unitless uint32 quantized quantization Warren -->
 <!-- cspell:ignore smootherstep viewports -->
 
-- Status: Phase 4R detailed design complete; implementation and operator acceptance pending
+- Status: Phase 4R implementation and automated acceptance complete; operator acceptance pending
 - Operator browser acceptance: pending
 - Date: 2026-08-13
 - FRD: `frd.md`, specifically R6-R9, R15-R25, R28, and AC29

@@ -1081,20 +1081,20 @@ geometry, and the proofs and permanent documentation that necessarily consume th
 
 ## Phase 4R: straight-segment lunar terrain
 
-- [ ] Amend and independently review `brand-and-lander-lld.md` for a strict-X straight-segment
+- [x] Amend and independently review `brand-and-lander-lld.md` for a strict-X straight-segment
       terrain authority whose complete surface remains in normalized `[0.1,0.6]`, visibly exercises
       that band in ordinary gameplay, and retains bounded navigable grade and grade change.
-- [ ] Prove horizontal site placement is selected without terrain-height input, then pin the deck
+- [x] Prove horizontal site placement is selected without terrain-height input, then pin the deck
       exactly `2.5 m` above the independently reconstructed maximum terrain height beneath the full
       closed platform-to-NOC footprint; extend the existing integrated supports to native terrain
       without an artificial height cap.
-- [ ] Implement only the reviewed terrain, terrain-derived structure geometry, route fixtures, and
+- [x] Implement only the reviewed terrain, terrain-derived structure geometry, route fixtures, and
       their required validators, tests, and permanent docs. Do not change controls, vehicle physics,
       landing tolerance, fuel consumption, refuel ratio, mission copy, sky, power-up behavior, or
       any other presentation. The route-proof allowance may add only the operator-authorized,
       conservative positive-altitude term to its independently certified base; it gives descents no
       credit and does not manufacture a one-quantum-smaller route failure.
-- [ ] Run derivation feasibility, complete website/repository gates, independent code review, and
+- [x] Run derivation feasibility, complete website/repository gates, independent code review, and
       fresh-eyes browser review. Prove collision/render/static parity, forward/reverse determinism,
       fixed `25/16` projection, and zero vertical scrolling at all required viewport sizes.
 - [ ] Refresh port 8766 only after the exact reviewed head and exact-head CI/CodeQL are green, then
