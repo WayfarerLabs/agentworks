@@ -45,11 +45,22 @@ the items run in three groups rather than all at once:
    other cli item. It lands before the contained items start.
 2. **Then the contained cli items run in parallel**, each in its own worktree, file-disjoint:
    descriptor generality (C1, C5) in `schema/`; guide dead surface with `machine_output` (G8, G2,
-   G11, G6); interior secrets validation (S2, S7); and the gcp test scaffolding (P5), which pairs
-   naturally with the sweep's gcp prose rows (P6).
-3. **The prose-and-form sweep runs last of the three**, because its exclusion rule is defined
-   against files the other items own; running it after they land means it inventories a settled
-   tree. Its read-only decision inventory is produced up front and does not wait.
+   G11, G6); and interior secrets validation (S2, S7).
+3. **The prose-and-form sweep runs after those**, because its exclusion rule is defined against
+   files the other items own; running it after they land means it inventories a settled tree. Its
+   read-only decision inventory is produced up front and does not wait.
+4. **The gcp fixture extraction (P5) runs after the sweep**, reversing the pairing an earlier
+   revision assumed. The sweep deletes gcp prose pins (P6) in the same files P5 factors, and
+   deletions rebase cleanly under a later extraction while an extraction does not rebase cleanly
+   under later deletions of what it extracted.
+
+The sweep's decision inventory came in at **539 rows: 294 delete, 38 convert, 207 keep**, covering
+about 700 assertion sites and 3,900 to 4,100 lines. It recommends cutting the sweep into five PRs by
+**shape** rather than by domain, plus a sixth for the source-guard family that `hla.md` now settles:
+the mechanical `match=` narrowing first, then guide and migration topics, then report lines and
+hints (the judgment-heavy batch), then schema, manifests, capabilities and platforms, then
+authored-artifact form policing. Batching by domain instead would put a no-judgment mechanical
+change into the same review as the sweep's riskiest deletions.
 
 **Website work is deferred** to a final wave 1 PR after #486 merges (operator ruling 8): W1, W4, W5,
 W6, W8 and the sweep's website rows. Wave 1 does not close until that PR lands. The gcp half of the
@@ -69,16 +80,19 @@ contained-trims item (P5) does not wait, since it shares no files with the websi
       S1's corpus and wording-pin trims, W4/W6 in contained trims, and the guide item's files
       `cli/tests/guide/test_contract_catalog.py` and `cli/tests/guide/test_assessment.py`, whose
       prose pins belong to that item so each file has one owner. The exclusion rule is general, not
-      this enumeration: any file another wave 1 item names or necessarily edits is owned wholesale
-      by that item, and the sweep's inventory records each such exclusion it encounters. The sweep's
-      first step commits an exact decision inventory derived from the absorbed survey, one row per
-      test or assertion group (a file mixing wholly-policing tests with embedded prose assertions
-      gets multiple rows), each row marked delete, convert, or keep. Keep behavioral, structural,
-      and security tests; delete the rest; convert to structural form only where a real invariant
-      would lose its only guard. Sentence-only observables are decided case by case, mostly by
-      deletion (R2.4). May land as several PRs. Done when: delete rows are gone at HEAD, convert
-      rows point at the landed structural replacement, and keep rows name the invariant that earns
-      the assertion.
+      this enumeration: a file is owned wholesale by another item when that item's **done-when
+      clause names it**, and the sweep's inventory records each such exclusion it encounters.
+      (Narrowed 2026-08-14 from "names or necessarily edits". The broader phrasing excluded the gcp
+      files, `test_schema_adapter.py`, and `test_view.py`, which are precisely files `findings.md`
+      names _for_ the sweep; overlap where another item merely touches a file is handled by
+      ordering, not by ownership.) The sweep's first step commits an exact decision inventory
+      derived from the absorbed survey, one row per test or assertion group (a file mixing
+      wholly-policing tests with embedded prose assertions gets multiple rows), each row marked
+      delete, convert, or keep. Keep behavioral, structural, and security tests; delete the rest;
+      convert to structural form only where a real invariant would lose its only guard.
+      Sentence-only observables are decided case by case, mostly by deletion (R2.4). May land as
+      several PRs. Done when: delete rows are gone at HEAD, convert rows point at the landed
+      structural replacement, and keep rows name the invariant that earns the assertion.
 - [ ] Delete guide dead surface and interior re-validation (G8's guide-module members and G2;
       `JsonScalar` and `VMIssueCode` live in `machine_output.py` and belong to the G6 item below);
       fix the vacuous monkeypatch test and add the persisted-enum parity test (G11, R2.3). This item
@@ -104,7 +118,8 @@ contained-trims item (P5) does not wait, since it shares no files with the websi
 - [ ] Contained test dedup and trims: shared fixture adoption in `test_lander_404.py` (W5), gcp
       shared test fixture module (P5), exported status constant (W6), threshold-not-exact contrast
       assertions (W4), drop the Chromium duplicate (W8). Done when: suite green without Chromium
-      installed, the gcp operation fake is defined once.
+      installed, the gcp operation fake is defined once. Splits by the two deferrals above: P5 runs
+      after the sweep, the four website items after PR #486.
 
 ## Wave 2: process and rule subtraction (R3)
 

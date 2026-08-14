@@ -33,12 +33,44 @@ loader and contribution channel when that effort starts, with the findings and t
 ## Doctrine 2: tests assert behavior; agreement is derived
 
 The unit of protection is the invariant, never the spelling of an authored artifact (prose, config,
-workflows, CSS tokens, our own source shape). Shapes wave 1 deletes and must not regenerate: AST
-assertions on our own source, verbatim pins of authored files, required-phrase lists, wording
-blacklists, mutate-one-string-assert-raises loops. Shapes it keeps: exit codes and error types,
-derivation parity against a canonical source, structural presence, thresholds, injection and
-redaction defenses. Replacements are the exception, added only for a real invariant that can
-actually regress, and never as a new production contract whose only consumer is a test.
+workflows, CSS tokens, our own source shape). Shapes wave 1 deletes and must not regenerate: source
+assertions that pin the spelling of our own code, verbatim pins of authored files, required-phrase
+lists, wording blacklists, mutate-one-string-assert-raises loops. Shapes it keeps: exit codes and
+error types, derivation parity against a canonical source, structural presence, thresholds,
+injection and redaction defenses, and boundary guards as defined below. Replacements are the
+exception, added only for a real invariant that can actually regress, and never as a new production
+contract whose only consumer is a test.
+
+### What a source-scanning guard protects, not how it inspects
+
+An earlier draft of this doctrine listed "AST assertions on our own source" as a delete shape
+outright. That over-reached, and the sweep's inventory found it covers about 1,955 lines that split
+in two along a line the shorthand could not see (operator ruling, 2026-08-14). The always-on
+`no-prose-policing-tests` rule already draws the right one: its target is "the spelling of our own
+source code". Inspecting source with `ast` is a technique, not a smell; what decides is what the
+assertion protects.
+
+- **Keep** a guard enforcing a boundary the type system cannot express, that an ordinary edit can
+  regress: import and layering boundaries, consent confinement
+  (`guide/test_power_import_boundary.py` is the standing example, forbidding the guide package from
+  reaching `subprocess`, sockets, or secrets), and drift against a canonical source. A guard
+  shipping a `test_guard_is_not_vacuous` companion is doing what principle 3 asks and is evidence
+  for keeping it.
+- **Delete** a guard pinning how our code is written rather than what it may reach: identifier
+  spellings, call-graph shape, statement order. The `phase7` corpus was this family, and so is
+  `resources/test_graph_guard.py`.
+
+### `match=` splits three ways
+
+It appears at 696 sites, and the criteria above do not decide it on their own (operator ruling,
+2026-08-14). Deleting it wholesale drops real branch coverage; preserving it by adding a production
+discriminator is exactly what R2.2 forbids. So:
+
+1. The raised type already discriminates: **delete** the `match=`, keep the `raises`.
+2. The match is the only thing distinguishing same-type branches of one function: **keep it,
+   narrowed to the minimal distinguishing token**, never the sentence. The test then asserts which
+   branch ran, which is behavior, rather than how it reads.
+3. It pins a sentence for its own sake: **delete**, per R2.4.
 
 ## Guidance delivery
 

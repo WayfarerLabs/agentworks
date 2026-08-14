@@ -11,6 +11,13 @@ basis); SDD artifacts +21,913; process docs +7,699. Always-on rules context grew
 
 ## Rule-delivery facts (probed 2026-08-12, three controlled subagent probes)
 
+**Resolved 2026-08-14; the bullets below describe the pre-wave-0 world and are kept as the record of
+what was wrong, not as current fact.** PR #515 removed the path filter, and issue 511 closed on two
+observations: a fresh session and a worktree-isolated subagent each carried all twelve rules, in
+full text, before any tool use. The open sub-question about harness-created worktrees is answered by
+the second of those; the delivery channel is now session-start `claudeMd` rather than path-triggered
+injection, so worktree location no longer decides anything.
+
 Tracked as [issue 511](https://github.com/WayfarerLabs/agentworks/issues/511); wave 0 resolves it
 (FRD R1.0). Exact source inventory as of 2026-08-13: 18 files in `.rulesync/rules/`; thirteen
 declare `globs: ["**/*"]` including `root.md` (which projects to `CLAUDE.md` and always loads);
@@ -78,15 +85,16 @@ deliberately narrow `cli-conventions.md`.
 
 ## Secrets (#453)
 
-- **S1** The `phase7` corpus: 3,407 test lines, 639 collected cases, of which roughly 620 fail only
-  on differently-spelled-but-correct code. Includes a 671-line hand-rolled name resolver and a
-  575-line type-inference engine as test-support modules, plus tests of those helpers. Discovery
-  keys on a parameter literally named `interaction`, so renaming it silently removes a function from
-  the guarded set. Behind it, `validate_interaction_policy` (a runtime check that a first-party enum
-  is an enum) at 152 call sites, one of which validates the value the same expression just
-  constructed (`cli/commands/secret.py:134-136`). `test_phase7_retired_enforcement.py:229-268` is
-  additionally a wording blacklist over README, docs, and production source. Ten permanent test
-  files are named after transient plan phase 7.
+- **S1** The `phase7` corpus: 3,186 test lines (1,552 support, 1,634 test), 621 collected cases, of
+  which roughly 620 fail only on differently-spelled-but-correct code. (Recounted exactly during
+  implementation, 2026-08-14; the original 3,407 and 639 were estimates.) Includes a 671-line
+  hand-rolled name resolver and a 575-line type-inference engine as test-support modules, plus tests
+  of those helpers. Discovery keys on a parameter literally named `interaction`, so renaming it
+  silently removes a function from the guarded set. Behind it, `validate_interaction_policy` (a
+  runtime check that a first-party enum is an enum) at 152 call sites, one of which validates the
+  value the same expression just constructed (`cli/commands/secret.py:134-136`).
+  `test_phase7_retired_enforcement.py:229-268` is additionally a wording blacklist over README,
+  docs, and production source. Ten permanent test files are named after transient plan phase 7.
 - **S2** Backend classes treated as hostile protocol peers: bare `except Exception` plus type-checks
   around every return from the three in-repo backends
   (`resolve.py:87-94, 351-360, 556-573, 612-624`), a `_BATCH_TOKEN` construction sentinel defeated
@@ -161,11 +169,16 @@ deliberately narrow `cli-conventions.md`.
   config shape; ADR 0018 describes deleted spellings; `vm_platform/README.md:385` states a rule four
   implementations no longer follow; assorted docstrings name retired spellings.
 - **C10** Prose-policing concentrations beyond the seeded purge FRD's survey:
-  `tests/schema/test_errors.py` (20+ sentence pins), `test_retired_shapes.py` (pins plus three
-  blacklists, redundant with its own structural tests), `test_capability_shape.py:21-32`,
-  `test_samples.py:152-171` (generated comments pinned line by line), and
-  `tests/manifests/test_emit.py` running 22 disk-backed load cycles for a property its derived tests
-  already establish.
+  `cli/tests/schema/test_errors.py` (20+ sentence pins),
+  `cli/tests/capabilities/test_retired_shapes.py` (pins plus three blacklists at `:185-186`, `:236`,
+  and `:373`, redundant with its own structural tests),
+  `cli/tests/manifests/test_capability_shape.py:21-32`, and `test_samples.py:152-171` (generated
+  comments pinned line by line). Path corrections and one retraction (2026-08-14, from the sweep
+  inventory's read-through): two of these were cited under `schema/` but live in `capabilities/` and
+  `manifests/`, which would have read as "deleted" to a later reader. And
+  `cli/tests/manifests/test_emit.py`'s 22 disk-backed load cycles are **withdrawn** as a finding:
+  they are the loader half of a two-parser soundness pairing, not redundant ceremony. The original
+  entry appears to have counted by token rather than by shape.
 
 ## Database and migrations (#472, #478, #503, #504, #469, #499)
 
@@ -234,6 +247,10 @@ deliberately narrow `cli-conventions.md`.
   an output directory that is always a fresh single-writer temp dir on an ephemeral CI runner.
 - **W8** A hard-required Chromium launch inside the unit suite re-verifying a layout decision a
   CSS-text test two functions above already pins, which the manual browser checklist also covers.
+  Corroborating evidence (2026-08-14): `test_site_documents.py`'s `browser_geometry` helper timed
+  out after 20 s against headless Chrome in CI, failing the Website job and the `ci-success` gate on
+  a docs-only PR (#518) that touched no website file. It passed on a bare re-run. A browser launch
+  in the unit suite is not only redundant here, it is a flake surface every unrelated PR pays for.
 - **W9** Twelve parallel dictionaries forming a closed-vocabulary framework describing exactly five
   fixed, non-extensible pages. The shape to revisit if W2/W3 are tackled; documented as intentional
   house style in `website/README.md`, so this is a design-revision decision.
