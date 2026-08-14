@@ -38,7 +38,7 @@ owner-templated field is emitted nullable on purpose
 is a fact the stream carries separately as ``FieldDoc.required``. The
 second half of that was true and the first half was the defect: the
 emitted schema accepts an owner-templated field's explicit null (now, for
-example, ``token: {mode: stored, secret: null}``) as a VALUE spelling, the
+example, ``token: {mode: secret, secret: null}``) as a VALUE spelling, the
 loader reads it as the instruction to use the owner template, and
 ``describe-kind`` must name that spelling. The subtraction is what let the
 two derivations disagree in the one place this module exists to watch, so

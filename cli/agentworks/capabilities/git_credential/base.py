@@ -35,20 +35,6 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
 
 
-class TokenSourcedConfig(AgwModel):
-    """Version 1 provider config, retained only for registration errors.
-
-    Third-party version 1 providers may still import this formerly public
-    base. Keeping the old shape importable lets registration reject their
-    declared contract version with the migration message. The version 2
-    descriptor refuses this base, so a provider cannot claim version 2
-    while retaining the outer scalar/null token contract.
-    """
-
-    token: Annotated[NonEmptyStr, SecretRef(usage="the auth token", default_template="git-token-{owner_name}")]
-    """The version 1 secret-name field."""
-
-
 def _http_probe(url: str, headers: dict[str, str], *, timeout: float = 5.0) -> tuple[int, bytes, dict[str, str]]:
     """GET ``url``; returns (status, body, lowercased-headers).
 
@@ -85,21 +71,21 @@ def _require_line_safe_token(token: str, *, secret_name: str) -> str:
     )
 
 
-class StoredToken(AgwModel):
-    """Obtain this credential's token from a stored secret."""
+class SecretToken(AgwModel):
+    """Obtain this credential's token from a named secret."""
 
     scalar_shorthand: ClassVar = ScalarShorthand(annotation=str, field="secret")
     """A bare ``token: <name>`` is this arm with ``secret`` filled."""
 
-    mode: Literal["stored"]
+    mode: Literal["secret"]
 
     secret: Annotated[NonEmptyStr, SecretRef(usage="the auth token", default_template="git-token-{owner_name}")]
     """The secret holding this credential's personal access token."""
 
 
 TokenAcquisition = Annotated[
-    StoredToken,
-    UnionScalarShorthand(discriminator="mode", arm=StoredToken),
+    SecretToken,
+    UnionScalarShorthand(discriminator="mode", arm=SecretToken),
 ]
 """How a git credential obtains its token, as a one-arm tagged union."""
 
@@ -107,12 +93,12 @@ TokenAcquisition = Annotated[
 class TokenAcquiringConfig(AgwModel):
     """The config every token-acquiring git credential provider shares."""
 
-    # Omission selects stored acquisition. Any other arm must be selected
+    # Omission selects secret acquisition. Any other arm must be selected
     # explicitly. Raw data is intentional: the owner
-    # boundary fills the stored arm's templated ``secret`` before pydantic
+    # boundary fills the secret arm's templated ``secret`` before pydantic
     # validates it, which a constructed instance could not express.
-    token: TokenAcquisition = Field(default={"mode": "stored"})  # type: ignore[assignment]
-    """How this credential obtains its token. Defaults to the stored arm;
+    token: TokenAcquisition = Field(default={"mode": "secret"})  # type: ignore[assignment]
+    """How this credential obtains its token. Defaults to the secret arm;
     a bare secret name is that arm's shorthand."""
 
 

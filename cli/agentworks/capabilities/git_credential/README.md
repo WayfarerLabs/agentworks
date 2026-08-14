@@ -40,7 +40,7 @@ Whichever provider a credential names, an operator can rely on two guarantees:
 
 - **A live token is never pasted into config.** The `token.secret` key names the secret containing
   the token, and a secret backend supplies its value at provisioning time. The field defaults to
-  stored acquisition; a bare secret name is shorthand for that arm.
+  secret acquisition; a bare secret name is shorthand for that arm.
 - **A bad token is caught early.** At provisioning time Agentworks verifies the token against its
   host before writing anything, so an expired, revoked, or mistyped token surfaces as a clear,
   actionable error up front rather than as a confusing git failure partway through setup. (The check
@@ -218,40 +218,38 @@ implementation missing any of them, naming the plugin:
   with no fields beyond its tag, which is closed-world by construction.
 - `name` / `description`: the registry row's identity.
 
-The current contract is version 2. Version 1 providers are rejected at registration. To migrate,
-extend `TokenAcquiringConfig`, read the stored secret name from `self.config.token.secret`, and set
-`contract_version = 2`. `TokenSourcedConfig` remains importable only so version 1 plugins receive
-that registration error; it is not valid for a version 2 provider.
+The current contract is version 2. Providers extend `TokenAcquiringConfig`, read the token secret
+name from `self.config.token.secret`, and declare `contract_version = 2`.
 
-#### Token Acquisition: One Stored Arm Today
+#### Token Acquisition: One Secret Arm Today
 
 The providers share `TokenAcquiringConfig`. Its `token` field is a real discriminated union even
 with one arm:
 
 ```python
-class StoredToken(AgwModel):
-    mode: Literal["stored"]
+class SecretToken(AgwModel):
+    mode: Literal["secret"]
     secret: Annotated[
         NonEmptyStr,
         SecretRef(usage="the auth token", default_template="git-token-{owner_name}"),
     ]
 
 TokenAcquisition = Annotated[
-    StoredToken,
-    UnionScalarShorthand(discriminator="mode", arm=StoredToken),
+    SecretToken,
+    UnionScalarShorthand(discriminator="mode", arm=SecretToken),
 ]
 
 class TokenAcquiringConfig(AgwModel):
-    token: TokenAcquisition = Field(default={"mode": "stored"})
+    token: TokenAcquisition = Field(default={"mode": "secret"})
 ```
 
-`StoredToken` declares `ScalarShorthand(annotation=str, field="secret")`, and the union's
+`SecretToken` declares `ScalarShorthand(annotation=str, field="secret")`, and the union's
 `UnionScalarShorthand` selects that arm before tag dispatch. This makes `token: my-secret` shorthand
-for `token: {mode: stored, secret: my-secret}`. Omission selects stored acquisition; any additional
+for `token: {mode: secret, secret: my-secret}`. Omission selects secret acquisition; any additional
 mechanism must be selected explicitly. The tag is `mode` because it selects an acquisition
 mechanism, not a token type.
 
-The `SecretRef` marker lives inside the stored arm, where the reference really exists. The core
+The `SecretRef` marker lives inside the secret arm, where the reference really exists. The core
 derives validation, default filling, total extraction, emitted schema, samples, and field
 documentation from that declaration. Omitted, scalar, and full-table spellings therefore contribute
 the same secret edge.
@@ -377,7 +375,7 @@ are the contract:
 | Success enrichment    | announces `login` and (fine-grained) expiry           | announces success only                                     |
 | `review_remote` flags | any embedded username                                 | only a username that is not the org                        |
 
-The shared shape underneath: one base config model carrying a `token` acquisition union whose stored
+The shared shape underneath: one base config model carrying a `token` acquisition union whose secret
 arm carries the marked `secret` field, both driving `_verify_token` through `_probe_pat`, both
 implementing public `credential_lines`, and both returning a `HelperEntry`. A third provider should
 look the same from the outside and differ only in these host-policy rows. Core callers, rather than
@@ -390,7 +388,7 @@ Grounded in the two shipped providers.
 #### Source Secrets by Name, Never by Value
 
 A provider names its token secret and reads the value only through the context; it never holds a
-token. The stored arm's `secret` field carries a NAME (defaulting to `git-token-<name>`), the edge
+token. The secret arm's `secret` field carries a NAME (defaulting to `git-token-<name>`), the edge
 comes from that field's `SecretRef` marker, and the value is delivered to `runup` and the materials
 op through the framework's resolve pass. This is the same discipline the cloud platforms follow for
 their API credentials (see the credentials section of `vm_platform/README.md`): nothing ever invites
@@ -458,7 +456,7 @@ templates:
 - [`../README.md`](../README.md): the capability lifecycle contract and prerequisite for this guide.
 - [`vm_platform/README.md`](../vm_platform/README.md): the sibling deep-dive; its credentials
   section is the reference for the secret-by-name discipline shared here.
-- `base.py`: the `GitCredentialProvider` ABC, `TokenAcquiringConfig` and its stored-token arm,
+- `base.py`: the `GitCredentialProvider` ABC, `TokenAcquiringConfig` and its secret-token arm,
   `HelperEntry`, and the shared probes (`_probe_pat`, `_http_probe`).
 - `github.py`: the `github` provider (the scoped, fine-grained-PAT reference).
 - `agentworks/plugins/azure/azdo.py`: the `azdo` provider (the plugin-shipped reference).

@@ -670,24 +670,23 @@ def test_the_shapes_the_envelope_tolerates_are_not_schema_errors() -> None:
 def test_git_token_acquisition_is_a_defaulted_one_arm_discriminated_union() -> None:
     """An unscoped github credential writes nothing but the provider tag.
 
-    Token acquisition remains a real tagged union with one stored arm;
+    Token acquisition remains a real tagged union with one secret arm;
     omission defaults to that historical behavior, and a bare secret name
-    remains the stored arm's shorthand. Explicit ``token: null`` is the
-    one retired spelling and therefore is not offered by emitted schema.
+    remains the secret arm's shorthand.
 
     ``AgwModel`` owns the correction; this is the end-to-end proof that it
     survives the splice into a hosting kind's document.
     """
     schema = document_schema("git-credential")
     token = schema["$defs"]["GitHubConfig"]["properties"]["token"]
-    assert token["default"] == {"mode": "stored"}
+    assert token["default"] == {"mode": "secret"}
     assert token["anyOf"][0] == {"type": "string"}
     tagged = token["anyOf"][1]
     assert tagged["discriminator"] == {
         "propertyName": "mode",
-        "mapping": {"stored": "#/$defs/StoredToken"},
+        "mapping": {"secret": "#/$defs/SecretToken"},
     }
-    assert tagged["oneOf"] == [{"$ref": "#/$defs/StoredToken"}]
+    assert tagged["oneOf"] == [{"$ref": "#/$defs/SecretToken"}]
     assert _errors(schema, _a_document("git-credential", {"provider": {"name": "github"}})) == []
     assert _errors(schema, _a_document("git-credential", {"provider": {"name": "github", "token": "custom"}})) == []
     assert (
@@ -695,7 +694,7 @@ def test_git_token_acquisition_is_a_defaulted_one_arm_discriminated_union() -> N
             schema,
             _a_document(
                 "git-credential",
-                {"provider": {"name": "github", "token": {"mode": "stored", "secret": "custom"}}},
+                {"provider": {"name": "github", "token": {"mode": "secret", "secret": "custom"}}},
             ),
         )
         == []
@@ -1172,7 +1171,7 @@ def test_reference_markers_reach_emitted_schema() -> None:
     assert all(set(extension) == {"kind", "usage", "default_template", "relationship"} for extension in marked)
 
 
-def test_the_stored_token_arm_states_its_reference_on_the_property() -> None:
+def test_the_secret_token_arm_states_its_reference_on_the_property() -> None:
     """The burial that ``_ref_at_top_level`` exists to undo, asserted
     against a REAL shipped field rather than a fixture model.
 
@@ -1181,7 +1180,7 @@ def test_the_stored_token_arm_states_its_reference_on_the_property() -> None:
     the string branch, and the lift hoists it onto the property. The
     fixture-model pins cover both burial shapes, but a fixture cannot
     drift out from under the shipped models. This reddens if a real
-    stored arm's ``secret`` stops answering "does this field name a secret?"
+    secret arm's ``secret`` stops answering "does this field name a secret?"
     at the property, which is where an editor hover and every consumer
     look.
 
@@ -1191,8 +1190,8 @@ def test_the_stored_token_arm_states_its_reference_on_the_property() -> None:
     and no branch kept a copy (lifted, not duplicated, so there stays
     exactly one place to read it).
     """
-    stored = document_schema("git-credential")["$defs"]["StoredToken"]
-    table = next(branch for branch in stored["anyOf"] if branch.get("type") == "object")
+    secret = document_schema("git-credential")["$defs"]["SecretToken"]
+    table = next(branch for branch in secret["anyOf"] if branch.get("type") == "object")
     prop = table["properties"]["secret"]
     assert "anyOf" in prop
     assert prop.get(REF_SCHEMA_KEY, {}).get("kind") == "secret"

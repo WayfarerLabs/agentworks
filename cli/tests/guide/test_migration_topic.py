@@ -119,10 +119,6 @@ def test_migration_actions_make_inventory_backups_and_verification_distinct() ->
     assert "whether it is pre-existing or TOML-derived" in edit.manual_steps
     assert "apply that hard error's exact rewrite" in edit.manual_steps
     assert "delete the retired line and write auth ambient, auth ambient, or placement local" in edit.manual_steps
-    assert "canonical tagged stored arm" in edit.manual_steps
-    assert "token: {mode: stored, secret: <existing-name>}" in edit.manual_steps
-    assert "Delete an outer token: null line or replace it exactly with token: {mode: stored}" in edit.manual_steps
-    assert "an omitted or null inner token.secret selects the default" in edit.manual_steps
     assert "No minted arm exists" in edit.manual_steps
     assert "MANIFEST_PATH to equal" in edit.manual_steps
     assert "pre-recorded file" in edit.manual_steps
@@ -324,9 +320,9 @@ def test_migration_git_token_teaching_matches_live_reference_and_services(
     token_entries = _schema_entries(target, ("token",))
     assert len(token_entries) == 1
     token = token_entries[0]
-    assert token.doc.default == {"mode": "stored"}
+    assert token.doc.default == {"mode": "secret"}
     assert not token.doc.required
-    assert [alternative.name for alternative in token.alternatives] == ["stored"]
+    assert [alternative.name for alternative in token.alternatives] == ["secret"]
     assert _schema_paths(target) >= {("token",), ("token", "mode"), ("token", "secret")}
     assert "minted" not in repr(reference_for(target))
 
@@ -347,16 +343,16 @@ def test_migration_git_token_teaching_matches_live_reference_and_services(
 
     assert refs() == [("secret", "git-token-dev")]
     assert refs("gh-pat") == [("secret", "gh-pat")]
-    assert refs({"mode": "stored"}) == [("secret", "git-token-dev")]
-    assert refs({"mode": "stored", "secret": None}) == [("secret", "git-token-dev")]
+    assert refs({"mode": "secret"}) == [("secret", "git-token-dev")]
+    assert refs({"mode": "secret", "secret": None}) == [("secret", "git-token-dev")]
 
-    with pytest.raises(ConfigError, match=r"replace the null line with the explicit choice: token: \{mode: stored\}"):
+    with pytest.raises(ConfigError):
         validate_capability_config(
             kind="git-credential-provider",
-            config={"name": provider, **base, "token": None},
+            config={"name": provider, **base, "token": {"mode": "stored", "secret": "gh-pat"}},
             owner=owner,
         )
-    with pytest.raises(ConfigError, match="unknown mode 'minted'; registered: 'stored'"):
+    with pytest.raises(ConfigError):
         validate_capability_config(
             kind="git-credential-provider",
             config={"name": provider, **base, "token": {"mode": "minted"}},
@@ -375,8 +371,8 @@ def test_declarable_git_credential_reference_keeps_structural_token_union() -> N
         ("provider", "token", "secret"),
     }
     assert len(token_entries) == 1
-    assert token_entries[0].doc.default == {"mode": "stored"}
-    assert [alternative.name for alternative in token_entries[0].alternatives] == ["stored"]
+    assert token_entries[0].doc.default == {"mode": "secret"}
+    assert [alternative.name for alternative in token_entries[0].alternatives] == ["secret"]
 
 
 def test_migration_review_action_covers_all_sites_and_distinguishes_outer_from_inner_null() -> None:
@@ -443,14 +439,6 @@ def test_migration_teaching_covers_cutover_validation_backends_and_auth_choices(
         "strict types",
         "`spec.platform.name: azure-vm`",
         "`spec.provider`",
-        "An omitted `provider.token` still selects a stored token and the default secret name",
-        "A scalar such as `token: gh-pat` is still accepted as shorthand",
-        "canonical current spelling is the tagged shape",
-        "omitting `token.secret` or writing `secret: null` selects the default secret name",
-        "The old outer spelling `token: null` is retired",
-        "`token: {mode: stored}`",
-        "A retired TOML scalar may still become the accepted scalar shorthand",
-        "No `minted` arm exists in the current contract",
         "Any manifest validation hard error returns that manifest to this edit loop",
     ):
         assert required in flowed

@@ -16,7 +16,6 @@ from agentworks.capabilities.git_credential.base import (
     HelperEntry,
     TokenAcquiringConfig,
 )
-from agentworks.capabilities.retired_shapes import RetiredNullTokenShape
 from agentworks.topics import TopicProse
 
 AzDOOrg = Annotated[str, Field(pattern=r"^[A-Za-z0-9._-]+$")]
@@ -39,7 +38,6 @@ class AzDOCredentialProvider(GitCredentialProvider):
     """Configures git credentials for Azure DevOps via a personal access token."""
 
     contract_version: ClassVar[int] = 2
-    retired_shape: ClassVar[RetiredNullTokenShape | None] = RetiredNullTokenShape()
     name: ClassVar[str] = "azdo"
     description: ClassVar[str] = "Azure DevOps personal access token"
     config_model: ClassVar[type[AzDOConfig]] = AzDOConfig
