@@ -157,6 +157,18 @@ guard; it is covered observationally, with failure-unwind and single-release cov
 pin could not see, in `cli/tests/vms/test_lifecycle_orchestrated.py` and
 `cli/tests/vms/test_vm_nodes.py`.
 
+One residual is recorded rather than fixed, because fixing it here would reintroduce the interior
+check this note just retired. Every consumer compares `interaction` by identity, and
+`InteractionPolicy` is a `StrEnum`, so a value that is equal but not identical (a plain `"refuse"`)
+would take the not-refuse branch and resolve through an interactive source in a run that meant to
+refuse. That is unreachable today: no config, deserialization, or plugin path produces an
+`InteractionPolicy` value, and `plugins/__init__.py` registers a hardcoded tuple rather than
+discovering anything. It becomes reachable the moment a third-party backend can be loaded, which is
+why it is filed as issue 529 against the external-plugin loader effort rather than left as a
+comment. The same issue records that `resolve.py`'s hardcoded `name == "prompt"` dispatch currently
+makes this fail loud for one backend and silent for every other, which is an accident of that
+special case rather than a property of the gate.
+
 This note narrows the interaction-policy validation convention only. The source-and-backend model,
 the resolution protocol, the value-free outcome vocabulary, the trust-boundary statement, and the
 0.14 break recorded above are untouched.
