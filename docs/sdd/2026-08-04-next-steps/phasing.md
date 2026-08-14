@@ -75,13 +75,14 @@ Two things this graph deliberately does not serialize:
   trust-based integration discipline, the gated graph projection and guide content channel,
   secret-source resolution, the event stream) rather than per-change; (2) test consolidation and
   removal, with the working assumption that the accreted unit-test estate can be cut in half, maybe
-  more, without sacrificing any coverage or quality; (3) code cleanup: file-size limits, vestigial
-  code removal, package renaming and refactoring left behind by the waves' moves, and an SDD
-  tombstoning sweep (operator ruling, 2026-08-08): superseded SDDs' contents are deleted down to
-  their `locked.md` tombstones per the sdd skill, with `2026-07-01-resource-manifests` the first
-  identified candidate (its lockfile already carries the supersession record) and individual SDDs
-  tombstoned earlier whenever reading them actively misleads. Findings are fixed before the saga
-  locks.
+  more, without sacrificing any coverage or quality (the pre-0.14 simplification pass does this
+  early, so what remains here is a verification sweep rather than the trim itself); (3) code
+  cleanup: file-size limits, vestigial code removal, package renaming and refactoring left behind by
+  the waves' moves, and an SDD tombstoning sweep (operator ruling, 2026-08-08): superseded SDDs'
+  contents are deleted down to their `locked.md` tombstones per the sdd skill, with
+  `2026-07-01-resource-manifests` the first identified candidate (its lockfile already carries the
+  supersession record) and individual SDDs tombstoned earlier whenever reading them actively
+  misleads. Findings are fixed before the saga locks.
 - **Wave 8: external plugin API.** Registration conformance, discovery, namespacing, versioning, and
   the distribution-trust model, promised publicly only once the internal contracts survive
   first-party use.
@@ -111,15 +112,16 @@ off whenever bandwidth allows, on its own merits and its own schedule.
 - **0.14.0 (held; operator ruling, 2026-08-06):** the breaking cleanup does not ship alone. The cut
   waits for the guide first slice (guide command core, `concept-onboarding`, the README bootstrap),
   so the release that rejects old inputs also ships the CLI that teaches the new ones; newcomers
-  ride the forgiving 0.13.0 until then. That gate is partially satisfied: the guide command core and
-  `concept-onboarding` merged 2026-08-08 via PR #428, while the README bootstrap arrives with the
-  onboarding child's bootstraps phase, so the gate stays open until it lands. The installer-plugins
-  child (operator ruling, 2026-08-07; launchable whenever, see Tracks) also gates the cut: its moves
-  are breaking and belong in the same well-cushioned release. The 0.13.0 warnings stay true because
-  the version number attaches to the breaking content, not the date. If wave 2's
-  generic-discriminator hard error lands in the same window, it folds in: one well-cushioned
-  breaking release instead of two. The vm-platform mode contract (PR #444, merged 2026-08-08) folds
-  in the same way: its written-old-shape hard errors ride the cushioned release, and its
+  ride the forgiving 0.13.0 until then. That gate is satisfied: the guide command core and
+  `concept-onboarding` merged 2026-08-08 via PR #428, and the README bootstrap shipped with the
+  assistance phase (PR #480, 2026-08-13; the generated block pins version 0.14.0 or newer, so it
+  resolves for operators when the release itself ships). The installer-plugins child (operator
+  ruling, 2026-08-07; launchable whenever, see Tracks) also gates the cut: its moves are breaking
+  and belong in the same well-cushioned release. The 0.13.0 warnings stay true because the version
+  number attaches to the breaking content, not the date. If wave 2's generic-discriminator hard
+  error lands in the same window, it folds in: one well-cushioned breaking release instead of two.
+  The vm-platform mode contract (PR #444, merged 2026-08-08) folds in the same way: its
+  written-old-shape hard errors ride the cushioned release, and its
   omission-equals-historical-default posture means manifests that never wrote the retired blocks
   cross without edits. The git-credential one-arm union restructure (operator ruling, 2026-08-08,
   ahead of credential minting) landed 2026-08-08 via PR #455, following the same pattern, together
@@ -138,12 +140,19 @@ off whenever bandwidth allows, on its own merits and its own schedule.
   operator blesses it: breaking surface changes belong in the same cushioned release. While `main`
   holds unreleased breaking changes, urgent operator fixes ship from a `0.13.x` backport branch.
 
-  **Ruling (operator, 2026-08-12):** the grammar rewrite is no longer conditional — 0.14.0 does not
-  ship until it lands. It joins the cut as a hard gate. **Sequence (operator, 2026-08-13):** the
-  guide trail-sign reshape and the onboarding track's simplifications first, then the grammar
-  rewrite, then the test cleanup pass (prose tests and more). That ordering absorbs the
-  test-consolidation and prose-test-purge children into the final step, so neither starts before the
-  grammar rewrite lands.
+  **Ruling (operator, 2026-08-12):** the grammar rewrite is no longer conditional. 0.14.0 does not
+  ship until it lands, so it joins the cut as a hard gate. **Sequence (operator, 2026-08-13, revised
+  the same day):** the simplification pass runs before the grammar rewrite, not after it. The order
+  is (1) that pass's wave 0, which establishes that always-on rules actually reach the agents they
+  bind (issue #511) and lands the deletion criteria, (2) its wave 1 deletions, (3) the grammar
+  rewrite, (4) its reassessment. Rewriting the CLI grammar over a surface that still carries the
+  deletable scaffolding means the rewrite carries it too. The pass's wave 2 (process and rule
+  subtraction) is not on this spine: it runs fully in parallel on its own session, file-disjoint
+  from wave 1, and the reassessment and lock wait for both waves. The onboarding trail-sign round
+  also runs alongside rather than ahead, split by boundary: the simplification pass owns guide
+  machinery, the onboarding effort owns guide content. The 0.14 breaking-truth items (S5, C3, C4,
+  C7) run as their own dispatched task in parallel, since folding them into the grammar rewrite
+  would grow an already massive effort (operator, 2026-08-13).
 
 - **Later:** remaining waves map to releases as they prove out; no need to pin numbers now.
 
