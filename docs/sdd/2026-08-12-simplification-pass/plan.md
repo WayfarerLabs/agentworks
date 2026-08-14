@@ -10,8 +10,10 @@ effort.
       isolated-worktree delivery per configured target (Claude, Codex, Copilot), confirm the
       Rulesync emission for a rule without `globs`, then drop the filter from the twelve broad
       always-on rules, keeping `cli-conventions.md` narrow. Done when: the probes are recorded on
-      issue #511 and the twelve rules are delivered unconditionally, or the blocker is escalated to
-      the operator.
+      issue #511 and the twelve rules are delivered unconditionally. Escalation does not complete
+      this item: if the probe shows this shape cannot work, wave 0 stays open and wave 1 does not
+      start until the operator's disposition is recorded here, and that disposition must itself make
+      the deletion criteria reach every affected lane (charter-carried criteria at minimum).
 - [ ] Amend `development-principles` with the trust-boundary doctrine (the four boundaries, interior
       trust, validator-names-its-boundary; ~10 lines) plus the principle-3 test-quality
       counterweight (R1.1), and `no-prose-policing-tests` with the authored-artifacts generalization
@@ -37,11 +39,12 @@ actively changing.
       credential non-persistence, main-only deploy, source-SHA/artifact binding, double-build diff)
       as focused checks over a proper YAML load. Done when: suite green, no hardcoded workflow text
       beyond the keys each check reads.
-- [ ] Prose/form-policing sweep across the estate (absorbed survey list plus G12, C10, D4, P6, W4,
-      W6, and the #470 manifesto pin): keep behavioral, structural, and security tests; delete the
-      rest; convert to structural form only where a real invariant would lose its only guard.
-      Sentence-only observables are decided case by case, mostly by deletion (R2.4). May land as
-      several PRs. Done when: the survey's pure-policing class is empty at HEAD.
+- [ ] Prose/form-policing sweep across the estate (absorbed survey list plus G12, C10, D4, P6, and
+      the #470 manifesto pin; W4 and W6 belong to the contained-trims item below, not here): keep
+      behavioral, structural, and security tests; delete the rest; convert to structural form only
+      where a real invariant would lose its only guard. Sentence-only observables are decided case
+      by case, mostly by deletion (R2.4). May land as several PRs. Done when: the survey's
+      pure-policing class is empty at HEAD.
 - [ ] Delete guide dead surface and interior re-validation (G8, G2); fix the vacuous monkeypatch
       test and add the persisted-enum parity test (G11, R2.3). Done when: suite green,
       `parse_topic_contribution` accepts only decoded data, the parity test fails on a synthetic new
@@ -78,13 +81,16 @@ actively changing.
 
 ## Reassess (R4)
 
+The reassessment waits for waves 1 and 2 **and for the CLI grammar rewrite landing**: the saga's
+`phasing.md` orders the spine wave 0, wave 1, grammar rewrite, reassessment, so this effort does not
+close or lock while the rewrite is in flight. (The 0.14 contract-truth flagging that an earlier
+revision scheduled here was discharged before this SDD merged: the package is dispatched as its own
+task on `refactor/breaking-truth-0-14`, and the prose-test-purge absorption is recorded in the saga
+ledger.)
+
 - [ ] Write the reassessment: what became simpler in concepts, paths, and contracts; the
       retrospective numbers (lines, test counts, suite wall time, always-on bytes); the surviving
       findings; and a per-subsystem proposal or an explicit drop for each. Done when: delivered to
-      the operator.
-- [ ] Flag the saga candidates through the operator: the 0.14 contract-truth package (S5, C3, C4,
-      C7, the migration-notes convention) with [migration-strategy.md](migration-strategy.md) as
-      seed, and the absorbed prose-test-purge ledger note. Done when: flagged; routing is the saga
-      lead's.
-- [ ] Write `locked.md` once waves 1 and 2 are complete, the reassessment is delivered, and the
-      flags are routed. Remaining candidates live in the reassessment, not in this plan.
+      the operator, after waves 1 and 2 are complete and the grammar rewrite has landed.
+- [ ] Write `locked.md` once the reassessment is delivered. Remaining candidates live in the
+      reassessment, not in this plan.

@@ -6,8 +6,8 @@ references are to HEAD at `fe83aaf7`; line numbers drift as the pass lands, so t
 anchors, not coordinates.
 
 Window arithmetic: cli code +36,029/-12,431; cli tests +50,661/-8,419 (test volume now 119,584 lines
-against 87,127 lines of code); SDD artifacts +21,913; process docs +7,699. Always-on rules context
-grew 7.8 KB to 30.6 KB.
+under `cli/tests` against 83,151 lines under `cli/agentworks`, both exact recounts at the `fe83aaf7`
+basis); SDD artifacts +21,913; process docs +7,699. Always-on rules context grew 7.8 KB to 30.6 KB.
 
 ## Rule-delivery facts (probed 2026-08-12, three controlled subagent probes)
 
@@ -185,7 +185,9 @@ deliberately narrow `cli-conventions.md`.
   written after the rule, already comply; the debt is inherited, not spreading.
 - **D5** #504 changed the locked safer-migrations SDD's classifier design (new `SchemaState` member,
   new exception type) without a `locked.md` supersession note; #503 set the precedent of writing
-  one. Judgment call routed to the operator.
+  one. Resolved (2026-08-13): the saga lead wrote the supersession note on that lock, recording the
+  `BUSY` addition, the surfaces #504 touched, and issue #505 as the tracker for the seams that still
+  classify inconsistently. No work remains here.
 - **D6** `doctor_state.py` repeats the same three-line exception-to-HealthGroup translation three
   times.
 

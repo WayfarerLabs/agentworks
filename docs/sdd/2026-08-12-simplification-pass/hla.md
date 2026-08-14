@@ -59,8 +59,10 @@ per charter and covers any delivery edge the probes miss.
 - **Wave 2**: process and rule subtraction PRs under the net-deletion constraint, in parallel with
   wave 1 on its own session (file-disjoint: `.rulesync/` and the skills tree versus `cli/` and
   `website/`).
-- **Reassess**: waits for both waves; the lead writes the reassessment and the candidate proposals;
-  the operator decides what, if anything, is promoted.
+- **Reassess**: waits for both waves and for the CLI grammar rewrite landing (the saga's
+  `phasing.md` puts the rewrite between wave 1 and this reassessment, so the effort cannot close or
+  lock early); the lead writes the reassessment and the candidate proposals; the operator decides
+  what, if anything, is promoted.
 
 ## Risks
 
