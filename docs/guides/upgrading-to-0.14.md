@@ -951,8 +951,8 @@ above: the FIELDS keep their spellings, but they now sit in an `auth` arm rather
 file you end up with. Proxmox is where it was.
 
 The rule itself is general for a field that directly names a secret and has a default: absent and
-`null` mean the same thing. These three are called out because they are the ones whose behavior The
-git credential secret arm's inner secret field follows the same general rule:
+`null` mean the same thing. These three are called out because their behavior changed. The git
+credential secret arm's inner secret field follows the same general rule:
 `token: { mode: secret, secret: null }` means the default `git-token-<name>` secret, as does
 omitting `secret` from that arm.
 
