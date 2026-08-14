@@ -121,3 +121,42 @@ not edit the saga SDD.
   credentials. Tests and the acceptance harness deliberately use a closed fake-provider boundary.
 - The acceptance harness intentionally supports POSIX hosts only. Generated PowerShell completion
   text is validated on Linux, but no native Windows CLI run is claimed.
+
+## Supersession (2026-08-14)
+
+The `2026-08-12-simplification-pass` effort's wave 1 deleted `validate_interaction_policy` and the
+`phase7` test corpus that enforced its use, so the conventions this SDD's `operator-surfaces-lld.md`
+records as normative no longer describe HEAD. Recorded here because that LLD is the only place on
+`main` that still specified the mechanism as current design, and this directory is locked.
+
+What went: the function itself (`secrets/policy.py`), its 152 production call sites, and the AST
+guard that required `interaction = validate_interaction_policy(interaction)` as the first executable
+statement of every public service and policy-parameter internal boundary, with its stored-policy,
+CLI-root, and directed-edge variants. The LLD sections that describe those requirements, principally
+its lines 145-153, 184-189, 396-400, 556-566, and 669-677, are superseded in full.
+
+Why: the value reaching every one of those call sites is a first-party `InteractionPolicy` produced
+and consumed within a single execution under strict mypy, either a typed parameter or a value
+constructed one expression earlier by `ordinary_interaction_policy()` or a ternary over a Typer
+boolean. That is interior by the trust-boundary doctrine the simplification pass landed in
+`development-principles` principle 3, so the check re-verified a guarantee the type system already
+carried. The operator-input boundary here is the CLI flag and the TTY probe, and both are crossed
+before an `InteractionPolicy` value exists.
+
+What is untouched, which is the part that matters for anyone reading this lock: **every interaction
+behavior recorded under "What shipped" still holds.** The `InteractionPolicy` enum,
+caller-authorized prompting, fail-before-prompt ordering, `agw secret verify`'s refuse-by-default
+posture and its final `--allow-interaction` opt-in, and the forwarding of an explicit policy across
+every boundary are all unchanged. What was removed is a runtime re-check that a first-party enum was
+that enum, plus the lexical enforcement of where that re-check had to appear. No call site changed
+which policy it passes, and no operator-visible behavior changes.
+
+One coverage question was checked rather than assumed. The corpus's lexical assertion that auth-key
+acquisition and `_ensure_tailscale` sit inside the activation hold was not that property's only
+guard; it is covered observationally, with failure-unwind and single-release coverage the lexical
+pin could not see, in `cli/tests/vms/test_lifecycle_orchestrated.py` and
+`cli/tests/vms/test_vm_nodes.py`.
+
+This note narrows the interaction-policy validation convention only. The source-and-backend model,
+the resolution protocol, the value-free outcome vocabulary, the trust-boundary statement, and the
+0.14 break recorded above are untouched.
