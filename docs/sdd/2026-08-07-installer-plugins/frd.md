@@ -13,8 +13,11 @@ package. These rows are useful catalog entries, not defaults that core requires.
 declarations into opt-in system plugins so their provider matches their optional ownership while the
 generic resource framework and initializer execution stay in core.
 
-This is the complete scope. The operator's 2026-08-13 correction supersedes the broader design in
-unmerged PR #451.
+This is the complete scope. The operator's 2026-08-13 correction supersedes the merged seed at
+`bbe9a506` and the broader design that followed it. Seed R7 and its possible `consumer_gating`
+trigger, C4's collision redesign, and the bundle growth path are not commitments of this child; the
+saga's 2026-08-13 correction defers collision redesign and this child makes no promise for the other
+removed concepts.
 
 ## Requirements
 
@@ -51,7 +54,7 @@ The following remain core and are not changed by this effort:
 - all raw package and command configuration fields
 
 No initializer capability, callback, execution seat, resource-disable setting, collision resolver,
-consumer gate, compatibility alias, or migrator is introduced.
+or consumer gate is introduced.
 
 ## Acceptance
 
@@ -69,12 +72,11 @@ consumer gate, compatibility alias, or migrator is introduced.
   new completion mechanism.
 - AC6. The CLI docs, resource guide, plugin docs, sample config, conceptual guide topics, and 0.14
   upgrade guide consistently teach the two opt-ins and all 16 moved selectors.
-- AC7. Source and installed-wheel tests prove that both manifest bundles and their guide content are
-  packaged and readable.
+- AC7. Installed-wheel coverage proves that both manifest bundles ship and remain readable, while
+  the existing package-data coverage continues to include their guide content.
 
 ## Compatibility ruling
 
 The operator waived the saga's default one-release warning runway on 2026-08-14. No shipped template
 or sample selects these optional catalog rows; affected configurations explicitly name one of the 16
-moved resources. On 0.14, those configurations receive the existing disabled-resource message until
-the owning plugin is enabled. No backward-compatibility or downgrade path is provided.
+moved resources. R10 is the authoritative transition contract.

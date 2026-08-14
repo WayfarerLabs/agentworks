@@ -44,22 +44,5 @@ dependency edges.
 All six rows move unchanged into the `install-command` plugin's manifest package. Admin and agent
 templates continue to select them through `install_commands`.
 
-## Core ownership retained
-
-| Surface                   | Retained core ownership                                                                     |
-| ------------------------- | ------------------------------------------------------------------------------------------- |
-| Apt framework             | Kinds, decoding, source dependencies, VM selection, source reconciliation, and installation |
-| Install-command framework | Kinds, predicates, references, system/admin/agent runners, PATH results, and ordering       |
-| Snap                      | VM-template configuration and installer                                                     |
-| Mise                      | Admin/agent configuration, installation, activation, lockfiles, pruning, and ordering       |
-| Dotfiles                  | Admin/agent configuration, synchronization, and checkout-local installation                 |
-| Tmuxinator                | Platform installation, workspace default, project generation, and links                     |
-| Claude setup              | Marketplace/plugin fields and admin/agent installation steps                                |
-| Initializer orchestration | Lifecycle, identity, security, transport, status, failure handling, and step order          |
-
-## Shape decision
-
-The two plugins publish manifests and guide topics only. They have no capabilities or callbacks.
-They are separate because they publish different resource kinds with different selection and
-dependency contracts. Core already provides the shared consumers, so moving execution would add an
-extension point without a need.
+The [FRD](./frd.md) owns the scope boundary and the [HLA](./hla.md) owns the plugin shape. This
+inventory is only the exact relocation payload and its existing selection relationships.
