@@ -30,7 +30,7 @@ from agentworks.secrets.outcomes import (
     _safe_diagnostic_text,
     complete_resolution_error,
 )
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
+from agentworks.secrets.policy import InteractionPolicy
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -109,7 +109,6 @@ class ResolutionPolicy:
     completion: CompletionPolicy
 
     def __post_init__(self) -> None:
-        validate_interaction_policy(self.interaction)
         if type(self.completion) is not CompletionPolicy:
             raise StateError("completion must be an exact CompletionPolicy") from None
 
@@ -689,7 +688,6 @@ def resolve_partial_for_reveal(
     interaction: InteractionPolicy,
 ) -> PartialResolution:
     """Resolve independent values for the explicit env reveal surface."""
-    interaction = validate_interaction_policy(interaction)
     broker = OutputInteractionBroker(secrets) if interaction is InteractionPolicy.ALLOW else None
     batch = resolve_batch(
         secrets,

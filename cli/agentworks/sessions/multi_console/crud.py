@@ -22,7 +22,6 @@ from agentworks import output
 from agentworks.errors import AlreadyExistsError, NotFoundError, ValidationError
 from agentworks.naming import MAX_FREEFORM_NAME_LENGTH, validate_name
 from agentworks.resources.access import named_console_template
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.sessions.multi_console_layout import (
     _apply_layout,
     _reorder_session_windows,
@@ -46,6 +45,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, ShellEntry
     from agentworks.secrets import SecretTarget
+    from agentworks.secrets.policy import InteractionPolicy
 
 
 def create_console(
@@ -132,7 +132,6 @@ def add_sessions(
     """Append sessions to an existing console in argument order. Atomic at the
     DB layer; if the console's tmux session is live, also adds the windows
     immediately (best-effort)."""
-    interaction = validate_interaction_policy(interaction)
     from agentworks.bootstrap import load_request_registry
 
     console = _require_console(db, console_name)
@@ -412,7 +411,6 @@ def add_shell(
 ) -> None:
     """Append a single shell entry to a session's window in a console. If the
     console is live, also splits the pane immediately (best-effort)."""
-    interaction = validate_interaction_policy(interaction)
     from agentworks.bootstrap import load_request_registry
 
     _validate_cwd(cwd)

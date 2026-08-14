@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.errors import BackupError, NotFoundError, StateError
 from agentworks.path_rendering import format_host_path
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.vms.manager import gated_vm_boundary
 
 if TYPE_CHECKING:
@@ -21,6 +20,7 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.db import Database, WorkspaceRow
+    from agentworks.secrets.policy import InteractionPolicy
     from agentworks.transports import SSHTransport, Transport
 
 
@@ -41,7 +41,6 @@ def backup_vm(
     just-in-time values seed the boundary resolver), and the
     held-active span covers the whole snapshot-archive-transfer body.
     """
-    interaction = validate_interaction_policy(interaction)
     from agentworks.bootstrap import load_request_registry
     from agentworks.ssh import SSHError, SSHLogger
     from agentworks.transports import SSHTransport, transport

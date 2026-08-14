@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from agentworks.errors import NotFoundError, ValidationError
 from agentworks.naming import MAX_SECRET_NAME_LENGTH, validate_name
 from agentworks.secrets.outcomes import format_remediation
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
+from agentworks.secrets.policy import InteractionPolicy
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -57,7 +57,6 @@ def verify_secrets(
     interaction: InteractionPolicy,
 ) -> tuple[ResolutionOutcome, ...]:
     """Resolve requested declarations once and return value-free outcomes."""
-    interaction = validate_interaction_policy(interaction)
     if not names:
         raise ValidationError("at least one secret name is required")
     invalid_name = False

@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import NotFoundError
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.acls import apply_workspace_acls
 from agentworks.workspaces.manager._common import _workspace_scope
@@ -21,6 +20,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, WorkspaceRow
     from agentworks.resources.registry import Registry
+    from agentworks.secrets.policy import InteractionPolicy
     from agentworks.transports import Transport
 
 
@@ -77,7 +77,6 @@ def repair_workspace(
     not-found checks stay pre-boundary: a refusal costs zero prompts,
     zero resolves, and zero gate events.
     """
-    interaction = validate_interaction_policy(interaction)
     from agentworks.agents.manager import AGENT_PREFIX
     from agentworks.bootstrap import load_request_registry
     from agentworks.ssh import SSHError

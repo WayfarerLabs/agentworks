@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import ConnectivityError, StateError, ValidationError
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 from ._helpers import _guard_failed_vm, _require_vm
 from .boundary import gated_vm_boundary
@@ -19,6 +18,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
+    from agentworks.secrets.policy import InteractionPolicy
 
 # Guards the missing-tailscale-binary warning to once per process: the
 # power-state fast path calls _is_tailscale_reachable on every gated
@@ -96,7 +96,6 @@ def port_forward_vm(
     validation and the no-Tailscale guard stay pre-gate: a refused
     forward costs zero prompts, zero resolves, and zero gate events.
     """
-    interaction = validate_interaction_policy(interaction)
     from agentworks.bootstrap import load_request_registry
 
     vm = _require_vm(db, name)

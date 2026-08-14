@@ -16,7 +16,6 @@ from agentworks.errors import (
     StateError,
     UserAbort,
 )
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
 
 if TYPE_CHECKING:
@@ -25,6 +24,7 @@ if TYPE_CHECKING:
     )
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow
+    from agentworks.secrets.policy import InteractionPolicy
     from agentworks.sessions.tmux import RunCommand
     from agentworks.transports import Transport
 from ._constants import _STOP_GRACE_SECONDS
@@ -158,7 +158,6 @@ def stop_session(
     interaction: InteractionPolicy,
 ) -> None:
     """Stop a running session. Sends C-c first, then kills after a grace period."""
-    interaction = validate_interaction_policy(interaction)
     from agentworks.sessions.tmux import force_kill_tmux_server
 
     session = _mgr._require_session(db, name)
@@ -256,7 +255,6 @@ def resume_session(
     after the kill is deliberately non-rollbackable (no unwind is
     consulted there), exactly the imperative shape.
     """
-    interaction = validate_interaction_policy(interaction)
     from agentworks.bootstrap import load_request_registry
     from agentworks.sessions.tmux import (
         create_session as create_tmux_session,
@@ -644,7 +642,6 @@ def stop_all_sessions(
     and ``admin_only`` are mutually exclusive; the caller enforces
     the mutex.
     """
-    interaction = validate_interaction_policy(interaction)
     sessions = _mgr.filter_sessions(
         db,
         workspace_name=workspace_name,
@@ -742,7 +739,6 @@ def resume_all_sessions(
     and ``admin_only`` are mutually exclusive; the caller enforces
     the mutex.
     """
-    interaction = validate_interaction_policy(interaction)
     sessions = _mgr.filter_sessions(
         db,
         workspace_name=workspace_name,
