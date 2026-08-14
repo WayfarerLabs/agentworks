@@ -41,21 +41,22 @@ actively changing.
       beyond the keys each check reads.
 - [ ] Prose/form-policing sweep across the estate (absorbed survey list plus G12, C10, D4, P6, and
       the #470 manifesto pin). Files owned by other items are excluded here: W1's workflow test,
-      S1's corpus and wording-pin trims, W4/W6 in contained trims, and
-      `cli/tests/guide/test_contract_catalog.py`, whose prose pins belong to the G2/G8 guide item so
-      each file has one owner. The sweep's first step commits an exact decision inventory derived
-      from the absorbed survey, one row per test or assertion group (a file mixing wholly-policing
-      tests with embedded prose assertions gets multiple rows), each row marked delete, convert, or
-      keep. Keep behavioral, structural, and security tests; delete the rest; convert to structural
-      form only where a real invariant would lose its only guard. Sentence-only observables are
-      decided case by case, mostly by deletion (R2.4). May land as several PRs. Done when: delete
-      rows are gone at HEAD, convert rows point at the landed structural replacement, and keep rows
-      name the invariant that earns the assertion.
+      S1's corpus and wording-pin trims, W4/W6 in contained trims, and the guide item's files
+      `cli/tests/guide/test_contract_catalog.py` and `cli/tests/guide/test_assessment.py`, whose
+      prose pins belong to that item so each file has one owner. The sweep's first step commits an
+      exact decision inventory derived from the absorbed survey, one row per test or assertion group
+      (a file mixing wholly-policing tests with embedded prose assertions gets multiple rows), each
+      row marked delete, convert, or keep. Keep behavioral, structural, and security tests; delete
+      the rest; convert to structural form only where a real invariant would lose its only guard.
+      Sentence-only observables are decided case by case, mostly by deletion (R2.4). May land as
+      several PRs. Done when: delete rows are gone at HEAD, convert rows point at the landed
+      structural replacement, and keep rows name the invariant that earns the assertion.
 - [ ] Delete guide dead surface and interior re-validation (G8, G2); fix the vacuous monkeypatch
       test and add the persisted-enum parity test (G11, R2.3). This item owns
-      `cli/tests/guide/test_contract_catalog.py` in full, its prose pins included (excluded from the
-      sweep above). Done when: suite green, `parse_topic_contribution` accepts only decoded data,
-      the parity test fails on a synthetic new member.
+      `cli/tests/guide/test_contract_catalog.py` and `cli/tests/guide/test_assessment.py` in full,
+      their prose pins included (both excluded from the sweep above; `test_assessment.py` directly
+      tests the G8 surfaces this item deletes). Done when: suite green, `parse_topic_contribution`
+      accepts only decoded data, the parity test fails on a synthetic new member.
 - [ ] Delete inert descriptor generality (C1, C5): `RegistryPolicy`, `kind_strategy`,
       `contract_version` plumbing, unreachable fallbacks, their pinning tests. Done when: suite
       green, four descriptors construct without the deleted fields.
