@@ -129,7 +129,16 @@ deliberately narrow `cli-conventions.md`.
   module, parsing the retired mapping shape its own upgrade guide says is not parsed.
 - **S9** Built-in source names hardcoded in generic code: `resolve.py:547,552` dispatches the
   interaction broker on `name == "prompt"` while a declared `interactive` flag exists;
-  `vm rekey --ignore-env` pops `os.environ` keyed on the literal `"env-var"` mapping.
+  `vm rekey --ignore-env` pops `os.environ` keyed on the literal `"env-var"` mapping. **This is not
+  only tidiness** (upgraded 2026-08-14, from the cold review of PR #523, which reproduced the
+  effect): that hardcoded name is currently acting as an accidental safety net. Because every
+  consumer compares `interaction` by identity and `InteractionPolicy` is a `StrEnum`, a value that
+  is equal but not identical takes the not-refuse branch and resolves through an interactive source
+  in a run that meant to refuse. The `prompt` dispatch raises on that, so `prompt` fails loud while
+  `onepassword` and every future interactive backend fail silent and permissive. Unreachable today
+  (plugins are a hardcoded tuple, and nothing constructs an `InteractionPolicy` from outside), so it
+  is filed as issue 529 against the external-plugin loader effort rather than fixed here; when this
+  is promoted, the safety half travels with it, and no backend's safety should depend on its name.
 - **S10** LLD prose in permanent docstrings: 45-line docstring over a 10-line body
   (`base.py:187-218`), 57-line module docstring litigating design history, a 16-line Typer help
   docstring describing internals.
