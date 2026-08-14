@@ -43,7 +43,10 @@ def _uncomment_examples(src: str) -> str:
 
 def _install_sample_keys(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    ssh_dir = tmp_path / ".ssh"
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    isolated_home = Path.home()
+    assert isolated_home.resolve() == tmp_path.resolve()
+    ssh_dir = isolated_home / ".ssh"
     ssh_dir.mkdir()
     (ssh_dir / "id_ed25519.pub").write_text("ssh-ed25519 AAAA...")
     (ssh_dir / "id_ed25519").write_text("-----BEGIN OPENSSH PRIVATE KEY-----")

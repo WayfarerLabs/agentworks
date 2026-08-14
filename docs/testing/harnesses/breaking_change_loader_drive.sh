@@ -30,6 +30,7 @@ cleanup() {
 trap cleanup EXIT
 
 export HOME="$WORKDIR"
+export USERPROFILE="$WORKDIR"
 mkdir -p "$HOME/.config/agentworks" "$HOME/.ssh"
 printf 'ssh-ed25519 AAAA...\n' >"$HOME/.ssh/id_ed25519.pub"
 printf '%s\n' '-----BEGIN OPENSSH PRIVATE KEY-----' >"$HOME/.ssh/id_ed25519"
