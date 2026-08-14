@@ -1,7 +1,7 @@
 # FRD: Installer Resource Plugins (Pre-0.14)
 
-- Status: Revised for the 2026-08-13 scope correction
-- Date: 2026-08-13
+- Status: Revised for artifact review
+- Date: 2026-08-14
 - Parent: the `2026-08-04-next-steps` saga
 - Review: the effort lead owns these artifacts and implementation; the saga lead reviews the
   artifact and implementation PRs
@@ -25,14 +25,18 @@ unmerged PR #451.
   fields, or execution order.
 - R4. Both plugins are installed with Agentworks, disabled by default, and enabled through the
   existing `[plugins].system` setting.
-- R5. Preserve the current generic resource behavior, including disabled-plugin use gating and
-  same-name operator override behavior. Improving either contract is deferred.
+- R5. Preserve current generic publication, visibility, disabled-plugin use gating, and same-name
+  row precedence. A dependency keeps its own enablement state even when an operator declaration wins
+  the referring row.
 - R6. Core continues to own apt and install-command kinds, validation, reference extraction,
   execution, idempotency, and initializer orchestration.
 - R7. Each plugin contributes concise guide teaching, and the sample config, permanent docs,
   completions assessment, and 0.14 upgrade guide reflect the ownership change.
 - R8. The packaged wheel contains both plugins' manifests and guide content.
 - R9. The breaking ownership change ships in 0.14.0.
+- R10. The standard disabled-resource message is the complete transition experience. Do not add a
+  warning runway, compatibility alias, automatic enablement, migrator, special remediation, or
+  downgrade support.
 
 ## Scope boundaries
 
@@ -57,8 +61,9 @@ consumer gate, compatibility alias, or migrator is introduced.
   commands.
 - AC3. With the owning plugin enabled, every moved selector resolves to its unchanged payload and is
   consumed by the unchanged core execution path.
-- AC4. With the owning plugin disabled, current registry visibility, use-gate, and operator override
-  behavior remain unchanged.
+- AC4. A same-name operator declaration continues to win row precedence. If that row references a
+  moved dependency, the standard gate refuses the disabled dependency unless the operator enables
+  its plugin or replaces or removes the dependency.
 - AC5. Resource completion follows the visible enabled inventory, while guide completion retains
   discoverable conceptual and dynamic topics, including topics for disabled rows. Neither gains a
   new completion mechanism.
@@ -66,3 +71,10 @@ consumer gate, compatibility alias, or migrator is introduced.
   upgrade guide consistently teach the two opt-ins and all 16 moved selectors.
 - AC7. Source and installed-wheel tests prove that both manifest bundles and their guide content are
   packaged and readable.
+
+## Compatibility ruling
+
+The operator waived the saga's default one-release warning runway on 2026-08-14. No shipped template
+or sample selects these optional catalog rows; affected configurations explicitly name one of the 16
+moved resources. On 0.14, those configurations receive the existing disabled-resource message until
+the owning plugin is enabled. No backward-compatibility or downgrade path is provided.
