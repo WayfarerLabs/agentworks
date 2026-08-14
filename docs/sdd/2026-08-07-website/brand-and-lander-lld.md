@@ -1671,9 +1671,10 @@ The pinned bootstrap digest and corrected geometry, physics, proof, world, and o
 be emitted together by the first independent v9 derivation, reviewed as one atomic fixture change,
 and then copied into the generated proof projection. The pre-correction Phase 4R/4S literals are
 forbidden; the LLD does not invent pre-derivation output hashes. The fixture remains primary
-authority. Verification recomputes every digest and fails on partial regeneration, a v7 output
-reader, missing assignment/pair/profile/terminal authority, ordering drift, payload-scope drift, or
-changed collision/physics digest.
+authority. Verification recomputes every digest and fails on partial regeneration, using v7 as the
+primary output or verification target, any v7 read outside the pinned bootstrap projection, missing
+assignment/pair/profile/terminal authority, ordering drift, payload-scope drift, or changed
+collision/physics digest.
 
 The exact CLI remains standard-library Node and accepts only:
 
