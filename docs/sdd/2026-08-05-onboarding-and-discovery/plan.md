@@ -420,11 +420,13 @@ Definition of done: R1, R2, R3, R10, R11, R12, R13, R16, AC1, AC2, AC3, AC7, AC8
 AC15 hold for both native packages and the universal zero-plugin copy/paste path.
 
 The completed Phase 3 checkboxes above preserve the full implementation journey. PR #480 merged on
-2026-08-12. The trail-sign destination intentionally supersedes its no-topic malformed-config exit
-behavior: a valid guide request now reports degraded live context in content and exits 0. Release
-publication belongs to the saga's release sequence, not to this child plan. The operator's
-2026-08-13 trail-sign ruling supersedes the remaining broad registry and repeated-wrapper acceptance
-phases with the smaller destination below.
+2026-08-12. The trail-sign destination intentionally supersedes its guide exit behavior for
+environmental live-context failures. No-topic ignores environmental state and exits 0 because it
+does not load that state. A selected topic with unavailable live context renders its available
+content with one warning and short placeholders, then exits 0. Release publication belongs to the
+saga's release sequence, not to this child plan. The operator's 2026-08-13 trail-sign ruling
+supersedes the remaining broad registry and repeated-wrapper acceptance phases with the smaller
+destination below.
 
 ## Phase 4: trail-sign simplification
 
