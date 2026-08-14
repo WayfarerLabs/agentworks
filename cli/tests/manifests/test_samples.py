@@ -159,15 +159,15 @@ def test_a_field_that_folds_a_scalar_names_both_spellings_and_shows_the_block() 
     assert "#      # secret: <string>" not in lines
 
 
-def test_git_token_sample_shows_the_stored_union_and_its_scalar_spelling() -> None:
+def test_git_token_sample_shows_the_secret_union_and_its_scalar_spelling() -> None:
     """The one-arm union is not collapsed into a plain secret field on
     the generated operator surface."""
     lines = sample_text("git-credential").splitlines()
     at = lines.index("#    # token:")
 
     assert lines[at - 2] == "#    # (string or table, optional)"
-    assert lines[at - 1] == "#    # One of: stored. Shown here: stored."
-    assert "#      # mode: stored" in lines
+    assert lines[at - 1] == "#    # One of: secret. Shown here: secret."
+    assert "#      # mode: secret" in lines
     assert "#      # secret: <string>" in lines
 
 

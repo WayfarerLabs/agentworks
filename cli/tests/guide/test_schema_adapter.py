@@ -230,9 +230,9 @@ def test_git_token_structural_union_renders_without_dropping_untagged_arm_fields
 
     assert rendered.issues == ()
     assert payload is not None
-    assert f"`{token_path}`: optional; `string or table`; default `{{mode: stored}}`" in payload
-    assert payload.count("Alternative `stored`") == 1
-    assert f"`{mode_path}`: required; `one of: stored`; choices `stored`" in payload
+    assert f"`{token_path}`: optional; `string or table`; default `{{mode: secret}}`" in payload
+    assert payload.count("Alternative `secret`") == 1
+    assert f"`{mode_path}`: required; `one of: secret`; choices `secret`" in payload
     assert f"`{secret_path}`: optional; `string or null`; owner default `git-token-<name>`" in payload
     assert "Alternative `minted`" not in payload
 

@@ -22,11 +22,8 @@ revision; the union sites carry the reasoning).
 
 The default is what keeps those breaks narrow: a manifest that omitted an
 old block still loads, landing on the same mechanism it always used. Only
-a document that WROTE the retired field crosses the break. The git-token
-acquisition union has the same omission history and keeps the released
-scalar shorthand; its only retired spelling is explicit ``token: null``.
-Every changed written shape gets its exact rewrite here rather than a bare
-model error.
+a document that WROTE the retired field crosses the break. Every changed
+written shape gets its exact rewrite here rather than a bare model error.
 """
 
 from __future__ import annotations
@@ -128,35 +125,7 @@ class RetiredPresenceShape:
         return f"{self.union_field}: {{mode: {self.absent_mode}}}"
 
 
-GIT_TOKEN_NULL_HINT = (
-    "Replace the null spelling as shown above; `agw resource describe-kind "
-    "git-credential-provider/<name>` documents the token field. "
-    'See "Git credential token acquisition is tagged now" in docs/guides/upgrading-to-0.14.md.'
-)
-"""Where an operator goes to replace the retired git-token null spelling."""
-
-
-@dataclass(frozen=True, kw_only=True)
-class RetiredNullTokenShape:
-    """The former ``token: null`` spelling of a stored git token.
-
-    A scalar token name still loads as the stored arm's shorthand, and an
-    omitted token still defaults to that arm. Explicit null is the one
-    written old shape that cannot survive the move: the union itself is
-    not nullable, and the stored arm's ``secret`` field is where the
-    owner-templated default now lives.
-    """
-
-    field: str = "token"
-    mode: str = "stored"
-
-    @property
-    def rewrite(self) -> str:
-        """The equivalent explicit choice for the old null spelling."""
-        return f"{self.field}: {{mode: {self.mode}}}"
-
-
-type RetiredShape = RetiredPresenceShape | RetiredNullTokenShape
+type RetiredShape = RetiredPresenceShape
 
 
 def retired_shape_error(
@@ -188,10 +157,6 @@ def retired_shape_error(
     they are about. Defaulted for the construct-time caller, which is
     validating a config that came from code and has no declaration site.
 
-    ``RetiredNullTokenShape`` handles the one old spelling whose value is
-    the whole signal: ``token: null``. Omission and a scalar name remain
-    accepted, so neither reaches the refusal.
-
     For ``RetiredPresenceShape``, a config that already carries the union field is left entirely alone,
     even when the retired field sits beside it. That document is a
     half-applied migration rather than a pre-migration one, and the model
@@ -217,20 +182,6 @@ def retired_shape_error(
     the old implicit spelling would be a poor cure.
     """
     if shape is None or not isinstance(config, Mapping):
-        return
-    if isinstance(shape, RetiredNullTokenShape):
-        if shape.field in config and config.get(shape.field) is None:
-            raise ConfigError(
-                located(
-                    location,
-                    f"{owner.display}: '{shape.field}: null' is a retired spelling. It selected the "
-                    f"stored token's default secret name, exactly as omitting '{shape.field}' did; "
-                    f"replace the null line with the explicit choice: {shape.rewrite}",
-                ),
-                entity_kind=owner.kind,
-                entity_name=owner.name,
-                hint=GIT_TOKEN_NULL_HINT,
-            )
         return
     if shape.union_field in config:
         return
