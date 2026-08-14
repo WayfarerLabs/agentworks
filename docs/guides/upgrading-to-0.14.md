@@ -7,9 +7,9 @@ state what they used to infer, and the manifest validation that tightened. It is
 flight.
 
 **This guide is release-scoped.** It exists only to carry hosts from 0.13 to 0.14, and it is deleted
-outright a release or two after 0.14 ships, along with the compatibility errors that point at it.
-Nothing here describes permanent behavior; if you are setting up a new host, or reading to
-understand how resources work, you want [resources.md](resources.md) instead.
+outright a release or two after 0.14 ships. Nothing here describes permanent behavior; if you are
+setting up a new host, or reading to understand how resources work, you want
+[resources.md](resources.md) instead.
 
 ## Before the first 0.14 state open
 
@@ -46,82 +46,65 @@ agw completion install
 Declaring resources in `config.toml` is no longer supported. `config.toml` is settings only. The
 classic TOML resource sections (`[secrets.*]`, `[vm_templates.*]`, `[git_credentials.*]`, the legacy
 flat `[azure]` / `[proxmox]` vm-site sections, `[apt_sources.*]`, and the rest) no longer load: a
-`config.toml` that still carries any of them is a hard error at load, naming the offending sections.
-This was deprecated with a load-time warning in an earlier release and is now removed. Resources are
-declared as YAML manifests (see
+`config.toml` that still carries any of them fails ordinary top-level validation, which names the
+unexpected root keys. This was deprecated with a load-time warning in an earlier release and is now
+removed. Resources are declared as YAML manifests (see
 ["Declaring resources: YAML manifests"](resources.md#declaring-resources-yaml-manifests) in the
 resources guide); settings sections load exactly as before.
 
 **Upgrading.** This is a breaking change, and the rewrite is yours to make. Agentworks ships no
-migration command. What it ships instead is an error naming every offending section, two commands
-that render the target shape live from this build's registry, and this section. If you would rather
-delegate the work than do it by hand, "Handing the rewrite to an agent" below is the same procedure
-written as a brief.
+migration command. The commands below render the target shape live from this build's registry, and
+this section maps each retired section to it. If you would rather delegate the work than do it by
+hand, "Handing the rewrite to an agent" below is the same procedure written as a brief.
 
-### What still answers while `config.toml` is refused
+### What still answers while `config.toml` is invalid
 
-Read this before you start, because it decides the order. The resource-section refusal happens at
-config load, so every command that builds the registry meets it, but they do not all react the same
-way:
+Read this before you start, because it decides the order. Retired resource sections are unexpected
+top-level keys, so every command that loads config meets ordinary validation:
 
 - **`agw resource describe-kind <target>` reads no config at all.** It answers on a host whose
   `config.toml` does not load, and it documents kinds and capability implementations whose plugin is
   not enabled.
-- **`agw resource sample <kind>`, and `--write <file>`, load settings only.** They work against a
-  `config.toml` that still carries every section you are about to delete.
-- **`agw resource schema --write` loads settings only too.** Run it early: a schema-aware editor
-  then checks each manifest as you type it (see
+- **`agw resource sample <kind>` reads no config when it prints to stdout.** Copy or redirect that
+  output into the intended resources file. `--write` needs a valid config to locate the resources
+  directory, so use it only after the cutover.
+- **`agw resource schema [<kind>]` also prints without loading config.** `schema --write` needs a
+  valid config, so schema-aware editor files can be generated after cutover (see
   ["Editing manifests with schema support"](resources.md#editing-manifests-with-schema-support) in
   the resources guide).
-- **`agw doctor` reports the refusal as one fail row and keeps going.** It retries the load
-  settings-only, which skips the resource-section check, and then validates the manifests you have
-  written so far. That makes it a working feedback loop for the whole rewrite, not just the finish
-  line.
+- **`agw doctor` reports the config failure and stops the config-dependent checks.** It validates
+  the manifests only after the retired sections are removed.
 - **`agw resource list` and `agw secret list` do refuse outright.** They print the error and exit,
   so they only answer once the last resource section is gone.
 
-So there are two different rhythms here, and conflating them is what makes this rewrite feel harder
-than it is:
-
-- **`config.toml` is all-or-nothing.** A file carrying one leftover section fails exactly like one
-  carrying ten, so you cannot delete one kind's sections, confirm it loads, and move on to the next.
-  Every section comes out in one pass, at the end.
-- **Your manifests are checked one at a time, starting now.** `agw doctor` names the file, the line,
-  the resource, the offending field, and the field list that field should have come from, all while
-  `config.toml` is still untouched:
+The migration therefore has two phases. First draft every manifest from the live samples and field
+references while keeping the saved inventory and backups unchanged. Then remove every retired
+section from `config.toml` in one pass and use `agw doctor` as the validation loop:
 
 ```console
-$ agw doctor    # config.toml still declares every section
+$ agw doctor    # after the one-time config.toml cutover
 Configuration:
   [ok]   Config file: ~/.config/agentworks/config.toml
-  [FAIL] Config: config.toml declares resources, which config.toml no longer supports (it is
-         settings only now): [secrets.*], [vm_templates.*], [agent_templates.*], ...
   [FAIL] Manifest: ~/.config/agentworks/resources/vm-templates.yaml:1: vm-template/default.memory_gib:
          unknown field; expected one of: apt, apt_packages, cpus, disk, env, inherits, memory,
          snap, swap, system_install_commands, tailscale_auth_key
          hint: `agw resource sample vm-template` prints this kind's fields
 
-Results: 15 ok, 7 info, 1 warn, 2 fail
+Results: 15 ok, 7 info, 1 warn, 1 fail
 ```
 
-Write a manifest, run `agw doctor`, fix what it names, repeat. Once every manifest is clean the
-Config row is the only fail left, and doctor starts rendering the **Secret backends** and
-**Secrets** groups from your manifests, which is a preview of the finished state you get before
-deleting a single section.
+Fix the named manifest, run `agw doctor` again, and repeat. Keep the cutover config in place during
+that loop; the backups are the loss-recovery boundary, not a way to reintroduce the retired input.
 
-### The inventory is the error message
+### Build the inventory from the saved config
 
-Any registry command names the full list of sections in one pass, so it is your work list:
+Read the retired section headers directly from the saved `config.toml`. An ordinary validation error
+names root keys, not the nested section families or their migration targets:
 
 ```console
 $ agw resource list
-Configuration error: config.toml declares resources, which config.toml no longer supports (it is
-settings only now): [secrets.*], [vm_templates.*], [session_templates.*], [git_credentials.*],
-[proxmox]. Rewrite the sections as YAML manifests (the [azure]/[proxmox] sections become vm-site
-manifests), then remove the sections from config.toml.
-  Hint: `agw resource sample <kind> --write <kind>s.yaml` writes a commented starter to edit, and
-  `agw resource describe-kind <kind>` lists every field with its type. The "TOML resource sections:
-  removed" section of docs/guides/upgrading-to-0.14.md walks through it section by section.
+Configuration error: unexpected top-level keys in config: git_credentials, proxmox, secrets,
+session_templates, vm_templates
 ```
 
 Each retired section maps to exactly one kind. Where the section name does not say which, this is
@@ -231,12 +214,13 @@ never read as configuration.
 
 One file per kind, named after the kind, is the layout that makes this rewrite easiest to check:
 each `config.toml` section family lands in exactly one file, so "did I move all of it" is answerable
-by looking at one place. `agw resource sample <kind> --write <kind>s.yaml` is built for that shape,
-and it is safe to point at a file that already exists: a second kind is appended under a commented
-`#---`, and the file's schema modeline is restamped from the one kind's schema to the any-kind
-`manifest.schema.json`. Both of those are document lines you must uncomment, so re-read
-["Declaring resources: YAML manifests"](resources.md#declaring-resources-yaml-manifests) in the
-resources guide before editing an appended file.
+by looking at one place. While the retired sections remain, copy or redirect
+`agw resource sample <kind>` into that file because `--write` requires a valid config. After
+cutover, `--write <kind>s.yaml` is safe to point at a file that already exists: a second kind is
+appended under a commented `#---`, and the file's schema modeline is restamped from the one kind's
+schema to the any-kind `manifest.schema.json`. Both of those are document lines you must uncomment,
+so re-read ["Declaring resources: YAML manifests"](resources.md#declaring-resources-yaml-manifests)
+in the resources guide before editing an appended file.
 
 ### The sections that are not a straight move
 
@@ -360,8 +344,7 @@ resources guide before editing an appended file.
 - **`[secret_backends.*]`** rows are deleted. They never carried configuration. For every desired
   non-default backend, declare a `secret-source` manifest that selects it, then list that source's
   name in `[secret_config].sources`, which is a setting and stays in `config.toml`. They are named
-  by the resource-section error like every other section, with that declaration step spelled out in
-  place of a direct rewrite instruction.
+  in the saved inventory beside every other retired section.
 
 ### Deleting the sections, and knowing you are done
 
@@ -403,11 +386,9 @@ the section, so for those just confirm the row is present.
 Then read the ORIGIN column: every row should name the file you expect. A resource in the right kind
 but the wrong file usually means a document landed under a heading you did not intend.
 
-If you have been running `agw doctor` as you wrote the manifests, this should pass first time. If
-you skipped that and are meeting the errors now, expect several passes: errors aggregate within a
-single resource but not across resources, because the load stops at the first document that fails,
-so six broken manifests take six passes rather than producing one list of six. Each pass names a
-file, a resource, and a field.
+Expect several passes after cutover: errors aggregate within a single resource but not across
+resources, because the load stops at the first document that fails, so six broken manifests take six
+passes rather than producing one list of six. Each pass names a file, a resource, and a field.
 
 `agw doctor` is the finish line. You are done when its **Configuration** group reports
 `Config is valid` and the run ends with `0 fail`:
@@ -440,9 +421,9 @@ per-resource errors until `agw doctor` is clean.
 Agentworks does not yet ship a command that drives this conversation for you, so give the agent the
 procedure above as its brief. What matters is that it gets the constraints, not just the goal:
 
-- `[secret_backends.*]` sections are deleted, not rewritten. They are the one family in the error
-  with no manifest form; the error says so per run.
-- The work list is the load error from `agw resource list`, and the target shape comes from
+- `[secret_backends.*]` sections are deleted, not rewritten. They are the one family in the saved
+  inventory with no manifest form.
+- The work list comes from the saved config inventory, and the target shape comes from
   `agw resource describe-kind <kind>` per kind. Field names are to be read from that output, never
   recalled. Where a `spec` selects a capability implementation, the fields come from
   `agw resource describe-kind <capability-kind>/<name>` (`vm-platform/proxmox`,
@@ -452,9 +433,9 @@ procedure above as its brief. What matters is that it gets the constraints, not 
   per-implementation output expands EVERY arm with that arm's own fields, so nothing about the modes
   has to be reconstructed from prose or from a second surface. `agw resource sample` is the surface
   that shows one arm only; it says so in a comment naming the `describe-kind` that prints them all.
-- `describe-kind`, `sample`, and `schema --write` work while `config.toml` is refused. `list` and
-  `secret list` do not. `agw doctor` DOES: it reports the refusal as one fail row and goes on to
-  validate the manifests written so far, so it is the iteration loop, not just the final check.
+- `describe-kind`, stdout `sample`, and stdout `schema` work while `config.toml` is invalid. Their
+  `--write` forms, `list`, `secret list`, and config-dependent doctor checks do not. Doctor becomes
+  the iteration loop after the one-time TOML cutover.
 - `config.toml` is all-or-nothing, so every resource section comes out in one pass at the end. That
   is not a reason to defer verification: run `agw doctor` after each manifest.
 - Settings sections stay in `config.toml`. Only resource sections move.
@@ -466,22 +447,10 @@ procedure above as its brief. What matters is that it gets the constraints, not 
 
 **Manifests on a retired shape.** Separately from the TOML sections, a manifest that names a
 capability in the old sibling shape (`platform: lima` plus a `platform_config:` table, and likewise
-`provider` / `provider_config`) does not load either. The error names the replacement, built from
-your own document:
-
-```console
-$ agw resource list
-Configuration error: ~/.config/agentworks/resources/git-credentials.yaml:1: spec.provider names
-the capability as a string, which is no longer supported; write one tagged table instead:
-provider: {name: github, token: ..., owner: ...}
-  Hint: Apply the rewrite above; `agw resource describe-kind <kind>` documents the field, and `agw
-  resource sample <kind>` prints it as a document to edit. See "The retired sibling capability
-  shape" in docs/guides/upgrading-to-0.14.md.
-```
-
-The keys it lists are the ones your document actually had, in order, with the values elided as
-`...`, so it tells you the shape to write and you fill your own values back in. Every document on
-the old shape has to move: one left behind leaves the whole resources directory unloadable.
+`provider` / `provider_config`) does not load either. Ordinary model validation reports the string
+selector and sibling key as invalid. Fold them into one tagged table: the selector becomes its
+`name`, and every sibling-table key moves beside it. Every document on the old shape has to move:
+one left behind leaves the whole resources directory unloadable.
 
 ## Azure, Proxmox, 1Password, and Claude Code are now opt-in
 
@@ -611,16 +580,11 @@ whether its config is well-formed that stopped being host-dependent.
 ### The retired sibling capability shape
 
 `platform: lima` beside a `platform_config:` table (and likewise `provider` / `provider_config`) is
-a hard error. The error prints the replacement, built from what your document says: the capability
-you named plus the keys you wrote, folded into one tagged table. The keys appear in your document's
-order with their values elided as `...`, so what you get is the shape to write rather than a line to
-paste unedited; put it in place of the pair and fill your own values back in. "TOML resource
-sections: removed" above shows one of these errors in full.
-
-Two documents get no printed replacement, because no honest one exists. If the `*_config` table
-carries its own `name` key, two keys claim to select the capability and which one wins is yours to
-decide. If it holds something that is not a table, there are no keys to fold and printing the tag
-alone would discard what you wrote. Both errors say so and name the field.
+a hard error through ordinary model validation. Put one tagged table in place of the pair: the
+string selector becomes its `name`, and every key from the sibling table moves beside `name` with
+its value unchanged. If the sibling table already carries its own `name`, decide which selector is
+correct before merging. If it is not a table, consult the live field reference and place or remove
+that value deliberately rather than discarding it during the fold.
 
 ### Git credential token acquisition mode is renamed
 
@@ -663,47 +627,18 @@ that omitted it was never broken. Proxmox and wsl2 are unaffected, having no cho
 this is checked wherever the manifest loads, whether or not the platform's plugin is enabled, per
 ["Every host checks every declaration now"](#every-host-checks-every-declaration-now) above.
 
-**What you see.** A site that WROTE the old block is refused by name, with the replacement rendered
-from the keys your own document had:
-
-```console
-$ agw resource list
-Configuration error: ~/.config/agentworks/resources/sites.yaml:1: vm-site/azure-dev:
-'service_principal' is no longer a supported field; the choice it used to carry by being present is
-written explicitly now: auth: {mode: service-principal, tenant_id: ..., client_id: ..., secret: ...}
-  Hint: Apply the rewrite above; `agw resource describe-kind <kind>` documents the field, and `agw
-  resource sample <kind>` prints it as a document to edit. See "Authentication and placement are
-  one tagged field now" in docs/guides/upgrading-to-0.14.md.
-```
-
-A site that wrote the old key as an explicit `null` gets its own message, and it is the one worth
-reading closest. On 0.13 a null meant exactly what omitting the key meant, so `vm_host: null` was a
-LOCAL site and `service_principal: null` was ambient auth. A retired field is still a retired field,
-so the line has to go; the message says what the null was doing and names the line to write in its
-place:
-
-```console
-$ agw resource list
-Configuration error: ~/.config/agentworks/resources/sites.yaml:1: vm-site/lima-here: 'vm_host:
-null' is a retired spelling. It selected 'local', exactly as omitting the key did, and ending that
-conflation is why the field is gone; delete the null line and write the choice instead: placement:
-{mode: local}
-  Hint: Apply the rewrite above; `agw resource describe-kind <kind>` documents the field, and `agw
-  resource sample <kind>` prints it as a document to edit. See "Authentication and placement are
-  one tagged field now" in docs/guides/upgrading-to-0.14.md.
-```
-
-Note which arm it names. A null selected the AMBIENT and LOCAL modes, never the credentialed ones,
-so `service_principal: null` becomes `auth: {mode: ambient}` and `vm_host: null` becomes
-`placement: {mode: local}` (each is the union's default, so deleting the null line alone also loads;
-writing the line keeps the choice visible in the document). If you are working from the null scan in
+Ordinary model validation now reports these retired keys as unknown fields. Use the migration
+mapping below rather than expecting the error to reconstruct the old intent. A null selected the
+AMBIENT and LOCAL modes, never the credentialed ones, so `service_principal: null` becomes
+`auth: {mode: ambient}` and `vm_host: null` becomes `placement: {mode: local}` (each is the union's
+default, so deleting the null line alone also loads; writing the line keeps the choice visible in
+the document). If you are working from the null scan in
 ["An explicit `null` secret name now means the DEFAULT secret"](#one-meaning-changed-rather-than-one-shape)
 below, these three keys are the ones whose nulls were doing something different from the secret
 fields that section covers.
 
-Both errors name the file, the line, and the site, like every other manifest error here. One site
-per pass, as everywhere else here, so three stale sites take three passes. `agw doctor` reports each
-as one fail row and carries on, which makes it the loop to work in.
+The error names the file, line, resource, and unknown field like every other model-validation error.
+One site per pass, as everywhere else here, so three stale sites take three passes after cutover.
 
 **Azure.** `auth` replaces `service_principal` at the same depth, and the keys you already had move
 into it beside a `mode` line:

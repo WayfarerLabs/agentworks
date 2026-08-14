@@ -13,7 +13,7 @@
 # config.toml is settings only now, and a config that still declares a
 # legacy inline resource section (e.g. the old `[azure]` vm-site shape)
 # must fail loudly rather than have that section silently dropped. See
-# `agentworks/config/load.py`'s `_raise_for_resource_sections` for the
+# `agentworks/config/load.py`'s unexpected-top-level validation for the
 # loader logic this exercises.
 #
 # See docs/testing/harnesses/README.md for the maintenance contract. Adapt
@@ -47,8 +47,8 @@ echo "$OUTPUT"
 
 echo ""
 echo "--- asserting the breaking change fails LOUDLY, not silently ---"
-if echo "$OUTPUT" | grep -q 'declares resources, which config.toml no longer supports'; then
-    echo "  ok: the legacy section is rejected with a precise, actionable error"
+if echo "$OUTPUT" | grep -q 'unexpected top-level keys in config: azure'; then
+    echo "  ok: the legacy section is rejected by ordinary top-level validation"
 else
     echo "  VIOLATION: expected a loud rejection of the legacy [azure] section;" >&2
     echo "  the loader may now be silently ignoring or mishandling it instead." >&2

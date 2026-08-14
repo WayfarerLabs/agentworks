@@ -86,9 +86,7 @@ class ConfigContract:
 class HostSurface:
     """How a capability kind is selected inside a declarable kind's spec.
 
-    The live manifest shape is one tagged table on ``naming_field``. Decode
-    also uses ``config_field`` to recognize the release-scoped sibling shape
-    and provide its migration error.
+    The manifest shape is one tagged table on ``naming_field``.
     """
 
     host_kind: str
@@ -97,16 +95,6 @@ class HostSurface:
 
     naming_field: str
     """The spec field naming the capability (``"platform"``)."""
-
-    config_field: str | None
-    """The RETIRED sibling field that used to hold the capability's config
-    blob (``"platform_config"``).
-
-    There is no such field any more: the row carries one tagged block, so
-    this exists for exactly one reader, ``decode._reject_legacy_shape``,
-    which names the retired field in the error that tells an operator how
-    to rewrite the 0.14 shape. ``None`` means the host never had a retired
-    sibling field."""
 
 
 @dataclass(frozen=True)

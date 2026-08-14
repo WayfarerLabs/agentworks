@@ -21,9 +21,6 @@ as a ``CapabilityBlock``. The CONTENT of a capability-owned blob is NOT
 validated here: its shape check is the finalize ``validate_config`` pass
 (R3), against the capability's own declared model.
 
-``KIND_SECTIONS`` maps kind identifiers to their retired TOML section
-names. Its one consumer is the resource-section refusal in
-``config.load``, which names the sections a config.toml still carries.
 """
 
 from __future__ import annotations
@@ -41,13 +38,12 @@ from agentworks.schema import RefOwner, config_error_from, extract_references, f
 from agentworks.schema._shape import Collection, shape_of
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Mapping
 
-    from agentworks.capabilities.descriptor import CapabilityKindDescriptor, HostSurface
+    from agentworks.capabilities.descriptor import CapabilityKindDescriptor
     from agentworks.env import EnvEntry
     from agentworks.manifests.envelope import Document
     from agentworks.schema.reference import ConfigReference
-    from agentworks.source_location import SourceLocation
 
 #: The fields a row carries as METADATA rather than as spec surface. They
 #: are real fields of the model, so a document writing one inside ``spec``
@@ -72,33 +68,6 @@ def _sample_hint(kind: str) -> str:
     vm-site platform enumeration, the git-credential provider list).
     """
     return f"`agw resource sample {kind}` prints this kind's fields"
-
-
-# Kind identifier -> retired TOML section name(s). Every kind maps to
-# exactly one section except vm-site, whose legacy declarations were the
-# two flat sections [azure] / [proxmox] with
-# section-name-becomes-resource-name semantics.
-KIND_SECTIONS: dict[str, tuple[str, ...]] = {
-    "secret": ("secrets",),
-    "vm-template": ("vm_templates",),
-    "agent-template": ("agent_templates",),
-    "workspace-template": ("workspace_templates",),
-    "session-template": ("session_templates",),
-    "git-credential": ("git_credentials",),
-    "admin-template": ("admin",),
-    "named-console-template": ("named_console",),
-    # secret-backend: capability kind, not declarable, so there is no decoder
-    # and never was a manifest to write. It is listed because the section IS
-    # a retired resource-declaring section and the resource-section refusal
-    # sweeps it like the rest; what differs is only its remediation ("delete
-    # it", not "rewrite it as a manifest"), which that refusal spells out.
-    "secret-backend": ("secret_backends",),
-    "vm-site": ("azure", "proxmox"),
-    "apt-source": ("apt_sources",),
-    "apt-package": ("apt_packages",),
-    "system-install-command": ("system_install_commands",),
-    "user-install-command": ("user_install_commands",),
-}
 
 
 @cache
@@ -145,122 +114,6 @@ def _hosting_descriptors() -> Mapping[str, CapabilityKindDescriptor]:
     )
 
 
-SIBLING_SHAPE_HINT = (
-    "Apply the rewrite above; `agw resource describe-kind <kind>` documents the field, "
-    "and `agw resource sample <kind>` prints it as a document to edit. "
-    'See "The retired sibling capability shape" in docs/guides/upgrading-to-0.14.md.'
-)
-"""Where an operator goes to make the retired sibling shape load again.
-
-Attached only to the errors that PRINT a rewrite, which is what "the
-rewrite above" refers to. The two shapes with no honest rewrite (below)
-carry their instruction inline instead and get no hint, so the hint never
-points at something that is not on screen.
-
-RELEASE-SCOPED, like the guide it names: the sibling shape is a 0.13
-spelling, and this hint retires when
-``docs/guides/upgrading-to-0.14.md`` is deleted. The errors it decorates
-keep their inline rewrite, which is the part that stands on its own.
-"""
-
-
-def _tagged_rewrite(field: str, name: str, keys: Iterable[str]) -> str:
-    """The exact canonical spelling that replaces a legacy sibling pair.
-
-    Built from what the document actually says (the capability's name and
-    the config keys it carries) rather than a generic template, so the
-    error shows the operator their own resource in the shape it now needs.
-    """
-    inner = ", ".join([f"name: {name}", *(f"{key}: ..." for key in keys)])
-    return f"{field}: {{{inner}}}"
-
-
-def _reject_legacy_shape(surface: HostSurface, spec: Mapping[str, object], location: SourceLocation) -> None:
-    """The 0.14 sibling pair, refused BY NAME with its rewrite.
-
-    Under the kind spec models this document is two problems the model
-    layer has no reason to connect: an unknown ``platform_config`` key and
-    a ``platform`` that is not a table. That generic pair is exactly what
-    this function exists to beat, so it runs before validation and names
-    the fold.
-
-    Two shapes get no printed rewrite, because no honest one exists and a
-    rewrite that looks authoritative and is quietly wrong is worse than
-    none: a sibling table carrying its OWN ``name`` (the fold would emit
-    ``{name: a, name: b}``, which is not valid YAML and hides that two
-    keys claim to select the capability), and a sibling holding a VALUE
-    that is not a table (there are no keys to fold, and printing the tag
-    alone would discard what the operator wrote). Both say what to do
-    inline, and neither carries :data:`SIBLING_SHAPE_HINT`, which reads
-    "apply the rewrite above" and would be pointing at nothing.
-
-    An EMPTY sibling (``platform_config:``, ``: null``, ``: ~``) is not
-    one of those two: a null holds nothing, so the fold discards nothing
-    and the rewrite is printable. It gets the rewrite and the hint, with
-    the extra instruction to delete the empty key that the
-    absent-sibling case has no need of.
-
-    The retired sibling field is refused whatever sits beside it, which is
-    the ORPHAN case (a ``platform_config`` alone) and the MIXED one (a
-    tagged ``platform`` table beside a stray ``platform_config``). The
-    model layer would answer both with a generic unknown key, and the
-    operator's next move is the same in both: fold those keys in.
-
-    **session-template is refused here even though no shipped release
-    emitted the pair.** Its ``harness_integration`` was born tagged (the
-    field rename and the rejection of the string form shipped in one
-    release), so no file agentworks WROTE can carry the sibling shape. The
-    shape is what an operator TYPES from ``harness:`` muscle memory, which
-    is what this refusal is for.
-
-    This is the one compatibility surface the model swap leaves behind,
-    and it goes together with ``HostSurface.config_field``, whose only
-    remaining job is to let this name the retired field. Delete both when
-    the shape is far enough in the past that a generic unknown key is a
-    good enough answer.
-    """
-    field, config_field = surface.naming_field, surface.config_field
-    if config_field is None:
-        return
-    value = spec.get(field)
-    if not isinstance(value, str):
-        if config_field in spec:
-            raise ConfigError(
-                located(
-                    location,
-                    f"spec.{config_field} is not a supported YAML field; "
-                    f"fold its keys into the spec.{field} tagged table",
-                )
-            )
-        return
-    name = value or "<capability>"
-    head = located(location, f"spec.{field} names the capability as a string, which is no longer supported")
-    if config_field not in spec:
-        raise ConfigError(
-            f"{head}; write one tagged table instead: {_tagged_rewrite(field, name, ())}", hint=SIBLING_SHAPE_HINT
-        )
-    sibling = spec[config_field]
-    if sibling is None:
-        raise ConfigError(
-            f"{head}, and spec.{config_field} is empty, so there are no keys to fold; write one tagged "
-            f"table instead and remove it: {_tagged_rewrite(field, name, ())}",
-            hint=SIBLING_SHAPE_HINT,
-        )
-    if not isinstance(sibling, dict):
-        raise ConfigError(
-            f"{head}, and spec.{config_field} is {sibling!r} rather than a table, so there are no keys to fold; "
-            f"write spec.{field} as one tagged table and put that value where it belongs, or remove it"
-        )
-    if "name" in sibling:
-        raise ConfigError(
-            f"{head}, and spec.{config_field} carries its own 'name' ({sibling['name']!r}), so which one "
-            f"selects the capability is your call; merge them by hand into one spec.{field} table"
-        )
-    raise ConfigError(
-        f"{head}; write one tagged table instead: {_tagged_rewrite(field, name, sibling)}", hint=SIBLING_SHAPE_HINT
-    )
-
-
 def decode_document(doc: Document, issues: list[str]) -> Any:
     """Decode one validated envelope into the kind's declared-resource row.
 
@@ -271,13 +124,6 @@ def decode_document(doc: Document, issues: list[str]) -> Any:
     """
     spec = dict(doc.spec)
     _reject_spec_metadata(doc, spec)
-    descriptor = _hosting_descriptors().get(doc.kind)
-    if (
-        descriptor is not None
-        and descriptor.manifest_section is not None
-        and descriptor.manifest_section.config_field is not None
-    ):
-        _reject_legacy_shape(descriptor.manifest_section, spec, doc.location)
     model = _model_for(doc.kind)
 
     owner = RefOwner(kind=doc.kind, name=doc.name)

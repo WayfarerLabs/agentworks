@@ -10,9 +10,9 @@ plugin injected via ``SYSTEM_PLUGINS``) and pins every contribution:
 - the ``azure-vm`` vm-platform ROW: present-but-disabled with a ``system-plugin``
   origin; a ``vm-site`` on it (a ``resources/`` manifest now, ADR 0022) is
   not-ready with the "enable plugin `azure`" hint and ``resolve_site`` refuses
-  it. The legacy ``[azure]`` flat section is a hard error at load now (pinned in
-  ``tests/vms/test_legacy_site_sections.py``), so its former "guided, not
-  broken" degrade-to-hint behavior no longer applies;
+  it. The legacy ``[azure]`` flat section is now an ordinary unexpected
+  top-level key at load, so its former "guided, not broken" degrade-to-hint
+  behavior no longer applies;
 - the ``azdo`` git-credential-provider ROW: present-but-disabled; a
   ``git-credential`` naming ``provider = "azdo"`` is not-ready via its R14
   propagate hook and refused at use;
@@ -47,9 +47,8 @@ if TYPE_CHECKING:
     from agentworks.config import Config
 
 # A ``vm-site`` manifest named ``azure`` on the ``azure-vm`` platform, the
-# declarative replacement for the legacy ``[azure]`` flat section (a hard error
-# now, ADR 0022; pinned in ``tests/vms/test_legacy_site_sections.py``). The
-# ordinary site fixture.
+# declarative replacement for the legacy ``[azure]`` flat section (an ordinary
+# unexpected top-level key now, ADR 0022). The ordinary site fixture.
 _AZURE_SITE = ManifestDoc(
     "vm-site",
     "azure",
@@ -209,11 +208,10 @@ def test_resolve_site_refuses_disabled_azure_with_hint(tmp_path: Path) -> None:
 
 
 # The R11.1 "guided, not broken" pin for the LEGACY ``[azure]`` flat section is
-# retired: under ADR 0022 that section is a hard error at load, not a
+# retired: under ADR 0022 that section is an unexpected top-level key, not a
 # silently-disabled site, so the "lands on the disabled row" premise is
-# structurally gone. The hard error (carrying the vm-site migration guidance) is
-# pinned by ``tests/vms/test_legacy_site_sections.py``; the disabled-site enable
-# hint stays covered by ``test_site_on_disabled_azure_is_not_ready_with_hint``.
+# structurally gone. The disabled-site enable hint stays covered by
+# ``test_site_on_disabled_azure_is_not_ready_with_hint``.
 
 
 # -- the git-credential use-gate (R14, provider propagate) -------------------

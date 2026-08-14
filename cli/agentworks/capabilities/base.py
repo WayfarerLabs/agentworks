@@ -48,7 +48,6 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from agentworks.capabilities.retired_shapes import RetiredShape
     from agentworks.config import Config
     from agentworks.resources.graph import Readiness
     from agentworks.resources.reference import ConfigReference
@@ -336,18 +335,6 @@ class Capability(ABC):
     this one declaration, and capability code is invoked for none of them.
     Registration-time conformance checks it against the kind's model
     contract (``CapabilityKindDescriptor.config_schema``)."""
-
-    retired_shape: ClassVar[RetiredShape | None] = None
-    """A config spelling this implementation used to accept, so a
-    pre-migration document is refused with its exact rewrite rather than
-    with a generic unknown key.
-
-    Defaulted to ``None``, unlike the declarations above: an
-    implementation with no retired spelling is the normal case, and having
-    to say so would be noise on every capability that has never broken its
-    config. Declared only for the length of one migration; see
-    :mod:`agentworks.capabilities.retired_shapes`, which is release-scoped
-    and meant to be deleted whole."""
 
     @classmethod
     def config_for(cls) -> type[BaseModel]:

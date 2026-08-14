@@ -83,10 +83,10 @@ def test_no_config_section_can_declare_a_secret_backend(tmp_path: Path) -> None:
     descriptor and from plugins, and config.toml cannot contribute one.
 
     ``[secret_backends.env-var]`` was the section that looked like it might,
-    and it is refused at load now rather than publishing a no-op, so the
-    built-in row is the only ``env-var`` there can be.
+    and its root is an ordinary unexpected top-level key, so the built-in row
+    is the only ``env-var`` there can be.
     """
-    with pytest.raises(ConfigError, match="settings only"):
+    with pytest.raises(ConfigError):
         load_config(
             _write_cfg(
                 tmp_path / "config.toml",

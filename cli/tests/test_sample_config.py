@@ -68,9 +68,7 @@ def test_sample_config_examples_uncomment_cleanly() -> None:
             f"line (extra space) is the usual culprit.\n  {e}{ctx}"
         ) from e
 
-    # Spot-check the settings sections all exist after uncommenting. The
-    # sample is settings-only: resource sections are deliberately absent
-    # (pinned by test_sample_config_declares_no_resources below).
+    # Spot-check the settings sections all exist after uncommenting.
     expected_top = {
         "operator",
         "paths",
@@ -81,19 +79,3 @@ def test_sample_config_examples_uncomment_cleanly() -> None:
     }
     missing = expected_top - set(parsed.keys())
     assert not missing, f"missing top-level sections after uncomment: {missing}"
-
-
-def test_sample_config_declares_no_resources() -> None:
-    """The sample is settings-only: even fully uncommented it declares no
-    resources in TOML. The detection set is ``KIND_SECTIONS``, the same
-    table the load-time resource-section refusal sweeps, so a resource
-    example sneaking back into the sample trips this test.
-    Resources are YAML manifests; the sample points at
-    `agw resource sample <kind>` instead."""
-    from agentworks.manifests.decode import KIND_SECTIONS
-
-    src = SAMPLE_PATH.read_text()
-    parsed = tomllib.loads(_uncomment_examples(src))
-    resource_sections = {section for sections in KIND_SECTIONS.values() for section in sections}
-    present = resource_sections & set(parsed.keys())
-    assert not present, f"sample config declares resources in TOML: {sorted(present)}"

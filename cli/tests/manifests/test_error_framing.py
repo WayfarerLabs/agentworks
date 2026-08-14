@@ -85,23 +85,6 @@ REFUSALS: list[tuple[str, dict[str, str]]] = [
             """
         },
     ),
-    # decode.py::_reject_legacy_shape -- the retired sibling-pair shape
-    (
-        "retired-sibling-shape",
-        {
-            "a.yaml": """
-            apiVersion: agentworks/v1
-            kind: git-credential
-            metadata:
-              name: gc
-              description: d
-            spec:
-              provider: github
-              provider_config:
-                owner: me
-            """
-        },
-    ),
 ]
 
 

@@ -2,10 +2,8 @@
 for section-header line numbers, and drives every settings-section loader
 to compose a validated ``Config``.
 
-config.toml is settings only now (ADR 0022): a resource-declaring section
-is a hard error (``_raise_for_resource_sections``), gated on ``resources``
-so the remediation commands can still read a config that carries them via
-the ``resources=False`` escape hatch.
+config.toml is settings only now (ADR 0022). Resource-declaring sections
+are ordinary unexpected top-level keys.
 
 Split out of the former monolithic ``agentworks/config.py`` (see
 ``agentworks/config/__init__.py`` for the package overview).
@@ -34,40 +32,9 @@ EXPECTED_TOP_LEVEL_KEYS = {
     "paths",
     "defaults",
     "database",
-    "named_console",
-    "vm_templates",
-    "admin",
-    "agent_templates",
     "session",
-    "session_templates",
-    "apt_sources",
-    "apt_packages",
-    "system_install_commands",
-    "user_install_commands",
-    "workspace_templates",
-    "git_credentials",
-    "azure",
-    "proxmox",
-    "secrets",
-    "secret_backends",
     "secret_config",
     "plugins",
-}
-
-
-# Doubly-legacy singleton spellings: these were renamed to the
-# ``[vm_templates.default]`` / ``[agent_templates.default]`` resource shape
-# before this effort, and those shapes are themselves now resources (ADR 0022).
-# The pointed rename error used to live in the vm/agent template loaders, which
-# were deleted with the TOML resource surface; on a normal load these keys now
-# fall through to the generic unexpected-key path, so give them a targeted hint
-# at the modern destination (a YAML manifest) rather than the stale rename
-# target.
-_LEGACY_SINGLETON_HINTS = {
-    "vm": "[vm.config] is a legacy spelling of the vm-template resource; declare it as a YAML "
-    "manifest (`agw resource sample vm-template`).",
-    "agent": "[agent.config] is a legacy spelling of the agent-template resource; declare it as a "
-    "YAML manifest (`agw resource sample agent-template`).",
 }
 
 
@@ -75,123 +42,12 @@ def _raise_unexpected_top_level_keys(data: dict[str, object]) -> None:
     """Reject unexpected top-level keys.
 
     This catches a common TOML pitfall: uncommenting a key without its section
-    header causes the key to land in the wrong (or top-level) section. Known
-    legacy singleton spellings retain their targeted migration errors instead
-    of receiving the generic message.
+    header causes the key to land in the wrong (or top-level) section.
     """
     unexpected = sorted(set(data.keys()) - EXPECTED_TOP_LEVEL_KEYS)
     if not unexpected:
         return
-    messages = [_LEGACY_SINGLETON_HINTS[key] for key in unexpected if key in _LEGACY_SINGLETON_HINTS]
-    generic = [key for key in unexpected if key not in _LEGACY_SINGLETON_HINTS]
-    if generic:
-        messages.append(f"unexpected top-level keys in config: {', '.join(generic)}")
-    raise ConfigError(" ".join(messages))
-
-
-def _raise_for_resource_sections(data: dict[str, object]) -> None:
-    """Hard-error when config.toml declares resources (ADR 0022).
-
-    config.toml is settings only now: the resource-declaration path moved to
-    YAML manifests. This is the replacement for the old deprecation nudge
-    (``_warn_deprecated_resource_sections``); it reuses the shared
-    ``KIND_SECTIONS`` presence sweep and the same grep-able display shapes.
-
-    The rewrite is the operator's, so the error carries every part of it
-    they need: which sections are the problem, which kind each becomes
-    where the section name does not say, the two commands that print the
-    target shape, and the guide section that walks it through. There is no
-    tool to defer to (operator ruling, 2026-08-07).
-
-    ``[secret_backends.*]`` is swept here like every other section (it IS a
-    resource-declaring section: it is in ``KIND_SECTIONS``, keyed by the
-    ``secret-backend`` kind), but it is the one section whose old row cannot
-    be rewritten directly. It never carried backend configuration. Delete it,
-    keep using the implied ``env-var`` / ``prompt`` sources as-is, or declare a
-    ``secret-source`` manifest that selects another desired backend, then place
-    that source name in ``[secret_config].sources``. Sending an
-    operator to write a ``secret-backend`` manifest would send them to a
-    command that errors, since ``secret-backend`` is a capability kind with
-    no declarable form. Hence the two clauses below rather than one message: a
-    config carrying both kinds of section still gets the whole job in one
-    read.
-
-    The escape hatch is ``load_config(resources=False)``: the commands that
-    ARE the remediation (``resource sample --write``, ``resource edit``'s
-    fallback) load that way and so still read a config that carries
-    resource sections, which is what lets an operator author the
-    replacement manifests before deleting the sections. Folding
-    ``[secret_backends.*]`` into this sweep is what finally puts it behind
-    that hatch too: it used to be refused by the settings load, which no
-    escape hatch covers, so a section carrying no configuration could break
-    the very commands the rewrite depends on.
-
-    RELEASE-SCOPED, and paired with its guide. This check exists only to
-    carry hosts across the 0.14 TOML sunset, so it retires on the same
-    schedule as ``docs/guides/upgrading-to-0.14.md``, which its hint names.
-    Delete the two together, or the error outlives the document it sends
-    the operator to. The retirement is this function, the ``resources=``
-    escape hatch it is gated by, and the retired section names in
-    ``EXPECTED_TOP_LEVEL_KEYS`` (they sit in that set only so this error
-    fires instead of the generic unexpected-key one; leaving them there
-    would make ``[secrets.*]`` load silently again).
-    """
-    from agentworks.manifests.decode import KIND_SECTIONS
-
-    present: list[str] = []
-    for _kind, sections in KIND_SECTIONS.items():
-        for section in sections:
-            if section not in data:
-                continue
-            # The header shape operators can grep for: [admin.config],
-            # [named_console], and the legacy vm-site sections ([azure] /
-            # [proxmox]) are non-family sections; everything else nests
-            # names ([secrets.<name>]).
-            if section == "admin":
-                present.append("[admin.config]")
-            elif section in ("named_console", "azure", "proxmox"):
-                present.append(f"[{section}]")
-            else:
-                present.append(f"[{section}.*]")
-    if not present:
-        return
-    noun = "section" if len(present) == 1 else "sections"
-    rewritable = [s for s in present if s != "[secret_backends.*]"]
-
-    message = (
-        f"config.toml declares resources, which config.toml no longer supports "
-        f"(it is settings only now): {', '.join(present)}."
-    )
-    hint_parts: list[str] = []
-    if rewritable:
-        rewrite_noun = "section" if len(rewritable) == 1 else "sections"
-        # The [azure]/[proxmox] sections become vm-site, a kind name nothing
-        # on screen would suggest; name it only when one is present.
-        site_hint = (
-            " (the [azure]/[proxmox] sections become vm-site manifests)"
-            if any(s in ("[azure]", "[proxmox]") for s in rewritable)
-            else ""
-        )
-        message += (
-            f" Rewrite {', '.join(rewritable)} as YAML manifests{site_hint}, "
-            f"then remove the {rewrite_noun} from config.toml."
-        )
-        hint_parts.append(
-            "`agw resource sample <kind> --write <kind>s.yaml` writes a commented starter to edit, "
-            "and `agw resource describe-kind <kind>` lists every field with its type."
-        )
-    if "[secret_backends.*]" in present:
-        message += " [secret_backends.*] carries no configuration, so delete it."
-        hint_parts.append(
-            "Use the implied env-var and prompt source names as-is. For another backend, declare a "
-            "secret-source manifest that selects it, then list the source name in [secret_config].sources, "
-            "which is a setting and stays in config.toml."
-        )
-    hint_parts.append(
-        'The "TOML resource sections: removed" section of docs/guides/upgrading-to-0.14.md '
-        f"walks through the {noun} one by one."
-    )
-    raise ConfigError(message, hint=" ".join(hint_parts))
+    raise ConfigError(f"unexpected top-level keys in config: {', '.join(unexpected)}")
 
 
 def load_config(
@@ -199,7 +55,6 @@ def load_config(
     *,
     warn_issues: bool = True,
     warn_deprecations: bool = True,
-    resources: bool = True,
     raise_errors: bool = False,
 ) -> Config:
     """Load and validate the agentworks configuration.
@@ -210,12 +65,6 @@ def load_config(
             Set to False when the caller handles issues itself (e.g. doctor).
         warn_deprecations: Emit deprecation nudges (default: True; also
             silenceable per-invocation via --no-deprecations).
-        resources: Enforce the resource-section hard error (default: True).
-            config.toml is settings only now; a resource-declaring section is
-            a hard error. The commands that ARE the remediation (``resource
-            sample --write``, ``resource edit``'s fallback) pass False to read
-            a config that still carries such sections. Settings load
-            identically either way.
         raise_errors: Raise typed errors for early file failures instead of
             using the legacy stderr and ``SystemExit`` path.
 
@@ -223,8 +72,7 @@ def load_config(
         Validated Config object.
 
     Raises:
-        ConfigError: If the config is missing, invalid, or declares resources
-            (with ``resources=True``).
+        ConfigError: If the config is missing or invalid.
         SystemExit: If an early file failure occurs and ``raise_errors`` is false.
     """
     # Re-imported here (rather than bound at module load) so that tests'
@@ -279,19 +127,12 @@ def load_config(
 
     _raise_unexpected_top_level_keys(data)
 
-    # config.toml is settings only: reject resource-declaring sections before
-    # the settings loaders run, unless the caller is the remediation itself
-    # (resources=False).
-    if resources:
-        _raise_for_resource_sections(data)
-
     session_config = _load_session_config(data, issues)
 
     # No settings loader produces a deprecation today (the last producer,
-    # the ``[secret_backends.*]`` no-op nudge, became part of the
-    # resource-section hard error above). The channel stays wired because it
-    # is generic machinery with an operator-facing flag (--no-deprecations),
-    # not because anything currently rides it.
+    # the ``[secret_backends.*]`` no-op nudge, was retired). The channel stays
+    # wired because it is generic machinery with an operator-facing flag
+    # (--no-deprecations), not because anything currently rides it.
     deprecations: list[str] = []
     secret_config_data = _load_secret_config(data, issues, decls)
     enabled_system_plugins = _load_plugins(data, issues, decls)

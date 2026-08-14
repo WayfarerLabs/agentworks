@@ -1,5 +1,5 @@
 """The ``git-credential-provider`` capability: code-side handles for
-each ``[git_credentials.<name>].provider`` value.
+each git-credential manifest's ``spec.provider.name`` value.
 
 Each provider implementation (``GitHubCredentialProvider`` in core,
 ``AzDOCredentialProvider`` in the opt-in ``azure`` system plugin) is a

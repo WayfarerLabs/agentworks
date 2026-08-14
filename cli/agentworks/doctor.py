@@ -530,7 +530,6 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
 
     g.ok("Config file", format_host_path(CONFIG_PATH))
 
-    config_load_failed = False
     try:
         from agentworks.config import load_config
 
@@ -546,21 +545,7 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
             str(e),
             hint=e.hint,
         )
-        config_load_failed = True
-        # The resource-section hard error (config.toml still declares
-        # resources) is exactly the mid-migration operator doctor helps most,
-        # so it must NOT truncate the report to one fail row. Retry
-        # settings-only: that skips the hard-error check, so the SSH,
-        # manifest, and registry checks below still render (mirroring the
-        # non-fatal manifest-load handling further down). A genuine settings
-        # error (bad [operator], non-conforming name, ...) re-raises on the
-        # retry and we return.
-        from agentworks.config import load_config as _load_settings_only
-
-        try:
-            config = _load_settings_only(warn_issues=False, resources=False, raise_errors=True)
-        except (ConfigError, ValidationError):
-            return g, None, None
+        return g, None, None
     # Manifest spec-level warnings (unknown keys with file:line, env
     # hygiene, ...) surface as doctor rows, exactly like TOML
     # config_issues below. Loading here (and passing the set into
@@ -595,13 +580,11 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     if manifests is not None:
         for issue in manifests.issues:
             g.warn("Manifest", issue)
-    if not config_load_failed and not config.config_issues and manifests is not None and not manifests.issues:
+    if not config.config_issues and manifests is not None and not manifests.issues:
         g.ok("Config is valid")
     # No deprecation rows here: every config.toml deprecation doctor used to
-    # render is a hard error now (the TOML resource declarations, the sibling
-    # capability-config shape, and the ``[secret_backends.*]`` no-op that was
-    # the last of them), so each arrives as the Config or Manifest fail row
-    # above instead. If a nudge is added back to ``Config.deprecation_issues``,
+    # render is retired now, so stale inputs reach ordinary Config or Manifest
+    # validation instead. If a nudge is added back to ``Config.deprecation_issues``,
     # render it here as a scannable one-liner (maintainer ruling, 2026-07-06):
     # the FACT plus one next step, with the teaching text left on the ambient
     # per-command warning.

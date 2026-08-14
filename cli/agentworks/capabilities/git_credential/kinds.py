@@ -9,17 +9,16 @@ module so the kinds self-register into ``KIND_REGISTRY`` at load.
 
 ``GitCredentialKind`` uses miss policy ``error`` -- it does NOT
 synthesize. Operators must explicitly declare every
-``[git_credentials.<name>]`` they reference (from
-``admin.git_credentials`` / ``agent_templates.*.git_credentials``). A
-typo'd reference errors at config load via the framework's miss-policy
-dispatch, with the reference source surfaced. The kind is intentionally
-minimal: validating "the name is published" is the whole job. Token
-resolution happens through the secret kind (each
+``git-credential`` manifest they reference from an admin-template or
+agent-template. A typo'd reference errors at config load via the framework's
+miss-policy dispatch, with the reference source surfaced. The kind is
+intentionally minimal: validating "the name is published" is the whole job.
+Token resolution happens through the secret kind (each
 ``GitCredentialConfig`` emits a ``SecretReference`` for its token at
 finalize time).
 
 ``GitCredentialProviderKind`` gives the framework a name-keyed marker so
-``[git_credentials.<name>].provider = "..."`` typos surface uniformly.
+``spec.provider.name`` typos surface uniformly.
 Provider implementations live in ``agentworks.git_credentials``; the
 companion publisher there adds one ``GitCredentialProviderEntry`` row per
 known provider, built-in with source ``"agentworks.git_credentials"``.
@@ -58,8 +57,8 @@ class GitCredentialProviderEntry:
     The actual provider class (``GitHubCredentialProvider`` in core,
     ``AzDOCredentialProvider`` in the ``azure`` plugin at
     ``agentworks.plugins.azure.azdo``) lives beside its capability module;
-    this row is what ``[git_credentials.<name>].provider = "..."`` resolves
-    against in the framework.
+    this row is what a git-credential's ``spec.provider.name`` resolves against
+    in the framework.
 
     Inbound references live on the dependency graph
     (``Registry.graph.dependents_of``), not on this row.
@@ -191,7 +190,6 @@ GIT_CREDENTIAL_PROVIDER_DESCRIPTOR = CapabilityKindDescriptor(
     manifest_section=HostSurface(
         host_kind="git-credential",
         naming_field="provider",
-        config_field="provider_config",
     ),
 )
 """The git-credential-provider record in the capability-kind descriptor

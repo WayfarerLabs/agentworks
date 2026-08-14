@@ -24,12 +24,10 @@ All three rows are present-but-disabled until an operator opts in with
 
 - the ``azure-vm`` platform row publishes with a ``system-plugin`` origin; a
   ``vm-site`` on it is not-ready with the "enable plugin `azure`" hint and
-  ``resolve_site`` refuses it. The deprecated legacy ``[azure]`` flat-section
-  site gets the same hint (a feature: legacy configs are guided, not broken
-  with an unknown-name error).
+  ``resolve_site`` refuses it.
 - the ``azdo`` provider row publishes with a ``system-plugin`` origin; a
-  ``git-credential`` naming ``provider = "azdo"`` is not-ready via its R14
-  propagate hook and refused at use.
+  ``git-credential`` whose tagged ``spec.provider.name`` is ``azdo`` is
+  not-ready via its R14 propagate hook and refused at use.
 - the ``az-cli`` install-command row publishes weak (add-if-absent) while
   disabled, so a vm-template's ``system_install_commands = ["az-cli"]``
   finalizes cleanly (no unknown-name error) and is refused at use by the Phase

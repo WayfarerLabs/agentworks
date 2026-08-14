@@ -13,10 +13,8 @@ R4).
   in-code rationale on ``_load_plugins``). The pre-rename ``enabled`` key
   is now one such unknown key, so a stale config fails loudly rather than
   silently leaving its plugins un-enabled.
-- ``enabled_system_plugins`` reaches ``Config`` identically on both
-  ``load_config(resources=True)`` (the default) and
-  ``load_config(resources=False)`` (the settings-only path), mirroring
-  ``secret_config_data``'s both-paths behavior.
+- ``enabled_system_plugins`` reaches ``Config`` through the settings loader,
+  mirroring ``secret_config_data``.
 """
 
 from __future__ import annotations
@@ -172,7 +170,7 @@ def test_plugins_unknown_key_alongside_valid_system_still_raises(tmp_path: Path)
         load_config(cfg, warn_issues=False)
 
 
-def test_plugins_system_reaches_config_on_both_load_paths(tmp_path: Path) -> None:
+def test_plugins_system_reaches_config(tmp_path: Path) -> None:
     cfg = _config(
         tmp_path,
         """
@@ -180,8 +178,5 @@ def test_plugins_system_reaches_config_on_both_load_paths(tmp_path: Path) -> Non
         system = ["a", "b"]
         """,
     )
-    with_resources = load_config(cfg, warn_issues=False, resources=True)
-    assert with_resources.enabled_system_plugins == ("a", "b")
-
-    settings_only = load_config(cfg, warn_issues=False, resources=False)
-    assert settings_only.enabled_system_plugins == ("a", "b")
+    config = load_config(cfg, warn_issues=False)
+    assert config.enabled_system_plugins == ("a", "b")
