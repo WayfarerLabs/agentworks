@@ -1127,7 +1127,10 @@ changes only terrain variety and the two non-contact failure classifications.
       every concrete route geometry, opening, Retry checkpoint, static scene, and retained-world
       bound against the new terrain without changing controls, physics, landing tolerance, fuel,
       mission pacing, sky, site geometry, copy, route spacing, or route behavior. Generated
-      reference schedules may change only as required to certify the new terrain geometries.
+      reference schedules may change only as required to certify the new terrain geometries. At the
+      sole final site of a finite physical world, preserve the ordinary service sequence with the
+      certified base allowance and zero deck delta, then omit next-target and route-proof authority
+      rather than generating beyond the terminus.
 - [ ] Add mutation-sensitive model, world, derivation, static, and real-browser witnesses for former
       ceiling and excessive-speed crossings, zero-fuel ballistic contact, less-periodic seeded
       angular terrain, exact height/grade limits, local decks/supports, collision/render parity, and

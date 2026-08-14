@@ -185,7 +185,11 @@ recorded as a growth path so nothing forecloses it, and none of it is in scope n
   bonus is below representable precision. Unused fuel carries forward and is never discarded merely
   because another site was completed. The sufficient allowance is not represented as the smallest
   successful reserve, and the reference plan does not waste fuel to manufacture a
-  one-quantum-smaller failure.
+  one-quantum-smaller failure. If the implementation uses a finite physical world, its sole final
+  site preserves the ordinary can, refuel, deployment, and power sequence without inventing an
+  unreachable next route. That terminal can uses the same independently certified base allowance
+  with zero height delta, after which target and route-proof authority are absent and the physical
+  terminus remains the only boundary.
 - R23. Unsafe terrain, platform, or building contact produces a brief vacuum-appropriate crash: a
   compact propellant flash and ballistic fragments, with no smoke cloud, atmospheric shock wave,
   sustained fireball, audio, or page movement. Reduced motion skips fragment travel and exposes the

@@ -355,6 +355,12 @@ allowance upper bound, and quantum rounding. The sufficient allowance is not des
 the smallest successful reserve, and the reference plan does not waste fuel to force a
 one-quantum-smaller failure.
 
+At the sole final site in a finite physical world, the service transaction preserves the same can,
+refuel, deployment, power, checkpoint, and player-commanded launch behavior without attempting to
+construct a target beyond the terminus. Its terminal award applies the same independently certified
+base allowance with zero deck delta. Target, cue, and route-proof authority then become absent; no
+new outcome, copy, automatic Exit, or hidden boundary state is introduced.
+
 After refueling, the G opening acts as a deployment bay: a small terminal-inspired agent reaches the
 surface and enters the single NOC in half the Phase 4L travel time. The later battery and signal
 sequence keeps its existing pace. A clean rectangular vertical phone-battery-style indicator, with
