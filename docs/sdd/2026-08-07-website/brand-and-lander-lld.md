@@ -2301,11 +2301,12 @@ approximation to a second curved pose authority. Across the 243 stored contacts,
 landing values are `vx=1.1551981660881976`, `vy=2.637967138882803`, `angle=15.754404597863527`, and
 `angularVelocity=24.372795201853602`, leaving respective inclusive limit margins
 `1.0448018339118026`, `.9620328611171969`, `2.2455954021364732`, and `1.6272047981463977`.
-Independent bound arithmetic gives total fuel `<75828`, maximum one-step translation `5687.1 m`,
-candidate depth `19`, maximum 50,554 knots, and `232870366152<2^38` for the deliberately loose
-altitude bound. These figures establish feasibility of the bounded classifier and comfortable
-recorded landing envelopes; permanent v9 replay remains the authority that all 243 corrected
-collision records and eight openings still pass before any fixture is accepted.
+Independent bound arithmetic gives total fuel `<75828`, maximum one-step translation
+`(9F+.8)/120=5687.1066666666675 m`, candidate depth `19`, maximum 50,554 knots, and
+`232870366152<2^38` for the deliberately loose altitude bound. These figures establish feasibility
+of the bounded classifier and comfortable recorded landing envelopes; permanent v9 replay remains
+the authority that all 243 corrected collision records and eight openings still pass before any
+fixture is accepted.
 
 ## 15. Verification matrix
 
