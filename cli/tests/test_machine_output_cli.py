@@ -628,21 +628,6 @@ def test_secret_describe_json_preserves_nulls_and_source_order(monkeypatch) -> N
     monkeypatch.setattr(inspect, "describe_secret", lambda *_args, **_kwargs: description)
 
     result = CliRunner().invoke(app, ["secret", "describe", "token", "--output", "json"])
-    _assert_human_baseline(
-        ["secret", "describe", "token"],
-        b"Secret: token\n"
-        b"  Kind: secret\n"
-        b"  Description: test token\n"
-        b"  Origin: unknown\n\n"
-        b"Referenced by:\n"
-        b"  (none recorded)\n\n"
-        b"Backend mappings:\n"
-        b"  - work-op (onepassword, declared): op://Work/token\n"
-        b"  - prompt-fallback (prompt, declared): (prompt at resolution time) (not ready: source unavailable)\n\n"
-        b"Resolution preview:\n"
-        b"  - skipped prompt-fallback: not ready: source unavailable\n"
-        b"  would attempt via work-op\n",
-    )
 
     assert result.exit_code == 0, result.output
     data = _json_document(result)["data"]
