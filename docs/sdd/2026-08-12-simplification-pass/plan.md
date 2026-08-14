@@ -9,11 +9,11 @@ effort.
 - [ ] Resolve rule delivery (R1.0, issue #511): probe fresh-session, no-file-tools, and
       isolated-worktree delivery per configured target (Claude, Codex, Copilot), confirm the
       Rulesync emission for a rule without `globs`, then drop the filter from the twelve broad
-      always-on rules, keeping `cli-conventions.md` narrow. Done when: the probes are recorded on
-      issue #511 and the twelve rules are delivered unconditionally. Escalation does not complete
-      this item: if the probe shows this shape cannot work, wave 0 stays open and wave 1 does not
-      start until the operator's disposition is recorded here, and that disposition must itself make
-      the deletion criteria reach every affected lane (charter-carried criteria at minimum).
+      always-on rules, keeping `cli-conventions.md` narrow. Done when, either branch (FRD R1.3): (a)
+      the probes are recorded on issue #511 and the twelve rules are delivered unconditionally, or
+      (b) the probe shows this shape cannot work and the operator's recorded disposition places the
+      full criteria text into every affected lane (charter-carried at minimum). Escalation alone
+      completes nothing: until one branch holds, wave 0 stays open and wave 1 does not start.
 - [ ] Amend `development-principles` with the trust-boundary doctrine (the four boundaries, interior
       trust, validator-names-its-boundary; ~10 lines) plus the principle-3 test-quality
       counterweight (R1.1), and `no-prose-policing-tests` with the authored-artifacts generalization
@@ -41,17 +41,21 @@ actively changing.
       beyond the keys each check reads.
 - [ ] Prose/form-policing sweep across the estate (absorbed survey list plus G12, C10, D4, P6, and
       the #470 manifesto pin). Files owned by other items are excluded here: W1's workflow test,
-      S1's corpus and wording-pin trims, and W4/W6 in contained trims. The sweep's first step
-      commits an exact per-file decision inventory (delete, convert, or keep, with the file list)
-      derived from the absorbed survey, and that inventory is the auditable baseline for completion.
-      Keep behavioral, structural, and security tests; delete the rest; convert to structural form
-      only where a real invariant would lose its only guard. Sentence-only observables are decided
-      case by case, mostly by deletion (R2.4). May land as several PRs. Done when: every inventory
-      row carries its decision and the delete rows are gone at HEAD.
+      S1's corpus and wording-pin trims, W4/W6 in contained trims, and
+      `cli/tests/guide/test_contract_catalog.py`, whose prose pins belong to the G2/G8 guide item so
+      each file has one owner. The sweep's first step commits an exact decision inventory derived
+      from the absorbed survey, one row per test or assertion group (a file mixing wholly-policing
+      tests with embedded prose assertions gets multiple rows), each row marked delete, convert, or
+      keep. Keep behavioral, structural, and security tests; delete the rest; convert to structural
+      form only where a real invariant would lose its only guard. Sentence-only observables are
+      decided case by case, mostly by deletion (R2.4). May land as several PRs. Done when: delete
+      rows are gone at HEAD, convert rows point at the landed structural replacement, and keep rows
+      name the invariant that earns the assertion.
 - [ ] Delete guide dead surface and interior re-validation (G8, G2); fix the vacuous monkeypatch
-      test and add the persisted-enum parity test (G11, R2.3). Done when: suite green,
-      `parse_topic_contribution` accepts only decoded data, the parity test fails on a synthetic new
-      member.
+      test and add the persisted-enum parity test (G11, R2.3). This item owns
+      `cli/tests/guide/test_contract_catalog.py` in full, its prose pins included (excluded from the
+      sweep above). Done when: suite green, `parse_topic_contribution` accepts only decoded data,
+      the parity test fails on a synthetic new member.
 - [ ] Delete inert descriptor generality (C1, C5): `RegistryPolicy`, `kind_strategy`,
       `contract_version` plumbing, unreachable fallbacks, their pinning tests. Done when: suite
       green, four descriptors construct without the deleted fields.
