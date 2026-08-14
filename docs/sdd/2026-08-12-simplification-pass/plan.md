@@ -43,14 +43,17 @@ actively changing.
       the #470 manifesto pin). Files owned by other items are excluded here: W1's workflow test,
       S1's corpus and wording-pin trims, W4/W6 in contained trims, and the guide item's files
       `cli/tests/guide/test_contract_catalog.py` and `cli/tests/guide/test_assessment.py`, whose
-      prose pins belong to that item so each file has one owner. The sweep's first step commits an
-      exact decision inventory derived from the absorbed survey, one row per test or assertion group
-      (a file mixing wholly-policing tests with embedded prose assertions gets multiple rows), each
-      row marked delete, convert, or keep. Keep behavioral, structural, and security tests; delete
-      the rest; convert to structural form only where a real invariant would lose its only guard.
-      Sentence-only observables are decided case by case, mostly by deletion (R2.4). May land as
-      several PRs. Done when: delete rows are gone at HEAD, convert rows point at the landed
-      structural replacement, and keep rows name the invariant that earns the assertion.
+      prose pins belong to that item so each file has one owner. The exclusion rule is general, not
+      this enumeration: any file another wave 1 item names or necessarily edits is owned wholesale
+      by that item, and the sweep's inventory records each such exclusion it encounters. The sweep's
+      first step commits an exact decision inventory derived from the absorbed survey, one row per
+      test or assertion group (a file mixing wholly-policing tests with embedded prose assertions
+      gets multiple rows), each row marked delete, convert, or keep. Keep behavioral, structural,
+      and security tests; delete the rest; convert to structural form only where a real invariant
+      would lose its only guard. Sentence-only observables are decided case by case, mostly by
+      deletion (R2.4). May land as several PRs. Done when: delete rows are gone at HEAD, convert
+      rows point at the landed structural replacement, and keep rows name the invariant that earns
+      the assertion.
 - [ ] Delete guide dead surface and interior re-validation (G8, G2); fix the vacuous monkeypatch
       test and add the persisted-enum parity test (G11, R2.3). This item owns
       `cli/tests/guide/test_contract_catalog.py` and `cli/tests/guide/test_assessment.py` in full,
