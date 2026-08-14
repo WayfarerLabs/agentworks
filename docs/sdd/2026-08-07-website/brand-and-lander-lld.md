@@ -78,24 +78,32 @@ Implementation uses these permanent names:
 | `website/templates/404.html`                           | Semantic 404 shell with the shared game placeholder             |
 | `website/templates/lander.html`                        | Dedicated Lander shell with the shared game placeholder         |
 | `website/templates/lander-game.html`                   | Sole source for the complete reusable game subtree              |
-| `website/build.py`                                     | Standard-library rendering, validation, and asset copying       |
+| `website/build.py`                                     | Rendering, validation, and exact proof-source composition       |
 | `website/site_game_validation.py`                      | Focused game DOM, module-closure, and manifest validation       |
 | `website/static/lander.css`                            | Scene layout, state selectors, focus, and SVG presentation      |
-| `website/static/lander-world.js`                       | Pure seed, terrain, site, geometry, and window functions        |
-| `website/static/lander-model.js`                       | Flight/run state, physics, contact, and constructive proofs     |
+| `website/static/lander-world.js`                       | Pure seed, terrain, site, collision, and window functions       |
+| `website/static/lander-model.js`                       | Authored flight/run state, physics, and proof replay            |
+| `website/static/lander-route-proofs.generated.js`      | Source-only generated 100-record proof projection               |
 | `website/static/lander-game.js`                        | DOM, clock/input, camera, focus, lifecycle, and rendering       |
 | `website/static/onboarding-copy.js`                    | Existing canonical onboarding copy; preserved without changes   |
 | `website/tools/derive_lander_routes.mjs`               | Independent, deterministic route-fixture derivation CLI         |
+| `website/tools/project_lander_route_proofs.mjs`        | Deterministic derived-fixture-to-source projection CLI          |
 | `website/tools/lander_clear_faces.mjs`                 | Independent scaffold-overlay and clear-face enumeration         |
 | `website/tests/fixtures/lander-route-geometry-v7.json` | Canonical global terrain, site, structure, and envelope input   |
 | `website/tests/fixtures/lander-route-derived-v7.json`  | Reviewed 100-pair schedules, openings, and witness output       |
-| `website/tests/lander-world.test.mjs`                  | Seeded world, window, site, and template vectors                |
+| `website/tests/lander-world.test.mjs`                  | Seeded world, window, site, and proof-key vectors               |
 | `website/tests/lander-model.test.mjs`                  | Scheduler, physics, mission, fuel, and checkpoint vectors       |
+| `website/tests/lander-route-proofs.test.mjs`           | Generated projection parity and exhaustive proof replay         |
 | `website/tests/test_lander_404.py`                     | Build, DOM, no-JS, and forbidden-surface checks                 |
 | `website/tests/lander-browser-checklist.md`            | Package-free browser, performance, and accessibility acceptance |
 
-The shipped artifact grows by exactly one file, `static/lander-world.js`. Tool and test files are
-not in the artifact. The production module DAG is exact:
+The shipped artifact grows by exactly one file, `static/lander-world.js`. Tool, test, and
+`lander-route-proofs.generated.js` source files are not separate artifact entries. Before ordinary
+asset validation, `build.py` requires the model's one exact generated-proof import and the
+projection's provenance marker, removes that source-only import, and prepends the reviewed generated
+module bytes to the existing `static/lander-model.js` destination. The output therefore remains the
+exact 13-file artifact and has no unresolved generated-module import. The shipped production module
+DAG is exact:
 
 ```text
 lander-game.js  -> lander-model.js -> lander-world.js
@@ -105,11 +113,12 @@ lander-game.js  -> lander-model.js -> lander-world.js
 `lander-game.js` imports the model API plus only the pure `cameraLeftForPose`, `CHUNK_WIDTH`,
 `mixUint32`, `siteScaffoldPath`, `siteStructure`, `skyProjectionForCamera`,
 `skyProjectionIdentityForCamera`, `targetDirectionForViewport`, `terrainFillPath`,
-`terrainSurfacePath`, and `terrainVerticesForRange` exports directly from `lander-world.js`.
-`lander-model.js` imports pure world construction, retention, seed, and geometry exports.
-`lander-world.js` imports neither production module, reads no DOM, clock, storage, or ambient
-randomness, and owns no mutable singleton. No production module imports upward or sideways outside
-this DAG.
+`terrainSurfacePath`, and `terrainVerticesForRange` exports directly from `lander-world.js`. The
+authored `lander-model.js` source additionally imports the source-only generated proof catalog;
+build-time composition resolves that edge inside the existing model artifact. `lander-model.js`
+imports pure world construction, retention, seed, collision, and geometry exports. `lander-world.js`
+imports neither production module, reads no DOM, clock, storage, or ambient randomness, and owns no
+mutable singleton. No production module imports upward or sideways outside this DAG.
 
 The model is the sole mutable run authority. One run aggregate owns physics, fuel, mission state,
 seed, generator cursor, retained sites, active and target IDs, route proof, checkpoint, and crash
@@ -118,13 +127,15 @@ focus, pointer capture, CSS projection, and entropy acquisition. Neither lower m
 browser global. The controller must not keep a second site, fuel, checkpoint, or mission copy.
 
 Prefer each focused production, tool, or test module at or below 500 lines; every authored source
-must remain below 1,000. `website/site_validation.py` is already near the hard ceiling. It imports
-`validate_game_contract` from `site_game_validation.py` and passes the rendered pages, asset
-manifest, and site base into that focused authority. The helper imports only the standard library,
-never imports `site_validation.py`, and owns all new game-subtree, game-module closure, and exact
-game-manifest rules. `test_lander_404.py` exercises the helper. The helper is build source, not a
-shipped site file, so the browser artifact remains exactly 13 files. Splitting follows authority,
-not line compression.
+must remain below 1,000. Generated fixture and source-projection bytes are not authored source, but
+their derivation, schema, provenance, composition, and review remain mandatory; authored logic may
+not be minified or formatting-ignored to evade the ceiling. `website/site_validation.py` is already
+near the hard ceiling. It imports `validate_game_contract` from `site_game_validation.py` and passes
+the rendered pages, asset manifest, and site base into that focused authority. The helper imports
+only the standard library, never imports `site_validation.py`, and owns all new game-subtree,
+game-module closure, and exact game-manifest rules. `test_lander_404.py` exercises the helper. The
+helper is build source, not a shipped site file, so the browser artifact remains exactly 13 files.
+Splitting follows authority, not line compression.
 
 The build seam remains `website/build.py --repo-root ROOT --output OUT --site-base BASE`. It emits
 only the complete linked site. The sole `{{SITE_BASE}}` token prefixes local links and imports.
@@ -1403,9 +1414,9 @@ The independently generated and atomically reviewed digest set is exactly:
 geometryDigest   17af6e4d762acc6dfee5f170d19b2f2952ac86e0844b49837b9f1a848255e8d8
 physicsDigest    e08f8260b723dd245db88de9ae2cdbac54bf9a97cb0bed1b6f170eda362c48dc
 assignmentDigest 82dec99b18672c2c5dd45bac43d19530cd4680e456f7329d183adbed3f9a4102
-proofDigest      3607ac69f8f639694fd0919b61f6786163c5a6bba25665c6baa6d2c238a2d147
+proofDigest      ca09ed720e3e752745af046cbb2013c99c36227963e9799b1f1cd8961b49f354
 worldDigest      ab4348a78e029553b659e99c14bc3b447b3f6a018943b77c179cf21664445d8f
-outputDigest     f2af9f25bfc91bf9b19600a083bdf2b0d53f8cc050b3e58237b1c8376f213490
+outputDigest     dea7263fe5b01ea1c0a442a1f2fefb3f4dad472cbe8668b8bf00793cde5afef7
 ```
 
 The fixture remains primary authority; these review literals detect substitution and do not create a
@@ -1425,10 +1436,28 @@ Unknown or missing flags exit 2; derivation or verification failure exits 1; suc
 Ordinary tests verify checked canonical data and never regenerate their expectations. Tooling never
 ships in the 13-file site artifact.
 
+The source-projection CLI is exact:
+
+```text
+node website/tools/project_lander_route_proofs.mjs \
+  --fixture website/tests/fixtures/lander-route-derived-v7.json \
+  --output website/static/lander-route-proofs.generated.js
+```
+
+It accepts no other argument order or flag, writes atomically, preserves numeric-sorted fixture
+record order, and emits one compact row per record after the exact shared prefix. Each row orders
+`pairKey,path,tailCommand,tailCount,scheduleDigest,contactStep,x,y,vx,vy,angle,angularVelocity,`
+`controllerBurn,baseBurn,climbSurcharge,allowance,maxHullTop,assignmentMembershipDigest,envelope,`
+`selectedLayer,macroExpansions,terminalReplays`. The projection then exports only `ROUTE_DIGESTS`,
+`REFERENCE_PROOFS`, and the direct-key `REFERENCE_PROOF_CATALOG`. Permanent tests rerun this
+projection to a temporary path and require byte equality with the reviewed generated source; build
+tests mutation-kill a missing/renamed import or provenance marker and prove the final artifact still
+has exactly 13 entries.
+
 ### 10.3 Honest sufficient allowance and award
 
-Set `FUEL_QUANTUM=.05` and define `quantumCeil(x)=ceil(x/FUEL_QUANTUM)*FUEL_QUANTUM`. For each proof
-record let `delta=targetDeck-originDeck` and
+Set `FUEL_QUANTUM=.05` and define `quantumCeil(x)=ceil(x/FUEL_QUANTUM)*FUEL_QUANTUM` with no epsilon
+subtraction or integer-key workaround. For each proof record let `delta=targetDeck-originDeck` and
 `climbSurcharge=max(0,delta)*GRAVITY/ENGINE_ACCELERATION=max(0,delta)/3`; descent receives no
 credit. In each record, `controllerBurn` is the raw exact replay burn,
 `baseBurn=controllerBurn-climbSurcharge`, `climbSurcharge` is the expression above, `allowance` is
@@ -2032,7 +2061,8 @@ alias.
 | Layer                                                                   | Required coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `node --test website/tests/lander-world.test.mjs`                       | Independently reconstruct the eight global profiles from seed and signed block index only, strict 16 m X cadence, exact normalized mapping/band, linear interpolation, terrain miter join/limit `2`, exact `.36/.40` grade/change bounds, four 96 m phases, all 2,048 assignments and 100 exact pairs, closed-footprint maximum, `+2.5 m` deck equality, and signed regeneration. Rebuild 14 truss members, three uncapped finite lattice columns with six native feet, colliders, and exact `sqrt(1.1296)` terrain-wedge aperture. Mutation-kill site-conditioned terrain, phase lock, curves, rounding, a global datum, shelf/cap, vertical edge, foot drift, or aperture diameter at or above `3.2 m`.                                                                                                                                 |
-| `node --test website/tests/lander-model.test.mjs`                       | Replay all 100 success records and eight openings with exact swept collision, one keyed lookup per pair, contact `<=4320`, hull top `<=56`, unchanged inclusive `2.2/3.6/18/26` limits, and real terrain/structure collision. Pin `B=12.65`, climb surcharge, quantum ceiling, separate engine exhaustion arithmetic, and absence of `smallerFailure`/runtime search. Retain fuel, ratio, checkpoint, Retry, zero-fuel, deployment, reduced-motion, and hidden-time vectors. No assertion encodes authored prose.                                                                                                                                                                                                                                                                                                                         |
+| `node --test website/tests/lander-route-proofs.test.mjs`                | Reproduce the generated proof source byte-for-byte from reviewed derived v7; replay all 100 success records over 2,048 assignments, one keyed lookup per pair, contact `<=4320`, hull top `<=56`, and exact collision. Pin `B=12.65`, exact no-epsilon quantum ceiling, sufficient allowances, digests, opening records, signed longevity, and absence of `smallerFailure`/runtime search.                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `node --test website/tests/lander-model.test.mjs`                       | Pin unchanged inclusive `2.2/3.6/18/26` landing limits, engine exhaustion arithmetic, fuel, ratio, checkpoint, Retry, zero-fuel, deployment, reduced-motion, hidden-time, collision, input, and scheduler vectors. No assertion encodes authored prose.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `node --test website/tests/lander-phase4l.test.mjs`                     | Mutation-sensitive controller/DOM tests pin exactly two controls-line children in keyboard/touch order, Retry label-source and hint structure without asserting text, internal `RESTART` dispatch, crash focus stability, click/`r` teardown-render-focus order, shell focus with `preventScroll`, and no synthesized input. Existing outside-shell and native-button rejection coverage remains exact.                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `node --test website/tests/lander-phase4m.test.mjs`                     | Mutation-sensitive controller/DOM tests pin five sky chunks, 20 stars, one or two deterministic landmarks in exactly two paths, the complete two-arc crescent, all three one/two-ring profiles, exact circle/ellipse intersections, omitted rear-center arcs, and complete foreground arcs. They retain static/dynamic descriptor equality, bounded reconciliation, `.24` parallax transforms, negative/positive camera following, bidirectional cue changes, pass/reverse/return, and no horizontal-bound failure. They also pin the exact opening half-gauge, post-award full reference without cap, `.9 s` deploy travel, unchanged refuel/power timing, hidden-time freeze, reduced-motion atomic projection, and structural copy/link/accessibility sources without embedding authored wording.                                      |
 | Derivation CLI fixture verification                                     | Generate temporary v7 output with v8 deriver and synthesizer v1, review the canonical delta, update geometry/assignment/proof/world/output digests atomically, then run ordinary `--verify`. Enumerate the exact `4 x 2 x 4^4` loop order into 2,048 assignments and 100 numeric-sorted exact pair keys. Regenerate with the pinned prefix, `12/269/6000` bounds, six-command expansion order, `Math.round` key, cost/tie tuple, first-safe-layer selection, and 4,320-step ceiling; exact independent and production replays must agree for all 100 routes and eight openings. Physics digest remains exact. No early-success omission, terrain-variant rejection, runtime fallback, fuel-wasting schedule, scope/order drift, or partial fixture is permitted.                                                                          |
