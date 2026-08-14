@@ -50,9 +50,9 @@ Alongside the three questions, weigh:
   shape is a tax on every future reader; the question is whether this one bought anything.
 - **Exceptions and special cases.** Per principle 1, a pile of special-case code usually means the
   underlying reality is modeled wrong. Point at the model, not just the pile.
-- **Trust placement.** Re-validating values our own typed code produced within one execution is
-  complexity with no threat behind it. Validation earns its place at real boundaries: operator
-  input, external processes and services, and state that crosses executions.
+- **Trust placement.** Apply principle 3's trust-boundary doctrine: validation earns its place at
+  the named boundaries, and re-validating interior values our own typed code produced within one
+  execution is complexity with no threat behind it.
 
 ## Calibration: you are not a brevity bot
 
