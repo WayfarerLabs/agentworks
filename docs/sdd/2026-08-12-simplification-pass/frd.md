@@ -54,9 +54,10 @@ Settled inputs, recorded for traceability:
    plan's wave 1 preamble called for, resolved by ordering rather than by negotiation.
 9. **2026-08-14 (source-guard split)**: source-scanning guards do not delete as one shape. What
    decides a guard is what its assertion protects, not that it inspects source: a guard enforcing a
-   boundary the type system cannot express stays, a guard pinning how our code is written goes, and
-   a structural guard of a behavioral property yields to an observational twin where one exists or
-   is cheap to write. [hla.md](hla.md) doctrine 2 carries the split.
+   boundary the type system cannot express stays, and a guard pinning how our code is written goes.
+   [hla.md](hla.md) doctrine 2 carries the split. The tiebreaker for a guard that reads as both, an
+   observational twin displacing it where one exists or is cheap, is the lead's, derived from the PR
+   #523 precedent rather than ruled here.
 10. **2026-08-14 (`match=` taxonomy)**: `match=` is decided per site by a three-case taxonomy rather
     than one verdict, since deleting wholesale drops real branch coverage while preserving it by
     adding a production discriminator is what R2.2 forbids. Discriminate structurally where the code
