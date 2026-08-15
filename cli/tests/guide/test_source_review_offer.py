@@ -101,18 +101,18 @@ def test_injected_missing_config_has_the_same_exit_behavior(monkeypatch) -> None
     assert selected.exit_code == 0
 
 
-def test_other_config_errors_remain_failures() -> None:
-    assert render_guide((), GuideMode.AGENT, load_config_fn=_broken).exit_code == 1
-    assert render_guide(("concept-onboarding",), GuideMode.AGENT, load_config_fn=_broken).exit_code == 1
+def test_other_config_errors_do_not_fail_valid_guide_requests() -> None:
+    assert render_guide((), GuideMode.AGENT, load_config_fn=_broken).exit_code == 0
+    assert render_guide(("concept-onboarding",), GuideMode.AGENT, load_config_fn=_broken).exit_code == 0
 
 
-def test_malformed_config_remains_a_failure(tmp_path: Path, monkeypatch) -> None:
+def test_malformed_config_degrades_a_selected_topic(tmp_path: Path, monkeypatch) -> None:
     config_path = tmp_path / "config.toml"
     config_path.write_text("[broken")
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", config_path)
 
     result = CliRunner().invoke(app, ["guide", "--agent", "concept-onboarding"])
 
-    assert result.exit_code == 1
+    assert result.exit_code == 0
     assert result.stdout
     assert result.stderr == ""

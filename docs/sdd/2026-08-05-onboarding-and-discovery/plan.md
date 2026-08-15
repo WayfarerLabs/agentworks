@@ -430,23 +430,23 @@ destination below.
 
 ## Phase 4: trail-sign simplification
 
-- [ ] Replace the ordinary no-topic overviews with two concise trail signs backed by one fixed
+- [x] Replace the ordinary no-topic overviews with two concise trail signs backed by one fixed
       destination tuple. Agent mode renders the seven concept destinations; human mode renders only
       the new-installation and existing-installation choices. Both point to completion and
       `agw guide --names-only` for deeper discovery. Done when: no-topic output contains no
       walkthrough, action records, live facts, exhaustive topic list, or duplicated destination
       source, and one structural test resolves every fixed slug through the selected-topic path.
-- [ ] Short-circuit the ordinary no-topic request after argument and evidence validation. It must
+- [x] Short-circuit the ordinary no-topic request after argument and evidence validation. It must
       bypass both topic catalogs and every live dependency described by the HLA. Done when:
       instrumented behavior is identical and successful for absent, valid, and malformed
       configuration, and contributed-topic failures do not appear on this catalog-free path.
-- [ ] Make `concept-onboarding` the single home of the complete startup posture, current-adoption
+- [x] Make `concept-onboarding` the single home of the complete startup posture, current-adoption
       assessment, and first VM/session sequence. Link progressively to `concept-source-review`
       without copying its actions or detailed teaching. Make every ongoing concept topic stand alone
       under the current operator instruction without duplicating the onboarding posture. Done when:
       onboarding is complete without treating no-topic as a handbook, source-review action ownership
       is unchanged, and a returning operator can enter each ongoing topic directly.
-- [ ] Make selected-topic live context fail soft. Derive whether live state is needed from the
+- [x] Make selected-topic live context fail soft. Derive whether live state is needed from the
       existing closed block types, load it once per response only when required, and reuse the
       existing error collection and unavailable rendering paths. On configuration, registry,
       database, or projection failure, render static blocks, prepend one deduplicated diagnostics
@@ -458,20 +458,24 @@ destination below.
       asserting authored wording. Include well-formed onboarding evidence whose live assessment is
       unavailable: it remains unapplied, uses the shared warning and derived-assessment placeholder,
       and exits 0 without changing malformed or provably invalid evidence failures.
-- [ ] Keep `--names-only` completion-safe: always return valid static names, add live names when
+- [x] Keep `--names-only` completion-safe: always return valid static names, add live names when
       available, and omit only names that cannot be established when live context fails. Do not emit
       diagnostics into names-only output or optimize its existing registry cost in this round. Done
       when: focused tests cover healthy and degraded inventories and completion generation is
       unchanged.
-- [ ] Review all touched guide summaries and connective teaching in human register and remove
+- [x] Review all touched guide summaries and connective teaching in human register and remove
       redundant explanation. Do not add wording pins, phrase blacklists, or snapshots of authored
       prose. Done when: the rendered pages are correct by review and tests cover only behavior,
       structure, action ownership, and safe side effects.
-- [ ] Update permanent CLI documentation for the trail signs, onboarding destination, fail-soft
+- [x] Update permanent CLI documentation for the trail signs, onboarding destination, fail-soft
       selected-topic behavior, and best-effort names-only inventory. Record completion code and
       sample configuration as unaffected. Run focused guide and completion tests, the full
       non-integration suite, Ruff, formatting, mypy, Rulesync drift, locked-SDD, and file lint. Done
       when: all applicable gates are green.
+- [x] Validate the VM row's persisted JSON columns at the database conversion boundary and map
+      malformed values to a typed, non-echoing `StateError`. Persisted state crosses executions and
+      is therefore a trust boundary; the guide can omit affected live facts without broad exception
+      handling, while unrelated converter behavior remains outside this round.
 - [ ] Complete the required project review and merge one ready implementation PR.
 
 Definition of done: FRD R1 through R5 and acceptance criteria 1 through 6 hold, with no new guide

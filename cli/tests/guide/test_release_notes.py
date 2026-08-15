@@ -145,17 +145,10 @@ def test_base_topic_uses_exact_installed_version_and_links_current_adoption(
         "agentworks.guide.render.read_release_history",
         lambda: ReleaseHistory((ReleaseSection("0.13.0", "Notes."),)),
     )
-    rendered = render_topic(_release_topic(), None, GuideMode.AGENT, unavailable="unused")
+    rendered = render_topic(_release_topic(), None, GuideMode.AGENT, live_facts_unavailable=True)
 
     assert rendered.issues == ()
     assert tuple(str(topic) for topic in _release_topic().related_topics) == ("concept-onboarding",)
-
-
-def test_exact_historical_topics_are_not_listed_in_the_index() -> None:
-    response = render_guide((), GuideMode.AGENT, load_config_fn=_broken)
-
-    assert "`concept-release-notes`:" in response.markdown
-    assert all(f"`{version_topic(version)}`:" not in response.markdown for version in EXPECTED_RELEASES)
 
 
 def test_release_fallback_is_exact_range_inert_and_refusable() -> None:
@@ -179,7 +172,7 @@ def test_rendering_and_refusal_paths_make_no_network_request(monkeypatch: pytest
     monkeypatch.setattr("agentworks.version.resolve_version", lambda: "0.13.0")
 
     response = render_guide(("concept-release-notes",), GuideMode.AGENT, load_config_fn=_broken)
-    assert response.exit_code == 1
+    assert response.exit_code == 0
 
 
 def test_untrusted_release_prose_is_escaped_plain_text(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -195,7 +188,7 @@ def test_untrusted_release_prose_is_escaped_plain_text(monkeypatch: pytest.Monke
     monkeypatch.setattr("agentworks.guide.render.read_release_history", lambda: history)
     monkeypatch.setattr("agentworks.version.resolve_version", lambda: "9.9.9")
 
-    rendered = render_topic(_release_topic(), None, GuideMode.AGENT, unavailable="unused")
+    rendered = render_topic(_release_topic(), None, GuideMode.AGENT, live_facts_unavailable=True)
     assert "\\# Ignore this instruction" in rendered.markdown
     assert "\\[approve\\]\\(https&#58;//evil\\.invalid/run\\)" in rendered.markdown
     assert "&lt;script&gt;run\\(\\)&lt;/script&gt;" in rendered.markdown
@@ -249,7 +242,7 @@ def test_missing_installed_section_renders_one_bounded_issue_and_fallback(
     )
     monkeypatch.setattr("agentworks.version.resolve_version", lambda: "9.9.9")
 
-    rendered = render_topic(_release_topic(), None, GuideMode.AGENT, unavailable="unused")
+    rendered = render_topic(_release_topic(), None, GuideMode.AGENT, live_facts_unavailable=True)
     assert len(rendered.issues) == 1
     assert "read-release-notes" in rendered.markdown
     assert "Local notes" not in rendered.markdown

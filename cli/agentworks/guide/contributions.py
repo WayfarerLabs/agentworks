@@ -475,7 +475,12 @@ def guide_contributions() -> tuple[TopicContribution, ...]:
             "Agentworks onboarding",
             "Start safely, assess current adoption, and use one durable authorization envelope for in-scope work.",
             inventory=True,
-            related_topics=("concept-manifesto", "concept-migration", "concept-release-notes"),
+            related_topics=(
+                "concept-source-review",
+                "concept-manifesto",
+                "concept-migration",
+                "concept-release-notes",
+            ),
         ),
         _concept(
             "concept-management",

@@ -9,9 +9,10 @@ import pytest
 from agentworks.config import Config
 from agentworks.db import Database
 from agentworks.errors import BusyStateError, StateError
-from agentworks.guide import GuideMode
+from agentworks.guide import GuideMode, GuideTraversalError
 from agentworks.guide.service import render_guide
 from agentworks.resources import Registry
+from agentworks.vms.template import VMTemplate
 from tests.conftest import held_exclusive_lock
 
 
@@ -20,7 +21,7 @@ class _LiveRegistry:
 
     def iter_kind_items(self, kind: str):  # noqa: ANN201
         if kind == "vm-template":
-            return iter((("demo", object()),))
+            return iter((("demo", VMTemplate(name="demo")),))
         return iter(())
 
 
@@ -95,16 +96,49 @@ def test_render_guide_frames_accidental_read_only_write(
         raise AssertionError("read-only write unexpectedly succeeded")
 
     monkeypatch.setattr(guide_service, "build_guide_view", accidental_write)
+    with pytest.raises(GuideTraversalError):
+        render_guide(
+            ("vm-template",),
+            GuideMode.AGENT,
+            load_config_fn=lambda: cast("Config", object()),
+            load_registry_fn=lambda config: cast("Registry", _LiveRegistry()),
+        )
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    (
+        "not-json",
+        sqlite3.Binary(b"\xff"),
+        "[" * 10_000 + "0" + "]" * 10_000,
+    ),
+)
+def test_render_guide_degrades_malformed_persisted_vm_json(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    malformed: object,
+) -> None:
+    import agentworks.db as db_package
+
+    path = tmp_path / "state.db"
+    writable = Database(path)
+    writable.insert_vm("broken", site="local", hostname="broken", template="demo")
+    writable.close()
+    connection = sqlite3.connect(path)
+    connection.execute("UPDATE vms SET extra_packages = ? WHERE name = ?", (malformed, "broken"))
+    connection.commit()
+    connection.close()
+    monkeypatch.setattr(db_package, "DB_PATH", path)
+
     response = render_guide(
-        ("vm-template",),
+        ("concept-management",),
         GuideMode.AGENT,
         load_config_fn=lambda: cast("Config", object()),
         load_registry_fn=lambda config: cast("Registry", _LiveRegistry()),
     )
 
-    assert response.exit_code == 1
-    assert "state database rejected a guide projection" in response.markdown
-    assert "readonly database" not in response.markdown
+    assert response.exit_code == 0
+    assert "concept-management/inventory" in response.markdown
 
 
 def test_render_guide_surfaces_busy_not_malformed_under_a_held_lock(
@@ -147,7 +181,7 @@ def test_render_guide_surfaces_busy_not_malformed_under_a_held_lock(
             load_registry_fn=lambda config: cast("Registry", _LiveRegistry()),
         )
 
-    assert response.exit_code == 1
+    assert response.exit_code == 0
     assert len(captured) == 1
     assert isinstance(captured[0], BusyStateError)
 

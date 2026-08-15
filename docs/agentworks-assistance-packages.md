@@ -41,6 +41,30 @@ The bootstrap adds no authorization, security-setting, or harness-posture teachi
 approvals and restrictions apply independently of the package. The guide owns any later security or
 authorization context needed for Agentworks work.
 
+## Guide discovery and degraded context
+
+`agw guide` without a topic is a short trail sign. Agent mode points to onboarding, management,
+troubleshooting, release notes, migration, secrets, and bug reporting. Human mode offers two paths:
+onboarding for a new installation and management for an existing installation. This request does not
+load the topic catalogs, configuration, registry, or state database. Use shell completion or
+`agw guide --names-only` to discover the complete installed topic inventory.
+
+`concept-onboarding` is the first-setup and current-adoption destination. It contains the startup
+security posture, reports available current facts, and derives the next first-VM or first-session
+step. Its related topics include `concept-source-review`, which separately owns the optional focused
+and full read-only source-review actions.
+
+A selected topic always renders its installed teaching when that teaching is valid. If
+configuration, the registry, the state database, or live projection is unavailable, the response
+shows one warning, names the omitted topic blocks, and leaves a short placeholder at each omission.
+The command exits 0 because the requested guidance rendered; use `agw doctor` to determine
+installation health. Invalid topic syntax, unknown topics, malformed verification evidence, and
+invalid requested guide content remain errors.
+
+`agw guide --names-only` prints one valid topic name per line. It always returns static names and
+adds live resource names when they can be established. A live-context failure omits only those
+best-effort names, emits no diagnostic prose, and does not fail shell completion.
+
 ## Maintaining generated packages
 
 After editing either canonical source file, regenerate every projection:

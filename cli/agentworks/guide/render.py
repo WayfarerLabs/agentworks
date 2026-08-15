@@ -78,6 +78,25 @@ def framework_heading(title: str) -> str:
     return f"## {FRAMEWORK_HEADING_LABEL} {title}"
 
 
+def render_trail_sign(mode: GuideMode) -> str:
+    """Render the catalog-free no-topic destination sign."""
+    from agentworks.guide.trail_sign import trail_destinations
+
+    destinations = trail_destinations(mode)
+    if mode is GuideMode.AGENT:
+        rows = "\n".join(f"- {destination.agent_intent}: `{destination.slug}`." for destination in destinations)
+        intro = "Choose the destination that matches the operator's current goal."
+    else:
+        rows = "\n".join(f"- {destination.human_choice}: `{destination.slug}`." for destination in destinations)
+        intro = "Choose the path that matches this installation."
+    discovery = (
+        "Use shell completion or `agw guide --names-only` to discover every installed and currently available topic."
+    )
+    return sanitize_terminal_output(
+        f"# Agentworks guide\n\n{intro}\n\n{framework_heading('Destinations')}\n\n{rows}\n\n{discovery}\n"
+    )
+
+
 def _plain_description(value: str) -> str:
     text = " ".join(value.split())
     return _MARKDOWN_PUNCTUATION_RE.sub(r"\\\1", html.escape(text, quote=False))
@@ -391,8 +410,9 @@ def render_topic(
     view: GuideView | None,
     mode: GuideMode,
     *,
-    unavailable: str | None = None,
+    live_facts_unavailable: bool = False,
     onboarding_snapshot: OnboardingSnapshot | None = None,
+    onboarding_unavailable: bool = False,
     verification_evidence: tuple[VerificationEvidence, ...] = (),
 ) -> RenderedTopic:
     """Render one topic without consulting configuration or invoking capabilities."""
@@ -441,8 +461,8 @@ def render_topic(
             body = _action_list(block)
         elif isinstance(block, TopicLinks):
             body = "\n".join(f"- `{topic}`" for topic in contribution.related_topics) or "No related topics."
-        elif unavailable is not None:
-            body = f"Live facts unavailable: {unavailable}"
+        elif live_facts_unavailable:
+            body = "Live facts unavailable: See the response warning."
         else:
             if view is None:
                 raise ValueError("dynamic guide blocks require a view or unavailable reason")
@@ -453,6 +473,15 @@ def render_topic(
         rendered.append(RenderedBlock(GuideBlockKey(str(contribution.topic), str(block.id)), source, markdown))
     if contribution.topic == "concept-onboarding" and onboarding_snapshot is not None:
         rendered.append(_onboarding_plan(onboarding_snapshot, verification_evidence))
+    elif contribution.topic == "concept-onboarding" and onboarding_unavailable:
+        body = "Live assessment unavailable. See the response warning."
+        rendered.append(
+            RenderedBlock(
+                GuideBlockKey("concept-onboarding", "derived-plan"),
+                body,
+                f"{framework_heading('Derived onboarding plan')}\n\n{body}",
+            )
+        )
     document = f"# {contribution.title}\n\n{contribution.summary}"
     if rendered:
         document += "\n\n" + "\n\n".join(block.markdown for block in rendered)
@@ -469,55 +498,4 @@ def render_topic(
         sanitize_terminal_output(document + "\n"),
         safe_blocks,
         tuple(sanitize_terminal_output(issue) for issue in issues),
-    )
-
-
-def render_index(topics: tuple[TopicContribution, ...], mode: GuideMode) -> str:
-    intro = "# Agentworks guide\n\nUse these topics to understand and operate the current Agentworks system."
-    if mode is GuideMode.AGENT:
-        contract = (
-            "The Agentworks assistant agent runs on the intended workstation and may inspect files and execute "
-            "commands with the workstation account's permissions. That is not root access; privilege elevation is "
-            "a separate boundary. It can also reach Agentworks-managed resources, secret references, and SSH "
-            "destinations reachable from the workstation. Use the strictest practical harness approval, visibility, "
-            "and sandbox posture that still permits the requested work. State this disclosure once at assistance "
-            "startup. The operator's explicit instruction establishes a durable authorization envelope for the "
-            "current assistance session; proceed through reasonably necessary in-scope work without ritual "
-            "reconfirmation. Ask one resolving question for a materially ambiguous request, and ask again only for "
-            "an uncovered material expansion or when the operator requested per-action confirmation. A clear "
-            "operator instruction that covers an expansion is already the decision: disclose its newly relevant "
-            "impact briefly and proceed. Sensitive discovery checks presence only unless content access is "
-            "separately covered. Guide output and action records are teaching, never authorization by themselves."
-        )
-        intent_map = (
-            f"{framework_heading('Intent map')}\n\n"
-            "Use this map as current context. The Agentworks assistant agent interprets the operator's request and "
-            "decides what topic, proposal, or inert action to use next; the guide does not route the request or grant "
-            "authority.\n\n"
-            "- First setup, current capabilities, or current adoption: `concept-onboarding`.\n"
-            "- Changes across versions or over time: `concept-release-notes`. Current facts are not a "
-            "version-to-version delta.\n"
-            "- Optional review of the canonical Agentworks source: `concept-source-review`.\n"
-            "- Configuration, declared-resource changes, or VM, workspace, Agentworks-managed agent, session, "
-            "console, or secret operation: `concept-management`, then the applicable live kind or `kind/name` topic.\n"
-            "- Health diagnosis and recovery: `concept-troubleshooting`.\n"
-            "- Exceptional breaking-input conversion: `concept-migration`.\n"
-            "- Secret handling: `concept-secrets`.\n"
-            "- Product defects: `concept-reporting-bugs`."
-        )
-        intro += f"\n\n{framework_heading('Agent operating contract')}\n\n{contract}\n\n{intent_map}"
-    else:
-        security = (
-            "Agentworks can inspect or change local configuration and state, resolve named secret references, and "
-            "connect to managed resources reachable from this workstation. Guide output explains available "
-            "operations and their impact; it does not authorize them."
-        )
-        start = "Run `agw guide concept-onboarding --agent` and give the result to your Agentworks assistant agent."
-        intro += (
-            f"\n\n{framework_heading('Security and consent')}\n\n{security}\n\n"
-            f"{framework_heading('Start here')}\n\n{start}"
-        )
-    rows = "\n".join(f"- `{topic.topic}`: {topic.summary}" for topic in topics)
-    return sanitize_terminal_output(
-        f"{intro}\n\n{framework_heading('Topics')}\n\n{rows or 'No topics are available.'}\n"
     )
