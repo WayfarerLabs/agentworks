@@ -56,11 +56,12 @@ agent install-command execution, predicate evaluation, PATH results, and idempot
 
 ### D4. Load first-party teaching only inside the guide boundary
 
-Each plugin owns one `plugin/<name>/overview` conceptual guide topic. The plugin package exposes the
-same first-party `guide_contributions()` adapter shape already used by core owning packages. A
-module-local two-entry mapping in the guide service calls those adapters only during guide-scoped
-catalog construction, then feeds their inert `TopicContribution` tuples through the existing
-system-plugin candidate path. It is a fixed first-party mapping, not a registry or extension seam.
+Each plugin owns one `plugin/<name>/overview` conceptual guide topic. The plugin package keeps a
+private `_load_guide_contributions()` adapter matching the request-scoped loading pattern already
+used by core owning packages. A module-local two-entry package-anchor mapping in the guide service
+imports those private adapters only during guide-scoped catalog construction, then feeds their inert
+`TopicContribution` tuples through the existing system-plugin candidate path. It is a fixed
+first-party mapping, not a registry or extension seam.
 
 The existing `Plugin.guide_topics` seat holds already-materialized inert contributions. It cannot
 directly carry these file-backed topics without reading Markdown while constructing the descriptor;
@@ -68,10 +69,11 @@ turning it into a loader would add the callback contract this bucket-only effort
 effort therefore leaves that field and the public plugin contract unchanged rather than duplicating
 its candidate-processing path or making plugin imports perform I/O.
 
-Ordinary plugin imports perform no guide file I/O. Each adapter reads only Markdown packaged beside
-its plugin, so any asset failure is confined to a guide request and cannot break plugin registration
-or an unrelated command. The installed-wheel catalog probe requires both first-party topic slugs to
-be retained without scoped catalog issues.
+Ordinary plugin imports perform no guide file I/O. Each private adapter reads only Markdown packaged
+beside its plugin, so an asset failure fails that guide request but cannot break plugin registration
+or an unrelated command. First-party package corruption is rejected by source and installed-wheel
+coverage rather than converted into a plugin-scoped catalog issue. The installed-wheel catalog probe
+requires both first-party topic slugs to be retained without catalog issues.
 
 The topic teaches ownership, the disabled-by-default posture, discovery, and verification. Any
 suggested config mutation is a validated, inert `GuideAction` with the exact config target,

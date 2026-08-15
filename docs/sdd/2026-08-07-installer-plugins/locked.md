@@ -19,15 +19,15 @@ resource-only contract.
   precedence, provenance, and the standard pre-mutation disabled-resource error. This effort adds no
   alias, migrator, automatic enablement, compatibility warning, or special gate.
 - Each plugin owns one request-scoped conceptual guide topic and packaged Markdown. File-backed
-  adapter failures are isolated to a plugin-scoped guide issue; ordinary plugin imports perform no
-  guide resource I/O.
+  private-loader failures are confined to that guide request; ordinary plugin imports perform no
+  guide resource I/O, and first-party package corruption is rejected by source and wheel gates.
 - The sample config, CLI and plugin references, resource guide, command reference, and 0.14 upgrade
   guide teach the two opt-ins, all moved selectors, composite apt dependencies, and additive plugin
   enablement.
 
 ## Verification
 
-- On current `main`, all 8,101 tests passed. Ruff check and formatting, strict mypy across 316
+- On current `main`, all 7,495 tests passed. Ruff check and formatting, strict mypy across 317
   source files, Prettier, markdownlint, cspell, locked-SDD validation, Rulesync drift, and diff
   checks also passed.
 - A wheel was built and installed without editable mode in a fresh Python 3.12 environment outside
@@ -38,9 +38,9 @@ resource-only contract.
   together, conceptual and dynamic guide topics, Bash/Zsh/PowerShell completion projections, and the
   four expected doctor roster combinations. The run left zero VMs and removed its temporary wheel,
   environment, home, config, database, fixtures, keys, and cache.
-- Per-phase project reviews and fresh-eyes reviews converged without implementation findings. The
-  aggregate project review found AC1 through AC7 clean and requested only this closeout record. Its
-  fresh-eyes documentation finding was corrected and re-reviewed clean.
+- Per-phase project reviews and fresh-eyes reviews converged. The public implementation review's AC4
+  gate, guide import-order, displaced coverage, and simplification findings were corrected in a
+  focused round, then the aggregate project review was repeated clean.
 - The branch was rebased onto `main` at `0a984496`, then the full gates and shipped-wheel acceptance
   were repeated against the pushed rebased head.
 

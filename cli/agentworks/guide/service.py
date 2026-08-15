@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import difflib
 import html
+import importlib
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never, cast
@@ -55,16 +56,13 @@ if TYPE_CHECKING:
     from agentworks.resources import Registry
 
 
-# These two installed manifest-only plugins own first-party teaching that is
-# packaged beside their manifests. Keep the fixed curation here rather than
-# extending Plugin.guide_topics into a loader contract: ordinary plugin import
-# and registration remain guide-I/O-free.
-from agentworks.plugins.apt import guide_contributions as _apt_guide_contributions
-from agentworks.plugins.install_command import guide_contributions as _install_command_guide_contributions
-
-_FIRST_PARTY_PLUGIN_GUIDE_CONTRIBUTIONS: dict[str, Callable[[], tuple[TopicContribution, ...]]] = {
-    "apt": _apt_guide_contributions,
-    "install-command": _install_command_guide_contributions,
+# These two installed manifest-only plugins own first-party teaching packaged
+# beside their manifests. Import their private adapters only during a guide
+# request: importing a same-named submodule replaces that name on its package,
+# while these stable package anchors keep ordinary plugin registration I/O-free.
+_FIRST_PARTY_PLUGIN_GUIDE_PACKAGES = {
+    "apt": "agentworks.plugins.apt",
+    "install-command": "agentworks.plugins.install_command",
 }
 
 _MARKDOWN_PUNCTUATION_RE = re.compile(r"([\\`*_{}\[\]()<>#!|])")
@@ -104,31 +102,14 @@ class _EmptyInventory:
 
 def _load_first_party_plugin_topics(
     plugin_name: str,
-) -> tuple[tuple[TopicContribution, ...], GuideCatalogIssue | None]:
-    """Load one curated package adapter without letting its assets break the catalog."""
-    loader = _FIRST_PARTY_PLUGIN_GUIDE_CONTRIBUTIONS.get(plugin_name)
-    if loader is None:
-        return (), None
-    source = f"system-plugin:{plugin_name}"
-    try:
-        return loader(), None
-    except GuideContributionError as error:
-        return (), GuideCatalogIssue(
-            GuideContributionError(
-                f"invalid guide contribution from {source}: first-party guide content is invalid",
-                source=source,
-                topic=error.topic,
-                field_path=error.field_path or "guide-content",
-            )
-        )
-    except (ImportError, OSError, UnicodeError):
-        return (), GuideCatalogIssue(
-            GuideContributionError(
-                f"invalid guide contribution from {source}: first-party guide content is unavailable",
-                source=source,
-                field_path="guide-content",
-            )
-        )
+) -> tuple[TopicContribution, ...]:
+    """Load one curated package adapter inside guide-scoped construction."""
+    package = _FIRST_PARTY_PLUGIN_GUIDE_PACKAGES.get(plugin_name)
+    if package is None:
+        return ()
+    module = importlib.import_module(package)
+    loader = cast("Callable[[], tuple[TopicContribution, ...]]", module._load_guide_contributions)
+    return loader()
 
 
 def build_authored_catalog(*, strict_trusted_taxonomy: bool = False) -> GuideCatalog:
@@ -160,12 +141,9 @@ def build_authored_catalog(*, strict_trusted_taxonomy: bool = False) -> GuideCat
         if strict_trusted_taxonomy:
             raise contribution_error from None
         release_issue = GuideCatalogIssue(contribution_error)
-    adapter_issues: list[GuideCatalogIssue] = []
     plugins: list[tuple[Plugin, tuple[object, ...]]] = []
     for _, plugin in sorted(SYSTEM_PLUGINS.items()):
-        first_party_topics, adapter_issue = _load_first_party_plugin_topics(plugin.name)
-        if adapter_issue is not None:
-            adapter_issues.append(adapter_issue)
+        first_party_topics = _load_first_party_plugin_topics(plugin.name)
         plugins.append((plugin, (*plugin.guide_topics, *first_party_topics)))
     resource_owners: list[tuple[str, str, str]] = []
     unavailable_resource_owners: set[str] = set()
@@ -184,10 +162,9 @@ def build_authored_catalog(*, strict_trusted_taxonomy: bool = False) -> GuideCat
         strict_trusted_taxonomy=strict_trusted_taxonomy,
         unavailable_plugin_resource_owners=frozenset(unavailable_resource_owners),
     )
-    if release_issue is None and not adapter_issues:
+    if release_issue is None:
         return catalog
-    issues = (*catalog.issues, *adapter_issues, *((release_issue,) if release_issue else ()))
-    return GuideCatalog(catalog.topics, issues)
+    return GuideCatalog(catalog.topics, (*catalog.issues, release_issue))
 
 
 def _schema_topic(slug: str) -> TopicContribution:

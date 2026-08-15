@@ -27,9 +27,9 @@ def test_operator_declared_factory_populates_file_and_line() -> None:
 
 
 def test_built_in_factory_populates_source_str() -> None:
-    o = Origin.built_in(source="agentworks.manifests.builtin/apt-sources.yaml")
+    o = Origin.built_in(source="agentworks.manifests.builtin/vm-sites.yaml")
     assert o.variant == "built-in"
-    assert o.source == "agentworks.manifests.builtin/apt-sources.yaml"
+    assert o.source == "agentworks.manifests.builtin/vm-sites.yaml"
     assert o.file is None
     assert o.line is None
 

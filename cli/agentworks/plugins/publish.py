@@ -143,13 +143,14 @@ def publish_plugins(registry: Registry, config: Config) -> None:
     # list) so a duplicate enabled name cannot double-publish.
     enabled = frozenset(config.enabled_system_plugins)
     for plugin in SYSTEM_PLUGINS.values():
-        if plugin.manifests is None:
+        anchor = plugin.manifests
+        if anchor is None:
             continue
-        _publish_plugin_manifests(registry, plugin, weak=plugin.name not in enabled)
+        _publish_plugin_manifests(registry, plugin.name, anchor, weak=plugin.name not in enabled)
 
 
-def _publish_plugin_manifests(registry: Registry, plugin: Plugin, *, weak: bool) -> None:
-    """Publish ``plugin``'s bundled manifests through the shared loader
+def _publish_plugin_manifests(registry: Registry, plugin_name: str, anchor: str, *, weak: bool) -> None:
+    """Publish ``plugin_name``'s bundled manifests through the shared loader
     body, stamping each entry with the plugin's per-file ``system-plugin``
     origin and restricting the kinds to ``PLUGIN_MANIFEST_KINDS``. Split out so
     the per-file origin closure is a cleanly typed inner function rather than a
@@ -165,12 +166,9 @@ def _publish_plugin_manifests(registry: Registry, plugin: Plugin, *, weak: bool)
     ``register_plugin``'s attributed re-raises rather than surfacing an anchor
     the operator cannot map back to a plugin."""
 
-    anchor = plugin.manifests
-    assert anchor is not None
-
     def origin_for(file_name: str) -> Origin:
         return Origin.system_plugin(
-            plugin=plugin.name,
+            plugin=plugin_name,
             source=f"{anchor}/manifests/{file_name}",
         )
 
@@ -184,4 +182,4 @@ def _publish_plugin_manifests(registry: Registry, plugin: Plugin, *, weak: bool)
             weak=weak,
         )
     except ConfigError as exc:
-        raise ConfigError(f"plugin {plugin.name!r}: {exc}") from exc
+        raise ConfigError(f"plugin {plugin_name!r}: {exc}") from exc

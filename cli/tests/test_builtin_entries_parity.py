@@ -21,6 +21,8 @@ from __future__ import annotations
 from textwrap import dedent
 from typing import TYPE_CHECKING, Any
 
+import pytest
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -244,6 +246,7 @@ def _write_operator_config(
     tmp_path: Path,
     *,
     manifests: dict[str, str] | None = None,
+    enabled_plugins: tuple[str, ...] = (),
 ) -> Path:
     """Write a minimal operator config (plus optional resources/*.yaml
     manifests) and return the config path.
@@ -256,7 +259,10 @@ def _write_operator_config(
     pub.write_text("ssh-ed25519 X")
     priv.write_text("-----BEGIN-----")
     cfg = tmp_path / "config.toml"
-    cfg.write_text(f'[operator]\nssh_public_key = "{pub}"\nssh_private_key = "{priv}"\n')
+    plugin_names = ", ".join(f'"{name}"' for name in enabled_plugins)
+    cfg.write_text(
+        f'[operator]\nssh_public_key = "{pub}"\nssh_private_key = "{priv}"\n\n[plugins]\nsystem = [{plugin_names}]\n'
+    )
     if manifests:
         resources = tmp_path / "resources"
         resources.mkdir()
@@ -312,6 +318,19 @@ def test_installer_plugin_rows_match_oracle_and_are_disabled_by_default(tmp_path
                 assert registry.graph.enablement_of(kind, entry.name) is Enablement.disabled
 
 
+def test_remaining_builtin_manifest_origin_is_truthful(tmp_path: Path) -> None:
+    """The built-in publisher retains its real variant and package source."""
+    from agentworks.bootstrap import build_registry
+    from agentworks.config import load_config
+
+    cfg = load_config(_write_operator_config(tmp_path), warn_issues=False)
+    origin = build_registry(cfg).lookup("vm-site", "lima-local").origin
+
+    assert origin is not None
+    assert origin.variant == "built-in"
+    assert origin.source == "agentworks.manifests.builtin/vm-sites.yaml"
+
+
 # The former ``test_operator_toml_override_wins_over_builtin`` was removed here:
 # it declared an operator ``[apt_packages.gh]`` override in config.toml, which
 # now hard-errors as a resource section (ADR 0022). With the TOML declaration
@@ -320,14 +339,14 @@ def test_installer_plugin_rows_match_oracle_and_are_disabled_by_default(tmp_path
 # semantics, same operator-declared origin), which is the sole remaining path.
 
 
-def test_operator_manifest_override_wins_over_installer_plugin(tmp_path: Path) -> None:
+def test_operator_manifest_override_keeps_plugin_dependency_enablement(tmp_path: Path) -> None:
     """An operator's YAML apt-package manifest with an installer plugin's name
-    replaces that row, carrying the
-    operator payload and an operator-declared origin.
+    replaces that row, but its retained plugin source keeps its own enablement.
     """
     from agentworks.bootstrap import build_registry
     from agentworks.config import load_config
-    from agentworks.resources.access import kind_dict
+    from agentworks.errors import StateError
+    from agentworks.resources.access import ensure_recipe_enabled, kind_dict
 
     manifest = dedent(
         """
@@ -342,16 +361,44 @@ def test_operator_manifest_override_wins_over_installer_plugin(tmp_path: Path) -
           apt:
             - gh
             - gh-extra
+        ---
+        apiVersion: agentworks/v1
+        kind: vm-template
+        metadata:
+          name: default
+          description: VM selecting the operator gh package
+        spec:
+          apt_packages:
+            - gh
         """
     )
-    cfg = load_config(
-        _write_operator_config(tmp_path, manifests={"override.yaml": manifest}),
+    disabled_dir = tmp_path / "disabled"
+    disabled_dir.mkdir()
+    disabled_cfg = load_config(
+        _write_operator_config(disabled_dir, manifests={"override.yaml": manifest}),
         warn_issues=False,
     )
-    registry = build_registry(cfg)
+    registry = build_registry(disabled_cfg)
 
     gh = kind_dict(registry, "apt-package")["gh"]
     assert gh.apt == ["gh", "gh-extra"]
     assert gh.description == "Operator gh override"
     assert gh.origin is not None
     assert gh.origin.variant == "operator-declared"
+
+    with pytest.raises(StateError) as exc:
+        ensure_recipe_enabled(registry, "vm-template", "default")
+    assert exc.value.entity_kind == "apt-source"
+    assert exc.value.entity_name == "github-cli"
+
+    enabled_dir = tmp_path / "enabled"
+    enabled_dir.mkdir()
+    enabled_cfg = load_config(
+        _write_operator_config(
+            enabled_dir,
+            manifests={"override.yaml": manifest},
+            enabled_plugins=("apt",),
+        ),
+        warn_issues=False,
+    )
+    ensure_recipe_enabled(build_registry(enabled_cfg), "vm-template", "default")

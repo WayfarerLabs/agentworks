@@ -468,6 +468,8 @@ spec:
 
 ## Built-ins, plugin catalogs, and overrides
 
+This section is the canonical operator contract for row precedence and dependency enablement.
+
 Built-in resources ship with the app and appear in `agw resource list --origin builtin`. Optional
 catalog rows carry the `system-plugin` origin. Override policy is per kind:
 

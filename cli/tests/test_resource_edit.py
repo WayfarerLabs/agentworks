@@ -87,6 +87,14 @@ def test_builtin_capability_has_no_file_to_edit(tmp_path: Path) -> None:
     assert "resource sample" not in (exc.value.hint or "")
 
 
+def test_builtin_declarable_resource_points_at_sample(tmp_path: Path) -> None:
+    """The remaining built-in declarable row keeps its sample pointer."""
+    registry = _registry(tmp_path)
+    with pytest.raises(ValidationError, match="built-in") as exc:
+        edit_location(registry, "vm-site", "lima-local")
+    assert "agw resource sample vm-site" in (exc.value.hint or "")
+
+
 def test_auto_declared_resource_has_no_file_to_edit(tmp_path: Path) -> None:
     """A bare vm-template/default auto-declares tailscale-auth-key."""
     registry = _registry(tmp_path, manifests=[ManifestDoc("vm-template", "default")])
