@@ -111,14 +111,14 @@ while adding one to another effort's is the sanctioned message channel below.
 
 One sanctioned channel does exist: new-file message passing. Adding a NEW file to another SDD's
 feature directory as a message is fine (a saga delivering seed notes into an adopted child's
-directory is the standing example); the restriction is on modifying another effort's existing
-artifacts. Name new message files `message-<YYYY>-<MM>-<DD>-<topic>.md`. The convention governs new
-messages only: message files delivered before it keep the names they already have, so there is no
-rename sweep to do and no inference to draw from an older name. A sender never overwrites an
-existing message file, because overwriting is an edit to another effort's artifact and can destroy a
-message the recipient has not read yet; a follow-up is always a new file. A delivered message file
-belongs to the receiving effort once read: integrate it into your own artifacts, then keep or delete
-it as you see fit.
+directory is the standing example); the cross-effort restriction is on modifying another effort's
+existing artifacts. Name new message files `message-<YYYY>-<MM>-<DD>-<topic>.md`. The convention
+governs new messages only: message files delivered before it keep the names they already have, so
+there is no rename sweep to do and no inference to draw from an older name. A sender never
+overwrites an existing message file, because overwriting is an edit to another effort's artifact and
+can destroy a message the recipient has not read yet; a follow-up is always a new file. A delivered
+message file belongs to the receiving effort once read: integrate it into your own artifacts, then
+keep or delete it, on the same grant terms as any other artifact in that directory.
 
 Delivery semantics: messages deliver via `main`, never by committing to another effort's live
 branch. A branch is mutable state under its owner's control (a rebase or force-push can silently

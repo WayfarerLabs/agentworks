@@ -120,9 +120,9 @@ stays out of the weeds on purpose:
   branch and head SHA; integrating that branch back onto the effort's branch is the lead's step, not
   the dev's, and doing it promptly keeps section 6's no-hoarding rule satisfied end to end.
 - **Relaunch the lead session after a rule change.** Subagents have been observed running under the
-  rules their launching session started with rather than the rules present in the tree they work in,
-  so a long-lived lead's subagents can be operating under rules the repo has already moved past;
-  relaunch before delegating work that a rule change governs.
+  rules their launching session started with rather than the rules currently on `main`, so a
+  long-lived lead's subagents can be operating under rules the repo has already moved past; relaunch
+  before delegating work that a rule change governs.
 
 ## 4. Choose the model deliberately for each delegation
 
