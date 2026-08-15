@@ -139,10 +139,12 @@ deliberately narrow `cli-conventions.md`.
   is a caller-supplied argument at the published service surface: no first-party site _constructs_ a
   non-enum policy, but the manifest services take `interaction` from callers outside our type
   checking, and a probe drove `verify_secrets(..., interaction="refuse")` into real OnePassword
-  backend execution. PR #523 closes that half by checking `interaction` on arrival at the four
-  services that consume a policy rather than forward one. The deferred half stays with issue 529
-  against the external-plugin loader effort: no backend's safety should depend on its name, and the
-  `prompt` special case is what currently decides whether the identity comparison fails loud.
+  backend execution. PR #523 closes that half on a structural rule: every construction of
+  `ResolutionPolicy` is preceded by the check on its own call path, plus a check at the three entry
+  points that do destructive or remote work before reaching a construction. The deferred half stays
+  with issue 529 against the external-plugin loader effort: no backend's safety should depend on its
+  name, and the `prompt` special case is what currently decides whether the identity comparison
+  fails loud.
 - **S10** LLD prose in permanent docstrings: 45-line docstring over a 10-line body
   (`base.py:187-218`), 57-line module docstring litigating design history, a 16-line Typer help
   docstring describing internals.
