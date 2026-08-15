@@ -67,7 +67,7 @@ def guide(
         ),
     ] = None,
 ) -> None:
-    """Render authored guidance and safe facts from the current system."""
+    """Show guide destinations or render selected guidance and safe facts."""
     explicit: Literal["agent", "human"] | None = None if agent is None else ("agent" if agent else "human")
     mode = select_guide_mode(explicit, os.environ, sys.stdout.isatty())
     verification_evidence = _parse_evidence(evidence or [])

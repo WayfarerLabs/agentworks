@@ -416,26 +416,6 @@ def test_union_arms_explain_recursion_and_point_to_addressable_references(
     assert "`agw resource describe-kind vm-platform/wsl2`" in payload
 
 
-def test_runtime_index_retains_other_topics_when_one_schema_target_is_invalid(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _reject_vm_template_title(monkeypatch)
-
-    response = render_guide(
-        (),
-        GuideMode.AGENT,
-        load_config_fn=lambda: object(),  # type: ignore[arg-type,return-value]
-        load_registry_fn=lambda _config: None,  # type: ignore[arg-type,return-value]
-    )
-
-    assert response.exit_code == 1
-    assert "agent-template" in response.names
-    assert "vm-template" not in response.names
-    assert "`agent-template`" in response.markdown
-    assert "schema:vm-template" in response.markdown
-    assert "SCHEMA_PAYLOAD" not in response.markdown
-
-
 def test_name_discovery_omits_invalid_schema_target_without_echoing_its_content(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -601,7 +581,7 @@ def test_schema_blocks_render_with_broken_config_beside_static_migration_teachin
         load_config_fn=_broken_config,
     )
 
-    assert response.exit_code == 1
+    assert response.exit_code == 0
     assert "Inventory and preserve the migration evidence" in response.markdown
     assert "Reference target: `vm-template`" in response.markdown
     assert "```yaml" in response.markdown
@@ -734,7 +714,7 @@ def test_schema_block_payloads_are_identical_between_modes() -> None:
 def test_explicit_resource_request_still_degrades_under_broken_config() -> None:
     response = render_guide(("vm-template/demo",), GuideMode.AGENT, load_config_fn=_broken_config)
 
-    assert response.exit_code == 1
-    assert "# vm-template/demo" in response.markdown
-    assert response.markdown.count("Live facts unavailable: see the system failure below") == 3
-    assert "`vm-template`" in response.markdown
+    assert response.exit_code == 0
+    assert "vm-template/demo/state" in response.markdown
+    assert "vm-template/demo/relationships" in response.markdown
+    assert "vm-template/demo/instances" in response.markdown

@@ -6,22 +6,29 @@ import difflib
 import html
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, assert_never, cast
 
-from agentworks.errors import AgentworksError, ConfigError, ConfigFileNotFoundError, StateError, ValidationError
-from agentworks.guide.assessment import OnboardingSnapshot
+from agentworks.errors import AgentworksError, ConfigError, StateError, ValidationError
+from agentworks.guide.assessment import OnboardingSnapshot, _validate_verification_evidence
 from agentworks.guide.catalog import GuideCatalog, GuideCatalogIssue, _build_guide_catalog
 from agentworks.guide.contract import (
+    ActionList,
+    AgentContract,
     BlockId,
     ConceptAnchor,
+    FieldReference,
+    GuideBlock,
     GuideContributionError,
     ImplementationAnchor,
     InstanceList,
     KindAnchor,
+    Overview,
     Relationships,
     ReleaseNotes,
     ResourceAnchor,
+    Sample,
     State,
+    Teaching,
     TopicContribution,
     TopicLinks,
     TopicSlug,
@@ -30,10 +37,10 @@ from agentworks.guide.contract import (
     parse_topic_contribution,
 )
 from agentworks.guide.contributions import guide_contributions
-from agentworks.guide.render import framework_heading, render_index, render_topic, sanitize_terminal_output
+from agentworks.guide.render import framework_heading, render_topic, render_trail_sign, sanitize_terminal_output
 from agentworks.guide.view import GuideInstanceFact, GuideRelationship, build_guide_view
 from agentworks.manifests.reference import describable_targets, reference_for
-from agentworks.release_notes import ReleaseNotesError, read_release_history, topic_version
+from agentworks.release_notes import ReleaseNotesError, read_release_history
 from agentworks.resources import KIND_REGISTRY
 
 if TYPE_CHECKING:
@@ -292,13 +299,41 @@ def _framed_error(error: AgentworksError) -> str:
     return message
 
 
-def _view_failure(topic: TopicContribution, error: AgentworksError) -> str:
-    """Frame a bounded per-topic projection failure without leaking raw resource objects."""
-    return f"live facts for {topic.topic} are unavailable: {_framed_error(error)}"
-
-
 def _unknown(slug: str, names: tuple[str, ...]) -> UnknownGuideTopicError:
     return UnknownGuideTopicError(slug, tuple(difflib.get_close_matches(slug, names, n=3)))
+
+
+def _requires_live_context(block: GuideBlock) -> bool:
+    """Classify the closed guide block vocabulary by its data source."""
+    if isinstance(block, (InstanceList, State, Relationships)):
+        return True
+    if isinstance(
+        block,
+        (Overview, Teaching, AgentContract, ActionList, TopicLinks, ReleaseNotes, FieldReference, Sample),
+    ):
+        return False
+    assert_never(block)
+
+
+def _topic_requires_live_context(topic: TopicContribution) -> bool:
+    return topic.topic == "concept-onboarding" or any(_requires_live_context(block) for block in topic.blocks)
+
+
+def _live_block_identities(topic: TopicContribution) -> tuple[str, ...]:
+    identities = tuple(f"{topic.topic}/{block.id}" for block in topic.blocks if _requires_live_context(block))
+    if topic.topic == "concept-onboarding":
+        identities += ("concept-onboarding/derived-plan",)
+    return identities
+
+
+def _context_warning(problems: dict[str, dict[str, None]]) -> str:
+    if not problems:
+        return ""
+    rows = []
+    for problem, identities in problems.items():
+        omitted = ", ".join(f"`{identity}`" for identity in identities)
+        rows.append(f"- {problem} Omitted blocks: {omitted}.")
+    return f"{framework_heading('Guide context is incomplete')}\n\n" + "\n".join(rows)
 
 
 def render_guide(
@@ -312,8 +347,6 @@ def render_guide(
     verification_evidence: tuple[VerificationEvidence, ...] = (),
 ) -> GuideResponse:
     """Build and render one atomic guide request with fail-soft live facts."""
-    authored = build_authored_catalog()
-    schema = _build_schema_catalog()
     requested = _normalize_requested(requested)
     if verification_evidence != ():
         if names_only:
@@ -322,6 +355,15 @@ def render_guide(
             raise ValidationError("verification evidence requires the concept-onboarding topic")
         if "concept-onboarding" not in requested:
             raise ValidationError("verification evidence requires the concept-onboarding topic")
+        _validate_verification_evidence(verification_evidence)
+    if not requested and not names_only:
+        from agentworks.guide.trail_sign import trail_destinations
+
+        destinations = tuple(str(destination.slug) for destination in trail_destinations(mode))
+        return GuideResponse(render_trail_sign(mode), 0, destinations)
+
+    authored = build_authored_catalog()
+    schema = _build_schema_catalog()
     if load_config_fn is None:
         from agentworks.config import load_config
 
@@ -333,185 +375,184 @@ def render_guide(
         from agentworks.bootstrap import load_guide_registry
 
         load_registry_fn = load_guide_registry
-    registry: Registry | None = None
-    system_error: AgentworksError | None = None
-    try:
-        config = load_config_fn()
-        registry = load_registry_fn(config)
-    except AgentworksError as error:
-        system_error = error
 
     authored_names = frozenset(authored.names())
-    dynamic_names = _dynamic_names(registry, schema)
-    dynamic_only_names = tuple(name for name in dynamic_names if name not in authored_names)
-    all_names = tuple(sorted(authored_names | frozenset(dynamic_only_names)))
+    schema_names = frozenset(schema.names())
+    static_names = tuple(sorted(authored_names | schema_names))
+    registry: Registry | None = None
+    system_error: AgentworksError | None = None
     if names_only:
+        try:
+            config = load_config_fn()
+            loaded_registry = load_registry_fn(config)
+            if loaded_registry is None:
+                raise StateError("resource registry is unavailable")
+            registry = loaded_registry
+        except AgentworksError:
+            pass
+        dynamic_names = _dynamic_names(registry, schema)
+        all_names = tuple(sorted(authored_names | frozenset(dynamic_names)))
         return GuideResponse("".join(f"{name}\n" for name in all_names), 0, all_names)
 
     validated_slots: list[tuple[str, TopicContribution | str | None]] = []
-    if requested:
-        schema_names = frozenset(schema.names())
-        rejected_topics = frozenset(
-            issue.error.topic for issue in (*authored.issues, *schema.issues) if issue.error.topic is not None
-        )
-        for slug in requested:
-            if slug in authored_names:
-                validated_slots.append((slug, authored.lookup(slug)))
-                continue
-            if slug in schema_names:
-                validated_slots.append((slug, schema.lookup(slug)))
-                continue
-            if slug in rejected_topics:
-                validated_slots.append((slug, None))
-                continue
-            kind = slug.split("/", 1)[0]
-            if registry is not None:
-                valid_dynamic = slug in dynamic_names
-            else:
-                handler = KIND_REGISTRY.get(kind)
-                valid_dynamic = slug in dynamic_names or (
-                    handler is not None and handler.category == "declarable" and slug.count("/") == 1
-                )
-            if not valid_dynamic:
-                raise _unknown(slug, all_names)
-            validated_slots.append((slug, slug))
-
-    requested_slots = tuple(
-        (slug, _dynamic_topic(registry, value) if isinstance(value, str) else value) for slug, value in validated_slots
+    rejected_topics = frozenset(
+        issue.error.topic for issue in (*authored.issues, *schema.issues) if issue.error.topic is not None
     )
+    for slug in requested:
+        if slug in authored_names:
+            validated_slots.append((slug, authored.lookup(slug)))
+        elif slug in schema_names:
+            validated_slots.append((slug, schema.lookup(slug)))
+        elif slug in rejected_topics:
+            validated_slots.append((slug, None))
+        elif slug.split("/", 1)[0] in KIND_REGISTRY and slug.count("/") <= 1:
+            validated_slots.append((slug, slug))
+        else:
+            raise _unknown(slug, static_names)
+
+    needs_live_context = any(
+        isinstance(value, str) or value is not None and _topic_requires_live_context(value)
+        for _slug, value in validated_slots
+    )
+    if needs_live_context:
+        try:
+            config = load_config_fn()
+            loaded_registry = load_registry_fn(config)
+            if loaded_registry is None:
+                raise StateError("resource registry is unavailable")
+            registry = loaded_registry
+        except AgentworksError as error:
+            system_error = error
+
+    all_names = static_names
+    if registry is not None:
+        dynamic_names = _dynamic_names(registry, schema)
+        all_names = tuple(sorted(authored_names | frozenset(dynamic_names)))
+        for slug, topic in validated_slots:
+            if isinstance(topic, str) and slug not in dynamic_names:
+                raise _unknown(slug, all_names)
+
+    requested_slots: list[tuple[str, TopicContribution | None]] = []
+    for slug, value in validated_slots:
+        if not isinstance(value, str):
+            requested_slots.append((slug, value))
+            continue
+        try:
+            requested_slots.append((slug, _dynamic_topic(registry, value)))
+        except KeyError:
+            requested_slots.append((slug, _dynamic_topic(None, value)))
 
     selected_topics = tuple(topic for _slug, topic in requested_slots if topic is not None)
 
-    visible_issues = authored.issues
-    visible_schema_issues = schema.issues
-    if requested:
-        visible_issues = tuple(issue for issue in visible_issues if issue.error.topic in requested)
-        visible_schema_issues = tuple(issue for issue in visible_schema_issues if issue.error.topic in requested)
-    runtime_issues = [str(issue.error) for issue in visible_schema_issues]
-    if not requested_slots:
-        schema_dynamic_topics = tuple(topic for topic in schema.topics if topic.topic not in authored_names)
-        schema_dynamic_names = frozenset(str(topic.topic) for topic in schema_dynamic_topics)
-        runtime_dynamic_topics = tuple(
-            _dynamic_topic(registry, name) for name in dynamic_only_names if name not in schema_dynamic_names
-        )
-        # Exact release topics remain addressable and completable, but their
-        # templated summaries do not help choose between versions in the index.
-        index_topics = tuple(
-            topic
-            for topic in (*authored.topics, *schema_dynamic_topics, *runtime_dynamic_topics)
-            if topic_version(str(topic.topic)) is None
-        )
-        markdown = render_index(index_topics, mode)
-    else:
-        from agentworks.db import DatabaseDriverError
+    visible_issues = tuple(issue for issue in authored.issues if issue.error.topic in requested)
+    visible_schema_issues = tuple(issue for issue in schema.issues if issue.error.topic in requested)
+    content_issues = [str(issue.error) for issue in visible_schema_issues]
+    context_problems: dict[str, dict[str, None]] = {}
 
-        owned_db = False
-        if selected_topics and registry is not None and db is None:
-            from agentworks.db import DB_PATH, Database
+    def record_context_problem(error: AgentworksError, identities: tuple[str, ...]) -> None:
+        problem = _framed_error(error).replace("\n", " ")
+        omitted = context_problems.setdefault(problem, {})
+        for identity in identities:
+            omitted.setdefault(identity, None)
 
-            if DB_PATH.exists():
-                try:
-                    db = Database(read_only=True)
-                    owned_db = True
-                except AgentworksError as error:
-                    system_error = error
-                    db = cast("Database", _EmptyInventory())
-            else:
-                db = cast("Database", _EmptyInventory())
-        documents = []
-        try:
-            onboarding_snapshot = None
-            if (
-                registry is not None
-                and system_error is None
-                and any(topic.topic == "concept-onboarding" for topic in selected_topics)
-            ):
-                if db is None:
-                    raise RuntimeError("guide database was not constructed")
-                onboarding_topic = next(topic for topic in selected_topics if topic.topic == "concept-onboarding")
+    owned_db = False
+    if needs_live_context and registry is not None and system_error is None and db is None:
+        from agentworks.db import DB_PATH, Database
+
+        if DB_PATH.exists():
+            try:
+                db = Database(read_only=True)
+                owned_db = True
+            except AgentworksError as error:
+                system_error = error
+        else:
+            db = cast("Database", _EmptyInventory())
+
+    all_live_identities = tuple(identity for topic in selected_topics for identity in _live_block_identities(topic))
+    if system_error is not None:
+        record_context_problem(system_error, all_live_identities)
+
+    from agentworks.db import DatabaseDriverError
+
+    views = {}
+    unavailable_topics: set[str] = set()
+    onboarding_snapshot = None
+    onboarding_unavailable = any(topic.topic == "concept-onboarding" for topic in selected_topics)
+    try:
+        if needs_live_context and registry is not None and system_error is None:
+            if db is None:
+                raise RuntimeError("guide database was not constructed")
+            onboarding_topic = next(
+                (topic for topic in selected_topics if topic.topic == "concept-onboarding"),
+                None,
+            )
+            if onboarding_topic is not None:
                 try:
                     onboarding_snapshot = build_onboarding_snapshot(registry, db)
+                    onboarding_unavailable = False
                 except AgentworksError as error:
-                    runtime_issues.append(_view_failure(onboarding_topic, error))
-                    onboarding_snapshot = None
-                # Validate the complete replay log against current projected
-                # targets before rendering any selected document. This keeps
-                # multi-topic output atomic even when onboarding is not first.
-                if onboarding_snapshot is not None and verification_evidence != ():
-                    from agentworks.guide.assessment import assess_onboarding
-
-                    assess_onboarding(onboarding_snapshot, verification_evidence=verification_evidence)
-                elif verification_evidence != ():
-                    raise ValidationError("verification evidence requires available onboarding facts")
-            elif verification_evidence != ():
-                raise ValidationError("verification evidence requires available onboarding facts")
-            for slug, topic in requested_slots:
-                if topic is None:
-                    documents.append(f"# {slug}\n\nThis guide topic is unavailable.")
+                    record_context_problem(error, ("concept-onboarding/derived-plan",))
+            for topic in selected_topics:
+                if not any(_requires_live_context(block) for block in topic.blocks):
                     continue
-                view = None
-                unavailable = None
-                if registry is not None and system_error is None:
-                    if db is None:
-                        raise RuntimeError("guide database was not constructed")
-                    if topic.topic == "concept-onboarding" and onboarding_snapshot is None:
-                        unavailable = "this topic's live projection is unavailable"
-                    else:
-                        try:
-                            view = build_guide_view(topic, registry, db)
-                        except AgentworksError as error:
-                            runtime_issues.append(_view_failure(topic, error))
-                            unavailable = "this topic's live projection is unavailable"
-                else:
-                    unavailable = "see the system failure below"
-                rendered_topic = render_topic(
-                    topic,
-                    view,
-                    mode,
-                    unavailable=unavailable,
-                    onboarding_snapshot=(onboarding_snapshot if topic.topic == "concept-onboarding" else None),
-                    verification_evidence=verification_evidence,
-                )
-                runtime_issues.extend(rendered_topic.issues)
-                documents.append(rendered_topic.markdown.rstrip())
-        except DatabaseDriverError:
-            # The guide owns a read-only connection. A future projection that
-            # accidentally attempts a write must degrade like any other live
-            # fact failure, without exposing SQLite internals or a database
-            # path. Render the whole selected set without live views so a
-            # multi-topic response stays atomic.
-            system_error = StateError(
-                "state database rejected a guide projection",
-                hint="Run a normal Agentworks command to inspect or repair the state database.",
-            )
-            documents = [
-                (
-                    f"# {slug}\n\nThis guide topic is unavailable."
-                    if topic is None
-                    else render_topic(
-                        topic,
-                        None,
-                        mode,
-                        unavailable="see the system failure below",
-                        verification_evidence=verification_evidence,
-                    ).markdown.rstrip()
-                )
-                for slug, topic in requested_slots
-            ]
-        finally:
-            if owned_db and db is not None:
-                db.close()
-        markdown = "\n\n---\n\n".join(documents) + "\n"
+                try:
+                    views[str(topic.topic)] = build_guide_view(topic, registry, db)
+                except AgentworksError as error:
+                    unavailable_topics.add(str(topic.topic))
+                    identities = tuple(
+                        f"{topic.topic}/{block.id}" for block in topic.blocks if _requires_live_context(block)
+                    )
+                    record_context_problem(error, identities)
+    except DatabaseDriverError:
+        system_error = StateError(
+            "state database rejected a guide projection",
+            hint="Run a normal Agentworks command to inspect or repair the state database.",
+        )
+        views.clear()
+        unavailable_topics = {str(topic.topic) for topic in selected_topics if _topic_requires_live_context(topic)}
+        onboarding_snapshot = None
+        onboarding_unavailable = any(topic.topic == "concept-onboarding" for topic in selected_topics)
+        context_problems.clear()
+        record_context_problem(system_error, all_live_identities)
+    finally:
+        if owned_db and db is not None:
+            db.close()
+
+    if onboarding_snapshot is not None and verification_evidence:
+        from agentworks.guide.assessment import assess_onboarding
+
+        assess_onboarding(onboarding_snapshot, verification_evidence=verification_evidence)
+
+    documents = []
+    for slug, topic in requested_slots:
+        if topic is None:
+            documents.append(f"# {slug}\n\nThis guide topic is unavailable.")
+            continue
+        topic_name = str(topic.topic)
+        live_unavailable = system_error is not None or topic_name in unavailable_topics
+        rendered_topic = render_topic(
+            topic,
+            views.get(topic_name),
+            mode,
+            unavailable="See the response warning." if live_unavailable else None,
+            onboarding_snapshot=onboarding_snapshot if topic.topic == "concept-onboarding" else None,
+            onboarding_unavailable=topic.topic == "concept-onboarding" and onboarding_unavailable,
+            verification_evidence=verification_evidence,
+        )
+        content_issues.extend(rendered_topic.issues)
+        documents.append(rendered_topic.markdown.rstrip())
+
+    markdown = "\n\n---\n\n".join(documents)
+    warning = _context_warning(context_problems)
+    if warning:
+        markdown = f"{warning}\n\n{markdown}"
+    markdown += "\n"
     issue_details = [f"- {issue.error.source}: {issue.error}" for issue in visible_issues]
-    issue_details.extend(f"- {issue}" for issue in dict.fromkeys(runtime_issues))
+    issue_details.extend(f"- {issue}" for issue in dict.fromkeys(content_issues))
     issue_markdown = ""
     if issue_details:
         details = "\n".join(issue_details)
         issue_markdown = f"\n\n{framework_heading('Guide content unavailable')}\n\n{details}"
-    error_markdown = (
-        f"\n\n{framework_heading('Live facts unavailable')}\n\n{_framed_error(system_error)}" if system_error else ""
-    )
-    expected_clean_home = isinstance(system_error, ConfigFileNotFoundError)
-    exit_code = 1 if visible_issues or runtime_issues or (system_error is not None and not expected_clean_home) else 0
-    output = sanitize_terminal_output(markdown.rstrip() + issue_markdown + error_markdown + "\n")
+    exit_code = 1 if visible_issues or content_issues else 0
+    output = sanitize_terminal_output(markdown.rstrip() + issue_markdown + "\n")
     return GuideResponse(output, exit_code, all_names)
