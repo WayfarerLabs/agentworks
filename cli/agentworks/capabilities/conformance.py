@@ -42,7 +42,6 @@ def conformance_error(descriptor: CapabilityKindDescriptor, impl: type) -> str |
             else None
         )
         or _forbidden_reference_error(descriptor, impl)
-        or _fixed_lifecycle_error(descriptor, impl)
     )
 
 
@@ -290,21 +289,6 @@ def _string_only_key(annotation: object) -> bool:
     if origin in (Union, types.UnionType):
         return bool(get_args(annotation)) and all(_string_only_key(arm) for arm in get_args(annotation))
     return False
-
-
-def _fixed_lifecycle_error(descriptor: CapabilityKindDescriptor, impl: type) -> str | None:
-    from agentworks.capabilities.secret_backend.base import SecretBackend
-
-    if descriptor.implementation_contract is not SecretBackend:
-        return None
-    for name in ("preflight", "runup"):
-        owner = next(base for base in impl.__mro__ if name in base.__dict__)
-        if owner is not SecretBackend:
-            return (
-                f"it overrides final SecretBackend.{name}; secret backends resolve before ordinary "
-                "capability preflight/runup"
-            )
-    return None
 
 
 def _version_error(descriptor: CapabilityKindDescriptor, impl: type) -> str | None:

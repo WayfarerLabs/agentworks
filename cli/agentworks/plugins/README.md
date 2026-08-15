@@ -171,9 +171,11 @@ failing far from the mistake. The checks:
 - **Constructibility**: nothing would stop the class being constructed (no unimplemented
   `@abstractmethod`). Checked structurally; the impl is never constructed to find out.
 - **Operations**: the domain operations the framework depends on are present and callable. For a
-  `secret-backend`, registration also checks the exact classmethod binding, parameter shape,
-  resolved annotations, and return annotation of `backend_readiness`, `would_attempt`,
-  `describe_lookup`, `external_operation_timeout`, and `create_client`.
+  `secret-backend`, registration also checks the call shape of `backend_readiness`, `would_attempt`,
+  `describe_lookup`, `external_operation_timeout`, and `create_client`: each declared as a
+  `@classmethod`, with the parameter names and kinds the resolution loop calls with. Annotations are
+  not compared, because a type claim is what the type checker is for and a plugin's types are not
+  under it either way.
 - **Config models**: the impl declares every model surface its descriptor names (see
   [Declaring config](#declaring-config)). Each extends its declared base and can be built; tagged
   config models identify their implementation. A secret backend's source config cannot reference a

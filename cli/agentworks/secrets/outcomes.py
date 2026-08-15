@@ -137,7 +137,15 @@ _UNSAFE_DIAGNOSTIC_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
 
 
 def _safe_diagnostic_text(value: str) -> bool:
-    """Reject text that can alter or forge a rendered diagnostic line."""
+    """Reject text that can alter or forge a rendered diagnostic line.
+
+    Boundary: operator-authored input rendered as text. Two of the fields on
+    a value-free row are operator-written and reach no naming validator: a
+    secret NAME, because ``secret`` auto-declares any name a config
+    reference uses without restriction (``secrets.kinds``), and a lookup
+    IDENTIFIER, which is the operator's own mapping value. Source names are
+    not among them; those pass ``validate_name`` at manifest decode.
+    """
     return all(unicodedata.category(char) not in _UNSAFE_DIAGNOSTIC_CATEGORIES for char in value)
 
 
@@ -160,24 +168,23 @@ class ResolutionOutcome:
         if (self.source is not None) is not rule.source_required:
             raise ValueError("invalid resolution outcome source")
         if not rule.identifier_allowed and self.identifier is not None:
-            raise ValueError("invalid resolution outcome identifier")
+            raise ValueError("this resolution outcome detail forbids an identifier")
         if (self.remediation_target is not None) is not rule.remediation_target_required:
             raise ValueError("invalid resolution outcome remediation target presence")
-        if rule.remediation_target_required and (
-            not isinstance(self.remediation_target, str)
-            or not self.remediation_target
-            or "/" in self.remediation_target
-        ):
-            raise ValueError("enable-plugin remediation target must be non-empty and '/'-free")
         if not _safe_diagnostic_text(self.name):
             raise ValueError("invalid resolution outcome name")
-        if self.source is not None and not _safe_diagnostic_text(self.source):
-            raise ValueError("invalid resolution outcome source")
         if self.identifier is not None and not _safe_diagnostic_text(self.identifier):
             raise ValueError("invalid resolution outcome identifier")
 
 
 def _escape_plugin_target(target: str) -> str:
+    """Render a plugin name as ASCII, escaping everything else.
+
+    Boundary: a capability class registered from outside our type checking.
+    A plugin names itself, and ``register_plugin`` only requires that name
+    to be non-empty and '/'-free, so the remediation line escapes rather
+    than trusts it. This is the sink, so it is the only place that has to.
+    """
     escaped: list[str] = []
     for char in target:
         codepoint = ord(char)

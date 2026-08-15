@@ -569,8 +569,8 @@ def _build_union(
     # Built from a runtime value, so mypy cannot see a type here and
     # neither could it if this were spelled any other way: the arms come
     # from a registry a plugin contributes to. The shape is checked
-    # instead at registration (conformance check five proves every arm
-    # extends the kind's base and tags itself) and by the union tests.
+    # instead at registration (``_model_error`` proves every arm extends
+    # the kind's base and tags itself) and by the union tests.
     union: Any = Annotated[Union[arms], Field(discriminator=discriminator)]  # noqa: UP007
     return cast(
         "type[BaseModel]",

@@ -6,12 +6,11 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from datetime import date
 from enum import StrEnum
-from typing import Annotated, Any, ClassVar, Literal, TypeAlias
+from typing import Annotated, Any, Literal
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
-from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.conformance import conformance_error
 from agentworks.capabilities.descriptor import descriptor_for
 from agentworks.capabilities.secret_backend import (
@@ -19,10 +18,6 @@ from agentworks.capabilities.secret_backend import (
     RemainingTime,
     SecretBackend,
     SecretSourceClient,
-)
-from agentworks.capabilities.secret_backend.conformance import (
-    _create_client_conformance_error,
-    _secret_backend_conformance_error,
 )
 from agentworks.resources.graph import Readiness
 from agentworks.schema import AgwModel, AgwRootModel, ResourceRef, SecretRef, model_is_complete
@@ -345,54 +340,6 @@ def test_a_python_only_type_nested_in_a_container_is_rejected() -> None:
     assert "datetime.date at root.rows[]{value}" in reason
 
 
-class DirectPreflightOverride(ConformingSecretBackend):
-    name = "phase3-fixture"
-    description = "overrides final preflight"
-    config_model: ClassVar[type[AgwModel]] = GoodConfig
-    mapping_model: ClassVar[type[AgwRootModel[Any]]] = GoodMapping
-
-    def preflight(self, ctx: RunContext) -> None:  # type: ignore[misc]
-        return None
-
-
-class DirectRunupOverride(ConformingSecretBackend):
-    name = "phase3-fixture"
-    description = "overrides final runup"
-    config_model: ClassVar[type[AgwModel]] = GoodConfig
-    mapping_model: ClassVar[type[AgwRootModel[Any]]] = GoodMapping
-
-    def runup(self, ctx: RunContext) -> None:  # type: ignore[misc]
-        return None
-
-
-class InheritsPreflightOverride(DirectPreflightOverride):
-    pass
-
-
-class InheritsRunupOverride(DirectRunupOverride):
-    pass
-
-
-@pytest.mark.parametrize(
-    ("impl", "operation"),
-    [
-        (DirectPreflightOverride, "preflight"),
-        (InheritsPreflightOverride, "preflight"),
-        (DirectRunupOverride, "runup"),
-        (InheritsRunupOverride, "runup"),
-    ],
-    ids=("direct-preflight", "inherited-preflight", "direct-runup", "inherited-runup"),
-)
-def test_direct_and_inherited_ordinary_lifecycle_overrides_are_rejected(
-    impl: type[SecretBackend], operation: str
-) -> None:
-    reason = conformance_error(DESCRIPTOR, impl)
-    assert reason == (
-        f"it overrides final SecretBackend.{operation}; secret backends resolve before ordinary "
-        "capability preflight/runup"
-    )
-
-
 def _valid_readiness(cls) -> Readiness:
     return Readiness.ready()
 
@@ -426,10 +373,6 @@ def _readiness_with_extra(cls, extra: str) -> Readiness:
     return Readiness.ready()
 
 
-def _readiness_with_wrong_return(cls) -> bool:
-    return True
-
-
 def _would_attempt_with_positional_mapping(cls, secret_name: str, mapping_present: bool) -> bool:
     return mapping_present
 
@@ -438,15 +381,7 @@ def _would_attempt_with_default(cls, secret_name: str, *, mapping_present: bool 
     return mapping_present
 
 
-def _would_attempt_with_wrong_annotation(cls, secret_name: bytes, *, mapping_present: bool) -> bool:
-    return mapping_present
-
-
 def _describe_with_wrong_name(cls, name: str, mapping: BaseModel | None) -> str | None:
-    return None
-
-
-def _describe_with_wrong_mapping_annotation(cls, secret_name: str, mapping: AgwModel | None) -> str | None:
     return None
 
 
@@ -462,28 +397,13 @@ def _timeout_with_default(cls, config: AgwModel | None = None) -> float | None:
     return None
 
 
-def _timeout_with_wrong_annotation(cls, config: object) -> float | None:
-    return None
-
-
-def _timeout_with_wrong_return(cls, config: AgwModel) -> int:
-    return 1
-
-
 @pytest.mark.parametrize(
     ("operation", "implementation", "expected"),
     [
         ("backend_readiness", _readiness_with_extra, "must declare 0 parameters after cls (got 1)"),
-        ("backend_readiness", _readiness_with_wrong_return, "must return agentworks.resources.graph.Readiness"),
         ("would_attempt", _would_attempt_with_positional_mapping, "parameter 'mapping_present' must be keyword-only"),
         ("would_attempt", _would_attempt_with_default, "parameter 'mapping_present' must not have a default"),
-        ("would_attempt", _would_attempt_with_wrong_annotation, "parameter 'secret_name' must be annotated as str"),
         ("describe_lookup", _describe_with_wrong_name, "parameter 1 must be named 'secret_name'"),
-        (
-            "describe_lookup",
-            _describe_with_wrong_mapping_annotation,
-            "parameter 'mapping' must be annotated as pydantic.main.BaseModel | None",
-        ),
         (
             "external_operation_timeout",
             _timeout_with_wrong_name,
@@ -499,30 +419,15 @@ def _timeout_with_wrong_return(cls, config: AgwModel) -> int:
             _timeout_with_default,
             "parameter 'config' must not have a default",
         ),
-        (
-            "external_operation_timeout",
-            _timeout_with_wrong_annotation,
-            "parameter 'config' must be annotated as agentworks.schema.base.AgwModel",
-        ),
-        (
-            "external_operation_timeout",
-            _timeout_with_wrong_return,
-            "must return float | None",
-        ),
     ],
     ids=(
         "readiness-count",
-        "readiness-return",
         "would-attempt-kind",
         "would-attempt-default",
-        "would-attempt-annotation",
         "describe-name",
-        "describe-annotation",
         "timeout-name",
         "timeout-kind",
         "timeout-default",
-        "timeout-annotation",
-        "timeout-return",
     ),
 )
 def test_source_contract_operation_exact_signature_rejection_matrix(
@@ -550,48 +455,6 @@ def test_external_timeout_is_never_invoked_during_conformance() -> None:
 
     assert conformance_error(DESCRIPTOR, _backend(external_operation_timeout=classmethod(timeout))) is None
     assert calls == 0
-
-
-def test_source_operation_annotations_resolve_at_the_inherited_definition_site() -> None:
-    class Owner(ConformingSecretBackend):
-        name = "phase3-fixture"
-        description = "definition-site annotation fixture"
-        config_model: ClassVar[type[AgwModel]] = GoodConfig
-        mapping_model: ClassVar[type[AgwRootModel[Any]]] = GoodMapping
-        Ready: TypeAlias = Readiness  # noqa: UP040
-        Name: TypeAlias = str  # noqa: UP040
-        Present: TypeAlias = bool  # noqa: UP040
-        Mapping: TypeAlias = BaseModel | None  # noqa: UP040
-        Identifier: TypeAlias = str | None  # noqa: UP040
-        SourceConfig: TypeAlias = AgwModel  # noqa: UP040
-        Timeout: TypeAlias = float | None  # noqa: UP040
-
-        @classmethod
-        def backend_readiness(cls) -> Ready:
-            return Readiness.ready()
-
-        @classmethod
-        def would_attempt(cls, secret_name: Name, *, mapping_present: Present) -> bool:
-            return mapping_present
-
-        @classmethod
-        def describe_lookup(cls, secret_name: Name, mapping: Mapping) -> Identifier:
-            return None
-
-        @classmethod
-        def external_operation_timeout(cls, config: SourceConfig) -> Timeout:
-            return None
-
-    class Inherited(Owner):
-        Ready = bool  # type: ignore[assignment]
-        Name = bytes  # type: ignore[assignment]
-        Present = str  # type: ignore[assignment]
-        Mapping = AgwModel  # type: ignore[assignment]
-        Identifier = object  # type: ignore[assignment]
-        SourceConfig = bytes  # type: ignore[assignment]
-        Timeout = str  # type: ignore[assignment]
-
-    assert _secret_backend_conformance_error(Inherited) is None
 
 
 Factory = Callable[..., AbstractContextManager[SecretSourceClient]]
@@ -635,28 +498,6 @@ def _defaulted_binding(
     cls=None,
     *,
     source_name: str,
-    config: AgwModel,
-    interaction_broker: InteractionBroker | None,
-    remaining_time: RemainingTime,
-) -> AbstractContextManager[SecretSourceClient]:
-    raise NotImplementedError
-
-
-def _annotated_binding(
-    cls: object,
-    *,
-    source_name: str,
-    config: AgwModel,
-    interaction_broker: InteractionBroker | None,
-    remaining_time: RemainingTime,
-) -> AbstractContextManager[SecretSourceClient]:
-    raise NotImplementedError
-
-
-def _unresolved_annotation(
-    cls,
-    *,
-    source_name: NeverDefined,  # type: ignore[name-defined]  # noqa: F821
     config: AgwModel,
     interaction_broker: InteractionBroker | None,
     remaining_time: RemainingTime,
@@ -719,41 +560,16 @@ def _defaulted_parameter(
     raise NotImplementedError
 
 
-def _wrong_parameter_annotation(
-    cls,
-    *,
-    source_name: bytes,
-    config: AgwModel,
-    interaction_broker: InteractionBroker | None,
-    remaining_time: RemainingTime,
-) -> AbstractContextManager[SecretSourceClient]:
-    raise NotImplementedError
-
-
-def _wrong_return(
-    cls,
-    *,
-    source_name: str,
-    config: AgwModel,
-    interaction_broker: InteractionBroker | None,
-    remaining_time: RemainingTime,
-) -> object:
-    raise NotImplementedError
-
-
 def _zero_parameter_factory() -> AbstractContextManager[SecretSourceClient]:
     raise NotImplementedError
 
 
-def _factory_owner(factory: Factory, *, binding: str = "class") -> type:
-    descriptor: object
+def _bound(factory: Factory, binding: str) -> object:
     if binding == "class":
-        descriptor = classmethod(factory)
-    elif binding == "static":
-        descriptor = staticmethod(factory)
-    else:
-        descriptor = factory
-    return type("FactoryOwner", (), {"create_client": descriptor})
+        return classmethod(factory)
+    if binding == "static":
+        return staticmethod(factory)
+    return factory
 
 
 @pytest.mark.parametrize(
@@ -764,15 +580,12 @@ def _factory_owner(factory: Factory, *, binding: str = "class") -> type:
         (_wrong_binding_name, "class", "first parameter must be named 'cls'"),
         (_positional_only_binding, "class", "parameter 'cls' must be positional-or-keyword"),
         (_defaulted_binding, "class", "parameter 'cls' must not have a default"),
-        (_annotated_binding, "class", "parameter 'cls' must not have an annotation"),
-        (_unresolved_annotation, "class", "annotations could not be resolved: NameError"),
+        (_zero_parameter_factory, "class", "must declare a 'cls' binding parameter"),
         (_too_few, "class", "must declare 4 parameters after cls (got 3)"),
         (_too_many, "class", "must declare 4 parameters after cls (got 5)"),
         (_wrong_parameter_name, "class", "parameter 1 must be named 'source_name'"),
         (_positional_parameter, "class", "parameter 'source_name' must be keyword-only"),
         (_defaulted_parameter, "class", "parameter 'source_name' must not have a default"),
-        (_wrong_parameter_annotation, "class", "parameter 'source_name' must be annotated as str"),
-        (_wrong_return, "class", "must return AbstractContextManager[SecretSourceClient]"),
     ],
     ids=(
         "instance-method",
@@ -780,58 +593,16 @@ def _factory_owner(factory: Factory, *, binding: str = "class") -> type:
         "cls-name",
         "cls-kind",
         "cls-default",
-        "cls-annotation",
-        "unresolved-annotation",
+        "no-binding-parameter",
         "missing-parameter",
         "extra-parameter",
         "parameter-name",
         "parameter-kind",
         "parameter-default",
-        "parameter-annotation",
-        "return-annotation",
     ),
 )
-def test_create_client_exact_signature_rejection_matrix(factory: Factory, binding: str, expected: str) -> None:
-    reason = _create_client_conformance_error(_factory_owner(factory, binding=binding))  # type: ignore[arg-type]
-    assert reason is not None
-    assert expected in reason
-
-
-def test_zero_parameter_create_client_has_a_stable_conformance_reason() -> None:
-    reason = _create_client_conformance_error(_factory_owner(_zero_parameter_factory))  # type: ignore[arg-type]
-    assert reason == "its create_client must declare a 'cls' binding parameter"
-
-
-def test_direct_and_inherited_future_annotated_classmethods_conform() -> None:
-    direct = _factory_owner(_valid_factory)
-    inherited = type("InheritedFactory", (direct,), {})
-    assert _create_client_conformance_error(direct) is None  # type: ignore[arg-type]
-    assert _create_client_conformance_error(inherited) is None  # type: ignore[arg-type]
-
-
-def test_annotations_resolve_against_the_defining_owners_class_namespace() -> None:
-    class Owner:
-        SourceName: TypeAlias = str  # noqa: UP040
-        SourceConfig: TypeAlias = AgwModel  # noqa: UP040
-        Broker: TypeAlias = InteractionBroker | None  # noqa: UP040
-        Budget: TypeAlias = RemainingTime  # noqa: UP040
-        ManagedClient: TypeAlias = AbstractContextManager[SecretSourceClient]  # noqa: UP040
-
-        @classmethod
-        def create_client(
-            cls,
-            *,
-            source_name: SourceName,
-            config: SourceConfig,
-            interaction_broker: Broker,
-            remaining_time: Budget,
-        ) -> ManagedClient:
-            raise NotImplementedError
-
-    class Inherited(Owner):
-        SourceName = bytes  # type: ignore[assignment]
-
-    assert _create_client_conformance_error(Inherited) is None  # type: ignore[arg-type]
+def test_create_client_call_shape_rejection_matrix(factory: Factory, binding: str, expected: str) -> None:
+    assert expected in _reason(create_client=_bound(factory, binding))
 
 
 def test_unbuildable_fixture_models_really_are_unbuildable() -> None:

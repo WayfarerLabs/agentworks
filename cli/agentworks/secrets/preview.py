@@ -29,8 +29,8 @@ class SkippedSource:
     reason: str
 
     def __post_init__(self) -> None:
-        if not self.reason or not _safe_diagnostic_text(self.source) or not _safe_diagnostic_text(self.reason):
-            raise ValueError("invalid skipped source")
+        if not self.reason:
+            raise ValueError("a skipped source must say why it was skipped")
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,10 +47,10 @@ class ResolutionPreview:
                 raise ValueError("attemptable preview requires a source")
         elif self.source is not None or self.identifier is not None:
             raise ValueError("unavailable preview forbids source and identifier")
+        # Boundary: the same operator-authored text a resolution outcome
+        # carries, on the same rendered rows. See ``_safe_diagnostic_text``.
         if not _safe_diagnostic_text(self.name):
             raise ValueError("invalid preview name")
-        if self.source is not None and not _safe_diagnostic_text(self.source):
-            raise ValueError("invalid preview source")
         if self.identifier is not None and not _safe_diagnostic_text(self.identifier):
             raise ValueError("invalid preview identifier")
 

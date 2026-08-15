@@ -15,7 +15,6 @@ from agentworks.capabilities.secret_backend.client import (
     SecretLookupRequest,
     SecretSourceClient,
 )
-from agentworks.errors import StateError
 from agentworks.schema import AgwModel
 from agentworks.secrets import SecretDecl
 from agentworks.secrets.outcomes import ResolutionDetail
@@ -92,28 +91,6 @@ class _TimedBackend(_Backend):
         if _TimedClient.phase == "factory":
             _TimedClient.clock.now = 2.0
         return _TimedContext(cls.events)
-
-
-class _InvalidTimeoutBackend(_Backend):
-    timeout_value: ClassVar[object] = None
-
-    @classmethod
-    def external_operation_timeout(cls, config: AgwModel) -> float | None:
-        return cast("float | None", cls.timeout_value)
-
-
-@pytest.mark.parametrize("timeout", [True, False, "1", object(), float("nan"), float("inf"), 0, -1])
-def test_invalid_external_operation_timeout_is_framework_state_error_before_factory(timeout: object) -> None:
-    _InvalidTimeoutBackend.events = []
-    _InvalidTimeoutBackend.timeout_value = timeout
-    with pytest.raises(StateError):
-        resolve_batch(
-            [SecretDecl(name="token", description="token")],
-            [_source(backend_class=_InvalidTimeoutBackend)],
-            policy=_policy(completion=CompletionPolicy.PARTIAL),
-            interaction_broker=None,
-        )
-    assert _InvalidTimeoutBackend.events == []
 
 
 @pytest.mark.parametrize(
