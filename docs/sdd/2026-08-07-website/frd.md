@@ -1,6 +1,6 @@
 # FRD: The agentworks.build Website
 
-- Status: Phase 4U requirements and architecture in progress; canonical assistance integrated
+- Status: Phase 4U runtime simplification in progress; canonical assistance integrated
 - Date: 2026-08-07
 - Last revised: 2026-08-15
 - Seeded by: the saga lead, at operator request. This is a standalone effort, deliberately NOT a
@@ -326,10 +326,18 @@ recorded as a growth path so nothing forecloses it, and none of it is in scope n
   explicit ruling, rotational acceleration remains exactly unchanged: this is a translational mass
   response refinement, not a rigid-body inertia rescale. Preserve fixed-step timing, commands,
   differential thrust mapping, fuel flow, landing tolerances, refuel ratio, service timing,
-  collision authority and semantics, fixed scene, and zero vertical scrolling. Regenerate every
-  terrain, spacing, physics, route, opening, finite-world, and browser witness from these
-  authorities; a sufficient-allowance base may change only as the formula-derived maximum of the new
-  certified routes.
+  collision authority and semantics, fixed scene, and zero vertical scrolling. Regenerate the
+  terrain, spacing, physics, opening, finite-world, and browser witnesses from these authorities.
+
+  Fuel prediction is deliberately simple and conservative rather than a live proof obligation. After
+  the next site exists, runtime computes one sufficient allowance as
+  `quantumCeil(22 + max(0,targetDeck-originDeck)/3)`, then applies the unchanged refuel ratio and
+  preserves carried reserve. The constant `22` is the reviewed round-up from representative Phase 4U
+  reference flights; the one-third climb term is unchanged because gravity and engine acceleration
+  scale together. Site generation performs no schedule search or replay and ships no per-route
+  schedule catalog. Offline tests cover openings plus representative closest, farthest,
+  steepest-rise, and steepest-fall routes, but neither runtime nor release acceptance attempts to
+  prove an exact schedule for every generated geometry.
 
 ## Settled constraints (inherited; do not reopen)
 
@@ -601,8 +609,13 @@ merged and settled on `main`. The first slice must not build toward them specula
   positive-mission witnesses prove every candidate decision, accepted deck at or below normalized
   `0.5`, exact `max footprint terrain + 2.5 m` equality, native support foot, accepted-distance
   bound, tightly `192 m`-centered complete-run mean, unchanged 4,096-site mission, and visible
-  contact-backed termini. Every resulting opening and route class has an independently regenerated
-  sufficient-allowance proof and concrete production replay without generation failure.
+  contact-backed termini. Site generation cannot fail because a route key or proof record is
+  missing. Independent arithmetic proves the constant-time allowance is exactly
+  `quantumCeil(22 + max(0,deckDelta)/3)` before the existing ratio; mutation-sensitive model tests
+  reject schedule search, schedule replay, a generated route catalog, lost carryover, descent
+  credit, or changed quantum rounding. Offline flight witnesses cover all openings and
+  representative closest, farthest, maximum-rise, and maximum-fall routes without making exhaustive
+  optimality or per-route prediction a release gate.
 
   Physics tests pin a relative translational mass scale of `0.7`, the canonical engine- and
   gravitational-force coefficients `9` and `3`, Number accelerations `90/7` and `30/7`, their exact

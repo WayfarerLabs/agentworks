@@ -1,6 +1,6 @@
 # HLA: The agentworks.build Website
 
-- Status: Phase 4U requirements and architecture in progress; canonical assistance integrated
+- Status: Phase 4U runtime simplification in progress; canonical assistance integrated
 - Date: 2026-08-07
 - Last revised: 2026-08-15
 - FRD: `frd.md`
@@ -367,9 +367,18 @@ accelerations scale by `1/0.7`, `g/a_engine` remains exactly one third, and the 
 surcharge formula is unchanged. Angular acceleration remains exactly `80` by explicit operator
 ruling, so mass does not imply an inertia change. The fixed step, fuel flow, two-engine command and
 assist mapping, landing envelope, collision authority, checkpoint/refuel sequence, and controller
-timing do not change. Geometry, physics, assignment, proof, world, output, and generated model
-projection regenerate atomically, and production replay certifies every accepted spacing/deck class
-before the new profile can ship.
+timing do not change.
+
+Phase 4U removes live route-proof replay and the shipped generated schedule catalog. Once the next
+site is generated, the model computes `quantumCeil(22 + max(0,targetDeck-originDeck)*(g/a_engine))`;
+because `g/a_engine=1/3`, this is the constant-time approved `22 + positive climb/3` allowance
+rounded to the existing `.05` quantum. It then applies the existing diminishing refuel ratio and
+adds the result to carried reserve. Descent never subtracts fuel. This calculation reads only two
+accepted decks and fixed constants: it does not search, simulate, import a schedule, or introduce a
+generation-error path. Test-only reference flights sample the opening and distance/elevation
+extremes; they are handling evidence, not runtime dependencies or claims of exact fuel prediction.
+Terrain/site geometry fixtures may regenerate for deterministic parity, but route schedules,
+route-proof fixtures, and their browser module are deleted rather than migrated.
 
 The materially elevated platform remains exactly three lander widths long beside one solid NOC
 building. One collider-backed open truss uses continuous top and bottom chords and a uniform

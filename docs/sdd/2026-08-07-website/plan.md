@@ -1,6 +1,6 @@
 # Plan: The agentworks.build Website
 
-- Status: Phase 4U requirements and architecture in progress; canonical assistance integrated
+- Status: Phase 4U runtime simplification in progress; canonical assistance integrated
 - Date: 2026-08-07
 - Last revised: 2026-08-15
 - FRD: `frd.md`
@@ -1191,6 +1191,12 @@ The operator subsequently ruled that angular acceleration remains unchanged. Pha
 the terrain-profile values, site pacing/finite-domain values, translational physics coefficients,
 and the fixtures and proofs that necessarily consume those authorities.
 
+The operator then clarified that fuel prediction should favor a simple, mostly-right runtime over an
+exhaustive always-right proof system and must not burden the browser with route calculations. Phase
+4U therefore removes live schedule replay and the generated per-route catalog. One conservative
+constant-time `22 + positive climb/3` allowance replaces them; a small representative offline flight
+matrix remains qualitative safety evidence rather than runtime authority.
+
 ## Phase 4U: final terrain, pacing, and translational response
 
 - [ ] Amend and independently review `brand-and-lander-lld.md` for unchanged strict linear terrain
@@ -1205,14 +1211,20 @@ and the fixtures and proofs that necessarily consume those authorities.
       unchanged angular acceleration `80`; prove canonical force coefficients, unchanged
       thrust-to-weight and climb-surcharge ratios, fixed step, commands, fuel flow, landing
       tolerance, collision authority, refuel, checkpoint, and service semantics.
-- [ ] Regenerate geometry, physics, assignment, route, proof, world, output, and model-projection
-      artifacts atomically. Exhaustively certify every new distance/deck class, all openings,
-      sufficient allowance, Retry, signed generation, all four complete 4,096-site missions, final
-      rail/service behavior, and deterministic generation/performance ceilings.
+- [ ] Remove live schedule replay, the generated route-proof browser module, and per-route derived
+      schedule fixtures. Compute allowance in constant time as
+      `quantumCeil(22 + max(0,deckDelta)/3)`, then apply the unchanged ratio and preserve carryover;
+      site generation must have no route-key/proof failure path.
+- [ ] Regenerate only the deterministic terrain/site geometry authority needed for parity. Verify
+      all openings plus representative closest, farthest, maximum-rise, and maximum-fall flights,
+      Retry, signed generation, all four complete 4,096-site missions, final rail/service behavior,
+      and deterministic generation/performance ceilings without claiming exact fuel prediction for
+      every route.
 - [ ] Add independent mutation-sensitive model/world/derivation/static and real-browser evidence for
       exact `.60/1.20` terrain limits, visible irregular relief, doubled average platform pacing,
-      deck/support bounds, translational response with unchanged rotation, real collision, bounded
-      retention, fixed `25/16` projection, and zero vertical scrolling at every required viewport.
+      deck/support bounds, translational response with unchanged rotation, constant-time fuel
+      arithmetic and absence of live replay, real collision, bounded retention, fixed `25/16`
+      projection, and zero vertical scrolling at every required viewport.
 - [ ] Run complete website/repository gates, cold code review, and fresh-eyes browser review.
       Refresh port 8766 only at an exact reviewed green head, then obtain operator hands-on
       acceptance before marking Phase 4U or the PR complete.
@@ -1221,7 +1233,8 @@ Definition of done: ordinary play retains the accepted straight, full-band terra
 sharper navigable peaks and valleys through exact `.60/1.20` limits; accepted platforms average
 approximately twice as far apart without violating the local deck ceiling or finite-world contract;
 translational flight responds faster under the exact `0.7` mass/force model while angular response,
-fuel semantics, collision, and controls remain unchanged; and the fixed scene never scrolls.
+fuel consumption, collision, and controls remain unchanged; fuel awards use the simple conservative
+constant-time formula with no live route calculation; and the fixed scene never scrolls.
 
 ## Phase 5: CI and default Pages deployment
 
