@@ -106,9 +106,16 @@ def predict_resolution(
     remains authoritative for presence and provider failures. Doctor uses
     the inspection variant, which reports interactive applicability without
     an operation policy.
+
+    Checks its own ``interaction`` rather than relying on the per-declaration
+    call below to do it: with no declarations, that call never happens and
+    this returns successfully having checked nothing. That is the same reach
+    the entry-point rule beside ``require_exact_interaction_policy`` names.
     """
+    from agentworks.secrets.policy import require_exact_interaction_policy
     from agentworks.secrets.preview import preview_operation_resolution
 
+    require_exact_interaction_policy(interaction)
     return {decl.name: preview_operation_resolution(decl, sources, interaction=interaction) for decl in decls}
 
 

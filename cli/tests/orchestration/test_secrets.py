@@ -291,6 +291,30 @@ def test_prediction_respects_source_opt_out() -> None:
     assert preview.category is PreviewCategory.UNAVAILABLE
 
 
+def test_prediction_rejects_a_non_enum_policy_with_nothing_to_predict() -> None:
+    """A caller-supplied ``"refuse"`` is equal to the enum but not identical to it.
+
+    With no declarations the per-declaration preview below never runs, so this
+    entry point's own check is the only rejection there will ever be. Without
+    it the call returns an empty prediction and the operation proceeds on an
+    interaction policy nothing ever validated.
+    """
+    with pytest.raises(StateError):
+        predict_resolution([], _sources(_FakeSource("env-var")), interaction="refuse")  # type: ignore[arg-type]
+
+
+def test_operation_preview_rejects_a_non_enum_policy_before_walking_any_source() -> None:
+    """``_preview`` compares ``interaction`` by identity, so a plain ``"refuse"``
+    reports attemptable where the operation would refuse. Preview builds no
+    policy, so the constructor's totality never covers this call."""
+    from agentworks.secrets.preview import preview_operation_resolution
+
+    prompt = _FakeSource("prompt", interactive=True)
+    with pytest.raises(StateError):
+        preview_operation_resolution(_decl("a"), _sources(prompt), interaction="refuse")  # type: ignore[arg-type]
+    assert prompt.resolve_calls == []
+
+
 def test_prediction_covers_every_declaration() -> None:
     sources = _sources(_FakeSource("env-var", values={"a": "1"}))
     predictions = predict_resolution([_decl("a"), _decl("b")], sources, interaction=InteractionPolicy.REFUSE)

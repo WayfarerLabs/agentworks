@@ -471,7 +471,7 @@ def _valid_factory(
     raise NotImplementedError
 
 
-def _wrong_binding_name(
+def _alternate_binding_name(
     klass,
     *,
     source_name: str,
@@ -577,7 +577,6 @@ def _bound(factory: Factory, binding: str) -> object:
     [
         (_valid_factory, "instance", "must be declared as @classmethod"),
         (_valid_factory, "static", "must be declared as @classmethod"),
-        (_wrong_binding_name, "class", "first parameter must be named 'cls'"),
         (_positional_only_binding, "class", "parameter 'cls' must be positional-or-keyword"),
         (_defaulted_binding, "class", "parameter 'cls' must not have a default"),
         (_zero_parameter_factory, "class", "must declare a 'cls' binding parameter"),
@@ -590,7 +589,6 @@ def _bound(factory: Factory, binding: str) -> object:
     ids=(
         "instance-method",
         "staticmethod",
-        "cls-name",
         "cls-kind",
         "cls-default",
         "no-binding-parameter",
@@ -603,6 +601,12 @@ def _bound(factory: Factory, binding: str) -> object:
 )
 def test_create_client_call_shape_rejection_matrix(factory: Factory, binding: str, expected: str) -> None:
     assert expected in _reason(create_client=_bound(factory, binding))
+
+
+def test_the_class_binding_parameter_may_be_spelled_anything() -> None:
+    """Python binds the class to the first parameter whatever it is called, so
+    the framework can call this and the seam has no opinion on the spelling."""
+    assert conformance_error(DESCRIPTOR, _backend(create_client=classmethod(_alternate_binding_name))) is None
 
 
 def test_unbuildable_fixture_models_really_are_unbuildable() -> None:

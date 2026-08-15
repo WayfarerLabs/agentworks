@@ -93,13 +93,14 @@ def _classmethod_conformance_error(
     declared = tuple(inspect.signature(raw.__func__).parameters.values())
     if not declared:
         return f"its {name} must declare a 'cls' binding parameter"
+    # The binding parameter's SPELLING is not part of the contract: Python binds
+    # the class to whatever the first parameter is called. Its kind and default
+    # are, because either one stops the framework calling the method at all.
     binding = declared[0]
-    if binding.name != "cls":
-        return f"its {name} first parameter must be named 'cls' (got {binding.name!r})"
     if binding.kind is not inspect.Parameter.POSITIONAL_OR_KEYWORD:
-        return f"its {name} parameter 'cls' must be positional-or-keyword"
+        return f"its {name} parameter {binding.name!r} must be positional-or-keyword"
     if binding.default is not inspect.Parameter.empty:
-        return f"its {name} parameter 'cls' must not have a default"
+        return f"its {name} parameter {binding.name!r} must not have a default"
     explicit = declared[1:]
     if len(explicit) != len(parameters):
         return f"its {name} must declare {len(parameters)} parameters after cls (got {len(explicit)})"
