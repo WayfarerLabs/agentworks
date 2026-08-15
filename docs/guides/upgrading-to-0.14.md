@@ -498,12 +498,17 @@ template selectors keep their spelling and payload. Map each selector to its own
 | `apt`             | `apt-source/github-cli`, `apt-source/hashicorp`, `apt-source/nodesource-v22`, `apt-source/ngrok-agent`, `apt-source/tofuutils-tenv`, `apt-package/gh`, `apt-package/terraform`, `apt-package/nodejs`, `apt-package/ngrok`, `apt-package/tenv` |
 | `install-command` | `user-install-command/oh-my-zsh`, `user-install-command/bun`, `user-install-command/fnm`, `user-install-command/nvm`, `user-install-command/starship`, `user-install-command/uv`                                                              |
 
-If your configuration selects rows from both lists, preserve any other enabled plugin names and use
-this literal setting:
+If your configuration selects rows from both lists, append both plugin names to the existing list.
+For example, retain an already enabled plugin rather than replacing the list:
 
 ```toml
+# before
 [plugins]
-system = ["apt", "install-command"]
+system = ["azure"]
+
+# after
+[plugins]
+system = ["azure", "apt", "install-command"]
 ```
 
 Use `agw doctor` to confirm the plugins' states and `agw resource list --include-disabled` to
