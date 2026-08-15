@@ -268,7 +268,7 @@ def active_sources(config: Config, registry: Registry) -> tuple[ActiveSource, ..
 
     lookup = registry_source_backend_lookup(registry)
     active: list[ActiveSource] = []
-    for name in config.secret_config_data.backends:
+    for name in config.secret_config_data.sources:
         selected = source_backend_class(lookup, name)
         if selected is None:
             error = direct_backend_source_error(
@@ -707,7 +707,7 @@ def validate_chain(config: Config, registry: Registry) -> None:
     """Validate source-chain reachability for operator-declared secrets."""
     from agentworks.resources.access import secret_decls
 
-    opted_in = set(config.secret_config_data.backends)
+    active_source_names = set(config.secret_config_data.sources)
     operator_decls = [
         decl
         for decl in secret_decls(registry).values()
@@ -716,15 +716,15 @@ def validate_chain(config: Config, registry: Registry) -> None:
     unreachable = [
         decl
         for decl in operator_decls
-        if not ({ref.name for ref in registry.graph.edges_of("secret", decl.name)} & opted_in)
+        if not ({ref.name for ref in registry.graph.edges_of("secret", decl.name)} & active_source_names)
     ]
     if unreachable:
         names = ", ".join(sorted(decl.name for decl in unreachable))
-        chain = ", ".join(config.secret_config_data.backends) or "(empty)"
+        source_chain = ", ".join(config.secret_config_data.sources) or "(empty)"
         raise ConfigError(
             f"unreachable secret(s): {names}",
             hint=(
-                f"active source chain: [{chain}]. Add an attemptable secret-source, "
+                f"active source chain: [{source_chain}]. Add an attemptable secret-source, "
                 "remove a false opt-out, or remove the unused declaration."
             ),
         )

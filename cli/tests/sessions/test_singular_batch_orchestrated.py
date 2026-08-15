@@ -385,7 +385,7 @@ def test_batch_repair_path_resolves_the_rejoin_key_late(
     """The late-resolve branch of the batch gate callback, for real: a
     started VM fails to reconnect and the repair path reads the
     template's rejoin auth key through the gate reader, which resolves
-    it LATE through the backend chain (the boundary burst, then exactly
+    it LATE through the source chain (the boundary burst, then exactly
     one repair burst) with no seed error; the heal the imperative
     repair carried survives the batch composition."""
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "tskey-late")

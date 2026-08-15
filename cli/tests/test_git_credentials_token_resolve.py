@@ -1,7 +1,7 @@
 """Tests for Phase 1d's git-credential token-resolution path.
 
 The framework resolves each git-credential's ``token`` field through
-the backend chain; the resolved value is written into
+the source chain; the resolved value is written into
 ``~/.git-credentials`` via ``credential_lines``. No
 ``AW_GIT_CREDENTIALS_<NAME>`` lookup, no ``provider.obtain_token``
 fallback.
