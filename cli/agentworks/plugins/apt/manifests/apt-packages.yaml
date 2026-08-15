@@ -1,8 +1,6 @@
-# Built-in apt packages: named apt package sets, each cross-referencing
-# the apt-source(s) that must be installed first. The cross-reference
-# lives in spec.apt_sources (a list of apt-source names); the framework's
-# apt-source miss policy validates it at build_registry time. Published
-# with a built-in origin through the bundled-manifest loader.
+# Optional apt package sets published by the `apt` system plugin. Each
+# `spec.apt_sources` entry resolves to an apt-source resource that is installed
+# before the packages.
 apiVersion: agentworks/v1
 kind: apt-package
 metadata:

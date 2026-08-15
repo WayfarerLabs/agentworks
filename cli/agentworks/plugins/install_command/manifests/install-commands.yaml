@@ -1,12 +1,5 @@
-# Built-in install commands: shell commands that install tooling, split
-# into system-install-command (VM-wide, run as the VM admin with explicit
-# sudo for privileged steps) and user-install-command (per-user, run for
-# each user). Both kinds share the same shape and differ only in execution
-# scope. Published with a built-in origin through the bundled-manifest loader.
-#
-# The former `az-cli` system-install-command migrated to the opt-in `azure`
-# system plugin (Phase 11), so this bundle now ships user-install-commands
-# only; `az-cli` publishes present-but-disabled from that plugin's manifests.
+# Optional user install commands published by the `install-command` system
+# plugin. They run per user during admin and agent initialization.
 #
 # Install commands are one logical shell invocation written as a single-line
 # YAML scalar, either plain or quoted.

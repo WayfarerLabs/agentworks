@@ -263,44 +263,6 @@ def test_build_registry_equivalent_to_manual_steps(example_config: Path, monkeyp
     assert manual.lookup("secret", "api-key").name == "api-key"
 
 
-def test_build_registry_publishes_builtin_apt_and_install_entries(
-    example_config: Path,
-) -> None:
-    """The built-in apt / install-command entries publish before the
-    operator sources so any operator override (TOML or manifest) layers
-    on top of the built-in base. Verified end-to-end: every apt /
-    install-command kind has at least one row after build_registry, and
-    those rows carry ``Origin.built_in`` with a bundled-manifest source
-    (the entries ship as ``manifests/builtin/*.yaml``).
-    """
-    from agentworks.bootstrap import build_registry
-
-    cfg = load_config(example_config, warn_issues=False)
-    r = build_registry(cfg)
-
-    # ``system-install-command`` is deliberately absent: its only built-in
-    # entry (``az-cli``) migrated to the ``azure`` system plugin (Phase 11), so
-    # the built-in bundle now ships no system-install-commands. The remaining
-    # three kinds still have built-in rows.
-    for kind in (
-        "apt-source",
-        "apt-package",
-        "user-install-command",
-    ):
-        # The built-in rows are built-in. Operator overrides (if any) would
-        # re-publish the same name with operator-declared origin, and a migrated
-        # bundle (the ``claude`` user-install-command) publishes a system-plugin
-        # row; the test's example_config exercises neither, so scope the oracle
-        # to the built-in-origin rows.
-        rows = [row for row in r.iter_kind(kind) if row.origin is not None and row.origin.variant == "built-in"]
-        assert rows, f"expected at least one built-in {kind} row from the bundled built-in manifests"
-        for row in rows:
-            assert row.origin is not None
-            assert row.origin.source is not None
-            assert row.origin.source.startswith("agentworks.manifests.builtin/")
-            assert row.origin.source.endswith(".yaml")
-
-
 def test_unknown_kind_in_requirement_errors_clearly(tmp_path: Path) -> None:
     """A requirement for a kind that isn't in ``KIND_REGISTRY`` errors with
     the requirement's source so operators can find the offending Resource.

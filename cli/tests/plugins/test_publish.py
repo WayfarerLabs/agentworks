@@ -137,7 +137,7 @@ def test_enabled_plugin_publishes_capability_and_manifest(monkeypatch: pytest.Mo
         source_origin = registry.lookup("apt-source", "fixture-apt-source").origin
         assert source_origin.variant == "system-plugin"
         assert source_origin.plugin == PLUGIN
-        assert source_origin.source == f"agentworks.plugins.{PLUGIN}/manifests/fixture-source.yaml"
+        assert source_origin.source == f"{_MANIFEST_ANCHOR}/manifests/fixture-source.yaml"
 
 
 # -- Not-enabled plugin: row present-but-disabled, manifest absent --------------
@@ -315,19 +315,6 @@ def test_plugin_path_gates_missing_subdir_but_builtin_path_does_not(
         origin_for=lambda file_name: Origin.built_in(source=f"nosub/{file_name}"),
         allowed_kinds=None,
     )
-
-
-def test_builtin_publish_routes_through_shared_body_preserving_origin() -> None:
-    """``builtin.py`` migrated onto the shared body; its rows still land with a
-    ``built-in`` origin whose source is ``agentworks.manifests.builtin/<file>``
-    (the exact shape it produced before the migration)."""
-    from agentworks.manifests import builtin
-
-    registry = Registry.empty()
-    builtin.publish_to(registry)
-    origin = registry.lookup("apt-source", "github-cli").origin
-    assert origin.variant == "built-in"
-    assert origin.source == "agentworks.manifests.builtin/apt-sources.yaml"
 
 
 # -- Phase 4 forward item: a disabled plugin's integration reaches the use-gate --

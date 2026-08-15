@@ -3,9 +3,9 @@
 The apt / install-command per-entry loaders now accept a ``decls``
 section-line map and stamp each entry's ``declared_at`` from it. The
 manifest decoders pass the document's own location, so manifest-loaded
-entries (the migrated built-ins under ``manifests/builtin/`` and
-operator-declared ``resources/*.yaml`` entries) carry a real source
-location instead of the synthesized sentinel.
+entries (the optional ``apt`` plugin and operator-declared
+``resources/*.yaml`` entries) carry a real source location instead of the
+synthesized sentinel.
 
 The operator-TOML apt surface is gone entirely now (config.toml hard-errors on
 resource sections, ADR 0022), so every operator apt-source is a YAML manifest
@@ -80,11 +80,10 @@ def _apt_sources(
     return kind_dict(registry, "apt-source")
 
 
-def test_builtin_entry_declared_at_points_at_bundled_manifest(tmp_path: Path) -> None:
-    """A built-in apt-source entry (resolved from the Registry on a
-    no-operator config) carries a real ``declared_at`` pointing at its
-    bundled ``manifests/builtin/*.yaml`` file, not the synthesized
-    sentinel.
+def test_plugin_entry_declared_at_points_at_bundled_manifest(tmp_path: Path) -> None:
+    """An optional apt plugin entry (resolved from the Registry on a
+    no-operator config) carries a real ``declared_at`` pointing at its bundled
+    manifest, not the synthesized sentinel.
     """
     src = _apt_sources(tmp_path)["github-cli"]
 
@@ -113,7 +112,7 @@ def test_operator_yaml_entry_declared_at_points_at_operator_file(
 
 def test_describe_surfaces_location_for_manifest_entry(tmp_path: Path) -> None:
     """The describe path surfaces the location for a manifest-loaded
-    entry: a built-in apt-source's origin points at its bundled file.
+    entry: an apt plugin source's origin points at its bundled file.
     """
     from agentworks.bootstrap import build_registry
     from agentworks.config import load_config
@@ -125,4 +124,4 @@ def test_describe_surfaces_location_for_manifest_entry(tmp_path: Path) -> None:
     desc = describe_resource(registry, "apt-source", "github-cli")
 
     assert desc.origin is not None
-    assert desc.origin.source == "agentworks.manifests.builtin/apt-sources.yaml"
+    assert desc.origin.source == "agentworks.plugins.apt/manifests/apt-sources.yaml"

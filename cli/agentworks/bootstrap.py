@@ -57,9 +57,8 @@ def build_registry(
     """Build a finalized ``Registry`` from the standard set of publishers.
 
     Publisher order: the bundled built-in manifests first
-    (``builtin_manifests``, which supply the built-in apt/install-command
-    entries too), then the built-in capability rows (one generic publisher
-    per capability-kind descriptor), then the system
+    (``builtin_manifests``, which supply reserved core rows), then the built-in
+    capability rows (one generic publisher per capability-kind descriptor), then the system
     plugins (``plugins.publish_plugins``: every shipped plugin's capability
     rows plus the enabled plugins' bundled manifests), then the built-in
     secret-source rows, then the operator's YAML ``ManifestSet``
@@ -96,9 +95,9 @@ def build_registry(
     # bundled rows always publish. Using a not-ready site is a typed error at
     # resolve time; doctor warns on references to one.
     registry = Registry.empty()
-    # Built-in publishers first. The bundled manifests supply the built-in
-    # apt/install-command entries (apt sources/packages and install commands
-    # ship as manifests/builtin/*.yaml); operator apt/install rows are YAML
+    # Built-in publishers first. The bundled manifests supply reserved core
+    # resources such as vm-sites; optional apt and install-command catalog rows
+    # publish from their system plugins below. Operator apt/install rows are YAML
     # manifests now (config.toml is settings only, ADR 0022), so there is no
     # separate apt / install_commands operator publisher anymore.
     builtin_manifests.publish_to(registry)

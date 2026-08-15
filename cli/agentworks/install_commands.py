@@ -16,10 +16,10 @@ scripts and multi-step installer machinery do not.
 Both are ``declarable`` kinds under the ``error`` miss policy: a typo'd
 reference (an unknown command named by a vm-template, admin-template, or
 agent-template) surfaces as a framework ``ConfigError`` at
-``build_registry`` time citing the reference's source. Built-in entries
-ship as bundled manifests under ``manifests/builtin/``; operators may add
-or override entries via YAML manifests. Manifest decoders use the loading
-helpers below.
+``build_registry`` time citing the reference's source. The optional
+app-shipped catalog is bundled with the ``install-command`` system plugin;
+operators may add or override entries via YAML manifests. Manifest decoders
+use the loading helpers below.
 
 ``agentworks.resources.kinds.__init__`` imports this module so the two
 kinds self-register into ``KIND_REGISTRY`` at load.
@@ -164,7 +164,8 @@ def _load_user_commands(
 # a framework miss-policy error at ``build_registry`` time, citing the
 # reference's source. There is no auto-declare path: entries are built-in
 # (bundled manifests) or operator-declared, and references must resolve to
-# a known name.
+# a known name. App-shipped install commands are supplied by opt-in system
+# plugins, while operator declarations remain YAML manifests.
 
 
 @dataclass(frozen=True)

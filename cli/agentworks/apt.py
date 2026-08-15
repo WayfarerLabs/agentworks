@@ -11,7 +11,7 @@ Both are ``declarable`` kinds under the ``error`` miss policy: a typo'd
 reference (an unknown apt-source named by a package, or an unknown
 apt-package named by a vm-template) surfaces as a framework
 ``ConfigError`` at ``build_registry`` time citing the reference's source.
-Built-in entries ship as bundled manifests under ``manifests/builtin/``;
+The optional app-shipped catalog is bundled with the ``apt`` system plugin;
 operators may add or override entries via YAML manifests. Manifest decoders
 delegate to ``_load_apt_sources`` and ``_load_apt_packages``.
 
@@ -181,11 +181,10 @@ def _load_apt_packages(
 
 
 # The operator apt publisher was deleted with the TOML resource surface
-# (ADR 0022): built-in apt entries ship as bundled YAML manifests
-# (``manifests/builtin/*.yaml``, via ``builtin_manifests.publish_to``), and
-# operator apt entries are YAML manifests too. ``_load_apt_sources`` /
-# ``_load_apt_packages`` above survive because the manifest apt decoders
-# still delegate to them.
+# (ADR 0022): app-shipped apt entries are bundled YAML manifests in the
+# optional ``apt`` system plugin, and operator apt entries are YAML manifests
+# too. ``_load_apt_sources`` / ``_load_apt_packages`` above survive because
+# the manifest apt decoders still delegate to them.
 
 
 # -- Framework kind strategies -------------------------------------------------
