@@ -157,9 +157,17 @@ def test_empty_token_rejected_by_validation() -> None:
         _validate({"token": ""}, owner_name="gh")
 
 
-def test_stored_token_mode_is_rejected() -> None:
+@pytest.mark.parametrize(
+    "token",
+    [
+        pytest.param(None, id="v0.13-outer-null"),
+        pytest.param({"mode": "stored", "secret": "my-secret"}, id="pre-release-stored"),
+        pytest.param({"mode": "minted"}, id="unknown-minted"),
+    ],
+)
+def test_retired_and_unknown_token_acquisition_shapes_are_rejected(token: object) -> None:
     with pytest.raises(ConfigError):
-        _validate({"token": {"mode": "stored", "secret": "my-secret"}}, owner_name="gh")
+        _validate({"token": token}, owner_name="gh")
 
 
 def test_extraction_total_on_malformed_config() -> None:

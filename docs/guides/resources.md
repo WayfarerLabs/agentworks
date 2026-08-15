@@ -186,7 +186,9 @@ capability and the remaining keys are that provider's configuration, which
 A provider's `token` field is a tagged acquisition choice with one supported arm:
 `token: {mode: secret, secret: my-github-token}` names the secret holding the token. Omitting
 `token` selects that arm and defaults its secret to `git-token-<credential name>`, while the scalar
-`token: my-github-token` is shorthand for the same secret arm.
+`token: my-github-token` is shorthand for the same secret arm. An outer `token: null` is invalid;
+omit `token` for the default or write `token: {mode: secret}` explicitly. Inside the secret arm,
+omitting `secret` or writing `secret: null` selects the default secret name.
 
 A github credential may carry a scope there, and the choice is the part worth explaining:
 `repos: ["owner/name", ...]` pins the credential to specific repositories (always a list, even for

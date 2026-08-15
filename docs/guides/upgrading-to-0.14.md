@@ -586,7 +586,7 @@ its value unchanged. If the sibling table already carries its own `name`, decide
 correct before merging. If it is not a table, consult the live field reference and place or remove
 that value deliberately rather than discarding it during the fold.
 
-### Git credential token acquisition mode is renamed
+### Git credential token acquisition is tagged now
 
 A git credential's `provider.token` says how the token is obtained, as a tagged union. Its one
 current arm is named `secret` because it names the secret holding the token:
@@ -602,9 +602,16 @@ forcing another restructure, but no minted arm exists in this release. Its futur
 repositories, permissions, and other creation parameters remain credential configuration; they do
 not become secret mappings.
 
-Change written tagged token values from `mode: stored` to `mode: secret`. The old `stored` mode is
-not accepted. Omitting `token` still selects secret acquisition and defaults the secret name to
+Version 0.13 YAML also allowed an explicit outer `provider.token: null`, with the same
+default-secret behavior as omission. Version 0.14 rejects it because the acquisition union is not
+nullable. Delete the `token: null` line to keep the same default, or rewrite it as
+`token: {mode: secret}` to record the choice explicitly. Omitting `token` still selects secret
+acquisition and defaults the secret name to
 `git-token-<credential name>`, while a scalar `token: gh-pat` remains shorthand for the secret arm.
+
+Tagged `mode: stored` appeared only in pre-release 0.14 snapshots; it was not a 0.13 spelling. If
+you used one of those snapshots, change written tagged token values from `mode: stored` to
+`mode: secret`. The pre-release `stored` mode is not accepted.
 
 Plugin authors use `TokenAcquiringConfig` for version 2 providers and read the named secret from
 `self.config.token.secret`.

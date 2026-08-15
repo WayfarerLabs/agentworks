@@ -223,8 +223,8 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             "MANIFEST_PATH contains one resource rewritten against the live sample and field reference for "
             "MANIFEST_KIND and, when present, the separate field reference for CAPABILITY_TARGET. "
             "Any retired presence shape uses the documented field mapping, including the outer-null mode mapping. "
-            "A git-credential token uses the canonical tagged secret arm, while an existing scalar's secret "
-            "name is preserved. "
+            "A git-credential token uses the canonical tagged secret arm; a version 0.13 outer token null is "
+            "deleted or rewritten as token: {mode: secret}, while an existing scalar's secret name is preserved. "
             "EXPECTED_IDENTITIES remains byte-for-byte unchanged.",
             None,
             "Keep the last validated manifest set and do not remove any retired TOML section.",
@@ -237,7 +237,8 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             "ambient, or placement local, respectively. For a git-credential, consult its provider reference. "
             "Omission still selects the secret default, and a scalar token remains accepted shorthand, but write "
             "the canonical tagged secret arm. Preserve a scalar's secret name as token: {mode: secret, secret: "
-            "<existing-name>}. An omitted or null inner token.secret selects the default. No minted arm exists. "
+            "<existing-name>}. Delete a version 0.13 outer token: null line or replace it with token: {mode: "
+            "secret}. An omitted or null inner token.secret selects the default. No minted arm exists. "
             "Require "
             "MANIFEST_PATH to equal the selected "
             "EXPECTED_IDENTITIES entry's pre-recorded file. Never add, remove, or change a baseline entry. Do "

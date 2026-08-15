@@ -376,7 +376,6 @@ def test_migration_review_action_covers_all_sites_and_distinguishes_outer_from_i
     assert "Do not modify a manifest during this review" in manual
     assert "delete the retired line" not in manual
     assert "provider.token" not in manual
-    assert "token: null" not in manual
     for stale in ("service_principal.secret", "credentials.access_key_secret"):
         assert stale not in manual
 
