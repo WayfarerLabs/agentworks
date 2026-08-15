@@ -21,7 +21,7 @@ effort. The pre-wave-1 measurements the reassessment compares against are in
       twelve the same way. That answers the isolated-worktree sub-question, since delivery is
       session-start `claudeMd` rather than path-triggered injection and worktree location decides
       nothing. Issue #511 is closed on both observations, so R1.3's gate on wave 1 is satisfied.
-- [x] Amend `development-principles` with the trust-boundary doctrine (the four boundaries, interior
+- [x] Amend `development-principles` with the trust-boundary doctrine (the five boundaries, interior
       trust, validator-names-its-boundary; ~10 lines) plus the principle-3 test-quality
       counterweight (R1.1), and `no-prose-policing-tests` with the authored-artifacts generalization
       (~3 sentences), one PR. Done when: merged, and the wave 1 items below cite the amendments in
