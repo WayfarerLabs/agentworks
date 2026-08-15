@@ -189,7 +189,7 @@ class SecretDecl(DeclaredResource):
         pass: EVERY declared ``backend_mappings`` entry is validated by the
         CORE against its selected backend's declared model (R9.9: every declared
         mapping, not just the opted-in ones, so a stale mapping for a
-        configured-but-not-opted-in backend fails at build). No backend code
+        configured-but-not-opted-in source fails at build). No backend code
         runs.
 
         UNCONDITIONAL over enablement, like the pass that calls it

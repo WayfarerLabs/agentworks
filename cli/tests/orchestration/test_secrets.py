@@ -253,11 +253,11 @@ def test_prediction_none_when_nothing_would_resolve() -> None:
     assert preview == {}
 
 
-def test_interactive_backend_predicted_resolvable_when_interactive(
+def test_interactive_source_predicted_resolvable_when_interactive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A prompt backend reports resolvable without probing (probing would
-    BE the prompt) WHEN interactive input is available this run."""
+    """A prompt source reports resolvable without probing (probing would BE
+    the prompt) WHEN interactive input is available this run."""
     from agentworks import output
 
     monkeypatch.setattr(output, "is_interactive", lambda: True)
@@ -268,11 +268,11 @@ def test_interactive_backend_predicted_resolvable_when_interactive(
     assert prompt.resolve_calls == []
 
 
-def test_interactive_backend_predicted_unresolvable_when_non_interactive(
+def test_interactive_source_predicted_unresolvable_when_non_interactive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Under --non-interactive / no TTY the prompt backend no-ops at
-    resolve time, so preflight prediction must call a prompt-only secret
+    """Under --non-interactive / no TTY the prompt source's backend no-ops
+    at resolve time, so preflight prediction must call a prompt-only secret
     unresolvable and fail fast (issue #202), still without probing."""
     from agentworks import output
 
@@ -284,7 +284,7 @@ def test_interactive_backend_predicted_unresolvable_when_non_interactive(
     assert prompt.resolve_calls == []
 
 
-def test_prediction_respects_backend_opt_out() -> None:
+def test_prediction_respects_source_opt_out() -> None:
     prompt = _FakeSource("prompt", interactive=True)
     decl = _decl("a", backend_mappings={"prompt": False})
     preview = predict_resolution([decl], _sources(prompt), interaction=InteractionPolicy.REFUSE)["a"]
@@ -311,7 +311,7 @@ def _px_ref() -> SecretReference:
 
 
 def _env_only_setup(tmp_path: Path) -> tuple[Config, Registry]:
-    """A real config and registry with the env-var backend alone, so
+    """A real config and registry with the env-var source alone, so
     predictions are driven by the environment (the node suites'
     not-resolvable shape)."""
     from agentworks.bootstrap import build_registry
@@ -323,7 +323,7 @@ def _env_only_setup(tmp_path: Path) -> tuple[Config, Registry]:
 
 def _env_and_prompt_setup(tmp_path: Path) -> tuple[Config, Registry]:
     """A real config whose chain is env-var THEN prompt, so an unset env
-    var falls through to the interactive backend."""
+    var falls through to the interactive prompt source."""
     from agentworks.bootstrap import build_registry
     from tests.orchestrated_fixtures import write_operator_config
 
@@ -472,7 +472,7 @@ def test_require_declared_refs_refuses_a_dangling_reference(tmp_path: Path) -> N
 
     This is the half of the old node preflight that STAYS the node's
     concern: whether the node's own declarations and the registry agree
-    is registry consistency. It reaches no backend and asks nothing
+    is registry consistency. It starts no source attempt and asks nothing
     about how the secret would get a value."""
     from agentworks.orchestration.secrets import require_declared_refs
 
