@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 import pytest
 
 from agentworks.errors import ConfigError, StateError
+from agentworks.naming import MAX_FREEFORM_NAME_LENGTH, validate_name
 from agentworks.orchestration.secrets import (
     ScopedSecrets,
     predict_resolution,
@@ -289,6 +290,27 @@ def test_prediction_respects_source_opt_out() -> None:
     decl = _decl("a", backend_mappings={"prompt": False})
     preview = predict_resolution([decl], _sources(prompt), interaction=InteractionPolicy.REFUSE)["a"]
     assert preview.category is PreviewCategory.UNAVAILABLE
+
+
+def test_preview_rows_reject_a_source_name_validate_name_accepts() -> None:
+    """The same decode hole ``ResolutionOutcome`` guards against reaches the two
+    preview rows, which render on the same surfaces (``secret describe``,
+    ``doctor``). ``validate_name`` accepts a trailing newline (issue #542), so
+    each row screens the source name itself."""
+    from agentworks.secrets.preview import PreviewCategory, ResolutionPreview, SkippedSource
+
+    forged = "envvar\n"
+    validate_name(forged, max_length=MAX_FREEFORM_NAME_LENGTH)
+    with pytest.raises(ValueError):
+        SkippedSource(source=forged, reason="not ready")
+    with pytest.raises(ValueError):
+        ResolutionPreview(
+            name="token",
+            category=PreviewCategory.ATTEMPTABLE,
+            source=forged,
+            identifier=None,
+            skipped_not_ready=(),
+        )
 
 
 def test_prediction_rejects_a_non_enum_policy_with_nothing_to_predict() -> None:

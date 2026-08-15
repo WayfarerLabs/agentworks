@@ -33,10 +33,19 @@ class InteractionPolicy(StrEnum):
 # constructs the policy, or read from a field checked when the object was built: the three
 # constructions inside ``Resolver`` read ``self._interaction``, checked in ``Resolver.__init__``
 # and never reassigned. A new ``Resolver`` method taking ``interaction`` would have neither.
-# `grep -rn "ResolutionPolicy(" cli/agentworks/` is the whole audit. Apply the rule mechanically,
-# including at a site whose own construction sits a line or two down and whose constructor would
-# therefore reject the value anyway. The alternative is a per-site judgment about how close is
-# close enough, which is what left a boundary bare before.
+#
+# The audit has two halves, and `grep -rn "ResolutionPolicy(" cli/agentworks/` is only the
+# first. It finds every construction, so it settles TOTALITY. It cannot find a published entry
+# point that CONSUMES ``interaction`` and constructs no policy, which is the REACH case above,
+# and that gap is not hypothetical: ``preview_operation_resolution`` and ``predict_resolution``
+# compare it by identity, build nothing, and went unchecked until someone read them. There is no
+# clean grep for the second half (roughly seventy functions take the parameter and ten check
+# it), so it is a criterion rather than a command: a function that accepts ``interaction`` from
+# a caller and can return without any policy being constructed checks it itself.
+#
+# Apply both halves mechanically, including at a site whose own construction sits a line or two
+# down and whose constructor would therefore reject the value anyway. The alternative is a
+# per-site judgment about how close is close enough, which is what left a boundary bare before.
 def require_exact_interaction_policy(interaction: InteractionPolicy) -> None:
     """Reject anything that is not an exact ``InteractionPolicy`` member.
 

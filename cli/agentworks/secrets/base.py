@@ -35,8 +35,8 @@ def require_exact_json_value(value: object) -> object:
     declares, so what YAML produced has to be what the backend sees. The
     manifest loader is pyyaml's ``SafeLoader``, whose tag set is wider than
     JSON: ``!!timestamp`` builds a ``datetime.date``, ``!!binary`` builds
-    ``bytes``, ``!!set`` builds a ``set``, and ``!!pairs`` builds tuples. Any
-    of those would reach a backend that was promised JSON.
+    ``bytes``, ``!!set`` builds a ``set``, and ``!!pairs`` builds a list of
+    tuples. Any of those would reach a backend that was promised JSON.
 
     The validator is attached recursively, so a failure keeps the list index
     or mapping key that led to it. Checking ``type`` rather than

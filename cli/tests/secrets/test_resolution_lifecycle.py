@@ -22,6 +22,7 @@ from agentworks.capabilities.secret_backend.client import (
     SecretSourceClient,
 )
 from agentworks.errors import ExternalError, SecretUnavailableError, StateError
+from agentworks.naming import MAX_FREEFORM_NAME_LENGTH, validate_name
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.resources.graph import Readiness
 from agentworks.schema import AgwModel, AgwRootModel, CapabilityBlock
@@ -479,6 +480,31 @@ def test_illegal_outcome_tuple_is_rejected() -> None:
             detail=ResolutionDetail.SOURCE_BACKEND_PLUGIN_DISABLED,
             remediation=ResolutionRemediation.ENABLE_PLUGIN,
             source="source",
+        )
+
+
+def test_a_source_name_that_passes_validate_name_can_still_forge_a_row() -> None:
+    """Decode's naming validator is not sufficient to trust a source name here.
+
+    ``NAME_RE`` anchors with ``$`` and is applied through ``re.match``, and ``$``
+    matches before a trailing newline, so ``validate_name`` accepts ``"envvar\\n"``
+    and a manifest can declare it. Rendering that source splits one diagnostic
+    row into two. Issue #542 tracks the validator; this guard is what stands
+    between the hole and a forged line, so it is not redundant with decode.
+
+    No ``match=``: with a safe name and no identifier, the source check is the
+    only one in ``__post_init__`` that this construction can trip.
+    """
+    forged = "envvar\n"
+    validate_name(forged, max_length=MAX_FREEFORM_NAME_LENGTH)
+    assert len(f"source={forged}; rest".splitlines()) > 1
+    with pytest.raises(ValueError):
+        ResolutionOutcome(
+            name="token",
+            category=ResolutionCategory.UNAVAILABLE,
+            detail=ResolutionDetail.SOFT_MISS,
+            remediation=ResolutionRemediation.CONFIGURE_SOURCE,
+            source=forged,
         )
 
 

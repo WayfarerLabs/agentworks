@@ -55,6 +55,12 @@ class ActiveSource:
     disabled_backend_plugin: str | None = None
 
     def __post_init__(self) -> None:
+        # Examined and kept, as this object's own cross-field invariant rather
+        # than as input validation: three fields are assembled here from three
+        # separate lookups, and nothing in their types says they agree. The
+        # second is what lets every backend downcast ``config`` to its declared
+        # model without re-checking, including the ``isinstance`` guards inside
+        # ``onepassword``. Types cannot express either agreement.
         if self.source.backend.name != self.backend_class.name:
             raise StateError(
                 f"secret-source/{self.source.name} selects {self.source.backend.name!r}, "
@@ -97,17 +103,21 @@ class CompletionPolicy(StrEnum):
 class ResolutionPolicy:
     """The two authorities one resolution pass runs under.
 
-    Boundary: a caller-supplied argument crossing into the resolution loop.
-    This constructor is how any caller reaches :func:`resolve_batch`, and
-    ``resolve_batch`` branches on both fields by identity, so both are
-    checked here and a policy that exists is a policy that was checked.
-    ``interaction`` decides whether an interactive source may be attempted;
-    ``completion`` decides whether a doomed batch fails before prompting.
-    An equal-but-not-identical value (a plain ``"refuse"``, a plain
-    ``"complete"``) takes the opposite branch silently in both cases.
+    ``interaction`` is the boundary. It arrives from callers our type checker
+    does not see, through the published service surface, and this constructor
+    is the totality half of the check the note above
+    ``require_exact_interaction_policy`` describes.
 
-    Checking on arrival at the service entry points buys position and reach
-    on top of this; see the note above ``require_exact_interaction_policy``.
+    ``completion`` is checked for a different and weaker reason, recorded
+    rather than dressed up as the same thing: it has no external channel
+    today, every value comes from a first-party literal, and no published
+    function takes it as a parameter. What it shares with ``interaction`` is
+    the failure mode. ``resolve_batch`` compares both by identity, so a plain
+    ``"complete"`` would silently take the partial branch and prompt through
+    a batch that was already doomed. One object, one rule, and a reader who
+    finds one field checked and the other bare has to work out which of two
+    reasons applies. The check costs a ``type()`` comparison in a constructor
+    that already runs one.
     """
 
     interaction: InteractionPolicy
@@ -264,7 +274,6 @@ def active_sources(config: Config, registry: Registry) -> tuple[ActiveSource, ..
     from agentworks.config.references import SettingReference
     from agentworks.resources.graph import Enablement
     from agentworks.secrets.sources import (
-        SecretSourceDecl,
         direct_backend_source_error,
         registry_source_backend_lookup,
         source_backend_class,
@@ -292,23 +301,28 @@ def active_sources(config: Config, registry: Registry) -> tuple[ActiveSource, ..
                 hint=f"declared secret sources: {registered}",
             ) from None
         source, backend_class = selected
-        if not isinstance(source, SecretSourceDecl):
-            raise StateError(f"secret-source/{name} is not a SecretSourceDecl")
         if registry.graph.enablement_of("secret-source", name) is Enablement.disabled:
             continue
         disabled_backend_plugin: str | None = None
         if registry.graph.enablement_of("secret-backend", source.backend.name) is Enablement.disabled:
             # ``origin.plugin`` is set only by the ``system-plugin`` variant, so it
             # doubles as the variant test, exactly as the other disabled-row tails
-            # read it (``resources.access.ensure_reference_enabled``).
+            # read it (``resources.access.ensure_reference_enabled``). Truthy, not
+            # ``is not None``, for the same reason that precedent is: an empty
+            # attribution names no plugin an operator could enable.
             origin = getattr(registry.lookup("secret-backend", source.backend.name), "origin", None)
-            disabled_backend_plugin = getattr(origin, "plugin", None)
+            disabled_backend_plugin = getattr(origin, "plugin", None) or None
         validated = validate_capability_config(
             kind="secret-backend",
             config=source.backend.tagged,
             owner=RefOwner(kind="secret-source", name=name),
             location=source.error_location,
         )
+        # Examined and kept, and it is a narrowing rather than a re-check:
+        # ``validate_capability_config`` is generic over kinds and returns
+        # ``BaseModel | None``, while a secret backend's config contract is
+        # ``AgwModel``. mypy cannot know the kind here, so this is the honest
+        # else-branch of a cast we would otherwise be making silently.
         if validated is None or not isinstance(validated, AgwModel):
             raise StateError(f"secret-source/{name} has no validated backend config")
         active.append(
@@ -514,8 +528,9 @@ def resolve_batch(
         if not projected:
             continue
         if not source.readiness.is_ready:
-            if not source.readiness.reason:
-                raise StateError(f"secret-source/{source.name} has invalid readiness") from None
+            # No reason check here: the reason is a backend's own text and this
+            # function never renders it. ``preview.py`` does render it, and keeps
+            # both its narrowing and ``SkippedSource``'s own emptiness invariant.
             for request, identifier in projected:
                 evidence[request.name].not_ready.append((source.name, identifier, source.disabled_backend_plugin))
             continue
@@ -563,10 +578,14 @@ def resolve_batch(
         except SecretClientFailure as failure:
             failure_kind = failure.kind
         except Exception:
-            # Boundary: an external process or service. The source turn shells
-            # out to a provider CLI or SDK, so anything it raises beyond the
-            # declared failure vocabulary becomes this source's per-secret
-            # ``unexpected`` outcome rather than ending the command.
+            # Boundary: an external process or service. What this contains is
+            # exactly ``_drive_source``: client construction, context entry,
+            # ``prepare``, ``resolve``, and exit, which is where a provider CLI
+            # or SDK actually runs. Anything raised there beyond the declared
+            # failure vocabulary becomes this source's per-secret ``unexpected``
+            # outcome rather than ending the command. The timeout declaration
+            # read above is deliberately outside: it does no I/O, so a raise
+            # from it is a first-party bug and should surface as one.
             unexpected = True
         if timed_out or failure_kind is not None or unexpected:
             if timed_out:

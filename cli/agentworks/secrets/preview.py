@@ -29,8 +29,16 @@ class SkippedSource:
     reason: str
 
     def __post_init__(self) -> None:
+        # ``reason`` is not screened. It is a backend's own text: a source folds
+        # its ``Readiness`` straight from ``impl.backend_readiness()`` or
+        # ``impl.not_ready(config)`` (``secrets/sources.py``), and ``Readiness``
+        # validates nothing. Not re-checking a registered class's return is the
+        # doctrine, and the registration seam is where that class is vetted.
+        # ``source`` is screened, for the reason ``_safe_diagnostic_text`` gives.
         if not self.reason:
             raise ValueError("a skipped source must say why it was skipped")
+        if not _safe_diagnostic_text(self.source):
+            raise ValueError("invalid skipped source name")
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +59,8 @@ class ResolutionPreview:
         # carries, on the same rendered rows. See ``_safe_diagnostic_text``.
         if not _safe_diagnostic_text(self.name):
             raise ValueError("invalid preview name")
+        if self.source is not None and not _safe_diagnostic_text(self.source):
+            raise ValueError("invalid preview source")
         if self.identifier is not None and not _safe_diagnostic_text(self.identifier):
             raise ValueError("invalid preview identifier")
 

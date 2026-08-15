@@ -139,12 +139,23 @@ _UNSAFE_DIAGNOSTIC_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
 def _safe_diagnostic_text(value: str) -> bool:
     """Reject text that can alter or forge a rendered diagnostic line.
 
-    Boundary: operator-authored input rendered as text. Two of the fields on
-    a value-free row are operator-written and reach no naming validator: a
-    secret NAME, because ``secret`` auto-declares any name a config
-    reference uses without restriction (``secrets.kinds``), and a lookup
-    IDENTIFIER, which is the operator's own mapping value. Source names are
-    not among them; those pass ``validate_name`` at manifest decode.
+    Boundary: operator-authored input rendered as text. Every name-shaped
+    field on a value-free row is operator-written, and none of them is
+    guaranteed newline-free by the time it renders:
+
+    - a secret NAME reaches no naming validator at all, because ``secret``
+      auto-declares any name a config reference uses (``secrets.kinds``);
+    - a lookup IDENTIFIER is the operator's own mapping value verbatim;
+    - a SOURCE name does pass ``validate_name`` at manifest decode, and that
+      is not sufficient: ``NAME_RE`` anchors with ``$`` and is applied with
+      ``re.match``, and ``$`` matches before a trailing newline, so
+      ``"envvar\\n"`` validates cleanly. Rendering that source splits one
+      row into two and the remainder becomes a forged line. Issue #542
+      tracks the root cause; fixing it there tightens validation for every
+      resource kind, so it is not a change this guard waits on.
+
+    A validator upstream is a reason to check less carefully here only when
+    it actually rejects what this rejects.
     """
     return all(unicodedata.category(char) not in _UNSAFE_DIAGNOSTIC_CATEGORIES for char in value)
 
@@ -173,6 +184,8 @@ class ResolutionOutcome:
             raise ValueError("invalid resolution outcome remediation target presence")
         if not _safe_diagnostic_text(self.name):
             raise ValueError("invalid resolution outcome name")
+        if self.source is not None and not _safe_diagnostic_text(self.source):
+            raise ValueError("invalid resolution outcome source")
         if self.identifier is not None and not _safe_diagnostic_text(self.identifier):
             raise ValueError("invalid resolution outcome identifier")
 
@@ -183,7 +196,12 @@ def _escape_plugin_target(target: str) -> str:
     Boundary: a capability class registered from outside our type checking.
     A plugin names itself, and ``register_plugin`` only requires that name
     to be non-empty and '/'-free, so the remediation line escapes rather
-    than trusts it. This is the sink, so it is the only place that has to.
+    than trusts it.
+
+    This is not the only place a plugin name reaches a rendered line:
+    ``plugins/enablement.py`` builds one into a ``DisabledMark.reason``,
+    which folds into a source's ``Readiness.reason`` and renders verbatim
+    through the preview path. That one is unescaped today.
     """
     escaped: list[str] = []
     for char in target:
