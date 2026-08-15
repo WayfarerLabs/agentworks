@@ -1,9 +1,9 @@
 """The tagged capability-config shape: the ONE way to name a capability.
 
 Every hosting surface (vm-site's platform, git-credential's provider,
-session-template's harness_integration) takes the capability as one
-tagged table whose ``name`` key selects it and whose remaining keys are
-its config.
+session-template's harness_integration, and secret-source's backend) takes
+the capability as one tagged table whose ``name`` key selects it and whose
+remaining keys are its config.
 """
 
 from __future__ import annotations
@@ -22,6 +22,71 @@ def _load_one(tmp_path: Path, name: str, text: str):  # noqa: ANN202 - test help
     resources.mkdir(parents=True)
     (resources / "res.yaml").write_text(dedent(text))
     return load_manifests(resources)
+
+
+@pytest.mark.parametrize(
+    ("kind", "name", "spec"),
+    [
+        pytest.param(
+            "vm-site",
+            "lab",
+            {"platform": "lima", "platform_config": {"vm_host": "me@box"}},
+            id="vm-site-sibling",
+        ),
+        pytest.param(
+            "git-credential",
+            "gh",
+            {"provider": "github", "provider_config": {"token": "gh-token"}},
+            id="git-credential-sibling",
+        ),
+        pytest.param(
+            "session-template",
+            "shell",
+            {"harness_integration": "shell", "harness_integration_config": {"command": "bash"}},
+            id="session-template-sibling",
+        ),
+        pytest.param(
+            "secret-source",
+            "ci-env",
+            {"backend": "env-var", "backend_config": {}},
+            id="secret-source-sibling",
+        ),
+        pytest.param(
+            "vm-site",
+            "azure",
+            {"platform": {"name": "azure-vm", "service_principal": None}},
+            id="azure-service-principal",
+        ),
+        pytest.param(
+            "vm-site",
+            "aws",
+            {"platform": {"name": "aws-ec2", "credentials": None}},
+            id="aws-credentials",
+        ),
+        pytest.param(
+            "vm-site",
+            "lima",
+            {"platform": {"name": "lima", "vm_host": "me@box"}},
+            id="lima-vm-host",
+        ),
+    ],
+)
+def test_retired_capability_shapes_fail_decode_or_build(
+    tmp_path: Path,
+    kind: str,
+    name: str,
+    spec: dict[str, object],
+) -> None:
+    """Retired host and capability shapes fail the shipped manifest path."""
+    from agentworks.bootstrap import build_registry
+    from agentworks.config import load_config
+    from tests.conftest import ManifestDoc, write_manifests
+
+    config_path = _write_config(tmp_path)
+    write_manifests(tmp_path, ManifestDoc(kind, name, spec))
+
+    with pytest.raises(ConfigError):
+        build_registry(load_config(config_path, warn_issues=False))
 
 
 def test_session_template_canonical_selector_decodes_to_the_internal_pair(tmp_path: Path) -> None:
