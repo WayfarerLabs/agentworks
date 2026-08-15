@@ -77,7 +77,7 @@ NOC. **Commanded thrust** is the post-input, post-assist, post-fuel engine value
 and plumes. **Manual steer** is the normalized signed turn intent before angular assistance;
 negative is left and positive is right. **Thrust-vector angle** is the manual-steer-derived
 direction shared by both engine forces and both rendered plumes while effective thrust is nonzero;
-it is zero at zero effective thrust. **Mission time** excludes hidden time. A **sufficient
+it is zero at zero effective thrust. **Mission time** excludes hidden time. A **predicted
 allowance** is section 10.1's conservative base plus the monotone positive deck-delta surcharge,
 rounded up to the pinned fuel quantum. It is neither a schedule-specific minimum nor a universal
 flight guarantee or global mathematical optimum over all possible controls. The **refuel ratio** for
@@ -1037,7 +1037,7 @@ exhaustion impossible; there is no route-key, proof, or generation-error transac
 
 Site `4095` is the sole terminal transaction. It does not call `createSiteForIndex(4096)` or create
 a descriptor beyond the physical rail. It otherwise preserves the ordinary can, 300 ms refuel, 900
-ms deployment, 1,400 ms power, installed agent, status, and launch-ready transitions. Its sufficient
+ms deployment, 1,400 ms power, installed agent, status, and launch-ready transitions. Its predicted
 terminal allowance is exactly section 10.3's direct `22`, using the formula with an absent next leg
 represented only here as `deckDelta=0`; the committed award is `22*currentRefuelRatio`, added to
 carryover without rounding or clamp. The same transaction sets `activeSiteId=4095`,
@@ -1485,8 +1485,9 @@ authoritative. With section 5.3's exact deck-delta range, the largest arithmetic
 
 No `targetRouteProof`, `routePairKey`, proof catalog, schedule digest, generated proof import,
 defensive replay, runtime search, or proof-derived failure belongs to the model, checkpoint, site,
-controller, static markup, or built JavaScript. Historical Phase 4R-4T route fixtures and tools may
-be deleted when they have no remaining current consumer. They are never Phase 4U bootstrap input.
+controller, static markup, or built JavaScript. Historical Phase 4R-4T route fixtures and tools must
+be deleted during implementation after their migration-only consumers are removed. None may remain
+as a bootstrap, compatibility alias, dormant alternate path, or Phase 4U input.
 
 ### 10.2 Geometry parity and non-exhaustive flight evidence
 
@@ -2407,7 +2408,7 @@ iteration over prior bases, using the post-increment ordinal for the current awa
 than adding to carried fuel, rounding/capping the award or reserve, advancing more than once,
 recomputing checkpoint authority from post-crash state, arbitrary precision, an artificial
 base-count bound, a runtime value below `1`, failure to round to exact `1` at `n=54`, or any effect
-on direct sufficient allowance or geometry digests. Exact mutation vectors pin `n=52,53,54,100` and
+on direct predicted allowance or geometry digests. Exact mutation vectors pin `n=52,53,54,100` and
 prove the 100-site sequence is non-increasing and never below `1`; they do not require it to remain
 strictly above `1`.
 
@@ -2421,7 +2422,7 @@ strictly above `1`.
 | R9, AC8: no-JS, in-memory lifecycle, pause, focus, reduced motion                       | Sections 4, 5.1, 8.2, 11, 12, and 15                |
 | R18: exact Lander title/`h1` and 404 explanatory copy                                   | Sections 4 and 15                                   |
 | R21, AC7: gauge, payoff, manual departure, battery/signal, legs                         | Sections 4, 7, 10.3, 12, 14, and 15                 |
-| R22, AC22: seeded target, sufficient allowance, ratio, carryover                        | Sections 5, 7.3, 10, 14, and 15                     |
+| R22, AC22: seeded target, predicted allowance, ratio, carryover                         | Sections 5, 7.3, 10, 14, and 15                     |
 | R21/AC22: elevated open scaffold with honest conservative colliders                     | Sections 5.3, 9, 10.2, 14, and 15                   |
 | R22, AC23: offscreen target and motion-safe bidirectional cue                           | Sections 6, 8.2, 12, and 15                         |
 | R23, AC24: vacuum crash and exact checkpoint Retry                                      | Sections 7.3, 9, 13-15                              |
