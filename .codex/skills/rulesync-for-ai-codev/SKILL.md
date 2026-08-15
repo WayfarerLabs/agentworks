@@ -10,7 +10,9 @@ on).
 
 ## Structure
 
-- `.rulesync/rules/*.md`: always-on context (loaded every session)
+- `.rulesync/rules/*.md`: always-on context (loaded every session). The one deliberate exception is
+  `cli-conventions.md`, which carries frontmatter `globs` so it is delivered path-scoped to the CLI
+  sources it governs; every other rule is delivered unconditionally.
 - `.rulesync/skills/*/SKILL.md`: on-demand context (invoked when needed)
 - `.rulesync/subagents/*.md`: specialized assistant personas
 - `rulesync.jsonc`: shared config; declares `targets: ["copilot", "claudecode", "codexcli"]` and the

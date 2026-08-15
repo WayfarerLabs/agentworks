@@ -1,6 +1,6 @@
 ---
 description: "CLI command shape and naming conventions"
-globs: ["**/agentworks/cli/**/*.py", "**/completions/**/*.py", "**/agentworks/**/manager.py"]
+globs: ["**/agentworks/cli/**/*.py", "**/completions/**/*.py", "**/agentworks/**/manager/**/*.py"]
 ---
 
 # CLI Conventions
@@ -123,7 +123,9 @@ subclasses from `agentworks.errors`, organized by _kind_ of error (`NotFoundErro
 `ExternalError`, `ConfigError`, `UserAbort`); the entity dimension (vm, workspace, agent, session,
 console) is carried as the `entity_kind` / `entity_name` attributes on the exception, not as the
 type. The CLI catches and renders them; no `typer.echo`, `print`, or `typer.Exit` from manager
-modules. See the `agentworks-reviewer` rubric for the full check.
+modules. The sole exception is `sessions/manager/_logs.py`, a raw data pipe that CI allowlists
+alongside the CLI package; the comment in that file says why. See the `agentworks-reviewer` rubric
+for the full check.
 
 ## When in doubt
 
