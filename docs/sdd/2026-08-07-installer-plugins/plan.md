@@ -18,7 +18,7 @@ land together. The artifact revision merges first because this is an active saga
 - [x] Replace the seed's broad scope with the 16-row inventory, revised FRD, HLA, migration
       strategy, and implementation plan.
 - [x] Run scoped documentation gates and obtain a clean independent artifact review.
-- [ ] Publish a draft artifact PR for saga-lead review, address findings, promote it when directed,
+- [x] Publish a draft artifact PR for saga-lead review, address findings, promote it when directed,
       and merge it before implementation.
 
 Definition of done: the artifacts name exactly two manifest-only plugins and contain no disable,
@@ -26,14 +26,14 @@ collision, initializer extension, or non-declared-installer implementation work.
 
 ## Phase 1: green manifest-only plugin move
 
-- [ ] Add and register the `apt` and `install-command` plugin descriptors with empty capabilities.
-- [ ] Move the ten apt and six user install-command rows unchanged into the owning packages.
-- [ ] Remove the now-empty built-in installer manifest files and update source comments that name
+- [x] Add and register the `apt` and `install-command` plugin descriptors with empty capabilities.
+- [x] Move the ten apt and six user install-command rows unchanged into the owning packages.
+- [x] Remove the now-empty built-in installer manifest files and update source comments that name
       their ownership.
-- [ ] Make the plugin manifest provenance source derive from the actual manifest package anchor so
+- [x] Make the plugin manifest provenance source derive from the actual manifest package anchor so
       the hyphenated plugin name records a truthful import path.
-- [ ] Preserve the exact payload oracle while changing its provider and enablement expectations.
-- [ ] Prove the two descriptors are shipped and disabled by default, and pin truthful provenance
+- [x] Preserve the exact payload oracle while changing its provider and enablement expectations.
+- [x] Prove the two descriptors are shipped and disabled by default, and pin truthful provenance
       from each manifest anchor. Rely on the existing generic framework tests for publication,
       gating, row precedence, and multiple enabled plugins.
 
