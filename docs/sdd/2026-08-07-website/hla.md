@@ -125,6 +125,12 @@ below the repository's 1,000-line ceiling. Tests mirror those seams rather than 
 contracts in one file. The split introduces no package dependency, plugin surface, or alternate
 builder API.
 
+The Lander's exact continuous-contact arithmetic is a focused shipped production module,
+`static/lander-collision.js`. `static/lander-world.js` owns world candidates and contact
+classification and imports only that pure arithmetic boundary. Both modules independently remain
+below the same 1,000-line ceiling; the builder copies them as separate modules and never
+concatenates them into an oversized output.
+
 ### D3. Repository content is a checked contract
 
 The site has three content classes:

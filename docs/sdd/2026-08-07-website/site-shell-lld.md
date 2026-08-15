@@ -32,6 +32,7 @@ availability notice and its temporary message input are absent.
 | `website/static/site.css`            | Shared tokens, shell, document presentation, focus, and reflow              |
 | `website/static/lander.css`          | Shared Lander/404 scene and mission presentation                            |
 | `website/static/lander-model.js`     | Pure deterministic lander model                                             |
+| `website/static/lander-collision.js` | Pure exact continuous-contact arithmetic                                    |
 | `website/static/lander-world.js`     | Pure seeded terrain, site, sky, and camera projection                       |
 | `website/static/lander-game.js`      | Page-agnostic game controller                                               |
 | `website/static/onboarding-copy.js`  | Accessible progressive copy enhancement for the canonical prompt            |
@@ -54,6 +55,7 @@ lander/index.html
 security/index.html
 static/lander-game.js
 static/lander-model.js
+static/lander-collision.js
 static/lander-world.js
 static/onboarding-copy.js
 static/lander.css
@@ -228,7 +230,7 @@ lives in the focused `website/site_asset_validation.py`. Each production module 
 remains below 1,000 lines. The split preserves one public build command and introduces no package or
 runtime dependency.
 
-Tests own a literal expected twelve-file manifest independent of production constants. They scan
+Tests own a literal expected fourteen-file manifest independent of production constants. They scan
 every static JavaScript module import, resolve same-origin relative imports against its emitted
 path, and require the target in that literal manifest; a missing `lander-model.js` mutation must
 fail. A malicious reviewed-link canary containing quotes, ampersands, and an attempted attribute
@@ -287,7 +289,7 @@ specified as two to three times the current compact `1.2rem` header mark; no CSS
 | Source completeness and safety | Complete-source projection, single-`h1`, UTF-8, fence, syntax, and link-map failure tests                                                                                                                   |
 | Template closure               | Token vocabulary, exact shell tree, HTML-hidden CTA, icon, breadcrumb, image, route-duplicate, direct Lander route, equal live label/title sources, and ownership mutation tests without authored-copy pins |
 | Generated semantics            | Five-page metadata structure, canonicals, landmarks, headings, skip links, shell, no-duplicate links, scripts, and local-reference tests; human review owns authored wording                                |
-| Exact artifacts                | The complete twelve-file manifest at `/` and `/agentworks/`; no partial API or CLI option                                                                                                                   |
+| Exact artifacts                | The complete fourteen-file manifest at `/` and `/agentworks/`; no partial API or CLI option                                                                                                                 |
 | Determinism and safety         | Repeated byte snapshots, hostile output trees, rollback injection, path and symlink tests                                                                                                                   |
 | Lander/404 preservation        | Shared-subtree identity, Python source/build tests, and Node model/controller contracts                                                                                                                     |
 | Browser acceptance             | `website/tests/lander-browser-checklist.md` pending five-page manual run                                                                                                                                    |

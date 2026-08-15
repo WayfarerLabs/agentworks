@@ -99,6 +99,7 @@ Implementation uses these permanent names:
 | `website/build.py`                                     | Rendering, validation, and exact proof-source composition       |
 | `website/site_game_validation.py`                      | Focused game DOM, module-closure, and manifest validation       |
 | `website/static/lander.css`                            | Scene layout, state selectors, focus, and SVG presentation      |
+| `website/static/lander-collision.js`                   | Pure exact continuous-contact arithmetic                        |
 | `website/static/lander-world.js`                       | Pure seed, terrain, site, collision, and window functions       |
 | `website/static/lander-model.js`                       | Authored flight/run state, physics, and proof replay            |
 | `website/static/lander-route-proofs.generated.js`      | Source-only generated 243-record proof projection               |
@@ -117,16 +118,17 @@ Implementation uses these permanent names:
 | `website/tests/test_lander_404.py`                     | Build, DOM, no-JS, and forbidden-surface checks                 |
 | `website/tests/lander-browser-checklist.md`            | Package-free browser, performance, and accessibility acceptance |
 
-The shipped artifact grows by exactly one file, `static/lander-world.js`. Tool, test, and
-`lander-route-proofs.generated.js` source files are not separate artifact entries. Before ordinary
-asset validation, `build.py` requires the model's one exact generated-proof import and the
-projection's provenance marker, removes that source-only import, and prepends the reviewed generated
-module bytes to the existing `static/lander-model.js` destination. The output therefore remains the
-exact 13-file artifact and has no unresolved generated-module import. The shipped production module
-DAG is exact:
+The complete shipped artifact contains both `static/lander-world.js` and the focused
+`static/lander-collision.js`; tool, test, and `lander-route-proofs.generated.js` source files are
+not separate artifact entries. Before ordinary asset validation, `build.py` requires the model's one
+exact generated-proof import and the projection's provenance marker, removes that source-only
+import, and prepends the reviewed generated module bytes to the existing `static/lander-model.js`
+destination. It copies the collision and world modules separately without concatenation. The output
+is therefore the exact 14-file artifact and has no unresolved generated-module import. The shipped
+production module DAG is exact:
 
 ```text
-lander-game.js  -> lander-model.js -> lander-world.js
+lander-game.js  -> lander-model.js -> lander-world.js -> lander-collision.js
        |--------------------------------^  read-only projection and seed helpers
 ```
 
@@ -137,8 +139,10 @@ lander-game.js  -> lander-model.js -> lander-world.js
 authored `lander-model.js` source additionally imports the source-only generated proof catalog;
 build-time composition resolves that edge inside the existing model artifact. `lander-model.js`
 imports pure world construction, retention, seed, collision, and geometry exports. `lander-world.js`
-imports neither production module, reads no DOM, clock, storage, or ambient randomness, and owns no
-mutable singleton. No production module imports upward or sideways outside this DAG.
+imports only exact root comparison, reconstruction, and segment-contact helpers from
+`lander-collision.js`. The collision module imports no production module; both lower modules read no
+DOM, clock, storage, or ambient randomness and own no mutable singleton. No production module
+imports upward or sideways outside this DAG.
 
 The model is the sole mutable run authority. One run aggregate owns physics, fuel, mission state,
 seed, generator cursor, retained sites, active and target IDs, route proof, checkpoint, and crash
@@ -154,18 +158,20 @@ near the hard ceiling. It imports `validate_game_contract` from `site_game_valid
 the rendered pages, asset manifest, and site base into that focused authority. The helper imports
 only the standard library, never imports `site_validation.py`, and owns all new game-subtree,
 game-module closure, and exact game-manifest rules. `test_lander_404.py` exercises the helper. The
-helper is build source, not a shipped site file, so the browser artifact remains exactly 13 files.
+helper is build source, not a shipped site file, so the browser artifact remains exactly 14 files.
 Splitting follows authority, not line compression.
 
-Phase 4S adds no production module or shipped artifact. Replace the existing collision block inside
-`lander-world.js` with section 9's candidate traversal and linear/quadratic reconstruction; do not
-append a second classifier. The expected authored result is 800-900 lines for `lander-world.js`,
-820-860 for `lander-model.js`, and below 720 for `lander-game.js`. Keep the existing 967-line model
-test below 1,000 by placing new collision/terminus/terminal-service coverage in the focused
-`lander-phase4s.test.mjs`; do not move unrelated assertions merely to game the ceiling. The ordinary
-broad-phase-clear step remains O(1), an ordinary near-ground step reaches approximately 10-12
-candidate halvings and one or two angle slabs, and only pathological maximum-reachable rotation can
-reach the declared 50,554-knot bound. That bound may cost work but cannot become a failure.
+Phase 4S adds exactly one focused shipped production module, `lander-collision.js`, and one artifact
+entry. Move section 9's exact dyadic root comparison and linear/quadratic segment-contact arithmetic
+into that pure module; retain candidate construction, feature precedence, and outcome classification
+in `lander-world.js`, and do not retain or append a second classifier. Both shipped modules must be
+below 1,000 lines before and after build; build composition may not hide an oversized module. Keep
+the existing near-ceiling model test below 1,000 by placing new collision/terminus/terminal-service
+coverage in the focused `lander-phase4s.test.mjs`; do not move unrelated assertions merely to game
+the ceiling. The ordinary broad-phase-clear step remains O(1), an ordinary near-ground step reaches
+approximately 10-12 candidate halvings and one or two angle slabs, and only pathological
+maximum-reachable rotation can reach the declared 50,554-knot bound. That bound may cost work but
+cannot become a failure.
 
 The build seam remains `website/build.py --repo-root ROOT --output OUT --site-base BASE`. It emits
 only the complete linked site. The sole `{{SITE_BASE}}` token prefixes local links and imports.
@@ -993,11 +999,10 @@ ordinary and final services is:
    step. There is no discarded first impulse. Every following step applies ordinary player input,
    gravity, fuel, and swept collision even if the player releases thrust before clearing the
    platform.
-7. The active platform top is ignored only while `launchCleared=false` and the integrated velocity
-   is upward. Once both transformed feet are strictly above `platformTop+0.05 m`, set
-   `launchCleared=true` and return `flying` in that same step without resetting pose, fuel, command,
-   clock, or input. Platform sides, underside, the unified truss, NOC, mast, and terrain are never
-   ignored.
+7. The active platform top is ignored only while `launchCleared=false`. Once both transformed feet
+   are strictly above `platformTop+0.05 m`, set `launchCleared=true` and return `flying` in that
+   same step without resetting pose, fuel, command, clock, or input. Platform sides, underside, the
+   unified truss, NOC, mast, and terrain are never ignored.
 
 Reduced motion skips the 2,600 ms service presentation and atomically applies can collection, award,
 the full gauge, agent entry/installation, all four battery bars, all three signal stages, powered
@@ -1688,7 +1693,7 @@ node website/tools/derive_lander_routes.mjs \
 
 Unknown or missing flags exit 2; derivation or verification failure exits 1; success exits 0.
 Ordinary tests verify checked canonical data and never regenerate their expectations. Tooling never
-ships in the 13-file site artifact.
+ships in the 14-file site artifact.
 
 The source-projection CLI is exact:
 
@@ -2315,7 +2320,7 @@ The exact local demo remains
 by `python3 -m http.server --directory /tmp/agentworks-site-demo 8000`. Game work opens `/lander/`;
 fallback acceptance opens `/404.html`.
 
-The complete artifact contains exactly these 13 files:
+The complete artifact contains exactly these 14 files:
 
 ```text
 index.html
@@ -2327,6 +2332,7 @@ assets/agw-favicon.svg
 assets/agw-rocket.svg
 static/site.css
 static/lander.css
+static/lander-collision.js
 static/lander-world.js
 static/lander-model.js
 static/lander-game.js
@@ -2343,7 +2349,7 @@ six-template/smaller-failure data are absent, not aliases.
 | `node --test website/tests/lander-world.test.mjs`                       | Independently reconstruct the eight global profiles from seed and signed superblock/epoch only, strict 16 m X cadence, exact normalized mapping/band, linear interpolation, terrain miter join/limit `2`, exact `.36/.40` grade/change bounds, sixteen 96/512 m phases, all 320 assignments and 243 exact pairs, closed-footprint maximum, `+2.5 m` deck equality, and signed regeneration. Pin the exact closed world/site bounds, terrain terminal indexes, two `.2 m` native-foot rails, clamped edge projection, and one permanent terminus path distinct from chunks. Across 4,096 vertices retain the variety witnesses. Rebuild 14 truss members, three uncapped finite lattice columns with six native feet and exact colliders. Mutation-kill forced alternation, site-conditioned terrain, phase lock, curves, rounding, a global datum, shelf/cap, retained-edge collider, missing/moved terminus, vertical terrain edge, or foot drift.                                                                                                                                                                                                                                                                      |
 | `node --test website/tests/lander-route-proofs.test.mjs`                | Reproduce the generated proof source byte-for-byte from reviewed derived v8; replay all 243 success records over 320 assignments, one keyed lookup per pair, contact `<=4320`, and exact complete collision with no hull-height rejection. Pin `B=12.55`, exact no-epsilon quantum ceiling, sufficient allowances, atomic corrected digests, S0-S7 openings, terminal record, signed longevity, and absence of `smallerFailure`/runtime search.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `node --test website/tests/lander-model.test.mjs`                       | Retain unchanged inclusive `2.2/3.6/18/26` landing limits, engine exhaustion arithmetic, fuel, ratio, checkpoint, Retry, zero-fuel, deployment, reduced-motion, hidden-time, collision integration, input, and scheduler vectors without growing this near-ceiling module. No assertion encodes authored prose.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `node --test website/tests/lander-phase4s.test.mjs`                     | Mutation-sensitive independent reconstruction of the `.02 m` detection-only candidate invariant and unexpanded linear/quadratic contact equations. Kill expansion-as-impact, endpoint-only contact, discriminant-sign rounding, repeated-root loss, collinear-overlap loss, a Number midpoint that stops progressing, shortest-arc knots, retained knot arrays, work-budget impact, retained-edge impact, invisible/moved rails, final-site route lookup, terminal award/cursor/null-target drift, or a 14th artifact. Exercise both signed maximum-reachable streams, assert exactly 50,554 visited knots and final-slab actual contact, and preserve stable model/listener/DOM counts through repeated Retry/lifecycle calls. Keep this focused test and every authored module below 1,000 lines.                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `node --test website/tests/lander-phase4s.test.mjs`                     | Mutation-sensitive independent reconstruction of the `.02 m` detection-only candidate invariant and unexpanded linear/quadratic contact equations. Kill expansion-as-impact, endpoint-only contact, discriminant-sign rounding, repeated-root loss, collinear-overlap loss, a Number midpoint that stops progressing, shortest-arc knots, retained knot arrays, work-budget impact, retained-edge impact, invisible/moved rails, final-site route lookup, terminal award/cursor/null-target drift, collision/world concatenation, or a 15th artifact. Exercise both signed maximum-reachable streams, assert exactly 50,554 visited knots and final-slab actual contact, and preserve stable model/listener/DOM counts through repeated Retry/lifecycle calls. Keep this focused test and every authored and shipped production module below 1,000 lines.                                                                                                                                                                                                                                                                                                                                                                |
 | `node --test website/tests/lander-phase4l.test.mjs`                     | Mutation-sensitive controller/DOM tests pin exactly two controls-line children in keyboard/touch order, Retry label-source and hint structure without asserting text, internal `RESTART` dispatch, crash focus stability, click/`r` teardown-render-focus order, shell focus with `preventScroll`, and no synthesized input. Existing outside-shell and native-button rejection coverage remains exact.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `node --test website/tests/lander-phase4m.test.mjs`                     | Mutation-sensitive controller/DOM tests pin five sky chunks, 20 stars, one or two deterministic landmarks in exactly two paths, the complete two-arc crescent, all three one/two-ring profiles, exact circle/ellipse intersections, omitted rear-center arcs, and complete foreground arcs. They retain static/dynamic descriptor equality, bounded reconciliation, `.24` parallax transforms, negative/positive camera following, bidirectional cue changes, pass/reverse/return, and the historical rejection of a generic horizontal-bound failure; Phase 4S's focused test owns the exact two-rail contact and camera-clamp exception. They also pin the exact opening half-gauge, post-award full reference without cap, `.9 s` deploy travel, unchanged refuel/power timing, hidden-time freeze, reduced-motion atomic projection, and structural copy/link/accessibility sources without embedding authored wording.                                                                                                                                                                                                                                                                                              |
 | Derivation CLI fixture verification                                     | Verify the immutable v7 bootstrap byte hash/schema/count/internal digests, extract its narrow schedule projection, and generate temporary v8 output with v9 deriver, collision v2, and synthesizer v1; review the canonical delta; update bootstrap/geometry/physics/assignment/proof/world/output digests atomically; then run ordinary `--verify`. Enumerate exact 16-phase/profile closure into 320 assignments and 243 numeric-sorted exact pair keys. Regenerate with pinned bootstrap order/selection, prefix, `12/269/6000` bounds, command order, integer-millimeter key, cost/tie tuple, first-safe-layer selection, and 4,320-step ceiling; exact independent and production replays agree for all 243 routes, eight openings, and terminal vector. No early-success omission, profile rejection, runtime fallback, fuel-wasting schedule, scope/order drift, undeclared input, or partial fixture is permitted.                                                                                                                                                                                                                                                                                               |

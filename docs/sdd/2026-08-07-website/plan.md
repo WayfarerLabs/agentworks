@@ -1119,10 +1119,12 @@ changes only terrain variety and the two non-contact failure classifications.
       terrain-independent site positions, local `max+2.5 m` decks, native support feet, and zero
       vertical scrolling.
 - [ ] Delete the vertical-ceiling crash and replace the 64-slice excessive-speed failure with a
-      bounded, complete swept-collision traversal. Fuel depletion must suppress thrust without
-      failing until a real terrain or structure contact occurs. A finite world is permitted only
-      with a visible physical terminus whose contact causes the failure; no retained-window edge or
-      pose within generated terrain may fail as a boundary.
+      bounded, complete swept-collision traversal. Keep exact contact arithmetic in one focused
+      shipped module, keep both that module and world authority below 1,000 lines, and ship the
+      exact fourteen-file artifact without build-time concatenation. Fuel depletion must suppress
+      thrust without failing until a real terrain or structure contact occurs. A finite world is
+      permitted only with a visible physical terminus whose contact causes the failure; no
+      retained-window edge or pose within generated terrain may fail as a boundary.
 - [ ] Regenerate terrain/world/route fixtures and proof projections atomically as required. Prove
       every concrete route geometry, opening, Retry checkpoint, static scene, and retained-world
       bound against the new terrain without changing controls, physics, landing tolerance, fuel,
