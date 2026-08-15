@@ -138,9 +138,6 @@ need four passes, and a foundational one should not get fewer.
   Never background or pause a `create`: a paused create leaks a live VM that nothing is watching.
 - Always tear down what you created, then independently verify residue-clean at every layer the
   platform touches, not just through the tool that created the resource.
-- Expect cloud eventual consistency on residue checks: a provider's list API can lag a just-deleted
-  resource by seconds. Re-check after a short delay, and prefer a fresher, more specific API over a
-  generic list view, before calling something a leak.
 - Calibrate timeouts to reality, not to impatience. Cloud and VM operations take minutes as a matter
   of course; a timeout set for a fast unit test manufactures a false "broken" verdict on an
   operation that was simply still running. See `agw-test-env` for platform-specific timeout
@@ -170,7 +167,9 @@ decides what blocks. Know that mechanism, because it is what happens to your rep
 follow for the testing session itself. It is not the PR's author, so its own route to any fix is the
 operator's direction, never its own initiative, not even for a one-line fix. And its run ends in a
 PR comment in every case, clean or blocked, because a live run that ends in silence leaves no record
-that it happened.
+that it happened. Say in that comment whether the session is willing to apply the fixes should the
+operator direct them, or that a finding belongs with the effort's own dev instead; the owner
+weighing disposition needs to know who would do the work.
 
 Report honestly: failures get their actual output attached, not a paraphrase, and any step you
 skipped gets named as skipped, not omitted.
@@ -187,6 +186,6 @@ which are the sections marked "inject" there. That is the part the subagent cann
 definition already carries the method, the synchronous-long-ops discipline, and the
 instruction-versus-data distinction, so restating those in a charter adds nothing.
 
-Launch it at the lighter tier. A delegated tester runs well there when the charter carries the
-inventory, budget, and prefix, so a scoped test run does not need the standard tier that
-`agentic-dev-process` section 4 defaults to.
+A delegated tester works well at the lighter tier when the charter carries the inventory, budget,
+and prefix, so a scoped test run rarely needs the standard tier that `agentic-dev-process` section 4
+defaults to. The tier remains that section's call, made per launch.

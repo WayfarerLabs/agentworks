@@ -32,9 +32,9 @@ the mechanism itself and stay as written.
 
 ## Inventory (inject)
 
-- CLI: `agw`, installed editable from an agentworks checkout's `cli/`, so it runs whatever branch is
-  checked out there. Operator config: `~/.config/agentworks/config.toml` plus YAML resources under
-  `~/.config/agentworks/resources/`.
+- CLI: `agw`, installed editable from an agentworks checkout's `cli/` (which one is in
+  `inventory.local.md`), so it runs whatever branch is checked out there. Operator config:
+  `~/.config/agentworks/config.toml` plus YAML resources under `~/.config/agentworks/resources/`.
 - vm-site `<vm-host-alias>`: remote Lima on `<remote-lima-host>`, reached via the ssh alias
   `<vm-host-alias>-<remote-user>` (user `<remote-user>`, over Tailscale). limactl lives at
   `/opt/homebrew/bin` (found via login shell; plain `ssh host cmd` does not see it). lima >= 2.2.0.
@@ -49,10 +49,9 @@ the mechanism itself and stay as written.
 - Secrets: env-var backend; `AW_SECRET_TAILSCALE_AUTH_KEY` is exported in the session environment
   and resolves the `tailscale-auth-key` secret used at vm create.
 - vm-site `azure` (layer-2, agentworks-managed): platform `azure-vm`, needs the `azure` system
-  plugin enabled (`[plugins] system = ["azure", "aws"]`). SP creds are delivered in
-  `AGW_TESTING_AZURE_*` env vars (CLIENT_ID / CLIENT_SECRET / TENANT_ID / SUBSCRIPTION_ID /
-  RESOURCE_GROUP / REGION). agentworks resolves the SP client secret as the `azure-client-secret`
-  secret via env-var backend, so agw commands need
+  plugin enabled. SP creds are delivered in `AGW_TESTING_AZURE_*` env vars (CLIENT_ID /
+  CLIENT_SECRET / TENANT_ID / SUBSCRIPTION_ID / RESOURCE_GROUP / REGION). agentworks resolves the SP
+  client secret as the `azure-client-secret` secret via env-var backend, so agw commands need
   `export AW_SECRET_AZURE_CLIENT_SECRET="$AGW_TESTING_AZURE_CLIENT_SECRET"`. The non-secret IDs go
   in `~/.config/agentworks/resources/azure.yaml` (spec.platform_config: subscription_id,
   resource_group, region, service_principal{tenant_id, client_id}); the RG must already exist.
@@ -65,26 +64,25 @@ the mechanism itself and stay as written.
   layer (list RG resources by the `<system-slug>-<name>` prefix), not just via `agw vm list`.
   Orphaned disk/NIC/public-IP after a VM delete is a known azure hazard to check for.
 - vm-site `ec2` (layer-2, agentworks-managed AWS EC2): platform `aws-ec2` (the name to use in the
-  site's `spec.platform.name`), needs the `aws` system plugin enabled
-  (`[plugins] system = ["azure", "aws"]`). PURE boto3, NO aws-cli needed (its install-command
-  manifest is deferred as #342), so residue checks use a boto3 snippet, not a CLI. Creds delivered
-  in `AGW_TESTING_AWS_*` env vars (ACCESS_KEY_ID / SECRET_ACCESS_KEY / REGION). agentworks resolves
-  the secret as the `aws-secret-access-key` secret via env-var backend, so agw commands need
-  `export AW_SECRET_AWS_SECRET_ACCESS_KEY="$AGW_TESTING_AWS_SECRET_ACCESS_KEY"`. Site config
-  `~/.config/agentworks/resources/ec2.yaml` uses the tagged shape under `spec.platform`: `name`
-  (`aws-ec2`), `region`, and a `credentials` block with `access_key_id` and `access_key_secret`.
-  `access_key_id` is a plain identifier (not secret); `access_key_secret` is the NAME of the secret.
-  Region `<aws-region>` (chosen for proximity to the operator). Account `<aws-account-id>`,
-  dedicated IAM user `<iam-user>` with a least-privilege EC2+SSM policy region-pinned to
-  `<aws-region>` (no EIP actions; the platform uses auto-assigned public IPs, never Elastic IPs).
-  GOTCHAS: a brand-new/dormant AWS account is "blocked, not recognized as valid" until AWS activates
-  it (identity/billing); the access-key-id and secret must be a MATCHED pair (mismatch results in
-  `SignatureDoesNotMatch` at runup). Exposure model: empty security group is the deny baseline (zero
-  ingress; no deny rule to install, unlike azure's NSG); ephemeral (proto,port,cidr)-tuple allows
-  scoped to the operator /32 for bootstrap + transient_route, revoked after. LEAK-WITNESS SWEEP
-  (boto3, `<aws-region>`): running instances tagged `agentworks:vm`, non-default security groups,
-  volumes; all must be empty after delete (EIPs omitted by design). Instances cost money; always
-  terminate + sweep.
+  site's `spec.platform.name`), needs the `aws` system plugin enabled. PURE boto3, NO aws-cli needed
+  (its install-command manifest is deferred as #342), so residue checks use a boto3 snippet, not a
+  CLI. Creds delivered in `AGW_TESTING_AWS_*` env vars (ACCESS_KEY_ID / SECRET_ACCESS_KEY / REGION).
+  agentworks resolves the secret as the `aws-secret-access-key` secret via env-var backend, so agw
+  commands need `export AW_SECRET_AWS_SECRET_ACCESS_KEY="$AGW_TESTING_AWS_SECRET_ACCESS_KEY"`. Site
+  config `~/.config/agentworks/resources/ec2.yaml` uses the tagged shape under `spec.platform`:
+  `name` (`aws-ec2`), `region`, and a `credentials` block with `access_key_id` and
+  `access_key_secret`. `access_key_id` is a plain identifier (not secret); `access_key_secret` is
+  the NAME of the secret. Region `<aws-region>` (chosen for proximity to the operator). Account
+  `<aws-account-id>`, dedicated IAM user `<iam-user>` with a least-privilege EC2+SSM policy
+  region-pinned to `<aws-region>` (no EIP actions; the platform uses auto-assigned public IPs, never
+  Elastic IPs). GOTCHAS: a brand-new/dormant AWS account is "blocked, not recognized as valid" until
+  AWS activates it (identity/billing); the access-key-id and secret must be a MATCHED pair (mismatch
+  results in `SignatureDoesNotMatch` at runup). Exposure model: empty security group is the deny
+  baseline (zero ingress; no deny rule to install, unlike azure's NSG); ephemeral
+  (proto,port,cidr)-tuple allows scoped to the operator /32 for bootstrap + transient_route, revoked
+  after. LEAK-WITNESS SWEEP (boto3, `<aws-region>`): running instances tagged `agentworks:vm`,
+  non-default security groups, volumes; all must be empty after delete (EIPs omitted by design).
+  Instances cost money; always terminate + sweep.
 - System slug: `<system-slug>`. It prefixes Lima instance names and tailnet hostnames automatically,
   so entity names stay bare (no extra prefix duplication).
 - Tailnet: this host and test VMs join the operator's tailnet. Deleted VMs leave offline machine
