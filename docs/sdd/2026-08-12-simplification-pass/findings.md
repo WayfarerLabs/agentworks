@@ -11,6 +11,13 @@ basis); SDD artifacts +21,913; process docs +7,699. Always-on rules context grew
 
 ## Rule-delivery facts (probed 2026-08-12, three controlled subagent probes)
 
+**Resolved 2026-08-14; the bullets below describe the pre-wave-0 world and are kept as the record of
+what was wrong, not as current fact.** PR #515 removed the path filter, and issue 511 closed on two
+observations: a fresh session and a worktree-isolated subagent each carried all twelve rules, in
+full text, before any tool use. The open sub-question about harness-created worktrees is answered by
+the second of those; the delivery channel is now session-start `claudeMd` rather than path-triggered
+injection, so worktree location no longer decides anything.
+
 Tracked as [issue 511](https://github.com/WayfarerLabs/agentworks/issues/511); wave 0 resolves it
 (FRD R1.0). Exact source inventory as of 2026-08-13: 18 files in `.rulesync/rules/`; thirteen
 declare `globs: ["**/*"]` including `root.md` (which projects to `CLAUDE.md` and always loads);
@@ -78,15 +85,16 @@ deliberately narrow `cli-conventions.md`.
 
 ## Secrets (#453)
 
-- **S1** The `phase7` corpus: 3,407 test lines, 639 collected cases, of which roughly 620 fail only
-  on differently-spelled-but-correct code. Includes a 671-line hand-rolled name resolver and a
-  575-line type-inference engine as test-support modules, plus tests of those helpers. Discovery
-  keys on a parameter literally named `interaction`, so renaming it silently removes a function from
-  the guarded set. Behind it, `validate_interaction_policy` (a runtime check that a first-party enum
-  is an enum) at 152 call sites, one of which validates the value the same expression just
-  constructed (`cli/commands/secret.py:134-136`). `test_phase7_retired_enforcement.py:229-268` is
-  additionally a wording blacklist over README, docs, and production source. Ten permanent test
-  files are named after transient plan phase 7.
+- **S1** The `phase7` corpus: 3,186 test lines (1,552 support, 1,634 test), 621 collected cases, of
+  which roughly 620 fail only on differently-spelled-but-correct code. (Recounted exactly during
+  implementation, 2026-08-14; the original 3,407 and 639 were estimates.) Includes a 671-line
+  hand-rolled name resolver and a 575-line type-inference engine as test-support modules, plus tests
+  of those helpers. Discovery keys on a parameter literally named `interaction`, so renaming it
+  silently removes a function from the guarded set. Behind it, `validate_interaction_policy` (a
+  runtime check that a first-party enum is an enum) at 152 call sites, one of which validates the
+  value the same expression just constructed (`cli/commands/secret.py:134-136`).
+  `test_phase7_retired_enforcement.py:229-268` is additionally a wording blacklist over README,
+  docs, and production source. Nine permanent test files are named after transient plan phase 7.
 - **S2** Backend classes treated as hostile protocol peers: bare `except Exception` plus type-checks
   around every return from the three in-repo backends
   (`resolve.py:87-94, 351-360, 556-573, 612-624`), a `_BATCH_TOKEN` construction sentinel defeated
@@ -121,7 +129,19 @@ deliberately narrow `cli-conventions.md`.
   module, parsing the retired mapping shape its own upgrade guide says is not parsed.
 - **S9** Built-in source names hardcoded in generic code: `resolve.py:547,552` dispatches the
   interaction broker on `name == "prompt"` while a declared `interactive` flag exists;
-  `vm rekey --ignore-env` pops `os.environ` keyed on the literal `"env-var"` mapping.
+  `vm rekey --ignore-env` pops `os.environ` keyed on the literal `"env-var"` mapping. **This is not
+  only tidiness** (upgraded 2026-08-14, from the cold review of PR #523, which reproduced the
+  effect): that hardcoded name is currently acting as an accidental safety net. Because every
+  consumer compares `interaction` by identity and `InteractionPolicy` is a `StrEnum`, a value that
+  is equal but not identical takes the not-refuse branch and resolves through an interactive source
+  in a run that meant to refuse. The `prompt` dispatch raises on that, so `prompt` fails loud while
+  `onepassword` and every future interactive backend fail silent and permissive. No first-party path
+  constructs a non-enum policy value: `verify_secrets` is absent from `agentworks.secrets.__all__`,
+  its only production caller is `cli/commands/secret.py:147`, and its `interaction` parameter is
+  typed `InteractionPolicy`, so reaching the path means importing an unexported function and passing
+  an untyped value, which mypy rejects in-repo. It is therefore filed as issue 529 against the
+  external-plugin loader effort rather than fixed here; when this is promoted, the safety half
+  travels with it, and no backend's safety should depend on its name.
 - **S10** LLD prose in permanent docstrings: 45-line docstring over a 10-line body
   (`base.py:187-218`), 57-line module docstring litigating design history, a 16-line Typer help
   docstring describing internals.
@@ -161,11 +181,16 @@ deliberately narrow `cli-conventions.md`.
   config shape; ADR 0018 describes deleted spellings; `vm_platform/README.md:385` states a rule four
   implementations no longer follow; assorted docstrings name retired spellings.
 - **C10** Prose-policing concentrations beyond the seeded purge FRD's survey:
-  `tests/schema/test_errors.py` (20+ sentence pins), `test_retired_shapes.py` (pins plus three
-  blacklists, redundant with its own structural tests), `test_capability_shape.py:21-32`,
-  `test_samples.py:152-171` (generated comments pinned line by line), and
-  `tests/manifests/test_emit.py` running 22 disk-backed load cycles for a property its derived tests
-  already establish.
+  `cli/tests/schema/test_errors.py` (20+ sentence pins),
+  `cli/tests/capabilities/test_retired_shapes.py` (pins plus three blacklists at `:185-186`, `:236`,
+  and `:373`, redundant with its own structural tests),
+  `cli/tests/manifests/test_capability_shape.py:21-32`, and `test_samples.py:152-171` (generated
+  comments pinned line by line). Path corrections and one retraction (2026-08-14, from the sweep
+  inventory's read-through): two of these were cited under `schema/` but live in `capabilities/` and
+  `manifests/`, which would have read as "deleted" to a later reader. And
+  `cli/tests/manifests/test_emit.py`'s 22 disk-backed load cycles are **withdrawn** as a finding:
+  they are the loader half of a two-parser soundness pairing, not redundant ceremony. The original
+  entry appears to have counted by token rather than by shape.
 
 ## Database and migrations (#472, #478, #503, #504, #469, #499)
 
@@ -234,6 +259,10 @@ deliberately narrow `cli-conventions.md`.
   an output directory that is always a fresh single-writer temp dir on an ephemeral CI runner.
 - **W8** A hard-required Chromium launch inside the unit suite re-verifying a layout decision a
   CSS-text test two functions above already pins, which the manual browser checklist also covers.
+  Corroborating evidence (2026-08-14): `test_site_documents.py`'s `browser_geometry` helper timed
+  out after 20 s against headless Chrome in CI, failing the Website job and the `ci-success` gate on
+  a docs-only PR (#518) that touched no website file. It passed on a bare re-run. A browser launch
+  in the unit suite is not only redundant here, it is a flake surface every unrelated PR pays for.
 - **W9** Twelve parallel dictionaries forming a closed-vocabulary framework describing exactly five
   fixed, non-extensible pages. The shape to revisit if W2/W3 are tackled; documented as intentional
   house style in `website/README.md`, so this is a design-revision decision.

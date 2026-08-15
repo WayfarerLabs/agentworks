@@ -33,12 +33,54 @@ loader and contribution channel when that effort starts, with the findings and t
 ## Doctrine 2: tests assert behavior; agreement is derived
 
 The unit of protection is the invariant, never the spelling of an authored artifact (prose, config,
-workflows, CSS tokens, our own source shape). Shapes wave 1 deletes and must not regenerate: AST
-assertions on our own source, verbatim pins of authored files, required-phrase lists, wording
-blacklists, mutate-one-string-assert-raises loops. Shapes it keeps: exit codes and error types,
-derivation parity against a canonical source, structural presence, thresholds, injection and
-redaction defenses. Replacements are the exception, added only for a real invariant that can
-actually regress, and never as a new production contract whose only consumer is a test.
+workflows, CSS tokens, our own source shape). Shapes wave 1 deletes and must not regenerate: source
+assertions that pin the spelling of our own code, verbatim pins of authored files, required-phrase
+lists, wording blacklists, mutate-one-string-assert-raises loops. Shapes it keeps: exit codes and
+error types, derivation parity against a canonical source, structural presence, thresholds,
+injection and redaction defenses, and boundary guards as defined below. Replacements are the
+exception, added only for a real invariant that can actually regress, and never as a new production
+contract whose only consumer is a test.
+
+### What a source-scanning guard protects, not how it inspects
+
+Source-scanning guards are a large family, estimated by the sweep's decision inventory at roughly
+1,955 lines; that inventory, not this doctrine, carries the file list. They do not sort as one shape
+(operator ruling 9), and the always-on `no-prose-policing-tests` rule draws the line that decides
+them: its target is "the spelling of our own source code". Inspecting source with `ast` is a
+technique, not a smell; what decides is what the assertion protects.
+
+- **Keep** a guard enforcing a boundary the type system cannot express, that an ordinary edit can
+  regress: import and layering boundaries, consent confinement
+  (`guide/test_power_import_boundary.py` is the standing example, forbidding the guide package from
+  reaching `subprocess`, sockets, or secrets), and drift against a canonical source.
+- **Delete** a guard pinning how our code is written rather than what it may reach: identifier
+  spellings, call-graph shape, statement order. The `phase7` corpus was this family, and so is
+  `resources/test_graph_guard.py`.
+
+Some guards read as both bullets at once, protecting a genuine behavioral property through
+structural inspection. There a structural guard yields to an observational twin wherever one exists
+or is cheap to write, and stays until then. PR #523 set the precedent when it deleted a lexical
+Tailscale-ordering pin whose property observational tests already covered.
+
+### `match=` splits three ways
+
+It appears at 696 sites, and the criteria above do not decide it on their own (operator ruling 10).
+Deleting it wholesale drops real branch coverage; preserving it by adding a production discriminator
+is exactly what R2.2 forbids. So:
+
+1. The raised type already discriminates: **delete** the `match=`, keep the `raises`.
+2. The match is the only thing distinguishing same-type branches of one function: **discriminate
+   structurally** where the code already offers a handle, meaning the exception type, an exception
+   attribute, or the cause chain, and assert on that instead. Where our own authored wording is
+   genuinely the only discriminator, **delete the assertion and accept the reduced branch
+   coverage**, which is what R2.4 directs; R2.2 forbids adding a production discriminator to
+   preserve it.
+3. It pins a sentence for its own sake: **delete**, per R2.4.
+
+No case licenses matching wording we author. `no-prose-policing-tests` permits pinning a token only
+where the prose arrives from outside the repository, so a `match=` against a provider's or an
+upstream tool's error text is the one surviving form; every message this repository writes is
+authored prose, error messages included.
 
 ## Guidance delivery
 
