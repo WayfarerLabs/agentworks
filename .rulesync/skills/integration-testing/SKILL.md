@@ -104,8 +104,8 @@ Not every PR needs the full pipeline at full depth; what it needs depends on wha
 ## Model-tiered multi-agent review for large or foundational PRs
 
 A PR large or foundational enough that a single review pass would be breadth without depth gets a
-tiered, multi-agent campaign instead of a single pass. Tiers are named as `agentic-dev-process`
-section 4 names them, never by product name:
+tiered, multi-agent campaign instead of a single pass. The tiers are `agentic-dev-process` section
+4's; name them by tier rather than by the model of the day, because model names change:
 
 1. **Mechanical scans at the lighter tier.** Wide sweeps for the mechanical stuff: style, obvious
    contract violations, dead code, missing tests. Cost-efficient because the failure mode at this
@@ -163,12 +163,14 @@ Durable lessons about what makes a review actually catch what matters:
 
 ## Disposition discipline
 
-A published test report informs; only the operator's authenticated direction decides. The procedure
-is `agentic-dev-process` section 7a, including the `awaiting-direction` label and the section 5
-materiality bar that decides what blocks. Two things follow for a testing session specifically. It
-is not the PR's author, so its route to any fix is the operator's direction, never its own
-initiative, not even for a one-line fix. And its run ends in a PR comment in every case, clean or
-blocked, because a live run that ends in silence leaves no record that it happened.
+A published test report informs; only the operator's authenticated direction decides. What you post
+is answered by the PR's owner, who responds per `agentic-dev-process` section 7a: a reading of every
+finding, the `awaiting-direction` label, and disposition against the section 5 materiality bar that
+decides what blocks. Know that mechanism, because it is what happens to your report. Two things
+follow for the testing session itself. It is not the PR's author, so its own route to any fix is the
+operator's direction, never its own initiative, not even for a one-line fix. And its run ends in a
+PR comment in every case, clean or blocked, because a live run that ends in silence leaves no record
+that it happened.
 
 Report honestly: failures get their actual output attached, not a paraphrase, and any step you
 skipped gets named as skipped, not omitted.
@@ -180,7 +182,7 @@ fallback label is "integration tester".
 ## Delegating to tester subagents
 
 When a charter goes to an `agentworks-tester` subagent, inject the relevant sections of
-`agw-test-env`: the concrete inventory, naming, budgets, and safety protocol for the environment it
-will run against. That is the part the subagent cannot know. Its own definition already carries the
-method, the synchronous-long-ops discipline, and the instruction-versus-data distinction, so
-restating those in a charter adds nothing.
+`agw-test-env`: the concrete inventory, naming, budgets, and the safety rules that bind the tester,
+which are the sections marked "inject" there. That is the part the subagent cannot know. Its own
+definition already carries the method, the synchronous-long-ops discipline, and the
+instruction-versus-data distinction, so restating those in a charter adds nothing.

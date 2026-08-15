@@ -31,3 +31,8 @@ own `inventory.local.md` copy.
 Add anything a reader would need that is not captured by the table above: known standing
 gotchas, account-activation quirks, host-sharing cautions, or anything else specific to your
 environment that the generic skill cannot know in advance.
+
+If you run local lima, this is where its install lives: the `uv` binary path, the path of the
+checkout agw runs from there, and the exact method for refreshing that checkout to the branch
+under test (the skill says the refresh is mandatory before every local-lima run; only you know
+how it is done here).

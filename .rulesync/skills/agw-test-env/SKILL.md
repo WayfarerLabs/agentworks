@@ -114,6 +114,9 @@ otherwise; the slug does global namespacing. Anything under `<system-slug>-*` on
 - Every main bump or PR test includes a **code-quality pass**: run the `agentworks-reviewer` agent
   over the new delta (post-merge range or PR branch) alongside the live retest (operator ruling,
   2026-07-26).
+- Delegated testers run well at the lighter tier, given a charter that carries the inventory,
+  budget, and prefix; a scoped test run does not need the standard tier that `agentic-dev-process`
+  section 4 defaults to.
 - Charters explicitly AUTHORIZE authoring scratch resources: when a surface can't be exercised
   through standing inventory (e.g. a secret-backed env template for `env show --resolve`), the
   tester should CREATE a prefixed scratch resource, test against it, and delete it, not report the
@@ -201,7 +204,10 @@ as needed). Core capabilities need nothing: lima/wsl2, shell, env-var/prompt, gi
   remoting). LOCAL means agw runs ON `<remote-lima-host>` itself, driving limactl directly (no SSH
   remoting), through the built-in `lima-local` site. A local install is standing under
   `<remote-user>`; reuse it:
-  - Its paths (the `uv` binary, the checkout it runs from, how that checkout is refreshed) are
+  - REFRESH THE LOCAL CHECKOUT to the branch under test before every local-lima run. It is a
+    separate checkout from the one this host drives, so a run against a stale one live-validates
+    code the PR does not contain and reports a confident false pass. Never copy a Linux `.venv` into
+    it; that host needs its own. The uv path, the checkout path, and the refresh method are
     host-specific and belong in `inventory.local.md`. `uv sync` auto-manages Python 3.12; the
     bundled macOS py3.9 is too old.
   - EVERY agw command there needs `PATH=/opt/homebrew/bin:/usr/local/bin:$PATH` (limactl + tailscale
