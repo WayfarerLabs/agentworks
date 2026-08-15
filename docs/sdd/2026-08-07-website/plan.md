@@ -1202,9 +1202,9 @@ and the fixtures and proofs that necessarily consume those authorities.
       `max+2.5 m` deck/support rule, and outward-shifted visible physical rails that preserve the
       complete 4,096-site mission and terminal transaction.
 - [ ] Pin relative translational mass `0.7`, engine acceleration `9/0.7`, gravity `3/0.7`, and
-      unchanged angular acceleration `80`; prove unchanged force ratio, climb-surcharge ratio, fixed
-      step, commands, fuel flow, landing tolerance, collision, refuel, checkpoint, and service
-      semantics.
+      unchanged angular acceleration `80`; prove canonical force coefficients, unchanged
+      thrust-to-weight and climb-surcharge ratios, fixed step, commands, fuel flow, landing
+      tolerance, collision authority, refuel, checkpoint, and service semantics.
 - [ ] Regenerate geometry, physics, assignment, route, proof, world, output, and model-projection
       artifacts atomically. Exhaustively certify every new distance/deck class, all openings,
       sufficient allowance, Retry, signed generation, all four complete 4,096-site missions, final

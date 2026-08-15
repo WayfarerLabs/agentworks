@@ -321,14 +321,15 @@ recorded as a growth path so nothing forecloses it, and none of it is in scope n
 
   The flight model also adopts a relative translational mass scale of exactly `0.7`. The engine
   force coefficient remains the Phase 4T value, so translational engine acceleration is divided by
-  `0.7`; gravitational acceleration is divided by the same `0.7`, keeping relative gravitational
-  force exactly unchanged and preserving the thrust-to-weight ratio. Per the operator's explicit
-  ruling, rotational acceleration remains exactly unchanged: this is a translational mass response
-  refinement, not a rigid-body inertia rescale. Preserve fixed-step timing, commands, differential
-  thrust mapping, fuel flow, landing tolerances, refuel ratio, service timing, collision outcomes,
-  fixed scene, and zero vertical scrolling. Regenerate every terrain, spacing, physics, route,
-  opening, finite-world, and browser witness from these authorities; a sufficient-allowance base may
-  change only as the formula-derived maximum of the new certified routes.
+  `0.7`; gravitational acceleration is divided by the same `0.7`, retaining the canonical
+  gravitational-force coefficient and preserving the thrust-to-weight ratio. Per the operator's
+  explicit ruling, rotational acceleration remains exactly unchanged: this is a translational mass
+  response refinement, not a rigid-body inertia rescale. Preserve fixed-step timing, commands,
+  differential thrust mapping, fuel flow, landing tolerances, refuel ratio, service timing,
+  collision authority and semantics, fixed scene, and zero vertical scrolling. Regenerate every
+  terrain, spacing, physics, route, opening, finite-world, and browser witness from these
+  authorities; a sufficient-allowance base may change only as the formula-derived maximum of the new
+  certified routes.
 
 ## Settled constraints (inherited; do not reopen)
 
@@ -603,15 +604,16 @@ merged and settled on `main`. The first slice must not build toward them specula
   contact-backed termini. Every resulting opening and route class has an independently regenerated
   sufficient-allowance proof and concrete production replay without generation failure.
 
-  Physics tests pin a relative translational mass scale of `0.7`, engine and gravitational
-  acceleration each equal to their Phase 4T value divided by `0.7`, unchanged gravitational force
-  and thrust-to-weight ratio, and byte-exact unchanged rotational acceleration. They reject a fuel
-  flow, input mapping, fixed-step, landing-tolerance, collision, or angular-response change. Model,
-  route, and real-browser evidence demonstrates the intended quicker translational response, correct
-  zero-fuel ballistic fall, complete swept collision, Retry/checkpoint identity, bounded retention
-  and performance, fixed `25/16` projection, and zero vertical page/game scrolling at wide, narrow,
-  short-height, and touch-landscape viewport sizes. Human hands-on acceptance remains the final
-  qualitative gate.
+  Physics tests pin a relative translational mass scale of `0.7`, the canonical engine- and
+  gravitational-force coefficients `9` and `3`, Number accelerations `90/7` and `30/7`, their exact
+  one-third ratio, and byte-exact unchanged rotational acceleration. They do not reconstruct force
+  by asserting a floating-point `0.7 * acceleration` product. They reject a fuel-flow,
+  input-mapping, fixed-step, landing-tolerance, collision-authority, or angular-response change.
+  Model, route, and real-browser evidence demonstrates the intended quicker translational response,
+  correct zero-fuel ballistic fall, complete swept collision, Retry/checkpoint identity, bounded
+  retention and performance, fixed `25/16` projection, and zero vertical page/game scrolling at
+  wide, narrow, short-height, and touch-landscape viewport sizes. Human hands-on acceptance remains
+  the final qualitative gate.
 
 ## Settled implementation rulings
 
