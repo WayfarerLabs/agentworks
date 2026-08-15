@@ -294,7 +294,7 @@ def test_secret_revealed_with_flag(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """--resolve resolves secret-backed entries through the active backend chain."""
+    """--resolve resolves secret-backed entries through the active source chain."""
     monkeypatch.setenv("AW_SECRET_SHARED_TOKEN", "from-operator-env")
     cfg = _write_config(
         tmp_path,

@@ -31,16 +31,16 @@ def test_secret_config_default_chain() -> None:
     pay nothing; operators who do get sensible zero-config resolution."""
     from agentworks.secrets.base import DEFAULT_SOURCE_CHAIN
 
-    assert SecretConfig().backends == DEFAULT_SOURCE_CHAIN
+    assert SecretConfig().sources == DEFAULT_SOURCE_CHAIN
     assert DEFAULT_SOURCE_CHAIN == ("env-var", "prompt")
 
 
 def test_secret_config_explicit_empty_disables_chain() -> None:
     """An explicit empty list opts out of resolution entirely (different
     from absence-of-config, which gets the default chain)."""
-    assert SecretConfig(backends=()).backends == ()
+    assert SecretConfig(sources=()).sources == ()
 
 
 def test_secret_config_preserves_order() -> None:
-    cfg = SecretConfig(backends=("env-var", "op-work", "prompt"))
-    assert cfg.backends == ("env-var", "op-work", "prompt")
+    cfg = SecretConfig(sources=("env-var", "op-work", "prompt"))
+    assert cfg.sources == ("env-var", "op-work", "prompt")

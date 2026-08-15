@@ -193,10 +193,10 @@ def test_a_not_ready_site_is_not_dangling(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_a_misspelled_backend_reports_as_a_bad_name_not_an_unreachable_secret(tmp_path: Path) -> None:
+def test_a_misspelled_source_reports_as_a_bad_name_not_an_unreachable_secret(tmp_path: Path) -> None:
     """Reference checking must run BEFORE ``secrets.validate_chain``.
 
-    A misspelled backend name matches no edge, so it simply drops out of the
+    A misspelled source name matches no edge, so it simply drops out of the
     reachability intersection: run the other way round, this config reports
     "unreachable secret(s): npm-token" and sends the operator to inspect a
     secret that is fine. Pins the ordering in ``bootstrap.build_registry``,

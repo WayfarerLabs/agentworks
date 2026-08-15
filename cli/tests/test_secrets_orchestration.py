@@ -460,9 +460,9 @@ def test_resolve_for_command_passes_extra_decls_through(
 
     calls: list[list[str]] = []
 
-    def _spy(decls: list[SecretDecl], backends: list[object], **kwargs: Any) -> ResolutionBatch:
+    def _spy(decls: list[SecretDecl], sources: list[object], **kwargs: Any) -> ResolutionBatch:
         calls.append([d.name for d in decls])
-        return _real(decls, backends, **kwargs)  # type: ignore[arg-type]
+        return _real(decls, sources, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr("agentworks.secrets.resolve.resolve_batch", _spy)
 

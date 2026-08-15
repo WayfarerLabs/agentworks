@@ -66,7 +66,7 @@ def _load_secret_config(
     sources_raw = raw["sources"]
     if not isinstance(sources_raw, list) or not all(isinstance(source, str) for source in sources_raw):
         raise ConfigError("[secret_config].sources must be a list of strings")
-    return SecretConfig(backends=tuple(sources_raw), declared_at=declared_at)
+    return SecretConfig(sources=tuple(sources_raw), declared_at=declared_at)
 
 
 def _load_plugins(

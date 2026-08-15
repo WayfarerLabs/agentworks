@@ -278,5 +278,5 @@ class SecretConfig:
     ``sources = []`` disables resolution entirely.
     """
 
-    backends: tuple[str, ...] = DEFAULT_SOURCE_CHAIN
+    sources: tuple[str, ...] = DEFAULT_SOURCE_CHAIN
     declared_at: SourceLocation = field(default_factory=synthesized)

@@ -77,7 +77,7 @@ def _default_site(config: Config) -> tuple[str, ...]:
 
 def _secret_chain(config: Config) -> tuple[str, ...]:
     """``[secret_config].sources``, the active-source precedence list."""
-    return config.secret_config_data.backends
+    return config.secret_config_data.sources
 
 
 #: Every settings value that names a resource row. A new one is added here,
@@ -148,7 +148,7 @@ def validate_setting_references(config: Config, registry: Registry) -> None:
     Run by ``bootstrap.build_registry`` immediately after ``finalize``, and
     BEFORE the subsystems' semantic checks: a bogus name must be reported as
     the bogus name it is, not as the downstream consequence of one. (Left to
-    run first, ``secrets.validate_chain`` would report a misspelled backend as
+    run first, ``secrets.validate_chain`` would report a misspelled source as
     an "unreachable secret", because a name that matches no edge simply drops
     out of its intersection.)
 

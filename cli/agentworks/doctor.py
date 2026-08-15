@@ -702,7 +702,7 @@ def _secret_source_statuses(config: Config, registry: Registry) -> tuple[SecretS
     from agentworks.resources.graph import Enablement
     from agentworks.secrets.sources import SecretSourceDecl, source_provenance
 
-    active_names = set(config.secret_config_data.backends)
+    active_source_names = set(config.secret_config_data.sources)
     statuses: list[SecretSourceStatus] = []
     for name, row in sorted(registry.iter_kind_items("secret-source"), key=lambda item: item[0]):
         if not isinstance(row, SecretSourceDecl):
@@ -712,7 +712,7 @@ def _secret_source_statuses(config: Config, registry: Registry) -> tuple[SecretS
                 name=name,
                 backend=row.backend.name,
                 provenance=source_provenance(row),
-                active=name in active_names,
+                active=name in active_source_names,
                 enabled=registry.graph.enablement_of("secret-source", name) is not Enablement.disabled,
                 not_ready_reason=registry.graph.readiness_of("secret-source", name).reason,
             )

@@ -17,9 +17,9 @@ that boundary:
   cfg.config_issues).
 - secret manifests parse into SecretDecls including all backend_mappings
   value forms (string, dict, false). ``true`` is rejected.
-- [secret_config].sources drives the active backend chain; precedence
+- [secret_config].sources drives the active source chain; precedence
   preserved (still a config setting).
-- Unknown backend kinds in [secret_config].sources raise ConfigError.
+- Unknown source names in [secret_config].sources raise ConfigError.
 - Unreachable secrets raise ConfigError at build_registry.
 - Env entries referencing undeclared secrets load cleanly (the Registry's
   auto-declare miss policy; auto-decl coverage lives in
@@ -100,12 +100,12 @@ def test_no_secrets_section_loads_with_default_chain(tmp_path: Path) -> None:
     up: call sites can run the resolve loop unconditionally. With no
     [secret_config] in the TOML, SecretConfig defaults to the standard
     env-var + prompt chain; with no declared secrets there is nothing
-    to resolve (no backend is consulted)."""
+    to resolve (no source is consulted)."""
     cfg_file = tmp_path / "config.toml"
     _write_base(cfg_file)
     cfg = load_config(cfg_file, warn_issues=False)
     # Absence of [secret_config] defaults to the standard chain.
-    assert cfg.secret_config_data.backends == ("env-var", "prompt")
+    assert cfg.secret_config_data.sources == ("env-var", "prompt")
     registry = build_registry(cfg)
     # No operator-declared secrets: config carries none, and no manifest
     # declares one (only the ever-present auto-declared tailscale-auth-key
@@ -129,7 +129,7 @@ def test_no_secrets_section_loads_with_default_chain(tmp_path: Path) -> None:
 def test_secret_config_absent_uses_default_chain(tmp_path: Path) -> None:
     """With no [secret_config] table, the loader uses the default chain
     so zero-config secret refs Just Work. Operator who writes
-    `KEY = { secret = "x" }` doesn't have to also configure backends."""
+    `KEY = { secret = "x" }` doesn't have to also configure sources."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
@@ -139,7 +139,7 @@ def test_secret_config_absent_uses_default_chain(tmp_path: Path) -> None:
         ],
     )
     cfg = load_config(cfg_file, warn_issues=False)
-    assert cfg.secret_config_data.backends == ("env-var", "prompt")
+    assert cfg.secret_config_data.sources == ("env-var", "prompt")
 
 
 def test_secret_config_table_without_sources_uses_default_chain(tmp_path: Path) -> None:
@@ -154,7 +154,7 @@ def test_secret_config_table_without_sources_uses_default_chain(tmp_path: Path) 
         """,
     )
     cfg = load_config(cfg_file, warn_issues=False)
-    assert cfg.secret_config_data.backends == ("env-var", "prompt")
+    assert cfg.secret_config_data.sources == ("env-var", "prompt")
 
 
 def test_secret_config_explicit_empty_list_disables_resolution(tmp_path: Path) -> None:
@@ -169,7 +169,7 @@ def test_secret_config_explicit_empty_list_disables_resolution(tmp_path: Path) -
         """,
     )
     cfg = load_config(cfg_file, warn_issues=False)
-    assert cfg.secret_config_data.backends == ()
+    assert cfg.secret_config_data.sources == ()
 
 
 @pytest.mark.parametrize(
@@ -200,7 +200,7 @@ def test_unrelated_secret_config_key_remains_a_soft_issue(tmp_path: Path) -> Non
     )
 
     cfg = load_config(cfg_file, warn_issues=False)
-    assert cfg.secret_config_data.backends == ("env-var",)
+    assert cfg.secret_config_data.sources == ("env-var",)
     assert len(cfg.config_issues) == 1
 
 
@@ -478,10 +478,10 @@ def test_secret_config_sources_preserves_precedence(tmp_path: Path) -> None:
         """,
     )
     cfg = load_config(cfg_file, warn_issues=False)
-    assert cfg.secret_config_data.backends == ("env-var", "prompt")
+    assert cfg.secret_config_data.sources == ("env-var", "prompt")
 
 
-def test_active_backends_stand_up_when_configured(tmp_path: Path) -> None:
+def test_active_sources_stand_up_when_configured(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
@@ -493,34 +493,33 @@ def test_active_backends_stand_up_when_configured(tmp_path: Path) -> None:
     )
     cfg = load_config(cfg_file, warn_issues=False)
     registry = build_registry(cfg)
-    backends = active_sources(cfg, registry)
-    # Smoke-check the chain: the first attempting backend is env-var.
+    sources = active_sources(cfg, registry)
+    # Smoke-check the chain: the first attempting source is env-var.
     decl = registry.lookup("secret", "shared")
-    first = next((b for b in backends if b.would_attempt(decl)), None)
+    first = next((source for source in sources if source.would_attempt(decl)), None)
     assert first is not None
     assert first.name == "env-var"
 
 
-def test_unknown_backend_kind_raises(tmp_path: Path) -> None:
+def test_unknown_source_name_raises(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
         settings="""
         [secret_config]
-        sources = ["env-var", "totally-fake-backend"]
+        sources = ["env-var", "totally-fake-source"]
         """,
     )
-    # The chain is reference edges on the published secret-config row
-    # (resource-manifests SDD); an unknown name hits the secret-backend
-    # kind's error miss policy at build_registry finalize.
+    # An unknown source name fails settings-reference validation after
+    # registry finalization.
     cfg = load_config(cfg_file, warn_issues=False)
-    with pytest.raises(ConfigError, match="totally-fake-backend"):
+    with pytest.raises(ConfigError, match="totally-fake-source"):
         build_registry(cfg)
 
 
 def test_unreachable_secret_raises(tmp_path: Path) -> None:
-    """A secret with env-var = false and a backend chain with no other
-    attempting backend is unreachable; ``validate_chain`` rejects it at
+    """A secret with env-var = false and a source chain with no other
+    attempting source is unreachable; ``validate_chain`` rejects it at
     ``build_registry``."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
