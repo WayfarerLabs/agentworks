@@ -342,10 +342,10 @@ with the existing ones.
   prompts.
 - **`--yes`** skips confirmation prompts; **`--force`** overrides the safety check entirely. These
   are distinct and should both be available where relevant.
-- **`_prompt_<thing>`** helpers in `cli.py` are the single resolution gate: they validate input when
-  an explicit value is given, prompt interactively when omitted (failing in non-interactive mode
-  with a helpful error pointing at the right flag), and return the full validated row. Callers
-  should not re-look-up.
+- **`prompt_<thing>`** helpers in `cli/agentworks/cli/_helpers.py` are the single resolution gate:
+  they validate input when an explicit value is given, prompt interactively when omitted (failing in
+  non-interactive mode with a helpful error pointing at the right flag), and return the full
+  validated row. Callers should not re-look-up.
 - **Subcommand verbs are verbs.** `completion show|install` is right; `completion <shell>` treats
   data as a verb and is wrong.
 - **Help text** is a single sentence, present-tense. Command docstrings describe what the command
@@ -357,7 +357,7 @@ Look for:
 - New commands whose argument shape doesn't match its siblings (mixed positional + flag for what is
   conceptually the same thing).
 - Mutex flag enforcement that fires deep inside the call stack instead of upfront.
-- New `_prompt_*` helpers that return raw strings instead of validated row objects.
+- New `prompt_*` resolver helpers that return raw strings instead of validated row objects.
 - Help text that is multi-sentence, references internal implementation, or contradicts the command's
   actual behavior.
 - Error messages that don't suggest a recovery path when the user can take one.
@@ -375,7 +375,7 @@ failure to whichever client is calling it.
 - Signals errors by raising typed exceptions from `agentworks.errors`, organized by _kind_ of error:
   `NotFoundError`, `AlreadyExistsError`, `ValidationError`, `StateError` (with `BrokenStateError`
   for unrecoverable states that need `--force`), `AuthorizationError`, `ConnectivityError`,
-  `ExternalError` (with `ProvisionerError` and `BackupError` for the specific external-failure
+  `ExternalError` (with `ProvisioningError` and `BackupError` for the specific external-failure
   flavors), `ConfigError`, `UserAbort`. The entity dimension (vm, workspace, agent, session,
   console, etc.) is carried as the `entity_kind` / `entity_name` attributes on the exception, not as
   the type. The optional `hint` attribute provides a remediation suggestion the CLI renders on a
@@ -383,15 +383,17 @@ failure to whichever client is calling it.
   it.
 - Produces user-facing output and feedback through the `agentworks.output` module, never through
   `typer.echo`, `print`, or by formatting strings into return values.
-- Must not import `typer`. This is enforced by a CI check; the only allowlisted exceptions are the
-  CLI layer (`cli.py`, `doctor.py`, `completions/`) and `sessions/manager/_logs.py` (which uses
-  typer purely as a raw data-pipe; see the comment in that file).
+- Must not import `typer`. This is enforced by a CI check (`.github/workflows/ci.yml`), which
+  allowlists exactly three paths: the `agentworks/cli/` package (every module under it, including
+  `cli/commands/`), `completions/`, and `sessions/manager/_logs.py` (which uses typer purely as a
+  raw data-pipe; see the comment in that file). Nothing else is exempt: `agentworks/doctor.py` is
+  service layer, so a typer import there fails CI.
 
-**CLI layer** (`cli.py`, the completion subsystem, `doctor.py`):
+**CLI layer** (the `agentworks/cli/` package and the completion subsystem):
 
 - Translates argv into service-layer calls.
 - Owns interactivity decisions (when to prompt, when to error in non-interactive mode).
-- Validates input early via the `_prompt_*` helpers (see check 9).
+- Validates input early via the `prompt_*` helpers (see check 9).
 - Translates service exceptions into `typer.Exit(1)` plus a user-facing message.
 
 **Assertions are for internal invariants only.** `assert` strips under `python -O` and has no
@@ -432,7 +434,8 @@ Look for:
 
 Changes to a resource kind, capability implementation, plugin, or documented operator workflow must
 update the corresponding colocated `agw guide` contribution. Review the implementation and its guide
-teaching together rather than accepting either in isolation.
+teaching together rather than accepting either in isolation. The `keep-collateral-in-sync` rule
+states the standard, including the consent boundary guide content must never cross.
 
 Look for:
 
