@@ -105,7 +105,14 @@ def test_render_guide_frames_accidental_read_only_write(
         )
 
 
-@pytest.mark.parametrize("malformed", ("not-json", sqlite3.Binary(b"\xff")))
+@pytest.mark.parametrize(
+    "malformed",
+    (
+        "not-json",
+        sqlite3.Binary(b"\xff"),
+        "[" * 10_000 + "0" + "]" * 10_000,
+    ),
+)
 def test_render_guide_degrades_malformed_persisted_vm_json(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

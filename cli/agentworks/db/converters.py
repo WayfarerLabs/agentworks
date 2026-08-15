@@ -89,7 +89,7 @@ def _parse_vm_json(
     if isinstance(raw, str):
         try:
             decoded = json.loads(raw)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, RecursionError):
             decoded = None
     else:
         decoded = None

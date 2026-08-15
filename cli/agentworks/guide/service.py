@@ -386,7 +386,7 @@ def render_guide(
         try:
             config = load_config_fn()
             loaded_registry = load_registry_fn(config)
-            if loaded_registry is None:
+            if loaded_registry is None or not loaded_registry.is_finalized:
                 raise StateError("resource registry is unavailable")
             registry = loaded_registry
         except AgentworksError:

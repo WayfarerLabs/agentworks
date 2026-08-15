@@ -15,7 +15,7 @@ from agentworks.guide import (
 from agentworks.guide.assessment import VerificationOutcome
 from agentworks.guide.contract import ActionId
 from agentworks.guide.service import _EmptyInventory, render_guide
-from agentworks.guide.trail_sign import TRAIL_DESTINATIONS, trail_destinations
+from agentworks.guide.trail_sign import TRAIL_DESTINATIONS
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -45,8 +45,20 @@ def test_no_topic_trail_sign_bypasses_catalogs_and_live_context(
         load_registry_fn=forbidden,  # type: ignore[arg-type]
     )
 
+    expected = {
+        GuideMode.AGENT: (
+            "concept-onboarding",
+            "concept-management",
+            "concept-troubleshooting",
+            "concept-release-notes",
+            "concept-migration",
+            "concept-secrets",
+            "concept-reporting-bugs",
+        ),
+        GuideMode.HUMAN: ("concept-onboarding", "concept-management"),
+    }
     assert response.exit_code == 0
-    assert response.names == tuple(str(destination.slug) for destination in trail_destinations(mode))
+    assert response.names == expected[mode]
 
 
 def test_every_fixed_destination_resolves_through_selected_topic_path(
@@ -160,3 +172,22 @@ def test_names_only_keeps_static_names_and_emits_no_diagnostic_lines() -> None:
     assert response.exit_code == 0
     assert tuple(response.markdown.splitlines()) == response.names
     assert set(str(destination.slug) for destination in TRAIL_DESTINATIONS) <= set(response.names)
+
+
+def test_names_only_omits_names_from_an_unfinalized_registry() -> None:
+    class UnfinalizedRegistry:
+        is_finalized = False
+
+        def iter_kind_items(self, kind: str):
+            return iter((("ghost", object()),))
+
+    response = render_guide(
+        (),
+        GuideMode.AGENT,
+        names_only=True,
+        load_config_fn=lambda: cast("Config", object()),
+        load_registry_fn=lambda _config: cast("Registry", UnfinalizedRegistry()),
+    )
+
+    assert response.exit_code == 0
+    assert "vm-template/ghost" not in response.names
