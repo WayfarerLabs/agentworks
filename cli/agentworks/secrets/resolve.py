@@ -693,9 +693,10 @@ def resolve_partial_for_reveal(
 ) -> PartialResolution:
     """Resolve independent values for the explicit env reveal surface.
 
-    Published and module-level: ``show_env`` forwards to this, but nothing stops another
-    caller reaching it directly, so it checks its own ``interaction`` rather than trusting
-    the one caller it has today.
+    Checks its own ``interaction`` because the coverage rule beside
+    ``require_exact_interaction_policy`` says every constructing function does. The
+    constructor would catch a bad value one line later here, which is exactly why the
+    rule is applied rather than judged.
     """
     require_exact_interaction_policy(interaction)
     broker = OutputInteractionBroker(secrets) if interaction is InteractionPolicy.ALLOW else None

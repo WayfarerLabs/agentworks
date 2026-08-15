@@ -89,9 +89,9 @@ class SecretTarget:
     unit tests trivially construct fake targets.
 
     Equality: ``label`` is excluded. Two targets with the same env
-    dicts but different labels compare equal. Hashing is not supported
-    -- the dataclass is frozen but the env fields are mutable dicts,
-    so ``hash(target)`` raises ``TypeError``. Callers that need to
+    dicts but different labels compare equal. Hashing is not supported:
+    the dataclass is frozen but the env fields are mutable dicts, so
+    ``hash(target)`` raises ``TypeError``. Callers that need to
     dedupe targets must do it by env content, not via ``set``.
     """
 
@@ -124,7 +124,7 @@ def compute_needed_secrets(
 
     The result preserves first-encounter order across targets, then
     extras, for deterministic prompting order. Referenced names are
-    looked up against the registry's ``secret`` rows -- which, after
+    looked up against the registry's ``secret`` rows, which, after
     finalize, cover operator-declared AND auto-declared secrets, so
     every name a published template's env references has a decl here.
     A miss therefore means a reference that failed to auto-declare (a
@@ -229,7 +229,7 @@ def resolve_for_command(
     Computes the union of needed ``SecretDecl``s via
     ``compute_needed_secrets`` and runs the resolve loop over the active
     sources once. The returned ``{secret_name: value}`` mapping is the
-    ONLY channel -- there is no cache. The command threads the values
+    ONLY channel; there is no cache. The command threads the values
     down to its ``compose_env`` sites (the same scope-dict discipline
     that keeps the eager-resolve set and the render set from drifting);
     "prompt-once" holds by construction because this is called once per
@@ -246,7 +246,7 @@ def resolve_for_command(
     Call this once at the head of any manager entry point that opens
     new shells. Pure inspection commands (``session attach``,
     ``session list``, ``console attach``, ``vm list``, etc.) MUST NOT
-    call it -- they inherit the env captured at shell-create time and
+    call it: they inherit the env captured at shell-create time and
     consume no secrets.
     """
     require_exact_interaction_policy(interaction)
