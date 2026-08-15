@@ -606,8 +606,8 @@ Version 0.13 YAML also allowed an explicit outer `provider.token: null`, with th
 default-secret behavior as omission. Version 0.14 rejects it because the acquisition union is not
 nullable. Delete the `token: null` line to keep the same default, or rewrite it as
 `token: {mode: secret}` to record the choice explicitly. Omitting `token` still selects secret
-acquisition and defaults the secret name to
-`git-token-<credential name>`, while a scalar `token: gh-pat` remains shorthand for the secret arm.
+acquisition and defaults the secret name to `git-token-<credential name>`, while a scalar
+`token: gh-pat` remains shorthand for the secret arm.
 
 Tagged `mode: stored` appeared only in pre-release 0.14 snapshots; it was not a 0.13 spelling. If
 you used one of those snapshots, change written tagged token values from `mode: stored` to
