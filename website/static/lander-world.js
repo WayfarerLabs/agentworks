@@ -1,4 +1,4 @@
-import { compareExactRoots, exactRootNumber, exactSegmentContact, exactZeroRoot } from "./lander-collision.js";
+import { affineHullEnclosure, compareExactRoots, exactRootNumber, exactSegmentContact, exactZeroRoot, hasInteriorAngleKnot } from "./lander-collision.js";
 
 export const STATIC_WORLD_SEED = 0x41475731,
     CHUNK_WIDTH = 50;
@@ -781,6 +781,18 @@ function candidatesForBounds(model, bounds, fixed, target, terrainIsFixed) {
     return candidates;
 }
 
+function hasCandidateForBounds(model, bounds, fixed, target, terrainIsFixed) {
+    if (fixed.some((candidate) => overlaps(candidateBounds(candidate), bounds, COLLISION_MARGIN))) return true;
+    if (!terrainIsFixed && terrainCandidates(model.seed, bounds).length) return true;
+    return Boolean(
+        target &&
+        target.platformTop >= bounds.bottom - COLLISION_MARGIN &&
+        target.platformTop <= bounds.top + COLLISION_MARGIN &&
+        target.platformRight >= bounds.left - COLLISION_MARGIN &&
+        target.platformLeft <= bounds.right + COLLISION_MARGIN,
+    );
+}
+
 const horizontalSegment = (left, right, y) => [
     { x: left, y },
     { x: right, y },
@@ -881,13 +893,6 @@ function* collisionKnots(previous, angularTravel) {
     yield { angle: endpoint, time: 1 };
 }
 
-function hasInteriorAngleKnot(previousAngle, angularTravel) {
-    const endpoint = previousAngle + angularTravel;
-    if (angularTravel > 0) return Math.floor(previousAngle) + 1 <= Math.ceil(endpoint) - 1;
-    if (angularTravel < 0) return Math.ceil(previousAngle) - 1 >= Math.floor(endpoint) + 1;
-    return false;
-}
-
 export function classifySweptContactFromBounds(model, previous, next, previousBounds, nextBounds, options = {}) {
     const target = collisionSiteById(model, model.targetSiteId);
     if (!Number.isFinite(options.angularTravel)) throw new TypeError("Swept contact requires explicit angularTravel");
@@ -911,7 +916,9 @@ export function classifySweptContactFromBounds(model, previous, next, previousBo
         model.collisionMaximumTop ??
         Math.max(29.2, target?.platformTop ?? -Infinity, ...features.map((feature) => candidateBounds(feature).top));
     if (!reachesTerminus && swept.bottom > maximumTop + COLLISION_MARGIN) return null;
-    const fixed = [...features];
+    const fixed = features.map((feature) =>
+        feature.bounds ? feature : { ...feature, bounds: candidateBounds(feature) },
+    );
     const terrainSegmentCount = Math.ceil((swept.right - swept.left) / TERRAIN_VERTEX_CADENCE);
     const contextTerrain = model.terrainAuthority === "context";
     const terrainIsFixed = contextTerrain || terrainSegmentCount <= 64;
@@ -941,19 +948,36 @@ export function classifySweptContactFromBounds(model, previous, next, previousBo
     instrumentation.visitedKnots = 0;
     instrumentation.maxKnotHulls = 0;
     instrumentation.maxStack = 0;
+    instrumentation.constructedKnotHulls = 0;
+    instrumentation.prunedSlabs = 0;
     let prior = null;
     for (const knot of collisionKnots(previous, angularTravel)) {
         instrumentation.visitedKnots += 1;
         const center = {
-            ...interpolatePose(previous, next, knot.time),
+            x: previous.x + (next.x - previous.x) * knot.time,
+            y: previous.y + (next.y - previous.y) * knot.time,
             angle: knot.angle,
         };
-        const current = { ...knot, hull: hullForPose(center) };
-        instrumentation.maxKnotHulls = Math.max(instrumentation.maxKnotHulls, prior ? 2 : 1);
+        const current = { ...knot, center };
         if (prior) {
+            // Every canonical affine-slab vertex coordinate stays between its two endpoint
+            // coordinates. The center enclosure expanded by the hull radius is therefore a strict
+            // superset of the complete slab; the ordinary detection margin remains in the overlap.
+            const coarseBounds = affineHullEnclosure(prior.center, center, HULL_RADIUS);
+            if (!hasCandidateForBounds(model, coarseBounds, fixed, target, terrainIsFixed)) {
+                instrumentation.prunedSlabs += 1;
+                prior = current;
+                continue;
+            }
+            const leftHull = prior.hull ?? hullForPose(prior.center);
+            if (!prior.hull) instrumentation.constructedKnotHulls += 1;
+            const rightHull = hullForPose(center);
+            instrumentation.constructedKnotHulls += 1;
+            current.hull = rightHull;
+            instrumentation.maxKnotHulls = Math.max(instrumentation.maxKnotHulls, 2);
             const contact = sweepSlab(
                 model,
-                { left: prior.time, right: current.time, leftHull: prior.hull, rightHull: current.hull },
+                { left: prior.time, right: current.time, leftHull, rightHull },
                 fixed,
                 target,
                 previous,

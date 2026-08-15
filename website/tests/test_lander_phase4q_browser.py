@@ -146,7 +146,8 @@ const maximumKnotSweep = (direction) => {
         const contact = classifySweptContact(model, previous, next, {angularTravel, instrumentation, features});
         if (contact?.cause !== "terminus" || contact.kind !== "unsafe" || contact.time <= .9999 ||
             instrumentation.visitedKnots !== 50554 || instrumentation.maxKnotHulls > 2 ||
-            instrumentation.maxStack > 20) throw new Error("maximum knot sweep contract drifted");
+            instrumentation.maxStack > 20 || instrumentation.prunedSlabs <= 50000 ||
+            instrumentation.constructedKnotHulls >= 256) throw new Error("maximum knot sweep contract drifted");
         return instrumentation;
     };
     classify();
@@ -485,6 +486,8 @@ class Phase4QBrowserTests(RepositoryFixture):
             self.assertEqual(row["instrumentation"]["visitedKnots"], 50554)
             self.assertLessEqual(row["instrumentation"]["maxKnotHulls"], 2)
             self.assertLessEqual(row["instrumentation"]["maxStack"], 20)
+            self.assertGreater(row["instrumentation"]["prunedSlabs"], 50000)
+            self.assertLess(row["instrumentation"]["constructedKnotHulls"], 256)
 
     def test_fixed_scene_has_no_page_growth_or_scroll_across_lifecycle(self) -> None:
         result = browser_phase4q_contract(self.build())

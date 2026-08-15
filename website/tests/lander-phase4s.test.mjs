@@ -350,5 +350,7 @@ test("maximum reachable signed angular sweeps find final-slab contact with bound
         assert.equal(instrumentation.visitedKnots, 50554);
         assert.ok(instrumentation.maxKnotHulls <= 2);
         assert.ok(instrumentation.maxStack <= 20);
+        assert.ok(instrumentation.prunedSlabs > 50000);
+        assert.ok(instrumentation.constructedKnotHulls < 256);
     }
 });

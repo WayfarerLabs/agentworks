@@ -19,6 +19,20 @@ function collisionRational(numerator, denominator = 1n) {
 
 const COLLISION_ZERO = collisionRational(0n);
 const COLLISION_ONE = collisionRational(1n);
+
+export const affineHullEnclosure = (left, right, radius) => ({
+    left: Math.min(left.x, right.x) - radius,
+    right: Math.max(left.x, right.x) + radius,
+    bottom: Math.min(left.y, right.y) - radius,
+    top: Math.max(left.y, right.y) + radius,
+});
+export function hasInteriorAngleKnot(start, travel) {
+    const end = start + travel;
+    if (travel > 0) return Math.floor(start) + 1 <= Math.ceil(end) - 1;
+    if (travel < 0) return Math.ceil(start) - 1 >= Math.floor(end) + 1;
+    return false;
+}
+
 const compareRationals = (left, right) =>
     left.numerator * right.denominator < right.numerator * left.denominator
         ? -1
