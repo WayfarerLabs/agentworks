@@ -6,13 +6,13 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import NotFoundError, StateError, UserAbort
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.manager._common import _workspace_scope
 
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
+    from agentworks.secrets.policy import InteractionPolicy
     from agentworks.transports import Transport
     from agentworks.vms.nodes import LiveVMNode
 
@@ -51,7 +51,6 @@ def delete_workspace(
     boundary-building standalone branch.
     """
 
-    interaction = validate_interaction_policy(interaction)
     ws = db.get_workspace(name)
     if ws is None:
         raise NotFoundError(

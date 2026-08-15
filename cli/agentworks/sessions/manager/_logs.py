@@ -12,11 +12,11 @@ from agentworks.errors import (
     BrokenStateError,
     StateError,
 )
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
+    from agentworks.secrets.policy import InteractionPolicy
 
 
 def session_logs(
@@ -28,7 +28,6 @@ def session_logs(
     interaction: InteractionPolicy,
 ) -> None:
     """Dump the scrollback buffer for a session."""
-    interaction = validate_interaction_policy(interaction)
     from agentworks.sessions.tmux import capture_output
 
     session = _mgr._require_session(db, name)

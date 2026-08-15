@@ -1273,6 +1273,43 @@ def test_delete_declined_confirm_aborts_with_zero_resolves_and_zero_gate(
     assert db.get_workspace("ws1") is not None
 
 
+def test_rehome_non_enum_policy_raises_before_any_session_probe(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeAdminTarget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The session-status guard opens SSH transports and writes repaired PIDs, and
+    the boundary that would otherwise reject the policy sits past all of it. The
+    check at the top of ``rehome_workspace`` is what keeps a rejected rehome from
+    touching the VM first."""
+    from agentworks.sessions import manager as sessions_manager
+
+    config = make_config()
+    _seed(db)
+    _seed_live_session(db, name="s1", ws="ws1")
+    _no_gate(monkeypatch)
+
+    def _boom(*a: object, **k: object) -> None:
+        raise AssertionError("sessions must not be probed for a rejected policy")
+
+    monkeypatch.setattr(sessions_manager, "ensure_pids_batch", _boom)
+    monkeypatch.setattr(sessions_manager, "batch_check_all_sessions", _boom)
+
+    with pytest.raises(StateError):
+        workspace_manager.rehome_workspace(
+            db,
+            config,
+            "ws1",
+            target_path="/dst/ws1",
+            interaction="refuse",  # type: ignore[arg-type]
+        )
+
+    assert resolve_counter == []
+    assert target.commands == []
+
+
 def test_rehome_overlapping_paths_fail_with_zero_resolves_and_zero_gate(
     db: Database,
     make_config,  # noqa: ANN001

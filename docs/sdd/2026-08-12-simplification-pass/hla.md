@@ -66,6 +66,13 @@ technique, not a smell; what decides is what the assertion protects.
   spellings, call-graph shape, statement order. The `phase7` corpus was this family, and so is
   `resources/test_graph_guard.py`.
 
+"Statement order" there means order pinned **lexically**, by reading the source. Order often matters
+behaviorally, and asserting its consequence is not the same shape: PR #523 hoisted a policy check
+above the work it guards and pinned that with tests asserting no row was deleted and no SSH config
+rewritten. Those never read the source, they fail only when the order actually breaks something, and
+they are exactly the observational twins the paragraph below prefers. Delete the pin that says a
+statement comes first; keep the test that says what goes wrong when it does not.
+
 Some guards read as both bullets at once, protecting a genuine behavioral property through
 structural inspection. There a structural guard yields to an observational twin wherever one exists
 or is cheap to write, and stays until then. PR #523 set the precedent when it deleted a lexical

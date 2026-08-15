@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 
 import agentworks.agents.manager as _mgr
 from agentworks.errors import NotFoundError
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.vms.manager import gated_vm_boundary
 
 from ._common import (
@@ -29,6 +28,7 @@ from ._common import (
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
+    from agentworks.secrets.policy import InteractionPolicy
 
 
 def shell_agent(
@@ -51,7 +51,6 @@ def shell_agent(
     its just-in-time values seed the boundary resolver), and the
     held-active span covers the whole interactive session.
     """
-    interaction = validate_interaction_policy(interaction)
     agent = db.get_agent(name)
     if agent is None:
         raise NotFoundError(
@@ -157,7 +156,6 @@ def exec_agent(
     :func:`shell_agent`: the gate opens before the preflight sweep and
     the held-active span covers the streamed remote command.
     """
-    interaction = validate_interaction_policy(interaction)
     import shlex
 
     from agentworks.env import ResourceContext, compose_env

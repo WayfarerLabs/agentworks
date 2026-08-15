@@ -6,7 +6,6 @@ import contextlib
 from typing import TYPE_CHECKING
 
 from agentworks.capabilities.base import RunContext
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 from ._helpers import _vm_scope
 
@@ -18,6 +17,7 @@ if TYPE_CHECKING:
     from agentworks.db import Database, VMRow
     from agentworks.resources import Registry
     from agentworks.secrets import SecretTarget
+    from agentworks.secrets.policy import InteractionPolicy
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import LiveVMNode
 
@@ -96,7 +96,6 @@ def gated_vm_boundary(
     changes the composition's shape rather than adding a flag to it.
 
     """
-    interaction = validate_interaction_policy(interaction)
     from agentworks.orchestration.activation import (
         activation_gate,
         gate_secret_resolver,
@@ -155,7 +154,6 @@ def _live_vm_boundary(
     exists to clean up), and describe only READS state (a status
     probe is its op; inspecting a stopped VM must never start it).
     """
-    interaction = validate_interaction_policy(interaction)
     from agentworks.bootstrap import load_request_registry
     from agentworks.orchestration.readiness import preflight_all
     from agentworks.orchestration.secrets import secret_union

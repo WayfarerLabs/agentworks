@@ -30,7 +30,7 @@ from agentworks.secrets.outcomes import (
     _safe_diagnostic_text,
     complete_resolution_error,
 )
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
+from agentworks.secrets.policy import InteractionPolicy, require_exact_interaction_policy
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -109,7 +109,10 @@ class ResolutionPolicy:
     completion: CompletionPolicy
 
     def __post_init__(self) -> None:
-        validate_interaction_policy(self.interaction)
+        # Both fields are compared by identity downstream, so both are checked here: no
+        # policy exists that was never checked. For what the entry-point checks buy on top
+        # of this one, see the note above ``require_exact_interaction_policy``.
+        require_exact_interaction_policy(self.interaction)
         if type(self.completion) is not CompletionPolicy:
             raise StateError("completion must be an exact CompletionPolicy") from None
 
@@ -688,8 +691,14 @@ def resolve_partial_for_reveal(
     *,
     interaction: InteractionPolicy,
 ) -> PartialResolution:
-    """Resolve independent values for the explicit env reveal surface."""
-    interaction = validate_interaction_policy(interaction)
+    """Resolve independent values for the explicit env reveal surface.
+
+    Checks its own ``interaction`` because the coverage rule beside
+    ``require_exact_interaction_policy`` says every constructing function does. The
+    constructor would catch a bad value one line later here, which is exactly why the
+    rule is applied rather than judged.
+    """
+    require_exact_interaction_policy(interaction)
     broker = OutputInteractionBroker(secrets) if interaction is InteractionPolicy.ALLOW else None
     batch = resolve_batch(
         secrets,

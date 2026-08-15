@@ -342,6 +342,28 @@ def test_verify_refuses_interactive_source_without_construction(monkeypatch: pyt
     assert _Backend.events == []
 
 
+def test_verify_rejects_non_enum_policy_before_any_source_work(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A caller-supplied ``"refuse"`` is equal to the enum but not identical to it.
+
+    Every consumer branches by identity, so without the boundary check this call would
+    take the not-refuse path and attempt the interactive source it meant to refuse.
+    """
+    registry = _registry("token")
+    monkeypatch.setattr(
+        "agentworks.secrets.resolve.active_sources",
+        lambda config, candidate: [_source(backend_class=_InteractiveBackend)],
+    )
+    with pytest.raises(StateError):
+        verify_secrets(
+            SimpleNamespace(),  # type: ignore[arg-type]
+            registry,  # type: ignore[arg-type]
+            ["token"],
+            interaction="refuse",  # type: ignore[arg-type]
+        )
+    assert registry.lookups == []
+    assert _Backend.events == []
+
+
 @pytest.mark.parametrize(
     ("failure", "expected"),
     (
@@ -488,16 +510,6 @@ def test_verify_rejects_empty_or_unsafe_names_without_echo(names: list[str]) -> 
         )
     assert "bad\nname" not in str(caught.value)
     assert caught.value.__cause__ is None
-
-
-def test_verify_rejects_non_exact_policy_before_other_work() -> None:
-    with pytest.raises(StateError, match="exact InteractionPolicy"):
-        verify_secrets(
-            SimpleNamespace(),  # type: ignore[arg-type]
-            _registry(),  # type: ignore[arg-type]
-            [],
-            interaction="refuse",  # type: ignore[arg-type]
-        )
 
 
 @pytest.mark.parametrize(

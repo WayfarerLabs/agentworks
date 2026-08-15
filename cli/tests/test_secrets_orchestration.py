@@ -22,7 +22,7 @@ import pytest
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.env import EnvEntry
-from agentworks.errors import ValidationError
+from agentworks.errors import StateError, ValidationError
 from agentworks.secrets import (
     SecretDecl,
     SecretTarget,
@@ -337,6 +337,40 @@ def test_resolve_for_command_returns_resolved_values(
     target = SecretTarget(vm={"K": EnvEntry({"secret": "api-key"})})
     resolved = resolve_for_command([target], config, build_registry(config), interaction=InteractionPolicy.REFUSE)
     assert resolved == {"api-key": "from-env"}
+
+
+def test_resolve_for_command_rejects_non_enum_policy_before_any_source_work(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A caller-supplied ``"refuse"`` is equal to the enum but not identical to it.
+
+    Every consumer branches by identity, so without the boundary check this call would
+    take the not-refuse path and attempt the interactive sources it meant to refuse. This
+    is the one name of the resolve family that ``agentworks.secrets`` exports, so it is
+    the one most reachable from a caller our type checker never sees.
+    """
+    monkeypatch.setenv("AW_SECRET_API_KEY", "from-env")
+    cfg = _write_config(
+        tmp_path,
+        settings="""
+        [secret_config]
+        sources = ["env-var"]
+        """,
+        manifests=[ManifestDoc("secret", "api-key", description="api")],
+    )
+    config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        raise AssertionError("a rejected policy must not reach the sources")
+
+    monkeypatch.setattr("agentworks.secrets.resolve.active_sources", _boom)
+    monkeypatch.setattr("agentworks.secrets.resolve.resolve_batch", _boom)
+
+    target = SecretTarget(vm={"K": EnvEntry({"secret": "api-key"})})
+    with pytest.raises(StateError):
+        resolve_for_command([target], config, registry, interaction="refuse")  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(

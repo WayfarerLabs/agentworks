@@ -38,7 +38,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -47,6 +46,7 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
     from agentworks.secrets.base import SecretDecl
+    from agentworks.secrets.policy import InteractionPolicy
     from agentworks.secrets.preview import ResolutionPreview
     from agentworks.secrets.resolve import ActiveSource
 
@@ -107,7 +107,6 @@ def predict_resolution(
     the inspection variant, which reports interactive applicability without
     an operation policy.
     """
-    interaction = validate_interaction_policy(interaction)
     from agentworks.secrets.preview import preview_operation_resolution
 
     return {decl.name: preview_operation_resolution(decl, sources, interaction=interaction) for decl in decls}
@@ -182,7 +181,6 @@ def require_predicted_refs(
     display of the instance whose config named the secret, so the error
     keeps the owner/usage framing the per-instance prediction produced.
     """
-    interaction = validate_interaction_policy(interaction)
     from agentworks.errors import ConfigError
     from agentworks.secrets.preview import PreviewCategory
     from agentworks.secrets.resolve import active_sources

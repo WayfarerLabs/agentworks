@@ -20,7 +20,7 @@ from agentworks.env.identity import ResourceContext, per_context_identity_env
 from agentworks.env.merge import effective_env
 from agentworks.errors import ValidationError
 from agentworks.secrets.outcomes import format_outcome
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
+from agentworks.secrets.policy import require_exact_interaction_policy
 
 if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from agentworks.db import AgentRow, Database, SessionRow, VMRow, WorkspaceRow
     from agentworks.env.entry import EnvEntry
     from agentworks.resources.registry import Registry
+    from agentworks.secrets.policy import InteractionPolicy
     from agentworks.sessions.templates import ResolvedSessionTemplate
     from agentworks.vms.templates import ResolvedVMTemplate
 
@@ -88,7 +89,7 @@ def show_env(
 
     Raises ``ValidationError`` when no context flag is provided.
     """
-    interaction = validate_interaction_policy(interaction)
+    require_exact_interaction_policy(interaction)
     ctx = _resolve_context(
         db,
         vm_name=vm_name,
@@ -399,7 +400,6 @@ def _reveal_values(
     multiline strings; this environment consumer applies its own line-safety
     guard before any value reaches a render input.
     """
-    interaction = validate_interaction_policy(interaction)
     if not reveal:
         return {}, {}
     from agentworks.resources.access import secret_decls

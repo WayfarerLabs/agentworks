@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.db import VMStatus
-from agentworks.errors import AuthorizationError, UserAbort
+from agentworks.errors import AuthorizationError, StateError, UserAbort
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import InteractionPolicy
 from agentworks.vms import manager as vm_manager
@@ -68,6 +68,35 @@ def _fake_backend(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
     monkeypatch.setattr(ProxmoxPlatform, "status", _status)
     monkeypatch.setattr(ProxmoxPlatform, "delete", _delete)
     return counts
+
+
+def test_non_enum_policy_deletes_nothing(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A caller-supplied ``"refuse"`` aborts the delete having changed nothing.
+
+    ``interaction`` reaches the resolver inside the best-effort span, which
+    downgrades every ``AgentworksError`` to a warning and carries on: without the
+    check at the top of ``delete_vm`` the rejection is swallowed, the row goes
+    (cascading workspaces, agents and sessions), the operator's SSH config is
+    rewritten, and the backend delete is skipped because no node was built,
+    leaving the backend VM running with nothing left to target it (#329).
+    """
+    _seed(db)
+    counts = _fake_backend(monkeypatch)
+    synced: list[object] = []
+    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: synced.append(a))
+
+    with pytest.raises(StateError):
+        vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction="refuse")  # type: ignore[arg-type]
+
+    assert db.get_vm("dvm") is not None
+    assert synced == []
+    assert counts["delete"] == 0
+    assert resolve_counter == []
 
 
 def test_delete_never_gates(

@@ -12,13 +12,13 @@ from agentworks.db.projections import project_session_mode
 from agentworks.errors import AlreadyExistsError, NotFoundError
 from agentworks.name_filters import validate_name_filters
 from agentworks.naming import validate_name
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.workspaces.manager._common import _guard_vm_status, _resolve_vm, _workspace_scope
 
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, WorkspaceRow
     from agentworks.machine_output import JsonObject
+    from agentworks.secrets.policy import InteractionPolicy
 
 # NAME-column truncation cap for ``workspace list``, derived from the
 # workspace-name cap so the two cannot drift: a valid name (<= 29) never
@@ -149,7 +149,6 @@ def create_workspace(
     workspace, exactly the imperative shape), so no realization log
     exists here.
     """
-    interaction = validate_interaction_policy(interaction)
     from agentworks.bootstrap import load_request_registry
 
     # build_registry runs first so framework miss-policies fire before

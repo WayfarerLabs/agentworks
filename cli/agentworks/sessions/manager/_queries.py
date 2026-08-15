@@ -16,7 +16,6 @@ from agentworks.errors import (
     StateError,
     UserAbort,
 )
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
 from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
 
@@ -24,6 +23,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow, VMRow
     from agentworks.machine_output import JsonObject
+    from agentworks.secrets.policy import InteractionPolicy
     from agentworks.sessions.tmux import RunCommand
 
 
@@ -107,7 +107,6 @@ def delete_session(
     interaction: InteractionPolicy,
 ) -> None:
     """Delete a session. Prompts if running/unknown (--yes to skip). --force for BROKEN."""
-    interaction = validate_interaction_policy(interaction)
     session = _mgr._require_session(db, name)
     with _mgr._prepare_vm(
         db,
@@ -312,7 +311,6 @@ def _cleanup_now_empty_workspace(
     rows are blanket policy, not per-workspace intent); implicit grants never
     count. See :func:`workspace_external_explicit_granters`.
     """
-    interaction = validate_interaction_policy(interaction)
     from agentworks.workspaces.manager import (
         delete_workspace,
         workspace_external_explicit_granters,
@@ -376,7 +374,6 @@ def _cleanup_now_empty_agent(
     report-but-keep any other candidate agent. A follow-on ``delete_agent``
     failure warns rather than aborts.
     """
-    interaction = validate_interaction_policy(interaction)
     from agentworks.agents.manager import agent_is_unused, delete_agent
 
     name = session.agent_name
@@ -420,7 +417,6 @@ def session_description(
     superset is a no-op everywhere but WSL2, where it anchors the
     status probes against the idle timer.
     """
-    interaction = validate_interaction_policy(interaction)
     session = _mgr._require_session(db, name)
     # Resolve the harness_integration for the display block (config-only, no
     # vm/target dependency) before entering the boundary span.
@@ -499,7 +495,6 @@ def describe_session(
     interaction: InteractionPolicy,
 ) -> None:
     """Show session details."""
-    interaction = validate_interaction_policy(interaction)
     render_session_description(session_description(db, config, name=name, interaction=interaction))
 
 
@@ -525,7 +520,6 @@ def list_sessions(
     shell completion (see issue #147); the order matches the table's
     workspace-grouped order so completion stays stable.
     """
-    interaction = validate_interaction_policy(interaction)
     if names_only:
         sessions = _mgr.filter_sessions(
             db,
@@ -571,7 +565,6 @@ def session_listing(
     interaction: InteractionPolicy,
 ) -> SessionListing:
     """Collect ordered session list facts with the existing status repair pass."""
-    interaction = validate_interaction_policy(interaction)
     sessions = _mgr.filter_sessions(
         db,
         workspace_name=workspace_name,
@@ -697,7 +690,6 @@ def attach_session(
     translation to process exit (check 9: no sys.exit in the service),
     mirroring :func:`agentworks.vms.manager.exec_vm`.
     """
-    interaction = validate_interaction_policy(interaction)
     from agentworks.sessions.tmux import tmux_cmd
 
     session = _mgr._require_session(db, name)

@@ -135,13 +135,16 @@ deliberately narrow `cli-conventions.md`.
   consumer compares `interaction` by identity and `InteractionPolicy` is a `StrEnum`, a value that
   is equal but not identical takes the not-refuse branch and resolves through an interactive source
   in a run that meant to refuse. The `prompt` dispatch raises on that, so `prompt` fails loud while
-  `onepassword` and every future interactive backend fail silent and permissive. No first-party path
-  constructs a non-enum policy value: `verify_secrets` is absent from `agentworks.secrets.__all__`,
-  its only production caller is `cli/commands/secret.py:147`, and its `interaction` parameter is
-  typed `InteractionPolicy`, so reaching the path means importing an unexported function and passing
-  an untyped value, which mypy rejects in-repo. It is therefore filed as issue 529 against the
-  external-plugin loader effort rather than fixed here; when this is promoted, the safety half
-  travels with it, and no backend's safety should depend on its name.
+  `onepassword` and every future interactive backend fail silent and permissive. The reachable path
+  is a caller-supplied argument at the published service surface: no first-party site _constructs_ a
+  non-enum policy, but the manifest services take `interaction` from callers outside our type
+  checking, and a probe drove `verify_secrets(..., interaction="refuse")` into real OnePassword
+  backend execution. PR #523 closes that half on a structural rule: `ResolutionPolicy.__post_init__`
+  checks, so no policy exists that was never checked, plus a check on arrival at the published
+  service functions and at the three entry points that do destructive or remote work before reaching
+  a construction. The deferred half stays with issue 529 against the external-plugin loader effort:
+  no backend's safety should depend on its name, and the `prompt` special case is what currently
+  decides whether the identity comparison fails loud.
 - **S10** LLD prose in permanent docstrings: 45-line docstring over a 10-line body
   (`base.py:187-218`), 57-line module docstring litigating design history, a 16-line Typer help
   docstring describing internals.

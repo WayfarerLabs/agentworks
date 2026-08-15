@@ -67,10 +67,31 @@ W6, W8 and the sweep's website rows. Wave 1 does not close until that PR lands. 
 extraction (P5) does not wait on #486, since it shares no files with the website work; it waits on
 the sweep instead, per group 4 above.
 
-- [ ] Delete the `phase7` corpus and `validate_interaction_policy` with its 152 call sites (S1).
+- [x] Delete the `phase7` corpus and `validate_interaction_policy` with its 152 call sites (S1).
       Keep `test_resolution_timeout_cleanup.py` (trim its two wording pins); rename kept fixtures
       off the `phase7` name. Done when: suite green, no `phase7` path or
-      `validate_interaction_policy` reference remains.
+      `validate_interaction_policy` reference remains. **Done**: 9 files and 3,186 lines gone, 621
+      cases, suite green; no kept fixture carried the `phase7` name, so no rename was owed. The
+      interior deletion stands in full, but review found the value is not interior everywhere: the
+      manifest services take `interaction` from callers outside our type checking, and a probe drove
+      a non-enum `"refuse"` into real backend execution. That is the caller-supplied trust boundary
+      the doctrine gained in #533, after the wave 0 amendment above merged with four. The item
+      therefore also added `require_exact_interaction_policy`, called in two places for two reasons.
+      `ResolutionPolicy.__post_init__` calls it, so **no policy can be constructed from an unchecked
+      `interaction`**, audited by `grep -rn "ResolutionPolicy(" cli/agentworks/`, which is six
+      constructions in six functions today and covers every path to `resolve_batch`. Eight call
+      sites remain outside the constructor: five check on arrival at the published service functions
+      and at `Resolver.__init__`, and three sit at entry points that do consequential work before
+      reaching a resolver at all, which buys position rather than presence, because a rejected
+      policy must leave nothing behind and so the check runs before any state change. Those three
+      are `delete_vm` (whose resolver sits inside a best-effort span that swallowed the rejection
+      and completed the delete with the backend delete skipped, the #329 orphaning), `reinit_agent`
+      (which persists a template re-point first), and `rehome_workspace` (which opens SSH transports
+      first). The deleted names survive in SDD prose only, and this is the whole list: both names in
+      this plan, in `findings.md`, and in the supersession note the work required on the locked
+      `2026-08-07-secret-sources` lock; `phase7` alone in `hla.md`; and
+      `validate_interaction_policy` alone in that lock's `operator-surfaces-lld.md`, which the
+      supersession note supersedes.
 - [ ] Replace `website/tests/test_pages_workflows.py` (W1): delete the hand-rolled YAML parser and
       every verbatim pin; rewrite the real policy invariants (least-privilege permissions,
       credential non-persistence, main-only deploy, source-SHA/artifact binding, double-build diff)

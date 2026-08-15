@@ -21,7 +21,6 @@ import agentworks.sessions.multi_console as _mc
 from agentworks import output
 from agentworks.errors import ExternalError, NotFoundError, StateError
 from agentworks.resources.access import named_console_template
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.sessions.multi_console_layout import (
     _apply_layout,
     _focus_session_pane,
@@ -36,6 +35,7 @@ from .tmux_build import PreserveEnvMemo, _resolve_workspace_path, _split_shell_p
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
+    from agentworks.secrets.policy import InteractionPolicy
 
 
 def restore_session(
@@ -64,7 +64,6 @@ def restore_session(
       every live shell pane in it with it (plus, for a single-member console,
       the console's last window, and with it the whole tmux session).
     """
-    interaction = validate_interaction_policy(interaction)
     from agentworks.bootstrap import load_request_registry
 
     console = _require_console(db, console_name)

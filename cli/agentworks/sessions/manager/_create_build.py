@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
 from agentworks import output
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 from ._create_types import SessionGraph
 
@@ -32,6 +31,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
     from agentworks.resources.registry import Registry
+    from agentworks.secrets.policy import InteractionPolicy
     from agentworks.workspaces.nodes import (
         LiveWorkspaceNode,
         PendingWorkspaceNode,
@@ -54,7 +54,6 @@ def _build_session_graph(
 ) -> SessionGraph:
     """Resolve the template and build the node graph, resolver union, and
     scope into a :class:`SessionGraph` (section S9)."""
-    interaction = validate_interaction_policy(interaction)
     name = plan.name
     workspace_name = plan.workspace_name
     new_workspace = plan.new_workspace

@@ -22,7 +22,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError
-from agentworks.secrets.policy import validate_interaction_policy
+from agentworks.secrets.policy import require_exact_interaction_policy
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -59,7 +59,7 @@ class Resolver:
         *,
         interaction: InteractionPolicy,
     ) -> None:
-        interaction = validate_interaction_policy(interaction)
+        require_exact_interaction_policy(interaction)
         self._config = config
         self._registry = registry
         self._interaction = interaction
@@ -161,7 +161,6 @@ class Resolver:
         contract violation (it would mean a second prompt session), so
         it raises instead of quietly re-prompting.
         """
-        interaction = validate_interaction_policy(self._interaction)
         if self._values is not None:
             unresolved = [n for n in self._decls if n not in self._values]
             if unresolved:
@@ -190,11 +189,11 @@ class Resolver:
         if not missing:
             resolved = dict(self._seeded)
         else:
-            broker = OutputInteractionBroker(missing) if interaction is InteractionPolicy.ALLOW else None
+            broker = OutputInteractionBroker(missing) if self._interaction is InteractionPolicy.ALLOW else None
             batch = resolve_batch(
                 missing,
                 active_sources(self._config, self._registry),
-                policy=ResolutionPolicy(interaction=interaction, completion=CompletionPolicy.COMPLETE),
+                policy=ResolutionPolicy(interaction=self._interaction, completion=CompletionPolicy.COMPLETE),
                 interaction_broker=broker,
             )
             resolved = {**self._seeded, **batch.complete_or_raise()}
@@ -205,7 +204,6 @@ class Resolver:
 
     def resolve_gate(self, name: str) -> str:
         """Resolve and seed one declaration before the operation boundary."""
-        interaction = validate_interaction_policy(self._interaction)
         if self._values is not None:
             raise StateError("a gate secret cannot resolve after the operation boundary")
         decl = self.register_name(name)
@@ -221,11 +219,11 @@ class Resolver:
             resolve_batch,
         )
 
-        broker = OutputInteractionBroker([decl]) if interaction is InteractionPolicy.ALLOW else None
+        broker = OutputInteractionBroker([decl]) if self._interaction is InteractionPolicy.ALLOW else None
         batch = resolve_batch(
             [decl],
             active_sources(self._config, self._registry),
-            policy=ResolutionPolicy(interaction=interaction, completion=CompletionPolicy.COMPLETE),
+            policy=ResolutionPolicy(interaction=self._interaction, completion=CompletionPolicy.COMPLETE),
             interaction_broker=broker,
         )
         projected = batch.complete_or_raise()
@@ -236,7 +234,6 @@ class Resolver:
 
     def resolve_late_repair(self, decl: SecretDecl) -> str:
         """Resolve one authorized repair secret without widening the cache."""
-        interaction = validate_interaction_policy(self._interaction)
         if self._values is None:
             raise StateError("a late repair secret requires the operation boundary")
         from agentworks.secrets.policy import InteractionPolicy
@@ -248,11 +245,11 @@ class Resolver:
             resolve_batch,
         )
 
-        broker = OutputInteractionBroker([decl]) if interaction is InteractionPolicy.ALLOW else None
+        broker = OutputInteractionBroker([decl]) if self._interaction is InteractionPolicy.ALLOW else None
         batch = resolve_batch(
             [decl],
             active_sources(self._config, self._registry),
-            policy=ResolutionPolicy(interaction=interaction, completion=CompletionPolicy.COMPLETE),
+            policy=ResolutionPolicy(interaction=self._interaction, completion=CompletionPolicy.COMPLETE),
             interaction_broker=broker,
         )
         projected = batch.complete_or_raise()

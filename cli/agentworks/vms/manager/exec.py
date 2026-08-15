@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.capabilities.base import RunContext
 from agentworks.errors import StateError, ValidationError
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 from ._helpers import (
     _credential_line_key,
@@ -22,6 +21,7 @@ from .boundary import gated_vm_boundary
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
+    from agentworks.secrets.policy import InteractionPolicy
 
 # NOTE on ``_resolve_vm_admin_env_scopes`` / ``_vm_secret_target``: both
 # are defined in ``_helpers.py``, and tests monkeypatch them as
@@ -66,7 +66,6 @@ def shell_vm(
     just-in-time values seed the boundary resolver), and the
     held-active span covers the whole interactive session.
     """
-    interaction = validate_interaction_policy(interaction)
     import shlex
 
     import agentworks.vms.manager as _mgr
@@ -182,7 +181,6 @@ def exec_vm(
     :func:`shell_vm`: the gate opens before the preflight sweep and
     the held-active span covers the streamed remote command.
     """
-    interaction = validate_interaction_policy(interaction)
     import shlex
 
     import agentworks.vms.manager as _mgr
@@ -283,7 +281,6 @@ def add_git_credential(
     context (``ctx.secret``, with the gate's scoped reader as the
     source for gate-driven ops).
     """
-    interaction = validate_interaction_policy(interaction)
     from agentworks.bootstrap import load_request_registry
     from agentworks.git_credentials.nodes import git_credential_node
     from agentworks.orchestration.activation import (

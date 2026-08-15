@@ -121,3 +121,77 @@ not edit the saga SDD.
   credentials. Tests and the acceptance harness deliberately use a closed fake-provider boundary.
 - The acceptance harness intentionally supports POSIX hosts only. Generated PowerShell completion
   text is validated on Linux, but no native Windows CLI run is claimed.
+
+## Supersession (2026-08-14)
+
+The `2026-08-12-simplification-pass` effort's wave 1 deleted `validate_interaction_policy` and the
+`phase7` corpus that enforced its use, so the conventions this SDD's `operator-surfaces-lld.md`
+records as normative no longer describe HEAD. Recorded here because that LLD is the only place on
+`main` that still specified the mechanism as current design, and this directory is locked. The LLD
+sections stating those requirements, principally its lines 145-153, 184-189, 396-400, 556-566,
+669-677, and 735-736, are superseded in full.
+
+What went: the interior half. The 152 call sites that re-checked a first-party `InteractionPolicy`
+already carried by a typed parameter, and the AST guard requiring
+`interaction = validate_interaction_policy(interaction)` as the first executable statement of every
+policy boundary. A value forwarded between our own functions within one execution under strict mypy
+is interior by the trust-boundary doctrine the simplification pass landed in
+`development-principles` principle 3, so those checks bought nothing.
+
+What stayed, at the boundary that deletion first got wrong: `interaction` is still checked once on
+arrival, by `require_exact_interaction_policy`. `InteractionPolicy` is a `StrEnum` and every
+consumer compares it by identity, so a value that is equal but not identical (a plain `"refuse"`)
+takes the not-refuse branch and resolves through an interactive source in a run that meant to
+refuse. That is reachable through the published service surface, whose functions take `interaction`
+from callers outside our type checking, and a probe against a configured OnePassword source
+reproduced the fault before the check was added. Forwarding a checked policy onward is not
+rechecked, and that is the whole difference from the 152-site convention this note supersedes.
+
+Where the check goes is mechanical rather than a judgment about which functions read as published:
+**`ResolutionPolicy.__post_init__` calls it, so no policy can be constructed from an unchecked
+`interaction`**, and `grep -rn "ResolutionPolicy(" cli/agentworks/` is the whole audit. That
+constructor requirement is the one `operator-surfaces-lld.md` states at its lines 687-691, which
+this note does not supersede: it holds at HEAD as written. Its attached test requirement at lines
+735-736 does go, because the check it demands a matrix for is a single `type(x) is` comparison, and
+the extra inputs test that one comparison over again. The six constructions today sit in six
+functions (`secrets.verification.verify_secrets`, `secrets.orchestration.resolve_for_command`,
+`secrets.resolve.resolve_partial_for_reveal`, and `Resolver.resolve`, `Resolver.resolve_gate`,
+`Resolver.resolve_late_repair`), and every path to `resolve_batch` crosses one. `Resolver.__init__`
+constructs no policy; it is a check site, and the three constructions inside `Resolver` read the
+`self._interaction` it checked and nothing reassigns. So a value is covered in one of two ways,
+checked in the function that constructs the policy or read from a field checked when the object was
+built, and a new `Resolver` method taking `interaction` as a parameter would have neither. The
+published-service framing this supersedes named four of them and got both directions wrong:
+`env.show.show_env` forwards to `resolve_partial_for_reveal` rather than consuming, and
+`resolve_partial_for_reveal` consumes and was left unchecked because it had a single caller, which
+is the same reasoning the 152-site deletion had to correct.
+
+Three entry points call the check themselves rather than inheriting it from the resolver they reach:
+`vms.manager.power.delete_vm`, `agents.manager.lifecycle.reinit_agent`, and
+`workspaces.manager.rehome.rehome_workspace`. Position, not presence, is what those buy. Each does
+consequential work before reaching its resolver, and `delete_vm` reaches its resolver inside a
+best-effort span that downgrades an `AgentworksError` to a warning, so a deeper rejection there was
+swallowed and the delete ran to completion with the backend delete skipped: exactly the #329
+orphaning the span exists to prevent. A rejected policy must leave nothing behind, so the check runs
+before any state change. Prompting is not a state change, and two commands do prompt first:
+`workspaces.manager.delete.delete_workspace` and `agents.manager.lifecycle.delete_agent` confirm the
+delete before the boundary they check inside, and a confirmed delete that then rejects the policy
+still leaves nothing behind.
+
+Every interaction behavior recorded under "What shipped" still holds: the enum, caller-authorized
+prompting, fail-before-prompt ordering, `agw secret verify`'s refuse-by-default posture and its
+final `--allow-interaction` opt-in, and the forwarding of an explicit policy across every boundary.
+No call site changed which policy it passes, and no operator-visible behavior changes. One coverage
+question was checked rather than assumed: the corpus's lexical assertion that auth-key acquisition
+and `_ensure_tailscale` sit inside the activation hold is covered observationally, with
+failure-unwind and single-release coverage the lexical pin could not see, in
+`cli/tests/vms/test_lifecycle_orchestrated.py` and `cli/tests/vms/test_vm_nodes.py`.
+
+Issue 529 keeps the half not fixed here: `resolve.py` dispatches the interaction broker on a
+hardcoded `name == "prompt"`, so the underlying identity comparison fails loud for that one backend
+and silent for every other. That is an accident of a built-in-name special case rather than a
+property of the gate, and no backend's safety should depend on its name.
+
+This note narrows the interaction-policy validation convention only. The source-and-backend model,
+the resolution protocol, the value-free outcome vocabulary, the trust-boundary statement, and the
+0.14 break recorded above are untouched.

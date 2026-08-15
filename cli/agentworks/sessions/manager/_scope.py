@@ -12,7 +12,6 @@ from agentworks.errors import (
     StateError,
 )
 from agentworks.name_filters import validate_name_filters
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.vms.manager import gated_vm_boundary
 
 if TYPE_CHECKING:
@@ -21,6 +20,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow, VMRow, WorkspaceRow
+    from agentworks.secrets.policy import InteractionPolicy
     from agentworks.sessions.tmux import RunCommand
     from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
@@ -91,7 +91,6 @@ def _prepare_vm(
     an SSHLogger attaches to the Transport so all calls log
     automatically.
     """
-    interaction = validate_interaction_policy(interaction)
     from agentworks.bootstrap import load_request_registry
     from agentworks.ssh import SSHLogger
 
@@ -264,7 +263,6 @@ def _batch_vm_boundary(
     no gate), the imperative lazy-bind property: ``session list
     --no-status`` and empty filter results must cost nothing here.
     """
-    interaction = validate_interaction_policy(interaction)
     if not vms:
         yield
         return

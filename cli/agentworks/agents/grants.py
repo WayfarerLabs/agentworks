@@ -21,13 +21,13 @@ from agentworks import output
 from agentworks.agents.manager import agent_scope
 from agentworks.errors import NotFoundError, ValidationError
 from agentworks.naming import LINUX_GROUPNAME_MAX_LENGTH
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.transports import transport
 from agentworks.vms.manager import gated_vm_boundary
 
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
+    from agentworks.secrets.policy import InteractionPolicy
     from agentworks.ssh import SSHLogger
 
 WS_GROUP_PREFIX = "ws-"
@@ -71,7 +71,6 @@ def grant_workspaces(
     empty-request and unknown-agent validations stay pre-gate: they
     fail with zero prompts and zero VM starts.
     """
-    interaction = validate_interaction_policy(interaction)
     if not grant_all and not workspace_names:
         raise ValidationError(
             f"grant for '{agent_name}' needs at least one workspace name or workspace_names empty + grant_all=True",
@@ -139,7 +138,6 @@ def revoke_workspaces(
     covering the group-membership SSH work, and the empty-request /
     unknown-agent validations pre-gate.
     """
-    interaction = validate_interaction_policy(interaction)
     if not revoke_all and not workspace_names:
         raise ValidationError(
             f"revoke for '{agent_name}' needs at least one workspace name or workspace_names empty + revoke_all=True",

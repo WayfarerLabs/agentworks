@@ -14,7 +14,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
@@ -22,6 +21,7 @@ if TYPE_CHECKING:
     from agentworks.db import Database, WorkspaceRow
     from agentworks.orchestration.node import Node
     from agentworks.resources.reference import ResourceReference
+    from agentworks.secrets.policy import InteractionPolicy
     from agentworks.vms.nodes import LiveVMNode
 
 
@@ -91,7 +91,6 @@ class PendingWorkspaceNode:
         *,
         interaction: InteractionPolicy,
     ) -> None:
-        interaction = validate_interaction_policy(interaction)
         self._db = db
         self._config = config
         self._name = name
@@ -148,7 +147,6 @@ class PendingWorkspaceNode:
         self._realized = True
 
     def teardown(self) -> None:
-        interaction = validate_interaction_policy(self._interaction)
         from agentworks.workspaces.manager import delete_workspace
 
         try:
@@ -159,7 +157,7 @@ class PendingWorkspaceNode:
                 force=True,
                 yes=True,
                 vm_node=self._vm,
-                interaction=interaction,
+                interaction=self._interaction,
             )
         except Exception as exc:
             # The teardown contract: name the artifact left standing.
@@ -190,7 +188,6 @@ def pending_workspace_node(
 ) -> PendingWorkspaceNode:
     """Build the pending ``workspace/<name>`` node with its VM edge
     attached."""
-    interaction = validate_interaction_policy(interaction)
     return PendingWorkspaceNode(
         db,
         config,

@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db, ordinary_interaction_policy, parse_csv_filter
 from agentworks.machine_output import OutputFormat
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
+
+if TYPE_CHECKING:
+    from agentworks.secrets.policy import InteractionPolicy
 
 session_app = typer.Typer(
     name="session",
@@ -50,7 +52,7 @@ def session_create(
     agent_template: Annotated[str | None, typer.Option("--agent-template", help="Template for new agent")] = None,
 ) -> None:
     """Create and start a session in a workspace."""
-    interaction = validate_interaction_policy(ordinary_interaction_policy())
+    interaction = ordinary_interaction_policy()
     from agentworks.config import load_config
     from agentworks.sessions.manager import create_session
 
@@ -82,7 +84,7 @@ def session_describe(
     ] = OutputFormat.HUMAN,
 ) -> None:
     """Show session details."""
-    interaction = validate_interaction_policy(ordinary_interaction_policy())
+    interaction = ordinary_interaction_policy()
     from agentworks.config import load_config
     from agentworks.sessions.manager import describe_session, session_description
 
@@ -129,7 +131,7 @@ def session_list(
     ] = OutputFormat.HUMAN,
 ) -> None:
     """List sessions. Filters compose with AND; name filters accept comma-separated values for OR-within-filter."""
-    interaction = validate_interaction_policy(ordinary_interaction_policy())
+    interaction = ordinary_interaction_policy()
     if names_only and output_format is OutputFormat.JSON:
         raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
     from agentworks.config import load_config
@@ -200,7 +202,7 @@ def session_stop(
     accept a single value or a comma-separated list (e.g.
     ``--vm vm1,vm2``); commas within a filter are OR-ed together.
     """
-    interaction = validate_interaction_policy(ordinary_interaction_policy())
+    interaction = ordinary_interaction_policy()
     from agentworks.config import load_config
     from agentworks.sessions.manager import stop_all_sessions, stop_session
 
@@ -251,7 +253,6 @@ def _resume_sessions(
     interaction: InteractionPolicy,
 ) -> None:
     """Validate and execute the single or batch session resume operation."""
-    interaction = validate_interaction_policy(interaction)
     from agentworks.config import load_config
     from agentworks.sessions.manager import resume_all_sessions, resume_session
 
@@ -353,7 +354,7 @@ def session_resume(
     accept a single value or a comma-separated list (e.g.
     ``--vm vm1,vm2``); commas within a filter are OR-ed together.
     """
-    interaction = validate_interaction_policy(ordinary_interaction_policy())
+    interaction = ordinary_interaction_policy()
     _resume_sessions(
         name,
         all_stopped=all_stopped,
@@ -373,7 +374,7 @@ def session_attach(
     name: Annotated[str, typer.Argument(help="Session name")],
 ) -> None:
     """Attach to a session."""
-    interaction = validate_interaction_policy(ordinary_interaction_policy())
+    interaction = ordinary_interaction_policy()
     from agentworks.config import load_config
     from agentworks.sessions.manager import attach_session
 
@@ -394,7 +395,7 @@ def session_delete(
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
 ) -> None:
     """Delete a session."""
-    interaction = validate_interaction_policy(ordinary_interaction_policy())
+    interaction = ordinary_interaction_policy()
     from agentworks.config import load_config
     from agentworks.sessions.manager import delete_session
 
@@ -414,7 +415,7 @@ def session_logs(
     lines: Annotated[int | None, typer.Option("--lines", "-n", help="Number of lines")] = None,
 ) -> None:
     """Dump the scrollback buffer for a session."""
-    interaction = validate_interaction_policy(ordinary_interaction_policy())
+    interaction = ordinary_interaction_policy()
     from agentworks.config import load_config
     from agentworks.sessions.manager import session_logs as _session_logs
 
