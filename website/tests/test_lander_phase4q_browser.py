@@ -22,7 +22,8 @@ from site_test_support import RepositoryFixture
 PROBE = r"""
 import { landerGameController as controller } from "/static/lander-game.js";
 import { advanceMissionSequence, classifySweptContact, createRun, stepFlight, updateRetention } from "/static/lander-model.js";
-import { STATIC_WORLD_SEED, WORLD_MAX_X, WORLD_MIN_X, hullForPose, terrainHeightAt } from "/static/lander-world.js";
+import { MAX_NORMALIZED_DECK, STATIC_WORLD_SEED, TERRAIN_PROFILES, WORLD_MAX_X, WORLD_MIN_X,
+    createSiteForIndex, hullForPose, terrainHeightAt } from "/static/lander-world.js";
 
 if (controller.frameId !== null) cancelAnimationFrame(controller.frameId);
 controller.frameId = null;
@@ -128,6 +129,20 @@ const timingSummary = (values) => {
     const ordered = values.toSorted((left, right) => left - right);
     return {samples: ordered.length, p95: ordered[Math.ceil(ordered.length * .95) - 1],
         maximum: ordered.at(-1)};
+};
+const terrainContract = () => {
+    const normalized = Object.values(TERRAIN_PROFILES).flat();
+    const sites = [];
+    for (const seed of [11, 39, 41, STATIC_WORLD_SEED]) {
+        for (let index = -4095; index <= 4095; index += 1) sites.push(createSiteForIndex(seed, index));
+    }
+    const spacings = sites.slice(1).flatMap((site, index) =>
+        site.seed === sites[index].seed ? [site.center - sites[index].center] : []);
+    return {minimum: Math.min(...normalized), maximum: Math.max(...normalized),
+        maximumDeck: Math.max(...sites.map((site) => site.normalizedDeck)),
+        maximumOrdinal: Math.max(...sites.map((site) => site.candidateOrdinal)),
+        minimumSpacing: Math.min(...spacings), maximumSpacing: Math.max(...spacings),
+        deckLimit: MAX_NORMALIZED_DECK};
 };
 const maximumKnotSweep = (direction) => {
     const model = {...createRun({seed: 41}), retainedSites: [], targetSiteId: null,
@@ -249,9 +264,11 @@ const longevity = (seed) => {
 };
 const valleyX = (seed) => Array.from({length: 33}, (_, index) => index * 16)
     .reduce((lowest, x) => terrainHeightAt(seed, x) < terrainHeightAt(seed, lowest) ? x : lowest, 0);
+const normalizedAt = (seed, x) => (terrainHeightAt(seed, x) + 9.2) / 64;
 window.phase4q = {snapshot, useSeed, service, fail, ballistic, edge, retry, leave, focusFooter, longevity,
     maximumKnotWitness,
-    valleyX, STATIC_WORLD_SEED, listenerTargets: {motion: controller.motion}};
+    normalizedAt, terrainContract, valleyX, STATIC_WORLD_SEED,
+    listenerTargets: {motion: controller.motion}};
 document.documentElement.dataset.phase4qReady = "true";
 """
 
@@ -337,7 +354,8 @@ def browser_phase4q_contract(
         screenshot_directory = output / "_phase4q-screenshots"
         screenshot_directory.mkdir(exist_ok=True)
         result: dict[str, object] = {"viewports": {}, "screenshots": [], "longevity": [],
-                                    "listeners": [], "maximumKnot": None}
+                                    "listeners": [], "maximumKnot": None,
+                                    "terrain": connection.evaluate("phase4q.terrainContract()")}
         viewports = (
             ("narrow", 320, 780, False),
             ("zoomEquivalent", 320, 240, False),
@@ -382,8 +400,12 @@ def browser_phase4q_contract(
                 stages.append(connection.evaluate("phase4q.snapshot('touch')"))
             stages.append(connection.evaluate("phase4q.leave()"))
             result["viewports"][name] = stages
-            for seed, x in ((11, 55), (41, 170), (1095194417, 250)):
-                connection.evaluate(f"phase4q.useSeed({seed}, {x}, 30, 'screenshot-{seed}')")
+            for seed, pose_x, sample_x in (
+                (11, 55, 55),
+                (41, 55, 80),
+                (1095194417, 55, 55),
+            ):
+                connection.evaluate(f"phase4q.useSeed({seed}, {pose_x}, 30, 'screenshot-{seed}')")
                 png = base64.b64decode(connection.call("Page.captureScreenshot", {
                     "format": "png", "captureBeyondViewport": False,
                 })["data"])
@@ -392,6 +414,7 @@ def browser_phase4q_contract(
                 png_width, png_height = struct.unpack(">II", png[16:24])
                 result["screenshots"].append({
                     "seed": seed, "width": png_width, "height": png_height,
+                    "peakNormalized": connection.evaluate(f"phase4q.normalizedAt({seed}, {sample_x})"),
                     "bytes": len(png), "sha256": hashlib.sha256(png).hexdigest(),
                     "path": str(screenshot),
                 })
@@ -466,7 +489,7 @@ class Phase4QBrowserTests(RepositoryFixture):
                 self.assertEqual(witness["maxima"]["sites"], 3)
                 self.assertLessEqual(witness["maxima"]["chunks"], 5)
                 self.assertLessEqual(witness["maxima"]["terrainVertices"], 48)
-                self.assertLessEqual(witness["maxima"]["world"], 80)
+                self.assertLessEqual(witness["maxima"]["world"], 76)
                 self.assertEqual(witness["maxima"]["document"], witness["finalDom"]["document"])
                 self.assertEqual(witness["maxima"]["world"], witness["finalDom"]["world"])
                 self.assertEqual(witness["stabilizedDom"], witness["finalDom"])
@@ -491,6 +514,13 @@ class Phase4QBrowserTests(RepositoryFixture):
 
     def test_fixed_scene_has_no_page_growth_or_scroll_across_lifecycle(self) -> None:
         result = browser_phase4q_contract(self.build())
+        terrain = result["terrain"]
+        self.assertEqual(terrain["minimum"], 0.1)
+        self.assertEqual(terrain["maximum"], 0.6)
+        self.assertGreater(terrain["maximumDeck"], 0.499)
+        self.assertLessEqual(terrain["maximumDeck"], terrain["deckLimit"])
+        self.assertEqual(terrain["maximumOrdinal"], 5)
+        self.assertEqual([terrain["minimumSpacing"], terrain["maximumSpacing"]], [56, 136])
         expected = {
             "narrow": (320, 780),
             "zoomEquivalent": (320, 240),
@@ -570,6 +600,7 @@ class Phase4QBrowserTests(RepositoryFixture):
                          [(320, 780)] * 3 + [(320, 240)] * 3 + [(667, 320)] * 3 +
                          [(1000, 780)] * 3)
         self.assertTrue(all(item["bytes"] > 3_000 for item in screenshots))
+        self.assertIn(0.6, [item["peakNormalized"] for item in screenshots])
         self.assertTrue(all(Path(item["path"]).is_file() for item in screenshots))
         self.assertEqual(len({item["sha256"] for item in screenshots}), 12)
         self.assert_longevity_contract(result)

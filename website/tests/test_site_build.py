@@ -295,7 +295,11 @@ class BuildAndInstallTests(RepositoryFixture):
             with self.subTest(path=path.relative_to(REPO_ROOT)):
                 self.assertLess(len(path.read_text(encoding="utf-8").splitlines()), 1_000)
         rendered, _ = site_builder._render_artifact(self.root, "/")
-        for relative in (Path("static/lander-world.js"), Path("static/lander-collision.js")):
+        for relative in (
+            Path("static/lander-model.js"),
+            Path("static/lander-world.js"),
+            Path("static/lander-collision.js"),
+        ):
             with self.subTest(emitted=relative):
                 self.assertLess(len(rendered[relative].decode().splitlines()), 1_000)
 

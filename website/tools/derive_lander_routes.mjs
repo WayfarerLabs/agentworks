@@ -6,20 +6,37 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { classifyRouteSweep, routeHull } from "./lander_route_collision.mjs";
 import { canonical, canonicalBytes, fixtureDigest as digest, fixturePose } from "./lander_route_fixture.mjs";
+import {
+    CANDIDATE_ORDERS,
+    PROFILE_ORDER,
+    REVIEW_SEEDS,
+    assignmentWorld,
+    assignmentsFor,
+    envelopeHeight,
+    envelopeWorld,
+    groupAssignments,
+    openingWorld,
+    validateNumberBound,
+    validateGeometry,
+    validatePredecessor,
+    worldWitness,
+} from "./lander_route_geometry.mjs";
 
-const DERIVER_VERSION = "agw-lander-route-deriver/v9";
-const SYNTHESIZER_VERSION = "agw-lander-corridor-synthesizer/v1";
-const DERIVED_SCHEMA = "agw-lander-route-derived/v8";
-const BOOTSTRAP_SCHEMA = "agw-lander-route-derived/v7";
-const BOOTSTRAP_SHA = "c5800497182045dbf664fd50abd6cfd79cc4293bdadbfd4afa526e72f7d71b12";
-const BOOTSTRAP_OUTPUT = "dea7263fe5b01ea1c0a442a1f2fefb3f4dad472cbe8668b8bf00793cde5afef7";
-const BOOTSTRAP_PROOF = "ca09ed720e3e752745af046cbb2013c99c36227963e9799b1f1cd8961b49f354";
+const DERIVER_VERSION = "agw-lander-route-deriver/v10";
+const SYNTHESIZER_VERSION = "agw-lander-corridor-synthesizer/v2";
+const DERIVED_SCHEMA = "agw-lander-route-derived/v9";
+const PREDECESSOR_SCHEMA = "agw-lander-route-geometry/v8";
+const PREDECESSOR_SHA = "257da30dbbaa9af6910ad2beb344162f0321760169cafb29a8e80164f4507248";
+const BOOTSTRAP_SCHEMA = "agw-lander-route-derived/v8";
+const BOOTSTRAP_SHA = "ebaa368a38b262bb7839b621fd9785a379347e57e2217a6a2dc66466f9fa5c88";
+const BOOTSTRAP_OUTPUT = "562de8434513923e150a5db0198afeed168b992f877372e171de4a00fb1ed2cd";
+const BOOTSTRAP_PROOF = "f49f06e1353684df36604e6f476380a9a58d5d97ddb478b24d35c69b4dd4e93f";
 const COLLISION_VERSION = "agw-lander-swept-collision/v2";
 const POSE_DECIMALS = 9;
-const STATIC_WORLD_SEED = 0x41475731;
-const WORLD_SEEDS = [11, 39, 41, STATIC_WORLD_SEED];
 const STEP_SECONDS = 1 / 120;
 const FUEL_QUANTUM = 0.05;
+const APPROVED_BASE = 13.4;
+const MAX_CONTACT_STEP = 4332;
 const COMMANDS = Object.freeze([
     [0, 0],
     [0.72, 0.72],
@@ -30,12 +47,12 @@ const COMMANDS = Object.freeze([
     [0, 0],
     [0.72, 0.72],
 ]);
-const SEARCH_COMMANDS = [0, 1, 2, 3, 4, 5];
+const SEARCH_COMMANDS = Object.freeze([0, 1, 2, 3, 4, 5]);
 const CONSTANTS = Object.freeze({
     ANGULAR_ASSIST_DIFFERENTIAL: 0.12,
     ANGULAR_ASSIST_FULL_SPEED: 15,
-    COLLISION_MARGIN: 0.02,
     COLLISION_ANGLE_KNOT_DEGREES: 1,
+    COLLISION_MARGIN: 0.02,
     ENGINE_ACCELERATION: 9,
     FUEL_FLOW: 1,
     FUEL_QUANTUM,
@@ -68,217 +85,31 @@ const PREFIX = Object.freeze([
     [0, 120],
     [2, 34],
 ]);
-const PROFILE_ORDER = ["S0", "S1", "S2", "S3", "S4", "S5", "S6", "S7"];
-const OPENING_COUNTS = Object.freeze({
-    S0: [162, 72],
-    S1: [348, 102],
-    S2: [378, 114],
-    S3: [264, 72],
-    S4: [168, 72],
-    S5: [378, 102],
-    S6: [258, 72],
-    S7: [378, 114],
-});
 
 const clamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, value));
-const positiveModulo = (value, modulus) => ((value % modulus) + modulus) % modulus;
-const normalizeDegrees = (value) => positiveModulo(value + 180, 360) - 180;
-function mixUint32(input) {
-    let value = Number(input) >>> 0;
-    value = Math.imul(value ^ (value >>> 16), 0x7feb352d);
-    value = Math.imul(value ^ (value >>> 15), 0x846ca68b);
-    return (value ^ (value >>> 16)) >>> 0;
-}
-const normalizeSeed = (seed) => Number(seed) >>> 0 || 0x6d2b79f5;
-function sampleUnit(seed, stream, index) {
-    return (
-        mixUint32(
-            normalizeSeed(seed) ^ Math.imul(stream, 0x9e3779b9) ^ Math.imul((Number(index) + 1) >>> 0, 0x85ebca6b),
-        ) /
-        2 ** 32
-    );
-}
+const normalizeDegrees = (value) => ((((value + 180) % 360) + 360) % 360) - 180;
 export const quantumCeil = (value) => Math.ceil(value / FUEL_QUANTUM) * FUEL_QUANTUM;
-export function millimeterDeltaCensus(assignments) {
-    return new Set(assignments.map(({ originMillimeters, targetMillimeters }) => targetMillimeters - originMillimeters))
-        .size;
-}
-
-function validateGeometry(geometry) {
-    if (
-        geometry.schema !== "agw-lander-route-geometry/v8" ||
-        geometry.synthesizer.recipe !== SYNTHESIZER_VERSION ||
-        geometry.terrain.superblockWidth !== 512 ||
-        geometry.terrain.epochSuperblocks !== 8 ||
-        geometry.terrain.cadence !== 16 ||
-        geometry.sites.formula !== "36+96*i" ||
-        geometry.sites.spacing !== 96 ||
-        geometry.siteGeometry.platform.clearance !== 2.5 ||
-        canonicalBytes(geometry.synthesizer.prefix) !== canonicalBytes(PREFIX) ||
-        geometry.synthesizer.beamWidth !== 6000 ||
-        geometry.synthesizer.maxLayers !== 269 ||
-        geometry.synthesizer.macroSteps !== 12 ||
-        geometry.synthesizer.maxContactStep !== 4320 ||
-        canonicalBytes(Object.keys(geometry.terrain.profiles).sort()) !== canonicalBytes([...PROFILE_ORDER].sort())
-    ) {
-        throw new Error("Unsupported or incomplete geometry-v8 fixture");
-    }
-}
-function worldY(geometry, normalized) {
-    return geometry.terrain.mapping.worldScale * normalized + geometry.terrain.mapping.worldOffset;
-}
-function assignedHeight(geometry, assignment, x) {
-    const blockIndex = Math.floor(x / 512);
-    const profile = blockIndex === assignment.leftBlock ? assignment.leftProfile : assignment.rightProfile;
-    if (profile === undefined) throw new RangeError(`Assignment ${assignment.assignmentId} misses block ${blockIndex}`);
-    const samples = geometry.terrain.profiles[`S${profile}`];
-    const local = x - blockIndex * 512;
-    const segment = Math.min(31, Math.floor(local / 16));
-    const fraction = (local - segment * 16) / 16;
-    return worldY(geometry, samples[segment] + (samples[segment + 1] - samples[segment]) * fraction);
-}
-function seededBlock(geometry, seed, blockIndex) {
-    const epoch = Math.floor(blockIndex / 8),
-        slot = positiveModulo(blockIndex, 8),
-        offset = Math.floor(8 * sampleUnit(seed, 15, 0)),
-        first = positiveModulo(offset + epoch, 8),
-        last = positiveModulo(first + 2, 8),
-        middle = Array.from({ length: 8 }, (_, index) => index).filter((index) => index !== first && index !== last);
-    for (let index = 5; index >= 1; index -= 1) {
-        const exchange = Math.floor((index + 1) * sampleUnit(seed, 16, (Math.imul(epoch, 6) + 5 - index) >>> 0));
-        [middle[index], middle[exchange]] = [middle[exchange], middle[index]];
-    }
-    const profile = [first, ...middle, last][slot],
-        samples = geometry.terrain.profiles[`S${profile}`];
-    return {
-        epoch,
-        index: blockIndex,
-        profile,
-        slot,
-        vertices: samples.map((height, index) => [blockIndex * 512 + index * 16, worldY(geometry, height)]),
-    };
-}
-function seededHeight(geometry, seed, x) {
-    const block = seededBlock(geometry, seed, Math.floor(x / 512));
-    const segment = Math.min(31, Math.floor((x - block.index * 512) / 16));
-    const samples = geometry.terrain.profiles[`S${block.profile}`];
-    const fraction = (x - block.index * 512 - segment * 16) / 16;
-    return worldY(geometry, samples[segment] + (samples[segment + 1] - samples[segment]) * fraction);
-}
-function siteDescriptor(heightAt, index, center) {
-    const closedFootprint = [center - 4.8, center + 13.8];
-    const xs = [...closedFootprint];
-    for (let x = Math.ceil(closedFootprint[0] / 16) * 16; x <= closedFootprint[1]; x += 16) xs.push(x);
-    const localNativeMaximum = Math.max(...xs.map(heightAt));
-    const platformTop = localNativeMaximum + 2.5;
-    const supportXs = [
-        closedFootprint[0],
-        closedFootprint[0] + 1,
-        closedFootprint[0] + 8.8,
-        closedFootprint[0] + 9.8,
-        closedFootprint[0] + 17.6,
-        closedFootprint[0] + 18.6,
-    ];
-    return { index, center, closedFootprint, localNativeMaximum, platformTop, supportFeet: supportXs.map(heightAt) };
-}
-function millimeters(deck) {
-    const result = Math.round(deck * 1000);
-    if (Math.abs(result / 1000 - deck) > 1e-12) throw new Error(`Non-millimetre deck ${deck}`);
-    return result;
-}
-
-function assignmentsFor(geometry) {
-    const assignments = [];
-    for (const phase of geometry.sites.spatialPhases) {
-        const leftBlock = Math.floor((phase - 4.8) / 512),
-            rightBlock = Math.floor((phase + 109.8) / 512);
-        for (let leftProfile = 0; leftProfile < 8; leftProfile += 1)
-            for (let rightProfile = 0; rightProfile < 8; rightProfile += 1) {
-                if ((leftBlock === rightBlock) !== (leftProfile === rightProfile)) continue;
-                const assignmentId = `p${phase}-a${leftProfile}-b${rightProfile}`;
-                const partial = { assignmentId, phase, leftBlock, rightBlock, leftProfile, rightProfile };
-                const heightAt = (x) => assignedHeight(geometry, partial, x);
-                const originDeck = siteDescriptor(heightAt, 0, phase).platformTop;
-                const targetDeck = siteDescriptor(heightAt, 1, phase + 96).platformTop;
-                const originMillimeters = millimeters(originDeck),
-                    targetMillimeters = millimeters(targetDeck);
-                assignments.push({
-                    ...partial,
-                    originDeck,
-                    targetDeck,
-                    originMillimeters,
-                    targetMillimeters,
-                    deckDelta: targetDeck - originDeck,
-                    pairKey: `d:${originMillimeters}:${targetMillimeters}`,
-                });
-            }
-    }
-    if (assignments.length !== 320) throw new Error(`Expected 320 assignments, got ${assignments.length}`);
-    return assignments;
-}
-
-function affineEnvelope(originDeck, targetDeck, x) {
-    const origin = originDeck - 2.5;
-    const target = targetDeck - 2.5;
-    if (x <= 13.8) return origin;
-    if (x >= 91.2) return target;
-    return Math.min(29.2, origin + 0.36 * (x - 13.8), target + 0.36 * (91.2 - x));
-}
-function envelopeVertices(originDeck, targetDeck) {
-    const origin = originDeck - 2.5;
-    const target = targetDeck - 2.5;
-    const xs = new Set([5, 13.8, 91.2, 107]);
-    const candidates = [
-        13.8 + (29.2 - origin) / 0.36,
-        91.2 - (29.2 - target) / 0.36,
-        (target - origin + 0.36 * (91.2 + 13.8)) / 0.72,
-    ];
-    for (const x of candidates) if (x > 13.8 && x < 91.2) xs.add(x);
-    return [...xs]
-        .sort((a, b) => a - b)
-        .map((x) => [x, affineEnvelope(originDeck, targetDeck, x)])
-        .filter((point, index, values) => index === 0 || canonicalBytes(point) !== canonicalBytes(values[index - 1]));
-}
-function groupAssignments(assignments) {
-    const groups = new Map();
-    for (const assignment of assignments) {
-        const group = groups.get(assignment.pairKey) ?? { assignmentIds: [], assignments: [] };
-        group.assignmentIds.push(assignment.assignmentId);
-        group.assignments.push(assignment);
-        groups.set(assignment.pairKey, group);
-    }
-    const groupsOrdered = [...groups].sort(
-        ([, left], [, right]) =>
-            left.assignments[0].originMillimeters - right.assignments[0].originMillimeters ||
-            left.assignments[0].targetMillimeters - right.assignments[0].targetMillimeters,
-    );
-    if (groupsOrdered.length !== 243) throw new Error(`Expected 243 pair keys, got ${groupsOrdered.length}`);
-    if (millimeterDeltaCensus(groupsOrdered.map(([, group]) => group.assignments[0])) !== 224) {
-        throw new Error("Expected 224 exact deck deltas");
-    }
-    return groupsOrdered;
-}
 
 function integrate(pose, engines, fuel = Infinity) {
     const totalRequest = engines[0] + engines[1];
     const manualSteer = clamp((engines[0] - engines[1]) / CONSTANTS.TURN_DIFFERENTIAL, -1, 1);
-    let assistedLeft = engines[0];
-    let assistedRight = engines[1];
+    let left = engines[0];
+    let right = engines[1];
     if (manualSteer === 0 && totalRequest > 0) {
         const raw =
             CONSTANTS.ANGULAR_ASSIST_DIFFERENTIAL *
             clamp(-pose.angularVelocity / CONSTANTS.ANGULAR_ASSIST_FULL_SPEED, -1, 1);
-        const assist = clamp(raw, -Math.min(totalRequest, 2 - totalRequest), Math.min(totalRequest, 2 - totalRequest));
-        assistedLeft = (totalRequest + assist) / 2;
-        assistedRight = (totalRequest - assist) / 2;
+        const limit = Math.min(totalRequest, 2 - totalRequest);
+        const assist = clamp(raw, -limit, limit);
+        left = (totalRequest + assist) / 2;
+        right = (totalRequest - assist) / 2;
     }
-    const requestedBurn = (assistedLeft + assistedRight) * STEP_SECONDS;
+    const requestedBurn = (left + right) * STEP_SECONDS;
     const exhausts = requestedBurn >= fuel;
     const scale = exhausts && requestedBurn > 0 ? fuel / requestedBurn : 1;
-    const left = assistedLeft * scale;
-    const right = assistedRight * scale;
-    const vectorAngle = left + right > 0 ? CONSTANTS.MAX_THRUST_VECTOR * manualSteer : 0;
-    const radians = ((pose.angle + vectorAngle) * Math.PI) / 180;
+    left *= scale;
+    right *= scale;
+    const radians = ((pose.angle + CONSTANTS.MAX_THRUST_VECTOR * manualSteer) * Math.PI) / 180;
     const total = CONSTANTS.ENGINE_ACCELERATION * (left + right);
     const vx = pose.vx + total * Math.sin(radians) * STEP_SECONDS;
     const vy = pose.vy + (total * Math.cos(radians) - CONSTANTS.GRAVITY) * STEP_SECONDS;
@@ -298,86 +129,85 @@ function integrate(pose, engines, fuel = Infinity) {
         burn: requestedBurn * scale,
     };
 }
+
 const rectangle = (left, right, bottom, top) => [
     { x: left, y: bottom },
     { x: right, y: bottom },
     { x: right, y: top },
     { x: left, y: top },
 ];
-function siteSolids(site, isOrigin) {
-    const platformLeft = site.center - 4.8,
-        platformRight = site.center + 4.8,
-        bottom = site.platformTop - 0.35;
-    const buildingLeft = platformRight + 2,
-        buildingRight = buildingLeft + 7,
-        roof = site.platformTop + 7.2;
-    const supports = [
-        [0, 1],
-        [8.8, 9.8],
-        [17.6, 18.6],
-    ].map(([a, b], index) => ({
-        left: platformLeft + a,
-        right: platformLeft + b,
-        leftFoot: site.supportFeet[index * 2],
-        rightFoot: site.supportFeet[index * 2 + 1],
-    }));
-    return {
-        isOrigin,
-        platform: { left: platformLeft, right: platformRight, bottom, top: site.platformTop },
-        truss: { left: platformLeft - 0.1, right: buildingRight + 0.1, bottom: bottom - 0.85, top: bottom + 0.1 },
-        supports: supports.map((s) => ({
-            left: s.left - 0.1,
-            right: s.right + 0.1,
-            bottom: Math.min(s.leftFoot, s.rightFoot) - 0.1,
-            top: bottom + 0.1,
-        })),
-        noc: { left: buildingLeft, right: buildingRight, bottom, top: roof },
-        mast: { left: buildingLeft + 3.25, right: buildingLeft + 3.75, bottom: roof, top: roof + 3.2 },
-    };
-}
+
 function collisionCandidates(world, ignoreOriginTop) {
-    const result = [],
-        target = world.sites[1] ?? world.sites[0];
+    const candidates = [];
+    const target = world.sites[1] ?? world.sites[0];
     for (const site of world.sites) {
-        const s = siteSolids(site, site.index === world.originSiteId);
-        const p = s.platform;
-        if (site === target || (s.isOrigin && ignoreOriginTop))
-            result.push(
+        const platformLeft = site.center - 4.8;
+        const platformRight = site.center + 4.8;
+        const bottom = site.platformTop - 0.35;
+        const buildingLeft = platformRight + 2;
+        const buildingRight = buildingLeft + 7;
+        const roof = site.platformTop + 7.2;
+        const origin = site.index === world.originSiteId;
+        if (site === target || (origin && ignoreOriginTop)) {
+            candidates.push(
                 {
                     cause: "platform",
                     priority: 1,
                     segment: [
-                        { x: p.left, y: p.top },
-                        { x: p.left, y: p.bottom },
+                        { x: platformLeft, y: site.platformTop },
+                        { x: platformLeft, y: bottom },
                     ],
                 },
                 {
                     cause: "platform",
                     priority: 1,
                     segment: [
-                        { x: p.left, y: p.bottom },
-                        { x: p.right, y: p.bottom },
+                        { x: platformLeft, y: bottom },
+                        { x: platformRight, y: bottom },
                     ],
                 },
                 {
                     cause: "platform",
                     priority: 1,
                     segment: [
-                        { x: p.right, y: p.bottom },
-                        { x: p.right, y: p.top },
+                        { x: platformRight, y: bottom },
+                        { x: platformRight, y: site.platformTop },
                     ],
                 },
             );
-        else result.push({ cause: "platform", priority: 1, polygon: rectangle(p.left, p.right, p.bottom, p.top) });
-        for (const box of [s.truss, ...s.supports, s.noc, s.mast])
-            result.push({
-                cause: box === s.noc ? "noc" : box === s.mast ? "mast" : box === s.truss ? "truss" : "column",
-                priority: box === s.noc || box === s.mast ? 0 : 2,
-                polygon: rectangle(box.left, box.right, box.bottom, box.top),
+        } else {
+            candidates.push({
+                cause: "platform",
+                priority: 1,
+                polygon: rectangle(platformLeft, platformRight, bottom, site.platformTop),
             });
+        }
+        const supports = [
+            [0, 1],
+            [8.8, 9.8],
+            [17.6, 18.6],
+        ].map(([left, right], index) => ({
+            left: platformLeft + left - 0.1,
+            right: platformLeft + right + 0.1,
+            bottom: Math.min(site.supportFeet[index * 2], site.supportFeet[index * 2 + 1]) - 0.1,
+            top: bottom + 0.1,
+        }));
+        const boxes = [
+            [
+                "truss",
+                2,
+                { left: platformLeft - 0.1, right: buildingRight + 0.1, bottom: bottom - 0.85, top: bottom + 0.1 },
+            ],
+            ...supports.map((box) => ["column", 2, box]),
+            ["noc", 0, { left: buildingLeft, right: buildingRight, bottom, top: roof }],
+            ["mast", 0, { left: buildingLeft + 3.25, right: buildingLeft + 3.75, bottom: roof, top: roof + 3.2 }],
+        ];
+        for (const [cause, priority, box] of boxes) {
+            candidates.push({ cause, priority, polygon: rectangle(box.left, box.right, box.bottom, box.top) });
+        }
     }
-    for (let index = 1; index < world.vertices.length; index += 1)
-        result.push({
+    for (let index = 1; index < world.vertices.length; index += 1) {
+        candidates.push({
             cause: "terrain",
             priority: 4,
             segment: [
@@ -386,17 +216,18 @@ function collisionCandidates(world, ignoreOriginTop) {
             ],
             solidBelow: true,
         });
-    result.push({
+    }
+    candidates.push({
         cause: "target",
         priority: 5,
+        target: true,
         segment: [
             { x: target.center - 4.8, y: target.platformTop },
             { x: target.center + 4.8, y: target.platformTop },
         ],
-        target: true,
     });
     return {
-        candidates: result,
+        candidates,
         target: { ...target, platformLeft: target.center - 4.8, platformRight: target.center + 4.8 },
     };
 }
@@ -406,43 +237,42 @@ function mergeRun(runs, command, count) {
     if (runs.at(-1)?.[0] === command) runs.at(-1)[1] += count;
     else runs.push([command, count]);
 }
+
 function replay(runs, world, initialPose, fuel, maxSteps = 4320) {
-    let pose = { ...initialPose },
-        remaining = fuel,
-        burn = 0,
-        stepIndex = 0,
-        launchCleared = initialPose.y > world.sites[0].platformTop + 0.05;
-    let maxHullTop = Math.max(...routeHull(pose).map((p) => p.y));
-    const used = [],
-        ordinaryCollision = collisionCandidates(world, false),
-        launchCollision = collisionCandidates(world, true);
+    let pose = { ...initialPose };
+    let remaining = fuel;
+    let burn = 0;
+    let step = 0;
+    let launchCleared = world.originSiteId === null || initialPose.y > world.sites[0].platformTop + 0.05;
+    let maxHullTop = Math.max(...routeHull(pose).map((point) => point.y));
+    const used = [];
+    const ordinary = collisionCandidates(world, false);
+    const launch = collisionCandidates(world, true);
     for (const [command, count] of runs) {
         let runCount = 0;
-        for (let i = 0; i < count; i += 1) {
-            if (stepIndex >= maxSteps) break;
-            const previous = pose,
-                result = integrate(pose, COMMANDS[command], remaining);
+        for (let index = 0; index < count && step < maxSteps; index += 1) {
+            const previous = pose;
+            const result = integrate(pose, COMMANDS[command], remaining);
             pose = result.pose;
             remaining = result.fuel;
             burn += result.burn;
-            stepIndex += 1;
+            step += 1;
             runCount += 1;
-            maxHullTop = Math.max(maxHullTop, ...routeHull(pose).map((p) => p.y));
-            const ignoreOriginTop = !launchCleared;
-            const collision = ignoreOriginTop ? launchCollision : ordinaryCollision,
-                contact = classifyRouteSweep(
-                    previous,
-                    pose,
-                    result.angularTravel,
-                    collision.candidates,
-                    collision.target,
-                );
+            maxHullTop = Math.max(maxHullTop, ...routeHull(pose).map((point) => point.y));
+            const collision = launchCleared ? ordinary : launch;
+            const contact = classifyRouteSweep(
+                previous,
+                pose,
+                result.angularTravel,
+                collision.candidates,
+                collision.target,
+            );
             if (contact) {
                 mergeRun(used, command, runCount);
                 return {
                     classification: contact.classification,
                     cause: contact.cause,
-                    contactStep: stepIndex,
+                    contactStep: step,
                     pose: contact.pose,
                     burn,
                     reserve: remaining,
@@ -452,297 +282,325 @@ function replay(runs, world, initialPose, fuel, maxSteps = 4320) {
             }
             launchCleared ||= routeHull(pose)
                 .slice(0, 2)
-                .every((f) => f.y > world.sites[0].platformTop + 0.05);
+                .every((foot) => foot.y > world.sites[0].platformTop + 0.05);
         }
         mergeRun(used, command, runCount);
     }
-    return {
-        classification: "incomplete",
-        contactStep: stepIndex,
-        pose,
-        burn,
-        reserve: remaining,
-        maxHullTop,
-        runs: used,
-    };
-}
-
-function envelopeWorld(originDeck, targetDeck) {
-    const relative = envelopeVertices(originDeck, targetDeck),
-        at = (x) => affineEnvelope(originDeck, targetDeck, x);
-    const make = (index, center, deck) => {
-        const left = center - 4.8;
-        return {
-            index,
-            center,
-            platformTop: deck,
-            supportFeet: [left, left + 1, left + 8.8, left + 9.8, left + 17.6, left + 18.6].map((x) => at(x - 36)),
-        };
-    };
-    return {
-        relativeEnvelope: relative,
-        originSiteId: 0,
-        sites: [make(0, 36, originDeck), make(1, 132, targetDeck)],
-        vertices: relative.map(([x, y]) => [x + 36, y]),
-    };
-}
-function assignmentWorld(geometry, assignment) {
-    const at = (x) => assignedHeight(geometry, assignment, x);
-    const origin = siteDescriptor(at, 0, assignment.phase),
-        target = siteDescriptor(at, 1, assignment.phase + 96);
-    const xs = new Set([assignment.phase - 31, assignment.phase + 127]);
-    for (let x = Math.ceil((assignment.phase - 31) / 16) * 16; x <= assignment.phase + 127; x += 16) xs.add(x);
-    for (const site of [origin, target])
-        for (const x of [
-            site.closedFootprint[0],
-            site.closedFootprint[0] + 1,
-            site.closedFootprint[0] + 8.8,
-            site.closedFootprint[0] + 9.8,
-            site.closedFootprint[0] + 17.6,
-            site.closedFootprint[0] + 18.6,
-        ])
-            xs.add(x);
-    return { originSiteId: 0, sites: [origin, target], vertices: [...xs].sort((a, b) => a - b).map((x) => [x, at(x)]) };
+    return { classification: "incomplete", contactStep: step, pose, burn, reserve: remaining, maxHullTop, runs: used };
 }
 
 function advanceMacro(pose, fuel, command) {
-    let p = pose,
-        f = fuel,
-        maxTop = -Infinity,
-        minY = Infinity;
-    for (let i = 0; i < 12; i += 1) {
-        const result = integrate(p, COMMANDS[command], f);
-        p = result.pose;
-        f = result.fuel;
-        maxTop = Math.max(maxTop, p.y + 6.5);
-        minY = Math.min(minY, p.y);
+    let current = pose;
+    let remaining = fuel;
+    let maxTop = -Infinity;
+    let minY = Infinity;
+    for (let index = 0; index < 12; index += 1) {
+        const result = integrate(current, COMMANDS[command], remaining);
+        current = result.pose;
+        remaining = result.fuel;
+        maxTop = Math.max(maxTop, current.y + 6.5);
+        minY = Math.min(minY, current.y);
     }
-    return { pose: p, fuel: f, maxTop, minY };
+    return { pose: current, fuel: remaining, maxTop, minY };
 }
+
 function runPrefix() {
-    let pose = { x: 0, y: 0, vx: 0, vy: 0, angle: 0, angularVelocity: 0 },
-        fuel = 30;
-    for (const [c, n] of PREFIX)
-        for (let i = 0; i < n; i += 1) {
-            const result = integrate(pose, COMMANDS[c], fuel);
+    let pose = { x: 0, y: 0, vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
+    let fuel = 30;
+    for (const [command, count] of PREFIX) {
+        for (let index = 0; index < count; index += 1) {
+            const result = integrate(pose, COMMANDS[command], fuel);
             pose = result.pose;
             fuel = result.fuel;
         }
+    }
     return { pose, fuel };
 }
-function quantizedKey(p) {
-    return [
-        Math.round(p.x * 2),
-        Math.round(p.y * 2),
-        Math.round(p.vx * 2),
-        Math.round(p.vy * 2),
-        Math.round(p.angle / 5),
-        Math.round(p.angularVelocity / 5),
-    ].join(":");
+
+function quantizedKey(pose, shallowReleaseLayer = -1) {
+    return `${[
+        Math.round(pose.x * 2),
+        Math.round(pose.y * 2),
+        Math.round(pose.vx * 2),
+        Math.round(pose.vy * 2),
+        Math.round(pose.angle / 5),
+        Math.round(pose.angularVelocity / 5),
+    ].join(":")}:${shallowReleaseLayer}`;
 }
-function runsFromPath(path) {
-    const runs = PREFIX.map((r) => [...r]);
+
+function compareIntegers(left, right) {
+    for (let index = 0; index < Math.min(left.length, right.length); index += 1) {
+        if (left[index] !== right[index]) return left[index] - right[index];
+    }
+    return left.length - right.length;
+}
+
+function compareStates(left, right, runsForPath) {
+    return (
+        left.cost - right.cost ||
+        right.fuel - left.fuel ||
+        compareIntegers(runsForPath(left.path).flat(), runsForPath(right.path).flat()) ||
+        (left.shallowReleaseLayer ?? -1) - (right.shallowReleaseLayer ?? -1) ||
+        left.pose.x - right.pose.x ||
+        left.pose.y - right.pose.y ||
+        left.pose.vx - right.pose.vx ||
+        left.pose.vy - right.pose.vy ||
+        left.pose.angle - right.pose.angle ||
+        left.pose.angularVelocity - right.pose.angularVelocity
+    );
+}
+
+function routeRuns(path) {
+    const runs = PREFIX.map((run) => [...run]);
     for (const digit of path) mergeRun(runs, Number(digit), 12);
     return runs;
 }
-function compareIntegers(left, right) {
-    for (let i = 0; i < Math.min(left.length, right.length); i += 1)
-        if (left[i] !== right[i]) return left[i] - right[i];
-    return left.length - right.length;
-}
-function flattened(path) {
-    return runsFromPath(path).flat();
-}
-function compareStates(a, b) {
-    return (
-        a.cost - b.cost ||
-        b.fuel - a.fuel ||
-        compareIntegers(flattened(a.path), flattened(b.path)) ||
-        a.pose.x - b.pose.x ||
-        a.pose.y - b.pose.y ||
-        a.pose.vx - b.pose.vx ||
-        a.pose.vy - b.pose.vy ||
-        a.pose.angle - b.pose.angle ||
-        a.pose.angularVelocity - b.pose.angularVelocity
-    );
-}
-function desired(layer, delta, prefixX, poseX) {
-    const cruiseY = Math.max(11.5, delta + 11.5);
-    let x,
-        y,
-        vx = 4.2,
-        vy = 0;
+
+function desiredRoute(layer, delta, distance, prefixX, shallowReleaseLayer) {
+    const cruise = Math.max(11.5, delta + 11.5);
+    let x;
+    let y;
+    let vx = 4.2;
+    let vy = 0;
     if (layer <= 190) {
-        x = prefixX + ((90 - prefixX) * layer) / 190;
-        y = 11.5 + (cruiseY - 11.5) * Math.min(1, layer / 120);
+        x = prefixX + ((distance - 6 - prefixX) * layer) / 190;
+        y = 11.5 + (cruise - 11.5) * Math.min(1, layer / 120);
     } else if (layer <= 210) {
-        const q = (layer - 190) / 20;
-        x = 90 + 4 * q;
-        vx = 4.2 - 3.2 * q;
-        y = cruiseY;
+        const progress = (layer - 190) / 20;
+        x = distance - 6 + 4 * progress;
+        vx = 4.2 - 3.2 * progress;
+        y = cruise;
     } else {
-        const q = Math.min(1, (layer - 210) / 50);
-        x = 94;
-        vx = 1 - q;
-        y = cruiseY - (cruiseY - (delta + 0.7)) * q;
+        const progress = Math.min(1, (layer - 210) / 50);
+        x = distance - 2;
+        vx = 1 - progress;
+        y = cruise - (cruise - (delta + 0.7)) * progress;
         vy = -1.5;
     }
     if (delta < -10) {
-        const q = clamp((layer - 120) / 140, 0, 1);
-        y = cruiseY + (delta + 0.7 - cruiseY) * q;
-        if (q < 1) vy = (delta + 0.7 - cruiseY) / 14;
+        const progress = clamp((layer - 120) / 140, 0, 1);
+        y = cruise + (delta + 0.7 - cruise) * progress;
+        if (progress < 1) vy = (delta + 0.7 - cruise) / 14;
     } else if (delta < 0) {
-        if (poseX >= 91.2) {
-            const q = clamp((layer - 150) / 110, 0, 1);
-            y = cruiseY + (delta + 0.7 - cruiseY) * q;
-            if (q < 1) vy = (delta + 0.7 - cruiseY) / 11;
+        if (shallowReleaseLayer >= 0) {
+            const duration = Math.max(1, Math.min(110, 269 - shallowReleaseLayer));
+            const progress = clamp((layer - shallowReleaseLayer) / duration, 0, 1);
+            y = cruise + (delta + 0.7 - cruise) * progress;
+            if (progress < 1) vy = (delta + 0.7 - cruise) / (duration / 10);
         } else {
-            y = cruiseY;
+            y = cruise;
             vy = 0;
         }
     }
     return { x, y, vx, vy };
 }
-function stateCost(pose, layer, fuel, delta, prefixX) {
-    const target = desired(layer, delta, prefixX, pose.x),
-        bias = Math.max(0, layer - 210) * 0.08;
+
+function routeCost(pose, layer, fuel, delta, distance, prefixX, shallowReleaseLayer) {
+    const target = desiredRoute(layer, delta, distance, prefixX, shallowReleaseLayer);
+    const terminalBias = Math.max(0, layer - 210) * 0.08;
     return (
         1.8 * Math.abs(pose.x - target.x) +
         2.4 * Math.abs(pose.y - target.y) +
-        (2 + bias) * Math.abs(pose.vx - target.vx) +
-        (2 + bias) * Math.abs(pose.vy - target.vy) +
+        (2 + terminalBias) * Math.abs(pose.vx - target.vx) +
+        (2 + terminalBias) * Math.abs(pose.vy - target.vy) +
         0.045 * Math.abs(pose.angle) +
         0.035 * Math.abs(pose.angularVelocity) +
-        0.08 * (30 - fuel)
-    );
-}
-function terminal(p, delta) {
-    return (
-        p.x >= 92.8 &&
-        p.x <= 99.2 &&
-        p.y >= delta &&
-        p.y <= delta + 0.3 &&
-        Math.abs(p.vx) <= 2.2 &&
-        p.vy <= 0 &&
-        Math.abs(p.vy) <= 3.6 &&
-        Math.abs(p.angle) <= 18 &&
-        Math.abs(p.angularVelocity) <= 26
+        0.5 * (30 - fuel)
     );
 }
 
-function synthesize(originDeck, targetDeck) {
-    const delta = targetDeck - originDeck,
-        origin = runPrefix(),
-        prefixX = origin.pose.x,
-        world = envelopeWorld(originDeck, targetDeck);
-    let beam = [{ pose: origin.pose, fuel: origin.fuel, path: "", cost: 0, maxHullTop: originDeck + 6.5 }],
-        macroExpansions = 0,
-        terminalReplays = 0;
+function routeTerminal(pose, delta, distance) {
+    return (
+        pose.x >= distance - 3.2 &&
+        pose.x <= distance + 3.2 &&
+        pose.y >= delta &&
+        pose.y <= delta + 0.3 &&
+        Math.abs(pose.vx) <= 2.2 &&
+        pose.vy <= 0 &&
+        Math.abs(pose.vy) <= 3.6 &&
+        Math.abs(pose.angle) <= 18 &&
+        Math.abs(pose.angularVelocity) <= 26
+    );
+}
+
+function synthesizeRoute(geometry, originDeck, targetDeck, distance) {
+    const delta = targetDeck - originDeck;
+    const origin = runPrefix();
+    const world = envelopeWorld(geometry, originDeck, targetDeck, distance);
+    const compare = (left, right) => compareStates(left, right, routeRuns);
+    let beam = [
+        {
+            pose: origin.pose,
+            fuel: origin.fuel,
+            path: "",
+            cost: 0,
+            maxHullTop: originDeck + 6.5,
+            shallowReleaseLayer: -1,
+        },
+    ];
+    let macroExpansions = 0;
+    let terminalReplays = 0;
     for (let layer = 1; layer <= 269; layer += 1) {
         const byKey = new Map();
-        for (const state of beam)
+        for (const state of beam) {
             for (const command of SEARCH_COMMANDS) {
                 macroExpansions += 1;
-                const advanced = advanceMacro(state.pose, state.fuel, command),
-                    p = advanced.pose;
+                const advanced = advanceMacro(state.pose, state.fuel, command);
+                const pose = advanced.pose;
                 if (
-                    !Object.values(p).every(Number.isFinite) ||
+                    !Object.values(pose).every(Number.isFinite) ||
                     advanced.fuel < 0 ||
                     advanced.minY < Math.min(-0.5, delta - 0.5) ||
-                    p.x < 5 ||
-                    p.x > 107 ||
-                    p.y < affineEnvelope(originDeck, targetDeck, p.x) - originDeck + 1.65 ||
-                    (p.x > 84 && p.x < 91.2 && p.y < delta + 11)
+                    pose.x < 5 ||
+                    pose.x > distance + 11 ||
+                    pose.y < envelopeHeight(originDeck, targetDeck, distance, pose.x) - originDeck + 1.65 ||
+                    (pose.x > distance - 12 && pose.x < distance - 4.8 && pose.y < delta + 11)
                 )
                     continue;
+                let shallowReleaseLayer = state.shallowReleaseLayer;
+                if (delta >= -10 && delta < 0 && shallowReleaseLayer < 0 && pose.x >= distance - 4.8)
+                    shallowReleaseLayer = layer;
                 const candidate = {
-                    pose: p,
+                    pose,
                     fuel: advanced.fuel,
                     path: state.path + command,
-                    cost: stateCost(p, layer, advanced.fuel, delta, prefixX),
+                    cost: routeCost(pose, layer, advanced.fuel, delta, distance, origin.pose.x, shallowReleaseLayer),
                     maxHullTop: Math.max(state.maxHullTop, originDeck + advanced.maxTop),
+                    shallowReleaseLayer,
                 };
-                const key = quantizedKey(p),
-                    existing = byKey.get(key);
-                if (!existing || compareStates(candidate, existing) < 0) byKey.set(key, candidate);
+                const key = quantizedKey(pose, shallowReleaseLayer);
+                const existing = byKey.get(key);
+                if (!existing || compare(candidate, existing) < 0) byKey.set(key, candidate);
             }
-        beam = [...byKey.values()].sort(compareStates).slice(0, 6000);
+        }
+        beam = [...byKey.values()].sort(compare).slice(0, 6000);
         for (const state of beam) {
-            if (!terminal(state.pose, delta)) continue;
+            if (!routeTerminal(state.pose, delta, distance)) continue;
             terminalReplays += 1;
-            const runs = runsFromPath(state.path);
-            mergeRun(runs, 0, 4320 - runs.reduce((sum, [, count]) => sum + count, 0));
+            const runs = routeRuns(state.path);
+            mergeRun(runs, 0, MAX_CONTACT_STEP - runs.reduce((sum, [, count]) => sum + count, 0));
             const replayed = replay(
                 runs,
                 world,
-                { x: 36, y: originDeck, vx: 0, vy: 0, angle: 0, angularVelocity: 0 },
+                { x: 0, y: originDeck, vx: 0, vy: 0, angle: 0, angularVelocity: 0 },
                 30,
+                MAX_CONTACT_STEP,
             );
-            if (replayed.classification === "safe")
+            if (replayed.classification === "safe") {
                 return {
                     runs: replayed.runs,
-                    search: { selectedLayer: layer, macroExpansions, terminalReplays },
                     replayed,
                     world,
+                    search: { selectedLayer: layer, macroExpansions, terminalReplays },
                 };
+            }
         }
     }
     throw new Error(
-        `No exact route for ${originDeck}/${targetDeck}; beam=${beam.length} expansions=${macroExpansions} terminalReplays=${terminalReplays} sample=${JSON.stringify(beam.slice(0, 3).map(({ pose }) => pose))}`,
+        `No exact route for ${distance}/${originDeck}/${targetDeck}; beam=${beam.length} expansions=${macroExpansions} terminalReplays=${terminalReplays}`,
     );
 }
 
 function scheduleDigest(runs) {
     let value = 2166136261;
-    for (const [command, count] of runs)
-        for (const byte of [command, count & 255, (count >>> 8) & 255]) value = Math.imul(value ^ byte, 16777619) >>> 0;
+    for (const [command, count] of runs) {
+        for (const byte of [command, count & 255, (count >>> 8) & 255]) {
+            value = Math.imul(value ^ byte, 16777619) >>> 0;
+        }
+    }
     return value;
 }
-let bootstrapSchedules;
 
-function replayBootstrap(originDeck, targetDeck) {
-    const world = envelopeWorld(originDeck, targetDeck);
+function compareCatalog(left, right) {
+    return (
+        left.scheduleDigest - right.scheduleDigest ||
+        left.sourceOrigin - right.sourceOrigin ||
+        left.sourceTarget - right.sourceTarget
+    );
+}
+
+function insertCatalog(catalog, candidate) {
+    const key = canonicalBytes(candidate.runs);
+    const existingIndex = catalog.findIndex((entry) => canonicalBytes(entry.runs) === key);
+    if (existingIndex >= 0) {
+        if (compareCatalog(candidate, catalog[existingIndex]) < 0) catalog[existingIndex] = candidate;
+    } else {
+        catalog.push(candidate);
+    }
+    catalog.sort(compareCatalog);
+}
+
+function selectCatalog(catalog, geometry, first) {
+    const delta = first.targetDeck - first.originDeck;
+    const world = envelopeWorld(geometry, first.originDeck, first.targetDeck, first.distance);
     let terminalReplays = 0;
-    for (const certified of bootstrapSchedules) {
+    for (const candidate of catalog) {
+        if (candidate.relativeY < delta || candidate.relativeY > delta + 0.3) continue;
         terminalReplays += 1;
         const replayed = replay(
-            certified.runs,
+            candidate.runs,
             world,
-            { x: 36, y: originDeck, vx: 0, vy: 0, angle: 0, angularVelocity: 0 },
+            { x: 0, y: first.originDeck, vx: 0, vy: 0, angle: 0, angularVelocity: 0 },
             30,
+            MAX_CONTACT_STEP,
         );
         if (replayed.classification === "safe") {
             return {
+                kind: candidate.bootstrap ? "bootstrap" : "reuse",
                 runs: replayed.runs,
-                search: { selectedLayer: certified.selectedLayer, macroExpansions: 0, terminalReplays },
                 replayed,
                 world,
+                search: { selectedLayer: candidate.selectedLayer, macroExpansions: 0, terminalReplays },
             };
         }
     }
     return null;
 }
 
-function recordFor(group) {
-    const first = group.assignments[0],
-        originDeck = first.originDeck,
-        targetDeck = first.targetDeck;
-    const result = replayBootstrap(originDeck, targetDeck) ?? synthesize(originDeck, targetDeck),
-        delta = targetDeck - originDeck;
-    for (const assignment of group.assignments) {
-        const concrete = assignmentWorld(currentGeometry, assignment);
-        const translated = result.runs;
-        const check = replay(
-            translated,
-            concrete,
-            { x: assignment.phase, y: originDeck, vx: 0, vy: 0, angle: 0, angularVelocity: 0 },
-            30,
-        );
-        if (check.classification !== "safe" || check.contactStep !== result.replayed.contactStep)
-            throw new Error(`Concrete replay mismatch ${assignment.assignmentId}`);
+function recordFor(geometry, group, catalogs, selectionCensus, class96Census) {
+    const first = group.assignments[0];
+    const catalog = catalogs.get(first.distance) ?? [];
+    catalogs.set(first.distance, catalog);
+    let result = selectCatalog(catalog, geometry, first);
+    if (!result) {
+        result = {
+            ...synthesizeRoute(geometry, first.originDeck, first.targetDeck, first.distance),
+            kind: "synthesis",
+        };
+        insertCatalog(catalog, {
+            bootstrap: false,
+            scheduleDigest: scheduleDigest(result.runs),
+            sourceOrigin: first.originMillimeters,
+            sourceTarget: first.targetMillimeters,
+            runs: result.runs.map((run) => [...run]),
+            relativeY: result.replayed.pose.y - first.originDeck,
+            selectedLayer: result.search.selectedLayer,
+        });
     }
-    const climbSurcharge = Math.max(0, delta) / 3,
-        controllerBurn = result.replayed.burn;
+    selectionCensus[result.kind] += 1;
+    if (first.distance === 96) class96Census[result.kind] += 1;
+    for (const assignment of group.assignments) {
+        const concrete = assignmentWorld(geometry, assignment);
+        const replayed = replay(
+            result.runs,
+            concrete,
+            {
+                x: assignment.originCenter,
+                y: assignment.originDeck,
+                vx: 0,
+                vy: 0,
+                angle: 0,
+                angularVelocity: 0,
+            },
+            30,
+            MAX_CONTACT_STEP,
+        );
+        if (replayed.classification !== "safe" || replayed.contactStep !== result.replayed.contactStep) {
+            throw new Error(`Concrete replay mismatch ${assignment.assignmentId}`);
+        }
+    }
+    const climbSurcharge = Math.max(0, first.deckDelta) / 3;
+    const controllerBurn = result.replayed.burn;
     return {
         pairKey: first.pairKey,
         envelope: result.world.relativeEnvelope,
@@ -757,8 +615,8 @@ function recordFor(group) {
             pose: fixturePose(
                 {
                     ...result.replayed.pose,
-                    x: result.replayed.pose.x - 36,
-                    y: result.replayed.pose.y - originDeck,
+                    x: result.replayed.pose.x,
+                    y: result.replayed.pose.y - first.originDeck,
                 },
                 POSE_DECIMALS,
             ),
@@ -766,105 +624,152 @@ function recordFor(group) {
         controllerBurn,
         baseBurn: controllerBurn - climbSurcharge,
         climbSurcharge,
+        allowance: quantumCeil(APPROVED_BASE + climbSurcharge),
         maxHullTop: result.replayed.maxHullTop,
     };
 }
 
-function openingWorld(geometry, profile) {
-    const samples = geometry.terrain.profiles[profile],
-        at = (x) => {
-            const local = positiveModulo(x, 512),
-                segment = Math.min(31, Math.floor(local / 16)),
-                q = (local - segment * 16) / 16;
-            return worldY(geometry, samples[segment] + (samples[segment + 1] - samples[segment]) * q);
-        };
-    const site = siteDescriptor(at, 0, 36),
-        vertices = [];
-    for (let x = 0; x <= 160; x += 16) vertices.push([x, at(x)]);
-    return { originSiteId: null, sites: [site], vertices };
-}
-function openingFor(geometry, profile) {
-    const world = openingWorld(geometry, profile),
-        [off, on] = OPENING_COUNTS[profile],
-        runs = [
-            [0, off],
-            [1, on],
-            [0, 720],
-        ],
-        result = replay(runs, world, { x: 30, y: 32, vx: 0.8, vy: -0.4, angle: 0, angularVelocity: 0 }, 15, 720);
-    if (result.classification !== "safe") throw new Error(`Opening ${profile} failed: ${JSON.stringify(result)}`);
-    return {
-        profile,
-        deck: world.sites[0].platformTop,
-        runs: result.runs,
-        contactStep: result.contactStep,
-        pose: fixturePose(result.pose, POSE_DECIMALS),
-        burn: result.burn,
-        reserve: result.reserve,
-        classification: "safe",
-    };
-}
-function worldWitness(geometry, seed, siteIndex) {
-    const center = 36 + 96 * siteIndex,
-        left = center - 4.8,
-        right = center + 13.8;
-    const firstBlock = Math.floor(left / 512),
-        lastBlock = Math.floor(right / 512),
-        superblocks = [];
-    for (let index = firstBlock; index <= lastBlock; index += 1) superblocks.push(seededBlock(geometry, seed, index));
-    const site = siteDescriptor((x) => seededHeight(geometry, seed, x), siteIndex, center);
-    const descriptor = {
-        seed: normalizeSeed(seed),
-        siteIndex,
-        directionlessPhase: positiveModulo(center, 512),
-        superblocks,
-        site,
-    };
-    return { descriptor, digest: digest(descriptor) };
+function openingRuns(path) {
+    const runs = [];
+    for (const digit of path) mergeRun(runs, Number(digit), 12);
+    return runs;
 }
 
-let currentGeometry;
-function parseArguments(args) {
-    const result = {};
-    for (let i = 0; i < args.length; i += 2) {
-        if (!["--geometry", "--bootstrap", "--output", "--verify"].includes(args[i]) || args[i + 1] === undefined)
-            throw new TypeError(
-                "Usage: derive_lander_routes.mjs --geometry PATH --bootstrap PATH --output PATH [--verify PATH]",
-            );
-        result[args[i].slice(2)] = args[i + 1];
+function openingTarget(layer, site) {
+    const cruise = Math.max(32, site.platformTop + 11.5);
+    if (layer <= 120) {
+        return {
+            x: 30 + ((site.center - 36) * layer) / 120,
+            y: 32 + (cruise - 32) * Math.min(1, layer / 60),
+            vx: Math.max(0.8, (site.center - 36) / 12),
+            vy: 0,
+        };
     }
-    if (
-        !result.geometry ||
-        !result.bootstrap ||
-        !result.output ||
-        (result.verify && resolve(result.output) === resolve(result.verify))
-    )
-        throw new TypeError(
-            "Usage: derive_lander_routes.mjs --geometry PATH --bootstrap PATH --output PATH [--verify PATH]",
-        );
-    return result;
+    if (layer <= 150) {
+        const progress = (layer - 120) / 30;
+        return { x: site.center - 6 + 4 * progress, y: cruise, vx: 4.2 - 3.2 * progress, vy: 0 };
+    }
+    const progress = Math.min(1, (layer - 150) / 80);
+    return {
+        x: site.center - 2,
+        y: cruise - (cruise - site.platformTop - 0.7) * progress,
+        vx: 1 - progress,
+        vy: -1.5,
+    };
 }
-async function readBootstrap(path) {
-    const bytes = await readFile(path),
-        bootstrapDigest = createHash("sha256").update(bytes).digest("hex"),
-        source = JSON.parse(bytes.toString("utf8"));
+
+function synthesizeOpening(geometry, profile, candidateOrder) {
+    const world = openingWorld(geometry, profile, candidateOrder);
+    const site = world.sites[0];
+    const initial = { x: 30, y: 32, vx: 0.8, vy: -0.4, angle: 0, angularVelocity: 0 };
+    const compare = (left, right) => compareStates(left, right, openingRuns);
+    let beam = [{ pose: initial, fuel: 15, path: "", cost: 0 }];
+    for (let layer = 1; layer <= 269; layer += 1) {
+        const byKey = new Map();
+        for (const state of beam) {
+            for (const command of SEARCH_COMMANDS) {
+                const advanced = advanceMacro(state.pose, state.fuel, command);
+                const pose = advanced.pose;
+                if (
+                    !Object.values(pose).every(Number.isFinite) ||
+                    advanced.fuel < 0 ||
+                    advanced.minY < -2.5 ||
+                    pose.x < 5 ||
+                    pose.x > site.center + 11 ||
+                    pose.y < -3.3
+                )
+                    continue;
+                const target = openingTarget(layer, site);
+                const terminalBias = Math.max(0, layer - 190) * 0.08;
+                const candidate = {
+                    pose,
+                    fuel: advanced.fuel,
+                    path: state.path + command,
+                    cost:
+                        1.8 * Math.abs(pose.x - target.x) +
+                        2.4 * Math.abs(pose.y - target.y) +
+                        (2 + terminalBias) * Math.abs(pose.vx - target.vx) +
+                        (2 + terminalBias) * Math.abs(pose.vy - target.vy) +
+                        0.045 * Math.abs(pose.angle) +
+                        0.035 * Math.abs(pose.angularVelocity) +
+                        0.5 * (15 - advanced.fuel),
+                };
+                const key = quantizedKey(pose);
+                const existing = byKey.get(key);
+                if (!existing || compare(candidate, existing) < 0) byKey.set(key, candidate);
+            }
+        }
+        beam = [...byKey.values()].sort(compare).slice(0, 6000);
+        for (const state of beam) {
+            const pose = state.pose;
+            if (
+                pose.x < site.center - 3.2 ||
+                pose.x > site.center + 3.2 ||
+                pose.y < site.platformTop ||
+                pose.y > site.platformTop + 0.3 ||
+                Math.abs(pose.vx) > 2.2 ||
+                pose.vy > 0 ||
+                Math.abs(pose.vy) > 3.6 ||
+                Math.abs(pose.angle) > 18 ||
+                Math.abs(pose.angularVelocity) > 26
+            )
+                continue;
+            const runs = openingRuns(state.path);
+            mergeRun(runs, 0, 4320 - runs.reduce((sum, [, count]) => sum + count, 0));
+            const result = replay(runs, world, initial, 15);
+            if (result.classification === "safe") {
+                return {
+                    profile: `S${profile}`,
+                    candidateOrder,
+                    center: site.center,
+                    candidateOrdinal: site.candidateOrdinal,
+                    offsetIndex: site.offsetIndex,
+                    deck: site.platformTop,
+                    runs: result.runs,
+                    contactStep: result.contactStep,
+                    pose: fixturePose(result.pose, POSE_DECIMALS),
+                    burn: result.burn,
+                    reserve: result.reserve,
+                    classification: "safe",
+                };
+            }
+        }
+    }
+    throw new Error(`Opening synthesis failed S${profile}/${candidateOrder}`);
+}
+
+function parsePair(pairKey) {
+    const match = /^d:(-?\d+):(-?\d+)$/.exec(pairKey);
+    if (!match) throw new Error(`Malformed bootstrap pair ${pairKey}`);
+    return [Number(match[1]), Number(match[2])];
+}
+
+async function readPinnedJson(path, expectedSha) {
+    const bytes = await readFile(path);
+    const sha = createHash("sha256").update(bytes).digest("hex");
+    if (sha !== expectedSha) throw new Error(`Pinned input digest mismatch ${path}`);
+    return { sha, value: JSON.parse(bytes.toString("utf8")) };
+}
+
+async function readInputs(options) {
+    const predecessor = await readPinnedJson(options.predecessorGeometry, PREDECESSOR_SHA);
+    if (predecessor.value.schema !== PREDECESSOR_SCHEMA) throw new Error("Predecessor schema mismatch");
+    const bootstrap = await readPinnedJson(options.bootstrap, BOOTSTRAP_SHA);
     if (
-        bootstrapDigest !== BOOTSTRAP_SHA ||
-        source.schema !== BOOTSTRAP_SCHEMA ||
-        source.outputDigest !== BOOTSTRAP_OUTPUT ||
-        source.proofDigest !== BOOTSTRAP_PROOF ||
-        source.records?.length !== 100
+        bootstrap.value.schema !== BOOTSTRAP_SCHEMA ||
+        bootstrap.value.outputDigest !== BOOTSTRAP_OUTPUT ||
+        bootstrap.value.proofDigest !== BOOTSTRAP_PROOF ||
+        bootstrap.value.records?.length !== 243
     )
         throw new Error("Bootstrap fixture authority mismatch");
     const distinct = new Map();
-    for (const record of source.records) {
-        const match = /^d:(-?\d+):(-?\d+)$/.exec(record.pairKey),
-            runs = record.runs,
-            steps = Array.isArray(runs) ? runs.reduce((sum, run) => sum + (run?.[1] ?? NaN), 0) : NaN;
+    for (const record of bootstrap.value.records) {
+        const [sourceOrigin, sourceTarget] = parsePair(record.pairKey);
+        const runs = record.runs;
+        const steps = Array.isArray(runs) ? runs.reduce((sum, run) => sum + (run?.[1] ?? NaN), 0) : NaN;
         if (
-            !match ||
             !Array.isArray(runs) ||
-            runs.length === 0 ||
+            !runs.length ||
             !Number.isInteger(record.search?.selectedLayer) ||
             record.search.selectedLayer < 1 ||
             !runs.every(
@@ -877,31 +782,121 @@ async function readBootstrap(path) {
                     (index === 0 || runs[index - 1][0] !== run[0]),
             ) ||
             steps > 4320 ||
-            scheduleDigest(runs) !== record.scheduleDigest
+            scheduleDigest(runs) !== record.scheduleDigest ||
+            !Number.isFinite(record.success?.pose?.y)
         )
             throw new Error(`Malformed bootstrap schedule ${record.pairKey}`);
         const candidate = {
-                digest: record.scheduleDigest >>> 0,
-                origin: Number(match[1]),
-                target: Number(match[2]),
-                runs: runs.map((run) => [...run]),
-                selectedLayer: record.search.selectedLayer,
-            },
-            key = canonicalBytes(candidate.runs),
-            existing = distinct.get(key);
-        if (
-            !existing ||
-            candidate.origin < existing.origin ||
-            (candidate.origin === existing.origin && candidate.target < existing.target)
-        )
-            distinct.set(key, candidate);
+            bootstrap: true,
+            scheduleDigest: record.scheduleDigest >>> 0,
+            sourceOrigin,
+            sourceTarget,
+            runs: runs.map((run) => [...run]),
+            relativeY: record.success.pose.y,
+            selectedLayer: record.search.selectedLayer,
+        };
+        const key = canonicalBytes(candidate.runs);
+        const existing = distinct.get(key);
+        if (!existing || compareCatalog(candidate, existing) < 0) distinct.set(key, candidate);
     }
-    const schedules = [...distinct.values()].sort(
-        (a, b) => a.digest - b.digest || a.origin - b.origin || a.target - b.target,
-    );
-    if (schedules.length !== 75) throw new Error(`Expected 75 bootstrap schedules, got ${schedules.length}`);
-    return { bootstrapDigest, schedules };
+    const schedules = [...distinct.values()].sort(compareCatalog);
+    if (schedules.length !== 225) throw new Error(`Expected 225 bootstrap schedules, got ${schedules.length}`);
+    return { predecessor, bootstrap, schedules };
 }
+
+function validateFeasibility(assignments, records, selectionCensus, class96Census) {
+    const maximumBase = records.reduce((left, right) => (right.baseBurn > left.baseBurn ? right : left));
+    const maximumContact = Math.max(...records.map((record) => record.success.contactStep));
+    const maximumBurn = Math.max(...records.map((record) => record.controllerBurn));
+    const maximumTop = Math.max(...records.map((record) => record.maxHullTop));
+    const branches = records.reduce(
+        (result, record) => {
+            const assignment = assignments.find((candidate) => candidate.pairKey === record.pairKey);
+            result[assignment.deckDelta < -10 ? "deep" : assignment.deckDelta < 0 ? "shallow" : "flatRise"] += 1;
+            return result;
+        },
+        { deep: 0, shallow: 0, flatRise: 0 },
+    );
+    const class96 = records.filter((record) => record.pairKey.startsWith("r:96000:"));
+    const assignments96 = assignments.filter((assignment) => assignment.distance === 96);
+    const synthesized = records.filter((record) => record.search.macroExpansions > 0);
+    if (
+        canonicalBytes(selectionCensus) !== canonicalBytes({ bootstrap: 70, reuse: 41, synthesis: 201 }) ||
+        canonicalBytes(class96Census) !== canonicalBytes({ bootstrap: 70, reuse: 35, synthesis: 72 }) ||
+        canonicalBytes(branches) !== canonicalBytes({ deep: 8, shallow: 121, flatRise: 183 }) ||
+        maximumBase.pairKey !== "r:136000:18340:12828" ||
+        maximumBase.baseBurn !== 13.368250000000229 ||
+        quantumCeil(maximumBase.baseBurn) !== APPROVED_BASE ||
+        maximumContact !== 4332 ||
+        maximumBurn !== 13.368250000000229 ||
+        maximumTop !== 44.50313531329338 ||
+        Math.max(...synthesized.map((record) => record.search.selectedLayer)) !== 269 ||
+        Math.max(...synthesized.map((record) => record.search.macroExpansions)) !== 9350310 ||
+        Math.max(...synthesized.map((record) => record.search.terminalReplays)) !== 2 ||
+        Math.max(
+            ...records
+                .filter((record) => !record.search.macroExpansions)
+                .map((record) => record.search.terminalReplays),
+        ) > 7 ||
+        class96.length !== 177 ||
+        assignments96.length !== 529 ||
+        Math.max(...class96.map((record) => record.baseBurn)) !== 12.87975000000018 ||
+        Math.max(...class96.map((record) => record.success.contactStep)) !== 4321
+    )
+        throw new Error("Phase 4T route feasibility authority mismatch");
+}
+
+function validateSignedWorld(geometry) {
+    for (const seed of REVIEW_SEEDS) {
+        let previous = null;
+        for (let index = -4095; index <= 4095; index += 1) {
+            const site = worldWitness(geometry, seed, index).descriptor.site;
+            if (site.candidateOrdinal > 5 || site.normalizedDeck > 0.5)
+                throw new Error(`Site bound mismatch ${seed}/${index}`);
+            if (previous) {
+                const spacing = site.center - previous.center;
+                if (spacing < 56 || spacing > 136) throw new Error(`Site spacing mismatch ${seed}/${index}`);
+            }
+            previous = site;
+        }
+        if (previous.center !== 393156 || Math.round((393216 - previous.center - 13.8) * 1000) !== 46200) {
+            throw new Error(`Final-site authority mismatch ${seed}`);
+        }
+    }
+}
+
+function parseArguments(args) {
+    const result = {};
+    for (let index = 0; index < args.length; index += 2) {
+        if (
+            !["--geometry", "--predecessor-geometry", "--bootstrap", "--output", "--verify"].includes(args[index]) ||
+            args[index + 1] === undefined
+        )
+            throw new TypeError(
+                "Usage: derive_lander_routes.mjs --geometry PATH --predecessor-geometry PATH --bootstrap PATH --output PATH [--verify PATH]",
+            );
+        result[args[index].slice(2).replaceAll("-", "_")] = args[index + 1];
+    }
+    const options = {
+        geometry: result.geometry,
+        predecessorGeometry: result.predecessor_geometry,
+        bootstrap: result.bootstrap,
+        output: result.output,
+        verify: result.verify,
+    };
+    if (
+        !options.geometry ||
+        !options.predecessorGeometry ||
+        !options.bootstrap ||
+        !options.output ||
+        (options.verify && resolve(options.output) === resolve(options.verify))
+    )
+        throw new TypeError(
+            "Usage: derive_lander_routes.mjs --geometry PATH --predecessor-geometry PATH --bootstrap PATH --output PATH [--verify PATH]",
+        );
+    return options;
+}
+
 async function main() {
     let options;
     try {
@@ -912,45 +907,38 @@ async function main() {
         return;
     }
     try {
-        currentGeometry = JSON.parse(await readFile(options.geometry, "utf8"));
-        validateGeometry(currentGeometry);
-        const bootstrap = await readBootstrap(options.bootstrap);
-        bootstrapSchedules = bootstrap.schedules;
-        const assignments = assignmentsFor(currentGeometry),
-            groups = groupAssignments(assignments),
-            provisionalRecords = [];
+        const geometry = JSON.parse(await readFile(options.geometry, "utf8"));
+        validateGeometry(geometry, SYNTHESIZER_VERSION);
+        const inputs = await readInputs(options);
+        validatePredecessor(inputs.predecessor.value, geometry);
+        const assignments = assignmentsFor(geometry);
+        const groups = groupAssignments(assignments);
+        const selectionCensus = { bootstrap: 0, reuse: 0, synthesis: 0 };
+        const class96Census = { bootstrap: 0, reuse: 0, synthesis: 0 };
+        const catalogs = new Map([[96, inputs.schedules.map((candidate) => structuredClone(candidate))]]);
+        const records = [];
         for (let index = 0; index < groups.length; index += 1) {
-            const [, group] = groups[index];
-            provisionalRecords.push(recordFor(group));
-            console.error(`derived ${index + 1}/243 ${provisionalRecords.at(-1).pairKey}`);
+            records.push(recordFor(geometry, groups[index], catalogs, selectionCensus, class96Census));
+            console.error(`derived ${index + 1}/312 ${records.at(-1).pairKey}`);
         }
-        const maximumBaseRecord = provisionalRecords.reduce((left, right) =>
-                right.baseBurn > left.baseBurn ? right : left,
-            ),
-            controllerBase = quantumCeil(maximumBaseRecord.baseBurn);
-        console.error(
-            `diagnostic controllerBase=${controllerBase} maximum=${maximumBaseRecord.baseBurn} key=${maximumBaseRecord.pairKey} bootstrap=${provisionalRecords.filter((record) => record.search.macroExpansions === 0).length}`,
-        );
-        if (
-            provisionalRecords.filter((record) => record.search.macroExpansions === 0).length !== 205 ||
-            provisionalRecords.filter((record) => record.search.macroExpansions !== 0).length !== 38 ||
-            maximumBaseRecord.pairKey !== "d:12364:9460" ||
-            maximumBaseRecord.baseBurn !== 12.50091666666676 ||
-            controllerBase !== 12.55
-        )
-            throw new Error("Route feasibility authority mismatch");
-        const approvedBase = 12.55;
-        const records = provisionalRecords.map((record) => ({
-            ...record,
-            allowance: quantumCeil(approvedBase + record.climbSurcharge),
-        }));
-        const openings = PROFILE_ORDER.map((profile) => openingFor(currentGeometry, profile));
+        validateFeasibility(assignments, records, selectionCensus, class96Census);
+        validateNumberBound(quantumCeil, APPROVED_BASE);
+        const openings = [];
+        for (let profile = 0; profile < PROFILE_ORDER.length; profile += 1) {
+            for (let candidateOrder = 0; candidateOrder < CANDIDATE_ORDERS.length; candidateOrder += 1) {
+                openings.push(synthesizeOpening(geometry, profile, candidateOrder));
+            }
+        }
+        if (Math.min(...openings.map((opening) => Number(opening.reserve.toFixed(6)))) < 6.386) {
+            throw new Error("Opening reserve authority mismatch");
+        }
+        validateSignedWorld(geometry);
         const terminal = {
             siteIndex: 4095,
             deckDelta: 0,
-            allowance: approvedBase,
+            allowance: APPROVED_BASE,
             ratio: 1,
-            award: approvedBase,
+            award: APPROVED_BASE,
             completedSites: 4096,
             generatorCursor: 4096,
             activeSiteId: 4095,
@@ -959,18 +947,22 @@ async function main() {
             cueDirection: null,
         };
         const worldWitnesses = [];
-        for (const seed of WORLD_SEEDS)
-            for (const direction of [-1, 1])
-                for (let ordinal = 0; ordinal <= 100; ordinal += 1)
-                    worldWitnesses.push(worldWitness(currentGeometry, seed, direction * ordinal));
+        for (const seed of REVIEW_SEEDS) {
+            for (const direction of [-1, 1]) {
+                for (let ordinal = 0; ordinal <= 100; ordinal += 1) {
+                    worldWitnesses.push(worldWitness(geometry, seed, direction * ordinal));
+                }
+            }
+        }
         const output = {
             schema: DERIVED_SCHEMA,
             deriverVersion: DERIVER_VERSION,
             synthesizerVersion: SYNTHESIZER_VERSION,
             collisionVersion: COLLISION_VERSION,
             canonicalPoseDecimals: POSE_DECIMALS,
-            bootstrapDigest: bootstrap.bootstrapDigest,
-            geometryDigest: digest(currentGeometry),
+            predecessorGeometryDigest: inputs.predecessor.sha,
+            bootstrapDigest: inputs.bootstrap.sha,
+            geometryDigest: digest(geometry),
             physicsDigest: digest({ collisionVersion: COLLISION_VERSION, commands: COMMANDS, constants: CONSTANTS }),
             assignments,
             assignmentDigest: digest(assignments),
@@ -982,15 +974,20 @@ async function main() {
             worldDigest: digest(worldWitnesses),
         };
         output.outputDigest = digest(output);
-        const serialized = `${JSON.stringify(canonical(output))}\n`,
-            temporary = `${options.output}.tmp-${process.pid}`;
+        const serialized = `${JSON.stringify(canonical(output))}\n`;
+        const temporary = `${options.output}.tmp-${process.pid}`;
         await writeFile(temporary, serialized, "utf8");
         await rename(temporary, options.output);
-        if (options.verify && (await readFile(options.verify, "utf8")) !== serialized)
+        if (options.verify && (await readFile(options.verify, "utf8")) !== serialized) {
             throw new Error(`Derived routes differ from ${options.verify}`);
+        }
+        console.error(
+            `derived assignments=${assignments.length} records=${records.length} openings=${openings.length} census=${JSON.stringify(selectionCensus)} output=${output.outputDigest}`,
+        );
     } catch (error) {
         console.error(error.stack ?? error.message);
         process.exitCode = 1;
     }
 }
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();

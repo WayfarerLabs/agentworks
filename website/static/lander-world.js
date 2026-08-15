@@ -1,4 +1,14 @@
-import { affineHullEnclosure, boundsOverlap, compareExactRoots, exactRootNumber, exactSegmentContact, exactZeroRoot, hasInteriorAngleKnot } from "./lander-collision.js";
+import {
+    affineHullEnclosure,
+    boundsOverlap,
+    compareExactRoots,
+    exactRootNumber,
+    exactSegmentContact,
+    exactZeroRoot,
+    hasInteriorAngleKnot,
+    polygonDistanceSquared,
+    polygonSegmentDistanceSquared,
+} from "./lander-collision.js";
 
 export const STATIC_WORLD_SEED = 0x41475731,
     CHUNK_WIDTH = 50;
@@ -21,11 +31,17 @@ export const NOC_CONNECTOR_WIDTH = 2,
 export const TERRAIN_VERTEX_CADENCE = 16,
     TERRAIN_BLOCK_WIDTH = 512,
     TERRAIN_EPOCH_BLOCKS = 8,
-    TERRAIN_GRADE_LIMIT = 0.36,
-    TERRAIN_GRADE_CHANGE_LIMIT = 0.4,
+    TERRAIN_GRADE_LIMIT = 0.4,
+    TERRAIN_GRADE_CHANGE_LIMIT = 0.8,
     TERRAIN_NORMALIZED_MINIMUM = 0.1,
     TERRAIN_NORMALIZED_MAXIMUM = 0.6,
     SITE_SPACING = 96;
+export const SITE_CANDIDATE_OFFSETS = Object.freeze([0, 8, 16, 24, 32, 40]);
+export const SITE_CANDIDATE_ORDERS = Object.freeze([
+    Object.freeze([0, 1, 2, 3, 4, 5]),
+    Object.freeze([0, 5, 4, 3, 2, 1]),
+]);
+export const MAX_NORMALIZED_DECK = 0.5;
 export const WORLD_MIN_X = -393216,
     WORLD_MAX_X = 393216,
     MIN_SITE_INDEX = -4095,
@@ -33,14 +49,14 @@ export const WORLD_MIN_X = -393216,
     TERMINUS_WIDTH = 0.2;
 
 const TERRAIN_PROFILE_ROWS = [
-    ".35 .40 .45 .51 .55 .58 .59 .60 .60 .60 .59 .56 .54 .54 .55 .56 .57 .58 .59 .59 .59 .57 .52 .45 .38 .37 .37 .35 .37 .29 .31 .35 .35",
-    ".35 .33 .29 .24 .18 .11 .10 .10 .12 .14 .15 .15 .15 .14 .13 .11 .10 .10 .10 .13 .17 .21 .25 .28 .31 .27 .26 .23 .26 .29 .36 .39 .35",
-    ".35 .30 .24 .17 .11 .11 .12 .12 .12 .14 .16 .16 .15 .14 .13 .11 .10 .10 .12 .15 .17 .21 .23 .23 .21 .27 .35 .38 .40 .32 .28 .31 .35",
-    ".35 .38 .40 .41 .42 .42 .41 .40 .36 .29 .21 .14 .10 .10 .11 .12 .13 .13 .12 .11 .11 .12 .15 .21 .28 .27 .24 .27 .28 .28 .24 .30 .35",
-    ".35 .39 .44 .50 .56 .58 .60 .60 .59 .57 .56 .56 .57 .57 .55 .53 .52 .51 .50 .48 .47 .47 .48 .48 .46 .40 .41 .35 .31 .23 .24 .30 .35",
-    ".35 .30 .25 .20 .14 .10 .10 .10 .11 .11 .14 .18 .22 .26 .30 .32 .32 .31 .29 .29 .30 .33 .37 .40 .42 .45 .38 .36 .33 .34 .40 .39 .35",
-    ".35 .35 .37 .41 .47 .51 .56 .60 .60 .60 .59 .56 .53 .51 .50 .50 .49 .48 .48 .48 .49 .49 .49 .46 .42 .35 .28 .24 .30 .33 .32 .38 .35",
-    ".35 .30 .24 .20 .14 .11 .10 .10 .11 .12 .13 .14 .14 .13 .12 .11 .10 .10 .11 .13 .16 .21 .26 .31 .37 .35 .43 .45 .50 .48 .40 .40 .35",
+    ".35 .29 .19 .11 .21 .30 .39 .47 .42 .41 .36 .28 .38 .45 .40 .30 .23 .28 .33 .26 .20 .30 .25 .19 .29 .35 .29 .22 .16 .10 .17 .26 .35",
+    ".35 .43 .52 .42 .35 .34 .27 .36 .41 .49 .41 .36 .31 .26 .34 .43 .52 .47 .37 .43 .33 .29 .28 .23 .33 .40 .45 .38 .36 .28 .36 .44 .35",
+    ".35 .30 .25 .35 .43 .36 .28 .33 .43 .33 .24 .29 .20 .19 .14 .23 .32 .37 .32 .38 .48 .57 .49 .42 .47 .52 .42 .36 .46 .39 .37 .28 .35",
+    ".35 .45 .52 .46 .38 .43 .49 .54 .48 .38 .43 .49 .44 .39 .48 .53 .45 .36 .42 .50 .44 .36 .27 .35 .27 .18 .26 .36 .30 .25 .35 .44 .35",
+    ".35 .26 .33 .42 .50 .60 .50 .41 .48 .39 .38 .29 .39 .29 .23 .31 .38 .28 .19 .28 .23 .18 .25 .32 .42 .37 .32 .40 .35 .28 .19 .28 .35",
+    ".35 .41 .51 .41 .33 .39 .48 .38 .30 .28 .22 .27 .36 .42 .34 .31 .28 .20 .28 .37 .43 .51 .41 .33 .43 .48 .38 .31 .41 .43 .50 .43 .35",
+    ".35 .28 .33 .43 .35 .30 .38 .31 .22 .32 .37 .30 .36 .38 .44 .34 .28 .35 .45 .40 .32 .39 .34 .25 .32 .34 .35 .41 .31 .29 .24 .29 .35",
+    ".35 .29 .21 .15 .23 .32 .42 .35 .33 .28 .36 .38 .48 .42 .34 .43 .48 .39 .33 .25 .34 .40 .33 .23 .32 .35 .40 .31 .24 .16 .26 .27 .35",
 ];
 export const TERRAIN_PROFILES = freeze(
     Object.fromEntries(TERRAIN_PROFILE_ROWS.map((row, index) => [`S${index}`, row.split(" ").map(Number)])),
@@ -240,67 +256,86 @@ export function siteScaffoldPath(site) {
         .join("");
 }
 
+export function siteCandidateOrder(seed) {
+    return sampleUnit(seed, 17, 0) < 0.5 ? 0 : 1;
+}
+
 export function createSiteForIndex(seed, siteIndex, state = {}) {
     if (!Number.isSafeInteger(siteIndex)) throw new TypeError("Site index must be a safe integer");
     if (siteIndex < MIN_SITE_INDEX || siteIndex > MAX_SITE_INDEX) {
         throw new RangeError(`Site index ${siteIndex} is outside the generated world`);
     }
     const normalized = normalizeSeed(seed);
-    const center = 36 + SITE_SPACING * siteIndex;
-    const platformLeft = center - PLATFORM_WIDTH / 2;
-    const platformRight = center + PLATFORM_WIDTH / 2;
-    const buildingRight = center + 13.8;
-    const candidates = [platformLeft, buildingRight];
-    for (
-        let x = Math.ceil(platformLeft / TERRAIN_VERTEX_CADENCE) * TERRAIN_VERTEX_CADENCE;
-        x <= buildingRight;
-        x += TERRAIN_VERTEX_CADENCE
-    )
-        candidates.push(x);
-    const localNativeMaximum = Math.max(...candidates.map((x) => terrainHeightAt(normalized, x)));
-    const platformTop = localNativeMaximum + PLATFORM_CLEARANCE;
-    const supportXs = [
-        platformLeft,
-        platformLeft + 1,
-        platformLeft + 8.8,
-        platformLeft + 9.8,
-        platformLeft + 17.6,
-        platformLeft + 18.6,
-    ];
-    return freeze({
-        id: siteIndex,
-        seed: normalized,
-        center,
-        localNativeMaximum,
-        supportFeet: supportXs.map((x) => terrainHeightAt(normalized, x)),
-        platformLeft,
-        platformRight,
-        platformTop,
-        platformBottom: platformTop - PLATFORM_THICKNESS,
-        canCollected: state.canCollected ?? false,
-        powered: state.powered ?? false,
-        nocStage: state.nocStage ?? 0,
-        pairKey: state.pairKey ?? null,
-        originSiteId: state.originSiteId ?? null,
-    });
+    const nominalCenter = 36 + SITE_SPACING * siteIndex;
+    const candidateOrder = siteCandidateOrder(normalized);
+    const order = SITE_CANDIDATE_ORDERS[candidateOrder];
+    for (let candidateOrdinal = 0; candidateOrdinal < order.length; candidateOrdinal += 1) {
+        const offsetIndex = order[candidateOrdinal];
+        const center = nominalCenter + SITE_CANDIDATE_OFFSETS[offsetIndex];
+        const platformLeft = center - PLATFORM_WIDTH / 2;
+        const platformRight = center + PLATFORM_WIDTH / 2;
+        const closedFootprint = [platformLeft, center + 13.8];
+        const candidates = [...closedFootprint];
+        for (
+            let x = Math.ceil(closedFootprint[0] / TERRAIN_VERTEX_CADENCE) * TERRAIN_VERTEX_CADENCE;
+            x <= closedFootprint[1];
+            x += TERRAIN_VERTEX_CADENCE
+        )
+            candidates.push(x);
+        const localNativeMaximum = Math.max(...candidates.map((x) => terrainHeightAt(normalized, x)));
+        const platformTop = localNativeMaximum + PLATFORM_CLEARANCE;
+        const normalizedDeck = (platformTop + 9.2) / 64;
+        if (normalizedDeck > MAX_NORMALIZED_DECK) continue;
+        const supportXs = [
+            platformLeft,
+            platformLeft + 1,
+            platformLeft + 8.8,
+            platformLeft + 9.8,
+            platformLeft + 17.6,
+            platformLeft + 18.6,
+        ];
+        return freeze({
+            id: siteIndex,
+            seed: normalized,
+            nominalCenter,
+            candidateOrder,
+            candidateOrdinal,
+            offsetIndex,
+            center,
+            closedFootprint,
+            localNativeMaximum,
+            normalizedDeck,
+            supportFeet: supportXs.map((x) => terrainHeightAt(normalized, x)),
+            platformLeft,
+            platformRight,
+            platformTop,
+            platformBottom: platformTop - PLATFORM_THICKNESS,
+            canCollected: state.canCollected ?? false,
+            powered: state.powered ?? false,
+            nocStage: state.nocStage ?? 0,
+            pairKey: state.pairKey ?? null,
+            originSiteId: state.originSiteId ?? null,
+        });
+    }
+    throw new Error(`No eligible site candidate for ${siteIndex}`);
 }
 
 export function createFirstSite(seed) {
     return createSiteForIndex(seed, 0);
 }
 
-function deckMillimeters(deck) {
-    const result = Math.round(deck * 1000);
-    if (Math.abs(result / 1000 - deck) > 1e-12) throw new Error(`Deck ${deck} is not millimetre exact`);
+function millimeters(value) {
+    const result = Math.round(value * 1000);
+    if (Math.abs(result / 1000 - value) > 1e-12) throw new Error(`Value ${value} is not millimetre exact`);
     return result;
 }
 
 export function routePairKey(originSite, targetSite) {
-    return `d:${deckMillimeters(originSite.platformTop)}:${deckMillimeters(targetSite.platformTop)}`;
+    return `r:${millimeters(targetSite.center - originSite.center)}:${millimeters(originSite.platformTop)}:${millimeters(targetSite.platformTop)}`;
 }
 
 export function selectRouteProof(originSite, targetSite, proofCatalog) {
-    if (targetSite.id !== originSite.id + 1 || targetSite.center - originSite.center !== SITE_SPACING) {
+    if (targetSite.id !== originSite.id + 1) {
         throw new Error(`Sites ${originSite.id}/${targetSite.id} are not one forward route leg`);
     }
     const key = routePairKey(originSite, targetSite);
@@ -526,61 +561,6 @@ export function hullBounds(pose) {
     return { left, right, bottom, top };
 }
 
-function segmentDistanceSquared(a, b, c, d) {
-    function orientation(p, q, r) {
-        return (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
-    }
-    function onSegment(p, q, r) {
-        return (
-            q.x >= Math.min(p.x, r.x) &&
-            q.x <= Math.max(p.x, r.x) &&
-            q.y >= Math.min(p.y, r.y) &&
-            q.y <= Math.max(p.y, r.y)
-        );
-    }
-    const o1 = orientation(a, b, c);
-    const o2 = orientation(a, b, d);
-    const o3 = orientation(c, d, a);
-    const o4 = orientation(c, d, b);
-    if (
-        (o1 === 0 && onSegment(a, c, b)) ||
-        (o2 === 0 && onSegment(a, d, b)) ||
-        (o3 === 0 && onSegment(c, a, d)) ||
-        (o4 === 0 && onSegment(c, b, d)) ||
-        (o1 > 0 !== o2 > 0 && o3 > 0 !== o4 > 0)
-    )
-        return 0;
-    function pointDistanceSquared(point, start, end) {
-        const dx = end.x - start.x;
-        const dy = end.y - start.y;
-        const lengthSquared = dx * dx + dy * dy;
-        const projection =
-            lengthSquared === 0
-                ? 0
-                : collisionClamp(((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared, 0, 1);
-        const x = start.x + projection * dx;
-        const y = start.y + projection * dy;
-        return (point.x - x) ** 2 + (point.y - y) ** 2;
-    }
-    return Math.min(
-        pointDistanceSquared(a, c, d),
-        pointDistanceSquared(b, c, d),
-        pointDistanceSquared(c, a, b),
-        pointDistanceSquared(d, a, b),
-    );
-}
-
-function polygonSegmentDistanceSquared(polygon, start, end) {
-    let minimum = Infinity;
-    for (let index = 0; index < polygon.length; index += 1) {
-        minimum = Math.min(
-            minimum,
-            segmentDistanceSquared(polygon[index], polygon[(index + 1) % polygon.length], start, end),
-        );
-    }
-    return minimum;
-}
-
 function rectangle(left, right, bottom, top) {
     return [
         { x: left, y: bottom },
@@ -595,30 +575,6 @@ const boxedFeature = (cause, priority, box) => ({
     priority,
     polygon: rectangle(box.left, box.right, box.bottom, box.top),
 });
-
-function pointInPolygon(point, polygon) {
-    let inside = false;
-    for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index, index += 1) {
-        const a = polygon[index];
-        const b = polygon[previous];
-        if (a.y > point.y !== b.y > point.y && point.x <= ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x)
-            inside = !inside;
-    }
-    return inside;
-}
-
-function polygonDistanceSquared(left, right) {
-    if (left.some((point) => pointInPolygon(point, right)) || right.some((point) => pointInPolygon(point, left)))
-        return 0;
-    let minimum = Infinity;
-    for (let index = 0; index < right.length; index += 1) {
-        minimum = Math.min(
-            minimum,
-            polygonSegmentDistanceSquared(left, right[index], right[(index + 1) % right.length]),
-        );
-    }
-    return minimum;
-}
 
 function belowTerrain(hull, segment) {
     const [left, right] = segment;
@@ -774,7 +730,11 @@ function candidatesForBounds(model, bounds, fixed, target, terrainIsFixed) {
 }
 
 function hasCandidateForBounds(model, bounds, fixed, target, terrainIsFixed) {
-    if (fixed.some((candidate) => boundsOverlap(candidateBounds(candidate), bounds, COLLISION_MARGIN, candidate.solidBelow)))
+    if (
+        fixed.some((candidate) =>
+            boundsOverlap(candidateBounds(candidate), bounds, COLLISION_MARGIN, candidate.solidBelow),
+        )
+    )
         return true;
     if (!terrainIsFixed && terrainCandidates(model.seed, bounds).length) return true;
     return Boolean(

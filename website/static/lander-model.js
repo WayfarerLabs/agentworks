@@ -54,7 +54,7 @@ export const TURNING_TOTAL = 0.8;
 export const MAX_THRUST_VECTOR = 30;
 export const ANGULAR_ASSIST_DIFFERENTIAL = 0.12;
 export const ANGULAR_ASSIST_FULL_SPEED = 15;
-export const BASE_ROUTE_ALLOWANCE = 12.55;
+export const BASE_ROUTE_ALLOWANCE = 13.4;
 
 export const FAILURE_STATUS = "Crashed!";
 export const GENERATION_ERROR_STATUS = "Mission generation failed. Use Exit mission to start a new run.";

@@ -394,18 +394,18 @@ def validate_game_contract(template: str) -> None:
     if (
         len(scaffold) != 1
         or any(scaffold[0].get(key) != value for key, value in scaffold_contract.items())
-        or not (scaffold[0].get("d") or "").startswith("M312 289.22H498M312 296.72H498M312 289.22L327.5 296.72")
-        or (scaffold[0].get("d") or "").count("M") != 57
+        or not (scaffold[0].get("d") or "").startswith("M312 493.7H498M312 501.2H498M312 493.7L327.5 501.2")
+        or (scaffold[0].get("d") or "").count("M") != 61
         or "Z" in (scaffold[0].get("d") or "")
-        or not (scaffold[0].get("d") or "").endswith("M488 305.22L498 310.72")
+        or not (scaffold[0].get("d") or "").endswith("M488 557.7L498 562.4")
     ):
         raise ValueError("lander-game.html: static open scaffold geometry is invalid")
     battery_contract = (
-        '<rect x="452" y="229.72" width="22" height="40" />',
-        '<path class="battery-bar battery-bar-1" d="M457 259.72h12v5h-12Z" />',
-        '<path class="battery-bar battery-bar-2" d="M457 251.72h12v5h-12Z" />',
-        '<path class="battery-bar battery-bar-3" d="M457 243.72h12v5h-12Z" />',
-        '<path class="battery-bar battery-bar-4" d="M457 235.72h12v5h-12Z" />',
+        '<rect x="452" y="434.2" width="22" height="40" />',
+        '<path class="battery-bar battery-bar-1" d="M457 464.2h12v5h-12Z" />',
+        '<path class="battery-bar battery-bar-2" d="M457 456.2h12v5h-12Z" />',
+        '<path class="battery-bar battery-bar-3" d="M457 448.2h12v5h-12Z" />',
+        '<path class="battery-bar battery-bar-4" d="M457 440.2h12v5h-12Z" />',
     )
     battery_positions = [template.find(fragment) for fragment in battery_contract]
     if -1 in battery_positions or battery_positions != sorted(battery_positions):
@@ -413,9 +413,9 @@ def validate_game_contract(template: str) -> None:
     if "battery-terminal" in template:
         raise ValueError("lander-game.html: battery terminal is forbidden")
     signal_contract = (
-        'd="M455 175.72Q463 167.72 471 175.72"',
-        'd="M448 174.72Q463 159.72 478 174.72"',
-        'd="M440 173.72Q463 150.72 486 173.72"',
+        'd="M455 380.2Q463 372.2 471 380.2"',
+        'd="M448 379.2Q463 364.2 478 379.2"',
+        'd="M440 378.2Q463 355.2 486 378.2"',
     )
     if any(fragment not in template for fragment in signal_contract):
         raise ValueError("lander-game.html: static symmetric antenna signal geometry is invalid")

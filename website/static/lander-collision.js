@@ -34,6 +34,77 @@ export function boundsOverlap(left, right, margin = 0, downward = false) {
         (downward || left.bottom <= right.top + margin)
     );
 }
+
+function segmentDistanceSquared(a, b, c, d) {
+    const orientation = (p, q, r) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+    const onSegment = (p, q, r) =>
+        q.x >= Math.min(p.x, r.x) &&
+        q.x <= Math.max(p.x, r.x) &&
+        q.y >= Math.min(p.y, r.y) &&
+        q.y <= Math.max(p.y, r.y);
+    const signs = [orientation(a, b, c), orientation(a, b, d), orientation(c, d, a), orientation(c, d, b)];
+    if (
+        (signs[0] === 0 && onSegment(a, c, b)) ||
+        (signs[1] === 0 && onSegment(a, d, b)) ||
+        (signs[2] === 0 && onSegment(c, a, d)) ||
+        (signs[3] === 0 && onSegment(c, b, d)) ||
+        (signs[0] > 0 !== signs[1] > 0 && signs[2] > 0 !== signs[3] > 0)
+    )
+        return 0;
+    const pointDistanceSquared = (point, start, end) => {
+        const dx = end.x - start.x,
+            dy = end.y - start.y,
+            lengthSquared = dx * dx + dy * dy,
+            projection =
+                lengthSquared === 0
+                    ? 0
+                    : Math.min(1, Math.max(0, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared)),
+            x = start.x + projection * dx,
+            y = start.y + projection * dy;
+        return (point.x - x) ** 2 + (point.y - y) ** 2;
+    };
+    return Math.min(
+        pointDistanceSquared(a, c, d),
+        pointDistanceSquared(b, c, d),
+        pointDistanceSquared(c, a, b),
+        pointDistanceSquared(d, a, b),
+    );
+}
+
+export function polygonSegmentDistanceSquared(polygon, start, end) {
+    let minimum = Infinity;
+    for (let index = 0; index < polygon.length; index += 1) {
+        minimum = Math.min(
+            minimum,
+            segmentDistanceSquared(polygon[index], polygon[(index + 1) % polygon.length], start, end),
+        );
+    }
+    return minimum;
+}
+
+function pointInPolygon(point, polygon) {
+    let inside = false;
+    for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index, index += 1) {
+        const a = polygon[index],
+            b = polygon[previous];
+        if (a.y > point.y !== b.y > point.y && point.x <= ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x)
+            inside = !inside;
+    }
+    return inside;
+}
+
+export function polygonDistanceSquared(left, right) {
+    if (left.some((point) => pointInPolygon(point, right)) || right.some((point) => pointInPolygon(point, left)))
+        return 0;
+    let minimum = Infinity;
+    for (let index = 0; index < right.length; index += 1) {
+        minimum = Math.min(
+            minimum,
+            polygonSegmentDistanceSquared(left, right[index], right[(index + 1) % right.length]),
+        );
+    }
+    return minimum;
+}
 export function hasInteriorAngleKnot(start, travel) {
     const end = start + travel;
     if (travel > 0) return Math.floor(start) + 1 <= Math.ceil(end) - 1;

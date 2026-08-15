@@ -5,7 +5,10 @@ import test from "node:test";
 
 import {
     CHUNK_WIDTH,
+    MAX_NORMALIZED_DECK,
     PLATFORM_CLEARANCE,
+    SITE_CANDIDATE_OFFSETS,
+    SITE_CANDIDATE_ORDERS,
     SITE_SPACING,
     STATIC_WORLD_SEED,
     TERRAIN_BLOCK_WIDTH,
@@ -13,6 +16,7 @@ import {
     TERRAIN_GRADE_LIMIT,
     TERRAIN_PROFILES,
     TERRAIN_VERTEX_CADENCE,
+    WORLD_MAX_X,
     cameraLeftForPose,
     createFirstSite,
     createSiteForIndex,
@@ -33,7 +37,7 @@ import {
     terrainVerticesForWindow,
 } from "../static/lander-world.js";
 
-const GEOMETRY_URL = new URL("fixtures/lander-route-geometry-v8.json", import.meta.url);
+const GEOMETRY_URL = new URL("fixtures/lander-route-geometry-v9.json", import.meta.url);
 const TEMPLATE_URL = new URL("../templates/lander-game.html", import.meta.url);
 
 function canonical(value) {
@@ -54,8 +58,24 @@ function close(actual, expected, tolerance = 1e-12) {
 test("global terrain is a deterministic signed 16/512 metre straight polyline", () => {
     assert.equal(TERRAIN_VERTEX_CADENCE, 16);
     assert.equal(TERRAIN_BLOCK_WIDTH, 512);
-    assert.equal(TERRAIN_GRADE_LIMIT, 0.36);
-    assert.equal(TERRAIN_GRADE_CHANGE_LIMIT, 0.4);
+    assert.equal(TERRAIN_GRADE_LIMIT, 0.4);
+    assert.equal(TERRAIN_GRADE_CHANGE_LIMIT, 0.8);
+    const expectedReversals = [12, 12, 16, 16, 16, 12, 16, 12];
+    let maximumGrade = 0;
+    let maximumGradeChange = 0;
+    Object.values(TERRAIN_PROFILES).forEach((samples, profile) => {
+        const grades = samples.slice(1).map((sample, index) => (sample - samples[index]) * 4);
+        maximumGrade = Math.max(maximumGrade, ...grades.map(Math.abs));
+        maximumGradeChange = Math.max(
+            maximumGradeChange,
+            ...grades.slice(1).map((grade, index) => Math.abs(grade - grades[index])),
+        );
+        const reversals = grades.filter((grade, index) => Math.sign(grade) !== Math.sign(grades[(index + 1) % 32]));
+        assert.equal(reversals.length, expectedReversals[profile]);
+        assert.ok(Math.min(...samples) >= 0.1 && Math.max(...samples) <= 0.6);
+    });
+    close(maximumGrade, TERRAIN_GRADE_LIMIT);
+    close(maximumGradeChange, TERRAIN_GRADE_CHANGE_LIMIT);
     for (const seed of [11, 39, 41, STATIC_WORLD_SEED]) {
         const profileIds = new Set();
         for (let block = -100; block <= 100; block += 1) {
@@ -77,11 +97,58 @@ test("global terrain is a deterministic signed 16/512 metre straight polyline", 
     }
 });
 
-test("route-only site X and closed native footprint produce exact local decks", () => {
+test("centered terrain corpus has no short-period autocorrelation rhythm", () => {
+    const pearson = (values, lag) => {
+        const left = values.slice(0, -lag);
+        const right = values.slice(lag);
+        const leftMean = left.reduce((sum, value) => sum + value, 0) / left.length;
+        const rightMean = right.reduce((sum, value) => sum + value, 0) / right.length;
+        let numerator = 0;
+        let leftSquare = 0;
+        let rightSquare = 0;
+        for (let index = 0; index < left.length; index += 1) {
+            const a = left[index] - leftMean;
+            const b = right[index] - rightMean;
+            numerator += a * b;
+            leftSquare += a * a;
+            rightSquare += b * b;
+        }
+        return numerator / Math.sqrt(leftSquare * rightSquare);
+    };
+    const expected = [
+        [0.08739957356836273, 32],
+        [0.07807537753104245, 40],
+        [0.07645001213865094, 40],
+        [0.07000743972739065, 61],
+    ];
+    [11, 39, 41, STATIC_WORLD_SEED].forEach((seed, seedIndex) => {
+        const normalized = Array.from({ length: 4096 }, (_, index) => {
+            const vertex = index - 2048;
+            const block = Math.floor(vertex / 32);
+            return terrainProfileForBlock(seed, block).samples[vertex - block * 32];
+        });
+        const correlations = Array.from({ length: 49 }, (_, index) => {
+            const lag = index + 16;
+            return [Math.abs(pearson(normalized, lag)), lag];
+        }).sort((left, right) => right[0] - left[0]);
+        assert.deepEqual(correlations[0], expected[seedIndex]);
+        assert.ok(correlations[0][0] < 0.09);
+    });
+});
+
+test("route-only candidate order and closed native footprint produce capped exact local decks", () => {
     for (const seed of [11, 39, 41, STATIC_WORLD_SEED]) {
+        let expectedOrder = null;
         for (let index = -100; index <= 100; index += 1) {
             const site = createSiteForIndex(seed, index);
-            assert.equal(site.center, 36 + SITE_SPACING * index);
+            assert.equal(site.nominalCenter, 36 + SITE_SPACING * index);
+            expectedOrder ??= site.candidateOrder;
+            assert.equal(site.candidateOrder, expectedOrder);
+            assert.deepEqual(SITE_CANDIDATE_ORDERS[site.candidateOrder][site.candidateOrdinal], site.offsetIndex);
+            assert.equal(site.center, site.nominalCenter + SITE_CANDIDATE_OFFSETS[site.offsetIndex]);
+            assert.ok(site.candidateOrdinal <= 5);
+            assert.ok(site.normalizedDeck <= MAX_NORMALIZED_DECK);
+            assert.deepEqual(site.closedFootprint, [site.platformLeft, site.center + 13.8]);
             const vertices = terrainVerticesForWindow(seed, [site], site.platformLeft, site.platformLeft + 18.6);
             const localMaximum = Math.max(...vertices.map(([, y]) => y));
             close(site.localNativeMaximum, localMaximum);
@@ -93,7 +160,31 @@ test("route-only site X and closed native footprint produce exact local decks", 
             );
         }
     }
-    close(createFirstSite(STATIC_WORLD_SEED).platformTop, 26.228);
+    const first = createFirstSite(STATIC_WORLD_SEED);
+    close(first.platformTop, first.localNativeMaximum + PLATFORM_CLEARANCE);
+});
+
+test("signed candidate generation terminates through the final physical rail", () => {
+    let minimumSpacing = Infinity;
+    let maximumSpacing = -Infinity;
+    for (const seed of [11, 39, 41, STATIC_WORLD_SEED]) {
+        let previous = null;
+        for (let index = -4095; index <= 4095; index += 1) {
+            const site = createSiteForIndex(seed, index);
+            assert.ok(site.candidateOrdinal <= 5);
+            assert.ok(site.normalizedDeck <= MAX_NORMALIZED_DECK);
+            if (previous) {
+                const spacing = site.center - previous.center;
+                minimumSpacing = Math.min(minimumSpacing, spacing);
+                maximumSpacing = Math.max(maximumSpacing, spacing);
+                assert.ok(spacing >= 56 && spacing <= 136);
+            }
+            previous = site;
+        }
+    }
+    assert.deepEqual([minimumSpacing, maximumSpacing], [56, 136]);
+    const final = createSiteForIndex(STATIC_WORLD_SEED, 4095);
+    close(WORLD_MAX_X - (final.center + 13.8), 46.2, 1e-9);
 });
 
 test("one exact keyed lookup terminates and is mutation sensitive", () => {
@@ -160,7 +251,7 @@ test("integrated truss and three unbounded supports reach their native feet", ()
     assert.equal(siteScaffoldPath(site).match(/M/g)?.length, members.length);
 });
 
-test("camera, retention, sky, and geometry-v8 remain bounded and deterministic", async () => {
+test("camera, retention, sky, and geometry-v9 remain bounded and deterministic", async () => {
     const site = createFirstSite(STATIC_WORLD_SEED);
     assert.deepEqual(
         [cameraLeftForPose({ x: 34 }), cameraLeftForPose({ x: 80 }), cameraLeftForPose({ x: -20 })],
@@ -175,8 +266,8 @@ test("camera, retention, sky, and geometry-v8 remain bounded and deterministic",
     const sky = skyProjectionForCamera(STATIC_WORLD_SEED, 0);
     assert.equal(sky.chunks.length, 5);
     const geometry = JSON.parse(await readFile(GEOMETRY_URL, "utf8"));
-    assert.equal(geometry.schema, "agw-lander-route-geometry/v8");
-    assert.equal(geometry.terrain.profiles.S1[6], 0.1);
+    assert.equal(geometry.schema, "agw-lander-route-geometry/v9");
+    assert.equal(geometry.terrain.profiles.S4[5], 0.6);
     assert.equal(
         createHash("sha256")
             .update(JSON.stringify(canonical(geometry)))

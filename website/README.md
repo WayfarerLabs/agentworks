@@ -137,32 +137,35 @@ This is the builder's only output shape. The manifest is explicit in `build.py`;
 recursively copies source directories or permits a generated local link outside the manifest.
 
 The game keeps its route catalog reviewable and independent from runtime generation. Geometry lives
-in `tests/fixtures/lander-route-geometry-v8.json`; it contains no schedule or fuel result.
+in `tests/fixtures/lander-route-geometry-v9.json`; it contains no schedule or fuel result.
 Regenerate to a temporary path and verify the reviewed fixture with:
 
 ```bash
 node website/tools/derive_lander_routes.mjs \
-  --geometry website/tests/fixtures/lander-route-geometry-v8.json \
-  --bootstrap website/tests/fixtures/lander-route-derived-v7.json \
-  --output /tmp/lander-route-derived-v8.json \
-  --verify website/tests/fixtures/lander-route-derived-v8.json
+  --geometry website/tests/fixtures/lander-route-geometry-v9.json \
+  --predecessor-geometry website/tests/fixtures/lander-route-geometry-v8.json \
+  --bootstrap website/tests/fixtures/lander-route-derived-v8.json \
+  --output /tmp/lander-route-derived-v9.json \
+  --verify website/tests/fixtures/lander-route-derived-v9.json
 
 node website/tools/project_lander_route_proofs.mjs \
-  --fixture website/tests/fixtures/lander-route-derived-v8.json \
+  --fixture website/tests/fixtures/lander-route-derived-v9.json \
   --output website/static/lander-route-proofs.generated.js
 ```
 
-The v9 deriver uses Node built-ins and independent copies of the terrain, physics, collision,
-structure, and proof authorities. It exhaustively enumerates 320 terrain assignments into 243 exact
-ordered deck-pair keys, then applies the bounded 269-layer, 6,000-state four-phase corridor
-synthesizer. Every selected route is replayed against its conservative envelope and all concrete
-member assignments. Derived v8 also records all eight opening profiles and signed 100-site world
-witnesses for four seeds. Runtime performs one exact keyed proof lookup and one defensive replay; it
-never imports the tool, scans a catalog, searches commands, retries a route, or conditions site X on
-terrain. The immutable v7 fixture contributes only its reviewed schedule projection: 205 keys select
-13 distinct bootstrap schedules and the bounded synthesizer derives the remaining 38. Fuel uses the
-sufficient `12.55 + max(0, deckDelta)/3` allowance rounded upward to the 0.05 quantum; it does not
-claim that one quantum less makes the physical route impossible.
+The v10 deriver uses Node built-ins and independent copies of the terrain, physics, collision,
+structure, and proof authorities. It exhaustively enumerates 736 terrain assignments into 312 exact
+ordered distance/deck-pair keys, then applies the bounded 269-layer, 6,000-state four-phase corridor
+synthesizer with actual-X shallow-release authority and exact replay through step 4,332. Every
+selected route is replayed against its conservative envelope and all concrete member assignments.
+Derived v9 also records all 16 opening profile/order outcomes and signed 100-site world witnesses
+for four seeds. Runtime performs one exact keyed proof lookup and one defensive replay; it never
+imports the tool, scans a catalog, searches commands, retries a route, or conditions the nominal
+site candidate on terrain. Immutable geometry-v8 and derived-v8 fixtures are narrow, pinned
+predecessor/bootstrap inputs: 70 keys select bootstrap schedules, 41 reuse already certified
+same-distance schedules, and 201 use bounded synthesis. Fuel uses the sufficient
+`13.4 + max(0, deckDelta)/3` allowance rounded upward to the 0.05 quantum; it does not claim that
+one quantum less makes the physical route impossible.
 
 The projection command deterministically converts the reviewed record order into a compact,
 source-only generated module. The builder verifies its provenance, composes it into
@@ -173,7 +176,7 @@ both authored modules byte-for-byte and never concatenates them.
 During a run, the model retains at most five terrain chunk indexes while the DOM always uses exactly
 two terrain paths plus one permanent physical-terminus path, the active and target sites plus one
 previous powered site, one input queue of at most 64 records, and eight crash fragments. The
-worst-case world projection has at most 80 descendants. Fuel has no capacity cap: unused reserve
+worst-case world projection has at most 76 descendants. Fuel has no capacity cap: unused reserve
 carries forward. At one-indexed powered base `n`, each collected can adds the next route's
 sufficient allowance multiplied by the direct constant-time ratio `1 + 0.5 ** (n - 1)`. Runtime
 number precision reaches exactly 1 at base 54 and remains 1 through base 100. Exit and reload

@@ -242,7 +242,7 @@ test("site structure exposes exact truss, three lattice-column, NOC, and mast en
     assert.deepEqual(structure.supportColumns.map(({ left, right }) => [left, right]), [
         [site.platformLeft, site.platformLeft + 1],
         [site.platformLeft + 8.8, site.platformLeft + 9.8],
-        [site.platformLeft + 17.6, structure.buildingRight],
+        [site.platformLeft + 17.6, site.platformLeft + 18.6],
     ]);
     assert.equal(structure.noc.bottom, site.platformBottom);
     assert.equal(structure.mast.right - structure.mast.left, 0.5);

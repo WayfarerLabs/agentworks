@@ -10,6 +10,7 @@ import {
     cameraLeftForPose,
     siteScaffoldMembers,
     siteStructure,
+    siteCandidateOrder,
     skyProjectionForCamera,
     skyProjectionIdentityForCamera,
     targetDirectionForViewport,
@@ -19,6 +20,14 @@ import {
 const ROOT = new URL("../", import.meta.url);
 const ZERO = Object.freeze({ left: 0, right: 0 });
 const COLLECTIVE = Object.freeze({ left: 0.72, right: 0.72 });
+const ROUTE_REQUESTS = Object.freeze([
+    ZERO,
+    COLLECTIVE,
+    Object.freeze({ left: 0, right: 0.375 }),
+    Object.freeze({ left: 0.375, right: 0 }),
+    Object.freeze({ left: 0.2125, right: 0.5875 }),
+    Object.freeze({ left: 0.5875, right: 0.2125 }),
+]);
 
 function close(actual, expected, tolerance = 1e-12) {
     assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} differs from ${expected}`);
@@ -53,18 +62,19 @@ test("opening and post-award fuel use honest uncapped gauge references", async (
     assert.equal(powered.checkpoint.fuelGaugeReference, powered.fuelGaugeReference);
 });
 test("half-tank opening lands for every global terrain profile", async () => {
-    const derived = JSON.parse(await readFile(new URL("tests/fixtures/lander-route-derived-v8.json", ROOT), "utf8"));
+    const derived = JSON.parse(await readFile(new URL("tests/fixtures/lander-route-derived-v9.json", ROOT), "utf8"));
     const seeds = new Map();
-    for (let seed = 1; seeds.size < 8; seed += 1) {
+    for (let seed = 1; seeds.size < 16; seed += 1) {
         const profile = terrainProfileForBlock(seed, 0).id;
-        if (!seeds.has(profile)) seeds.set(profile, seed);
+        const key = `${profile}:${siteCandidateOrder(seed)}`;
+        if (!seeds.has(key)) seeds.set(key, seed);
     }
     for (const witness of derived.openings) {
-        let model = createRun({ seed: seeds.get(witness.profile) });
+        let model = createRun({ seed: seeds.get(`${witness.profile}:${witness.candidateOrder}`) });
         close(model.retainedSites[0].platformTop, witness.deck);
         let steps = 0;
         for (const [command, count] of witness.runs) {
-            const request = command === 0 ? ZERO : COLLECTIVE;
+            const request = ROUTE_REQUESTS[command];
             for (let index = 0; index < count; index += 1, steps += 1) {
                 model = stepFlight(model, request);
             }

@@ -17,13 +17,14 @@ import { FakeElement, controllerClasses, controllerFixture } from "./lander-test
 
 const ROOT = new URL("../", import.meta.url);
 const EXPECTED_DIGESTS = Object.freeze({
-    assignmentDigest: "597c7ffe9cba6ce2d95dd1204e40ff8562bea22088ca13fa9b930656992a918b",
-    bootstrapDigest: "c5800497182045dbf664fd50abd6cfd79cc4293bdadbfd4afa526e72f7d71b12",
-    geometryDigest: "6c3e4bc4a18ca5bb2bf4d82aed124f2e55aef1d3517349efc2fc70b4de56a206",
-    outputDigest: "562de8434513923e150a5db0198afeed168b992f877372e171de4a00fb1ed2cd",
+    assignmentDigest: "cd46a599456005c156a72c904d33ac2950446efad220a1a3db56553abdcbe48b",
+    bootstrapDigest: "ebaa368a38b262bb7839b621fd9785a379347e57e2217a6a2dc66466f9fa5c88",
+    geometryDigest: "65a491fd64bce20dfad6001d11206a9616e2313aa77fad8c363f00ff79e2a4ce",
+    outputDigest: "37acd7fbb5d068b9e83ddde8a80454d1cc88e83f018210588bb62e9cf121f08b",
     physicsDigest: "e3af9abd8ba3677f67b6aee8fea1c6b46b2592799640469f76dd674e1f04406c",
-    proofDigest: "f49f06e1353684df36604e6f476380a9a58d5d97ddb478b24d35c69b4dd4e93f",
-    worldDigest: "2a4bf5e7b780c82b5161a3e42c64ba2d429483f4c74cd5e211892a1f28114500",
+    predecessorGeometryDigest: "257da30dbbaa9af6910ad2beb344162f0321760169cafb29a8e80164f4507248",
+    proofDigest: "1c9177830b1ba25c7cdb2751466bfd57b1409ed9849f96dcd78392c5a3988640",
+    worldDigest: "d32a90ba482d41a874db740447838792a5927eee15b24cddf62ca98b6e0bfa1b",
 });
 
 async function controllerAt(model = createRun({ seed: 1 })) {
@@ -71,8 +72,8 @@ test("landing profile and the finite route catalog remain exact", () => {
         [2.2, 3.6, 18, 26],
     );
     assert.deepEqual(ROUTE_DIGESTS, EXPECTED_DIGESTS);
-    assert.equal(REFERENCE_PROOFS.length, 243);
-    assert.equal(new Set(REFERENCE_PROOFS.map(({ pairKey }) => pairKey)).size, 243);
+    assert.equal(REFERENCE_PROOFS.length, 312);
+    assert.equal(new Set(REFERENCE_PROOFS.map(({ pairKey }) => pairKey)).size, 312);
     assert.ok(
         REFERENCE_PROOFS.every((proof) => proof.success.classification === "safe" && !("smallerFailure" in proof)),
     );

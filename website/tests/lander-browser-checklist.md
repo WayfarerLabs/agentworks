@@ -51,6 +51,16 @@ must remain unchanged across all four runs. Run
 automated Chromium evidence; it does not replace the qualitative terrain or cross-engine acceptance
 below.
 
+The Phase 4T witness uses the successor 16/512 m straight-polyline corpus and the
+terrain-independent six-candidate site order. It checks visible sharp reversals, normalized `.6`
+terrain away from pads, accepted decks at or below `.5`, native support feet, and candidate
+rejection without terrain mutation. The route witness covers all 312 exact keys and 736 concrete
+assignments, including `70/41/201` bootstrap/reuse/synthesis selections, exact contact through step
+4,332, 16 openings, and the sufficient 13.4 base allowance. Capture seed 11, 39, 41, and static
+evidence at `1000x780`, `320x780`, true `320x240`, and a true mobile/touch `667x320`; require inner,
+client, and scroll width/height equality with zero scroll before and after lifecycle. Screenshots
+are qualitative artifacts for operator inspection and are not golden-policed.
+
 The Phase 4S witness supersedes the Phase 4R terrain corpus with global 16/512 m asymmetric
 straight-polyline superblock profiles, the visible physical world termini, concrete-contact-only
 failure, and the terminal site-4095 service lifecycle. It verifies that former ceiling and

@@ -26,7 +26,7 @@ from test_lander_phase4k_browser_cleanup import _FakeProcess, _NullRootRaceConne
 
 PROBE = r"""
 import { landerGameController as controller } from "/static/lander-game.js";
-import { createRun, stepFlight } from "/static/lander-model.js";
+import { createRun, stepFlight, updateRetention } from "/static/lander-model.js";
 
 const shell = document.querySelector("#lander-scene-shell");
 const restart = document.querySelector("#lander-restart");
@@ -85,7 +85,7 @@ const layout = () => {
             scrollWidth: document.documentElement.scrollWidth}};
 };
 const powered = checkpointRun();
-const expected = projection({...powered, ...powered.checkpoint, state: "launching"});
+const expected = projection(updateRetention({...powered, ...powered.checkpoint, state: "launching"}));
 const order = [];
 const nativeRender = controller.render.bind(controller);
 controller.render = () => { order.push("render"); nativeRender(); };

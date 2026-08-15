@@ -695,10 +695,11 @@ test("intermediate NOC battery stages project from model to the retained site DO
     const group = fixture.elements["site-layer"].querySelector(`[data-site-id="${active.id}"]`);
     assert.equal(group.dataset.nocStage, "2");
     const structure = siteStructure(active);
+    const buildingBottom = 548 - active.platformBottom * 10;
+    const roof = Math.round((548 - structure.roof * 10) * 1e9) / 1e9;
     assert.equal(
         group.querySelector(".noc-building").attributes.get("d"),
-        `M${structure.buildingLeft * 10} ${548 - active.platformBottom * 10}` +
-            `V${548 - structure.roof * 10}h70V${548 - active.platformBottom * 10}Z`,
+        `M${structure.buildingLeft * 10} ${buildingBottom}V${roof}h70V${buildingBottom}Z`,
     );
     controller.model = updateRetention(advanceMissionSequence(model, 0.2));
     controller.render();
@@ -914,7 +915,7 @@ test("retention and DOM reconciliation change only at bounded window keys", asyn
     controller.destroy();
 });
 
-test("worst-case world projection stays within eighty descendants during a crash", async () => {
+test("worst-case world projection stays at the exact descendant ceiling during a crash", async () => {
     let model = createRun({ seed: 1 });
     const sites = [model.retainedSites[0]];
     for (let id = 1; id < 3; id += 1) {
@@ -960,6 +961,5 @@ test("worst-case world projection stays within eighty descendants during a crash
     assert.equal(fixture.elements["site-layer"].children.length, 3);
     assert.equal(fixture.elements["debris-layer"].children.length, 8);
     assert.equal(descendantCount(world), 76);
-    assert.ok(descendantCount(world) <= 80);
     controller.destroy();
 });

@@ -3,7 +3,13 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { createRun, stepFlight } from "../static/lander-model.js";
-import { siteScaffoldMembers, siteScaffoldPath, siteStructure } from "../static/lander-world.js";
+import {
+    cameraLeftForPose,
+    retainedChunkIndexes,
+    siteScaffoldMembers,
+    siteScaffoldPath,
+    siteStructure,
+} from "../static/lander-world.js";
 import { controllerClasses, controllerFixture } from "./lander-test-dom.mjs";
 
 const ROOT = new URL("../", import.meta.url);
@@ -43,7 +49,11 @@ function retryKey(shell) {
 
 function assertRestored(model, checkpoint) {
     for (const [field, expected] of Object.entries(checkpoint)) {
-        assert.deepEqual(model[field], expected, field);
+        assert.deepEqual(
+            model[field],
+            field === "retainedChunks" ? retainedChunkIndexes(cameraLeftForPose(checkpoint.pose)) : expected,
+            field,
+        );
     }
     assert.equal(model.state, "launching");
     assert.equal(model.launchStarted, false);
