@@ -13,11 +13,11 @@ Use this package-free checklist against `/lander/` for ordinary game work and `/
 fallback in the complete built site. Record each execution so a future reader can distinguish
 verified behavior from an expectation that has not been run.
 
-The continuous expedition materially replaces Phase 4C's one-shot mission. Its terrain, sites, fuel,
-route proofs, bidirectional cue and camera, parallax sky, checkpoint restart, vacuum crash, rolling
-retention, arcade fuel gauge, and installed-agent payoff require a new browser record. Older checked
-rows below remain historical evidence for their named source only; they do not accept the current
-game.
+The continuous expedition materially replaces Phase 4C's one-shot mission. Its terrain, sites,
+direct predicted fuel awards, bidirectional cue and camera, parallax sky, checkpoint restart, vacuum
+crash, rolling retention, arcade fuel gauge, and installed-agent payoff require a new browser
+record. Older checked rows below remain historical evidence for their named source only; they do not
+accept the current game.
 
 The Phase 4L automated Chromium witness exercises the 320-by-640 layout and the 320-by-900 CSS-pixel
 reflow equivalent of a 1280-pixel viewport at 400 percent. It checks the two single-rect,
@@ -196,11 +196,35 @@ operator inspection; no test approves wording or golden pixels.
       CSS, four modules, and SVG loads, the game makes no request and creates no durable storage.
       Confirm the exact 14-file artifact ships `lander-world.js` and its leaf `lander-collision.js`
       separately, with no concatenated duplicate collision authority.
-- [ ] Record active frame p95, 100-site retention counts, and direct generation plus one-proof
-      replay p95/max on the pre-merge Chromium machine. Required ceilings are 4 ms frame p95, 25 ms
-      generation p95, and 50 ms generation maximum.
+- [ ] Record active frame p95, 100-site retention counts, and direct generation plus the O(1)
+      predicted-allowance formula p95/max on the pre-merge Chromium machine. No route search,
+      simulation, or proof replay occurs. Required ceilings are 4 ms frame p95, 25 ms generation
+      p95, and 50 ms generation maximum.
 
-### Continuous-expedition automated execution record
+### Phase 4U automated execution record
+
+- Date: 2026-08-15
+- Source: `998e8a77b62659437acf00433441793ef46ef193`
+- Browser: repository-selected headless Chromium through the DevTools Protocol
+- Tester: Phase 4U implementation gate and qualitative screenshot inspection
+- Outcome: PASS for the automated evidence; operator Chrome/Edge acceptance remains pending
+
+The exact source passed all 103 Node lander tests in 4.90 seconds and all 157 website Python tests,
+including the real-Chromium witnesses, in 36.694 seconds. The focused Phase 4Q Chromium module also
+passed both tests in 4.87 seconds. Its 100-site lifecycle invokes direct site generation and the
+O(1) `quantumCeil(22 + max(0, deckDelta) / 3)` prediction without a route key, schedule, search,
+simulation, catalog, or replay. The permanent witness continues to enforce the 4 ms frame-p95, 25 ms
+generation-p95, and 50 ms generation-maximum ceilings rather than recording an unobserved timing
+distribution here.
+
+The same run emitted 12 distinct qualitative PNGs across seeds 11, 41, and STATIC and all four
+required viewport shapes. Inspection covered `1000x780`, `320x780`, true `320x240`, and true mobile
+touch `667x320`; the touch case reported inner, document-client, and document-scroll dimensions of
+exactly `667x320` with scroll position zero. The straight sharper facets, normalized-band relief,
+local decks, native supports, footer actions, and fixed scene remained visible without vertical
+growth or scroll. These observations are run evidence, not golden-image assertions.
+
+### Historical route-proof automated execution record
 
 - Date: 2026-08-10
 - Source: `e0db7e225e227c69725709b2fd013a1d3e0d2475`
@@ -210,8 +234,8 @@ operator inspection; no test approves wording or golden pixels.
 - Viewport: 1000 by 900 CSS pixels at device-pixel ratio 1
 - Motion preference: normal and reduced
 - Tester: isolated fresh-eyes automated browser acceptance
-- Outcome: PASS for every automated continuous-expedition row; the separate operator Chrome/Edge row
-  remains pending
+- Outcome: PASS for the then-current route-proof implementation; the record is historical and does
+  not accept the Phase 4U direct predicted-allowance implementation
 
 Three legal service contacts were injected into the live controller and then exercised through real
 browser animation frames, model transitions, rendering, and player-control return. Fuel progressed
@@ -223,11 +247,11 @@ claiming 100 manually flown services.
 The actual simultaneous worst-case render contained ten terrain paths, three complete sites, eight
 crash fragments, five direct world children, and exactly 80 `#lander-world` descendants. Active
 frame callback time over 1,250 samples had p95 `0.9 ms`, maximum `26.5 ms`, and mean `0.433 ms`.
-Generation plus direct allowance work across 100 deterministic services had p95 `7.2 ms`, maximum
-`15.3 ms`, and mean `6.071 ms`. Retention stayed at ten chunks and three sites while the camera
-moved in both directions. After garbage collection, observed JavaScript heap decreased from
-2,123,772 to 1,285,712 bytes, DOM nodes from 484 to 479, and browser-reported event listeners
-remained 19 to 19.
+Generation plus the source's then-current template selection and proof replay across 100
+deterministic services had p95 `7.2 ms`, maximum `15.3 ms`, and mean `6.071 ms`. Retention stayed at
+ten chunks and three sites while the camera moved in both directions. After garbage collection,
+observed JavaScript heap decreased from 2,123,772 to 1,285,712 bytes, DOM nodes from 484 to 479, and
+browser-reported event listeners remained 19 to 19.
 
 The run also passed real CDP keyboard, mouse, and touch events; browser-generated
 `lostpointercapture`; every named collision surface; normal and reduced-motion crashes; pre- and
