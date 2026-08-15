@@ -1,22 +1,23 @@
 # CLI Grammar Correction, Functional Requirements
 
-- Status: Draft for operator review
+- Status: Revised after operator disposition, ready for artifact re-review
 - Date: 2026-08-15
 - Depends on: `cli-surface-study.md`, `prior-art-research.md`, and `future-directions.md`
 
 ## Purpose
 
-Make type explanation, relationship inspection, and fixed-destination schema installation say what
-they do. The change is intentionally narrow and gates 0.14.0.
+Make type explanation, generic relationship inspection, and fixed-destination schema installation
+say what they do. The change is intentionally narrow and gates 0.14.0.
 
 ## Settled product decisions
 
-1. `resource describe-kind` is renamed to `resource explain`.
-2. Relational inspection belongs under a new top-level `graph` namespace.
-3. `resource describe` is removed. Its relationships move to `graph`; no generic replacement card is
-   created because the remaining facts are covered by existing commands.
-4. `--write` is path-valued. The schema set's fixed-destination action is named `--install`.
-5. This is a pre-0.14 breaking cutover. Removed spellings do not receive aliases.
+1. `resource describe-kind` becomes `resource explain` without new behavior.
+2. `graph show KIND/NAME` launches as a fixed one-hop, both-directions relationship view.
+3. `resource describe` is removed with no replacement card, alias, or compatibility shim.
+4. `secret describe` keeps its contextual relationship sections and JSON fields unchanged.
+5. `--write` is path-valued; the schema set's fixed-destination action is `--install`.
+6. The 0.14 upgrade guide carries the breaking command map. The operator explicitly waived a
+   deprecation release for the `resource describe` command shipped in 0.13.
 
 ## Functional requirements
 
@@ -29,114 +30,109 @@ they do. The change is intentionally narrow and gates 0.14.0.
 - **FR3.** Explain shall render from the existing schema and field-documentation service. Its field
   coverage, capability listing behavior, ordering, errors, and human output semantics shall not be
   broadened as part of the rename.
-- **FR4.** Explain shall read no operator config, build no resource registry, open no database, and
-  work when config is missing or invalid and when a contributing plugin is installed but disabled.
-- **FR5.** Explain shall not add a bare kind-listing mode, field-path operand, or machine-output
-  mode in this effort. `resource kinds`, `resource sample`, and `resource schema` retain their
-  existing responsibilities.
+- **FR4.** Explain shall use its current config-free schema and capability resolver. It shall build
+  no resource registry, open no database, and work when config is missing or invalid and when a
+  contributing plugin is installed but disabled.
+- **FR5.** `resource kinds`, `resource sample`, and `resource schema` retain their existing
+  responsibilities. Field selection and machine output for explain are outside this effort.
 
 ### Graph
 
 - **FR6.** The CLI shall add a top-level `agw graph` namespace with `agw graph show KIND/NAME` as
-  its initial relational-view subcommand.
-- **FR7.** The initial graph view shall require exactly one focal resource identity in the existing
-  `KIND/NAME` grammar. Omitting the focus or supplying more than one is a usage error. The command
-  shall expose the saga-required kind-filter, direction, depth, and output axes. The HLA shall pin
-  defaults, validation, and interaction among those axes before planning.
-- **FR8.** At minimum, the graph service shall represent every relationship currently unique to
-  `resource describe`: inbound declared-resource references and live-instance usage from the kind's
-  existing `instances` hook. Existing `source`, `usage`, optional `declared_by`, instance-kind, and
-  instance-name facts shall not be silently discarded.
-- **FR9.** Graph directions and depths shall have one documented orientation relative to the focal
-  node. Direct neighbors, unbounded traversal, repeated nodes, cycles, filtering, and deterministic
-  ordering shall have testable semantics.
-- **FR10.** Human output shall be deterministic and terminal-readable. Machine output shall use a
-  new command ID in the versioned JSON envelope and closed, typed node and edge records. Human and
-  JSON renderers shall project the same safe fact service.
+  its initial subcommand.
+- **FR7.** Graph show shall require exactly one focal resource identity. It shall resolve
+  `KIND/NAME` through the config-backed finalized request registry, independently of explain's
+  config-free resolver. Zero or multiple operands are usage errors.
+- **FR8.** The launch view shall be one hop in both directions. It shall represent outbound declared
+  references, inbound declared references, and live-instance usage. Inbound facts shall preserve
+  `source`, `usage`, and optional `declared_by`; live facts shall preserve instance kind and name.
+- **FR9.** Launch shall not include kind, direction, or depth selectors. Duplicate edges and output
+  ordering shall have deterministic, testable semantics settled in HLA.
+- **FR10.** Human output shall be terminal-readable. Machine output shall use a new command ID in
+  the versioned JSON envelope and closed, typed node and edge records. Both renderers shall project
+  the same safe fact service.
 - **FR11.** Graph shall never disclose secret values. A secret resource may appear by identity and
   safe metadata only, under the same no-reflection boundary as current machine output.
 - **FR12.** Graph shall be operationally read-only. It shall not create or migrate database state,
   repair stored process state, activate resources, make provider or remote probes, resolve secret
   values, or prompt.
-- **FR13.** A query shall demand only the sources required by its selected relationships. The HLA
-  shall specify database-open behavior and source-specific errors, including absent, stale,
-  malformed, and unreadable live state, before implementation planning.
+- **FR13.** Source acquisition shall be demand-driven. A focal kind without a live-instance hook
+  shall not require the database. HLA shall specify a read-only database open and source-specific
+  errors for focal kinds that do project live usage.
 - **FR14.** The implementation shall reuse the frozen resource graph and existing per-kind instance
   projections without inserting database rows into `Registry`, mutating `Registry.graph`, or
   presenting an orchestration plan as complete inventory.
 
 ### Removal of resource describe
 
-- **FR15.** `agw resource describe KIND/NAME` shall be removed in the same cutover that adds the
-  graph replacement for its relationships.
+- **FR15.** `agw resource describe KIND/NAME` shall be removed in the same cutover that adds graph
+  show.
 - **FR16.** The `resource.describe` machine-output command and dynamic completion entries shall be
-  removed. The new graph view shall receive its own command ID and schema rather than pretending to
-  preserve the old card payload.
-- **FR17.** No generic describe command or reduced resource card shall replace it. Documentation
-  shall direct operators to `graph` for relationships and to existing inventory, diagnostics, edit,
-  and kind-specific commands for all other questions.
+  removed. `graph.show` receives its own schema rather than preserving the card-shaped payload.
+- **FR17.** The removed non-relational facts shall keep explicit owners: resource inventory and
+  kind-specific commands own identity, description, and origin; resource inventory retains readiness
+  and enablement state; doctor owns diagnostic explanation; edit owns declaration location. The
+  describe-only disabled sentence is derived prose, not a separate fact to migrate.
+- **FR18.** `secret describe` shall retain its backend, resolution, relationship, and machine-output
+  contract unchanged. Its relationships are contextual; `graph.show` is the canonical generic
+  relationship contract.
 
 ### Writer semantics
 
-- **FR18.** Every option named `--write` in the resulting CLI shall take an explicit path.
-- **FR19.** `agw resource sample KIND --write PATH` shall retain its existing create, fill, append,
+- **FR19.** Every option named `--write` in the resulting CLI shall take an explicit path.
+- **FR20.** `agw resource sample KIND --write PATH` shall retain its existing create, fill, append,
   validation, inert-document, and schema-association behavior.
-- **FR20.** `agw resource schema --install` shall replace `resource schema --write`. It shall write
+- **FR21.** `agw resource schema --install` shall replace `resource schema --write`. It shall write
   the whole schema set to the existing fixed `resources/.schema/` destination, take no `KIND`, and
   retain current idempotent overwrite and reporting behavior.
-- **FR21.** Stdout forms `resource schema` and `resource schema KIND` shall remain unchanged.
+- **FR22.** Stdout forms `resource schema` and `resource schema KIND` shall remain unchanged.
 
 ### Complete cutover
 
-- **FR22.** Command help, examples, errors, hints, completions, command IDs, tests, command
-  reference, current guides, embedded guide content, and the 0.14 upgrade guide shall use the new
-  grammar in the same implementation series.
-- **FR23.** Bash, zsh, and PowerShell completion generation and dynamic completion shall continue to
+- **FR23.** Command help, examples, errors, hints, completions, command IDs, tests, command
+  reference, surviving guides, and the 0.14 upgrade guide shall use the new grammar in the same
+  implementation series.
+- **FR24.** Bash, zsh, and PowerShell completion generation and dynamic completion shall continue to
   work with broken or missing config wherever the current explanation path does.
-- **FR24.** Touched resource-group help shall describe its resulting inventory, explanation,
+- **FR25.** The implementation shall coordinate with the separate guide-cleanup effort. It shall not
+  preserve, update, or regenerate a guide route that effort removes as redundant.
+- **FR26.** Touched resource-group help shall describe its resulting inventory, explanation,
   authoring, and editing responsibilities rather than the removed generic inspector.
-- **FR25.** Directly encountered hygiene defects may ride with the change only when they concern a
-  touched command contract and are cheap to fix. Unrelated CLI consistency work shall be recorded
-  separately and shall not expand this SDD.
 
 ## Quality requirements
 
 - **QR1.** Graph collection and rendering have service-level tests in addition to CLI tests.
-- **QR2.** Tests assert behavior, facts, schemas, and stable identifiers. They do not assert the
-  preferred wording of prose authored by this project.
-- **QR3.** The implementation keeps command modules thin and preserves lazy imports and fast help
-  and completion paths.
-- **QR4.** The new graph code has no network dependency and no ambient write side effects.
-- **QR5.** All changed documentation and completions ship with the code; no post-release repair is
-  part of the definition of done.
+- **QR2.** Tests assert behavior, facts, schemas, and stable identifiers, not preferred prose.
+- **QR3.** Command modules stay thin and preserve lazy imports and fast help and completion paths.
+- **QR4.** New graph code has no network dependency and no ambient write side effects.
+- **QR5.** Changed permanent documentation and completions ship with the behavior they describe.
 
 ## Acceptance criteria
 
 1. The old `resource describe-kind`, `resource describe`, and `resource schema --write` spellings
-   fail as unknown or invalid usage and are named in the 0.14 upgrade guide.
+   fail as unknown or invalid usage. The shipped `resource describe` break appears in the 0.14
+   upgrade map; the two unreleased spellings are replaced silently throughout active 0.14 guidance.
 2. `resource explain` passes the current `describe-kind` behavior suite under its new command and
    identity.
-3. The graph view can reproduce the inbound reference and live-instance usage facts formerly shown
-   for a named resource, subject to its explicit direction and source-demand semantics.
-4. Graph output is deterministic, secret-safe, read-only, and equivalent across human and JSON fact
-   projections.
+3. `graph show KIND/NAME` renders the deterministic one-hop outbound, inbound, and live-usage facts
+   in human and JSON form without a kind, direction, or depth option.
+4. Graph is secret-safe and read-only, and a declaration-only query does not demand live state.
 5. `resource schema --install` writes exactly the fixed schema set that the old boolean writer did,
    while every remaining `--write` requires a path.
-6. No active reference, completion entry, machine-output fixture, or operator-facing hint points to
-   a removed spelling except the upgrade guide's before-and-after explanation.
-7. Repository gates and the scoped implementation, completion, documentation, and live CLI tests
-   pass before the draft PR is presented for merge intent.
+6. `secret describe` retains its existing human relationship sections and `secret.describe` JSON
+   fields.
+7. No active reference, completion entry, machine-output fixture, or operator-facing hint points to
+   a removed spelling except the upgrade guide and clearly historical records.
+8. Repository gates and scoped implementation, completion, documentation, and live CLI tests pass
+   before merge intent.
 
 ## Out of scope
 
-- Generic concrete-object describe across declaration and live-instance kinds.
-- New relation providers beyond the minimum graph contract approved in HLA.
-- Field-level explain, explain JSON, graph path queries, DOT or Mermaid, and graph mutation.
+- Generic concrete-object cards across declaration and live-instance kinds.
+- Kind, direction, or depth selection; whole-graph and path queries; new relation providers.
+- Field-level explain, explain JSON, DOT, Mermaid, graph watch, and graph mutation.
 - Renames or flag cleanup outside the four settled corrections.
-- Compatibility aliases or a staged deprecation release.
+- Compatibility aliases, warning shims, or a staged deprecation release.
 
-## Required operator review
-
-Approve or amend the functional boundary above. The remaining graph query choices listed in
-`cli-surface-study.md` are HLA decisions; they do not reopen the settled command ownership or expand
-the feature set.
+HLA may settle the four architecture questions in `cli-surface-study.md` without reopening these
+functional boundaries.

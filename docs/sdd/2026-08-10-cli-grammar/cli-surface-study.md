@@ -1,36 +1,31 @@
 # Focused CLI Grammar Study
 
-- Status: Study input for FRD review
+- Status: Revised input for HLA
 - Date: 2026-08-15
-- Code basis: `origin/main` at `4ff5f1427c8970387b44e4cce0731b6fd14caa02`
-- Scope authority: the next-steps saga ruling plus the operator's 2026-08-15 scope and ownership
-  decisions
+- Code basis: `origin/main` at `44448aa0`
+- Scope authority: the next-steps saga plus the operator's 2026-08-15 command-ownership and
+  compatibility rulings
 
 ## Outcome
 
-This effort is no longer a whole-CLI grammar redesign. It makes four related corrections:
+This effort makes four related corrections rather than redesigning the whole CLI:
 
 1. Rename `agw resource describe-kind TARGET` to `agw resource explain TARGET` without expanding the
-   command's behavior.
-2. Add a top-level `agw graph` namespace whose first subcommand owns relational inspection.
-3. Remove `agw resource describe KIND/NAME`. Its relationship data moves to `graph`; its remaining
-   facts already have other owners.
-4. Make `--write` consistently path-valued by replacing the fixed-destination
-   `agw resource schema --write` mode with `--install`.
+   command.
+2. Add `agw graph show KIND/NAME` as the generic terminal and machine-readable relationship view.
+3. Remove `agw resource describe KIND/NAME`; existing commands cover its non-relational facts.
+4. Replace the fixed-destination `agw resource schema --write` mode with `--install`, leaving
+   path-valued `resource sample --write PATH` unchanged.
 
-The implementation also fixes directly touched help, completion, machine-output, and documentation
-contracts. It does not rename unrelated commands or establish a universal grammar for the other 69
-current endpoints.
+The rebased CLI has 73 leaf command endpoints. No other endpoint is in implementation scope except
+for directly affected help, completion, machine-output, test, and documentation contracts.
 
-## Current surface
-
-The rebased CLI has 73 leaf command endpoints. The only current commands in implementation scope
-are:
+## Current surface and disposition
 
 | Current command                     | Current responsibility                                                   | Disposition                                     |
 | ----------------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------- |
 | `resource describe-kind TARGET`     | Config-independent field and capability documentation                    | Rename to `resource explain`; preserve behavior |
-| `resource describe KIND/NAME`       | Resource header, inbound declaration references, and live-instance usage | Remove; relationships move to `graph`           |
+| `resource describe KIND/NAME`       | Resource header, inbound declaration references, and live-instance usage | Remove                                          |
 | `resource sample KIND --write PATH` | Write or append an inert sample at an operator-selected path             | Keep                                            |
 | `resource schema [KIND] --write`    | Install the complete schema set at a fixed path                          | Rename the mode to `--install`                  |
 
@@ -38,118 +33,94 @@ No top-level `graph` group exists today.
 
 ### Why `resource describe` should disappear
 
-The command currently renders two categories of facts:
+The command has no remaining question of its own after responsibilities are assigned explicitly:
 
-- Identity, description, origin, readiness, and enablement facts. `resource list`, `resource kinds`,
-  `resource edit`, `doctor`, and the kind-specific list and describe commands already own the
-  actionable views of these facts.
-- Inbound declaration references and live database instances that use the resource. These are
-  relationships, so `graph` is their natural owner.
+| Current fact                      | Surviving owner                                                                                                              |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Identity, description, and origin | `resource list`, `resource kinds`, `resource edit`, and kind-specific commands                                               |
+| Readiness                         | `resource list` keeps the marker and JSON reason; `doctor` owns diagnostic explanation                                       |
+| Enablement                        | `resource list --include-disabled` and `doctor` own status; the describe-only sentence is derived prose, not a distinct fact |
+| Inbound declared dependents       | `graph show`                                                                                                                 |
+| Live instances using a resource   | `graph show`                                                                                                                 |
 
-Keeping a reduced `resource describe` would create a card with no distinct operator question.
-Rebuilding it as a generic cross-kind card would restore the broad node-model project that was
-explicitly removed from scope. The clean migration is deletion, with no alias and no replacement
-card.
+Outbound declared dependencies were not part of `resource describe`. `graph show` adds them from the
+existing frozen resource graph to complete the fixed both-directions neighborhood; they are a new
+projection, not a migrated card fact.
 
-## Recommended launch grammar
+Keeping a reduced card would recreate a generic inspector with no distinct operator job.
 
-The HLA should validate this concrete starting point:
+Two current overlaps need explicit treatment. `agw guide KIND/NAME` renders resource relationships,
+but a separate guide-cleanup effort is removing guide routes that add nothing beyond CLI commands.
+This effort does not preserve or recreate that route. `secret describe` is deliberately different:
+it has unique backend-mapping and resolution-preview value, so its contextual relationship sections
+and existing JSON contract remain unchanged. `graph.show` becomes the canonical generic relationship
+contract, not an exclusive ban on useful kind-specific context.
+
+## Launch grammar
 
 ```text
-agw graph show KIND/NAME
-    [--kind KIND[,KIND...]]
-    [--direction dependencies|dependents|both]
-    [--depth N]
-    [--output human|json]
+agw graph show KIND/NAME [--output human|json]
 ```
 
-`show` is preferable to making the graph group itself executable. It names the neighborhood query
-and leaves room for a later two-node `path` query without changing the launch grammar. It is also
-preferable to noun-specific subcommands such as `graph resource`: graph ownership should follow the
-relationship question, not reproduce the source-system partitions that the graph connects.
+Launch requires exactly one focal registry resource. The view is fixed: one hop, both directions,
+with no kind, direction, or depth selector. It contains:
 
-The first implementation must cover the relationships that `resource describe` exposes today:
+- outbound declared-resource references from the focal resource;
+- inbound declared-resource references, preserving `source`, `usage`, and optional `declared_by`;
+- live-instance usage from the focal kind's existing `instances` hook.
 
-- inbound declared-resource references, including their existing `source`, `usage`, and optional
-  `declared_by` metadata;
-- live-instance usage returned by the resource kind's existing `instances` hook.
-
-The saga's focal node, kind filter, direction, depth, and output axes belong in the initial
-contract. Launch requires exactly one focal `KIND/NAME`; omitting it is a usage error. A whole-graph
-query is future work. The HLA must determine which flag combinations can be implemented truthfully
-from current sources. It must not invent a unified living graph or register database rows into the
-frozen resource registry to satisfy the syntax.
+The fixed neighborhood answers the migration question without forcing traversal, cycle, or filter
+semantics that have no launch consumer. The `show` subcommand leaves a clean future home for a
+distinct two-node `path` query.
 
 ### Read and safety boundary
 
-`graph` is an inspector. It must not create or migrate a database, repair stored runtime state,
-activate a resource, resolve a secret value, or prompt for credentials. A declaration-only query
-must not demand an unrelated live-state source. When a selected relationship requires the database,
-the service must open it through an explicitly read-only boundary and give a source-specific error
-if that source cannot be read. The HLA owns the exact source-demand and partial-result policy.
+`graph show` is config-backed: `KIND/NAME` resolves through the finalized request registry. That is
+not the same resolver as config-free `resource explain KIND/NAME`, even though the token looks the
+same.
 
-Human output should be a deterministic adjacency or tree view. JSON should use the repository's
-versioned envelope and typed node and edge records. DOT, Mermaid, watch mode, and arbitrary field
-selection have no named launch consumer and are not initial requirements.
+The command must not create or migrate a database, repair stored runtime state, activate a resource,
+resolve a secret value, make provider or remote probes, or prompt. Source acquisition is
+demand-driven: a focal kind without a live-instance projection does not require an unrelated
+database. When live usage is supported, the database is opened through an explicitly read-only
+boundary with source-specific failure behavior settled in HLA.
+
+Human output is a deterministic one-hop neighborhood. JSON uses the repository's versioned envelope
+and typed node and edge facts.
 
 ## Explain rename boundary
 
-`resource explain TARGET` keeps the current `KIND` and capability `KIND/NAME` target forms. It keeps
-the defining operational property of `describe-kind`: it reads no config and builds no registry, so
-it can explain recovery steps while configuration is broken or a plugin is disabled.
+`resource explain TARGET` retains the current declarable `KIND`, capability `KIND`, and capability
+implementation `KIND/NAME` forms. It reads no config, builds no registry, and opens no database, so
+it continues to work during configuration recovery and for an installed but disabled plugin.
 
-The launch does not add:
-
-- a bare invocation that replaces `resource kinds`;
-- dotted field-path selection;
-- JSON output;
-- aliases or a compatibility wrapper for `describe-kind`.
-
-Implementation names may contain dots today. A future field selector therefore must use a distinct
-option such as `--field PATH`, not append a dotted path to `KIND/NAME` and create an ambiguous
-operand.
+Field-level selection is future work. Because implementation names may contain dots, a future field
+selector should use an option such as `--field PATH` rather than an ambiguous dotted operand.
 
 ## Writer semantics
 
-Only two CLI options are currently named `--write`:
+Only two CLI options are currently named `--write`. `resource sample --write PATH` takes an
+operator-selected relative YAML path; `resource schema --write` is a boolean that installs the full
+set at fixed `resources/.schema/`.
 
-- `resource sample --write PATH` takes an operator-selected relative YAML path.
-- `resource schema --write` is a boolean that writes the complete set to the fixed
-  `resources/.schema/` directory.
+After this effort, `--write` always takes a path. `resource schema --install` names the fixed,
+idempotent installation action and takes no kind. The stdout schema forms remain unchanged.
 
-After this effort, `--write` always takes a path and `resource schema --install` names the fixed,
-idempotent installation action. `schema [KIND]` remains the stdout form. `schema --install` takes no
-kind and retains the existing whole-set and fixed-path behavior.
+## Cutover scope
 
-## Directly related hygiene
+The cutover includes command registration, help, errors, active hints, three-shell completions,
+machine-output IDs and fixtures, current permanent documentation, and behavioral tests. It
+coordinates with the guide-cleanup effort so it neither edits a route that is being deleted nor
+reintroduces that route through generated teaching.
 
-The touched surface needs one internally consistent cutover:
+The FRD is the single authority for implementation exclusions. Historical ADRs and completed SDDs
+remain historical unless they are still active operator instructions.
 
-- Typer command registration, help, examples, errors, and generated shell completions;
-- dynamic completion command IDs;
-- machine-output command IDs and JSON fixtures for the removed and added inspectors;
-- command reference, resources guide, active platform guides, upgrade guide, and embedded guide
-  content;
-- schema, sample, and validation hints that direct operators to the field reference;
-- tests of behavior and structured contracts, without assertions that police author-written prose.
+## Questions handed to HLA
 
-Historical ADR and completed SDD text should remain historical unless it is an active instruction
-that operators still follow.
-
-## Explicit non-goals
-
-- A generic `agw describe` command or a shared card model for every declaration and live instance.
-- Renaming grouped lifecycle, inspection, verification, environment, or synchronization commands.
-- A universal `KIND/NAME` model for every database-backed object.
-- A persistent or mutable living graph service.
-- New graph relation discovery beyond the launch relationships and axes.
-- New explanation features beyond the rename.
-- Compatibility aliases during the pre-0.14 cutover.
-
-## Review questions handed to HLA
-
-1. What are the exact depth-zero, depth-one, unbounded, cycle, and repeated-node rules?
-2. How do current inbound references and live-instance usage map to typed edge kinds and direction?
-3. Which query combinations require the database, and what is the behavior when it is absent, stale,
-   or unreadable?
-4. What stable node and edge fields form the initial `graph.show` JSON v1 contract?
+1. What typed node and edge kinds represent outbound declarations, inbound declarations, and live
+   usage without losing current provenance?
+2. What deterministic ordering and duplicate-edge rules apply to the fixed neighborhood?
+3. Which focal kinds demand the database, and how do absent, stale, malformed, and unreadable live
+   state fail without affecting declaration-only queries?
+4. What stable fields form the initial `graph.show` JSON v1 contract?
