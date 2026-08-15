@@ -230,10 +230,10 @@ def test_disabled_secret_backend_makes_its_active_source_not_ready() -> None:
     assert registry.graph.enablement_of("secret-backend", "onepassword") is Enablement.disabled
     assert registry.graph.readiness_of("secret-backend", "onepassword").is_ready
 
-    config = cast("Config", SimpleNamespace(secret_config_data=SimpleNamespace(backends=("onepassword", "prompt"))))
-    chain = active_sources(config, registry)
-    assert [source.name for source in chain] == ["onepassword", "prompt"]
-    assert not chain[0].readiness.is_ready  # retained so typed resolution can report why it was skipped
+    config = cast("Config", SimpleNamespace(secret_config_data=SimpleNamespace(sources=("onepassword", "prompt"))))
+    sources = active_sources(config, registry)
+    assert [source.name for source in sources] == ["onepassword", "prompt"]
+    assert not sources[0].readiness.is_ready  # retained so typed resolution can report why it was skipped
 
 
 @pytest.mark.parametrize("disable_onepassword", [True, False], ids=["disabled", "enabled"])

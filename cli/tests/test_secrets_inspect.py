@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.secrets.inspect import (
-    _BACKEND_CELL_WIDTH,
     _NAME_CELL_WIDTH,
+    _SOURCE_CELL_WIDTH,
     SecretRow,
     SecretSourceCell,
     SecretTable,
@@ -187,14 +187,14 @@ def test_prompt_cell_has_no_static_identifier(tmp_path: Path) -> None:
 
 
 def test_column_order_matches_backend_chain_precedence(tmp_path: Path) -> None:
-    """The columns appear in [secret_config].backends order so operators
+    """The columns appear in [secret_config].sources order so operators
     see the resolution order directly in the table layout."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
         settings="""
         [secret_config]
-        backends = ["prompt", "env-var"]
+        sources = ["prompt", "env-var"]
         """,
         admin_env={"TOKEN": {"secret": "x"}},
         manifests=[ManifestDoc("secret", "x", description="x")],
@@ -236,7 +236,7 @@ def test_names_only_lists_every_registry_secret(tmp_path: Path, monkeypatch) -> 
 
 
 def test_empty_backend_chain_yields_no_columns(tmp_path: Path) -> None:
-    """``backends = []`` opts out of all resolution; the table has no
+    """``sources = []`` opts out of all resolution; the table has no
     backend columns. Operator-declared secrets in this state would
     trip the unreachable-secret config-load error. The
     auto-declared ``tailscale-auth-key`` row (Phase 1c) is still
@@ -248,7 +248,7 @@ def test_empty_backend_chain_yields_no_columns(tmp_path: Path) -> None:
         cfg_file,
         settings="""
         [secret_config]
-        backends = []
+        sources = []
         """,
     )
     table = _build_table(cfg_file)
@@ -263,11 +263,11 @@ def test_render_secret_table_caps_long_backend_identifier(
     captured_output: CapturedOutput,
 ) -> None:
     """The LIST view truncates a long backend identifier to
-    ``_BACKEND_CELL_WIDTH`` with a trailing ``...`` so it cannot blow the
+    ``_SOURCE_CELL_WIDTH`` with a trailing ``...`` so it cannot blow the
     table width out. Built directly (no op wiring): the account-first
     onepassword identifier here comfortably exceeds the cap."""
     long_ident = "my.1password.com: op://Employee/Registry/token"
-    assert len(long_ident) > _BACKEND_CELL_WIDTH
+    assert len(long_ident) > _SOURCE_CELL_WIDTH
     table = SecretTable(
         sources=("onepassword",),
         rows=(
@@ -289,11 +289,11 @@ def test_render_secret_table_caps_long_backend_identifier(
     )
     render_secret_table(table)
 
-    truncated = long_ident[: _BACKEND_CELL_WIDTH - 3] + "..."
-    assert len(truncated) == _BACKEND_CELL_WIDTH
+    truncated = long_ident[: _SOURCE_CELL_WIDTH - 3] + "..."
+    assert len(truncated) == _SOURCE_CELL_WIDTH
     joined = "\n".join(captured_output.info)
     # The identifier appears truncated, and the full form never does, so the
-    # onepassword column width is bounded by ``_BACKEND_CELL_WIDTH``.
+    # onepassword source column width is bounded by ``_SOURCE_CELL_WIDTH``.
     assert truncated in joined
     assert long_ident not in joined
     data_line = next(line for line in captured_output.info if line.startswith("reg "))
@@ -347,7 +347,7 @@ def _readiness_grid_config(tmp_path: Path) -> Path:
         system = ["onepassword"]
 
         [secret_config]
-        backends = ["env-var", "onepassword", "prompt"]
+        sources = ["env-var", "onepassword", "prompt"]
         """,
         admin_env={
             "A": {"secret": "mapped-op"},

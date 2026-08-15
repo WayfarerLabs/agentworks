@@ -229,12 +229,7 @@ def test_validate_manifest_action_reports_precise_manifest_failure_in_json(
 ) -> None:
     config_path = _write_doctor_config(
         tmp_path,
-        """
-        [vm_templates.default]
-
-        [admin.config]
-        shell = "zsh"
-        """,
+        "",
     )
     sensitive = "sensitive-invalid-manifest-marker"
     resources = tmp_path / "resources"
@@ -252,11 +247,10 @@ def test_validate_manifest_action_reports_precise_manifest_failure_in_json(
     data = cast("dict[str, object]", document["data"])
     checks = _configuration_checks(document)
     assert next(check for check in checks if check["name"] == "Config file")["status"] == "ok"
-    assert next(check for check in checks if check["name"] == "Config")["status"] == "fail"
     manifest = next(check for check in checks if check["name"] == "Manifest")
     assert manifest["status"] == "fail"
     assert sensitive in cast("str", manifest["message"])
-    assert cast("dict[str, int]", data["counts"])["fail"] == 2
+    assert cast("dict[str, int]", data["counts"])["fail"] == 1
 
 
 def test_validate_manifest_action_rejects_registry_failure_after_decode(
@@ -265,12 +259,7 @@ def test_validate_manifest_action_rejects_registry_failure_after_decode(
 ) -> None:
     config_path = _write_doctor_config(
         tmp_path,
-        """
-        [vm_templates.default]
-
-        [admin.config]
-        shell = "zsh"
-        """,
+        "",
     )
     missing = "unknown-parent-marker"
     write_manifests(tmp_path, ManifestDoc("vm-template", "child", {"inherits": [missing]}))
@@ -286,7 +275,6 @@ def test_validate_manifest_action_rejects_registry_failure_after_decode(
     registry = next(check for check in checks if check["name"] == "Resource registry")
     assert registry["status"] == "fail"
     assert missing in cast("str", registry["message"])
-    assert "require no check with either name" in action.expected_state
 
 
 def test_validate_manifest_action_rejects_settings_error_before_manifest_check(
@@ -305,21 +293,15 @@ def test_validate_manifest_action_rejects_settings_error_before_manifest_check(
     assert [check["name"] for check in checks] == ["Config file", "Config"]
     assert checks[1]["status"] == "fail"
     assert "unexpected-settings" in cast("str", checks[1]["message"])
-    assert "Config message must be the expected migration hard error" in action.expected_state
 
 
-def test_validate_manifest_action_reports_stable_retained_checkpoint_structure(
+def test_validate_manifest_action_reports_a_clean_cutover_checkpoint(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = _write_doctor_config(
         tmp_path,
-        """
-        [vm_templates.default]
-
-        [admin.config]
-        shell = "zsh"
-        """,
+        "",
     )
     _configure_config_only_doctor(monkeypatch, config_path)
     action = _migration_actions()["validate-manifest-set"]
@@ -327,12 +309,11 @@ def test_validate_manifest_action_reports_stable_retained_checkpoint_structure(
 
     result = CliRunner().invoke(app, list(action.command[1:]))
 
-    document = _parse_exact_v1(result, "doctor", exit_code=1)
+    document = _parse_exact_v1(result, "doctor")
     checks = _configuration_checks(document)
     assert next(check for check in checks if check["name"] == "Config file")["status"] == "ok"
-    config = next(check for check in checks if check["name"] == "Config")
-    assert config["status"] == "fail"
-    assert "config.toml declares resources" in cast("str", config["message"])
+    config = next(check for check in checks if check["name"] == "Config is valid")
+    assert config["status"] == "ok"
     assert not any(
         check["name"] in {"Manifest", "Resource registry"} and check["status"] in {"warn", "fail"} for check in checks
     )

@@ -2,10 +2,9 @@
 
 Each provider implementation (``GitHubCredentialProvider``,
 ``AzDOCredentialProvider``) is the code-side handle for one
-``[git_credentials.<name>].provider = "..."`` value (``type`` is the
-accepted legacy alias). The framework's ``git-credential-provider``
-kind holds one row per known provider so a typo in the
-operator's ``provider`` field surfaces as a clean miss-policy error at
+git-credential manifest's ``spec.provider.name`` value. The framework's
+``git-credential-provider`` kind holds one row per known provider so a typo in
+the operator's provider name surfaces as a clean miss-policy error at
 ``build_registry`` time.
 """
 

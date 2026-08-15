@@ -35,9 +35,9 @@ def test_migration_actions_pin_order_consent_operations_and_no_execution_authori
         ("backup-resources", ConsentBoundary.MUTATE_AGENTWORKS),
         ("verify-migration-inputs", ConsentBoundary.READ_CONFIGURED_STATE),
         ("edit-one-manifest", ConsentBoundary.MUTATE_AGENTWORKS),
-        ("validate-manifest-set", ConsentBoundary.EXAMINE_WORKSTATION),
         ("review-null-secret-fields", ConsentBoundary.READ_CONFIGURED_STATE),
         ("remove-retired-sections", ConsentBoundary.MUTATE_AGENTWORKS),
+        ("validate-manifest-set", ConsentBoundary.EXAMINE_WORKSTATION),
         ("compare-operator-inventory", ConsentBoundary.EXAMINE_WORKSTATION),
         ("finish-doctor", ConsentBoundary.EXAMINE_WORKSTATION),
         ("restore-database-backup", ConsentBoundary.MUTATE_AGENTWORKS),
@@ -45,8 +45,8 @@ def test_migration_actions_pin_order_consent_operations_and_no_execution_authori
     ]
     assert action_block.actions[0].command is None
     assert action_block.actions[0].manual_steps is not None
-    assert action_block.actions[5].command == ("agw", "doctor", "--output", "json")
-    assert action_block.actions[5].verification is None
+    assert action_block.actions[7].command == ("agw", "doctor", "--output", "json")
+    assert action_block.actions[7].verification is None
     assert action_block.actions[8].command == (
         "agw",
         "resource",
@@ -117,12 +117,7 @@ def test_migration_actions_make_inventory_backups_and_verification_distinct() ->
     assert "pre-existing or TOML-derived expected identity" in edit.required_inputs[0].description
     assert "separate field-reference topic" in edit.manual_steps
     assert "whether it is pre-existing or TOML-derived" in edit.manual_steps
-    assert "apply that hard error's exact rewrite" in edit.manual_steps
     assert "delete the retired line and write auth ambient, auth ambient, or placement local" in edit.manual_steps
-    assert "canonical tagged stored arm" in edit.manual_steps
-    assert "token: {mode: stored, secret: <existing-name>}" in edit.manual_steps
-    assert "Delete an outer token: null line or replace it exactly with token: {mode: stored}" in edit.manual_steps
-    assert "an omitted or null inner token.secret selects the default" in edit.manual_steps
     assert "No minted arm exists" in edit.manual_steps
     assert "MANIFEST_PATH to equal" in edit.manual_steps
     assert "pre-recorded file" in edit.manual_steps
@@ -132,19 +127,6 @@ def test_migration_actions_make_inventory_backups_and_verification_distinct() ->
     validation = by_id["validate-manifest-set"]
     assert validation.command == ("agw", "doctor", "--output", "json")
     assert validation.verification is None
-    assert "config.toml declares resources" in validation.expected_state
-    assert "config.toml is settings only now" in validation.expected_state
-    assert "names the retained sections" in validation.expected_state
-    assert "command must exit 1" in validation.expected_state
-    assert "one JSON document" in validation.expected_state
-    assert "data.groups contains the Configuration group" in validation.expected_state
-    assert "Config file with status ok" in validation.expected_state
-    assert "Config with status fail" in validation.expected_state
-    assert "require no check with either name" in validation.expected_state
-    assert "status warn or fail" in validation.expected_state
-    assert "Use the Manifest and Resource registry facts for precise diagnostics" in validation.expected_state
-    assert "hard error leaves this action unverified" in validation.expected_state
-    assert "returns the selected manifest to edit-one-manifest" in validation.expected_state
 
     comparison = by_id["compare-operator-inventory"]
     assert comparison.consent is ConsentBoundary.EXAMINE_WORKSTATION
@@ -324,9 +306,9 @@ def test_migration_git_token_teaching_matches_live_reference_and_services(
     token_entries = _schema_entries(target, ("token",))
     assert len(token_entries) == 1
     token = token_entries[0]
-    assert token.doc.default == {"mode": "stored"}
+    assert token.doc.default == {"mode": "secret"}
     assert not token.doc.required
-    assert [alternative.name for alternative in token.alternatives] == ["stored"]
+    assert [alternative.name for alternative in token.alternatives] == ["secret"]
     assert _schema_paths(target) >= {("token",), ("token", "mode"), ("token", "secret")}
     assert "minted" not in repr(reference_for(target))
 
@@ -347,16 +329,16 @@ def test_migration_git_token_teaching_matches_live_reference_and_services(
 
     assert refs() == [("secret", "git-token-dev")]
     assert refs("gh-pat") == [("secret", "gh-pat")]
-    assert refs({"mode": "stored"}) == [("secret", "git-token-dev")]
-    assert refs({"mode": "stored", "secret": None}) == [("secret", "git-token-dev")]
+    assert refs({"mode": "secret"}) == [("secret", "git-token-dev")]
+    assert refs({"mode": "secret", "secret": None}) == [("secret", "git-token-dev")]
 
-    with pytest.raises(ConfigError, match=r"replace the null line with the explicit choice: token: \{mode: stored\}"):
+    with pytest.raises(ConfigError):
         validate_capability_config(
             kind="git-credential-provider",
-            config={"name": provider, **base, "token": None},
+            config={"name": provider, **base, "token": {"mode": "stored", "secret": "gh-pat"}},
             owner=owner,
         )
-    with pytest.raises(ConfigError, match="unknown mode 'minted'; registered: 'stored'"):
+    with pytest.raises(ConfigError):
         validate_capability_config(
             kind="git-credential-provider",
             config={"name": provider, **base, "token": {"mode": "minted"}},
@@ -375,8 +357,8 @@ def test_declarable_git_credential_reference_keeps_structural_token_union() -> N
         ("provider", "token", "secret"),
     }
     assert len(token_entries) == 1
-    assert token_entries[0].doc.default == {"mode": "stored"}
-    assert [alternative.name for alternative in token_entries[0].alternatives] == ["stored"]
+    assert token_entries[0].doc.default == {"mode": "secret"}
+    assert [alternative.name for alternative in token_entries[0].alternatives] == ["secret"]
 
 
 def test_migration_review_action_covers_all_sites_and_distinguishes_outer_from_inner_null() -> None:
@@ -391,12 +373,9 @@ def test_migration_review_action_covers_all_sites_and_distinguishes_outer_from_i
     assert "omitted placement selects local" in manual
     assert "outer explicit null means auth ambient, auth ambient, or placement local" in manual
     assert "Inside a credential arm, an omitted or null secret reference" in manual
-    assert "record the hard error's exact required rewrite and return it to edit-one-manifest" in manual
     assert "Do not modify a manifest during this review" in manual
-    assert "apply that hard error's exact rewrite" not in manual
     assert "delete the retired line" not in manual
     assert "provider.token" not in manual
-    assert "token: null" not in manual
     for stale in ("service_principal.secret", "credentials.access_key_secret"):
         assert stale not in manual
 
@@ -417,17 +396,9 @@ def test_migration_teaching_covers_cutover_validation_backends_and_auth_choices(
         "pre-recorded intended path",
         "without changing the baseline",
         "one manifest at a time",
-        "after each edit",
-        "must say that `config.toml` declares resources",
-        "`config.toml` is settings only now",
-        "name the retained sections",
-        "`Resource registry` facts for precise diagnostics",
-        "retained-section checkpoint exits `1`",
-        "`Config file` with status `ok`",
-        "`Config` with status `fail`",
-        "no check with either name to have status `warn` or `fail`",
+        "ordinary top-level validation",
+        "Validation begins after the one-time TOML cutover",
         "`[secret_backends.*]`",
-        "`[secret_config].backends`",
         "Inspect every pre-existing and TOML-derived site manifest",
         "Omitted `auth` defaults to ambient authentication",
         "`auth.secret` names the client secret",
@@ -444,15 +415,7 @@ def test_migration_teaching_covers_cutover_validation_backends_and_auth_choices(
         "strict types",
         "`spec.platform.name: azure-vm`",
         "`spec.provider`",
-        "An omitted `provider.token` still selects a stored token and the default secret name",
-        "A scalar such as `token: gh-pat` is still accepted as shorthand",
-        "canonical current spelling is the tagged shape",
-        "omitting `token.secret` or writing `secret: null` selects the default secret name",
-        "The old outer spelling `token: null` is retired",
-        "`token: {mode: stored}`",
-        "A retired TOML scalar may still become the accepted scalar shorthand",
-        "No `minted` arm exists in the current contract",
-        "Any manifest validation hard error returns that manifest to this edit loop",
+        "Any validation error returns the selected manifest to `edit-one-manifest`",
     ):
         assert required in flowed
     for stale in ("`service_principal.secret`", "`credentials.access_key_secret`"):
@@ -460,7 +423,7 @@ def test_migration_teaching_covers_cutover_validation_backends_and_auth_choices(
     assert "migration command" not in flowed
 
 
-def test_migration_action_rendering_is_markdown_safe_and_mode_identical() -> None:
+def test_migration_action_payload_is_mode_identical() -> None:
     topic = _topic("concept-migration")
     human = render_topic(topic, None, GuideMode.HUMAN)
     agent = render_topic(topic, None, GuideMode.AGENT)
@@ -468,6 +431,3 @@ def test_migration_action_rendering_is_markdown_safe_and_mode_identical() -> Non
     human_actions = next(block for block in human.blocks if block.key.block_id == "actions")
     agent_actions = next(block for block in agent.blocks if block.key.block_id == "actions")
     assert human_actions.source_payload == agent_actions.source_payload
-    assert "Authorization class: `mutate-agentworks`" in human_actions.markdown
-    assert "[secret_config].backends" not in human_actions.markdown
-    assert r"\[secret\_config\].backends" in human_actions.markdown

@@ -13,7 +13,7 @@
 # config.toml is settings only now, and a config that still declares a
 # legacy inline resource section (e.g. the old `[azure]` vm-site shape)
 # must fail loudly rather than have that section silently dropped. See
-# `agentworks/config/load.py`'s `_raise_for_resource_sections` for the
+# `agentworks/config/load.py`'s unexpected-top-level validation for the
 # loader logic this exercises.
 #
 # See docs/testing/harnesses/README.md for the maintenance contract. Adapt
@@ -30,27 +30,60 @@ cleanup() {
 trap cleanup EXIT
 
 export HOME="$WORKDIR"
-mkdir -p "$HOME/.config/agentworks"
+export USERPROFILE="$WORKDIR"
+mkdir -p "$HOME/.config/agentworks" "$HOME/.ssh"
+printf 'ssh-ed25519 AAAA...\n' >"$HOME/.ssh/id_ed25519.pub"
+printf '%s\n' '-----BEGIN OPENSSH PRIVATE KEY-----' >"$HOME/.ssh/id_ed25519"
+chmod 600 "$HOME/.ssh/id_ed25519"
 
-# An OLD-shaped config.toml: a legacy inline `[azure]` vm-site section,
-# the pre-ADR-0022 way of declaring a resource directly in config.toml.
+# Start with valid settings so the paired drive proves that adding the retired
+# resource root, rather than an unrelated settings defect, changes the
+# Configuration state.
 cat >"$HOME/.config/agentworks/config.toml" <<'EOF'
-[azure]
-subscription_id = "example"
+[operator]
+ssh_public_key = "~/.ssh/id_ed25519.pub"
+ssh_private_key = "~/.ssh/id_ed25519"
 EOF
 
 cd "$CLI_DIR"
 
+configuration_state() {
+    local expected="$1"
+    uv run python -c '
+import json
+import sys
+
+document = json.load(sys.stdin)
+assert document["schema_version"] == 1
+assert document["command"] == "doctor"
+configuration = next(group for group in document["data"]["groups"] if group["name"] == "Configuration")
+checks = configuration["checks"]
+failures = [check for check in checks if check["status"] == "fail"]
+if sys.argv[1] == "valid":
+    assert not failures
+else:
+    assert len(failures) == 1
+' "$expected"
+}
+
+echo "--- driving agw doctor against valid settings ---"
+OUTPUT="$(uv run agw doctor --output json 2>/dev/null || true)"
+echo "$OUTPUT"
+printf '%s' "$OUTPUT" | configuration_state valid
+
+# Add an OLD-shaped legacy inline `[azure]` vm-site section, the pre-ADR-0022
+# way of declaring a resource directly in config.toml.
+cat >>"$HOME/.config/agentworks/config.toml" <<'EOF'
+
+[azure]
+subscription_id = "example"
+EOF
+
 echo "--- driving agw doctor against an old-shaped config.toml ---"
-OUTPUT="$(uv run agw doctor 2>&1 || true)"
+OUTPUT="$(uv run agw doctor --output json 2>/dev/null || true)"
 echo "$OUTPUT"
 
 echo ""
 echo "--- asserting the breaking change fails LOUDLY, not silently ---"
-if echo "$OUTPUT" | grep -q 'declares resources, which config.toml no longer supports'; then
-    echo "  ok: the legacy section is rejected with a precise, actionable error"
-else
-    echo "  VIOLATION: expected a loud rejection of the legacy [azure] section;" >&2
-    echo "  the loader may now be silently ignoring or mishandling it instead." >&2
-    exit 1
-fi
+printf '%s' "$OUTPUT" | configuration_state invalid
+echo "  ok: the legacy section changes Configuration from valid to failed"

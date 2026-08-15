@@ -215,8 +215,8 @@ def test_cli_edit_rejects_token_without_slash(tmp_path: Path, monkeypatch) -> No
     assert "expected KIND/NAME" in str(result.exception)
 
 
-def test_cli_edit_works_when_config_fails_validation(tmp_path: Path, monkeypatch) -> None:
-    """The fix-it path: a broken config is exactly when edit is needed
+def test_cli_edit_works_when_manifests_fail_validation(tmp_path: Path, monkeypatch) -> None:
+    """The fix-it path: a broken manifest is exactly when edit is needed
     most (the maintainer hit this breaking YAML intentionally). A
     ConfigError from the strict path falls back to a tolerant,
     validation-free envelope scan; the declaring file still opens, with

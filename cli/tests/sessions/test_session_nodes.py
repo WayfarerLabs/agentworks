@@ -439,7 +439,7 @@ def test_sweep_predicts_a_harness_integration_config_secret_with_owner_usage_fra
     template = (
         [ManifestDoc("session-template", "scan", {"harness_integration": {"name": "scanner"}})] if declared else []
     )
-    config = write_operator_config(tmp_path, '[secret_config]\nbackends = ["env-var"]\n', manifests=template)
+    config = write_operator_config(tmp_path, '[secret_config]\nsources = ["env-var"]\n', manifests=template)
     registry = build_registry(config)
     # Prove the parametrization actually forks the declaration path: a
     # real auto-declared row versus the synthesize fallback's KeyError.
@@ -471,7 +471,7 @@ def test_sweep_passes_a_resolvable_harness_integration_config_secret(
     from agentworks.orchestration.secrets import secret_union
     from tests.orchestrated_fixtures import write_operator_config
 
-    config = write_operator_config(tmp_path, '[secret_config]\nbackends = ["env-var"]\n')
+    config = write_operator_config(tmp_path, '[secret_config]\nsources = ["env-var"]\n')
     registry = build_registry(config)
     monkeypatch.setenv("AW_SECRET_SCANNER_API_KEY", "sk-123")
     session = _scanner_session(db, monkeypatch)

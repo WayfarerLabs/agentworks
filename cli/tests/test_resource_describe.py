@@ -67,7 +67,7 @@ def test_describes_operator_declared_resource(tmp_path: Path) -> None:
         cfg_file,
         settings="""
         [secret_config]
-        backends = ["env-var"]
+        sources = ["env-var"]
         """,
         manifests=[ManifestDoc("secret", "my-key", description="operator-typed note")],
     )

@@ -8,7 +8,7 @@ Use `agw resource sample secret-source` to start a source manifest and
 OnePassword, declare a source that selects the `onepassword` backend and holds its account and
 optional timeout; each secret maps that source name directly to one scalar `op://` reference. The
 configured backend name `onepassword` is not a source alias. The synthesized source names `env-var`
-and `prompt` remain valid directly in `[secret_config].backends`.
+and `prompt` remain valid directly in `[secret_config].sources`.
 
 Use `agw secret describe NAME` for non-resolving prediction. Use `agw secret verify NAME...` for a
 real batch proof when the exact names and value-free resolution class are inside the current

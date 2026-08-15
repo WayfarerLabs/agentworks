@@ -14,7 +14,7 @@ def test_secret_decl_defaults() -> None:
     assert d.backend_mappings == {}
 
 
-def test_secret_decl_carries_mappings_keyed_by_backend_name() -> None:
+def test_secret_decl_carries_mappings_keyed_by_source_name() -> None:
     d = SecretDecl(
         name="x",
         description="X",
@@ -27,20 +27,20 @@ def test_secret_decl_carries_mappings_keyed_by_backend_name() -> None:
 
 def test_secret_config_default_chain() -> None:
     """SecretConfig defaults to the standard env-var + prompt chain when no
-    [secret_config].backends is provided. Operators who don't use secrets
+    [secret_config].sources is provided. Operators who don't use secrets
     pay nothing; operators who do get sensible zero-config resolution."""
     from agentworks.secrets.base import DEFAULT_SOURCE_CHAIN
 
-    assert SecretConfig().backends == DEFAULT_SOURCE_CHAIN
+    assert SecretConfig().sources == DEFAULT_SOURCE_CHAIN
     assert DEFAULT_SOURCE_CHAIN == ("env-var", "prompt")
 
 
 def test_secret_config_explicit_empty_disables_chain() -> None:
     """An explicit empty list opts out of resolution entirely (different
     from absence-of-config, which gets the default chain)."""
-    assert SecretConfig(backends=()).backends == ()
+    assert SecretConfig(sources=()).sources == ()
 
 
 def test_secret_config_preserves_order() -> None:
-    cfg = SecretConfig(backends=("env-var", "op-work", "prompt"))
-    assert cfg.backends == ("env-var", "op-work", "prompt")
+    cfg = SecretConfig(sources=("env-var", "op-work", "prompt"))
+    assert cfg.sources == ("env-var", "op-work", "prompt")

@@ -46,7 +46,7 @@ def test_declared_source_accepts_string_subclass_plugin_attribution(
             {"backend_mappings": {"work-op": "op://Work/item/password"}},
             description="token",
         ),
-        settings='[secret_config]\nbackends = ["work-op"]\n',
+        settings='[secret_config]\nsources = ["work-op"]\n',
     )
     config = load_config(config_path, warn_issues=False)
     registry = build_registry(config)

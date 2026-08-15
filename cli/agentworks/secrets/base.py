@@ -189,7 +189,7 @@ class SecretDecl(DeclaredResource):
         pass: EVERY declared ``backend_mappings`` entry is validated by the
         CORE against its selected backend's declared model (R9.9: every declared
         mapping, not just the opted-in ones, so a stale mapping for a
-        configured-but-not-opted-in backend fails at build). No backend code
+        configured-but-not-opted-in source fails at build). No backend code
         runs.
 
         UNCONDITIONAL over enablement, like the pass that calls it
@@ -251,11 +251,11 @@ class SecretDecl(DeclaredResource):
 
 
 DEFAULT_SOURCE_CHAIN: tuple[str, ...] = ("env-var", "prompt")
-"""Default source chain when ``[secret_config].backends`` is absent.
+"""Default source chain when ``[secret_config].sources`` is absent.
 
 Resolves declared secrets from operator-side env (``AW_SECRET_<NAME>``) first,
 then prompts interactively. The chain is operator-overridable via an explicit
-``[secret_config]`` block; an explicit empty list ``backends = []`` disables
+``[secret_config]`` block; an explicit empty list ``sources = []`` disables
 resolution entirely (operators who don't use secrets pay nothing either way).
 """
 
@@ -268,15 +268,15 @@ class SecretConfig:
     subsystem when it validates (``validate_chain``, at
     ``build_registry``) and when it resolves (the operation's typed resolution batch).
 
-    ``backends`` retains its settings spelling but contains source names:
+    ``sources`` is the settings spelling and contains source names:
     presence activates the source and list order is the resolution precedence. A declared source absent from
     this list is dormant (never consulted).
 
     Default value is ``DEFAULT_SOURCE_CHAIN`` (``env-var``, then ``prompt``).
     The default applies when the operator's TOML has no ``[secret_config]``
-    table OR has the table without a ``backends`` key. An explicit
-    ``backends = []`` disables resolution entirely.
+    table OR has the table without a ``sources`` key. An explicit
+    ``sources = []`` disables resolution entirely.
     """
 
-    backends: tuple[str, ...] = DEFAULT_SOURCE_CHAIN
+    sources: tuple[str, ...] = DEFAULT_SOURCE_CHAIN
     declared_at: SourceLocation = field(default_factory=synthesized)

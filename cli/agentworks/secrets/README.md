@@ -8,8 +8,8 @@ instances of those implementations.
 
 The distinction matters when one backend needs several configurations. Two sources can both select
 `onepassword` while using different accounts, timeouts, and precedence positions. A secret's
-`backend_mappings` keys are source names, and `[secret_config].backends` keeps its existing spelling
-but contains source names in resolution order.
+`backend_mappings` keys are source names, and `[secret_config].sources` contains source names in
+resolution order.
 
 ## Simple defaults
 
@@ -56,7 +56,7 @@ spec:
     work-op: op://Engineering/npm/token
 ```
 
-Then place `work-op` wherever it belongs in `[secret_config].backends`. A configured backend name
+Then place `work-op` wherever it belongs in `[secret_config].sources`. A configured backend name
 such as `onepassword` is not treated as a source alias in 0.14. The synthesized `env-var` and
 `prompt` source names remain valid unchanged. An unknown source name that exactly matches a
 configured backend produces a hard error with the source manifest and mapping rewrite; there is no

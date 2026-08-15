@@ -63,7 +63,7 @@ TOML resource loaders/publisher, nothing else.
 resource registry may use the word "kind" for its identity. Lifecycle entities (VMs, workspaces,
 agents, sessions, consoles) are NOT resources, and code calls their type `instance_kind`.
 
-Config is just config: settings that name resources (like `[secret_config].backends`) are never
+Config is just config: settings that name resources (like `[secret_config].sources`) are never
 published as pseudo-resources; the owning subsystem validates them against the finalized registry at
 the composition boundary (`build_registry`).
 
@@ -125,6 +125,10 @@ config at the reference site.
 > - **The capability is not invoked.** It DECLARES its config as a model, and the core derives both
 >   the validation and the implied references from that declaration, reading the model and the raw
 >   blob and running no capability code. The config is no longer an opaque blob to the framework.
+>
+> Amended 2026-08-14: the release-scoped sibling-shape rewrite named above has been retired. An old
+> sibling pair now reaches ordinary closed-world model validation. `HostSurface` records only the
+> live host kind and tagged naming field; it no longer carries the retired sibling field name.
 
 The INTERNAL resource representation follows the nested shape too
 (`GitCredentialConfig.provider_config`) as this represents the best representation available. For
@@ -143,11 +147,11 @@ the YAML surface and the internal model stay uniform.
 > arguing for is now structural: there is one shape, on the surface and inside.
 
 For secrets concretely, the current model is a bounded `SecretBackend` client selected by a
-declarable `secret-source`. `[secret_config].backends` keeps its spelling but lists source names in
-precedence order, and `backend_mappings` is keyed by source name. `env-var` and `prompt` are
-synthesized sources, preserving the simple default. OnePassword account and timeout live on its
-source; the per-secret mapping is one scalar `op://` reference. Resolution opens one lazy client per
-attempted source and produces value-free typed outcomes.
+declarable `secret-source`. `[secret_config].sources` lists source names in precedence order, and
+`backend_mappings` is keyed by source name. `env-var` and `prompt` are synthesized sources,
+preserving the simple default. OnePassword account and timeout live on its source; the per-secret
+mapping is one scalar `op://` reference. Resolution opens one lazy client per attempted source and
+produces value-free typed outcomes.
 
 ### YAML manifests, auto-loaded, Kubernetes envelope
 
@@ -218,7 +222,7 @@ ADR 0013's decision (CLI-side secret injection at command time, with no VM-side 
 ADR 0014's decision (`AcceptEnv AW_*` wildcard transport via SSH `SetEnv`) both stand unchanged.
 What this ADR supersedes is the resolution _mechanism_ those documents describe in passing: the "env
 var, then prompt" sourcing is the default configured-source chain
-(`[secret_config].backends = ["env-var", "prompt"]`) over synthesized sources. Where 0013/0014 say
+(`[secret_config].sources = ["env-var", "prompt"]`) over synthesized sources. Where 0013/0014 say
 "the CLI resolves secret values", read "the active source chain resolves them through bounded
 `SecretBackend` clients".
 

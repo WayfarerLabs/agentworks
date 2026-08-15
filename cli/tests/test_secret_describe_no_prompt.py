@@ -41,7 +41,7 @@ def _write_api_key_cfg(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> Path:
             ssh_private_key = "{priv}"
 
             [secret_config]
-            backends = ["env-var", "prompt"]
+            sources = ["env-var", "prompt"]
             """
         )
     )

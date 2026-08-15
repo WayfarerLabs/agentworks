@@ -11,9 +11,9 @@ A capability-only migration (no bundled manifests), so this drives
 - a ``vm-site`` on the ``proxmox`` platform (a ``resources/`` manifest now, ADR
   0022): not-ready with the "enable plugin `proxmox`" hint, and ``resolve_site``
   refuses it at use, until ``[plugins] system = ["proxmox"]``. The legacy
-  ``[proxmox]`` flat section is a hard error at load now (pinned in
-  ``tests/vms/test_legacy_site_sections.py``), so its former "guided, not
-  broken" degrade-to-hint behavior no longer applies.
+  ``[proxmox]`` flat section is now an ordinary unexpected top-level key at
+  load, so its former "guided, not broken" degrade-to-hint behavior no longer
+  applies.
 
 Enabling ``[plugins] system = ["proxmox"]`` makes the site ready and
 resolvable.
@@ -41,9 +41,9 @@ if TYPE_CHECKING:
 
 
 # A ``vm-site`` manifest named ``proxmox`` on the ``proxmox`` platform, the
-# declarative replacement for the legacy ``[proxmox]`` flat section (which is a
-# hard error now, ADR 0022; that breaking change is pinned in
-# ``tests/vms/test_legacy_site_sections.py``). Used as the ordinary site fixture.
+# declarative replacement for the legacy ``[proxmox]`` flat section (now an
+# ordinary unexpected top-level key, ADR 0022). Used as the ordinary site
+# fixture.
 def _proxmox_site() -> ManifestDoc:
     return ManifestDoc(
         "vm-site",
@@ -160,11 +160,9 @@ def test_resolve_site_refuses_disabled_proxmox_with_hint(tmp_path: Path) -> None
 
 
 # The R11.1 "guided, not broken" pin for the LEGACY ``[proxmox]`` flat section
-# is retired: under ADR 0022 that section is a hard error at load, not a
+# is retired: under ADR 0022 that section is an unexpected top-level key, not a
 # silently-disabled site, so the "lands on the disabled row" premise is
-# structurally gone. The hard error (carrying the vm-site migration guidance)
-# is pinned by ``tests/vms/test_legacy_site_sections.py``; the disabled-site
-# enable hint stays covered by
+# structurally gone. The disabled-site enable hint stays covered by
 # ``test_site_on_disabled_proxmox_is_not_ready_with_hint`` above.
 
 

@@ -1,7 +1,7 @@
 """Tests for Phase 1d's git-credential token-resolution path.
 
 The framework resolves each git-credential's ``token`` field through
-the backend chain; the resolved value is written into
+the source chain; the resolved value is written into
 ``~/.git-credentials`` via ``credential_lines``. No
 ``AW_GIT_CREDENTIALS_<NAME>`` lookup, no ``provider.obtain_token``
 fallback.
@@ -67,7 +67,7 @@ def test_collect_git_tokens_resolves_default_secret_name(
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var"]
+        sources = ["env-var"]
         """,
         manifests=[ManifestDoc("git-credential", "github", {"provider": {"name": "github"}})],
     )
@@ -92,7 +92,7 @@ def test_collect_git_tokens_resolves_custom_secret_name(
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var"]
+        sources = ["env-var"]
         """,
         manifests=[ManifestDoc("git-credential", "github", {"provider": {"name": "github", "token": "custom-tok"}})],
     )
@@ -123,7 +123,7 @@ def test_collect_git_tokens_rejects_multiline_after_real_operation_resolve(
 
     cfg = _write_cfg(
         tmp_path,
-        settings='[secret_config]\nbackends = ["env-var"]\n',
+        settings='[secret_config]\nsources = ["env-var"]\n',
         manifests=[ManifestDoc("git-credential", "github", {"provider": {"name": "github"}})],
     )
     config = load_config(cfg, warn_issues=False)
@@ -153,7 +153,7 @@ def test_collect_git_tokens_batches_multiple_credentials(
         system = ["azure"]
 
         [secret_config]
-        backends = ["env-var"]
+        sources = ["env-var"]
         """,
         manifests=[
             ManifestDoc("git-credential", "github", {"provider": {"name": "github"}}),
@@ -192,7 +192,7 @@ def test_manifest_declared_credential_resolves_through_the_fold(
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var"]
+        sources = ["env-var"]
         """,
         manifests=[
             ManifestDoc("git-credential", "widgets-bot", {"provider": {"name": "github", "repos": ["acme/widgets"]}})
@@ -219,7 +219,7 @@ def test_collect_git_tokens_credential_lines_use_resolved_value(
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var"]
+        sources = ["env-var"]
         """,
         manifests=[ManifestDoc("git-credential", "github", {"provider": {"name": "github"}})],
     )
@@ -250,7 +250,7 @@ def test_secret_name_equals_graph_secret_edge_single_derivation(
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var"]
+        sources = ["env-var"]
         """,
         manifests=[ManifestDoc("git-credential", "github", {"provider": {"name": "github", "token": "custom-tok"}})],
     )

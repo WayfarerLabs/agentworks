@@ -23,7 +23,6 @@ import gzip
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from agentworks import output
-from agentworks.capabilities.retired_shapes import RetiredPresenceShape
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
@@ -93,15 +92,6 @@ class EC2Platform(VMPlatform):
     name: ClassVar[str] = "aws-ec2"
     description: ClassVar[str] = "Amazon EC2 instances (region + optional VPC subnet)"
     config_model: ClassVar[type[AwsEC2Config]] = AwsEC2Config
-    # An aws-ec2 site that WROTE ``credentials`` (or wrote it null)
-    # crosses this break and gets its exact rewrite; a site that omitted
-    # it lands on the ambient default and was never broken. Release-scoped.
-    retired_shape: ClassVar[RetiredPresenceShape | None] = RetiredPresenceShape(
-        retired_field="credentials",
-        union_field="auth",
-        present_mode="access-key",
-        absent_mode="ambient",
-    )
     prose: ClassVar[TopicProse | None] = TopicProse(
         title="Amazon EC2",
         overview="""
