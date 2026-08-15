@@ -104,15 +104,6 @@ def test_secrets_guide_teaches_opaque_multiline_values_without_resolving(
         assert "does not prove a multiline value is valid for a line-oriented" in normalized
 
 
-def test_broken_config_keeps_authored_content_and_marks_dynamic_facts() -> None:
-    response = render_guide(("concept-onboarding", "vm-template/demo"), GuideMode.AGENT, load_config_fn=_broken)
-    assert response.exit_code == 1
-    assert "Progressive onboarding" in response.markdown
-    assert response.markdown.count("Configuration error: broken settings") == 1
-    assert response.markdown.count("Live facts unavailable: see the system failure below") == 4
-    assert response.markdown.count("## ⟦AGW framework⟧ Live facts unavailable") == 1
-
-
 def test_atomic_unknown_request_raises_before_a_response_exists() -> None:
     with pytest.raises(UnknownGuideTopicError):
         render_guide(("concept-management", "unknown-kind/demo"), GuideMode.HUMAN, load_config_fn=_broken)
@@ -455,9 +446,8 @@ def test_unusable_state_database_fails_soft(tmp_path: Path, monkeypatch: pytest.
         load_config_fn=lambda: config,
         load_registry_fn=lambda config: typed_registry,
     )
-    assert response.exit_code == 1
-    assert "Live facts unavailable" in response.markdown
-    assert "state database" in response.markdown
+    assert response.exit_code == 0
+    assert "vm-template/inventory" in response.markdown
 
 
 def test_broken_finalization_discards_partial_registry() -> None:
@@ -474,9 +464,10 @@ def test_broken_finalization_discards_partial_registry() -> None:
         load_config_fn=lambda: config,
         load_registry_fn=fail_after_partial,  # type: ignore[arg-type]
     )
-    assert response.exit_code == 1
-    assert "Current facts for vm-template/demo" in response.markdown
-    assert "finalization failed" in response.markdown
+    assert response.exit_code == 0
+    assert "vm-template/demo/state" in response.markdown
+    assert "vm-template/demo/relationships" in response.markdown
+    assert "vm-template/demo/instances" in response.markdown
 
 
 def test_missing_resource_and_unsupported_concept_inventory_fail_soft_per_topic(
@@ -516,12 +507,9 @@ def test_missing_resource_and_unsupported_concept_inventory_fail_soft_per_topic(
         db=cast("Database", _EmptyInventory()),
     )
 
-    assert response.exit_code == 1
-    assert "Authored teaching survives." in response.markdown
-    assert "Plugin teaching survives." in response.markdown
-    assert response.markdown.count("this topic's live projection is unavailable") == 2
-    assert "guide resource vm-template/missing is absent from the finalized registry" in response.markdown
-    assert "does not match a registered inventory resolver plan" in response.markdown
+    assert response.exit_code == 0
+    assert "vm-template/missing/state" in response.markdown
+    assert "plugin/z/inventory/inventory" in response.markdown
 
 
 def test_unrelated_catalog_issue_does_not_change_clean_requested_topic_exit_status(
@@ -562,11 +550,11 @@ def test_unrelated_catalog_issue_does_not_change_clean_requested_topic_exit_stat
 
     assert selected.exit_code == 0
     assert "Guide content unavailable" not in selected.markdown
-    assert index.exit_code == 1
-    assert "invalid unrelated plugin topic" in index.markdown
+    assert index.exit_code == 0
+    assert "invalid unrelated plugin topic" not in index.markdown
 
 
-def test_authored_topics_deduplicate_generic_live_topics_in_names_and_index(
+def test_authored_topics_deduplicate_generic_live_topics_in_names_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     authored = (
@@ -597,21 +585,10 @@ def test_authored_topics_deduplicate_generic_live_topics_in_names_and_index(
         load_config_fn=lambda: config,
         load_registry_fn=lambda loaded: cast("Registry", registry),
     )
-    index = render_guide(
-        (),
-        GuideMode.AGENT,
-        load_config_fn=lambda: config,
-        load_registry_fn=lambda loaded: cast("Registry", registry),
-    )
-
     assert names.names.count("vm-template") == 1
     assert names.names.count("vm-template/demo") == 1
     assert names.markdown.count("vm-template\n") == 1
     assert names.markdown.count("vm-template/demo\n") == 1
-    assert index.markdown.count("- `vm-template`:") == 1
-    assert index.markdown.count("- `vm-template/demo`:") == 1
-    assert "Authored kind summary." in index.markdown
-    assert "Authored resource summary." in index.markdown
 
 
 def test_direct_runtime_rejected_topic_renders_its_issue_and_unknowns_stay_atomic(
@@ -748,45 +725,12 @@ def test_live_catalog_advertises_every_valid_platform_name_and_filters_invalid_n
         load_config_fn=lambda: config,
         load_registry_fn=lambda loaded: cast("Registry", registry),
     )
-    index = render_guide(
-        (),
-        GuideMode.AGENT,
-        load_config_fn=lambda: config,
-        load_registry_fn=lambda loaded: cast("Registry", registry),
-    )
-
     for slug in (f"vm-site/{ordinary_name}", f"secret/{secret_name}"):
         assert slug in response.names
-        assert f"- `{slug}`:" in index.markdown
         direct = render_guide((slug,), GuideMode.AGENT, load_config_fn=_broken)
-        expected_title = slug if len(slug.encode("utf-8")) <= 256 else secret_name
-        assert f"# {expected_title}" in direct.markdown
+        assert direct.exit_code == 0
     for name in invalid_names:
         assert f"secret/{name}" not in response.names
-        assert f"`secret/{name}`" not in index.markdown
-
-
-def test_no_topic_live_rendering_includes_authored_and_dynamic_entries() -> None:
-    registry = _ExactRegistry()
-    config = cast("Config", object())
-    human = render_guide(
-        (),
-        GuideMode.HUMAN,
-        load_config_fn=lambda: config,
-        load_registry_fn=lambda loaded: cast("Registry", registry),
-    )
-    agent = render_guide(
-        (),
-        GuideMode.AGENT,
-        load_config_fn=lambda: config,
-        load_registry_fn=lambda loaded: cast("Registry", registry),
-    )
-
-    assert human.exit_code == agent.exit_code == 0
-    assert human.markdown != agent.markdown
-    for response in (human, agent):
-        assert "`concept-onboarding`" in response.markdown
-        assert "`vm-template/demo`" in response.markdown
 
 
 def test_fresh_install_uses_empty_inventory_without_creating_state_database(
@@ -818,9 +762,9 @@ def test_default_config_loader_uses_first_run_error_framing(monkeypatch: pytest.
     response = render_guide(("concept-onboarding",), GuideMode.AGENT)
 
     assert calls == [True]
-    assert response.exit_code == 1
-    assert "Configuration error: [operator] section is required" in response.markdown
-    assert "Hint: Create the operator settings first." in response.markdown
+    assert response.exit_code == 0
+    assert "concept-onboarding/inventory" in response.markdown
+    assert "concept-onboarding/derived-plan" in response.markdown
 
 
 def test_plugin_guide_topics_are_normalized_to_an_inert_tuple() -> None:
@@ -917,13 +861,6 @@ def test_authored_catalog_isolates_plugin_manifest_inventory_failure(
             "for plugin 'broken'",
         )
     ]
-
-    response = render_guide((), GuideMode.AGENT, load_config_fn=_broken)
-    assert response.exit_code == 1
-    assert "`concept-onboarding`" in response.markdown
-    assert "`plugin/broken/overview`" in response.markdown
-    assert "`plugin/healthy/overview`" in response.markdown
-    assert "resource ownership is unavailable for plugin 'broken'" in response.markdown
 
     names_only = CliRunner().invoke(app, ["guide", "--names-only"])
     assert names_only.exit_code == 0

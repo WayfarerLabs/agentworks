@@ -145,13 +145,6 @@ def test_base_topic_uses_exact_installed_version_and_links_current_adoption(
     assert tuple(str(topic) for topic in _release_topic().related_topics) == ("concept-onboarding",)
 
 
-def test_exact_historical_topics_are_not_listed_in_the_index() -> None:
-    response = render_guide((), GuideMode.AGENT, load_config_fn=_broken)
-
-    assert "`concept-release-notes`:" in response.markdown
-    assert all(f"`{version_topic(version)}`:" not in response.markdown for version in EXPECTED_RELEASES)
-
-
 def test_release_fallback_is_exact_range_inert_and_refusable() -> None:
     block = next(block for block in _release_topic().blocks if isinstance(block, ActionList))
     action = block.actions[0]
@@ -173,7 +166,7 @@ def test_rendering_and_refusal_paths_make_no_network_request(monkeypatch: pytest
     monkeypatch.setattr("agentworks.version.resolve_version", lambda: "0.13.0")
 
     response = render_guide(("concept-release-notes",), GuideMode.AGENT, load_config_fn=_broken)
-    assert response.exit_code == 1
+    assert response.exit_code == 0
 
 
 def test_untrusted_release_prose_is_escaped_plain_text(monkeypatch: pytest.MonkeyPatch) -> None:

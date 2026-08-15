@@ -78,6 +78,25 @@ def framework_heading(title: str) -> str:
     return f"## {FRAMEWORK_HEADING_LABEL} {title}"
 
 
+def render_trail_sign(mode: GuideMode) -> str:
+    """Render the catalog-free no-topic destination sign."""
+    from agentworks.guide.trail_sign import trail_destinations
+
+    destinations = trail_destinations(mode)
+    if mode is GuideMode.AGENT:
+        rows = "\n".join(f"- {destination.agent_intent}: `{destination.slug}`." for destination in destinations)
+        intro = "Choose the destination that matches the operator's current goal."
+    else:
+        rows = "\n".join(f"- {destination.human_choice}: `{destination.slug}`." for destination in destinations)
+        intro = "Choose the path that matches this installation."
+    discovery = (
+        "Use shell completion or `agw guide --names-only` to discover every installed and currently available topic."
+    )
+    return sanitize_terminal_output(
+        f"# Agentworks guide\n\n{intro}\n\n{framework_heading('Destinations')}\n\n{rows}\n\n{discovery}\n"
+    )
+
+
 def _plain_description(value: str) -> str:
     text = " ".join(value.split())
     return _MARKDOWN_PUNCTUATION_RE.sub(r"\\\1", html.escape(text, quote=False))
@@ -393,6 +412,7 @@ def render_topic(
     *,
     unavailable: str | None = None,
     onboarding_snapshot: OnboardingSnapshot | None = None,
+    onboarding_unavailable: bool = False,
     verification_evidence: tuple[VerificationEvidence, ...] = (),
 ) -> RenderedTopic:
     """Render one topic without consulting configuration or invoking capabilities."""
@@ -453,6 +473,15 @@ def render_topic(
         rendered.append(RenderedBlock(GuideBlockKey(str(contribution.topic), str(block.id)), source, markdown))
     if contribution.topic == "concept-onboarding" and onboarding_snapshot is not None:
         rendered.append(_onboarding_plan(onboarding_snapshot, verification_evidence))
+    elif contribution.topic == "concept-onboarding" and onboarding_unavailable:
+        body = "Live assessment unavailable. See the response warning."
+        rendered.append(
+            RenderedBlock(
+                GuideBlockKey("concept-onboarding", "derived-plan"),
+                body,
+                f"{framework_heading('Derived onboarding plan')}\n\n{body}",
+            )
+        )
     document = f"# {contribution.title}\n\n{contribution.summary}"
     if rendered:
         document += "\n\n" + "\n\n".join(block.markdown for block in rendered)

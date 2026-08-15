@@ -258,9 +258,33 @@ def _validate_evidence(
     applicable: dict[GuideIdentity, ActionId],
     known_ids: frozenset[ActionId],
 ) -> dict[GuideIdentity, VerificationEvidence]:
+    _validate_verification_evidence(evidence, known_ids=known_ids)
+    by_target: dict[GuideIdentity, VerificationEvidence] = {}
+    for item in evidence:
+        expected = applicable.get(item.target)
+        if expected is None:
+            raise ValidationError(
+                f"verification evidence target {item.target.kind}/{item.target.name} is not applicable"
+            )
+        if item.action_id != expected:
+            raise ValidationError(
+                f"onboarding action {item.action_id!s} does not match target {item.target.kind}/{item.target.name}"
+            )
+        by_target[item.target] = item
+    return by_target
+
+
+def _validate_verification_evidence(
+    evidence: tuple[VerificationEvidence, ...],
+    *,
+    known_ids: frozenset[ActionId] | None = None,
+) -> None:
+    """Validate caller-owned evidence that has not yet been applied to live facts."""
     if type(evidence) is not tuple:
         raise ValidationError("verification evidence must be a tuple")
-    by_target: dict[GuideIdentity, VerificationEvidence] = {}
+    if known_ids is None:
+        known_ids = frozenset(action.id for action in onboarding_actions())
+    targets: set[GuideIdentity] = set()
     for item in evidence:
         if type(item) is not VerificationEvidence:
             raise ValidationError("verification evidence must contain exact VerificationEvidence records")
@@ -279,19 +303,9 @@ def _validate_evidence(
             or not is_valid_topic_slug(target_kind + "/" + target_name)
         ):
             raise ValidationError("verification evidence has an invalid target or outcome")
-        if item.target in by_target:
+        if item.target in targets:
             raise ValidationError(f"duplicate verification evidence for {item.target.kind}/{item.target.name}")
-        expected = applicable.get(item.target)
-        if expected is None:
-            raise ValidationError(
-                f"verification evidence target {item.target.kind}/{item.target.name} is not applicable"
-            )
-        if item.action_id != expected:
-            raise ValidationError(
-                f"onboarding action {item.action_id!s} does not match target {item.target.kind}/{item.target.name}"
-            )
-        by_target[item.target] = item
-    return by_target
+        targets.add(item.target)
 
 
 def assess_onboarding(

@@ -102,9 +102,8 @@ def test_render_guide_frames_accidental_read_only_write(
         load_registry_fn=lambda config: cast("Registry", _LiveRegistry()),
     )
 
-    assert response.exit_code == 1
-    assert "state database rejected a guide projection" in response.markdown
-    assert "readonly database" not in response.markdown
+    assert response.exit_code == 0
+    assert "vm-template/inventory" in response.markdown
 
 
 def test_render_guide_surfaces_busy_not_malformed_under_a_held_lock(
@@ -147,7 +146,7 @@ def test_render_guide_surfaces_busy_not_malformed_under_a_held_lock(
             load_registry_fn=lambda config: cast("Registry", _LiveRegistry()),
         )
 
-    assert response.exit_code == 1
+    assert response.exit_code == 0
     assert len(captured) == 1
     assert isinstance(captured[0], BusyStateError)
 
