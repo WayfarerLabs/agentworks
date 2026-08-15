@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, BinaryIO
+from typing import TYPE_CHECKING, BinaryIO, assert_never
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -20,9 +20,12 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ReferenceEntry
 
 
-type JsonScalar = None | bool | int | float | str
-type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
+type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]
 type JsonObject = dict[str, JsonValue]
+
+# The version every JSON v1 envelope carries. Consumers branch on it; nothing
+# here does, so it stays a named constant rather than a fact any record holds.
+_SCHEMA_VERSION = 1
 
 
 class OutputFormat(StrEnum):
@@ -59,13 +62,8 @@ def encode_json_envelope(command: MachineOutputCommand, data: JsonObject) -> byt
     Encoding completes before any caller-owned stream is written, so invalid or
     unserializable facts cannot leave a partial JSON document on stdout.
     """
-    if not isinstance(command, MachineOutputCommand):
-        raise TypeError("command must be a MachineOutputCommand")
-    if not isinstance(data, dict):
-        raise TypeError("data must be an object")
-
     envelope: JsonObject = {
-        "schema_version": 1,
+        "schema_version": _SCHEMA_VERSION,
         "command": command.value,
         "data": data,
     }
@@ -84,19 +82,22 @@ def write_json_envelope(command: MachineOutputCommand, data: JsonObject, stream:
     """Write one JSON v1 document directly to a byte stream.
 
     Callers pass stdout's binary buffer, never the presentation output handler,
-    so terminal formatting cannot enter a machine-readable response.
+    so terminal formatting cannot enter a machine-readable response.  A buffered
+    binary stream writes the whole document or raises, so one write is the whole
+    response.
     """
-    document = encode_json_envelope(command, data)
-    offset = 0
-    while offset < len(document):
-        written = stream.write(document[offset:])
-        if written is None or written <= 0:
-            raise OSError("JSON output stream made no progress")
-        offset += written
+    stream.write(encode_json_envelope(command, data))
 
 
 def project_origin(origin: Origin | None) -> JsonObject | None:
-    """Project safe, stable provenance fields without a display rendering."""
+    """Project safe, stable provenance fields without a display rendering.
+
+    ``Origin`` expresses four variants through one set of broadly typed
+    fields, so which fields are populated is a per-variant contract the type
+    checker cannot carry.  These checks enforce that contract rather than
+    re-check types; without them a variant built outside its factory would
+    render ``None`` as text into the JSON v1 document.
+    """
     if origin is None:
         return None
 
@@ -148,29 +149,14 @@ def project_origin(origin: Origin | None) -> JsonObject | None:
             "source_resource": None,
             "plugin": origin.plugin,
         }
-    raise AssertionError(f"unhandled Origin variant: {origin.variant!r}")
+    assert_never(origin.variant)
 
 
 def project_reference(reference: ReferenceEntry) -> JsonObject:
     """Project one inbound graph entry without display-derived declarer data."""
-    if not (
-        isinstance(reference.source, tuple)
-        and len(reference.source) == 2
-        and all(isinstance(part, str) for part in reference.source)
-    ):
-        raise AssertionError("reference sources require a two-string identity")
-    if not isinstance(reference.usage, str):
-        raise AssertionError("reference usage must be a string")
-
     declared_by_kind: str | None = None
     declared_by_name: str | None = None
     if reference.declared_by is not None:
-        if not (
-            isinstance(reference.declared_by, tuple)
-            and len(reference.declared_by) == 2
-            and all(isinstance(part, str) for part in reference.declared_by)
-        ):
-            raise AssertionError("reference declarers require a two-string identity")
         declared_by_kind, declared_by_name = reference.declared_by
 
     return {
@@ -189,8 +175,6 @@ def project_references(references: Sequence[ReferenceEntry]) -> list[JsonObject]
 
 def project_instance_reference(reference: InstanceRef) -> JsonObject:
     """Project one current instance reference without grouping it for display."""
-    if not isinstance(reference.instance_kind, str) or not isinstance(reference.instance_name, str):
-        raise AssertionError("instance references require string kind and name")
     return {"kind": reference.instance_kind, "name": reference.instance_name}
 
 

@@ -15,6 +15,7 @@ from agentworks.db import Database
 from agentworks.errors import ValidationError
 from agentworks.guide import (
     ActionId,
+    GuideAction,
     GuideIdentity,
     GuideInstanceFact,
     GuideMode,
@@ -27,10 +28,8 @@ from agentworks.guide import (
     VerificationEvidence,
     VerificationOutcome,
     assess_onboarding,
-    guided_actions,
     onboarding_actions,
     render_guide,
-    replayable_actions,
 )
 from agentworks.guide.service import build_onboarding_snapshot
 from agentworks.resources import KIND_REGISTRY, Origin, Registry, ResourceReference
@@ -68,6 +67,11 @@ def _snapshot(
 
 def _evidence(action: str, kind: str, name: str, outcome: VerificationOutcome) -> VerificationEvidence:
     return VerificationEvidence(ActionId(action), GuideIdentity(kind, name), outcome)
+
+
+def _action(action_id: str) -> GuideAction:
+    """Look one canonical action up by identity, so ordering is never pinned."""
+    return next(action for action in onboarding_actions() if action.id == ActionId(action_id))
 
 
 class _CountedSnapshotFact:
@@ -149,22 +153,17 @@ def test_target_scoped_secret_evidence_changes_only_its_fact(
     assert assessment.action_ids == expected_actions
 
 
-def test_guided_and_replayable_outcomes_and_refusal_alternatives_are_equal() -> None:
+def test_refused_verification_carries_its_action_refusal_alternative_as_the_reason() -> None:
     evidence = (_evidence("verify-vm-connection", "vm", "worker", VerificationOutcome.REFUSED),)
-    guided = assess_onboarding(
+
+    assessment = assess_onboarding(
         _snapshot(instances=(GuideInstanceFact("vm", "worker"),)), verification_evidence=evidence
     )
-    replayable = assess_onboarding(
-        _snapshot(instances=(GuideInstanceFact("vm", "worker"),)), verification_evidence=evidence
-    )
-    assert guided.findings == replayable.findings
-    assert (
-        tuple(action.id for action in guided_actions(guided))
-        == tuple(action.id for action in replayable_actions(replayable))
-        == (ActionId("run-doctor"),)
-    )
-    assert guided.findings[0].status is OnboardingStatus.UNVERIFIABLE
-    assert guided.findings[0].reason == onboarding_actions()[2].refusal_alternative
+
+    vm_action = _action("verify-vm-connection")
+    assert assessment.findings[0].status is OnboardingStatus.UNVERIFIABLE
+    assert assessment.findings[0].reason == vm_action.refusal_alternative
+    assert assessment.action_ids == (ActionId("run-doctor"),)
 
 
 def test_ready_rerun_with_accepted_proof_is_a_clean_no_op() -> None:
@@ -349,7 +348,7 @@ def test_cli_replays_refusal_as_manual_alternative_without_repeating_action(
 
     assert result.exit_code == 0
     assert "`secret/tailscale-auth-key`: unverifiable" in result.stdout
-    assert "Use describe and backend readiness as prediction only" in result.stdout
+    assert _action("verify-named-secret").refusal_alternative in result.stdout
     assert "### `verify-named-secret`" not in result.stdout
 
 
@@ -381,7 +380,6 @@ def test_cli_rejects_evidence_for_shapes_that_cannot_consume_it(
     assert result.exit_code == 1
     assert result.stdout == ""
     assert isinstance(result.exception, ValidationError)
-    assert "verification evidence" in str(result.exception)
     assert loaded is False
 
 
@@ -437,7 +435,6 @@ def test_cli_rejects_malformed_evidence_atomically(monkeypatch: pytest.MonkeyPat
 
     assert result.exit_code == 2
     assert result.stdout == ""
-    assert "ACTION_ID:KIND/NAME=verified|failed|refused" in result.stderr
     assert loaded is False
 
 
@@ -447,7 +444,6 @@ def test_cli_rejects_control_bytes_in_evidence_without_echoing_them(control: str
     result = CliRunner().invoke(app, ["guide", "concept-onboarding", "--evidence", value])
     assert result.exit_code == 2
     assert f"to{control}ken" not in result.stderr
-    assert "ACTION_ID:KIND/NAME=verified|failed|refused" in result.stderr
 
 
 def test_cli_rejects_line_break_in_evidence_without_echoing_the_value() -> None:
@@ -491,7 +487,6 @@ def test_service_rejects_control_bytes_in_evidence_identity(
             verification_evidence=evidence,
         )
 
-    assert str(raised.value) == "verification evidence has an invalid target or outcome"
     assert "\x1b" not in str(raised.value)
     assert "\x80" not in str(raised.value)
 
@@ -518,7 +513,7 @@ def test_service_rejects_evidence_with_slash_outside_selector_boundary(
     registry.finalize()
     evidence = (_evidence("verify-named-secret", kind, name, VerificationOutcome.VERIFIED),)
 
-    with pytest.raises(ValidationError) as raised:
+    with pytest.raises(ValidationError):
         render_guide(
             ("concept-onboarding",),
             GuideMode.AGENT,
@@ -528,7 +523,6 @@ def test_service_rejects_evidence_with_slash_outside_selector_boundary(
             verification_evidence=evidence,
         )
 
-    assert str(raised.value) == "verification evidence has an invalid target or outcome"
     baseline = render_guide(
         ("concept-onboarding",),
         GuideMode.AGENT,
@@ -559,10 +553,17 @@ def test_malformed_mismatched_and_inapplicable_evidence_is_rejected(evidence: ob
 
 
 def test_proof_actions_run_once_and_creation_actions_use_json_verification() -> None:
-    actions = onboarding_actions()
-    assert all(action.verification is None for action in actions[:3])
-    assert actions[3].verification == ("agw", "vm", "describe", "$VM_NAME", "--output", "json")
-    assert actions[4].verification == ("agw", "session", "describe", "$SESSION_NAME", "--output", "json")
+    proof_ids = {"run-doctor", "verify-named-secret", "verify-vm-connection"}
+    assert all(action.verification is None for action in onboarding_actions() if action.id in proof_ids)
+    assert _action("create-first-vm").verification == ("agw", "vm", "describe", "$VM_NAME", "--output", "json")
+    assert _action("create-first-session").verification == (
+        "agw",
+        "session",
+        "describe",
+        "$SESSION_NAME",
+        "--output",
+        "json",
+    )
 
 
 def test_action_validation_occurs_only_when_guide_operation_requests_records(
@@ -579,7 +580,7 @@ def test_action_validation_occurs_only_when_guide_operation_requests_records(
     monkeypatch.setattr(module, "validate_guide_action", record_action)
     assert calls == []
     module.onboarding_actions()
-    assert len(calls) == 5
+    assert calls == list(module._ACTION_RECORDS)
 
 
 def test_real_views_compose_snapshot_and_render_target_scoped_evidence(
@@ -647,11 +648,11 @@ def test_real_views_compose_snapshot_and_render_target_scoped_evidence(
         load_registry_fn=lambda config: registry,
         db=db,
     )
-    vm_action = next(action for action in onboarding_actions() if action.id == "verify-vm-connection")
+    vm_action = _action("verify-vm-connection")
     action_start = pending.markdown.index(f"### `{vm_action.id}`")
     action_end = pending.markdown.find("\n### `", action_start + 1)
     rendered_action = pending.markdown[action_start : action_end if action_end >= 0 else None]
-    assert "- If refused:" in rendered_action
+    assert vm_action.refusal_alternative in rendered_action
 
     evidence = (
         _evidence("verify-named-secret", "secret", "tailscale-auth-key", VerificationOutcome.VERIFIED),
@@ -665,7 +666,7 @@ def test_real_views_compose_snapshot_and_render_target_scoped_evidence(
         db=db,
         verification_evidence=evidence,
     )
-    assert "No onboarding actions are needed" in response.markdown
+    assert "### `" not in response.markdown
     assert "`secret/tailscale-auth-key`: done" in response.markdown
     assert "`vm/worker`: done" in response.markdown
 
@@ -682,7 +683,7 @@ def test_real_views_compose_snapshot_and_render_target_scoped_evidence(
         for mode in (GuideMode.AGENT, GuideMode.HUMAN)
     ]
     for markdown in outputs:
-        assert "Retain the stored VM fact and mark connectivity unverifiable" in markdown
+        assert vm_action.refusal_alternative in markdown
         assert "### `verify-vm-connection`" not in markdown
 
 

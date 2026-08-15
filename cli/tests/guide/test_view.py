@@ -149,7 +149,6 @@ def test_concept_view_copies_facts_without_invoking_forbidden_powers(monkeypatch
         "inbound",
         "instances",
         "inventory",
-        "kind",
         "me",
         "outbound",
     }
@@ -351,6 +350,6 @@ def test_real_finalized_registry_relationships_and_instance_hook_are_eager(monke
     assert view.instances() == (GuideInstanceFact("vm", "alpha"), GuideInstanceFact("vm", "zeta"))
     assert exhausted
     assert [(edge.source.name, edge.target.name, edge.usage) for edge in view.outbound()] == [("a", "b", "a uses b")]
-    public_results = (view.me(), view.kind(), view.instances(), view.inbound(), view.outbound())
+    public_results = (view.me(), view.instances(), view.inbound(), view.outbound())
     forbidden = (Registry, Handler, Node)
     assert not any(isinstance(item, forbidden) or callable(item) for result in public_results for item in _walk(result))

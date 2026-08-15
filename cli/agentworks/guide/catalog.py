@@ -16,6 +16,7 @@ from agentworks.guide.contract import (
     Sample,
     TopicContribution,
     UnknownGuideTopicError,
+    _decoded_contribution,
     parse_topic_contribution,
 )
 from agentworks.resources import KIND_REGISTRY
@@ -150,7 +151,7 @@ def _build_guide_catalog(
     issues: list[GuideContributionError] = []
     for candidate in candidates:
         try:
-            topic = parse_topic_contribution(candidate.value, candidate.source)
+            topic = parse_topic_contribution(_decoded_contribution(candidate.value, candidate.source), candidate.source)
             ownership = _ownership_error(candidate, topic)
             if ownership is not None:
                 raise ownership

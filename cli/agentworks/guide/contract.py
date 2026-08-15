@@ -226,7 +226,6 @@ class TopicContribution:
 
 
 class ConsentBoundary(Enum):
-    NONE = "none"
     READ_CONFIGURED_STATE = "read-configured-state"
     EXAMINE_WORKSTATION = "examine-workstation"
     RESOLVE_NAMED_SECRET = "resolve-named-secret"
@@ -864,49 +863,51 @@ def _action_record_value(value: object) -> dict[str, object]:
     }
 
 
-def _record_value(value: TopicContribution, source: str) -> dict[str, object]:
-    """Copy a programmatic inert record into the same closed decoded shape."""
+_BLOCK_DISCRIMINATORS: dict[type[GuideBlock], str] = {
+    Overview: "overview",
+    Teaching: "teaching",
+    AgentContract: "agent-contract",
+    InstanceList: "instance-list",
+    State: "state",
+    Relationships: "relationships",
+    FieldReference: "field-reference",
+    Sample: "sample",
+    ReleaseNotes: "release-notes",
+    ActionList: "action-list",
+    TopicLinks: "topic-links",
+}
+
+
+def _decoded_contribution(value: object, source: str) -> object:
+    """Project a typed contribution into the decoded shape, passing others through.
+
+    Contributions arrive as frozen ``TopicContribution`` records, while the
+    contract's rules (byte caps, markdown safety, anchor grammar) are defined
+    over the decoded shape, so the catalog converts before it validates.
+    """
+    if type(value) is not TopicContribution:
+        return value
     anchor = value.anchor
-    if type(anchor) is ConceptAnchor:
-        anchor_value: dict[str, object] = {"type": "concept", "name": anchor.name}
-    elif type(anchor) is KindAnchor:
+    anchor_value: dict[str, object]
+    if isinstance(anchor, ConceptAnchor):
+        anchor_value = {"type": "concept", "name": anchor.name}
+    elif isinstance(anchor, KindAnchor):
         anchor_value = {"type": "kind", "kind": anchor.kind}
-    elif type(anchor) is ResourceAnchor:
+    elif isinstance(anchor, ResourceAnchor):
         anchor_value = {"type": "resource", "kind": anchor.kind, "name": anchor.name}
-    elif type(anchor) is ImplementationAnchor:
-        anchor_value = {"type": "implementation", "kind": anchor.kind, "name": anchor.name}
     else:
-        anchor_value = {"type": object()}
+        anchor_value = {"type": "implementation", "kind": anchor.kind, "name": anchor.name}
     block_values: list[dict[str, object]] = []
-    names = {
-        Overview: "overview",
-        Teaching: "teaching",
-        AgentContract: "agent-contract",
-        InstanceList: "instance-list",
-        State: "state",
-        Relationships: "relationships",
-        FieldReference: "field-reference",
-        Sample: "sample",
-        ReleaseNotes: "release-notes",
-        ActionList: "action-list",
-        TopicLinks: "topic-links",
-    }
-    if type(value.blocks) not in {tuple, list}:
-        raise _error(InvalidBlockError, source, None, "blocks", "must be a sequence")
-    for block in cast("tuple[object, ...] | list[object]", value.blocks):
-        discriminator = names.get(type(block))
+    for index, block in enumerate(value.blocks):
+        discriminator = _BLOCK_DISCRIMINATORS.get(type(block))
         if discriminator is None:
-            block_values.append({"type": object(), "id": "invalid"})
-            continue
-        block = cast("GuideBlock", block)
+            raise _error(InvalidBlockError, source, None, f"blocks[{index}]", "is not a known block type")
         block_value: dict[str, object] = {"type": discriminator, "id": block.id}
         if isinstance(block, (Overview, Teaching, AgentContract)):
             block_value["markdown"] = block.markdown
         elif isinstance(block, FieldReference):
             block_value["section"] = block.section
         elif isinstance(block, ActionList):
-            if type(block.actions) is not tuple:
-                raise _error(InvalidBlockError, source, None, "blocks.actions", "must be a sequence")
             block_value["actions"] = [_action_record_value(action) for action in block.actions]
         block_values.append(block_value)
     return {
@@ -920,11 +921,9 @@ def _record_value(value: TopicContribution, source: str) -> dict[str, object]:
 
 
 def parse_topic_contribution(value: object, source: str) -> TopicContribution:
-    """Parse one closed contribution without retaining decoded containers."""
+    """Parse one closed decoded contribution without retaining its containers."""
     if type(source) is not str or not source:
         raise _error(GuideContributionError, "<invalid-source>", None, "source", "must be a non-blank string")
-    if type(value) is TopicContribution:
-        value = _record_value(value, source)
     data = _mapping(
         value,
         {"topic", "title", "summary", "anchor", "blocks", "related_topics"},

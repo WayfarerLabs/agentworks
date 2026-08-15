@@ -430,13 +430,3 @@ def assess_onboarding(
         OnboardingRelationshipFinding(relationship, OnboardingStatus.DONE) for relationship in snapshot.relationships
     )
     return OnboardingAssessment(tuple(revised), relationships, selected)
-
-
-def guided_actions(assessment: OnboardingAssessment) -> tuple[GuideAction, ...]:
-    """Return canonical actions for a consumer applying its current authorization envelope."""
-    return assessment.actions
-
-
-def replayable_actions(assessment: OnboardingAssessment) -> tuple[GuideAction, ...]:
-    """Return the same canonical actions for a non-interactive consumer."""
-    return assessment.actions

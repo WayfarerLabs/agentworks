@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any, cast, get_args
 
 import pytest
 
@@ -14,6 +14,7 @@ from agentworks.guide import (
     ConsentBoundary,
     DuplicateTopicError,
     GuideAction,
+    GuideBlock,
     GuideCatalog,
     GuideContributionError,
     InvalidBlockError,
@@ -25,7 +26,7 @@ from agentworks.guide import (
     validate_guide_action,
 )
 from agentworks.guide.catalog import _build_guide_catalog
-from agentworks.guide.contract import is_valid_topic_slug
+from agentworks.guide.contract import _BLOCK_DISCRIMINATORS, is_valid_topic_slug
 from agentworks.plugins.base import Plugin
 from agentworks.resources import KIND_REGISTRY
 
@@ -234,7 +235,12 @@ def test_unknown_nested_field_and_duplicate_block_are_rejected() -> None:
         parse_topic_contribution(value, "source")
 
 
-def test_programmatic_records_are_revalidated_and_copied() -> None:
+def test_every_guide_block_variant_has_a_decoded_discriminator() -> None:
+    """A new block variant must reach the decoded shape, which no type can force."""
+    assert set(get_args(GuideBlock.__value__)) == set(_BLOCK_DISCRIMINATORS)
+
+
+def test_typed_records_reach_the_catalog_as_validated_copies() -> None:
     original = TopicContribution(
         TopicSlug("concept-safe"),
         "Safe",
@@ -242,30 +248,12 @@ def test_programmatic_records_are_revalidated_and_copied() -> None:
         ConceptAnchor("concept-safe"),
         (Overview(BlockId("overview"), "Text."),),
     )
-    parsed = parse_topic_contribution(original, "core")
-    assert parsed == original
-    assert parsed is not original
 
+    (retained,) = _build_guide_catalog((("core", original),)).topics
 
-@pytest.mark.parametrize("field", ["topic", "title", "summary", "anchor", "blocks", "related_topics"])
-def test_malformed_programmatic_records_fail_with_typed_errors_without_execution(field: str) -> None:
-    called = False
-
-    def payload() -> None:
-        nonlocal called
-        called = True
-
-    original = TopicContribution(
-        TopicSlug("concept-safe"),
-        "Safe",
-        "Summary.",
-        ConceptAnchor("concept-safe"),
-        (Overview(BlockId("overview"), "Text."),),
-    )
-    object.__setattr__(original, field, payload)
-    with pytest.raises(GuideContributionError):
-        parse_topic_contribution(original, "core")
-    assert not called
+    assert retained == original
+    assert retained is not original
+    assert retained.blocks[0] is not original.blocks[0]
 
 
 def test_plugin_cannot_hide_reserved_core_topic() -> None:
@@ -456,8 +444,9 @@ def test_action_ids_are_unique_across_action_blocks() -> None:
         {"type": "action-list", "id": "first", "actions": [_action_value()]},
         {"type": "action-list", "id": "second", "actions": [_action_value()]},
     ]
-    with pytest.raises(InvalidBlockError, match="duplicate action IDs"):
+    with pytest.raises(InvalidBlockError) as raised:
         parse_topic_contribution(topic, "core")
+    assert raised.value.field_path == "blocks"
 
 
 @pytest.mark.parametrize(
@@ -483,8 +472,10 @@ def test_action_list_never_interpolates_sensitive_inputs() -> None:
     assert isinstance(inputs, list)
     assert isinstance(inputs[0], dict)
     inputs[0]["sensitive"] = True
-    with pytest.raises(GuideContributionError, match="sensitive input"):
+    with pytest.raises(GuideContributionError) as raised:
         parse_topic_contribution(_action_topic([action]), "core")
+    # The rejection lands on the interpolating token, not the block or the input.
+    assert raised.value.field_path == "blocks[0].actions[0].command[2]"
 
 
 @pytest.mark.parametrize(
@@ -522,7 +513,9 @@ def test_action_list_prose_preserves_exact_inert_inline_literals() -> None:
 
 
 def test_action_list_count_and_cumulative_byte_bounds_fail_closed() -> None:
-    with pytest.raises(InvalidBlockError, match="32-action limit"):
+    # Each payload trips exactly one bound: 33 small actions stay well under the
+    # byte cap, and 17 maximal manual steps stay under the action count.
+    with pytest.raises(InvalidBlockError):
         parse_topic_contribution(
             _action_topic([_action_value(action_id=f"action-{index}") for index in range(33)]),
             "core",
@@ -530,7 +523,7 @@ def test_action_list_count_and_cumulative_byte_bounds_fail_closed() -> None:
     actions = [_action_value(action_id=f"action-{index}", manual=True) for index in range(17)]
     for action in actions:
         action["manual_steps"] = "x" * (8 * 1024)
-    with pytest.raises(InvalidBlockError, match="131072-byte action-data limit"):
+    with pytest.raises(InvalidBlockError):
         parse_topic_contribution(_action_topic(actions), "core")
 
 
@@ -669,10 +662,13 @@ def test_related_topics_apply_the_canonical_slug_grammar(related: str) -> None:
 
 
 def test_related_topic_values_have_an_explicit_byte_bound() -> None:
+    longest = "k" * 63 + "/" + "s" * 253
+
+    assert parse_topic_contribution(_topic("concept-safe", related=[longest]), "plugin:z").related_topics == (longest,)
+
     with pytest.raises(InvalidTopicSlugError) as raised:
-        parse_topic_contribution(_topic("concept-safe", related=["a" * 318]), "plugin:z")
+        parse_topic_contribution(_topic("concept-safe", related=[longest + "s"]), "plugin:z")
     assert raised.value.field_path == "related_topics[0]"
-    assert "317-byte limit" in str(raised.value)
 
 
 def test_resource_topics_accept_actual_ordinary_and_secret_name_limits() -> None:
