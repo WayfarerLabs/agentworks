@@ -525,10 +525,11 @@ profile; no exact vertex period from 1 through 64 exists; each 512 m profile's i
 differ from `.35`; and both `.10` and `.60` occur in the complete corpus. Record normalized Pearson
 autocorrelation at vertex lags `[1,8,16,24,32,40,48,56,64]`. Lag 1 may be high because adjacent
 facets are navigable, but the maximum absolute value at every integer lag 16 through 64 is
-respectively `.08260604511595857`, `.07967784737337971`, `.07361514011031926`, and
-`.07005035995525277`; require it below `.09` for every seed. Mutating the epoch rotation, shuffle
-index, first/last separation, any profile sample, or boundary rule must fail this independent
-reconstruction. These are numeric world properties, not authored-prose or golden-image assertions.
+respectively `.08739957356836273`, `.07807537753104245`, `.07645001213865094`, and
+`.07000743972739065`, occurring at respective lags `[32,40,40,61]`; require it below `.09` for every
+seed. Mutating the epoch rotation, shuffle index, first/last separation, any profile sample, or
+boundary rule must fail this independent reconstruction. These are numeric world properties, not
+authored-prose or golden-image assertions.
 
 For the variety witness only, classify `S0,S4,S6` as upper-like and `S1,S2,S3,S5,S7` as lower-like;
 this label does not affect selection or geometry. In signed superblocks `[-64,63]`, each review seed
