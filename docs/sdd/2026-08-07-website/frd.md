@@ -1,6 +1,6 @@
 # FRD: The agentworks.build Website
 
-- Status: Phase 4S free-flight and terrain-variety correction in design; canonical assistance
+- Status: Phase 4T sharper-terrain and deck-cap refinement in design; canonical assistance
   integrated
 - Date: 2026-08-07
 - Last revised: 2026-08-14
@@ -286,6 +286,24 @@ recorded as a growth path so nothing forecloses it, and none of it is in scope n
   required, but any finite world edge must be visible before contact and cannot cause a failure
   while the lander remains inside known terrain. The fixed `25/16` scene and zero vertical page
   scrolling remain unchanged.
+- R30. The operator's next hands-on review accepts Phase 4S's straight terrain, full vertical band,
+  local supports, free flight, physical termini, and fixed no-scroll scene, but requests sharper and
+  more frequent navigable relief. For each corresponding seeded `512 m` profile, the number of true
+  segment-grade sign reversals doubles from the frozen Phase 4S profile, so the cyclic mean
+  horizontal distance between reversals is exactly halved. The typical reversal strength also
+  doubles against the frozen Phase 4S corpus, and the maximum permitted adjacent segment-grade
+  change doubles from `0.40` to `0.80`; the maximum absolute segment grade may increase only to
+  `0.40`, the minimum symmetric bound capable of exercising that change. Terrain remains a strict-X
+  straight polyline within normalized height `[0.1,0.6]`, without curves, vertical edges,
+  sample-to-sample sawtooth chatter, or a short repeating silhouette. A site's nominal horizontal
+  candidate is selected before any terrain-height read. After its complete platform-to-NOC footprint
+  is fixed, compute the unchanged exact deck `max native terrain + 2.5 m`; reject that candidate and
+  advance through the LLD's deterministic bounded candidate order whenever the deck's normalized
+  height would exceed `0.5`. Accepted decks never exceed `0.5`, rejected terrain is not altered, and
+  terrain away from accepted footprints remains free to reach `0.6`. This eligibility refinement may
+  change site spacing and the generated reference schedules needed to certify it, but does not
+  change controls, vehicle physics, landing tolerances, fuel consumption, refuel ratio, sky, service
+  timing, copy, collision outcomes, finite-world behavior, or vertical scrolling.
 
 ## Settled constraints (inherited; do not reopen)
 
@@ -534,6 +552,20 @@ merged and settled on `main`. The first slice must not build toward them specula
   evidence proves a visible physical terminus and contact-backed failure there while every pose
   inside the generated terrain remains free of boundary failure. Existing local deck equality,
   route-proof, retention, fixed-scene, and zero-scroll acceptance remains green.
+- AC31. Independent reconstruction compares every new `512 m` terrain profile with its frozen Phase
+  4S predecessor and proves exactly twice as many true grade-sign reversals, exactly half the cyclic
+  mean reversal spacing, at least twice the pinned typical reversal strength, maximum absolute grade
+  `<=0.40`, and maximum adjacent-grade change `<=0.80`. The complete polyline remains within
+  normalized `[0.1,0.6]`, reaches both ends of the band across the reviewed corpus, and contains no
+  curve, vertical segment, forced per-vertex alternation, or short repeating silhouette. Site tests
+  derive each nominal candidate without terrain input, then independently evaluate candidates in the
+  deterministic bounded order: every rejected candidate would require a deck above normalized `0.5`,
+  every accepted candidate satisfies exact `deck=max footprint terrain+2.5 m` and normalized deck
+  `<=0.5`, and neither outcome mutates terrain. Exhaustive derivation and production replay certify
+  every resulting spacing/deck geometry, opening, sufficient allowance, Retry checkpoint, and
+  long-run site sequence without generation failure. Real-browser wide, narrow, short-height, and
+  touch-landscape witnesses show the stronger irregular angular terrain, terrain peaks up to `0.6`,
+  no platform above `0.5`, native support feet, and zero page/game vertical scrolling.
 
 ## Settled implementation rulings
 

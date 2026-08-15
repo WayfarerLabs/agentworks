@@ -1,6 +1,6 @@
 # HLA: The agentworks.build Website
 
-- Status: Phase 4S free-flight and terrain-variety correction in design; canonical assistance
+- Status: Phase 4T sharper-terrain and deck-cap refinement in design; canonical assistance
   integrated
 - Date: 2026-08-07
 - Last revised: 2026-08-14
@@ -334,6 +334,20 @@ or an explicitly rendered physical terminus if the implementation chooses a fini
 terminus is optional, visible before contact, and separate from the bounded rolling render window;
 crossing a retained-window edge is never a crash. These changes do not introduce a vertical camera,
 page growth, scrolling, or unbounded retained world state.
+
+Phase 4T increases relief without adding another terrain authority. Each frozen-profile successor
+has exactly twice its Phase 4S predecessor's true slope-sign reversals; measuring reversal intervals
+cyclically across the same `512 m` span therefore halves their mean horizontal spacing. The reviewed
+corpus also doubles typical reversal strength, permits adjacent segment-grade change through `0.80`,
+and caps absolute grade at `0.40`, while the same strict linear chain remains within normalized
+`[0.1,0.6]`. Mission progression proposes a horizontal candidate without reading terrain. Only after
+the full structural footprint is immutable does site generation sample the native envelope and
+compute the unchanged `max+2.5 m` deck. A normalized deck above `0.5` makes that candidate
+ineligible; generation advances through one seeded, bounded, directly reproducible candidate order
+until an eligible site is found. It never clamps the deck, lowers terrain, inserts a shelf, or
+conditions the terrain generator on site state. The route fixture exhaustively certifies every
+accepted distance/deck class and termination bound. Rendering, collision, static recovery, supports,
+fuel, and no-scroll projection continue to consume the same accepted result.
 
 The materially elevated platform remains exactly three lander widths long beside one solid NOC
 building. One collider-backed open truss uses continuous top and bottom chords and a uniform
