@@ -411,7 +411,7 @@ Look for:
 - `assert <expr>` on values that came from argv, the DB, or any other non-internal source.
 - `raise Exception(...)` or `raise RuntimeError(...)` instead of an `AgentworksError` subclass.
 - Catch-all `except Exception` that swallows or generically remaps real errors.
-- Direct construction of CLI-shaped error messages in `manager.py` modules ("Error: ..." prefixes,
+- Direct construction of CLI-shaped error messages in service-layer modules ("Error: ..." prefixes,
   "...; pass --foo" hints). Service errors carry meaning; the CLI renders them.
 
 ### 11. Documentation in sync with the live surface
