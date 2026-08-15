@@ -23,6 +23,7 @@ from agentworks.guide import (
     GuideCatalogIssue,
     GuideContributionError,
     GuideMode,
+    GuideTraversalError,
     InstanceList,
     KindAnchor,
     Overview,
@@ -470,7 +471,7 @@ def test_broken_finalization_discards_partial_registry() -> None:
     assert "vm-template/demo/instances" in response.markdown
 
 
-def test_missing_resource_and_unsupported_concept_inventory_fail_soft_per_topic(
+def test_missing_resource_fails_soft_but_structural_projection_defects_do_not(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     missing = TopicContribution(
@@ -499,17 +500,25 @@ def test_missing_resource_and_unsupported_concept_inventory_fail_soft_per_topic(
     registry = MissingRegistry()
     config = cast("Config", object())
 
-    response = render_guide(
-        ("vm-template/missing", "plugin/z/inventory"),
+    missing_response = render_guide(
+        ("vm-template/missing",),
         GuideMode.AGENT,
         load_config_fn=lambda: config,
         load_registry_fn=lambda loaded: cast("Registry", registry),
         db=cast("Database", _EmptyInventory()),
     )
 
-    assert response.exit_code == 0
-    assert "vm-template/missing/state" in response.markdown
-    assert "plugin/z/inventory/inventory" in response.markdown
+    assert missing_response.exit_code == 0
+    assert "vm-template/missing/state" in missing_response.markdown
+
+    with pytest.raises(GuideTraversalError):
+        render_guide(
+            ("plugin/z/inventory",),
+            GuideMode.AGENT,
+            load_config_fn=lambda: config,
+            load_registry_fn=lambda loaded: cast("Registry", registry),
+            db=cast("Database", _EmptyInventory()),
+        )
 
 
 def test_unrelated_catalog_issue_does_not_change_clean_requested_topic_exit_status(
