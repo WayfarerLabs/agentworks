@@ -68,7 +68,7 @@ behavior accurately.
       list, use gating, guide, completion, and doctor scenarios.
 - [ ] Obtain clean independent implementation, documentation, and fresh-eyes reviews; resolve every
       valid finding.
-- [ ] Record any unavailable live backend as an explicit test gap. Do not require a remote VM when
+- [x] Record any unavailable live backend as an explicit test gap. Do not require a remote VM when
       unchanged executor tests and installed-artifact CLI acceptance cover the declaration move.
 - [ ] Update the plan truthfully, add `locked.md`, and deliver the breaking change with a
       conventional commit containing a `BREAKING CHANGE:` footer.
