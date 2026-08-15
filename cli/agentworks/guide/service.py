@@ -53,6 +53,19 @@ if TYPE_CHECKING:
     from agentworks.guide.assessment import VerificationEvidence
     from agentworks.resources import Registry
 
+
+# These two installed manifest-only plugins own first-party teaching that is
+# packaged beside their manifests. Keep the fixed curation here rather than
+# extending Plugin.guide_topics into a loader contract: ordinary plugin import
+# and registration remain guide-I/O-free.
+from agentworks.plugins.apt import guide_contributions as _apt_guide_contributions
+from agentworks.plugins.install_command import guide_contributions as _install_command_guide_contributions
+
+_FIRST_PARTY_PLUGIN_GUIDE_CONTRIBUTIONS: dict[str, Callable[[], tuple[TopicContribution, ...]]] = {
+    "apt": _apt_guide_contributions,
+    "install-command": _install_command_guide_contributions,
+}
+
 _MARKDOWN_PUNCTUATION_RE = re.compile(r"([\\`*_{}\[\]()<>#!|])")
 
 
@@ -117,7 +130,13 @@ def build_authored_catalog(*, strict_trusted_taxonomy: bool = False) -> GuideCat
         if strict_trusted_taxonomy:
             raise contribution_error from None
         release_issue = GuideCatalogIssue(contribution_error)
-    plugins = tuple((plugin, tuple(plugin.guide_topics)) for _, plugin in sorted(SYSTEM_PLUGINS.items()))
+    plugins = tuple(
+        (
+            plugin,
+            (*plugin.guide_topics, *_FIRST_PARTY_PLUGIN_GUIDE_CONTRIBUTIONS.get(plugin.name, lambda: ())()),
+        )
+        for _, plugin in sorted(SYSTEM_PLUGINS.items())
+    )
     resource_owners: list[tuple[str, str, str]] = []
     unavailable_resource_owners: set[str] = set()
     for plugin, _topics in plugins:

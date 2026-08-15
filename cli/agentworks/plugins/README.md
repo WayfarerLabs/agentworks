@@ -7,9 +7,9 @@ publishes a new kind: it contributes implementations of the four existing capabi
 declarable resources bundled as YAML manifests. A plugin is an **origin** (`system-plugin`), the
 fourth alongside `operator-declared`, `built-in`, and `auto-declared`.
 
-The shipped index currently installs `onepassword`, `claude`, `proxmox`, `azure`, `codex`, `aws`,
-and `gcp`; all are disabled until named in `[plugins].system`. The index remains authoritative, and
-`agw doctor` renders it directly.
+The shipped index currently installs `onepassword`, `apt`, `install-command`, `claude`, `proxmox`,
+`azure`, `codex`, `aws`, and `gcp`; all are disabled until named in `[plugins].system`. The index
+remains authoritative, and `agw doctor` renders it directly.
 
 This document is for authoring a system plugin. For the operator-facing model (how origins and the
 enablement axis read on the surfaces) see `docs/guides/resources.md`; for the decision record see
@@ -45,8 +45,11 @@ Fields:
 - **`manifests`** (optional): an importlib-resources package anchor whose `manifests/` subdirectory
   holds the plugin's bundled YAML resource manifests (the same envelope operators write; see
   `docs/guides/resources.md`). `None` when the plugin ships no manifests.
-- **`guide_topics`**: an inert tuple of `TopicContribution` records consumed only while building an
-  `agw guide` catalog. It does not execute during plugin registration or ordinary commands.
+- **`guide_topics`**: an inert tuple of already-materialized `TopicContribution` records consumed
+  only while building an `agw guide` catalog. It does not execute during plugin registration or
+  ordinary commands. File-backed first-party teaching stays behind a fixed guide-service mapping and
+  a package-local lazy adapter, so descriptor construction and ordinary plugin imports never read
+  guide content.
 - **`required_scopes`** and **`commands`**: reserved, inert placeholders (see below).
 
 The descriptor depends on nothing in the capability or registry machinery, so it is constructible in
@@ -70,6 +73,10 @@ isolates an invalid plugin topic while retaining valid core and plugin topics. T
 reports rejected content and exits 1, while an unrelated valid topic remains a clean response. A
 retained topic whose live projection is unavailable keeps its authored teaching, reports the scoped
 issue, and exits 1.
+
+Keep authored Markdown beside the owning package under `guide-content/`. A package-local adapter may
+load it only during a guide request and returns inert contributions. Do not turn `guide_topics` into
+a loader callback or add a generic plugin discovery mechanism for first-party package content.
 
 Every renderer-owned level-2 heading in raw CLI Markdown carries the exact literal `⟦AGW framework⟧`
 marker. After bounded input validation, HTML entity decoding, and Unicode normalization, the

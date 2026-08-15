@@ -404,22 +404,22 @@ created.
 
 ### System Plugins
 
-Agentworks ships some vendor- and tool-specific capabilities (VM platforms, harness integrations,
-git-credential providers, secret backends) as **system plugins**: separable bundles that are
-installed but off by default. The shipped build installs `azure` (the `azure-vm` VM platform, the
-`azdo` git-credential provider, and the `az-cli` install-command), `proxmox` (the `proxmox` VM
-platform), `aws` (the `aws-ec2` VM platform), `gcp` (the `gcp-gce` VM platform and optional guest
-`gcloud-cli` apt package), `onepassword` (the `onepassword` secret backend), `claude` (the
-`claude-code` harness integration and the `claude` CLI install-command), and `codex` (the `codex`
-harness integration and the `codex` CLI install-command). (This is a different sense of "plugin"
-from [Claude Code Plugins](#claude-code-plugins) below, which installs marketplace plugins into
-Claude Code itself.)
+Agentworks ships optional vendor, tool, and installer catalogs as **system plugins**: separable
+bundles that are installed but off by default. The shipped build installs `apt` (five apt sources
+and their five package sets), `install-command` (six user install commands), `azure` (the `azure-vm`
+VM platform, the `azdo` git-credential provider, and the `az-cli` install-command), `proxmox` (the
+`proxmox` VM platform), `aws` (the `aws-ec2` VM platform), `gcp` (the `gcp-gce` VM platform and
+optional guest `gcloud-cli` apt package), `onepassword` (the `onepassword` secret backend), `claude`
+(the `claude-code` harness integration and the `claude` CLI install-command), and `codex` (the
+`codex` harness integration and the `codex` CLI install-command). (This is a different sense of
+"plugin" from [Claude Code Plugins](#claude-code-plugins) below, which installs marketplace plugins
+into Claude Code itself.)
 
 Opt in by name in `config.toml`:
 
 ```toml
 [plugins]
-system = ["azure", "aws", "gcp", "proxmox", "onepassword", "claude", "codex"] # only those you use
+system = ["apt", "install-command", "azure", "aws", "gcp", "proxmox", "onepassword", "claude", "codex"] # only those you use
 ```
 
 A resource that references a not-enabled plugin's contribution (an `azure-vm` vm-site, a
@@ -463,14 +463,17 @@ spec:
   claude_plugins: [nerftools-default@nerftools]
 ```
 
-### Built-in Apt / Install-Command Entries
+### Optional Apt / Install-Command Catalogs
 
-Agentworks ships built-in entries for common tools (apt sources, apt packages, system install
-commands, and user install commands), bundled as YAML manifests under
-`agentworks/manifests/builtin/`. Run
+The optional `apt` plugin owns the shipped apt sources and package sets. The optional
+`install-command` plugin owns the shipped user install commands. Both are installed but disabled by
+default, while core continues to own their kinds, validation, dependency ordering, runners, and
+executors. Enable the matching plugin in `[plugins].system` before a template selects an entry. Run
 `agw resource list --kind apt-package,system-install-command,user-install-command,apt-source` to see
-what is available (or filter to any single kind). Reference these entries by name from VM, admin,
-and agent templates. User-defined entries override built-in entries with the same name.
+what is available (or filter to any single kind), and add `--include-disabled` before enablement.
+Reference entries by name from VM, admin, and agent templates. User-defined entries override a
+same-named plugin row. A custom apt package that keeps a shipped apt-source dependency still needs
+`apt` enabled, or must replace or remove that source dependency too.
 
 Prefer template `apt`, `apt_packages`, `snap`, or `mise_packages` fields over a custom install
 command. When an install command is necessary, its `command` is one logical shell invocation written

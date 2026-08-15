@@ -76,18 +76,24 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # refused at use) with an "enable plugin <name>" hint, never an unknown-name
 # error. Only installed plugin names are valid in `system` (an unknown name is a
 # hard error, as is any key in `[plugins]` other than `system`). The shipped
-# build installs `onepassword` (the 1Password secret backend), `claude` (the
+# build installs `onepassword` (the 1Password secret backend), `apt` (optional
+# apt sources and package sets), `install-command` (optional user install
+# commands), `claude` (the
 # Claude Code harness integration and its `claude` CLI install-command), `codex`
 # (the Codex harness integration and its `codex` CLI install-command), `proxmox`
 # (the Proxmox VE VM platform), `azure` (the Azure VM platform, the Azure
 # DevOps git-credential provider, and the `az-cli` install-command), `aws`
 # (the EC2 VM platform), and `gcp`
 # (the Google Compute Engine VM platform and optional guest `gcloud-cli` apt
-# package).
-# `agw doctor` shows a System plugins roster with each
-# plugin's state.
+# package). Core still owns runners and executors, plus snap, mise, dotfiles,
+# tmuxinator, and Claude marketplace/plugin setup.
+# `agw doctor` shows a System plugins roster with each plugin's state. For a
+# template that selects an apt catalog entry, add `apt`; for one that selects a
+# shipped user install command, add `install-command`. Keep existing names. If
+# a resource is disabled, its standard message names the plugin: add that name
+# here or replace the dependency.
 #[plugins]
-#system = ["onepassword", "claude", "codex", "proxmox", "azure", "aws", "gcp"]   # installed plugins to enable
+#system = ["apt", "install-command", "onepassword", "claude", "codex", "proxmox", "azure", "aws", "gcp"]   # installed plugins to enable
 
 # --- Default values for CLI flags ---
 

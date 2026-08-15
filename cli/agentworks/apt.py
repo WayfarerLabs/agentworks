@@ -219,7 +219,9 @@ class _AptSourceKind:
 
         Apt packages reference a source by name; nothing installs a source on its own.
         In the stanza, `{arch}` stands for the VM's architecture (`amd64` or `arm64`).
-        Several sources ship built in; declaring one under a built-in's name replaces it.
+        Several sources ship through the optional `apt` plugin; declaring one under a plugin
+        source name replaces it. A package retaining a shipped source dependency still needs that
+        plugin enabled.
         """,
     )
     model: type[DeclaredResource] = AptSourceEntry
@@ -246,8 +248,9 @@ class _AptPackageKind:
         the sources first and the packages after.
 
         The indirection is what lets a template say `gh` without also knowing which
-        repository provides it. Several packages ship built in; declaring one under a
-        built-in's name replaces it.
+        repository provides it. Several packages ship through the optional `apt` plugin; declaring
+        one under a plugin catalog name replaces it. A package retaining a shipped source dependency
+        still needs the `apt` plugin enabled.
         """,
     )
     model: type[DeclaredResource] = AptPackageEntry
