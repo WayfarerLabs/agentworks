@@ -122,8 +122,10 @@ R3.2 requires the after number to be lower.
 - [ ] Skills: consolidate the testing trio's diverged and contradictory copies to one authoritative
       home, keeping deliberate cross-perspective reinforcement (PR1, PR10, operator caution
       2026-08-12); trim journey narration and register across the process tree (PR7, PR8, PR9),
-      leaving the exercised label and handoff conventions untouched (PR2 as corrected). Done when:
-      net deletion, and a top-tier consistency review over the changed tree per
+      leaving the exercised label and handoff conventions untouched (PR2 as corrected). This item
+      also owns the two review-authority restatements PR3 left behind, in `integration-testing` and
+      `agw-test-env`, since it owns those files. Done when: net deletion, those two restatements
+      point at section 7a, and a top-tier consistency review over the changed tree per
       `agentic-dev-process` reports no new contradictions.
 
 ## Reassess (R4)
