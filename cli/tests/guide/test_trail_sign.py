@@ -5,14 +5,21 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from agentworks.errors import ConfigError
-from agentworks.guide import GuideIdentity, GuideMode, UnknownGuideTopicError, VerificationEvidence
+from agentworks.guide import (
+    GuideIdentity,
+    GuideMode,
+    GuideTraversalError,
+    UnknownGuideTopicError,
+    VerificationEvidence,
+)
 from agentworks.guide.assessment import VerificationOutcome
 from agentworks.guide.contract import ActionId
-from agentworks.guide.service import render_guide
+from agentworks.guide.service import _EmptyInventory, render_guide
 from agentworks.guide.trail_sign import TRAIL_DESTINATIONS, trail_destinations
 
 if TYPE_CHECKING:
     from agentworks.config import Config
+    from agentworks.db import Database
     from agentworks.resources import Registry
 
 
@@ -124,6 +131,27 @@ def test_unverifiable_well_formed_evidence_stays_unapplied() -> None:
 
     assert response.exit_code == 0
     assert "concept-onboarding/derived-plan" in response.markdown
+
+
+def test_structural_onboarding_snapshot_failure_remains_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    class EmptyRegistry:
+        is_finalized = True
+
+        def iter_kind_items(self, kind: str):
+            return iter(())
+
+    def broken_snapshot(*args: object) -> None:
+        raise GuideTraversalError("structural assessment defect")
+
+    monkeypatch.setattr("agentworks.guide.service.build_onboarding_snapshot", broken_snapshot)
+    with pytest.raises(GuideTraversalError):
+        render_guide(
+            ("concept-onboarding",),
+            GuideMode.AGENT,
+            load_config_fn=lambda: cast("Config", object()),
+            load_registry_fn=lambda config: cast("Registry", EmptyRegistry()),
+            db=cast("Database", _EmptyInventory()),
+        )
 
 
 def test_names_only_keeps_static_names_and_emits_no_diagnostic_lines() -> None:

@@ -105,9 +105,11 @@ def test_render_guide_frames_accidental_read_only_write(
         )
 
 
+@pytest.mark.parametrize("malformed", ("not-json", sqlite3.Binary(b"\xff")))
 def test_render_guide_degrades_malformed_persisted_vm_json(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    malformed: object,
 ) -> None:
     import agentworks.db as db_package
 
@@ -116,7 +118,7 @@ def test_render_guide_degrades_malformed_persisted_vm_json(
     writable.insert_vm("broken", site="local", hostname="broken", template="demo")
     writable.close()
     connection = sqlite3.connect(path)
-    connection.execute("UPDATE vms SET extra_packages = ? WHERE name = ?", ("not-json", "broken"))
+    connection.execute("UPDATE vms SET extra_packages = ? WHERE name = ?", (malformed, "broken"))
     connection.commit()
     connection.close()
     monkeypatch.setattr(db_package, "DB_PATH", path)
