@@ -139,17 +139,33 @@ is interior by the trust-boundary doctrine the simplification pass landed in
 `development-principles` principle 3, so those checks bought nothing.
 
 What stayed, at the boundary that deletion first got wrong: `interaction` is still checked once on
-arrival, by `require_exact_interaction_policy` at the four published services that consume a policy
-rather than forward one (`secrets.verification.verify_secrets`,
-`secrets.orchestration.resolve_for_command`, `secrets.resolver.Resolver.__init__`, and
-`env.show.show_env`). Every path to `resolve_batch` crosses one of them. `InteractionPolicy` is a
-`StrEnum` and every consumer compares it by identity, so a value that is equal but not identical (a
-plain `"refuse"`) takes the not-refuse branch and resolves through an interactive source in a run
-that meant to refuse. That is reachable through this published service surface, which is why it is
-checked there: these functions take `interaction` from callers outside our type checking, and a
-probe against a configured OnePassword source reproduced the fault before the check was added.
-Forwarding a checked policy onward is not rechecked, and that is the whole difference from the
-152-site convention this note supersedes.
+arrival, by `require_exact_interaction_policy`. `InteractionPolicy` is a `StrEnum` and every
+consumer compares it by identity, so a value that is equal but not identical (a plain `"refuse"`)
+takes the not-refuse branch and resolves through an interactive source in a run that meant to
+refuse. That is reachable through the published service surface, whose functions take `interaction`
+from callers outside our type checking, and a probe against a configured OnePassword source
+reproduced the fault before the check was added. Forwarding a checked policy onward is not
+rechecked, and that is the whole difference from the 152-site convention this note supersedes.
+
+Where the check goes is mechanical rather than a judgment about which functions read as published:
+**every construction of a `ResolutionPolicy` is preceded on its own call path by the check**, and
+`grep -rn "ResolutionPolicy(" cli/agentworks/` is the whole audit. The six constructions today sit
+in five functions (`secrets.verification.verify_secrets`,
+`secrets.orchestration.resolve_for_command`, `secrets.resolver.Resolver.__init__`,
+`secrets.resolve.resolve_partial_for_reveal`, and the three inside `Resolver`), and every path to
+`resolve_batch` crosses one. The published-service framing this supersedes named four of them and
+got both directions wrong: `env.show.show_env` forwards to `resolve_partial_for_reveal` rather than
+consuming, and `resolve_partial_for_reveal` consumes and was left unchecked because it had a single
+caller, which is the same reasoning the 152-site deletion had to correct.
+
+Three entry points call the check themselves rather than inheriting it from the resolver they reach:
+`vms.manager.power.delete_vm`, `agents.manager.lifecycle.reinit_agent`, and
+`workspaces.manager.rehome.rehome_workspace`. Position, not presence, is what those buy. Each does
+consequential work before reaching its resolver, and `delete_vm` reaches its resolver inside a
+best-effort span that downgrades an `AgentworksError` to a warning, so a deeper rejection there was
+swallowed and the delete ran to completion with the backend delete skipped: exactly the #329
+orphaning the span exists to prevent. A rejected policy must leave nothing behind, so the check runs
+before any prompt, any DB write, and any transport.
 
 Every interaction behavior recorded under "What shipped" still holds: the enum, caller-authorized
 prompting, fail-before-prompt ordering, `agw secret verify`'s refuse-by-default posture and its

@@ -75,10 +75,19 @@ the sweep instead, per group 4 above.
       interior deletion stands in full, but review found the value is not interior everywhere: the
       manifest services take `interaction` from callers outside our type checking, and a probe drove
       a non-enum `"refuse"` into real backend execution. The item therefore also added
-      `require_exact_interaction_policy` at the four published services that consume a policy rather
-      than forward one, which every path to `resolve_batch` crosses. Both names survive in SDD prose
-      (this plan, `findings.md`, and the supersession note the work required on the locked
-      `2026-08-07-secret-sources` lock, whose LLD specified the deleted validator as normative).
+      `require_exact_interaction_policy` under a mechanical rule: **every construction of a
+      `ResolutionPolicy` is preceded on its own call path by the check**, audited by
+      `grep -rn "ResolutionPolicy(" cli/agentworks/`, which is six constructions in five functions
+      today and covers every path to `resolve_batch`. Three entry points call it themselves rather
+      than inheriting it from the resolver they reach, because each does consequential work first:
+      `delete_vm` (whose resolver sits inside a best-effort span that swallowed the rejection and
+      completed the delete with the backend delete skipped, the #329 orphaning), `reinit_agent`
+      (which persists a template re-point first), and `rehome_workspace` (which opens SSH transports
+      first). The deleted names survive in SDD prose only, and this is the whole list: both names in
+      this plan, in `findings.md`, and in the supersession note the work required on the locked
+      `2026-08-07-secret-sources` lock; `phase7` alone in `hla.md`; and
+      `validate_interaction_policy` alone in that lock's `operator-surfaces-lld.md`, which the
+      supersession note supersedes.
 - [ ] Replace `website/tests/test_pages_workflows.py` (W1): delete the hand-rolled YAML parser and
       every verbatim pin; rewrite the real policy invariants (least-privilege permissions,
       credential non-persistence, main-only deploy, source-SHA/artifact binding, double-build diff)
