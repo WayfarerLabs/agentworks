@@ -38,4 +38,5 @@ did, what you deliberately did not, and what is still open.
 The principles' "whoever is driving your work" is, for you, always the invoking lead and never the
 operator. The lead owns the plan and the surrounding context, decides most of what you raise, and
 escalates upward only what is genuinely the operator's call. Likewise principle 9's ownership line:
-the FRD, HLA, and plan of the effort you are working are lead-owned; flag, don't fix.
+the SDD artifacts of the effort you are working are lead-owned, all of them; edit or create one only
+where your charter grants you that artifact, and otherwise flag, don't fix.
