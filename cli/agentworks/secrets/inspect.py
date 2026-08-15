@@ -526,7 +526,7 @@ def render_secret_description(desc: SecretDescription) -> None:
                 status = mapping.identifier
             else:
                 status = "(prompt at resolution time)"
-            # A would-attempt backend that cannot run here keeps its mapping
+            # A would-attempt source that cannot run here keeps its mapping
             # shown (the config is real) but is flagged not-ready (R9.1).
             if mapping.would_attempt and mapping.not_ready_reason is not None:
                 status += f" (not ready: {mapping.not_ready_reason})"
@@ -535,7 +535,7 @@ def render_secret_description(desc: SecretDescription) -> None:
     # --- Resolution preview ---
     output.info("")
     output.info("Resolution preview:")
-    # The honest offline layer first: backends the walk skips because they are
+    # The honest offline layer first: sources the walk skips because they are
     # not-ready here (R9.6), then the optimistic would-resolve verdict under it.
     for skipped in desc.resolution.skipped_not_ready:
         output.detail(f"- skipped {skipped.source}: not ready: {skipped.reason}")
