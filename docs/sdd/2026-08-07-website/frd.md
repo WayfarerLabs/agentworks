@@ -173,22 +173,21 @@ recorded as a growth path so nothing forecloses it, and none of it is in scope n
 - R22. After each safe landing, the next site is deterministically placed beyond the right edge of
   the current view. A visible edge arrow points toward that target from either side while it remains
   offscreen and hides once the site enters view; under reduced motion it remains a static direction
-  cue. Before issuing the departing site's gas can, the game calculates a deterministic sufficient
-  fuel allowance for a certified reference flight to the generated next platform. The allowance is
-  an independently derived conservative base plus the positive platform-height difference divided by
-  three, rounded upward to the existing fuel quantum; descending platforms receive no negative
-  credit. The can adds that allowance multiplied by the **refuel ratio** `1 + 0.5^(n-1)`, where `n`
-  is the one-indexed number of the base just powered. The first base therefore uses `2`, followed by
-  `1.5`, `1.25`, `1.125`, and a mathematically monotonic approach to one from above. The runtime's
-  binary-number projection never falls below one and may round to exactly one once the remaining
-  bonus is below representable precision. Unused fuel carries forward and is never discarded merely
-  because another site was completed. The sufficient allowance is not represented as the smallest
-  successful reserve, and the reference plan does not waste fuel to manufacture a
-  one-quantum-smaller failure. If the implementation uses a finite physical world, its sole final
-  site preserves the ordinary can, refuel, deployment, and power sequence without inventing an
-  unreachable next route. That terminal can uses the same independently certified base allowance
-  with zero height delta, after which target and route-proof authority are absent and the physical
-  terminus remains the only boundary.
+  cue. Before issuing the departing site's gas can, the game computes one deterministic conservative
+  predicted allowance from a fixed base plus one third of positive platform-height difference,
+  rounded upward to the existing fuel quantum; descending platforms receive no negative credit.
+  Phase 4U pins that base to `22` and forbids runtime schedule search, proof replay, or a generated
+  per-route catalog. The can adds the predicted allowance multiplied by the **refuel ratio**
+  `1 + 0.5^(n-1)`, where `n` is the one-indexed number of the base just powered. The first base
+  therefore uses `2`, followed by `1.5`, `1.25`, `1.125`, and a mathematically monotonic approach to
+  one from above. The runtime's binary-number projection never falls below one and may round to
+  exactly one once the remaining bonus is below representable precision. Unused fuel carries forward
+  and is never discarded merely because another site was completed. The prediction is not
+  represented as the smallest or universally exact reserve. If the implementation uses a finite
+  physical world, its sole final site preserves the ordinary can, refuel, deployment, and power
+  sequence without inventing an unreachable next route. That terminal can applies the same base with
+  zero height delta; target and cue authority are then absent and the physical terminus remains the
+  only boundary.
 - R23. Unsafe terrain, platform, or building contact produces a brief vacuum-appropriate crash: a
   compact propellant flash and ballistic fragments, with no smoke cloud, atmospheric shock wave,
   sustained fireball, audio, or page movement. Reduced motion skips fragment travel and exposes the
@@ -330,14 +329,17 @@ recorded as a growth path so nothing forecloses it, and none of it is in scope n
   terrain, spacing, physics, opening, finite-world, and browser witnesses from these authorities.
 
   Fuel prediction is deliberately simple and conservative rather than a live proof obligation. After
-  the next site exists, runtime computes one sufficient allowance as
+  the next site exists, runtime computes one predicted allowance as
   `quantumCeil(22 + max(0,targetDeck-originDeck)/3)`, then applies the unchanged refuel ratio and
   preserves carried reserve. The constant `22` is the reviewed round-up from representative Phase 4U
   reference flights; the one-third climb term is unchanged because gravity and engine acceleration
   scale together. Site generation performs no schedule search or replay and ships no per-route
   schedule catalog. Offline tests cover openings plus representative closest, farthest,
   steepest-rise, and steepest-fall routes, but neither runtime nor release acceptance attempts to
-  prove an exact schedule for every generated geometry.
+  prove an exact schedule for every generated geometry. This Phase 4U simplification supersedes the
+  inherited exhaustive route-proof and certified-sufficient-allowance clauses wherever they appear
+  in R20, R28-R30, AC26, and AC29-AC31; their terrain, collision, lifecycle, and no-scroll contracts
+  remain active.
 
 ## Settled constraints (inherited; do not reopen)
 
@@ -470,12 +472,12 @@ merged and settled on `main`. The first slice must not build toward them specula
   visible collision-backed supports reach from that structure to the independently interpolated
   terrain at its left, center, and right, without separate brace fields, an uninterrupted
   sky-colored rectangle beneath it, or a visual opening that contradicts collision. Each award
-  equals the next route's deterministic sufficient allowance multiplied by the refuel ratio
-  `1 + 0.5^(n-1)` for one-indexed powered-base number `n`, beginning at `2` and approaching one
-  without crossing it. A test-controlled reference flight reaches and safely lands on every
-  representative generated next platform using no more than the calculated allowance. Independent
-  arithmetic tests pin upward fuel-quantum rounding and exact exhaustion behavior without asserting
-  that one quantum less than a deliberately conservative allowance must make the route fail.
+  equals `quantumCeil(22 + max(0,deckDelta)/3)` multiplied by the refuel ratio `1 + 0.5^(n-1)` for
+  one-indexed powered-base number `n`, beginning at `2` and approaching one without crossing it.
+  Representative opening and route-extreme flights exercise the prediction without claiming every
+  generated route is optimally or exactly fueled. Independent arithmetic tests pin upward
+  fuel-quantum rounding and exact exhaustion behavior without asserting that one quantum less than a
+  deliberately conservative prediction must make the route fail.
 - AC23. While the next site is outside the viewport, a visible cue points toward it from the
   corresponding left or right edge and blinks only when motion is allowed and the document is
   active. It becomes static under reduced motion, pauses while hidden, reverses correctly when the

@@ -391,26 +391,22 @@ region-specific pad, connector, or NOC brace pattern, so the site reads as one e
 structure without a long exposed sky strip, repeated X fields, a false flat foundation, or a
 decorative opening the lander could appear able to traverse. A safe landing under the pinned,
 modestly relaxed speed and attitude limits consumes that site's one gas can exactly once. The fuel
-award is computed only after the next site exists: a deterministic reference plan starts at the
-post-refuel, post-power platform checkpoint, includes the pinned player-reachable launch prefix,
-uses the same immutable physics profile as play, and demonstrates a safe next landing within a
-deterministic sufficient allowance. That allowance is an independently certified conservative base
-plus one third of positive platform-height gain, rounded upward to the existing fuel quantum;
-descents receive no negative credit. The award is that allowance multiplied by the refuel ratio
+award is computed only after the next site exists. The model takes fixed base `22`, adds one third
+of positive platform-height gain, and rounds upward to the existing fuel quantum; descents receive
+no negative credit. The award is that conservative prediction multiplied by the refuel ratio
 `1 + 0.5^(n-1)`, where `n` is the one-indexed number of the base just powered. The sequence begins
 `2, 1.5, 1.25, 1.125` and mathematically approaches one from above in constant time. Its binary
 runtime projection never falls below one and may round to exactly one when the remaining bonus is
 smaller than representable precision. The award is added to the carried reserve without erasing
-unused fuel. Exhaustive finite geometry classes and independent runtime replay pin the route proof,
-allowance upper bound, and quantum rounding. The sufficient allowance is not described or tested as
-the smallest successful reserve, and the reference plan does not waste fuel to force a
-one-quantum-smaller failure.
+unused fuel. Arithmetic tests pin the constant-time formula and quantum rounding; representative
+opening and route-extreme flights provide handling evidence without a runtime search, replay, proof
+record, or claim that the prediction is exact for every route.
 
 At the sole final site in a finite physical world, the service transaction preserves the same can,
 refuel, deployment, power, checkpoint, and player-commanded launch behavior without attempting to
-construct a target beyond the terminus. Its terminal award applies the same independently certified
-base allowance with zero deck delta. Target, cue, and route-proof authority then become absent; no
-new outcome, copy, automatic Exit, or hidden boundary state is introduced.
+construct a target beyond the terminus. Its terminal award applies the same base `22` with zero deck
+delta. Target and cue authority then become absent; no new outcome, copy, automatic Exit, or hidden
+boundary state is introduced.
 
 After refueling, the G opening acts as a deployment bay: a small terminal-inspired agent reaches the
 surface and enters the single NOC in half the Phase 4L travel time. The later battery and signal
