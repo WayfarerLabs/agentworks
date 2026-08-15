@@ -283,16 +283,8 @@ def test_installer_plugin_rows_match_oracle_and_are_disabled_by_default(tmp_path
     assert SYSTEM_PLUGINS["install-command"].capabilities == {}
     assert SYSTEM_PLUGINS["install-command"].manifests == "agentworks.plugins.install_command"
 
-    srcs = {
-        name: entry
-        for name, entry in kind_dict(registry, "apt-source").items()
-        if entry.origin.plugin == "apt"
-    }
-    pkgs = {
-        name: entry
-        for name, entry in kind_dict(registry, "apt-package").items()
-        if entry.origin.plugin == "apt"
-    }
+    srcs = {name: entry for name, entry in kind_dict(registry, "apt-source").items() if entry.origin.plugin == "apt"}
+    pkgs = {name: entry for name, entry in kind_dict(registry, "apt-package").items() if entry.origin.plugin == "apt"}
     usr_cmds = {
         name: entry
         for name, entry in kind_dict(registry, "user-install-command").items()
@@ -318,6 +310,7 @@ def test_installer_plugin_rows_match_oracle_and_are_disabled_by_default(tmp_path
                 assert entry.origin.plugin == plugin
                 assert entry.origin.source == source
                 assert registry.graph.enablement_of(kind, entry.name) is Enablement.disabled
+
 
 # The former ``test_operator_toml_override_wins_over_builtin`` was removed here:
 # it declared an operator ``[apt_packages.gh]`` override in config.toml, which
