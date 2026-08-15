@@ -217,16 +217,11 @@ def test_unknown_apt_source_reference_errors_via_framework(
         build_registry(cfg)
 
 
-def test_operator_declared_apt_source_layers_over_builtin(
+def test_operator_declared_apt_source_tracks_dependency_edges(
     tmp_path: Path,
 ) -> None:
-    """Operator-declared ``[apt_sources.<name>]`` in config.toml is
-    parsed and published by ``apt.publish_to`` with ``operator-declared``
-    origin. Publish order (the bundled manifests first, then
-    ``apt.publish_to``) plus the kind's ``builtin_override = "allow"``
-    policy is what lets the operator's declaration override the built-in
-    for the same name. The same layering pattern that already covers
-    apt_packages.
+    """A unique operator-declared apt source retains its origin and inbound
+    apt-package dependency edge after finalization.
     """
     cfg = load_config(
         _write_cfg(

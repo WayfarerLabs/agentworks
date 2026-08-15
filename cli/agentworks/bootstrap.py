@@ -58,15 +58,15 @@ def build_registry(
 
     Publisher order: the bundled built-in manifests first
     (``builtin_manifests``, which supply reserved core rows), then the built-in
-    capability rows (one generic publisher per capability-kind descriptor), then the system
-    plugins (``plugins.publish_plugins``: every shipped plugin's capability
-    rows plus the enabled plugins' bundled manifests), then the built-in
-    secret-source rows, then the operator's YAML ``ManifestSet``
+    capability rows (one generic publisher per capability-kind descriptor), then
+    the system plugins (``plugins.publish_plugins``: every shipped plugin's
+    capability and manifest rows), then the built-in secret-source rows, then
+    the operator's YAML ``ManifestSet``
     (``Config.publish_to`` is a no-op now: config.toml is settings only, ADR
-    0022). Plugin capability rows publish
-    unconditionally and are marked disabled at finalize when not opted in
-    (the injected ``plugin_enablement_source``). Operator rows may replace
-    built-in rows only where the kind's ``builtin_override`` allows.
+    0022). Plugin rows publish unconditionally; rows from a disabled plugin are
+    weak and marked disabled at finalize by the injected
+    ``plugin_enablement_source``. Operator rows may replace built-in rows only
+    where the kind's ``builtin_override`` allows.
 
     When ``manifests`` is None (the standard path), the resources
     directory next to the loaded config file (``<config-dir>/resources/``)
@@ -107,9 +107,9 @@ def build_registry(
     for descriptor in capability_descriptors():
         publish_capability_rows(registry, descriptor)
     # System plugins publish here, after the built-in capability rows and
-    # before the operator sources: every shipped plugin's capability rows
-    # unconditionally (present-but-disabled when not opted in, via the
-    # enablement source below), and the enabled plugins' bundled manifests.
+    # before the operator sources: every shipped plugin's capability and
+    # manifest rows unconditionally. Disabled plugins' manifest rows publish
+    # weak and finalize present-but-disabled via the enablement source below.
     # Publication-only (impls were seated at import), so purity holds.
     plugins.publish_plugins(registry, config)
     # The two zero-config defaults are ordinary source rows, published only

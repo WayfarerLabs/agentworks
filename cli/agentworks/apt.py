@@ -60,9 +60,9 @@ class AptSourceEntry(DeclaredResource):
     when a package requires a source's key + list stanza before it can be
     installed. A first-class, system-declared Registry Resource: inherits the
     uniform metadata from ``DeclaredResource`` (the publisher stamps
-    ``origin`` as ``built-in`` for shipped entries or ``operator-declared`` for
-    config-added ones; ``references`` is attached by the framework's finalize
-    pass from the apt_packages that name it).
+    ``origin`` as ``system-plugin`` for app-shipped optional entries or
+    ``operator-declared`` for operator entries; ``references`` is attached by
+    the framework's finalize pass from the apt_packages that name it).
     """
 
     # The examples on these four are what a generated sample writes on the
@@ -193,8 +193,8 @@ def _load_apt_packages(
 # ``apt_sources`` list, or in a ``[vm_templates.*].apt_packages`` list,
 # surfaces as a framework miss-policy error at ``build_registry`` time,
 # citing the reference's source. There is no auto-declare path: entries are
-# built-in (bundled manifests) or operator-declared, and references must
-# resolve to a known name.
+# app-shipped through an opt-in system plugin or operator-declared, and
+# references must resolve to a known name.
 #
 # ``apt-source`` was originally not a framework kind (only operator-facing
 # config referenced by name got promoted at first). It joined the framework

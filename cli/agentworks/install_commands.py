@@ -162,10 +162,9 @@ def _load_user_commands(
 # Both kinds use the **error miss policy**: a typo in a template's
 # ``system_install_commands`` / ``user_install_commands`` list surfaces as
 # a framework miss-policy error at ``build_registry`` time, citing the
-# reference's source. There is no auto-declare path: entries are built-in
-# (bundled manifests) or operator-declared, and references must resolve to
-# a known name. App-shipped install commands are supplied by opt-in system
-# plugins, while operator declarations remain YAML manifests.
+# reference's source. There is no auto-declare path: entries are app-shipped
+# through opt-in system plugins or operator-declared, and references must
+# resolve to a known name. Operator declarations remain YAML manifests.
 
 
 @dataclass(frozen=True)
