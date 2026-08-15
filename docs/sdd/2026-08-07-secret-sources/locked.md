@@ -128,8 +128,8 @@ The `2026-08-12-simplification-pass` effort's wave 1 deleted `validate_interacti
 `phase7` corpus that enforced its use, so the conventions this SDD's `operator-surfaces-lld.md`
 records as normative no longer describe HEAD. Recorded here because that LLD is the only place on
 `main` that still specified the mechanism as current design, and this directory is locked. The LLD
-sections stating those requirements, principally its lines 145-153, 184-189, 396-400, 556-566, and
-669-677, are superseded in full.
+sections stating those requirements, principally its lines 145-153, 184-189, 396-400, 556-566,
+669-677, and 735-736, are superseded in full.
 
 What went: the interior half. The 152 call sites that re-checked a first-party `InteractionPolicy`
 already carried by a typed parameter, and the AST guard requiring
@@ -151,7 +151,9 @@ Where the check goes is mechanical rather than a judgment about which functions 
 **`ResolutionPolicy.__post_init__` calls it, so no policy can be constructed from an unchecked
 `interaction`**, and `grep -rn "ResolutionPolicy(" cli/agentworks/` is the whole audit. That
 constructor requirement is the one `operator-surfaces-lld.md` states at its lines 687-691, which
-this note does not supersede: it holds at HEAD as written. The six constructions today sit in six
+this note does not supersede: it holds at HEAD as written. Its attached test requirement at lines
+735-736 does go, because the check it demands a matrix for is a single `type(x) is` comparison, and
+the extra inputs test that one comparison over again. The six constructions today sit in six
 functions (`secrets.verification.verify_secrets`, `secrets.orchestration.resolve_for_command`,
 `secrets.resolve.resolve_partial_for_reveal`, and `Resolver.resolve`, `Resolver.resolve_gate`,
 `Resolver.resolve_late_repair`), and every path to `resolve_batch` crosses one. `Resolver.__init__`

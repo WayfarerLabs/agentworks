@@ -18,7 +18,7 @@ import pytest
 from agentworks.config import load_config
 from agentworks.db import Database
 from agentworks.env.show import ResolvedEnvRow, show_env
-from agentworks.errors import ValidationError
+from agentworks.errors import StateError, ValidationError
 from agentworks.secrets.policy import InteractionPolicy
 from tests.conftest import ManifestDoc, write_manifests
 
@@ -314,6 +314,42 @@ def test_secret_revealed_with_flag(
     api = next(r for r in rows if r.key == "API_KEY")
     assert api.is_secret
     assert api.rendered_value == "from-operator-env"
+
+
+def test_show_env_rejects_non_enum_policy_before_any_source_work(
+    db: Database,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A caller-supplied ``"refuse"`` is equal to the enum but not identical to it.
+
+    ``show_env`` builds no policy of its own, and on the non-reveal path it builds none at all,
+    so its own check is the only thing that can reject the value. Without it a revealing call
+    reaches the source chain carrying a policy every consumer will read as not-refuse.
+    """
+    monkeypatch.setenv("AW_SECRET_SHARED_TOKEN", "from-operator-env")
+    cfg = _write_config(
+        tmp_path,
+        settings="""
+        [secret_config]
+        sources = ["env-var", "prompt"]
+        """,
+        admin=ManifestDoc(
+            "admin-template", "default", {"shell": "zsh", "env": {"API_KEY": {"secret": "shared-token"}}}
+        ),
+        manifests=[ManifestDoc("secret", "shared-token", description="shared API token")],
+    )
+    config = load_config(cfg, warn_issues=False)
+    _seed_db(db)
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        raise AssertionError("a rejected policy must not reach the sources")
+
+    monkeypatch.setattr("agentworks.secrets.resolve.active_sources", _boom)
+    monkeypatch.setattr("agentworks.secrets.resolve.resolve_partial_for_reveal", _boom)
+
+    with pytest.raises(StateError):
+        show_env(db, config, vm_name="vm-1", reveal_secrets=True, interaction="refuse")  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(

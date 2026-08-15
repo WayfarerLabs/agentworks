@@ -110,8 +110,8 @@ class ResolutionPolicy:
 
     def __post_init__(self) -> None:
         # Both fields are compared by identity downstream, so both are checked here: no
-        # policy exists that was never checked. The entry-point checks are not redundant
-        # with this one; see the note above ``require_exact_interaction_policy``.
+        # policy exists that was never checked. For what the entry-point checks buy on top
+        # of this one, see the note above ``require_exact_interaction_policy``.
         require_exact_interaction_policy(self.interaction)
         if type(self.completion) is not CompletionPolicy:
             raise StateError("completion must be an exact CompletionPolicy") from None
