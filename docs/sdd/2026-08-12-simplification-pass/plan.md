@@ -21,7 +21,7 @@ effort. The pre-wave-1 measurements the reassessment compares against are in
       twelve the same way. That answers the isolated-worktree sub-question, since delivery is
       session-start `claudeMd` rather than path-triggered injection and worktree location decides
       nothing. Issue #511 is closed on both observations, so R1.3's gate on wave 1 is satisfied.
-- [x] Amend `development-principles` with the trust-boundary doctrine (the five boundaries, interior
+- [x] Amend `development-principles` with the trust-boundary doctrine (the four boundaries, interior
       trust, validator-names-its-boundary; ~10 lines) plus the principle-3 test-quality
       counterweight (R1.1), and `no-prose-policing-tests` with the authored-artifacts generalization
       (~3 sentences), one PR. Done when: merged, and the wave 1 items below cite the amendments in
@@ -74,14 +74,18 @@ the sweep instead, per group 4 above.
       cases, suite green; no kept fixture carried the `phase7` name, so no rename was owed. The
       interior deletion stands in full, but review found the value is not interior everywhere: the
       manifest services take `interaction` from callers outside our type checking, and a probe drove
-      a non-enum `"refuse"` into real backend execution. The item therefore also added
-      `require_exact_interaction_policy` under a mechanical rule: **every construction of a
-      `ResolutionPolicy` is preceded on its own call path by the check**, audited by
-      `grep -rn "ResolutionPolicy(" cli/agentworks/`, which is six constructions in five functions
-      today and covers every path to `resolve_batch`. Three entry points call it themselves rather
-      than inheriting it from the resolver they reach, because each does consequential work first:
-      `delete_vm` (whose resolver sits inside a best-effort span that swallowed the rejection and
-      completed the delete with the backend delete skipped, the #329 orphaning), `reinit_agent`
+      a non-enum `"refuse"` into real backend execution. That is the caller-supplied trust boundary
+      the doctrine gained in #533, after the wave 0 amendment above merged with four. The item
+      therefore also added `require_exact_interaction_policy`, called in two places for two reasons.
+      `ResolutionPolicy.__post_init__` calls it, so **no policy can be constructed from an unchecked
+      `interaction`**, audited by `grep -rn "ResolutionPolicy(" cli/agentworks/`, which is six
+      constructions in six functions today and covers every path to `resolve_batch`. Eight call
+      sites remain outside the constructor: five check on arrival at the published service functions
+      and at `Resolver.__init__`, and three sit at entry points that do consequential work before
+      reaching a resolver at all, which buys position rather than presence, because a rejected
+      policy must leave nothing behind and so the check runs before any state change. Those three
+      are `delete_vm` (whose resolver sits inside a best-effort span that swallowed the rejection
+      and completed the delete with the backend delete skipped, the #329 orphaning), `reinit_agent`
       (which persists a template re-point first), and `rehome_workspace` (which opens SSH transports
       first). The deleted names survive in SDD prose only, and this is the whole list: both names in
       this plan, in `findings.md`, and in the supersession note the work required on the locked

@@ -148,15 +148,21 @@ reproduced the fault before the check was added. Forwarding a checked policy onw
 rechecked, and that is the whole difference from the 152-site convention this note supersedes.
 
 Where the check goes is mechanical rather than a judgment about which functions read as published:
-**every construction of a `ResolutionPolicy` is preceded on its own call path by the check**, and
-`grep -rn "ResolutionPolicy(" cli/agentworks/` is the whole audit. The six constructions today sit
-in five functions (`secrets.verification.verify_secrets`,
-`secrets.orchestration.resolve_for_command`, `secrets.resolver.Resolver.__init__`,
-`secrets.resolve.resolve_partial_for_reveal`, and the three inside `Resolver`), and every path to
-`resolve_batch` crosses one. The published-service framing this supersedes named four of them and
-got both directions wrong: `env.show.show_env` forwards to `resolve_partial_for_reveal` rather than
-consuming, and `resolve_partial_for_reveal` consumes and was left unchecked because it had a single
-caller, which is the same reasoning the 152-site deletion had to correct.
+**`ResolutionPolicy.__post_init__` calls it, so no policy can be constructed from an unchecked
+`interaction`**, and `grep -rn "ResolutionPolicy(" cli/agentworks/` is the whole audit. That
+constructor requirement is the one `operator-surfaces-lld.md` states at its lines 687-691, which
+this note does not supersede: it holds at HEAD as written. The six constructions today sit in six
+functions (`secrets.verification.verify_secrets`, `secrets.orchestration.resolve_for_command`,
+`secrets.resolve.resolve_partial_for_reveal`, and `Resolver.resolve`, `Resolver.resolve_gate`,
+`Resolver.resolve_late_repair`), and every path to `resolve_batch` crosses one. `Resolver.__init__`
+constructs no policy; it is a check site, and the three constructions inside `Resolver` read the
+`self._interaction` it checked and nothing reassigns. So a value is covered in one of two ways,
+checked in the function that constructs the policy or read from a field checked when the object was
+built, and a new `Resolver` method taking `interaction` as a parameter would have neither. The
+published-service framing this supersedes named four of them and got both directions wrong:
+`env.show.show_env` forwards to `resolve_partial_for_reveal` rather than consuming, and
+`resolve_partial_for_reveal` consumes and was left unchecked because it had a single caller, which
+is the same reasoning the 152-site deletion had to correct.
 
 Three entry points call the check themselves rather than inheriting it from the resolver they reach:
 `vms.manager.power.delete_vm`, `agents.manager.lifecycle.reinit_agent`, and
@@ -165,7 +171,10 @@ consequential work before reaching its resolver, and `delete_vm` reaches its res
 best-effort span that downgrades an `AgentworksError` to a warning, so a deeper rejection there was
 swallowed and the delete ran to completion with the backend delete skipped: exactly the #329
 orphaning the span exists to prevent. A rejected policy must leave nothing behind, so the check runs
-before any prompt, any DB write, and any transport.
+before any state change. Prompting is not a state change, and two commands do prompt first:
+`workspaces.manager.delete.delete_workspace` and `agents.manager.lifecycle.delete_agent` confirm the
+delete before the boundary they check inside, and a confirmed delete that then rejects the policy
+still leaves nothing behind.
 
 Every interaction behavior recorded under "What shipped" still holds: the enum, caller-authorized
 prompting, fail-before-prompt ordering, `agw secret verify`'s refuse-by-default posture and its
