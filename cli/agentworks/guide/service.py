@@ -51,6 +51,7 @@ if TYPE_CHECKING:
     from agentworks.db import Database
     from agentworks.guide.agent_mode import GuideMode
     from agentworks.guide.assessment import VerificationEvidence
+    from agentworks.plugins.base import Plugin
     from agentworks.resources import Registry
 
 
@@ -101,6 +102,35 @@ class _EmptyInventory:
         return ()
 
 
+def _load_first_party_plugin_topics(
+    plugin_name: str,
+) -> tuple[tuple[TopicContribution, ...], GuideCatalogIssue | None]:
+    """Load one curated package adapter without letting its assets break the catalog."""
+    loader = _FIRST_PARTY_PLUGIN_GUIDE_CONTRIBUTIONS.get(plugin_name)
+    if loader is None:
+        return (), None
+    source = f"system-plugin:{plugin_name}"
+    try:
+        return loader(), None
+    except GuideContributionError as error:
+        return (), GuideCatalogIssue(
+            GuideContributionError(
+                f"invalid guide contribution from {source}: first-party guide content is invalid",
+                source=source,
+                topic=error.topic,
+                field_path=error.field_path or "guide-content",
+            )
+        )
+    except (ImportError, OSError, UnicodeError):
+        return (), GuideCatalogIssue(
+            GuideContributionError(
+                f"invalid guide contribution from {source}: first-party guide content is unavailable",
+                source=source,
+                field_path="guide-content",
+            )
+        )
+
+
 def build_authored_catalog(*, strict_trusted_taxonomy: bool = False) -> GuideCatalog:
     """Collect records, optionally making trusted taxonomy drift a CI error."""
     from agentworks.plugins import SYSTEM_PLUGINS
@@ -130,13 +160,13 @@ def build_authored_catalog(*, strict_trusted_taxonomy: bool = False) -> GuideCat
         if strict_trusted_taxonomy:
             raise contribution_error from None
         release_issue = GuideCatalogIssue(contribution_error)
-    plugins = tuple(
-        (
-            plugin,
-            (*plugin.guide_topics, *_FIRST_PARTY_PLUGIN_GUIDE_CONTRIBUTIONS.get(plugin.name, lambda: ())()),
-        )
-        for _, plugin in sorted(SYSTEM_PLUGINS.items())
-    )
+    adapter_issues: list[GuideCatalogIssue] = []
+    plugins: list[tuple[Plugin, tuple[object, ...]]] = []
+    for _, plugin in sorted(SYSTEM_PLUGINS.items()):
+        first_party_topics, adapter_issue = _load_first_party_plugin_topics(plugin.name)
+        if adapter_issue is not None:
+            adapter_issues.append(adapter_issue)
+        plugins.append((plugin, (*plugin.guide_topics, *first_party_topics)))
     resource_owners: list[tuple[str, str, str]] = []
     unavailable_resource_owners: set[str] = set()
     for plugin, _topics in plugins:
@@ -149,14 +179,15 @@ def build_authored_catalog(*, strict_trusted_taxonomy: bool = False) -> GuideCat
             unavailable_resource_owners.add(plugin.name)
     catalog = _build_guide_catalog(
         trusted,
-        plugins,
+        tuple(plugins),
         tuple(resource_owners),
         strict_trusted_taxonomy=strict_trusted_taxonomy,
         unavailable_plugin_resource_owners=frozenset(unavailable_resource_owners),
     )
-    if release_issue is None:
+    if release_issue is None and not adapter_issues:
         return catalog
-    return GuideCatalog(catalog.topics, (*catalog.issues, release_issue))
+    issues = (*catalog.issues, *adapter_issues, *((release_issue,) if release_issue else ()))
+    return GuideCatalog(catalog.topics, issues)
 
 
 def _schema_topic(slug: str) -> TopicContribution:

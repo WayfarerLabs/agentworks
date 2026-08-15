@@ -47,9 +47,8 @@ def _actions() -> tuple[GuideAction, ...]:
             "The operator wants a read-only check after deciding whether to enable the install-command catalog.",
             (),
             ConsentBoundary.READ_CONFIGURED_STATE,
-            ("agw", "doctor"),
-            "The System plugins roster identifies install-command and reports its configured enabled or disabled "
-            "state.",
+            ("agw", "resource", "list", "--origin", "plugin", "--include-disabled"),
+            "The list includes install-command-origin rows and marks them disabled when the plugin is not enabled.",
             None,
             "Do not read configured state; the plugin state remains unchanged.",
         ),

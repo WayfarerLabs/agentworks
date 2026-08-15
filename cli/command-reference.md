@@ -1072,12 +1072,13 @@ Unreadable or malformed configuration remains an error and exits nonzero.
 ### Resource Registry
 
 Cross-kind inspection of the Resource Registry. The registry is the framework that owns every
-operator-declared, auto-declared, and built-in resource the CLI knows about: secrets, VM templates,
-agent templates, workspace templates, apt / install-command entries, git credential providers,
-secret backends, etc. The two commands below stop at the framework-uniform fields (`kind`, `name`,
-`origin`, `references`, `used_by`, `description`). For kind-specific detail (secret backend
-mappings, template inheritance chains, resolution previews), reach for the per-kind command (e.g.
-`agw secret describe`).
+operator-declared, auto-declared, built-in, and system-plugin resource the CLI knows about: secrets,
+VM templates, agent templates, workspace templates, apt / install-command entries, git credential
+providers, secret backends, etc. Apt and user install-command catalog rows carry the system-plugin
+origin and remain present, but disabled, until their owning plugin is enabled. The two commands
+below stop at the framework-uniform fields (`kind`, `name`, `origin`, `references`, `used_by`,
+`description`). For kind-specific detail (secret backend mappings, template inheritance chains,
+resolution previews), reach for the per-kind command (e.g. `agw secret describe`).
 
 | Command                              | Description                                                          |
 | ------------------------------------ | -------------------------------------------------------------------- |

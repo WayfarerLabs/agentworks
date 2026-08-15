@@ -29,8 +29,8 @@ Resources come from four origins: **operator-declared** (you wrote them, as YAML
 **built-in** (shipped with agentworks and inseparable from it, e.g. the `env-var` and `prompt`
 secret backends), **auto-declared** (the framework filled in a referenced-but-undeclared resource,
 e.g. the `tailscale-auth-key` secret or `git-token-<name>` secrets), and **system-plugin**
-(contributed by an installed, opted-in system plugin; see "System plugins" below). Filter by origin
-with `agw resource list --origin operator|auto|builtin|plugin`.
+(contributed by an installed system plugin, regardless of whether its rows are enabled; see "System
+plugins" below). Filter by origin with `agw resource list --origin operator|auto|builtin|plugin`.
 
 ## Declaring resources: YAML manifests
 
