@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
 import tempfile
 import threading
 import time
+from collections.abc import Callable
 from functools import partial
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -19,7 +21,8 @@ from lander_chromium_phase4k import (
     _QuietHandler,
     dispatch_key,
 )
-from site_test_support import RepositoryFixture
+from site_test_support import RepositoryFixture, mock, snapshot
+from test_lander_phase4k_browser_cleanup import _FakeProcess, _NullRootRaceConnection
 
 PROBE = r"""
 import { landerGameController as controller } from "/static/lander-game.js";
@@ -123,8 +126,24 @@ document.documentElement.dataset.phase4lReady = "true";
 """
 
 
-def browser_phase4l_contract(output: Path) -> dict[str, object]:
-    chromium = next(
+def _readiness_expression(url: str) -> str:
+    return (
+        f"location.href === {json.dumps(url)} && "
+        "document.readyState === 'complete' && "
+        "document.documentElement?.dataset.phase4lReady === 'true'"
+    )
+
+
+def browser_phase4l_contract(
+    output: Path,
+    *,
+    chromium_path: str | None = None,
+    connection_factory: Callable[[str], DevToolsConnection] = DevToolsConnection,
+    popen_factory: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
+    target_factory: Callable[[Path, subprocess.Popen[bytes]], str] = _devtools_target,
+    tempdir_factory: Callable[[], tempfile.TemporaryDirectory[str]] = tempfile.TemporaryDirectory,
+) -> dict[str, object]:
+    chromium = chromium_path or next(
         (candidate for name in ("google-chrome", "chromium", "chromium-browser") if (candidate := shutil.which(name))),
         None,
     )
@@ -135,7 +154,7 @@ def browser_phase4l_contract(output: Path) -> dict[str, object]:
     source = page.read_text(encoding="utf-8")
     server = ThreadingHTTPServer(("127.0.0.1", 0), partial(_QuietHandler, directory=str(output)))
     thread = threading.Thread(target=server.serve_forever, daemon=True, name="phase4l-browser-server")
-    profile = tempfile.TemporaryDirectory()
+    profile = tempdir_factory()
     process: subprocess.Popen[bytes] | None = None
     connection: DevToolsConnection | None = None
     try:
@@ -145,7 +164,7 @@ def browser_phase4l_contract(output: Path) -> dict[str, object]:
             encoding="utf-8",
         )
         thread.start()
-        process = subprocess.Popen(
+        process = popen_factory(
             (
                 chromium,
                 "--headless",
@@ -162,7 +181,7 @@ def browser_phase4l_contract(output: Path) -> dict[str, object]:
             stderr=subprocess.DEVNULL,
             env={**os.environ, "HOME": profile.name},
         )
-        connection = DevToolsConnection(_devtools_target(Path(profile.name), process))
+        connection = connection_factory(target_factory(Path(profile.name), process))
         for domain in ("Runtime", "Page", "Accessibility"):
             connection.call(f"{domain}.enable")
         connection.call(
@@ -174,9 +193,11 @@ def browser_phase4l_contract(output: Path) -> dict[str, object]:
                 "mobile": False,
             },
         )
-        connection.call("Page.navigate", {"url": f"http://127.0.0.1:{server.server_address[1]}/lander/"})
+        loaded_url = f"http://127.0.0.1:{server.server_address[1]}/lander/"
+        connection.call("Page.navigate", {"url": loaded_url})
+        readiness = _readiness_expression(loaded_url)
         for _ in range(200):
-            if connection.evaluate("document.documentElement.dataset.phase4lReady === 'true'"):
+            if connection.evaluate(readiness):
                 break
             time.sleep(0.025)
         else:
@@ -237,6 +258,47 @@ def browser_phase4l_contract(output: Path) -> dict[str, object]:
 
 
 class Phase4LBrowserTests(RepositoryFixture):
+    def test_null_root_navigation_race_keeps_polling_and_cleans_up(self) -> None:
+        output = self.build()
+        before = snapshot(output)
+        process = _FakeProcess()
+        connection = _NullRootRaceConnection()
+        profile_paths: list[Path] = []
+
+        def profile_factory() -> tempfile.TemporaryDirectory[str]:
+            profile = tempfile.TemporaryDirectory()
+            profile_paths.append(Path(profile.name))
+            return profile
+
+        with (
+            mock.patch.object(time, "sleep", return_value=None),
+            self.assertRaises(AssertionError),
+        ):
+            browser_phase4l_contract(
+                output,
+                chromium_path="chromium-test",
+                connection_factory=lambda url: connection,
+                popen_factory=lambda *args, **kwargs: process,
+                target_factory=lambda profile, owned: "ws://phase4l.invalid",
+                tempdir_factory=profile_factory,
+            )
+        navigation = next(params for method, params in connection.calls if method == "Page.navigate")
+        loaded_url = str(navigation["url"])
+        self.assertTrue(loaded_url.endswith("/lander/"))
+        self.assertEqual(connection.expressions, [_readiness_expression(loaded_url)] * 200)
+        readiness = connection.expressions[0]
+        self.assertIn(f"location.href === {json.dumps(loaded_url)}", readiness)
+        self.assertIn("document.readyState === 'complete'", readiness)
+        self.assertIn("document.documentElement?.dataset.phase4lReady", readiness)
+        self.assertTrue(connection.closed)
+        self.assertTrue(process.terminated)
+        self.assertEqual(snapshot(output), before)
+        self.assertFalse((output / "phase4l-browser.js").exists())
+        self.assertTrue(all(not path.exists() for path in profile_paths))
+        self.assertFalse(
+            any(thread.name == "phase4l-browser-server" and thread.is_alive() for thread in threading.enumerate())
+        )
+
     def test_real_chromium_two_line_reflow_and_exact_retry_restore(self) -> None:
         result = browser_phase4l_contract(self.build())
         for label in ("narrow", "zoomEquivalent"):
