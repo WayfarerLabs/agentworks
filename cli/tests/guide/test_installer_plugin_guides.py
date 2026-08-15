@@ -52,12 +52,15 @@ def test_installer_plugin_verification_actions_read_only_configured_resources() 
         "agentworks.plugins.install_command.guide_contributions"
     ).guide_contributions
 
-    expected_command = ("agw", "resource", "list", "--origin", "plugin", "--include-disabled")
+    expected_commands = {
+        "verify-apt-plugin": ("agw", "guide", "apt-package/gh"),
+        "verify-install-command-plugin": ("agw", "guide", "user-install-command/uv"),
+    }
     for contribution in (*apt_contributions(), *install_command_contributions()):
         actions = next(block.actions for block in contribution.blocks if isinstance(block, ActionList))
         verification = next(action for action in actions if str(action.id).startswith("verify-"))
         assert verification.consent is ConsentBoundary.READ_CONFIGURED_STATE
-        assert verification.command == expected_command
+        assert verification.command == expected_commands[str(verification.id)]
 
 
 def test_unavailable_first_party_guide_content_keeps_descriptor_and_unrelated_topics(

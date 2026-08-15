@@ -12,7 +12,7 @@ Four variants today:
 - ``built-in``: shipped with the app itself, inseparable from it (the
   bundled-manifest publisher and other app-bundled publishers). Carries
   ``source: str``, a code-source identifier like
-  ``"agentworks.manifests.builtin/apt-sources.yaml"``.
+  ``"agentworks.manifests.builtin/vm-sites.yaml"``.
 - ``auto-declared``: synthesized by a kind's miss policy during
   ``Registry.finalize()`` to satisfy a reference that didn't resolve to
   any published Resource. Carries ``source: tuple[str, str]`` -- the first
