@@ -15,7 +15,7 @@ from agentworks.guide import (
 from agentworks.guide.assessment import VerificationOutcome
 from agentworks.guide.contract import ActionId
 from agentworks.guide.service import _EmptyInventory, render_guide
-from agentworks.guide.trail_sign import TRAIL_DESTINATIONS
+from agentworks.guide.trail_sign import TRAIL_DESTINATIONS, trail_destinations
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -58,7 +58,9 @@ def test_no_topic_trail_sign_bypasses_catalogs_and_live_context(
         GuideMode.HUMAN: ("concept-onboarding", "concept-management"),
     }
     assert response.exit_code == 0
-    assert response.names == expected[mode]
+    assert tuple(str(destination.slug) for destination in trail_destinations(mode)) == expected[mode]
+    for slug in expected[mode]:
+        assert f"`{slug}`" in response.markdown
 
 
 def test_every_fixed_destination_resolves_through_selected_topic_path(
@@ -170,8 +172,8 @@ def test_names_only_keeps_static_names_and_emits_no_diagnostic_lines() -> None:
     response = render_guide((), GuideMode.AGENT, names_only=True, load_config_fn=_broken_config)
 
     assert response.exit_code == 0
-    assert tuple(response.markdown.splitlines()) == response.names
-    assert set(str(destination.slug) for destination in TRAIL_DESTINATIONS) <= set(response.names)
+    names = set(response.markdown.splitlines())
+    assert set(str(destination.slug) for destination in TRAIL_DESTINATIONS) <= names
 
 
 def test_names_only_omits_names_from_an_unfinalized_registry() -> None:
@@ -190,4 +192,4 @@ def test_names_only_omits_names_from_an_unfinalized_registry() -> None:
     )
 
     assert response.exit_code == 0
-    assert "vm-template/ghost" not in response.names
+    assert "vm-template/ghost" not in response.markdown.splitlines()

@@ -73,8 +73,8 @@ def test_mode_precedence(explicit, environ, tty: bool, expected: GuideMode) -> N
 
 def test_human_and_agent_rendering_have_semantic_parity() -> None:
     topic = next(topic for topic in guide_contributions() if topic.topic == "concept-management")
-    human = render_topic(topic, None, GuideMode.HUMAN, unavailable="unused")
-    agent = render_topic(topic, None, GuideMode.AGENT, unavailable="unused")
+    human = render_topic(topic, None, GuideMode.HUMAN, live_facts_unavailable=True)
+    agent = render_topic(topic, None, GuideMode.AGENT, live_facts_unavailable=True)
     assert {(block.key, block.source_payload) for block in human.blocks} == {
         (block.key, block.source_payload) for block in agent.blocks
     }
@@ -92,8 +92,8 @@ def test_secrets_guide_teaches_opaque_multiline_values_without_resolving(
 
     monkeypatch.setattr(secrets, "resolve_batch", denied)
     topic = secrets_guide()[0]
-    human = render_topic(topic, None, GuideMode.HUMAN, unavailable="unused")
-    agent = render_topic(topic, None, GuideMode.AGENT, unavailable="unused")
+    human = render_topic(topic, None, GuideMode.HUMAN, live_facts_unavailable=True)
+    agent = render_topic(topic, None, GuideMode.AGENT, live_facts_unavailable=True)
 
     assert {(block.key, block.source_payload) for block in human.blocks} == {
         (block.key, block.source_payload) for block in agent.blocks
@@ -590,8 +590,9 @@ def test_authored_topics_deduplicate_generic_live_topics_in_names_only(
         load_config_fn=lambda: config,
         load_registry_fn=lambda loaded: cast("Registry", registry),
     )
-    assert names.names.count("vm-template") == 1
-    assert names.names.count("vm-template/demo") == 1
+    rendered_names = names.markdown.splitlines()
+    assert rendered_names.count("vm-template") == 1
+    assert rendered_names.count("vm-template/demo") == 1
     assert names.markdown.count("vm-template\n") == 1
     assert names.markdown.count("vm-template/demo\n") == 1
 
@@ -731,11 +732,11 @@ def test_live_catalog_advertises_every_valid_platform_name_and_filters_invalid_n
         load_registry_fn=lambda loaded: cast("Registry", registry),
     )
     for slug in (f"vm-site/{ordinary_name}", f"secret/{secret_name}"):
-        assert slug in response.names
+        assert slug in response.markdown.splitlines()
         direct = render_guide((slug,), GuideMode.AGENT, load_config_fn=_broken)
         assert direct.exit_code == 0
     for name in invalid_names:
-        assert f"secret/{name}" not in response.names
+        assert f"secret/{name}" not in response.markdown.splitlines()
 
 
 def test_fresh_install_uses_empty_inventory_without_creating_state_database(

@@ -472,6 +472,10 @@ destination below.
       sample configuration as unaffected. Run focused guide and completion tests, the full
       non-integration suite, Ruff, formatting, mypy, Rulesync drift, locked-SDD, and file lint. Done
       when: all applicable gates are green.
+- [x] Validate the VM row's persisted JSON columns at the database conversion boundary and map
+      malformed values to a typed, non-echoing `StateError`. Persisted state crosses executions and
+      is therefore a trust boundary; the guide can omit affected live facts without broad exception
+      handling, while unrelated converter behavior remains outside this round.
 - [ ] Complete the required project review and merge one ready implementation PR.
 
 Definition of done: FRD R1 through R5 and acceptance criteria 1 through 6 hold, with no new guide

@@ -410,7 +410,7 @@ def render_topic(
     view: GuideView | None,
     mode: GuideMode,
     *,
-    unavailable: str | None = None,
+    live_facts_unavailable: bool = False,
     onboarding_snapshot: OnboardingSnapshot | None = None,
     onboarding_unavailable: bool = False,
     verification_evidence: tuple[VerificationEvidence, ...] = (),
@@ -461,8 +461,8 @@ def render_topic(
             body = _action_list(block)
         elif isinstance(block, TopicLinks):
             body = "\n".join(f"- `{topic}`" for topic in contribution.related_topics) or "No related topics."
-        elif unavailable is not None:
-            body = f"Live facts unavailable: {unavailable}"
+        elif live_facts_unavailable:
+            body = "Live facts unavailable: See the response warning."
         else:
             if view is None:
                 raise ValueError("dynamic guide blocks require a view or unavailable reason")

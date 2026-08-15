@@ -93,8 +93,7 @@ def test_schema_service_error_is_strict_for_ci_and_isolated_at_runtime(
     response = render_guide(
         ("vm-template", "agent-template", "vm-platform/azure-vm"),
         GuideMode.AGENT,
-        load_config_fn=lambda: object(),  # type: ignore[arg-type,return-value]
-        load_registry_fn=lambda _config: None,  # type: ignore[arg-type,return-value]
+        load_config_fn=_broken_config,  # type: ignore[arg-type]
     )
 
     assert response.exit_code == 1
@@ -102,7 +101,7 @@ def test_schema_service_error_is_strict_for_ci_and_isolated_at_runtime(
     assert "Reference target: `agent-template`" in response.markdown
     assert "`config.auth.secret`" in response.markdown
     assert "invalid guide contribution from schema:vm-template: reference is unavailable" in response.markdown
-    assert "vm-template" not in response.names
+    assert "vm-template" not in response.markdown.splitlines()
     assert "SCHEMA_SERVICE_PAYLOAD" not in response.markdown
 
 
@@ -114,8 +113,7 @@ def test_runtime_isolates_invalid_schema_target_in_explicit_multi_topic_render(
     response = render_guide(
         ("vm-template", "agent-template"),
         GuideMode.AGENT,
-        load_config_fn=lambda: object(),  # type: ignore[arg-type,return-value]
-        load_registry_fn=lambda _config: None,  # type: ignore[arg-type,return-value]
+        load_config_fn=_broken_config,  # type: ignore[arg-type]
     )
 
     assert response.exit_code == 1
@@ -381,13 +379,12 @@ def test_name_discovery_omits_invalid_schema_target_without_echoing_its_content(
         (),
         GuideMode.AGENT,
         names_only=True,
-        load_config_fn=lambda: object(),  # type: ignore[arg-type,return-value]
-        load_registry_fn=lambda _config: None,  # type: ignore[arg-type,return-value]
+        load_config_fn=_broken_config,  # type: ignore[arg-type]
     )
 
     assert response.exit_code == 0
-    assert "agent-template" in response.names
-    assert "vm-template" not in response.names
+    assert "agent-template" in response.markdown.splitlines()
+    assert "vm-template" not in response.markdown.splitlines()
     assert "SCHEMA_PAYLOAD" not in response.markdown
     assert "Guide content unavailable" not in response.markdown
 
@@ -403,7 +400,7 @@ def test_schema_reference_prose_maps_once_and_preserves_authored_markdown() -> N
     overview = next(block for block in topic.blocks if isinstance(block, Overview))
     assert overview.markdown == reference.overview
     assert "`{{session_name}}`" in overview.markdown
-    rendered = render_topic(topic, None, GuideMode.AGENT, unavailable="registry unavailable")
+    rendered = render_topic(topic, None, GuideMode.AGENT, live_facts_unavailable=True)
     assert rendered.markdown.count(reference.overview) == 1
     fields = next(block.source_payload for block in rendered.blocks if block.key.block_id == "fields")
     assert fields is not None
@@ -659,8 +656,8 @@ def test_field_and_sample_renderers_read_live_services(monkeypatch: pytest.Monke
 
 def test_schema_block_payloads_are_identical_between_modes() -> None:
     topic = _dynamic_topic(None, "secret")
-    human = render_topic(topic, None, GuideMode.HUMAN, unavailable="registry unavailable")
-    agent = render_topic(topic, None, GuideMode.AGENT, unavailable="registry unavailable")
+    human = render_topic(topic, None, GuideMode.HUMAN, live_facts_unavailable=True)
+    agent = render_topic(topic, None, GuideMode.AGENT, live_facts_unavailable=True)
 
     assert [(block.key, block.source_payload) for block in human.blocks] == [
         (block.key, block.source_payload) for block in agent.blocks

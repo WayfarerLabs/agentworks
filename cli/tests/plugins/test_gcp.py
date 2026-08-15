@@ -181,4 +181,4 @@ def test_registry_drives_gcp_sample_and_guide_completion_names() -> None:
 
     assert "gcp-gce" in sample_text("vm-site")
     response = render_guide((), GuideMode.AGENT, names_only=True)
-    assert "vm-platform/gcp-gce" in response.names
+    assert "vm-platform/gcp-gce" in response.markdown.splitlines()

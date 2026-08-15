@@ -67,7 +67,6 @@ def _configuration_description(value: str) -> str:
 class GuideResponse:
     markdown: str
     exit_code: int
-    names: tuple[str, ...]
 
 
 class _EmptyInventory:
@@ -352,16 +351,11 @@ def render_guide(
     if verification_evidence != ():
         if names_only:
             raise ValidationError("verification evidence cannot be used with --names-only")
-        if not requested:
-            raise ValidationError("verification evidence requires the concept-onboarding topic")
         if "concept-onboarding" not in requested:
             raise ValidationError("verification evidence requires the concept-onboarding topic")
         _validate_verification_evidence(verification_evidence)
     if not requested and not names_only:
-        from agentworks.guide.trail_sign import trail_destinations
-
-        destinations = tuple(str(destination.slug) for destination in trail_destinations(mode))
-        return GuideResponse(render_trail_sign(mode), 0, destinations)
+        return GuideResponse(render_trail_sign(mode), 0)
 
     authored = build_authored_catalog()
     schema = _build_schema_catalog()
@@ -386,14 +380,14 @@ def render_guide(
         try:
             config = load_config_fn()
             loaded_registry = load_registry_fn(config)
-            if loaded_registry is None or not loaded_registry.is_finalized:
+            if not loaded_registry.is_finalized:
                 raise StateError("resource registry is unavailable")
             registry = loaded_registry
         except AgentworksError:
             pass
         dynamic_names = _dynamic_names(registry, schema)
         all_names = tuple(sorted(authored_names | frozenset(dynamic_names)))
-        return GuideResponse("".join(f"{name}\n" for name in all_names), 0, all_names)
+        return GuideResponse("".join(f"{name}\n" for name in all_names), 0)
 
     validated_slots: list[tuple[str, TopicContribution | str | None]] = []
     rejected_topics = frozenset(
@@ -418,10 +412,7 @@ def render_guide(
     if needs_live_context:
         try:
             config = load_config_fn()
-            loaded_registry = load_registry_fn(config)
-            if loaded_registry is None:
-                raise StateError("resource registry is unavailable")
-            registry = loaded_registry
+            registry = load_registry_fn(config)
         except AgentworksError as error:
             system_error = error
     if registry is not None and not registry.is_finalized:
@@ -437,6 +428,8 @@ def render_guide(
 
     requested_slots: list[tuple[str, TopicContribution | None]] = []
     unavailable_topics: set[str] = set()
+    # Lookup-time and projection-time absence intentionally report the same
+    # operator fact: the requested live resource could not be established.
     for slug, value in validated_slots:
         if not isinstance(value, str):
             requested_slots.append((slug, value))
@@ -568,7 +561,7 @@ def render_guide(
             topic,
             views.get(topic_name),
             mode,
-            unavailable="See the response warning." if live_unavailable else None,
+            live_facts_unavailable=live_unavailable,
             onboarding_snapshot=onboarding_snapshot if topic.topic == "concept-onboarding" else None,
             onboarding_unavailable=topic.topic == "concept-onboarding" and onboarding_unavailable,
             verification_evidence=verification_evidence,
@@ -589,4 +582,4 @@ def render_guide(
         issue_markdown = f"\n\n{framework_heading('Guide content unavailable')}\n\n{details}"
     exit_code = 1 if visible_issues or content_issues else 0
     output = sanitize_terminal_output(markdown.rstrip() + issue_markdown + "\n")
-    return GuideResponse(output, exit_code, all_names)
+    return GuideResponse(output, exit_code)
