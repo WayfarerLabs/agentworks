@@ -43,17 +43,17 @@ predicate, runner, or initializer moved.
 
 ## Phase 2: guide and operator teaching
 
-- [ ] Add one complete conceptual guide topic under each plugin package through guide-scoped,
+- [x] Add one complete conceptual guide topic under each plugin package through guide-scoped,
       first-party adapters selected by a module-local two-entry mapping; keep ordinary plugin
       imports I/O-free and leave the public plugin contract unchanged.
-- [ ] Add one import-boundary test proving neither plugin import reads guide content. Rely on the
+- [x] Add one import-boundary test proving neither plugin import reads guide content. Rely on the
       existing generic guide tests for candidate validation and completion behavior.
-- [ ] Extend installed-wheel coverage for both manifest YAML bundles and require both new guide
+- [x] Extend installed-wheel coverage for both manifest YAML bundles and require both new guide
       topics to survive the existing catalog probe without scoped issues; rely on the existing
       global guide-content glob for the Markdown assets themselves.
-- [ ] Update source ownership comments, the sample config, CLI and plugin READMEs, resource guide,
+- [x] Update source ownership comments, the sample config, CLI and plugin READMEs, resource guide,
       idempotency guidance where affected, and the 0.14 upgrade guide.
-- [ ] Confirm no completion implementation or generated artifact change is required.
+- [x] Confirm no completion implementation or generated artifact change is required.
 
 Definition of done: guide reads are request-scoped, the installed artifact carries both asset
 families, and every permanent operator surface teaches the opt-in ownership and composite dependency
@@ -61,7 +61,7 @@ behavior accurately.
 
 ## Phase 3: verification and closeout
 
-- [ ] Run scoped lint, type, and test gates, then the full repository gates required by CI.
+- [x] Run scoped lint, type, and test gates, then the full repository gates required by CI.
 - [ ] Build and install the wheel in an isolated environment and load both plugins' manifests and
       guide content through package resources.
 - [ ] Exercise the shipped CLI in an isolated home with each plugin disabled and enabled, including
