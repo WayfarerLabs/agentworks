@@ -615,9 +615,10 @@ behavioral guide tests prove that the installed guide owns continuing assistance
 - copy behavior exercised for success, unavailable API, and rejected write without changing the
   source text;
 - custom 404 fallback, initial hidden controls, bounded idle cue, keyboard/vi/pointer mappings,
-  deterministic flight and world vectors, plume-to-thrust mapping, repeated deployment, generated
-  route fuel proofs, checkpoint restart, finite crash/exit states, bounded rolling geometry,
-  background pause, and reduced-motion equivalents asserted;
+  deterministic flight and world vectors, plume-to-thrust mapping, repeated deployment,
+  constant-time fuel-prediction arithmetic, representative opening and route-extreme flights,
+  checkpoint restart, finite crash/exit states, bounded rolling geometry, background pause, and
+  reduced-motion equivalents asserted;
 - arcade fuel/refuel projection, installed-agent persistence, centered success/crash banners,
   in-scene native actions, and the terrain-separated bottom control rail asserted without changing
   physics, route, world, privacy, or shared-fragment contracts;

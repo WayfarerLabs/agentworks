@@ -336,10 +336,10 @@ recorded as a growth path so nothing forecloses it, and none of it is in scope n
   scale together. Site generation performs no schedule search or replay and ships no per-route
   schedule catalog. Offline tests cover openings plus representative closest, farthest,
   steepest-rise, and steepest-fall routes, but neither runtime nor release acceptance attempts to
-  prove an exact schedule for every generated geometry. This Phase 4U simplification supersedes the
-  inherited exhaustive route-proof and certified-sufficient-allowance clauses wherever they appear
-  in R20, R28-R30, AC26, and AC29-AC31; their terrain, collision, lifecycle, and no-scroll contracts
-  remain active.
+  prove an exact schedule for every generated geometry. This Phase 4U simplification supersedes any
+  inherited clause that requires an exhaustive, generated, or reference-schedule proof of next-route
+  fuel sufficiency; all inherited terrain, first-landing, collision, lifecycle, and no-scroll
+  contracts remain active.
 
 ## Settled constraints (inherited; do not reopen)
 
