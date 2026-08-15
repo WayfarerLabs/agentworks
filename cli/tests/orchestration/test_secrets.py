@@ -107,7 +107,7 @@ def test_declarations_come_from_the_registry() -> None:
 
 def test_unknown_name_falls_back_to_a_bare_declaration() -> None:
     """Parity with ``Resolver.register_name``: an empty registry must
-    keep the backend chain callable for well-known names."""
+    keep the source chain callable for well-known names."""
     registry = cast("Registry", _FakeRegistry({}))
     (out,) = secret_declarations(["tailscale-auth-key"], registry)
     assert out == SecretDecl(name="tailscale-auth-key", description="")
@@ -116,7 +116,7 @@ def test_unknown_name_falls_back_to_a_bare_declaration() -> None:
 # -- predict_resolution ------------------------------------------------------
 
 
-class _FakeBackend:
+class _FakeSource:
     """State captured by a final ActiveSource-shaped prediction fixture."""
 
     def __init__(
@@ -144,7 +144,7 @@ class _PredictionMapping(AgwRootModel[str]):
 
 
 class _PredictionClient:
-    def __init__(self, state: _FakeBackend) -> None:
+    def __init__(self, state: _FakeSource) -> None:
         self._state = state
 
     def prepare(self, requests: tuple[object, ...], *, remaining_time: object) -> None:
@@ -157,7 +157,7 @@ class _PredictionClient:
 
 
 class _PredictionContext(AbstractContextManager[Any]):
-    def __init__(self, state: _FakeBackend) -> None:
+    def __init__(self, state: _FakeSource) -> None:
         self._state = state
 
     def __enter__(self) -> _PredictionClient:
@@ -171,16 +171,16 @@ def _decl(name: str, **kw: object) -> SecretDecl:
     return SecretDecl(name=name, description="", **kw)  # type: ignore[arg-type]
 
 
-def _chain(*backends: _FakeBackend) -> list[ActiveSource]:
+def _sources(*source_states: _FakeSource) -> list[ActiveSource]:
     from agentworks.capabilities.secret_backend import SecretBackend
     from agentworks.capabilities.secret_backend.client import InteractionBroker, RemainingTime, SecretSourceClient
     from agentworks.secrets.resolve import ActiveSource
 
-    out: list[ActiveSource] = []
-    for state in backends:
+    sources: list[ActiveSource] = []
+    for state in source_states:
 
         class _PredictionBackend(SecretBackend):
-            _state: ClassVar[_FakeBackend] = state
+            _state: ClassVar[_FakeSource] = state
             contract_version: ClassVar[int] = 2
             config_model: ClassVar[type[AgwModel]] = _PredictionConfig
             mapping_model: ClassVar[type[AgwRootModel[Any]]] = _PredictionMapping
@@ -212,7 +212,7 @@ def _chain(*backends: _FakeBackend) -> list[ActiveSource]:
             ) -> AbstractContextManager[SecretSourceClient]:
                 return cast("AbstractContextManager[SecretSourceClient]", _PredictionContext(cls._state))
 
-        out.append(
+        sources.append(
             ActiveSource(
                 source=SecretSourceDecl(name=state.name, backend=CapabilityBlock.of("prediction")),
                 backend_class=_PredictionBackend,
@@ -220,80 +220,80 @@ def _chain(*backends: _FakeBackend) -> list[ActiveSource]:
                 readiness=state.readiness,
             )
         )
-    return out
+    return sources
 
 
 def test_prediction_reports_the_first_attemptable_source() -> None:
-    chain = _chain(
-        _FakeBackend("env-var"),  # attempts but produces nothing
-        _FakeBackend("op", values={"a": "1"}),
+    sources = _sources(
+        _FakeSource("env-var"),  # attempts but produces nothing
+        _FakeSource("op", values={"a": "1"}),
     )
-    preview = predict_resolution([_decl("a")], chain, interaction=InteractionPolicy.REFUSE)["a"]
+    preview = predict_resolution([_decl("a")], sources, interaction=InteractionPolicy.REFUSE)["a"]
     assert preview.category is PreviewCategory.ATTEMPTABLE
     assert preview.source == "env-var"
-    assert chain[0].source.name == "env-var"
+    assert sources[0].source.name == "env-var"
 
 
-def test_prediction_skips_a_not_ready_backend() -> None:
-    """R9.6/R9.7 lockstep: a not-ready backend is skipped by the predictor even
-    though it WOULD produce a value, so it never names a backend resolution will
-    skip; the chain falls through to the next ready backend."""
-    chain = _chain(
-        _FakeBackend("op", values={"a": "1"}, not_ready_reason="op CLI not installed"),
-        _FakeBackend("env-var", values={"a": "2"}),
+def test_prediction_skips_a_not_ready_source() -> None:
+    """R9.6/R9.7 lockstep: a not-ready source is skipped by the predictor even
+    though it WOULD produce a value, so it never names a source resolution will
+    skip; the chain falls through to the next ready source."""
+    sources = _sources(
+        _FakeSource("op", values={"a": "1"}, not_ready_reason="op CLI not installed"),
+        _FakeSource("env-var", values={"a": "2"}),
     )
-    preview = predict_resolution([_decl("a")], chain, interaction=InteractionPolicy.REFUSE)["a"]
+    preview = predict_resolution([_decl("a")], sources, interaction=InteractionPolicy.REFUSE)["a"]
     assert preview.category is PreviewCategory.ATTEMPTABLE
     assert preview.source == "env-var"
     assert preview.skipped_not_ready == (SkippedSource(source="op", reason="op CLI not installed"),)
 
 
 def test_prediction_none_when_nothing_would_resolve() -> None:
-    preview = predict_resolution([], _chain(_FakeBackend("env-var")), interaction=InteractionPolicy.REFUSE)
+    preview = predict_resolution([], _sources(_FakeSource("env-var")), interaction=InteractionPolicy.REFUSE)
     assert preview == {}
 
 
-def test_interactive_backend_predicted_resolvable_when_interactive(
+def test_interactive_source_predicted_resolvable_when_interactive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A prompt backend reports resolvable without probing (probing would
-    BE the prompt) WHEN interactive input is available this run."""
+    """A prompt source reports resolvable without probing (probing would BE
+    the prompt) WHEN interactive input is available this run."""
     from agentworks import output
 
     monkeypatch.setattr(output, "is_interactive", lambda: True)
-    prompt = _FakeBackend("prompt", interactive=True)
-    preview = predict_resolution([_decl("a")], _chain(prompt), interaction=InteractionPolicy.ALLOW)["a"]
+    prompt = _FakeSource("prompt", interactive=True)
+    preview = predict_resolution([_decl("a")], _sources(prompt), interaction=InteractionPolicy.ALLOW)["a"]
     assert preview.category is PreviewCategory.ATTEMPTABLE
     assert preview.source == "prompt"
     assert prompt.resolve_calls == []
 
 
-def test_interactive_backend_predicted_unresolvable_when_non_interactive(
+def test_interactive_source_predicted_unresolvable_when_non_interactive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Under --non-interactive / no TTY the prompt backend no-ops at
-    resolve time, so preflight prediction must call a prompt-only secret
+    """Under --non-interactive / no TTY the prompt source's backend no-ops
+    at resolve time, so preflight prediction must call a prompt-only secret
     unresolvable and fail fast (issue #202), still without probing."""
     from agentworks import output
 
     monkeypatch.setattr(output, "is_interactive", lambda: False)
-    prompt = _FakeBackend("prompt", interactive=True)
-    preview = predict_resolution([_decl("a")], _chain(prompt), interaction=InteractionPolicy.REFUSE)["a"]
+    prompt = _FakeSource("prompt", interactive=True)
+    preview = predict_resolution([_decl("a")], _sources(prompt), interaction=InteractionPolicy.REFUSE)["a"]
     assert preview.category is PreviewCategory.REFUSED_INTERACTION
     assert preview.source == "prompt"
     assert prompt.resolve_calls == []
 
 
-def test_prediction_respects_backend_opt_out() -> None:
-    prompt = _FakeBackend("prompt", interactive=True)
+def test_prediction_respects_source_opt_out() -> None:
+    prompt = _FakeSource("prompt", interactive=True)
     decl = _decl("a", backend_mappings={"prompt": False})
-    preview = predict_resolution([decl], _chain(prompt), interaction=InteractionPolicy.REFUSE)["a"]
+    preview = predict_resolution([decl], _sources(prompt), interaction=InteractionPolicy.REFUSE)["a"]
     assert preview.category is PreviewCategory.UNAVAILABLE
 
 
 def test_prediction_covers_every_declaration() -> None:
-    chain = _chain(_FakeBackend("env-var", values={"a": "1"}))
-    predictions = predict_resolution([_decl("a"), _decl("b")], chain, interaction=InteractionPolicy.REFUSE)
+    sources = _sources(_FakeSource("env-var", values={"a": "1"}))
+    predictions = predict_resolution([_decl("a"), _decl("b")], sources, interaction=InteractionPolicy.REFUSE)
     assert tuple(predictions) == ("a", "b")
     assert all(preview.category is PreviewCategory.ATTEMPTABLE for preview in predictions.values())
 
@@ -311,23 +311,23 @@ def _px_ref() -> SecretReference:
 
 
 def _env_only_setup(tmp_path: Path) -> tuple[Config, Registry]:
-    """A real config and registry with the env-var backend alone, so
+    """A real config and registry with the env-var source alone, so
     predictions are driven by the environment (the node suites'
     not-resolvable shape)."""
     from agentworks.bootstrap import build_registry
     from tests.orchestrated_fixtures import write_operator_config
 
-    config = write_operator_config(tmp_path, '[secret_config]\nbackends = ["env-var"]\n')
+    config = write_operator_config(tmp_path, '[secret_config]\nsources = ["env-var"]\n')
     return config, build_registry(config)
 
 
 def _env_and_prompt_setup(tmp_path: Path) -> tuple[Config, Registry]:
     """A real config whose chain is env-var THEN prompt, so an unset env
-    var falls through to the interactive backend."""
+    var falls through to the interactive prompt source."""
     from agentworks.bootstrap import build_registry
     from tests.orchestrated_fixtures import write_operator_config
 
-    config = write_operator_config(tmp_path, '[secret_config]\nbackends = ["env-var", "prompt"]\n')
+    config = write_operator_config(tmp_path, '[secret_config]\nsources = ["env-var", "prompt"]\n')
     return config, build_registry(config)
 
 
@@ -438,7 +438,7 @@ def test_scoped_reader_satisfies_the_secret_reader_protocol() -> None:
         ctx.secret("b")
 
 
-def _px_site_setup(tmp_path: Path, chain: str = '"env-var"') -> tuple[Config, Registry]:
+def _px_site_setup(tmp_path: Path, source_names: str = '"env-var"') -> tuple[Config, Registry]:
     """A real config DECLARING the proxmox site, so its ``proxmox-token``
     reference is auto-declared into the registry at finalize. The
     prediction helpers above do not need this (they are handed a
@@ -448,7 +448,7 @@ def _px_site_setup(tmp_path: Path, chain: str = '"env-var"') -> tuple[Config, Re
 
     config = write_operator_config(
         tmp_path,
-        PLUGINS_ENABLED + f"[secret_config]\nbackends = [{chain}]\n",
+        PLUGINS_ENABLED + f"[secret_config]\nsources = [{source_names}]\n",
         manifests=[proxmox_site()],
     )
     return config, build_registry(config)
@@ -472,7 +472,7 @@ def test_require_declared_refs_refuses_a_dangling_reference(tmp_path: Path) -> N
 
     This is the half of the old node preflight that STAYS the node's
     concern: whether the node's own declarations and the registry agree
-    is registry consistency. It reaches no backend and asks nothing
+    is registry consistency. It starts no source attempt and asks nothing
     about how the secret would get a value."""
     from agentworks.orchestration.secrets import require_declared_refs
 
@@ -497,7 +497,7 @@ def test_require_declared_refs_says_nothing_about_resolvability(
     resolve still passes intactness. Resolvability is the operation's
     question, asked by the preflight sweep; a node asking it would make
     every resource that names a secret carry a verdict about the
-    operator's backend chain."""
+    operator's source chain."""
     from agentworks import output
     from agentworks.orchestration.secrets import require_declared_refs
 

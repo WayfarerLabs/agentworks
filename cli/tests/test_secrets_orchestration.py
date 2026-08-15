@@ -94,7 +94,7 @@ def test_unions_single_target_env_chain(
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var"]
+        sources = ["env-var"]
         """,
         manifests=[ManifestDoc("secret", "api-key", description="shared API key")],
     )
@@ -130,7 +130,7 @@ def test_unions_across_multiple_targets_dedup_by_name(tmp_path: Path) -> None:
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var", "prompt"]
+        sources = ["env-var", "prompt"]
         """,
         manifests=[
             ManifestDoc("secret", "shared", description="shared"),
@@ -167,7 +167,7 @@ def test_walks_all_scopes_in_target(tmp_path: Path) -> None:
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var", "prompt"]
+        sources = ["env-var", "prompt"]
         """,
         manifests=[
             ManifestDoc("secret", "vm-secret", description="vm"),
@@ -200,7 +200,7 @@ def test_extra_decls_extend_union(tmp_path: Path) -> None:
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var", "prompt"]
+        sources = ["env-var", "prompt"]
         """,
         manifests=[
             ManifestDoc("secret", "from-env", description="in env table"),
@@ -229,7 +229,7 @@ def test_secret_references_invariant_under_value_substitution(
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var", "prompt"]
+        sources = ["env-var", "prompt"]
         """,
         manifests=[ManifestDoc("secret", "api", description="api")],
     )
@@ -275,7 +275,7 @@ def test_cross_target_first_encounter_ordering(tmp_path: Path) -> None:
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var", "prompt"]
+        sources = ["env-var", "prompt"]
         """,
         manifests=[
             ManifestDoc("secret", "b-secret", description="b"),
@@ -300,7 +300,7 @@ def test_extra_decls_dedupe_against_target_decls(tmp_path: Path) -> None:
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var", "prompt"]
+        sources = ["env-var", "prompt"]
         """,
         manifests=[ManifestDoc("secret", "shared", description="shared")],
     )
@@ -329,7 +329,7 @@ def test_resolve_for_command_returns_resolved_values(
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var"]
+        sources = ["env-var"]
         """,
         manifests=[ManifestDoc("secret", "api-key", description="api")],
     )
@@ -356,7 +356,7 @@ def test_resolve_for_command_rejects_multiline_environment_target_after_delivery
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var"]
+        sources = ["env-var"]
         """,
         manifests=[ManifestDoc("secret", "api-key", description="api")],
     )
@@ -389,7 +389,7 @@ def test_resolved_values_are_plain_data(
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var"]
+        sources = ["env-var"]
         """,
         manifests=[ManifestDoc("secret", "api-key", description="api")],
     )
@@ -449,7 +449,7 @@ def test_resolve_for_command_passes_extra_decls_through(
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var"]
+        sources = ["env-var"]
         """,
         manifests=[ManifestDoc("secret", "external", description="external")],
     )
@@ -460,9 +460,9 @@ def test_resolve_for_command_passes_extra_decls_through(
 
     calls: list[list[str]] = []
 
-    def _spy(decls: list[SecretDecl], backends: list[object], **kwargs: Any) -> ResolutionBatch:
+    def _spy(decls: list[SecretDecl], sources: list[object], **kwargs: Any) -> ResolutionBatch:
         calls.append([d.name for d in decls])
-        return _real(decls, backends, **kwargs)  # type: ignore[arg-type]
+        return _real(decls, sources, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr("agentworks.secrets.resolve.resolve_batch", _spy)
 

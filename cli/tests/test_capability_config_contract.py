@@ -417,12 +417,12 @@ def test_prompt_false_opt_out_still_loads(tmp_path: Path) -> None:
     build_registry(config)  # no error
 
 
-def test_declared_mapping_for_non_opted_in_backend_is_validated_at_build(tmp_path: Path) -> None:
-    """R9.9: a declared mapping addressed to a PRESENT backend is validated at
-    build even when that backend is not in the active chain (the secret's own
-    ``validate``, run by the finalize pass, checks every present backend's
-    mapping, not just the opted-in ones). Here env-var is not opted in (chain
-    is prompt-only) but its structured mapping is malformed for env-var, so the
+def test_declared_mapping_for_non_opted_in_source_is_validated_at_build(tmp_path: Path) -> None:
+    """R9.9: a declared mapping addressed to a PRESENT source is validated at
+    build even when that source is not active (the secret's own ``validate``,
+    run by the finalize pass, checks every declared source mapping, not just
+    the opted-in ones). Here env-var is not opted in (the chain is prompt-only)
+    but its structured mapping is malformed for the env-var backend, so the
     build now fails, where the old ``validate_chain`` left it dormant."""
     _manifest(
         tmp_path,
@@ -434,7 +434,7 @@ def test_declared_mapping_for_non_opted_in_backend_is_validated_at_build(tmp_pat
         tmp_path,
         """
         [secret_config]
-        backends = ["prompt"]
+        sources = ["prompt"]
         """,
     )
     with pytest.raises(ConfigError, match="backend_mappings.env-var: must be a string"):

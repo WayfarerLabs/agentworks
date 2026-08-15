@@ -218,7 +218,7 @@ def locate_document(resources_dir: Path, kind: str, name: str) -> LocateResult:
     """Best-effort ``(file, line)`` of the manifest document declaring
     ``kind``/``name`` -- WITHOUT validating anything.
 
-    The fix-it path for ``agw resource edit``: when the config is
+    The fix-it path for ``agw resource edit``: when the manifest set is
     failing validation, the strict registry lookup is unavailable, but
     the operator needs the declaring file MORE, not less. This scan
     reads raw envelopes only (``kind`` / ``metadata.name``), skips

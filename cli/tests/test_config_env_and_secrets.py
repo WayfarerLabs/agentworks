@@ -17,9 +17,9 @@ that boundary:
   cfg.config_issues).
 - secret manifests parse into SecretDecls including all backend_mappings
   value forms (string, dict, false). ``true`` is rejected.
-- [secret_config].backends drives the active backend chain; precedence
+- [secret_config].sources drives the active source chain; precedence
   preserved (still a config setting).
-- Unknown backend kinds in [secret_config].backends raise ConfigError.
+- Unknown source names in [secret_config].sources raise ConfigError.
 - Unreachable secrets raise ConfigError at build_registry.
 - Env entries referencing undeclared secrets load cleanly (the Registry's
   auto-declare miss policy; auto-decl coverage lives in
@@ -100,12 +100,12 @@ def test_no_secrets_section_loads_with_default_chain(tmp_path: Path) -> None:
     up: call sites can run the resolve loop unconditionally. With no
     [secret_config] in the TOML, SecretConfig defaults to the standard
     env-var + prompt chain; with no declared secrets there is nothing
-    to resolve (no backend is consulted)."""
+    to resolve (no source is consulted)."""
     cfg_file = tmp_path / "config.toml"
     _write_base(cfg_file)
     cfg = load_config(cfg_file, warn_issues=False)
     # Absence of [secret_config] defaults to the standard chain.
-    assert cfg.secret_config_data.backends == ("env-var", "prompt")
+    assert cfg.secret_config_data.sources == ("env-var", "prompt")
     registry = build_registry(cfg)
     # No operator-declared secrets: config carries none, and no manifest
     # declares one (only the ever-present auto-declared tailscale-auth-key
@@ -129,7 +129,7 @@ def test_no_secrets_section_loads_with_default_chain(tmp_path: Path) -> None:
 def test_secret_config_absent_uses_default_chain(tmp_path: Path) -> None:
     """With no [secret_config] table, the loader uses the default chain
     so zero-config secret refs Just Work. Operator who writes
-    `KEY = { secret = "x" }` doesn't have to also configure backends."""
+    `KEY = { secret = "x" }` doesn't have to also configure sources."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
@@ -139,11 +139,11 @@ def test_secret_config_absent_uses_default_chain(tmp_path: Path) -> None:
         ],
     )
     cfg = load_config(cfg_file, warn_issues=False)
-    assert cfg.secret_config_data.backends == ("env-var", "prompt")
+    assert cfg.secret_config_data.sources == ("env-var", "prompt")
 
 
-def test_secret_config_table_without_backends_uses_default_chain(tmp_path: Path) -> None:
-    """[secret_config] without an explicit backends key still falls back
+def test_secret_config_table_without_sources_uses_default_chain(tmp_path: Path) -> None:
+    """[secret_config] without an explicit sources key still falls back
     to the default chain. This shape lets operators reserve the table
     for future fields without losing the default resolution behavior."""
     cfg_file = tmp_path / "config.toml"
@@ -154,22 +154,54 @@ def test_secret_config_table_without_backends_uses_default_chain(tmp_path: Path)
         """,
     )
     cfg = load_config(cfg_file, warn_issues=False)
-    assert cfg.secret_config_data.backends == ("env-var", "prompt")
+    assert cfg.secret_config_data.sources == ("env-var", "prompt")
 
 
 def test_secret_config_explicit_empty_list_disables_resolution(tmp_path: Path) -> None:
-    """An explicit `backends = []` is respected (operator opts out
+    """An explicit `sources = []` is respected (operator opts out
     entirely). Distinct from absence-of-config, which gets the default."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
         settings="""
         [secret_config]
-        backends = []
+        sources = []
         """,
     )
     cfg = load_config(cfg_file, warn_issues=False)
-    assert cfg.secret_config_data.backends == ()
+    assert cfg.secret_config_data.sources == ()
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        '[secret_config]\nbackends = ["env-var"]\n',
+        '[secret_config]\nsources = ["env-var"]\nbackends = ["prompt"]\n',
+    ],
+    ids=["backends-only", "backends-and-sources"],
+)
+def test_retired_secret_config_backends_key_is_a_hard_error(tmp_path: Path, settings: str) -> None:
+    cfg_file = tmp_path / "config.toml"
+    _write_base(cfg_file, settings=settings)
+
+    with pytest.raises(ConfigError):
+        load_config(cfg_file, warn_issues=False)
+
+
+def test_unrelated_secret_config_key_remains_a_soft_issue(tmp_path: Path) -> None:
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        settings="""
+        [secret_config]
+        sources = ["env-var"]
+        future_setting = true
+        """,
+    )
+
+    cfg = load_config(cfg_file, warn_issues=False)
+    assert cfg.secret_config_data.sources == ("env-var",)
+    assert len(cfg.config_issues) == 1
 
 
 def test_admin_env_plaintext_and_secret(tmp_path: Path) -> None:
@@ -178,7 +210,7 @@ def test_admin_env_plaintext_and_secret(tmp_path: Path) -> None:
         cfg_file,
         settings="""
         [secret_config]
-        backends = ["env-var", "prompt"]
+        sources = ["env-var", "prompt"]
         """,
         manifests=[
             ManifestDoc(
@@ -215,7 +247,7 @@ def test_agent_template_env(tmp_path: Path) -> None:
         cfg_file,
         settings="""
         [secret_config]
-        backends = ["env-var", "prompt"]
+        sources = ["env-var", "prompt"]
         """,
         manifests=[
             ManifestDoc(
@@ -254,7 +286,7 @@ def test_session_template_env_plaintext_and_secret(tmp_path: Path) -> None:
         cfg_file,
         settings="""
         [secret_config]
-        backends = ["env-var", "prompt"]
+        sources = ["env-var", "prompt"]
         """,
         manifests=[
             ManifestDoc(
@@ -340,7 +372,7 @@ def test_env_referencing_undeclared_secret_does_not_error(
         cfg_file,
         settings="""
         [secret_config]
-        backends = ["env-var"]
+        sources = ["env-var"]
         """,
         manifests=[ManifestDoc("admin-template", "default", {"env": {"API_KEY": {"secret": "missing"}}})],
     )
@@ -363,7 +395,7 @@ def test_secret_declared_with_all_mapping_forms(tmp_path: Path) -> None:
         system = ["onepassword"]
 
         [secret_config]
-        backends = ["prompt"]
+        sources = ["prompt"]
         """,
         manifests=[
             ManifestDoc(
@@ -428,7 +460,7 @@ def test_secret_true_in_backend_mappings_rejected(tmp_path: Path) -> None:
         cfg_file,
         settings="""
         [secret_config]
-        backends = ["env-var"]
+        sources = ["env-var"]
         """,
         manifests=[ManifestDoc("secret", "token", {"backend_mappings": {"env-var": True}}, description="bad")],
     )
@@ -436,66 +468,65 @@ def test_secret_true_in_backend_mappings_rejected(tmp_path: Path) -> None:
         _load(cfg_file)
 
 
-def test_secret_config_backends_preserves_precedence(tmp_path: Path) -> None:
+def test_secret_config_sources_preserves_precedence(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
         settings="""
         [secret_config]
-        backends = ["env-var", "prompt"]
+        sources = ["env-var", "prompt"]
         """,
     )
     cfg = load_config(cfg_file, warn_issues=False)
-    assert cfg.secret_config_data.backends == ("env-var", "prompt")
+    assert cfg.secret_config_data.sources == ("env-var", "prompt")
 
 
-def test_active_backends_stand_up_when_configured(tmp_path: Path) -> None:
+def test_active_sources_stand_up_when_configured(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
         settings="""
         [secret_config]
-        backends = ["env-var", "prompt"]
+        sources = ["env-var", "prompt"]
         """,
         manifests=[ManifestDoc("secret", "shared", description="Shared token")],
     )
     cfg = load_config(cfg_file, warn_issues=False)
     registry = build_registry(cfg)
-    backends = active_sources(cfg, registry)
-    # Smoke-check the chain: the first attempting backend is env-var.
+    sources = active_sources(cfg, registry)
+    # Smoke-check the chain: the first attempting source is env-var.
     decl = registry.lookup("secret", "shared")
-    first = next((b for b in backends if b.would_attempt(decl)), None)
+    first = next((source for source in sources if source.would_attempt(decl)), None)
     assert first is not None
     assert first.name == "env-var"
 
 
-def test_unknown_backend_kind_raises(tmp_path: Path) -> None:
+def test_unknown_source_name_raises(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
         settings="""
         [secret_config]
-        backends = ["env-var", "totally-fake-backend"]
+        sources = ["env-var", "totally-fake-source"]
         """,
     )
-    # The chain is reference edges on the published secret-config row
-    # (resource-manifests SDD); an unknown name hits the secret-backend
-    # kind's error miss policy at build_registry finalize.
+    # An unknown source name fails settings-reference validation after
+    # registry finalization.
     cfg = load_config(cfg_file, warn_issues=False)
-    with pytest.raises(ConfigError, match="totally-fake-backend"):
+    with pytest.raises(ConfigError, match="totally-fake-source"):
         build_registry(cfg)
 
 
 def test_unreachable_secret_raises(tmp_path: Path) -> None:
-    """A secret with env-var = false and a backend chain with no other
-    attempting backend is unreachable; ``validate_chain`` rejects it at
+    """A secret with env-var = false and a source chain with no other
+    attempting source is unreachable; ``validate_chain`` rejects it at
     ``build_registry``."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
         settings="""
         [secret_config]
-        backends = ["env-var"]
+        sources = ["env-var"]
         """,
         manifests=[
             ManifestDoc(
@@ -510,7 +541,7 @@ def test_unreachable_secret_raises(tmp_path: Path) -> None:
 
 def test_reachability_scope_is_operator_declared_only(tmp_path: Path) -> None:
     """Reachability preservation invariant (LLD d): the check covers
-    OPERATOR-declared secrets only. With ``backends = []`` every secret is
+    OPERATOR-declared secrets only. With ``sources = []`` every secret is
     unreachable, but the only secrets present are auto-declared (the
     ever-present tailscale-auth-key), so the build SUCCEEDS; an auto-declared
     secret cannot invalidate a deliberate empty-chain opt-out (it surfaces at
@@ -520,7 +551,7 @@ def test_reachability_scope_is_operator_declared_only(tmp_path: Path) -> None:
         cfg_file,
         settings="""
         [secret_config]
-        backends = []
+        sources = []
         """,
     )
     cfg = load_config(cfg_file, warn_issues=False)
@@ -531,7 +562,8 @@ def test_reachability_scope_is_operator_declared_only(tmp_path: Path) -> None:
 def test_reachability_keying_is_would_attempt_readiness_blind(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Reachability preservation invariant (LLD d): the build-time check is
     keyed on WOULD-ATTEMPT (the frozen edges), READINESS-BLIND. A secret whose
-    only opted-in backend is onepassword, forced NOT-READY, is still reachable
+    only opted-in source is team-op, whose onepassword backend is forced
+    NOT-READY, is still reachable
     (the build succeeds); it would fail only at resolution, exactly as today."""
     from agentworks.plugins.onepassword.backend import OnePasswordBackend
     from agentworks.resources.graph import Readiness
@@ -545,7 +577,7 @@ def test_reachability_keying_is_would_attempt_readiness_blind(tmp_path: Path, mo
         system = ["onepassword"]
 
         [secret_config]
-        backends = ["team-op"]
+        sources = ["team-op"]
         """,
         manifests=[
             ManifestDoc(
@@ -577,7 +609,7 @@ def test_unreachable_secret_error_message_and_hint(tmp_path: Path) -> None:
         cfg_file,
         settings="""
         [secret_config]
-        backends = ["env-var"]
+        sources = ["env-var"]
         """,
         manifests=[
             ManifestDoc(
@@ -599,32 +631,6 @@ def test_unreachable_secret_error_message_and_hint(tmp_path: Path) -> None:
     # The hint mentions the three remediation paths.
     assert "attemptable secret-source" in exc.value.hint
     assert "remove" in exc.value.hint
-
-
-def test_secret_backends_section_errors_whatever_it_names(
-    tmp_path: Path,
-) -> None:
-    """``[secret_backends.*]`` is a retired resource section, refused at load
-    regardless of the name it carries.
-
-    This used to assert that a TYPO ('env_var' for 'env-var') was caught by a
-    name check against the built-in backend registry. That check is gone: it
-    could not tell a typo from a plugin backend, so it refused correctly
-    spelled ones too. The section is wrong whatever it names, which catches
-    the typo as a side effect and stops mis-reporting the plugin case (see
-    tests/test_config_deprecation_warnings.py for the three names side by
-    side).
-    """
-    cfg_file = tmp_path / "config.toml"
-    _write_base(
-        cfg_file,
-        settings="""
-        [secret_backends.env_var]
-        # typo: kind is 'env-var' (kebab), not 'env_var' (snake)
-        """,
-    )
-    with pytest.raises(ConfigError, match="settings only"):
-        load_config(cfg_file, warn_issues=False)
 
 
 #: Every scope that has an env table, with the address its warning frames
@@ -814,7 +820,7 @@ def test_undeclared_secret_in_parent_no_longer_errors(
         cfg_file,
         settings="""
         [secret_config]
-        backends = ["env-var", "prompt"]
+        sources = ["env-var", "prompt"]
         """,
         manifests=[
             ManifestDoc("agent-template", "parent", {"env": {"TOKEN": {"secret": "missing-secret"}}}),

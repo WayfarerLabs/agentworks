@@ -1,13 +1,4 @@
-"""Legacy TOML [azure] / [proxmox] sections are a hard error now (ADR 0022:
-config.toml is settings only), plus the defaults.site
-alias behavior (settings, unaffected) and the YAML vm-site manifest path.
-
-The old dual-path (flat TOML sections loading as vm-site resources) is gone:
-an operator rewrites those sections as vm-site manifests by hand, which is
-what the load error tells them to do and what the resources guide walks
-through. The token_secret nonconforming-name warning that the flat TOML
-loader emitted is now surfaced only on the YAML manifest path (tested here).
-"""
+"""The canonical defaults.site setting and YAML vm-site manifest path."""
 
 from __future__ import annotations
 
@@ -24,21 +15,6 @@ ssh_public_key = "{key}.pub"
 ssh_private_key = "{key}"
 """
 
-AZURE_SECTION = """
-[azure]
-subscription_id = "0000"
-resource_group = "agw"
-region = "eastus"
-"""
-
-PROXMOX_SECTION = """
-[proxmox]
-api_url = "https://pve:8006"
-node = "pve1"
-token_id = "agw@pam!agw"
-template_vmid = 9000
-"""
-
 
 @pytest.fixture
 def write_config(tmp_path: Path):
@@ -52,27 +28,6 @@ def write_config(tmp_path: Path):
         return path
 
     return _write
-
-
-def test_legacy_sections_are_a_hard_error(write_config) -> None:
-    """[azure] / [proxmox] are resource-declaring sections now, so a normal
-    load hard-errors, naming the sections and the vm-site clause (the kind
-    they become, which neither section name would suggest)."""
-    with pytest.raises(ConfigError) as excinfo:
-        load_config(write_config(AZURE_SECTION + PROXMOX_SECTION), warn_issues=False)
-    message = str(excinfo.value)
-    assert "[azure]" in message
-    assert "[proxmox]" in message
-    assert "become vm-site manifests" in message
-
-
-def test_settings_only_load_reads_a_config_with_legacy_sections(write_config) -> None:
-    """The escape hatch loads a config carrying [azure] without error
-    (`resource sample --write` uses it, so an operator can author the
-    replacement manifests before deleting the sections); settings load
-    identically."""
-    config = load_config(write_config(AZURE_SECTION), warn_issues=False, resources=False)
-    assert config.operator is not None
 
 
 def test_defaults_site_parses(write_config) -> None:

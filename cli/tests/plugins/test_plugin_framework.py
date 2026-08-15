@@ -23,7 +23,6 @@ import pytest
 import agentworks
 import agentworks.plugins as plugins_pkg
 from agentworks.capabilities.descriptor import RegistryPolicy, capability_descriptors
-from agentworks.capabilities.git_credential import TokenSourcedConfig
 from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.errors import StateError
 from agentworks.origin import Origin
@@ -259,25 +258,6 @@ class _BackendWithNonBooleanInteractive(ConformingSecretBackend):
     interactive = 1  # type: ignore[assignment]
 
 
-class _LegacyGitConfig(TokenSourcedConfig):
-    name: Literal["old-git-provider", "old-shape-v2"]
-
-
-class _GitProviderOnV1(ConformingGitCredentialProvider):
-    """A provider written against the pre-token-union config contract."""
-
-    name = "old-git-provider"
-    description = "still exposes the version 1 token field"
-    contract_version = 1
-    config_model = _LegacyGitConfig
-
-
-class _GitProviderOnOldShapeV2(ConformingGitCredentialProvider):
-    name = "old-shape-v2"
-    description = "claims version 2 without migrating its token config"
-    config_model = _LegacyGitConfig
-
-
 def test_git_contract_v2_retains_public_credential_lines_hook() -> None:
     class _CompatibleV2Provider(ConformingGitCredentialProvider):
         name = "compatible-v2-provider"
@@ -345,8 +325,6 @@ class _PlatformWithAMistaggedModel(ConformingVMPlatform):
         ("vm-platform", _PlatformWithoutADescription, "'description' class attribute"),
         ("secret-backend", _BackendMissingItsOperations, "does not derive from SecretBackend"),
         ("secret-backend", _BackendWithoutInteractive, "does not derive from SecretBackend"),
-        ("git-credential-provider", _GitProviderOnV1, "declares contract_version 1"),
-        ("git-credential-provider", _GitProviderOnOldShapeV2, "not a TokenAcquiringConfig subclass"),
         ("vm-platform", _PlatformWithoutAConfigModel, "declares no config_model"),
         ("vm-platform", _PlatformWithoutAModel, "not a AgwModel subclass"),
         ("vm-platform", _PlatformWithAnUntaggedModel, "does not tag itself"),
@@ -358,8 +336,6 @@ class _PlatformWithAMistaggedModel(ConformingVMPlatform):
         "missing-metadata",
         "missing-operations",
         "missing-attribute",
-        "old-git-provider-contract",
-        "old-git-provider-shape",
         "no-config-model",
         "config-model-is-not-a-model",
         "config-model-carries-no-tag",

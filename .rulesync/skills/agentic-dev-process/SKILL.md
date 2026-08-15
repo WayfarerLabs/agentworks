@@ -25,6 +25,12 @@ and delegate the depth.
 
 Before touching anything, decide how big this is, because the size picks the track.
 
+First establish whether an SDD already governs the work, because that answer changes the track
+before size does: an effort in flight under `docs/sdd/` carries requirements and decisions your
+change has to fit, and its plan is the source of truth for what is done. Never proceed unsure; ask
+(the `development-process` rule makes this everyone's obligation, however the work reached you). The
+`sdd` skill governs how those artifacts move once you are inside one.
+
 - **Large or significant efforts** (new subsystems, contract or schema changes, anything spanning
   many files or hard to reverse): run the SDD process (section 2) and implement through delegation
   (section 3).
@@ -36,7 +42,7 @@ Before touching anything, decide how big this is, because the size picks the tra
   delegated implementation, plus the delegation-specific lane.)
 - When it is genuinely ambiguous which track fits, lean heavier for anything that reshapes a
   contract or is hard to undo, lighter for a localized change that follows an existing pattern. If
-  still unsure, ask (the `ask-questions` rule).
+  still unsure, ask (`development-principles` principle 10).
 
 ## 1a. Fixes you may fold in
 
@@ -351,9 +357,9 @@ your own private reviews (section 5) keep their fix loop.
 
 Throughout the effort, escalate to the operator for anything significant: a necessary redesign, a
 requirement that turns out wrong, a blocking decision that is the operator's to make, a discovery
-that changes the shape or scope of the work, or a smell you cannot resolve cleanly (the `push-back`
-and `permission-to-fail` rules). Surface it early and plainly rather than papering over it or
-guessing.
+that changes the shape or scope of the work, or a smell you cannot resolve cleanly
+(`development-principles` principles 10 and 14). Surface it early and plainly rather than papering
+over it or guessing.
 
 Short of that, keep pushing forward as long as the road is clear. The goal is steady, reviewed
 progress that the operator can trust without having to drive every step, punctuated by clear

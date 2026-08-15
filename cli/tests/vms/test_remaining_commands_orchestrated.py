@@ -247,7 +247,7 @@ def test_rekey_missing_key_fails_at_the_one_resolve_before_status(
     """Pure prediction permits the env source; resolution then fails before status."""
     from agentworks.errors import SecretUnavailableError
 
-    config = make_config('[secret_config]\nbackends = ["env-var"]\n')
+    config = make_config('[secret_config]\nsources = ["env-var"]\n')
     _seed_vm(db)
     monkeypatch.delenv("AW_SECRET_TAILSCALE_AUTH_KEY", raising=False)
     events = _fake_status(monkeypatch, VMStatus.RUNNING)

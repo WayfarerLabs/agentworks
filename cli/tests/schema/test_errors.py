@@ -120,14 +120,6 @@ def _lines(model_cls: type[BaseModel], blob: object) -> list[str]:
 
 # -- The representative-mistakes corpus ---------------------------------------
 #
-# A fifth entry, the retired sibling capability shape, lives END TO END in
-# ``tests/manifests/test_capability_shape.py`` instead of here. It is a
-# whole-document mistake rather than a blob-versus-model one: to this layer
-# it is just an unknown ``platform_config`` key beside a ``platform`` that
-# is not a table, which is the generic pair its error exists to beat. See
-# ``test_sibling_shape_is_rejected_with_the_exact_rewrite``.
-
-
 def test_an_unknown_key_names_the_fields_that_are_valid() -> None:
     lines = _lines(PrincipalLike, {"client_id": "c", "tenant_id": "t", "client_ids": 1})
 
@@ -160,11 +152,7 @@ def test_a_missing_required_UNION_also_names_the_choices_it_is_between() -> None
     is a CHOICE to make, and the choice is the only hard part.
 
     ``platform: is required`` sends an operator to ``describe-kind`` to
-    learn something this error is holding. That gap is invisible today
-    because ``retired_shapes`` intercepts exactly these three unions with
-    a much richer message, and that module is release-scoped: when it is
-    deleted, its own docstring's "the ABSENT case needs the most help"
-    lands here.
+    learn something this error is holding.
 
     A missing ORDINARY field is left alone, which is the same assertion
     above: there is nothing else true to say about a missing string.

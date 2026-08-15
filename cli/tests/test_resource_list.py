@@ -31,7 +31,7 @@ _VM_DEFAULT = ManifestDoc("vm-template", "default", {"apt": ["zsh"]})
 # The env-var secret backend, the settings block most of these tests carry.
 _ENV_VAR_BACKEND = """
 [secret_config]
-backends = ["env-var"]
+sources = ["env-var"]
 """
 
 

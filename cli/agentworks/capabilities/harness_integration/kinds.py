@@ -131,7 +131,6 @@ HARNESS_INTEGRATION_DESCRIPTOR = CapabilityKindDescriptor(
     manifest_section=HostSurface(
         host_kind="session-template",
         naming_field="harness_integration",
-        config_field="harness_integration_config",
     ),
 )
 """The harness-integration record in the capability-kind descriptor table

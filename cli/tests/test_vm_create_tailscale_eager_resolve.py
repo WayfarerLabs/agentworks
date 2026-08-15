@@ -65,7 +65,7 @@ def test_boundary_resolves_tailscale_from_env_var(
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var"]
+        sources = ["env-var"]
         """,
     )
     config = load_config(cfg, warn_issues=False)
@@ -94,7 +94,7 @@ def test_boundary_uses_custom_tailscale_secret_name(
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var"]
+        sources = ["env-var"]
         """,
         manifests=[ManifestDoc("vm-template", "azure-prod", {"tailscale_auth_key": "custom-ts"})],
     )
@@ -119,7 +119,7 @@ def test_template_preflight_predicts_env_source_without_probing_key(
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var"]
+        sources = ["env-var"]
         """,
     )
     config = load_config(cfg, warn_issues=False)

@@ -120,7 +120,7 @@ def test_secret_config_declared_at(tmp_path: Path, ssh_keys: tuple[Path, Path]) 
         tmp_path,
         """\
         [secret_config]
-        backends = ["env-var"]
+        sources = ["env-var"]
         """,
         ssh_keys,
     )

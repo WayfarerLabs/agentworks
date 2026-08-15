@@ -98,7 +98,6 @@ SECRET_BACKEND_DESCRIPTOR = CapabilityKindDescriptor(
     manifest_section=HostSurface(
         host_kind="secret-source",
         naming_field="backend",
-        config_field=None,
     ),
     config_schema=ConfigContract(
         base=AgwModel,

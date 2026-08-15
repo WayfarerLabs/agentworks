@@ -41,10 +41,11 @@ does not add, remove, or change an entry.
 
 ## Rewrite one resource at a time
 
-Map each retired section family to the kind named by the load error. Use `agw resource sample KIND`
-or `agw guide KIND` for a declarable manifest shape. Use `agw resource describe-kind KIND/NAME` or
-`agw guide KIND/NAME` for the tagged configuration of a capability implementation. The installed
-schema is authoritative. This topic deliberately does not copy its fields.
+Map each retired section family to a kind with the table below; ordinary top-level validation names
+only the unexpected root keys. Use `agw resource sample KIND` or `agw guide KIND` for a declarable
+manifest shape. Use `agw resource describe-kind KIND/NAME` or `agw guide KIND/NAME` for the tagged
+configuration of a capability implementation. The installed schema is authoritative. This topic
+deliberately does not copy its fields.
 
 The release-history mapping is:
 
@@ -73,48 +74,43 @@ live implementation reference: `[azure]` selects `spec.platform.name: azure-vm`,
 
 For every pre-existing or TOML-derived `git-credential`, inspect that provider's live reference and
 preserve its token acquisition intent inside `spec.provider`. An omitted `provider.token` still
-selects a stored token and the default secret name. A scalar such as `token: gh-pat` is still
-accepted as shorthand for the stored arm, but the canonical current spelling is the tagged shape:
+selects a secret token and the default secret name. A scalar such as `token: gh-pat` is still
+accepted as shorthand for the secret arm, but the canonical current spelling is the tagged shape:
 
 ```yaml
 token:
-  mode: stored
+  mode: secret
   secret: gh-pat
 ```
 
 Within that arm, omitting `token.secret` or writing `secret: null` selects the default secret name.
-The old outer spelling `token: null` is retired: delete that line to preserve its omission behavior,
-or replace it exactly with `token: {mode: stored}` to record the same choice explicitly. A retired
-TOML scalar may still become the accepted scalar shorthand, but write the canonical tagged spelling
-above during this migration. No `minted` arm exists in the current contract.
+Version 0.13 YAML also allowed an outer `provider.token: null`, which selected the same default as
+omission. Version 0.14 rejects that outer null. Delete the line to preserve the default, or replace
+it with `token: {mode: secret}` to make the choice explicit. A retired TOML scalar may still become
+the accepted scalar shorthand, but write the canonical tagged spelling above during this migration.
+No `minted` arm exists in the current contract. Tagged `mode: stored` was only a pre-release 0.14
+snapshot spelling, not a 0.13 spelling; replace it with `mode: secret` if one of those snapshots
+wrote it.
 
 Write one manifest at a time at its pre-recorded intended path while leaving every retired TOML
 section in place. The edit must consume its existing expected identity without changing the
 baseline. Use the manifest kind's sample and field reference. When the manifest contains tagged
-capability configuration, use that implementation's separate `kind/name` field reference. Run
-`agw doctor --output json` after each edit. Its `Configuration` group's `Config` failure must be the
-expected migration hard error: it must say that `config.toml` declares resources, say that
-`config.toml` is settings only now, and name the retained sections. Parse its one JSON document even
-though the retained-section checkpoint exits `1`. Require `schema_version` to be the integer `1`,
-`command` to equal `doctor`, `data` to be an object, and `data.groups` to contain the
-`Configuration` group. That group must contain `Config file` with status `ok` and `Config` with
-status `fail`. Its `Config` message must contain the expected migration hard error above. Use the
-`Manifest` and `Resource registry` facts for precise diagnostics, and require no check with either
-name to have status `warn` or `fail`, before recording the action as verified. Fix closed-world
-fields, strict types, non-nullable nulls, retired sibling capability shapes, and reference or cycle
-failures from those facts and the live field reference.
+capability configuration, use that implementation's separate `kind/name` field reference. A config
+that still carries retired resource sections fails ordinary top-level validation, so commands that
+load it cannot validate the manifest set during this drafting phase. Read every field from the live
+references and keep the immutable identity inventory as the loss check. Validation begins after the
+one-time TOML cutover below.
 
 The `edit-one-manifest` mutation applies to both pre-existing manifests and manifests derived from
-retired TOML. If validation reports a written legacy `service_principal`, `credentials`, or
-`vm_host` field, apply that hard error's exact replacement in the selected manifest. A retired outer
-field written as explicit null selected the same mode as omission: delete the retired null line and
-write `auth: {mode: ambient}`, `auth: {mode: ambient}`, or `placement: {mode: local}`, respectively.
-A manifest that omitted the old outer field needs no shape edit because the new tagged field has the
-same default. For a retired outer `provider.token: null`, delete the line or write
-`token: {mode: stored}`. Convert a retained scalar token to the canonical tagged stored arm while
-preserving its secret name. Validate the changed manifest again before reviewing it. Any manifest
-validation hard error returns that manifest to this edit loop; it does not advance to read-only
-review or cutover.
+retired TOML. Replace a written legacy `service_principal`, `credentials`, or `vm_host` field with
+`auth: {mode: service-principal, ...}`, `auth: {mode: access-key, ...}`, or
+`placement: {mode: ssh, host: ...}`, respectively, moving the retired value's fields into that arm.
+A retired outer field written as explicit null selected the same mode as omission: delete the
+retired null line and write `auth: {mode: ambient}`, `auth: {mode: ambient}`, or
+`placement: {mode: local}`, respectively. A manifest that omitted the old outer field needs no shape
+edit because the new tagged field has the same default. Convert a retained scalar token to the
+canonical tagged secret arm while preserving its secret name. For a version 0.13 outer
+`provider.token: null`, delete the line or write `token: {mode: secret}`.
 
 ## Review authentication, placement, and changed secret references
 
@@ -138,8 +134,8 @@ tagged choices now:
 
 The old presence-shaped fields are retired. During this read-only review, a remaining
 `service_principal`, `credentials`, or `vm_host` shape means the earlier edit loop is incomplete.
-Record the hard error's exact required rewrite and return that manifest to `edit-one-manifest`; do
-not modify it during review. For classification, `service_principal: null` means
+Record the required current field mapping and return that manifest to `edit-one-manifest`; do not
+modify it during review. For classification, `service_principal: null` means
 `auth: {mode: ambient}`, `credentials: null` means `auth: {mode: ambient}`, and `vm_host: null`
 means `placement: {mode: local}`. Do not confuse these outer-null mappings with a null inner secret
 reference, which still selects the well-known secret name. Review is complete only after every site
@@ -151,15 +147,23 @@ has a current shape and its mode and secret-reference intent are confirmed.
 sources keep their names and work without manifests. For every desired non-default backend, use
 `agw resource sample secret-source` to declare an operator-named source whose tagged
 `spec.backend.name` selects that implementation. Move implementation config to that backend block,
-then put the source name in `[secret_config].backends` and use it as the key in each secret's
+then put the source name in `[secret_config].sources` and use it as the key in each secret's
 `backend_mappings`. The synthesized `env-var` and `prompt` names remain valid without manifests. For
 OnePassword, move the old mapping's account to the source and make every mapping one scalar `op://`
 reference. The optional positive timeout is new source configuration. A direct configured-backend
 name such as `onepassword` is a hard 0.14 error, not a compatibility alias.
 
-After every new manifest has passed its per-manifest doctor loop, remove all retired resource
-sections from `config.toml` in one edit. Run `agw resource list --origin operator --output json` and
-parse exactly one JSON document. Require `schema_version` to be the integer `1`, `command` to equal
+After every manifest has been drafted and reviewed against the live references, remove all retired
+resource sections from `config.toml` in one edit. Then run `agw doctor --output json` to validate
+the whole manifest set. Parse exactly one JSON document and require `schema_version` to be the
+integer `1`, `command` to equal `doctor`, `data` to be an object, and the `Configuration` group to
+report the config file and config as valid. Use its `Manifest` and `Resource registry` facts for
+closed-world fields, strict types, non-nullable nulls, reference failures, and cycles. Any
+validation error returns the selected manifest to `edit-one-manifest`; keep the cutover config in
+place and repeat doctor after the edit.
+
+Once the manifest set validates, run `agw resource list --origin operator --output json` and parse
+exactly one JSON document. Require `schema_version` to be the integer `1`, `command` to equal
 `resource.list`, and `data` to be an object before comparing the result with the caller-owned
 expected identities by `kind/name`, operator-declared origin variant, and intended manifest file
 path, ignoring source line. This normal inventory command may probe host readiness, so run it only

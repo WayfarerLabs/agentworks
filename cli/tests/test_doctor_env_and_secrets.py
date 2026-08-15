@@ -95,7 +95,7 @@ def test_secret_resolves_via_env_var_when_set(
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var", "prompt"]
+        sources = ["env-var", "prompt"]
         """,
         admin_env={"TOKEN": {"secret": "shared"}},
         manifests=[ManifestDoc("secret", "shared", description="Shared API token")],
@@ -118,7 +118,7 @@ def test_doctor_accepts_mapping_keyed_by_differently_named_declared_source(
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["work-env"]
+        sources = ["work-env"]
         """,
         manifests=[
             ManifestDoc("secret-source", "work-env", {"backend": {"name": "env-var"}}),
@@ -143,13 +143,13 @@ def test_secret_resolves_via_prompt_when_env_var_unset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When env-var has nothing and prompt is in the chain, doctor reports
-    the secret as resolving via prompt -- prompt is just another backend."""
+    the secret as resolving via prompt, which is another active source."""
     monkeypatch.delenv("AW_SECRET_SHARED", raising=False)
     cfg = _write_config(
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var", "prompt"]
+        sources = ["env-var", "prompt"]
         """,
         admin_env={"TOKEN": {"secret": "shared"}},
         manifests=[ManifestDoc("secret", "shared", description="Shared API token")],
@@ -168,13 +168,13 @@ def test_secret_not_available_when_env_var_unset_and_prompt_opted_out(
 ) -> None:
     """When prompt is opted out via backend_mappings.prompt = false AND
     env-var has no value, doctor reports the secret as WARN (config is
-    valid but no backend in the chain would resolve it)."""
+    valid but no source in the chain would resolve it)."""
     monkeypatch.delenv("AW_SECRET_OPTED_OUT", raising=False)
     cfg = _write_config(
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var", "prompt"]
+        sources = ["env-var", "prompt"]
         """,
         admin_env={"TOKEN": {"secret": "opted-out"}},
         manifests=[
@@ -249,10 +249,10 @@ def test_secret_backends_group_skips_disabled_plugin_backend(tmp_path: Path, mon
     assert "not enabled in [plugins].system" in (roster["plugin onepassword"].message or "")
 
 
-def test_check_secrets_flags_a_not_ready_only_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """R9.6: a secret whose only attempting backend is not-ready is at-risk;
-    ``_check_secrets`` warns and names the not-ready backend rather than
-    falsely predicting resolution via it (lockstep with the resolution skip)."""
+def test_check_secrets_flags_a_not_ready_only_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """R9.6: a secret whose only attempting source selects a not-ready backend
+    is at-risk. ``_check_secrets`` warns rather than falsely predicting
+    resolution through that source (lockstep with the resolution skip)."""
     monkeypatch.setattr("shutil.which", lambda name: None)  # op absent
     cfg = _write_config(
         tmp_path,
@@ -261,7 +261,7 @@ def test_check_secrets_flags_a_not_ready_only_backend(tmp_path: Path, monkeypatc
         system = ["onepassword"]
 
         [secret_config]
-        backends = ["onepassword"]
+        sources = ["onepassword"]
         """,
         admin_env={"TOKEN": {"secret": "op-only"}},
         manifests=[
@@ -327,7 +327,7 @@ def test_mapping_to_undeclared_kind_hard_errors_at_build(tmp_path: Path) -> None
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var", "prompt"]
+        sources = ["env-var", "prompt"]
         """,
         admin_env={"TOKEN": {"secret": "shared"}},
         manifests=[
@@ -342,13 +342,13 @@ def test_mapping_to_undeclared_kind_hard_errors_at_build(tmp_path: Path) -> None
 def test_mapping_to_multiple_undeclared_kinds_hard_errors_at_build(tmp_path: Path) -> None:
     """With two unknown-source mappings, the first dangling edge the
     resolve pass reaches hard-errors at ``build_registry`` (naming that
-    backend); the build never gets far enough to enumerate both, unlike the
+    source); the build never gets far enough to enumerate both, unlike the
     old tolerant per-secret doctor row that listed them sorted."""
     cfg = _write_config(
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var", "prompt"]
+        sources = ["env-var", "prompt"]
         """,
         admin_env={"TOKEN": {"secret": "shared"}},
         manifests=[
@@ -384,66 +384,6 @@ def test_agentworks_identity_override_surfaces_in_configuration(
     g, _, _ = _check_config()
     warns = [c for c in g.checks if c.status == Status.WARN]
     assert any("AGENTWORKS_SESSION" in (c.message or "") for c in warns), [(c.name, c.message) for c in warns]
-
-
-def test_doctor_resource_sections_fail_row_and_continues(tmp_path: Path, monkeypatch) -> None:
-    """config.toml declaring resources is a hard error now (ADR 0022). Doctor
-    must NOT truncate the report to one fail row for the mid-migration
-    operator it helps most: it renders the Config fail row, then retries
-    settings-only (``resources=False``) and continues with the rest of the
-    report (SSH rows, registry)."""
-    # This test needs a config that genuinely still declares resources in TOML
-    # (the mid-migration state), so it writes those sections directly rather
-    # than through the manifest-based helper.
-    pub = tmp_path / "id.pub"
-    priv = tmp_path / "id"
-    pub.write_text("ssh-ed25519 AAAA...")
-    priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
-    cfg = tmp_path / "config.toml"
-    cfg.write_text(
-        dedent(f"""\
-        [operator]
-        ssh_public_key = "{pub.as_posix()}"
-        ssh_private_key = "{priv.as_posix()}"
-
-        [vm_templates.default]
-
-        [admin.config]
-        shell = "zsh"
-        """)
-    )
-    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
-    g, config, registry = _check_config()
-    fails = [(c.name, c.message or "") for c in g.checks if c.status == Status.FAIL]
-    assert any(name == "Config" and "settings only" in message for name, message in fails), fails
-    # The report continued past the fail row rather than aborting: the
-    # settings-only retry produced a config, the SSH checks rendered, and the
-    # registry still built.
-    assert config is not None
-    assert any(c.name.startswith("SSH") for c in g.checks), [c.name for c in g.checks]
-    assert registry is not None
-
-
-def test_doctor_reports_secret_backends_as_a_fail_row_and_keeps_reporting(tmp_path: Path, monkeypatch) -> None:
-    """``[secret_backends.*]`` is a resource section now, so doctor renders
-    it as the Config FAIL row and the settings-only retry carries the rest of
-    the report.
-
-    Both halves matter. It used to be refused by the SETTINGS load, which the
-    retry cannot skip, so this section truncated the whole report to one fail
-    row with every later group reporting `skipped`, and nothing on screen said
-    a ``[secret_backends.*]`` section was the reason. That is the operator
-    doctor helps most, mid-migration, so the row-plus-report shape is the
-    point of the move, not a side effect of it.
-    """
-    cfg = _write_config(tmp_path, settings="[secret_backends.env-var]\n")
-    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
-    g, config, _ = _check_config()
-    fails = [(c.name, c.message or "") for c in g.checks if c.status == Status.FAIL]
-    assert any(name == "Config" and "[secret_backends.*]" in message for name, message in fails), fails
-    # The retry succeeded, so the report goes on rather than truncating.
-    assert config is not None
-    assert any(c.name.startswith("SSH") for c in g.checks), [c.name for c in g.checks]
 
 
 def test_manifest_issues_surface_as_doctor_rows(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -556,7 +496,7 @@ spec:
 
 def _sp_site_config(tmp_path: Path) -> Path:
     """An operator config declaring an azure site with a service
-    principal, whose client secret only the prompt backend could
+    principal, whose client secret only the prompt source could
     supply."""
     cfg = _write_config(
         tmp_path,
@@ -565,7 +505,7 @@ def _sp_site_config(tmp_path: Path) -> Path:
         system = ["azure"]
 
         [secret_config]
-        backends = ["env-var", "prompt"]
+        sources = ["env-var", "prompt"]
         """,
     )
     write_manifests(tmp_path, _AZURE_SP_SITE, filename="site.yaml")

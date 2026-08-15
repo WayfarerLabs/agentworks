@@ -10,7 +10,7 @@ Coverage, kind by kind through the ACTUAL consumer (R9 capability side, R14):
 
 - vm-platform: a ``vm-site`` on a disabled plugin platform is not-ready with the
   enable-plugin hint (existing fold), and ``resolve_site`` refuses it.
-- secret-backend: a disabled plugin backend is excluded from ``active_backends``
+- secret-backend: a disabled plugin backend is excluded from ``active_sources``
   but NOT from secret-mapping validation, which is unconditional over
   enablement (inert for resolution and validated are separate properties).
 - git-credential-provider: a ``git-credential`` on a disabled plugin provider is
@@ -369,11 +369,11 @@ def test_a_valid_mapping_to_a_disabled_backend_builds_and_stays_inert() -> None:
         assert registry.graph.enablement_of("secret-backend", "fixture-backend") is Enablement.disabled
         config = cast(
             "Config",
-            SimpleNamespace(secret_config_data=SimpleNamespace(backends=("fixture-source", "prompt"))),
+            SimpleNamespace(secret_config_data=SimpleNamespace(sources=("fixture-source", "prompt"))),
         )
-        chain = active_sources(config, registry)
-        assert [source.name for source in chain] == ["fixture-source", "prompt"]
-        assert not chain[0].readiness.is_ready
+        sources = active_sources(config, registry)
+        assert [source.name for source in sources] == ["fixture-source", "prompt"]
+        assert not sources[0].readiness.is_ready
 
 
 def test_mapping_to_an_absent_backend_reports_the_dangling_edge_not_a_shape_error() -> None:

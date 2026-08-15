@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import pytest
-import yaml
 from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
 from agentworks.env import EnvEntry, PlaintextEnvEntry, SecretEnvEntry
 from agentworks.schema import (
-    AgwModel,
     RefOwner,
     extract_references,
     filled_defaults,
@@ -73,12 +71,14 @@ def test_all_spellings_are_exposed_by_a_structural_one_of() -> None:
     documentation too."""
     emitted = EnvEntry.model_json_schema()
     assert "anyOf" not in emitted
-    plaintext, secret = emitted["oneOf"]
+    assert len(emitted["oneOf"]) == 2
+    plaintext = emitted["$defs"]["PlaintextEnvEntry"]
+    secret = emitted["$defs"]["SecretEnvEntry"]
     assert plaintext["anyOf"][0] == {"type": "string"}
     assert plaintext["anyOf"][1]["required"] == ["value"]
-    assert plaintext["anyOf"][1]["properties"]["secret"] == {"type": "null"}
+    assert set(plaintext["anyOf"][1]["properties"]) == {"value"}
     assert secret["required"] == ["secret"]
-    assert secret["properties"]["value"] == {"type": "null"}
+    assert set(secret["properties"]) == {"secret"}
 
 
 def test_the_runtime_wrapper_contains_one_closed_arm() -> None:
@@ -102,87 +102,38 @@ def test_the_two_spellings_are_one_declaration() -> None:
 
 
 @pytest.mark.parametrize(
-    ("legacy", "canonical"),
-    [
-        ({"value": "vim", "secret": None}, {"value": "vim"}),
-        ({"value": None, "secret": "editor-token"}, {"secret": "editor-token"}),
-    ],
-)
-def test_legacy_null_companions_validate_as_the_obvious_arm(
-    legacy: dict[str, object], canonical: dict[str, str]
-) -> None:
-    entry = EnvEntry.model_validate(legacy)
-
-    assert entry.model_dump() == canonical
-
-
-def test_the_old_models_persisted_dump_still_loads() -> None:
-    class LegacyEnvEntry(AgwModel):
-        value: str | None = None
-        secret: str | None = None
-
-    persisted = LegacyEnvEntry(value=None, secret="editor-token").model_dump()
-
-    assert persisted == {"value": None, "secret": "editor-token"}
-    assert EnvEntry.model_validate(persisted).model_dump() == {"secret": "editor-token"}
-
-
-def test_a_yaml_null_companion_still_loads() -> None:
-    loaded = yaml.safe_load("value: vim\nsecret: null\n")
-
-    assert loaded == {"value": "vim", "secret": None}
-    assert EnvEntry.model_validate(loaded).model_dump() == {"value": "vim"}
-
-
-@pytest.mark.parametrize(
-    "legacy",
+    "retired",
     [
         {"value": "vim", "secret": None},
         {"value": None, "secret": "editor-token"},
     ],
 )
-def test_emitted_schema_accepts_every_legacy_null_companion_the_loader_accepts(
-    legacy: dict[str, object],
-) -> None:
-    EnvEntry.model_validate(legacy)
+def test_retired_null_companions_are_rejected_by_runtime_and_schema(retired: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        EnvEntry.model_validate(retired)
 
-    assert list(Draft202012Validator(EnvEntry.model_json_schema()).iter_errors(legacy)) == []
+    assert list(Draft202012Validator(EnvEntry.model_json_schema()).iter_errors(retired))
 
 
 @pytest.mark.parametrize(
-    ("legacy", "canonical"),
+    ("entry", "names"),
     [
-        ({"value": "vim", "secret": None}, {"value": "vim"}),
-        ({"value": None, "secret": "editor-token"}, {"secret": "editor-token"}),
+        ({"value": "vim"}, []),
+        ({"secret": "editor-token"}, ["editor-token"]),
     ],
 )
-def test_fill_canonicalizes_legacy_null_companions(legacy: dict[str, object], canonical: dict[str, str]) -> None:
-    assert filled_defaults(EnvEntry, legacy, OWNER) == canonical
-    assert legacy != canonical, "the input stays in its persisted spelling"
+def test_structural_walks_preserve_canonical_env_entries(entry: dict[str, str], names: list[str]) -> None:
+    assert filled_defaults(EnvEntry, entry, OWNER) == entry
+    assert [edge.name for edge in extract_references(EnvEntry, entry)] == names
 
 
 @pytest.mark.parametrize(
-    ("legacy", "names"),
-    [
-        ({"value": "vim", "secret": None}, []),
-        ({"value": None, "secret": "editor-token"}, ["editor-token"]),
-    ],
-)
-def test_extraction_follows_legacy_null_companions_to_the_obvious_arm(
-    legacy: dict[str, object], names: list[str]
-) -> None:
-    assert [edge.name for edge in extract_references(EnvEntry, legacy)] == names
-
-
-@pytest.mark.parametrize(
-    "ambiguous",
+    "malformed",
     [
         {"value": "vim", "unknown": None},
         {"value": None, "secret": None},
     ],
 )
-def test_null_canonicalization_does_not_hide_unknown_or_ambiguous_shapes(
-    ambiguous: dict[str, object],
-) -> None:
+def test_unknown_or_ambiguous_shapes_remain_rejected(malformed: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
-        EnvEntry.model_validate(ambiguous)
+        EnvEntry.model_validate(malformed)

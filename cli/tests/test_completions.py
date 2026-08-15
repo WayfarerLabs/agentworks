@@ -354,7 +354,7 @@ class TestOptionFlagsInSpec:
     through here. This is the direct completion-spec guard for the
     ``env show --reveal-secrets`` -> ``--resolve`` rename (R9.8): the renamed
     flag must complete, and the removed spelling must NOT appear (the
-    always-consider-completions rule).
+    keep-collateral-in-sync rule's completions row).
     """
 
     def _env_show_option_flags(self) -> list[str]:
@@ -373,8 +373,8 @@ class TestOptionFlagsInSpec:
     def test_include_disabled_flag_reaches_the_completion_spec(self) -> None:
         # `resource list --include-disabled` is a plain boolean flag, captured
         # by the Typer introspection with no merge-tree change (it is not a
-        # dynamic path element). The always-consider-completions rule: a new CLI
-        # flag must reach the tree.
+        # dynamic path element). The keep-collateral-in-sync rule's completions
+        # row: a new CLI flag must reach the tree.
         spec = build_spec(app)
         resource_list = _walk_commands(spec)["agentworks.resource.list"]
         opts = [opt for param in resource_list.params for opt in param.opts]

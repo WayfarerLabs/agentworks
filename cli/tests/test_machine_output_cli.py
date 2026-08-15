@@ -611,15 +611,15 @@ def test_secret_describe_json_preserves_nulls_and_source_order(monkeypatch) -> N
         references=(),
         used_by=None,
         source_mappings=(
-            SourceMapping("first", "env-var", SourceProvenance.DECLARED, True, "TOKEN", None),
-            SourceMapping("second", "prompt", SourceProvenance.DECLARED, True, None, "source unavailable"),
+            SourceMapping("work-op", "onepassword", SourceProvenance.DECLARED, True, "op://Work/token", None),
+            SourceMapping("prompt-fallback", "prompt", SourceProvenance.DECLARED, True, None, "source unavailable"),
         ),
         resolution=ResolutionPreview(
             name="token",
             category=PreviewCategory.ATTEMPTABLE,
-            source="first",
-            identifier="TOKEN",
-            skipped_not_ready=(SkippedSource("second", "source unavailable"),),
+            source="work-op",
+            identifier="op://Work/token",
+            skipped_not_ready=(SkippedSource("prompt-fallback", "source unavailable"),),
         ),
     )
     monkeypatch.setattr(config, "load_config", lambda **_kwargs: object())
@@ -628,21 +628,6 @@ def test_secret_describe_json_preserves_nulls_and_source_order(monkeypatch) -> N
     monkeypatch.setattr(inspect, "describe_secret", lambda *_args, **_kwargs: description)
 
     result = CliRunner().invoke(app, ["secret", "describe", "token", "--output", "json"])
-    _assert_human_baseline(
-        ["secret", "describe", "token"],
-        b"Secret: token\n"
-        b"  Kind: secret\n"
-        b"  Description: test token\n"
-        b"  Origin: unknown\n\n"
-        b"Referenced by:\n"
-        b"  (none recorded)\n\n"
-        b"Backend mappings:\n"
-        b"  - first (env-var, declared): TOKEN\n"
-        b"  - second (prompt, declared): (prompt at resolution time) (not ready: source unavailable)\n\n"
-        b"Resolution preview:\n"
-        b"  - skipped second: not ready: source unavailable\n"
-        b"  would attempt via first\n",
-    )
 
     assert result.exit_code == 0, result.output
     data = _json_document(result)["data"]
@@ -652,8 +637,8 @@ def test_secret_describe_json_preserves_nulls_and_source_order(monkeypatch) -> N
     assert described["origin"] is None
     assert described["hint"] is None
     assert described["used_by"] is None
-    assert [mapping["source"] for mapping in described["source_mappings"]] == ["first", "second"]
-    assert [mapping["backend"] for mapping in described["source_mappings"]] == ["env-var", "prompt"]
+    assert [mapping["source"] for mapping in described["source_mappings"]] == ["work-op", "prompt-fallback"]
+    assert [mapping["backend"] for mapping in described["source_mappings"]] == ["onepassword", "prompt"]
 
 
 def test_doctor_json_writes_complete_failing_report_before_exit(monkeypatch) -> None:

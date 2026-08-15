@@ -1,5 +1,5 @@
 """The ``git-credential-provider`` capability: code-side handles for
-each ``[git_credentials.<name>].provider`` value.
+each git-credential manifest's ``spec.provider.name`` value.
 
 Each provider implementation (``GitHubCredentialProvider`` in core,
 ``AzDOCredentialProvider`` in the opt-in ``azure`` system plugin) is a
@@ -22,10 +22,9 @@ from __future__ import annotations
 from agentworks.capabilities.git_credential.base import (
     GitCredentialProvider,
     HelperEntry,
-    StoredToken,
+    SecretToken,
     TokenAcquiringConfig,
     TokenAcquisition,
-    TokenSourcedConfig,
 )
 from agentworks.capabilities.git_credential.github import GitHubCredentialProvider
 
@@ -34,10 +33,9 @@ __all__ = [
     "GitCredentialProvider",
     "GitHubCredentialProvider",
     "HelperEntry",
-    "StoredToken",
+    "SecretToken",
     "TokenAcquiringConfig",
     "TokenAcquisition",
-    "TokenSourcedConfig",
 ]
 
 

@@ -7,7 +7,7 @@ Phase 1 of that effort -- now a typo'd ``{ secret = "anthropic-api-ky"     }``
 no longer errors at config load; the framework auto-declares
 ``anthropic-api-ky``, and operators see the unexpected name in
 ``agw secret list`` (Phase 1e) / ``agw doctor``. Runtime resolution
-surfaces "no active backend resolved" if no backend yields a value.
+surfaces an unavailable secret if no active source yields a value.
 """
 
 from __future__ import annotations

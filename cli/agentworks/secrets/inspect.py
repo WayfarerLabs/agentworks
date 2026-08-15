@@ -44,18 +44,18 @@ class SecretSourceCell:
 
     source: str
     would_attempt: bool
-    """False = this backend won't attempt this secret (mapping=false or no
-    default convention and no explicit mapping). True = backend will try."""
+    """False = this source's backend won't attempt this secret (mapping=false
+    or no default convention and no explicit mapping). True = it will try."""
     identifier: str | None
     """Backend's lookup identifier for this secret (env var name, op:// URI,
     vault path, ...). None means the backend has no static identifier --
     prompt always attempts but doesn't know what to look up until run time."""
     not_ready_reason: str | None
-    """The backend node's stored readiness reason (off the graph), or None when
-    the backend is ready. Orthogonal to ``would_attempt`` (readiness is host
-    usability; would-attempt is a pure (secret, mapping) function): a not-ready
-    backend still "would attempt" a mapped secret, but cannot run here, so the
-    grid shows ``not ready: <reason>`` and it wins over the identifier (R9.7)."""
+    """The source node's stored readiness reason (off the graph), or None when
+    the source is ready. Orthogonal to ``would_attempt`` (readiness is host
+    usability; would-attempt is a pure (secret, mapping) function): a source
+    whose backend would attempt can still be not-ready, so the grid shows
+    ``not ready: <reason>`` and it wins over the identifier (R9.7)."""
 
 
 @dataclass(frozen=True)
@@ -179,12 +179,12 @@ def build_secret_table(config: Config, registry: Registry) -> SecretTable:
     )
 
 
-_BACKEND_CELL_WIDTH = 40
+_SOURCE_CELL_WIDTH = 40
 # Wide enough for every practical name (the auto-declared git-token-* family
 # included) while keeping the list view scannable when a name approaches the
 # 253-char secret cap.
 _NAME_CELL_WIDTH = 50
-"""Cap for the per-backend identifier columns in the LIST view, so a long
+"""Cap for the per-source identifier columns in the LIST view, so a long
 ``op://`` reference (optionally account-prefixed) or env-var name does not
 blow the table width out. The single-secret DETAIL view is left uncapped."""
 
@@ -197,18 +197,18 @@ def render_secret_table(table: SecretTable) -> None:
 
     - ``No secrets in the resource registry.`` -- nothing declared or
       auto-declared.
-    - ``No active secret sources.`` -- ``[secret_config].backends = []``.
+    - ``No active secret sources.`` -- ``[secret_config].sources = []``.
 
-    Otherwise a header + table with one column per active (opted-in) backend
+    Otherwise a header + table with one column per active (opted-in) source
     in chain order. Cell semantics, per R9.7 (never the overloaded
     ``enabled`` / ``disabled`` literals):
 
     - ``won't attempt`` when ``would_attempt`` is False (a ``false`` opt-out,
       or a mapping-required backend with no mapping);
-    - ``not ready: <reason>`` when the backend's node is not-ready on this host
-      (wins over the identifier: it cannot run here, R9.7);
-    - the explicit identifier (``AW_SECRET_X``, ``op://...``) when the backend
-      would attempt, is ready, and has a static lookup key;
+    - ``not ready: <reason>`` when the source is not-ready on this host (wins
+      over the identifier: it cannot run here, R9.7);
+    - the explicit identifier (``AW_SECRET_X``, ``op://...``) when the source's
+      backend would attempt, the source is ready, and it has a static lookup key;
     - ``would attempt`` when it would attempt and is ready but has no static
       key (e.g. ``prompt``).
     """
@@ -217,7 +217,7 @@ def render_secret_table(table: SecretTable) -> None:
         return
     if not table.sources:
         output.info(
-            "No active secret sources. Set [secret_config].backends to source "
+            "No active secret sources. Set [secret_config].sources to source "
             "names (or leave it unset to use env-var then prompt).",
         )
         return
@@ -247,14 +247,14 @@ def render_secret_table(table: SecretTable) -> None:
                 # attempt regardless of whether the host tool is present).
                 cells.append("won't attempt")
             elif cell.not_ready_reason is not None:
-                # Not-ready wins over the identifier (R9.7): a mapped backend
+                # Not-ready wins over the identifier (R9.7): a mapped source
                 # that cannot run here shows why, not the ref it can't use.
-                cells.append(output.truncate(f"not ready: {cell.not_ready_reason}", _BACKEND_CELL_WIDTH))
+                cells.append(output.truncate(f"not ready: {cell.not_ready_reason}", _SOURCE_CELL_WIDTH))
             elif cell.identifier is not None:
                 # Cap the identifier column so a long op:// ref (or
                 # account-prefixed one) does not blow the table out. The
                 # DETAIL view keeps the full identifier.
-                cells.append(output.truncate(cell.identifier, _BACKEND_CELL_WIDTH))
+                cells.append(output.truncate(cell.identifier, _SOURCE_CELL_WIDTH))
             else:
                 cells.append("would attempt")
         rendered.append(tuple(cells))
@@ -281,6 +281,7 @@ class SourceMapping:
     Fields express what the backend would do at resolution time without
     actually resolving (no I/O):
 
+    - ``source``: the configured source name.
     - ``backend``: the backend name (``"env-var"``, ``"prompt"``, ...).
     - ``would_attempt``: True if the backend would try this secret at
       resolution time. False = explicit opt-out via
@@ -298,7 +299,7 @@ class SourceMapping:
     would_attempt: bool
     identifier: str | None
     not_ready_reason: str | None
-    """The backend node's stored readiness reason, or None when ready. The
+    """The source node's stored readiness reason, or None when ready. The
     mapping is still shown when not-ready (the config is real; it just cannot
     run here now), annotated ``(not ready: <reason>)`` (R9.1)."""
 
@@ -511,7 +512,7 @@ def render_secret_description(desc: SecretDescription) -> None:
     output.info("")
     output.info("Backend mappings:")
     if not desc.source_mappings:
-        output.detail("(no active sources in [secret_config].backends)")
+        output.detail("(no active sources in [secret_config].sources)")
     else:
         provenance_labels = {
             SourceProvenance.OPERATOR_OVERRIDE: "operator override of synthesized default",
@@ -525,7 +526,7 @@ def render_secret_description(desc: SecretDescription) -> None:
                 status = mapping.identifier
             else:
                 status = "(prompt at resolution time)"
-            # A would-attempt backend that cannot run here keeps its mapping
+            # A would-attempt source that cannot run here keeps its mapping
             # shown (the config is real) but is flagged not-ready (R9.1).
             if mapping.would_attempt and mapping.not_ready_reason is not None:
                 status += f" (not ready: {mapping.not_ready_reason})"
@@ -534,7 +535,7 @@ def render_secret_description(desc: SecretDescription) -> None:
     # --- Resolution preview ---
     output.info("")
     output.info("Resolution preview:")
-    # The honest offline layer first: backends the walk skips because they are
+    # The honest offline layer first: sources the walk skips because they are
     # not-ready here (R9.6), then the optimistic would-resolve verdict under it.
     for skipped in desc.resolution.skipped_not_ready:
         output.detail(f"- skipped {skipped.source}: not ready: {skipped.reason}")

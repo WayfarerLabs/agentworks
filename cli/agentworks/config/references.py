@@ -2,7 +2,7 @@
 resolve.
 
 A handful of settings are references: ``defaults.site`` names a ``vm-site``,
-``[secret_config].backends`` names ``secret-source`` rows in precedence
+``[secret_config].sources`` names ``secret-source`` rows in precedence
 order. They are settings, not resources, and are never published as
 pseudo-resources (ADR 0016), so the framework's own reference machinery does
 not see them: a ``ResourceReference`` is sourced from a declaring ROW, and
@@ -24,7 +24,7 @@ wording for the same operator mistake.
 
 **Timing.** The registry does not exist at settings-load time, so a
 reference cannot be checked there; the loaders validate SHAPE only
-(``defaults.site`` is a non-empty string, ``backends`` is a list of strings).
+(``defaults.site`` is a non-empty string, ``sources`` is a list of strings).
 Existence is checked after the resource graph is finalized, at the
 composition boundary that holds both worlds
 (``bootstrap.build_registry``). The Registry is deliberately NOT the place:
@@ -57,7 +57,7 @@ class _SettingRefSource:
     """One SETTING that names resource rows.
 
     ``setting`` is the operator-facing spelling, verbatim as it appears in
-    ``config.toml`` (``defaults.site``, ``[secret_config].backends``), because
+    ``config.toml`` (``defaults.site``, ``[secret_config].sources``), because
     it is what the error tells the operator to go and edit. ``kind`` is the
     resource kind the names must resolve in. ``read`` pulls the named values
     off a ``Config`` as a tuple, so a scalar setting and a list setting are
@@ -76,8 +76,8 @@ def _default_site(config: Config) -> tuple[str, ...]:
 
 
 def _secret_chain(config: Config) -> tuple[str, ...]:
-    """``[secret_config].backends``, the active-source precedence list."""
-    return config.secret_config_data.backends
+    """``[secret_config].sources``, the active-source precedence list."""
+    return config.secret_config_data.sources
 
 
 #: Every settings value that names a resource row. A new one is added here,
@@ -88,7 +88,7 @@ def _secret_chain(config: Config) -> tuple[str, ...]:
 #: not a name of anything.
 _SETTING_REF_SOURCES: tuple[_SettingRefSource, ...] = (
     _SettingRefSource(setting="defaults.site", kind="vm-site", read=_default_site),
-    _SettingRefSource(setting="[secret_config].backends", kind="secret-source", read=_secret_chain),
+    _SettingRefSource(setting="[secret_config].sources", kind="secret-source", read=_secret_chain),
 )
 
 
@@ -148,7 +148,7 @@ def validate_setting_references(config: Config, registry: Registry) -> None:
     Run by ``bootstrap.build_registry`` immediately after ``finalize``, and
     BEFORE the subsystems' semantic checks: a bogus name must be reported as
     the bogus name it is, not as the downstream consequence of one. (Left to
-    run first, ``secrets.validate_chain`` would report a misspelled backend as
+    run first, ``secrets.validate_chain`` would report a misspelled source as
     an "unreachable secret", because a name that matches no edge simply drops
     out of its intersection.)
 

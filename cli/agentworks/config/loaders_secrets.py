@@ -7,13 +7,12 @@ Two neighbours are deliberately absent. The ``[secrets.*]`` resource loader
 (``_load_secrets``) is gone: config.toml stopped declaring resources
 (ADR 0022), and secrets are decoded from YAML manifests by
 ``agentworks.manifests.decode``. ``[secret_backends.*]`` is gone the same
-way: it was a retired backend-selection row that carried no configuration, so
-it is swept by
-``_raise_for_resource_sections`` in ``agentworks.config.load`` alongside
-every other retired resource section, instead of being half-warned and
-half-refused here against the built-in backend registry.
+way: it was a retired backend-selection row that carried no configuration.
+Like every retired resource section, it is now an unexpected top-level key
+instead of being half-warned and half-refused here against the built-in
+backend registry.
 
-``[secret_config].backends`` now NAMES declared ``secret-source`` resources and
+``[secret_config].sources`` NAMES declared ``secret-source`` resources and
 stays, because choosing and ordering them is configuration. Only its SHAPE is checked here:
 the registry does not exist at settings-load time, so whether the names
 resolve is settled after finalize, by
@@ -42,9 +41,9 @@ def _load_secret_config(
 ) -> SecretConfig:
     """Load [secret_config] with the active-source precedence list.
 
-    Absence of the [secret_config] table OR absence of the ``backends`` key
+    Absence of the [secret_config] table OR absence of the ``sources`` key
     within it falls back to ``SecretConfig()``'s default chain
-    (``DEFAULT_SOURCE_CHAIN``). An explicit ``backends = []`` is respected
+    (``DEFAULT_SOURCE_CHAIN``). An explicit ``sources = []`` is respected
     as "no sources" (operator opts out of resolution entirely).
     """
     declared_at = decls.lookup("secret_config")
@@ -53,13 +52,21 @@ def _load_secret_config(
     raw = data["secret_config"]
     if not isinstance(raw, dict):
         raise ConfigError("[secret_config] must be a table")
-    _warn_unexpected_keys(raw, {"backends"}, "secret_config", issues)
-    if "backends" not in raw:
+    if "backends" in raw:
+        raise ConfigError(
+            "[secret_config].backends was renamed to [secret_config].sources",
+            hint=(
+                'Rename backends to sources in config.toml. See "Secret source precedence key" '
+                "in docs/guides/upgrading-to-0.14.md."
+            ),
+        )
+    _warn_unexpected_keys(raw, {"sources"}, "secret_config", issues)
+    if "sources" not in raw:
         return SecretConfig(declared_at=declared_at)
-    backends_raw = raw["backends"]
-    if not isinstance(backends_raw, list) or not all(isinstance(b, str) for b in backends_raw):
-        raise ConfigError("[secret_config].backends must be a list of strings")
-    return SecretConfig(backends=tuple(backends_raw), declared_at=declared_at)
+    sources_raw = raw["sources"]
+    if not isinstance(sources_raw, list) or not all(isinstance(source, str) for source in sources_raw):
+        raise ConfigError("[secret_config].sources must be a list of strings")
+    return SecretConfig(sources=tuple(sources_raw), declared_at=declared_at)
 
 
 def _load_plugins(

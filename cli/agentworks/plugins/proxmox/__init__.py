@@ -7,9 +7,7 @@ seats its ``ProxmoxPlatform`` into ``VM_PLATFORM_REGISTRY`` through the
 ``system-plugin`` origin. The row is present-but-disabled until an operator
 opts in with ``[plugins] system = ["proxmox"]``; while disabled a
 ``vm-site`` on the ``proxmox`` platform is not-ready with the "enable plugin
-`proxmox`" hint and ``resolve_site`` refuses it. The deprecated legacy
-``[proxmox]`` flat-section site gets the same hint (a feature: legacy configs
-are guided, not broken with an unknown-name error).
+`proxmox`" hint and ``resolve_site`` refuses it.
 
 The platform's REST client (``api.py``, formerly the ``proxmox_api.py``
 sibling in the core capability package) ships alongside as a package sibling,

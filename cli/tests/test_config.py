@@ -287,41 +287,6 @@ def test_git_credential_name_conforming_but_derived_over_cap_warns(tmp_path: Pat
     ), issues
 
 
-def test_legacy_singleton_spelling_gets_a_pointed_error(tmp_path: Path) -> None:
-    """A doubly-legacy ``[vm.config]`` / ``[agent.config]`` section (renamed to
-    the template shape before this effort, now a resource) is not a resource
-    section in KIND_SECTIONS, so it falls to the strict unexpected-key path,
-    which points it at the modern YAML-manifest
-    destination rather than the generic message or the stale rename target."""
-    pub = tmp_path / "id.pub"
-    priv = tmp_path / "id"
-    pub.write_text("key")
-    priv.write_text("key")
-
-    config_file = tmp_path / "config.toml"
-    config_file.write_text(
-        dedent(f"""\
-        [operator]
-        ssh_public_key = "{pub.as_posix()}"
-        ssh_private_key = "{priv.as_posix()}"
-
-        [vm.config]
-        cpus = 4
-
-        [agent.config]
-        shell = "/bin/bash"
-    """)
-    )
-    with pytest.raises(ConfigError) as excinfo:
-        load_config(config_file)
-    message = str(excinfo.value)
-    assert "[vm.config]" in message and "vm-template" in message and "resource sample" in message
-    assert "[agent.config]" in message and "agent-template" in message
-    # The pointed hints replace, not augment, the generic "unexpected top-level
-    # keys" line for these known spellings.
-    assert "unexpected top-level keys" not in message
-
-
 def test_unexpected_top_level_keys_fail(tmp_path: Path) -> None:
     """Bare keys before any section header land at top level."""
     pub = tmp_path / "id.pub"

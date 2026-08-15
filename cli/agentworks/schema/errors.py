@@ -481,8 +481,7 @@ def located(location: SourceLocation | None, text: str) -> str:
     """``text`` prefixed with where the operator can go and fix it.
 
     Public because a config error does not have to come from pydantic to
-    deserve the same frame. A pre-validation refusal
-    (:mod:`agentworks.capabilities.retired_shapes`, the envelope and
+    deserve the same frame. A pre-validation refusal (the envelope and
     duplicate checks in :mod:`agentworks.manifests`) raises its own
     ``ConfigError`` about the same document, at the same moment, with the
     same location in hand, and an operator reading a batch of manifest

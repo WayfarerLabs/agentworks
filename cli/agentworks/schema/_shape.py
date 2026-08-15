@@ -217,12 +217,6 @@ class FieldShape:
     item_structural_arms: tuple[type[BaseModel], ...]
     """:attr:`structural_arms` one collection-element level down."""
 
-    structural_null_companions: bool
-    """Whether this structural union accepts foreign-arm ``null`` keys."""
-
-    item_structural_null_companions: bool
-    """:attr:`structural_null_companions` one collection-element level down."""
-
     @property
     def block(self) -> type[BaseModel] | None:
         """The model whose fields the field-documentation stream expands
@@ -317,8 +311,6 @@ def shape_of(field: FieldInfo) -> FieldShape:
     item_union_model: type[BaseModel] | None = None
     structural_arms: tuple[type[BaseModel], ...] = ()
     item_structural_arms: tuple[type[BaseModel], ...] = ()
-    structural_null_companions = False
-    item_structural_null_companions = False
 
     found = _collection_element(inner)
     if found is not None:
@@ -339,10 +331,9 @@ def shape_of(field: FieldInfo) -> FieldShape:
         elif _is_model(element):
             item_model = element
         elif _is_union(element):
-            if (structural := _structural_union_of(element_meta)) is not None:
+            if _structural_union_of(element_meta) is not None:
                 item_union_members = tuple(split_annotated(arg)[0] for arg in get_args(element))
                 item_structural_arms = _closed_model_arms(item_union_members)
-                item_structural_null_companions = structural.canonicalize_null_companions
             else:
                 item_union_members = tuple(split_annotated(arg)[0] for arg in get_args(element))
                 item_union_model = _sole_model(item_union_members)
@@ -361,10 +352,9 @@ def shape_of(field: FieldInfo) -> FieldShape:
             union_scalar_shorthand = _sole_union_scalar_shorthand(spine_metadata(field))
         elif _is_model(inner):
             nested_model = inner
-        elif (structural := _structural_union_of([*field.metadata, *inner_metadata])) is not None:
+        elif _structural_union_of([*field.metadata, *inner_metadata]) is not None:
             union_members = tuple(split_annotated(arg)[0] for arg in get_args(inner))
             structural_arms = _closed_model_arms(union_members)
-            structural_null_companions = structural.canonicalize_null_companions
         else:
             union_members = tuple(split_annotated(arg)[0] for arg in get_args(inner))
             union_model = _sole_model(union_members)
@@ -398,8 +388,6 @@ def shape_of(field: FieldInfo) -> FieldShape:
         item_union_model=item_union_model,
         structural_arms=structural_arms,
         item_structural_arms=item_structural_arms,
-        structural_null_companions=structural_null_companions,
-        item_structural_null_companions=item_structural_null_companions,
     )
 
 
@@ -411,46 +399,6 @@ class _ClosedShape:
     allowed: frozenset[str]
 
 
-def structural_arm_and_value(
-    arms: tuple[type[BaseModel], ...],
-    value: object,
-    *,
-    canonicalize_null_companions: bool = False,
-) -> tuple[type[BaseModel] | None, object]:
-    """The structural arm ``value`` addresses and its canonical spelling.
-
-    Old combined models could persist a selected field beside the other
-    arm's explicit ``null`` field. An explicit structural union treats that
-    null as a companion, not a second arm, only when removing it leaves one
-    uniquely addressed arm. Unknown keys and non-null cross-arm values stay
-    untouched so validation can refuse them.
-    """
-    if not isinstance(value, Mapping) or not all(isinstance(key, str) for key in value):
-        return None, value
-    keys = frozenset(value)
-    shapes = tuple((arm, shape) for arm in arms if (shape := _closed_shape_of(arm)) is not None)
-    matched = [arm for arm, shape in shapes if _matches(shape, keys)]
-    if len(matched) == 1:
-        return matched[0], value
-    if not canonicalize_null_companions:
-        return None, value
-    if not isinstance(value, dict):
-        return None, value
-    known = frozenset(name for _arm, shape in shapes for name in shape.allowed)
-    if not keys <= known:
-        return None, value
-    candidates: list[tuple[type[BaseModel], dict[object, object]]] = []
-    for arm, shape in shapes:
-        canonical = {
-            key: item
-            for key, item in value.items()
-            if item is not None or not isinstance(key, str) or key in shape.allowed
-        }
-        if len(canonical) != len(value) and _matches(shape, frozenset(canonical)):
-            candidates.append((arm, canonical))
-    return candidates[0] if len(candidates) == 1 else (None, value)
-
-
 def structural_arm_for(arms: tuple[type[BaseModel], ...], value: object) -> type[BaseModel] | None:
     """The one structural arm ``value`` addresses, or ``None``.
 
@@ -459,8 +407,12 @@ def structural_arm_for(arms: tuple[type[BaseModel], ...], value: object) -> type
     and validation reports the scalar error. Unknown keys, missing required
     keys, and a key set accepted by several arms address nothing.
     """
-    arm, _canonical = structural_arm_and_value(arms, value)
-    return arm
+    if not isinstance(value, Mapping) or not all(isinstance(key, str) for key in value):
+        return None
+    keys = frozenset(value)
+    shapes = tuple((arm, shape) for arm in arms if (shape := _closed_shape_of(arm)) is not None)
+    matched = [arm for arm, shape in shapes if _matches(shape, keys)]
+    return matched[0] if len(matched) == 1 else None
 
 
 def structurally_addressable_arms(arms: tuple[type[BaseModel], ...]) -> tuple[type[BaseModel], ...]:

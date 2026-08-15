@@ -8,9 +8,9 @@
 # git credentials, vm-sites, and apt / install-command entries live in the
 # resources/ directory next to this file (`agw resource sample <kind>`
 # prints a commented starter; --all for every kind). Legacy TOML resource
-# sections are no longer supported: a config.toml that still declares
-# resources is a hard error at load now (they were previously deprecated
-# with a warning); the resources guide walks through rewriting them. This
+# sections are no longer supported: their roots are ordinary unexpected
+# top-level keys now (they were previously deprecated with a warning); the
+# resources guide walks through rewriting them. This
 # file is the permanent home for SETTINGS: operator identity, paths,
 # defaults, database safety, enabled plugins, and the secret source chain.
 #
@@ -23,7 +23,7 @@
 #   - Framework keys (section names, field names) use snake_case:
 #     [secret_config], ssh_public_key, runup_git_credentials.
 #   - Operator-typed identifiers (site names, source names, secret names)
-#     use kebab-case: `site = "lima-local"`, `backends = ["env-var",
+#     use kebab-case: `site = "lima-local"`, `sources = ["env-var",
 #     "prompt"]`. The validator is permissive so legacy names continue to
 #     load, but new names should follow kebab.
 
@@ -151,10 +151,10 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # and mapping model.
 
 #[secret_config]
-#backends = ["env-var", "work-op", "prompt"]    # example; default is ["env-var", "prompt"].
+#sources = ["env-var", "work-op", "prompt"]     # example; default is ["env-var", "prompt"].
 # Only listed sources are consulted, in this precedence order; the first source
 # that produces a value wins. A not-ready source (for example `work-op` with no
-# `op` installed) is skipped and the chain falls through. `backends = []`
+# `op` installed) is skipped and the chain falls through. `sources = []`
 # disables resolution. Every name must be a declared secret-source. A direct
 # backend name is a 0.14 configuration error with the exact source declaration
 # and mapping rewrite needed to fix it.

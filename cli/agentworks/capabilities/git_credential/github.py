@@ -24,7 +24,6 @@ from agentworks.capabilities.git_credential.base import (
     HelperEntry,
     TokenAcquiringConfig,
 )
-from agentworks.capabilities.retired_shapes import RetiredNullTokenShape
 from agentworks.topics import TopicProse
 
 # GitHub owner/repo name charset. Interpolated verbatim into gitconfig
@@ -83,7 +82,6 @@ class GitHubCredentialProvider(GitCredentialProvider):
     """
 
     contract_version: ClassVar[int] = 2
-    retired_shape: ClassVar[RetiredNullTokenShape | None] = RetiredNullTokenShape()
     name: ClassVar[str] = "github"
     description: ClassVar[str] = "GitHub personal access token"
     config_model: ClassVar[type[GitHubConfig]] = GitHubConfig
