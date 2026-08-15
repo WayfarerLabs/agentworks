@@ -9,7 +9,7 @@
 <!-- cspell:ignore quantized quantization Warren -->
 <!-- cspell:ignore smootherstep viewports -->
 
-- Status: Phase 4U simplified route design complete; implementation blocked on independent review
+- Status: Phase 4U implemented and independently reviewed; operator acceptance pending
 - Operator browser acceptance: pending
 - Date: 2026-08-15
 - FRD: `frd.md`, specifically R6-R9, R15-R25, R28-R31, AC26, and AC29-AC32

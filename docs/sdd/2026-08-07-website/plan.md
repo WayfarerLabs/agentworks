@@ -1,6 +1,7 @@
 # Plan: The agentworks.build Website
 
-- Status: Phase 4U runtime simplification in progress; canonical assistance integrated
+- Status: Phase 4U implemented and independently reviewed; operator acceptance pending; canonical
+  assistance integrated
 - Date: 2026-08-07
 - Last revised: 2026-08-15
 - FRD: `frd.md`
@@ -1199,28 +1200,28 @@ matrix remains qualitative safety evidence rather than runtime authority.
 
 ## Phase 4U: final terrain, pacing, and translational response
 
-- [ ] Amend and independently review `brand-and-lander-lld.md` for unchanged strict linear terrain
+- [x] Amend and independently review `brand-and-lander-lld.md` for unchanged strict linear terrain
       and normalized `[0.1,0.6]` bounds, retained Phase 4T reversal density, maximum grade `0.60`,
       maximum adjacent-grade change `1.20`, and mutation-sensitive rejection of curves, vertical
       edges, sawtooth chatter, or short periodic silhouettes.
-- [ ] Pin the terrain-independent `192 m` nominal site stride, bounded fallback order,
+- [x] Pin the terrain-independent `192 m` nominal site stride, bounded fallback order,
       accepted-distance range, complete-run mean, normalized `0.5` deck ceiling, unchanged exact
       `max+2.5 m` deck/support rule, and outward-shifted visible physical rails that preserve the
       complete 4,096-site mission and terminal transaction.
-- [ ] Pin relative translational mass `0.7`, engine acceleration `9/0.7`, gravity `3/0.7`, and
+- [x] Pin relative translational mass `0.7`, engine acceleration `9/0.7`, gravity `3/0.7`, and
       unchanged angular acceleration `80`; prove canonical force coefficients, unchanged
       thrust-to-weight and climb-surcharge ratios, fixed step, commands, fuel flow, landing
       tolerance, collision authority, refuel, checkpoint, and service semantics.
-- [ ] Remove live schedule replay, the generated route-proof browser module, and per-route derived
+- [x] Remove live schedule replay, the generated route-proof browser module, and per-route derived
       schedule fixtures. Compute allowance in constant time as
       `quantumCeil(22 + max(0,deckDelta)/3)`, then apply the unchanged ratio and preserve carryover;
       site generation must have no route-key/proof failure path.
-- [ ] Regenerate only the deterministic terrain/site geometry authority needed for parity. Verify
+- [x] Regenerate only the deterministic terrain/site geometry authority needed for parity. Verify
       all openings plus representative closest, farthest, maximum-rise, and maximum-fall flights,
       Retry, signed generation, all four complete 4,096-site missions, final rail/service behavior,
       and deterministic generation/performance ceilings without claiming exact fuel prediction for
       every route.
-- [ ] Add independent mutation-sensitive model/world/derivation/static and real-browser evidence for
+- [x] Add independent mutation-sensitive model/world/derivation/static and real-browser evidence for
       exact `.60/1.20` terrain limits, visible irregular relief, doubled average platform pacing,
       deck/support bounds, translational response with unchanged rotation, constant-time fuel
       arithmetic and absence of live replay, real collision, bounded retention, fixed `25/16`

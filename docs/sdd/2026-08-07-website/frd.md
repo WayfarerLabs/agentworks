@@ -1,6 +1,7 @@
 # FRD: The agentworks.build Website
 
-- Status: Phase 4U runtime simplification in progress; canonical assistance integrated
+- Status: Phase 4U implemented and independently reviewed; operator acceptance pending; canonical
+  assistance integrated
 - Date: 2026-08-07
 - Last revised: 2026-08-15
 - Seeded by: the saga lead, at operator request. This is a standalone effort, deliberately NOT a
