@@ -1,7 +1,6 @@
 # FRD: The agentworks.build Website
 
-- Status: Phase 4T implemented and independently reviewed; operator acceptance pending; canonical
-  assistance integrated
+- Status: Phase 4U requirements and architecture in progress; canonical assistance integrated
 - Date: 2026-08-07
 - Last revised: 2026-08-15
 - Seeded by: the saga lead, at operator request. This is a standalone effort, deliberately NOT a
@@ -304,6 +303,32 @@ recorded as a growth path so nothing forecloses it, and none of it is in scope n
   change site spacing and the generated reference schedules needed to certify it, but does not
   change controls, vehicle physics, landing tolerances, fuel consumption, refuel ratio, sky, service
   timing, copy, collision outcomes, finite-world behavior, or vertical scrolling.
+- R31. The operator's subsequent hands-on review accepts Phase 4T's terrain direction and exact
+  vertical limits but requests one final increase in terrain aggression, platform separation, and
+  translational responsiveness. The strict straight-line terrain keeps the exact normalized
+  `[0.1,0.6]` band, the existing Phase 4T reversal-density authority, and the normalized `0.5`
+  platform-deck ceiling. Its maximum absolute segment grade increases from `0.40` to `0.60`, and its
+  maximum adjacent segment-grade change increases by another 50 percent from `0.80` to `1.20`; the
+  reviewed corpus must intentionally exercise both new limits without introducing curves, vertical
+  segments, per-vertex sawtooth chatter, a short repeating silhouette, or terrain shaped around
+  sites. Mission placement doubles the nominal horizontal platform stride from `96 m` to `192 m`.
+  The deterministic bounded fallback order may vary individual accepted distances only to honor the
+  unchanged local `max terrain + 2.5 m` deck rule and normalized `0.5` deck ceiling; its
+  complete-run average must remain independently bounded tightly around `192 m` rather than
+  recreating the old pacing through frequent short legs. Preserve the same 4,096-site finite mission
+  and visible contact-backed termini, moving the physical rails outward only as required by the
+  longer route.
+
+  The flight model also adopts a relative translational mass scale of exactly `0.7`. The engine
+  force coefficient remains the Phase 4T value, so translational engine acceleration is divided by
+  `0.7`; gravitational acceleration is divided by the same `0.7`, keeping relative gravitational
+  force exactly unchanged and preserving the thrust-to-weight ratio. Per the operator's explicit
+  ruling, rotational acceleration remains exactly unchanged: this is a translational mass response
+  refinement, not a rigid-body inertia rescale. Preserve fixed-step timing, commands, differential
+  thrust mapping, fuel flow, landing tolerances, refuel ratio, service timing, collision outcomes,
+  fixed scene, and zero vertical scrolling. Regenerate every terrain, spacing, physics, route,
+  opening, finite-world, and browser witness from these authorities; a sufficient-allowance base may
+  change only as the formula-derived maximum of the new certified routes.
 
 ## Settled constraints (inherited; do not reopen)
 
@@ -566,6 +591,27 @@ merged and settled on `main`. The first slice must not build toward them specula
   long-run site sequence without generation failure. Real-browser wide, narrow, short-height, and
   touch-landscape witnesses show the stronger irregular angular terrain, terrain peaks up to `0.6`,
   no platform above `0.5`, native support feet, and zero page/game vertical scrolling.
+- AC32. Independent reconstruction proves the Phase 4U terrain remains a strict-X straight polyline
+  in normalized `[0.1,0.6]`, retains the accepted Phase 4T reversal-density authority, reaches both
+  exact band endpoints across the canonical corpus, and intentionally attains maximum absolute grade
+  `0.60` and maximum adjacent-grade change `1.20` without a vertical segment, curve, per-vertex
+  sawtooth, or short periodic silhouette. Site placement begins from a terrain-independent `192 m`
+  nominal stride and the LLD's finite bounded fallback order. Exhaustive signed and complete
+  positive-mission witnesses prove every candidate decision, accepted deck at or below normalized
+  `0.5`, exact `max footprint terrain + 2.5 m` equality, native support foot, accepted-distance
+  bound, tightly `192 m`-centered complete-run mean, unchanged 4,096-site mission, and visible
+  contact-backed termini. Every resulting opening and route class has an independently regenerated
+  sufficient-allowance proof and concrete production replay without generation failure.
+
+  Physics tests pin a relative translational mass scale of `0.7`, engine and gravitational
+  acceleration each equal to their Phase 4T value divided by `0.7`, unchanged gravitational force
+  and thrust-to-weight ratio, and byte-exact unchanged rotational acceleration. They reject a fuel
+  flow, input mapping, fixed-step, landing-tolerance, collision, or angular-response change. Model,
+  route, and real-browser evidence demonstrates the intended quicker translational response, correct
+  zero-fuel ballistic fall, complete swept collision, Retry/checkpoint identity, bounded retention
+  and performance, fixed `25/16` projection, and zero vertical page/game scrolling at wide, narrow,
+  short-height, and touch-landscape viewport sizes. Human hands-on acceptance remains the final
+  qualitative gate.
 
 ## Settled implementation rulings
 

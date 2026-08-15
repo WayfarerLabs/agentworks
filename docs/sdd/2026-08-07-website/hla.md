@@ -1,7 +1,6 @@
 # HLA: The agentworks.build Website
 
-- Status: Phase 4T implemented and independently reviewed; operator acceptance pending; canonical
-  assistance integrated
+- Status: Phase 4U requirements and architecture in progress; canonical assistance integrated
 - Date: 2026-08-07
 - Last revised: 2026-08-15
 - FRD: `frd.md`
@@ -348,6 +347,29 @@ until an eligible site is found. It never clamps the deck, lowers terrain, inser
 conditions the terrain generator on site state. The route fixture exhaustively certifies every
 accepted distance/deck class and termination bound. Rendering, collision, static recovery, supports,
 fuel, and no-scroll projection continue to consume the same accepted result.
+
+Phase 4U keeps that single terrain/site chain and changes only its pinned data and the translational
+physics profile. Successor profiles remain strict-X `16 m`-sampled straight polylines in normalized
+`[0.1,0.6]`, retain Phase 4T's reversal-density contract, and deliberately reach absolute grade
+`0.60` plus adjacent-grade change `1.20` without adding curves, vertical edges, sawtooth chatter, or
+site-conditioned samples. Mission-index authority doubles the nominal center stride from `96 m` to
+`192 m`; the separately seeded bounded fallback order remains terrain-independent, and only after a
+candidate footprint is fixed may the world sampler apply the existing `max+2.5 m` deck and
+normalized `0.5` eligibility rules. The LLD must derive accepted-distance bounds and a complete-run
+mean tightly centered on `192 m`, then expand the two visible physical rail positions just enough to
+preserve all 4,096 positive sites and the existing final-service transaction. Rendering retention
+and collision stay window-bounded even though the finite procedural authority becomes wider.
+
+The model expresses the response change as a relative translational mass scale `m=0.7`. It derives
+engine acceleration from the unchanged Phase 4T engine-force coefficient as `a_engine=9/m` and
+gravity from the unchanged gravitational-force coefficient as `g=3/m`; consequently both
+accelerations scale by `1/0.7`, `g/a_engine` remains exactly one third, and the positive-climb fuel
+surcharge formula is unchanged. Angular acceleration remains exactly `80` by explicit operator
+ruling, so mass does not imply an inertia change. The fixed step, fuel flow, two-engine command and
+assist mapping, landing envelope, collision authority, checkpoint/refuel sequence, and controller
+timing do not change. Geometry, physics, assignment, proof, world, output, and generated model
+projection regenerate atomically, and production replay certifies every accepted spacing/deck class
+before the new profile can ship.
 
 The materially elevated platform remains exactly three lander widths long beside one solid NOC
 building. One collider-backed open truss uses continuous top and bottom chords and a uniform

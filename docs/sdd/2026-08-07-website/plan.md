@@ -1,7 +1,6 @@
 # Plan: The agentworks.build Website
 
-- Status: Phase 4T implemented and independently reviewed; operator acceptance pending; canonical
-  assistance integrated
+- Status: Phase 4U requirements and architecture in progress; canonical assistance integrated
 - Date: 2026-08-07
 - Last revised: 2026-08-15
 - FRD: `frd.md`
@@ -26,11 +25,12 @@ retains ownership of production acceptance and the final closeout PR.
 PR #486 carries the continuous Lander work. Phases 4A through 4O are accepted gameplay history;
 Phase 4P's automated record remains immutable but its product behavior was rejected by the operator,
 Phase 4Q restores the accepted fixed-scene baseline, Phase 4R owns the straight-terrain correction,
-Phase 4S owns the free-flight and terrain-variety follow-up, and Phase 4T owns the final
-sharper-terrain and bounded-platform-height refinement. The PR preserves the established site,
-canonical assistance projection, hosting, and routes throughout that recovery.
+Phase 4S owns the free-flight and terrain-variety follow-up, Phase 4T owns the sharper-terrain and
+bounded-platform-height refinement, and Phase 4U owns the final terrain aggression, doubled platform
+pacing, and translational-response refinement. The PR preserves the established site, canonical
+assistance projection, hosting, and routes throughout that recovery.
 
-`locked.md` never merges before R1-R25 and R28-R30 plus AC1-AC26 and AC29-AC31 are accepted in
+`locked.md` never merges before R1-R25 and R28-R31 plus AC1-AC26 and AC29-AC32 are accepted in
 production; superseded R26-R27 and AC27-AC28 are historical evidence, not closeout gates. Every
 earlier merge is independently useful and operable. The first release was honest without an
 onboarding claim, and the integrated release consumes the canonical source from the same reviewed PR
@@ -1184,6 +1184,45 @@ normalized `0.6`, no accepted platform exceeds normalized `0.5`, every deck rema
 above its untouched native footprint maximum, all resulting routes are certified, and the fixed
 scene never scrolls vertically.
 
+The operator's 2026-08-15 hands-on review accepted Phase 4T's terrain direction and exact vertical
+band, then requested maximum grade `0.60`, another 50-percent increase in maximum adjacent-grade
+change to `1.20`, approximately doubled platform separation, and a lighter translational response.
+The operator subsequently ruled that angular acceleration remains unchanged. Phase 4U changes only
+the terrain-profile values, site pacing/finite-domain values, translational physics coefficients,
+and the fixtures and proofs that necessarily consume those authorities.
+
+## Phase 4U: final terrain, pacing, and translational response
+
+- [ ] Amend and independently review `brand-and-lander-lld.md` for unchanged strict linear terrain
+      and normalized `[0.1,0.6]` bounds, retained Phase 4T reversal density, maximum grade `0.60`,
+      maximum adjacent-grade change `1.20`, and mutation-sensitive rejection of curves, vertical
+      edges, sawtooth chatter, or short periodic silhouettes.
+- [ ] Pin the terrain-independent `192 m` nominal site stride, bounded fallback order,
+      accepted-distance range, complete-run mean, normalized `0.5` deck ceiling, unchanged exact
+      `max+2.5 m` deck/support rule, and outward-shifted visible physical rails that preserve the
+      complete 4,096-site mission and terminal transaction.
+- [ ] Pin relative translational mass `0.7`, engine acceleration `9/0.7`, gravity `3/0.7`, and
+      unchanged angular acceleration `80`; prove unchanged force ratio, climb-surcharge ratio, fixed
+      step, commands, fuel flow, landing tolerance, collision, refuel, checkpoint, and service
+      semantics.
+- [ ] Regenerate geometry, physics, assignment, route, proof, world, output, and model-projection
+      artifacts atomically. Exhaustively certify every new distance/deck class, all openings,
+      sufficient allowance, Retry, signed generation, all four complete 4,096-site missions, final
+      rail/service behavior, and deterministic generation/performance ceilings.
+- [ ] Add independent mutation-sensitive model/world/derivation/static and real-browser evidence for
+      exact `.60/1.20` terrain limits, visible irregular relief, doubled average platform pacing,
+      deck/support bounds, translational response with unchanged rotation, real collision, bounded
+      retention, fixed `25/16` projection, and zero vertical scrolling at every required viewport.
+- [ ] Run complete website/repository gates, cold code review, and fresh-eyes browser review.
+      Refresh port 8766 only at an exact reviewed green head, then obtain operator hands-on
+      acceptance before marking Phase 4U or the PR complete.
+
+Definition of done: ordinary play retains the accepted straight, full-band terrain but permits
+sharper navigable peaks and valleys through exact `.60/1.20` limits; accepted platforms average
+approximately twice as far apart without violating the local deck ceiling or finite-world contract;
+translational flight responds faster under the exact `0.7` mass/force model while angular response,
+fuel semantics, collision, and controls remain unchanged; and the fixed scene never scrolls.
+
 ## Phase 5: CI and default Pages deployment
 
 - [x] Delegate workflow implementation to an `agentworks-dev` subagent with ownership of the Pages
@@ -1294,7 +1333,7 @@ with no branch-only dependency, duplicated bootstrap, or website-owned continuin
       metadata/CSP, byte-equivalent Lander/404 game subtree, and compact 404 title after onboarding
       integration.
 
-Definition of done: R1-R25 and R28-R30, AC2-AC3, and AC5-AC26 plus AC29-AC31 hold through the
+Definition of done: R1-R25 and R28-R31, AC2-AC3, and AC5-AC26 plus AC29-AC32 hold through the
 existing site and pipeline, with the temporary notice removed rather than retained as configuration.
 
 ## Phase 9: complete acceptance and closeout
@@ -1319,7 +1358,7 @@ existing site and pipeline, with the temporary notice removed rather than retain
       run final gates, obtain the required closeout review, and hand the ready PR to the operator
       for merge.
 
-Definition of done: AC1-AC26 and AC29-AC31 hold at `https://agentworks.build`, R1-R25 and R28-R30
+Definition of done: AC1-AC26 and AC29-AC32 hold at `https://agentworks.build`, R1-R25 and R28-R31
 plus C1-C5 are production facts, the deployment is operable without this SDD, all plan boxes are
 truthful, and the effort is locked.
 
