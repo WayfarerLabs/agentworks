@@ -1,7 +1,7 @@
 # Target State
 
 - Status: North star, accumulating settled rulings
-- Last updated: 2026-08-13
+- Last updated: 2026-08-15
 
 This document describes where Agentworks is going across this saga effort, synthesized from the
 perspectives in `inputs/`. It is the target of these waves, not a forever vision: when
@@ -89,7 +89,24 @@ helper should emit exactly that fact as a skill.
 the topics rather than teaching, and the onboarding walkthrough it currently carries (the
 source-review offer and the rest) moves into a dedicated onboarding topic. The same round takes
 whatever other simplifications the onboarding and discovery track has accumulated; the operator's
-own reading is that earlier phases of that effort landed tech debt while unattended.
+own reading is that earlier phases of that effort landed tech debt while unattended. Shipped
+2026-08-15 (PRs #519 and #537).
+
+**Ruling (operator, 2026-08-15, the guide-value rubric):** guide content earns its place only by
+conveying concepts or higher-level synthesis not available from a single CLI command. A guide block
+whose content is one command's output wearing guide clothes is removed, and the guide points at the
+command instead, signpost-style all the way down. Kept by the rubric: `concept-` topics, the
+onboarding sequence and adoption assessment, the agent contract, and action records with their
+consent boundaries and refusal alternatives. The rubric executes survey-first: a read-only inventory
+classifying every guide block with machinery consequences priced, reviewed before anything is
+removed, and blocks duplicating a command that does not exist yet (the relationship view, until
+`graph show` lands) are not removed before their new owner ships. If the survey finds the cuttable
+surface small, keeping it is an acceptable answer.
+
+**Ruling (operator, 2026-08-15):** `resource describe` is removed pre-0.14. Its relational facts
+move to the grammar child's `graph` namespace; no generic replacement card is created. This retires
+the A-or-B previously recorded in the ledger. The one shipped spelling requires the operator's
+deprecation-runway waiver, pending on PR #491.
 
 ### Declarative model (destination 2)
 

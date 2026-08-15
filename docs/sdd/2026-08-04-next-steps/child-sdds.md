@@ -1,7 +1,7 @@
 # Child SDDs
 
 - Status: Active ledger
-- Last updated: 2026-08-13
+- Last updated: 2026-08-15
 
 This is the saga's tracking document, the analog of an ordinary SDD's `plan.md`. Completed
 checkboxes are immutable records, per the standard rule. The saga SDD locks when every entry here is
@@ -88,12 +88,11 @@ locked.
 - [x] Assistance phase merged (PR #480, 2026-08-13): always-available Agentworks assistance, with
       the operator's own simplification rounds on it and the R16 ruling that one full canonical
       assistance body is the only source
-- [ ] Simplification and trail-sign phase (operator rulings, 2026-08-12; see `target-state.md`):
-      `agw guide` becomes a trail sign, the walkthrough moves to a dedicated onboarding topic, and
-      the track's accumulated tech debt is simplified. Runs alongside the pre-0.14 serial spine
-      rather than ahead of it (see `phasing.md`), split by boundary: this effort owns guide content,
-      the simplification pass owns guide machinery. This modifies the effort's own SDD; the effort
-      lead owns that revision, including whether its remaining phases still hold as planned
+- [x] Simplification and trail-sign phase complete (operator rulings 2026-08-12, recorded in
+      `target-state.md`; design PR #519 and implementation PR #537, both merged 2026-08-15): the
+      no-topic guide is a catalog-free trail sign, `concept-onboarding` owns the walkthrough,
+      selected topics fail soft on environmental failure with doctor as the health authority, and
+      the release-test fix (PR #539) fixed every future release PR's CI
 - [ ] Remaining phases (wave 2 adoption, closeout) per the effort's per-phase PR plan. The README
       bootstrap shipped with the assistance phase (PR #480), so the bootstraps gate is satisfied;
       the generated block pins version 0.14.0 or newer and resolves when the release ships
@@ -152,10 +151,11 @@ locked.
       just wanted to bucket the existing installers. Nothing more." The disabled-error experience is
       deferred as a nice-to-have. The design set endorsed above is therefore larger than the work;
       the effort lead trims the plan to the moves before implementing
-- [ ] Implementation complete (the moves, plus whatever guide-topic and upgrade-guide steps the
-      moves themselves require)
+- [x] Implementation complete (PR #536, 2026-08-15): all sixteen rows moved byte-identical into the
+      opt-in `apt` and `install-command` plugins, the AC4 composite gate pinned through the real
+      recipe path, guide loading request-scoped per the fail-soft contract. **This lane is closed**
 - [ ] Ships in 0.14.0 (gates the cut per `phasing.md` release mapping)
-- [ ] Locked
+- [x] Locked (`locked.md` rode PR #536 and binds on `main`)
 
 ### Simplification pass (pre-0.14): 2026-08-12-simplification-pass
 
@@ -194,6 +194,15 @@ item shrinks to a verification sweep.
       full suite. How many PRs they land as is the child's call: its plan already allows the prose
       sweep to span several, and the saga lead has recommended batching by domain to about three so
       the round count matches the work rather than the item count
+- [x] Wave 0 closed on branch (a) (PRs #515/#518, 2026-08-14): the twelve broad rules deliver
+      unconditionally, verified by fresh-session and worktree probes; issue #511 closed, with the
+      recorded limit that rules propagate at session boundaries, not merge boundaries
+- [ ] Wave 1 in progress: the phase7 corpus deleted with the caller-supplied boundary check landed
+      (PR #523), criteria sharpened and executable (PR #524), fifth trust boundary ruled (PR #533);
+      remaining items run against the merged criteria
+- [ ] Wave 2 in progress: rules seventeen to ten (PR #521), process-tree fact refresh (PR #535),
+      testing-trio consolidation (PR #538), artifact ownership default (PR #540, one-clause
+      follow-up owed per its post-merge review)
 - [ ] Wave 2: process and rule subtraction under a strict net-deletion constraint. Runs in parallel
       with wave 1 on its own session (operator, 2026-08-13), file-disjoint from it; the reassessment
       below waits for both waves
@@ -205,17 +214,21 @@ item shrinks to a verification sweep.
 Ruled out of the simplification pass and into its own vehicle (operator, 2026-08-13): folding them
 into the grammar rewrite would grow an already massive effort. Four contract-truth fixes that are
 free only while 0.14 is unreleased: `[secret_config].backends` names sources, not backends (S5); the
-one-arm `TokenAcquisition` union collapses to the concrete stored-token shape (C3); the
-`canonicalize_null_companions` compat flag stops re-advertising the spelling it just broke (C4); and
-the four compat layers are deleted or given recorded expiries (C7). Migration guidance flows through
-`BREAKING CHANGE:` footers, the packaged changelog, and the guide release-notes topics rather than
-compat code. The strategy artifact behind that (`migration-strategy.md` in the simplification pass's
-directory) is on draft PR #509 rather than on `main`, so the brief names it and says when it becomes
-readable; it is not carried on the task branch. Runs in parallel with the deletion waves; it owns
-`env/entry.py` and the token union while the pass owns the inert descriptor fields.
+one-arm `TokenAcquisition` union's stored arm renames to `mode: secret`, the union kept by operator
+ruling because token minting is imminent (C3); the `canonicalize_null_companions` compat flag stops
+re-advertising the spelling it just broke (C4); and the four compat layers are deleted or given
+recorded expiries (C7). Migration guidance flows through `BREAKING CHANGE:` footers, the packaged
+changelog, and the guide release-notes topics rather than compat code. The strategy artifact behind
+that (`migration-strategy.md` in the simplification pass's directory) is on draft PR #509 rather
+than on `main`, so the brief names it and says when it becomes readable; it is not carried on the
+task branch. Runs in parallel with the deletion waves; it owns `env/entry.py` and the token union
+while the pass owns the inert descriptor fields.
 
 - [x] Brief seeded (2026-08-13, on `refactor/breaking-truth-0-14`); awaiting an assignee
-- [ ] Implemented, reviewed, merged before the 0.14.0 tag
+- [x] Implemented, reviewed, merged before the 0.14.0 tag (PR #531, 2026-08-15): all four
+      contract-truth items enforced, 23 net files simpler, the released `token: null` break taught
+      correctly, and the C3 keep-the-union ruling recorded on the PR. **This lane is closed**; its
+      session can retire and follow-ons live as issues
 
 ### Dispatched task (not a child SDD): git-credential variant restructure
 
@@ -285,14 +298,14 @@ Planned children, seeded when their prerequisites land (see `phasing.md`):
 - Wave 6: agentic artifacts and distillation
 - Wave 7: structured control
 - Wave 8: external plugin API
-- CLI grammar child (**ruled in and gating, operator, 2026-08-12**; seed PR #491 open in draft):
-  `describe-kind` becomes `explain` (matching kubectl's verb), a top-level `agw graph` command owns
-  all relational views with focal-node, kind-filter, direction, depth, and format axes, `describe`'s
-  fate is an open A-or-B (remove, or rebuild as the kind-aware card with a per-kind detail hook),
-  `--write` semantics unify, and the CLI-hygiene audit bundle rides along. No longer conditional:
-  0.14.0 does not ship until it lands. Runs after the simplification pass's deletion waves, so the
-  rewrite is done over the smaller surface, and it owns updating any guide content and docs its
-  renames touch.
+- CLI grammar child (**ruled in and gating, operator, 2026-08-12**; active, focused FRD in
+  checkpoint review on PR #491): `describe-kind` becomes `explain`, a top-level `agw graph` gains
+  `graph show KIND/NAME` as its initial single-focus relational view, and **`resource describe` is
+  removed** (operator ruling, 2026-08-15, retiring the earlier A-or-B): its relationships move to
+  `graph`, with no replacement card. `--write` becomes path-valued with `--install` for the schema
+  set's fixed destination. No longer conditional: 0.14.0 does not ship until it lands. Runs after
+  the simplification pass's deletion waves, so the rewrite is done over the smaller surface, and it
+  owns updating any guide content and docs its renames touch.
 - Security-architecture doc child: seeds after wave 3 merges; carries the per-platform
   durable-surface inventory (what each provider retains) so provider-boundary reviews check a list
   rather than rediscovering the class incident-by-incident (lesson from wave 3's three-round class
