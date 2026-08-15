@@ -181,6 +181,7 @@ def test_disabled_secret_backend_makes_its_active_source_not_ready() -> None:
     from agentworks.capabilities.publish import publish_capability_rows
     from agentworks.config import Config
     from agentworks.plugins import publish_plugins
+    from agentworks.plugins.enablement import plugin_enablement_source
     from agentworks.secrets.resolve import active_sources
     from agentworks.secrets.sources import SecretSourceDecl, publish_builtin_secret_sources
 
@@ -188,42 +189,17 @@ def test_disabled_secret_backend_makes_its_active_source_not_ready() -> None:
     publish_capability_rows(registry, descriptor_for("secret-backend"))
     publish_builtin_secret_sources(registry)
     # onepassword ships as a system plugin now (its built-in row is gone), so
-    # publish its capability row through the plugin path; the stub source below
-    # then disables it, exactly as the plugin opt-in source would.
-    publish_plugins(registry, cast("Config", SimpleNamespace(enabled_system_plugins=())))
+    # publish its capability row and finalize it with the same opt-in source
+    # production supplies.
+    plugin_config = cast("Config", SimpleNamespace(enabled_system_plugins=()))
+    publish_plugins(registry, plugin_config)
     registry.add(
         "secret-source",
         "onepassword",
         SecretSourceDecl(name="onepassword", backend=CapabilityBlock.of("onepassword")),
         Origin.operator_declared(file=Path("sources.yaml"), line=1),
     )
-    # ``publish_plugins`` also emits the claude and codex plugins' weak
-    # install-command, example session-template, and example agent-template rows
-    # and the vendor plugins' weak guest-CLI resource rows; disable
-    # them too so no weak row survives finalize unmarked (the
-    # weak-implies-disabled guard).
-    # The stub stands in for the real plugin source, which would disable every
-    # not-enabled plugin's rows.
-    registry.finalize(
-        enablement_sources=[
-            _source_disabling(
-                ("secret-backend", "onepassword"),
-                ("user-install-command", "claude"),
-                ("system-install-command", "az-cli"),
-                ("apt-source", "google-cloud-cli"),
-                ("apt-package", "gcloud-cli"),
-                ("user-install-command", "codex"),
-                ("session-template", "example-claude-strict"),
-                ("session-template", "example-claude-auto"),
-                ("session-template", "example-claude-yolo"),
-                ("session-template", "example-codex-strict"),
-                ("session-template", "example-codex-auto"),
-                ("session-template", "example-codex-yolo"),
-                ("agent-template", "example-claude"),
-                ("agent-template", "example-codex"),
-            )
-        ]
-    )
+    registry.finalize(enablement_sources=[plugin_enablement_source(plugin_config)])
 
     # The enablement axis reads disabled; the fold still stored a ready
     # placeholder (enablement, not readiness, answers for a disabled node).
@@ -259,6 +235,7 @@ def test_r9_9_mapping_is_validated_whether_or_not_its_backend_is_enabled(disable
     from agentworks.capabilities.publish import publish_capability_rows
     from agentworks.config import Config
     from agentworks.plugins import publish_plugins
+    from agentworks.plugins.enablement import plugin_enablement_source
     from agentworks.secrets.base import SecretDecl
     from agentworks.secrets.sources import SecretSourceDecl
 
@@ -266,7 +243,8 @@ def test_r9_9_mapping_is_validated_whether_or_not_its_backend_is_enabled(disable
         registry = Registry.empty()
         publish_capability_rows(registry, descriptor_for("secret-backend"))
         # onepassword's row now comes from the plugin path, not a built-in.
-        publish_plugins(registry, cast("Config", SimpleNamespace(enabled_system_plugins=())))
+        plugin_config = cast("Config", SimpleNamespace(enabled_system_plugins=("onepassword",)))
+        publish_plugins(registry, plugin_config)
         registry.add(
             "secret-source",
             "vault-op",
@@ -279,29 +257,10 @@ def test_r9_9_mapping_is_validated_whether_or_not_its_backend_is_enabled(disable
             SecretDecl(name="vaulted", description="a vaulted key", backend_mappings={"vault-op": mapping}),
             Origin.operator_declared(file=Path("c.toml"), line=1),
         )
-        # Always disable the claude and codex plugins' weak install-command,
-        # example session-template, and example agent-template rows and the vendor
-        # plugins' weak guest-CLI resource rows (all emitted by
-        # publish_plugins) so no weak row survives finalize unmarked; onepassword
-        # is disabled only on the disabled branch.
-        disabled = [
-            ("user-install-command", "claude"),
-            ("system-install-command", "az-cli"),
-            ("apt-source", "google-cloud-cli"),
-            ("apt-package", "gcloud-cli"),
-            ("user-install-command", "codex"),
-            ("session-template", "example-claude-strict"),
-            ("session-template", "example-claude-auto"),
-            ("session-template", "example-claude-yolo"),
-            ("session-template", "example-codex-strict"),
-            ("session-template", "example-codex-auto"),
-            ("session-template", "example-codex-yolo"),
-            ("agent-template", "example-claude"),
-            ("agent-template", "example-codex"),
-        ]
+        sources: list[EnablementSource] = [plugin_enablement_source(plugin_config)]
         if disable_onepassword:
-            disabled.append(("secret-backend", "onepassword"))
-        registry.finalize(enablement_sources=[_source_disabling(*disabled)])
+            sources.append(_source_disabling(("secret-backend", "onepassword")))
+        registry.finalize(enablement_sources=sources)
         return registry
 
     # The precondition, proven rather than assumed: onepassword is present, and
