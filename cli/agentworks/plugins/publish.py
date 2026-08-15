@@ -169,7 +169,7 @@ def _publish_plugin_manifests(registry: Registry, plugin_name: str, anchor: str,
     def origin_for(file_name: str) -> Origin:
         return Origin.system_plugin(
             plugin=plugin_name,
-            source=f"agentworks.plugins.{plugin_name}/manifests/{file_name}",
+            source=f"{anchor}/manifests/{file_name}",
         )
 
     try:

@@ -23,9 +23,16 @@ def test_installed_wheel_contains_every_authored_guide_block(tmp_path: Path) -> 
         path.relative_to(project).as_posix() for path in (project / "agentworks").glob("**/guide-content/**/*.md")
     }
     assert authored
+    expected_manifests = {
+        "agentworks/plugins/apt/manifests/apt-packages.yaml",
+        "agentworks/plugins/apt/manifests/apt-sources.yaml",
+        "agentworks/plugins/install_command/manifests/install-commands.yaml",
+    }
     with zipfile.ZipFile(wheel) as archive:
         packaged = set(archive.namelist())
         assert authored <= packaged
+        assert expected_manifests <= packaged
+        assert all(archive.read(path).strip() for path in expected_manifests)
         assert not any(name.endswith("guide-content/.markdownlint.jsonc") for name in packaged)
         assert archive.read("agentworks/CHANGELOG.md") == (project / "CHANGELOG.md").read_bytes()
 
@@ -56,6 +63,10 @@ def test_installed_wheel_contains_every_authored_guide_block(tmp_path: Path) -> 
                 "import agentworks; "
                 "from agentworks.guide.service import build_authored_catalog; "
                 "catalog = build_authored_catalog(strict_trusted_taxonomy=True); "
+                "names = set(catalog.names()); "
+                "assert {'plugin/apt/overview', 'plugin/install-command/overview'} <= names; "
+                "assert not any(issue.error.source in {'system-plugin:apt', 'system-plugin:install-command'} "
+                "for issue in catalog.issues); "
                 "blocks = [block for topic in catalog.topics for block in topic.blocks "
                 "if hasattr(block, 'markdown')]; "
                 "assert blocks and all(block.markdown.strip() for block in blocks); "

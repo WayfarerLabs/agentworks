@@ -26,10 +26,10 @@ agw resource kinds                      # every kind: category, counts, purpose
 ```
 
 Resources come from four origins: **operator-declared** (you wrote them, as YAML manifests),
-**built-in** (shipped with agentworks, e.g. the `env-var` and `prompt` secret backends and the
-built-in apt / install-command entries), **auto-declared** (the framework filled in a
-referenced-but-undeclared resource, e.g. the `tailscale-auth-key` secret or `git-token-<name>`
-secrets), and **system-plugin** (contributed by an installed, opted-in system plugin; see "System
+**built-in** (shipped with agentworks and inseparable from it, e.g. the `env-var` and `prompt`
+secret backends), **auto-declared** (the framework filled in a referenced-but-undeclared resource,
+e.g. the `tailscale-auth-key` secret or `git-token-<name>` secrets), and **system-plugin**
+(contributed by an installed system plugin, regardless of whether its rows are enabled; see "System
 plugins" below). Filter by origin with `agw resource list --origin operator|auto|builtin|plugin`.
 
 ## Declaring resources: YAML manifests
@@ -466,14 +466,18 @@ spec:
   test_exec: my-tool
 ```
 
-## Built-ins and overrides
+## Built-ins, plugin catalogs, and overrides
 
-Built-in resources ship with the app and appear in `agw resource list --origin builtin`. Override
-policy is per kind:
+This section is the canonical operator contract for row precedence and dependency enablement.
+
+Built-in resources ship with the app and appear in `agw resource list --origin builtin`. Optional
+catalog rows carry the `system-plugin` origin. Override policy is per kind:
 
 - **Apt / install-command kinds** (`apt-source`, `apt-package`, `system-install-command`,
-  `user-install-command`): declaring the same name overrides the built-in, the name is the
-  interface, and same-name override is how you customize what `gh` installs.
+  `user-install-command`): declaring the same name overrides a plugin row, the name is the
+  interface, and same-name override is how you customize what `gh` installs. An overridden apt
+  package still needs `apt` enabled if it keeps a shipped apt-source dependency. Otherwise declare
+  the source too or remove that dependency.
 - **Bundled vm-sites** (`lima-local`, `wsl2`): reserved names. Redeclaring one is an error; declare
   a sibling site instead. Like every vm-site they register on every host and report not-ready where
   this host lacks what they need (`agw resource list` marks the row; `describe` and `agw doctor`
@@ -532,6 +536,14 @@ roster is the list for this build, with each plugin's description and its opt-in
 with. Authoring a system plugin is documented in the plugins package README
 (`cli/agentworks/plugins/README.md`).
 
+The `apt` plugin owns five shipped apt sources and five apt package sets. The `install-command`
+plugin owns six shipped user install commands. They are both disabled by default. Core still owns
+the resource kinds, validation, apt source-before-package ordering, idempotent runners, executors,
+and initialization. Core also continues to own snap, mise, dotfiles, tmuxinator, and Claude
+marketplace/plugin setup. Enable `apt` only for a template selecting its apt catalog, and
+`install-command` only for an admin or agent template selecting its shipped user command. Use
+`agw doctor` to see their states and `agw resource list --include-disabled` to inspect their rows.
+
 **A capability's config is validated whether or not you can use it here.** Enablement and readiness
 gate USE, not validation: a `vm-site` naming the `proxmox` platform has its platform config checked
 when the manifest loads, even on a host where the `proxmox` plugin is not enabled, and the same
@@ -540,17 +552,18 @@ key is a hard error naming the fields the capability declares on every host. A r
 capability is disabled is instead not-ready with an "enable plugin `<name>`" hint and is refused at
 use.
 
-**Which plugins you need follows from what your resources reference.** Enable `onepassword` if a
-declared secret source selects the `onepassword` backend; `proxmox` if a `vm-site` uses the
-`proxmox` platform; `gcp` if you use `gcp-gce` or a template installs the `gcloud-cli` apt package;
-`aws` if you use `aws-ec2`; `azure` if you use the `azure-vm` platform, the `azdo` (Azure DevOps)
-git-credential provider, or the `az-cli` install-command; and `claude` if a `session-template` uses
-the `claude-code` integration or a template installs the `claude` CLI. Until you do, a resource that
-references one is not-ready (or refused at use) with an "enable plugin `<name>`" hint, never a
-silent failure. The default local path (the `lima` / `wsl2` platforms, the `shell` harness
-integration, the `env-var` / `prompt` secret backends, and the `github` git-credential provider)
-needs no `[plugins]` entry at all. `agw doctor` lists every installed plugin and whether it is
-enabled.
+**Which plugins you need follows from what your resources reference.** Enable `apt` for its shipped
+apt source and package rows; `install-command` for its shipped user install-command rows;
+`onepassword` if a declared secret source selects the `onepassword` backend; `proxmox` if a
+`vm-site` uses the `proxmox` platform; `gcp` if you use `gcp-gce` or a template installs the
+`gcloud-cli` apt package; `aws` if you use `aws-ec2`; `azure` if you use the `azure-vm` platform,
+the `azdo` (Azure DevOps) git-credential provider, or the `az-cli` install-command; and `claude` if
+a `session-template` uses the `claude-code` integration or a template installs the `claude` CLI.
+Until you do, a resource that references one is not-ready (or refused at use) with an "enable plugin
+`<name>`" hint, never a silent failure. The default local path (the `lima` / `wsl2` platforms, the
+`shell` harness integration, the `env-var` / `prompt` secret backends, and the `github`
+git-credential provider) needs no `[plugins]` entry at all. `agw doctor` lists every installed
+plugin and whether it is enabled.
 
 ## Secrets: configured sources and implementation backends
 

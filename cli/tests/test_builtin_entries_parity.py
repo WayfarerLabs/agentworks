@@ -1,10 +1,10 @@
-"""Parity oracle for the built-in apt / install-command entries (dissolve-catalog SDD).
+"""Parity oracle for the optional installer plugin rows.
 
-This module pins the resolved payloads of the built-in apt /
-install-command entries as constants, captured from the pre-migration
-built-in definition path. It is the permanent no-drift reference: the
-built-in entries now ship as bundled YAML manifests, and the parity test
-here asserts the Registry still resolves byte-for-byte identical payloads.
+This module pins the resolved payloads of the apt and user install-command
+entries as constants, captured from the pre-plugin built-in definition path.
+It is the permanent no-drift reference: the rows now ship from two opt-in
+system plugins, and the parity test here asserts the Registry still resolves
+byte-for-byte identical payloads.
 
 The constants are the oracle. They are hand-transcribed (not derived from
 the loader) on purpose: if a payload silently changes in the bundled
@@ -12,15 +12,16 @@ manifests, the constant no longer matches and the test fails.
 
 Payload scope: only the kind-specific fields plus ``name`` and
 ``description`` are compared. Provenance fields on ``DeclaredResource``
-(``origin``, ``declared_at``, ``references``) are deliberately excluded:
-they differ by definition-path and are checked separately by the origin
-assertions in the Phase 1 registry test.
+(``origin``, ``declared_at``, ``references``) are checked separately by the
+provider assertions below.
 """
 
 from __future__ import annotations
 
 from textwrap import dedent
 from typing import TYPE_CHECKING, Any
+
+import pytest
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -31,7 +32,7 @@ if TYPE_CHECKING:
         UserInstallCommandEntry,
     )
 
-# -- The oracle: resolved payloads of the built-in entries ---------------------
+# -- The oracle: resolved payloads of the moved entries ------------------------
 
 EXPECTED_APT_SOURCES: dict[str, dict[str, Any]] = {
     "github-cli": {
@@ -128,14 +129,6 @@ EXPECTED_APT_PACKAGES: dict[str, dict[str, Any]] = {
     },
 }
 
-# NOTE: `az-cli` (the Azure CLI) is deliberately absent: it migrated out of the
-# built-in bundle into the `azure` system plugin (Phase 11), so it now publishes
-# a `system-plugin` row, present-but-disabled by default. The built-in bundle
-# now ships no system-install-commands.
-# `test_bundled_builtin_rows_match_oracle` pins that it is gone from the built-in
-# bundle and now carries a system-plugin origin.
-EXPECTED_SYSTEM_INSTALL_COMMANDS: dict[str, dict[str, Any]] = {}
-
 EXPECTED_USER_INSTALL_COMMANDS: dict[str, dict[str, Any]] = {
     "oh-my-zsh": {
         "name": "oh-my-zsh",
@@ -177,11 +170,6 @@ EXPECTED_USER_INSTALL_COMMANDS: dict[str, dict[str, Any]] = {
         "test_file": "~/.nvm/nvm.sh",
         "test_dir": None,
     },
-    # NOTE: `claude` (the Claude Code CLI) is deliberately absent: it migrated
-    # out of the built-in bundle into the `claude` system plugin (Phase 9), so
-    # it now publishes a `system-plugin` row, present-but-disabled by default.
-    # `test_bundled_builtin_rows_match_oracle` pins that it is gone from the
-    # built-in bundle and now carries a system-plugin origin.
     "starship": {
         "name": "starship",
         "description": "Starship cross-shell prompt",
@@ -241,15 +229,16 @@ def install_command_payload(
     }
 
 
-# -- Bundled built-in manifests resolve to the oracle payloads -----------------
+# -- Installer plugins resolve to the oracle payloads --------------------------
 
-# Which bundled file each kind's built-in rows ship in. The origin's
-# source carries the shipped filename (see manifests/builtin.py).
-_BUNDLED_SOURCE = {
-    "apt-source": "agentworks.manifests.builtin/apt-sources.yaml",
-    "apt-package": "agentworks.manifests.builtin/apt-packages.yaml",
-    "system-install-command": "agentworks.manifests.builtin/install-commands.yaml",
-    "user-install-command": "agentworks.manifests.builtin/install-commands.yaml",
+_PLUGIN_MANIFESTS = {
+    "apt": {
+        "apt-source": "agentworks.plugins.apt/manifests/apt-sources.yaml",
+        "apt-package": "agentworks.plugins.apt/manifests/apt-packages.yaml",
+    },
+    "install-command": {
+        "user-install-command": "agentworks.plugins.install_command/manifests/install-commands.yaml",
+    },
 }
 
 
@@ -257,6 +246,7 @@ def _write_operator_config(
     tmp_path: Path,
     *,
     manifests: dict[str, str] | None = None,
+    enabled_plugins: tuple[str, ...] = (),
 ) -> Path:
     """Write a minimal operator config (plus optional resources/*.yaml
     manifests) and return the config path.
@@ -269,7 +259,10 @@ def _write_operator_config(
     pub.write_text("ssh-ed25519 X")
     priv.write_text("-----BEGIN-----")
     cfg = tmp_path / "config.toml"
-    cfg.write_text(f'[operator]\nssh_public_key = "{pub}"\nssh_private_key = "{priv}"\n')
+    plugin_names = ", ".join(f'"{name}"' for name in enabled_plugins)
+    cfg.write_text(
+        f'[operator]\nssh_public_key = "{pub}"\nssh_private_key = "{priv}"\n\n[plugins]\nsystem = [{plugin_names}]\n'
+    )
     if manifests:
         resources = tmp_path / "resources"
         resources.mkdir()
@@ -278,90 +271,82 @@ def _write_operator_config(
     return cfg
 
 
-def test_bundled_builtin_rows_match_oracle(tmp_path: Path) -> None:
-    """On a config with no operator apt / install-command entries, the
-    Registry's built-in rows come entirely from the bundled manifests and
-    resolve to the Phase 0 oracle payloads byte-for-byte, each carrying a
-    ``built-in`` origin pointed at its bundled file. This is the no-drift
-    proof for the TOML-to-YAML migration.
+def test_installer_plugin_rows_match_oracle_and_are_disabled_by_default(tmp_path: Path) -> None:
+    """The 16 moved rows retain their payloads, provider, anchor-derived
+    provenance, and default-disabled state.
     """
     from agentworks.bootstrap import build_registry
     from agentworks.config import load_config
+    from agentworks.plugins import SYSTEM_PLUGINS
     from agentworks.resources.access import kind_dict
+    from agentworks.resources.graph import Enablement
 
     cfg = load_config(_write_operator_config(tmp_path), warn_issues=False)
     registry = build_registry(cfg)
 
-    srcs = {n: e for n, e in kind_dict(registry, "apt-source").items() if e.origin.variant == "built-in"}
-    pkgs = {n: e for n, e in kind_dict(registry, "apt-package").items() if e.origin.variant == "built-in"}
-    # Vendor guest CLI rows and the claude user-install-command ship
-    # present-but-disabled from system plugins. Scope every built-in oracle to
-    # built-in-origin rows.
-    sys_cmds = {
-        n: e for n, e in kind_dict(registry, "system-install-command").items() if e.origin.variant == "built-in"
-    }
-    usr_cmds = {n: e for n, e in kind_dict(registry, "user-install-command").items() if e.origin.variant == "built-in"}
+    assert SYSTEM_PLUGINS["apt"].capabilities == {}
+    assert SYSTEM_PLUGINS["apt"].manifests == "agentworks.plugins.apt"
+    assert SYSTEM_PLUGINS["install-command"].capabilities == {}
+    assert SYSTEM_PLUGINS["install-command"].manifests == "agentworks.plugins.install_command"
 
+    srcs = {name: entry for name, entry in kind_dict(registry, "apt-source").items() if entry.origin.plugin == "apt"}
+    pkgs = {name: entry for name, entry in kind_dict(registry, "apt-package").items() if entry.origin.plugin == "apt"}
+    usr_cmds = {
+        name: entry
+        for name, entry in kind_dict(registry, "user-install-command").items()
+        if entry.origin.plugin == "install-command"
+    }
+
+    assert list(srcs) == list(EXPECTED_APT_SOURCES)
+    assert list(pkgs) == list(EXPECTED_APT_PACKAGES)
+    assert list(usr_cmds) == list(EXPECTED_USER_INSTALL_COMMANDS)
     assert {name: apt_source_payload(entry) for name, entry in srcs.items()} == EXPECTED_APT_SOURCES
     assert {name: apt_package_payload(entry) for name, entry in pkgs.items()} == EXPECTED_APT_PACKAGES
-    assert {
-        name: install_command_payload(entry) for name, entry in sys_cmds.items()
-    } == EXPECTED_SYSTEM_INSTALL_COMMANDS
     assert {name: install_command_payload(entry) for name, entry in usr_cmds.items()} == EXPECTED_USER_INSTALL_COMMANDS
 
-    # The migrated `claude` install-command is gone from the built-in bundle and
-    # now carries the `claude` system-plugin origin (Phase 9).
-    assert "claude" not in usr_cmds  # not a built-in row anymore
-    claude = kind_dict(registry, "user-install-command")["claude"]
-    assert claude.origin is not None
-    assert claude.origin.variant == "system-plugin"
-    assert claude.origin.plugin == "claude"
-
-    # Provider guest CLIs are plugin-owned optional tooling, never built-in
-    # provisioning dependencies. Their system-plugin origins remain visible
-    # even while the vendor plugin is disabled.
-    assert "az-cli" not in sys_cmds  # not a built-in row
-    az_cli = kind_dict(registry, "system-install-command")["az-cli"]
-    assert az_cli.origin is not None
-    assert az_cli.origin.variant == "system-plugin"
-    assert az_cli.origin.plugin == "azure"
-    for kind, name in (("apt-source", "google-cloud-cli"), ("apt-package", "gcloud-cli")):
-        entry = kind_dict(registry, kind)[name]
-        assert entry.origin is not None
-        assert entry.origin.variant == "system-plugin"
-        assert entry.origin.plugin == "gcp"
-    assert "gcloud-cli" not in kind_dict(registry, "system-install-command")
-
-    # Provenance: every built-in row is a built-in origin pointed at the
-    # bundled file for its kind (not the former agentworks.catalog source).
-    for kind, rows in (
-        ("apt-source", srcs),
-        ("apt-package", pkgs),
-        ("system-install-command", sys_cmds),
-        ("user-install-command", usr_cmds),
+    for plugin, rows_by_kind in (
+        ("apt", (("apt-source", srcs), ("apt-package", pkgs))),
+        ("install-command", (("user-install-command", usr_cmds),)),
     ):
-        for entry in rows.values():
-            assert entry.origin is not None
-            assert entry.origin.variant == "built-in"
-            assert entry.origin.source == _BUNDLED_SOURCE[kind]
+        for kind, rows in rows_by_kind:
+            source = _PLUGIN_MANIFESTS[plugin][kind]
+            for entry in rows.values():
+                assert entry.origin is not None
+                assert entry.origin.variant == "system-plugin"
+                assert entry.origin.plugin == plugin
+                assert entry.origin.source == source
+                assert registry.graph.enablement_of(kind, entry.name) is Enablement.disabled
+
+
+def test_remaining_builtin_manifest_origin_is_truthful(tmp_path: Path) -> None:
+    """The built-in publisher retains its real variant and package source."""
+    from agentworks.bootstrap import build_registry
+    from agentworks.config import load_config
+
+    cfg = load_config(_write_operator_config(tmp_path), warn_issues=False)
+    origin = build_registry(cfg).lookup("vm-site", "lima-local").origin
+
+    assert origin is not None
+    assert origin.variant == "built-in"
+    assert origin.source == "agentworks.manifests.builtin/vm-sites.yaml"
 
 
 # The former ``test_operator_toml_override_wins_over_builtin`` was removed here:
 # it declared an operator ``[apt_packages.gh]`` override in config.toml, which
 # now hard-errors as a resource section (ADR 0022). With the TOML declaration
 # surface gone, that test collapses onto its manifest sibling
-# ``test_operator_manifest_override_wins_over_builtin`` below (same override
+# ``test_operator_manifest_override_wins_over_installer_plugin`` below (same override
 # semantics, same operator-declared origin), which is the sole remaining path.
 
 
-def test_operator_manifest_override_wins_over_builtin(tmp_path: Path) -> None:
-    """An operator's YAML apt-package manifest with a built-in's name
-    replaces the built-in row, the same as the TOML path, carrying the
-    operator payload and an operator-declared origin.
+def test_operator_manifest_override_keeps_plugin_dependency_enablement(tmp_path: Path) -> None:
+    """An operator's YAML apt-package manifest with an installer plugin's name
+    replaces that row, but its retained plugin source keeps its own enablement.
     """
     from agentworks.bootstrap import build_registry
     from agentworks.config import load_config
-    from agentworks.resources.access import kind_dict
+    from agentworks.errors import StateError
+    from agentworks.resources.access import ensure_recipe_enabled, kind_dict
 
     manifest = dedent(
         """
@@ -376,16 +361,44 @@ def test_operator_manifest_override_wins_over_builtin(tmp_path: Path) -> None:
           apt:
             - gh
             - gh-extra
+        ---
+        apiVersion: agentworks/v1
+        kind: vm-template
+        metadata:
+          name: default
+          description: VM selecting the operator gh package
+        spec:
+          apt_packages:
+            - gh
         """
     )
-    cfg = load_config(
-        _write_operator_config(tmp_path, manifests={"override.yaml": manifest}),
+    disabled_dir = tmp_path / "disabled"
+    disabled_dir.mkdir()
+    disabled_cfg = load_config(
+        _write_operator_config(disabled_dir, manifests={"override.yaml": manifest}),
         warn_issues=False,
     )
-    registry = build_registry(cfg)
+    registry = build_registry(disabled_cfg)
 
     gh = kind_dict(registry, "apt-package")["gh"]
     assert gh.apt == ["gh", "gh-extra"]
     assert gh.description == "Operator gh override"
     assert gh.origin is not None
     assert gh.origin.variant == "operator-declared"
+
+    with pytest.raises(StateError) as exc:
+        ensure_recipe_enabled(registry, "vm-template", "default")
+    assert exc.value.entity_kind == "apt-source"
+    assert exc.value.entity_name == "github-cli"
+
+    enabled_dir = tmp_path / "enabled"
+    enabled_dir.mkdir()
+    enabled_cfg = load_config(
+        _write_operator_config(
+            enabled_dir,
+            manifests={"override.yaml": manifest},
+            enabled_plugins=("apt",),
+        ),
+        warn_issues=False,
+    )
+    ensure_recipe_enabled(build_registry(enabled_cfg), "vm-template", "default")

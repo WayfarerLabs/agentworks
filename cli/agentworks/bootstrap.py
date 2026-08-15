@@ -57,17 +57,16 @@ def build_registry(
     """Build a finalized ``Registry`` from the standard set of publishers.
 
     Publisher order: the bundled built-in manifests first
-    (``builtin_manifests``, which supply the built-in apt/install-command
-    entries too), then the built-in capability rows (one generic publisher
-    per capability-kind descriptor), then the system
-    plugins (``plugins.publish_plugins``: every shipped plugin's capability
-    rows plus the enabled plugins' bundled manifests), then the built-in
-    secret-source rows, then the operator's YAML ``ManifestSet``
+    (``builtin_manifests``, which supply reserved core rows), then the built-in
+    capability rows (one generic publisher per capability-kind descriptor), then
+    the system plugins (``plugins.publish_plugins``: every shipped plugin's
+    capability and manifest rows), then the built-in secret-source rows, then
+    the operator's YAML ``ManifestSet``
     (``Config.publish_to`` is a no-op now: config.toml is settings only, ADR
-    0022). Plugin capability rows publish
-    unconditionally and are marked disabled at finalize when not opted in
-    (the injected ``plugin_enablement_source``). Operator rows may replace
-    built-in rows only where the kind's ``builtin_override`` allows.
+    0022). Plugin rows publish unconditionally and every opted-out plugin row
+    is marked disabled at finalize by the injected ``plugin_enablement_source``.
+    Disabled plugin manifest rows additionally publish weak. Operator rows may
+    replace built-in rows only where the kind's ``builtin_override`` allows.
 
     When ``manifests`` is None (the standard path), the resources
     directory next to the loaded config file (``<config-dir>/resources/``)
@@ -96,9 +95,9 @@ def build_registry(
     # bundled rows always publish. Using a not-ready site is a typed error at
     # resolve time; doctor warns on references to one.
     registry = Registry.empty()
-    # Built-in publishers first. The bundled manifests supply the built-in
-    # apt/install-command entries (apt sources/packages and install commands
-    # ship as manifests/builtin/*.yaml); operator apt/install rows are YAML
+    # Built-in publishers first. The bundled manifests supply reserved core
+    # resources such as vm-sites; optional apt and install-command catalog rows
+    # publish from their system plugins below. Operator apt/install rows are YAML
     # manifests now (config.toml is settings only, ADR 0022), so there is no
     # separate apt / install_commands operator publisher anymore.
     builtin_manifests.publish_to(registry)
@@ -108,9 +107,9 @@ def build_registry(
     for descriptor in capability_descriptors():
         publish_capability_rows(registry, descriptor)
     # System plugins publish here, after the built-in capability rows and
-    # before the operator sources: every shipped plugin's capability rows
-    # unconditionally (present-but-disabled when not opted in, via the
-    # enablement source below), and the enabled plugins' bundled manifests.
+    # before the operator sources: every shipped plugin's capability and
+    # manifest rows unconditionally. Disabled plugins' manifest rows publish
+    # weak and finalize present-but-disabled via the enablement source below.
     # Publication-only (impls were seated at import), so purity holds.
     plugins.publish_plugins(registry, config)
     # The two zero-config defaults are ordinary source rows, published only

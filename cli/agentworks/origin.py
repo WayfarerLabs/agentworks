@@ -12,7 +12,7 @@ Four variants today:
 - ``built-in``: shipped with the app itself, inseparable from it (the
   bundled-manifest publisher and other app-bundled publishers). Carries
   ``source: str``, a code-source identifier like
-  ``"agentworks.manifests.builtin/apt-sources.yaml"``.
+  ``"agentworks.manifests.builtin/vm-sites.yaml"``.
 - ``auto-declared``: synthesized by a kind's miss policy during
   ``Registry.finalize()`` to satisfy a reference that didn't resolve to
   any published Resource. Carries ``source: tuple[str, str]`` -- the first
@@ -23,8 +23,7 @@ Four variants today:
   ``plugin: str`` (the plugin name) and ``source: str`` (a code-source
   identifier like ``"agentworks.plugins.<name>"`` for a capability row
   or ``"agentworks.plugins.<name>/manifests/<file>"`` for a bundled
-  manifest); ``file``/``line`` are ``None``. Nothing constructs this
-  variant yet; the plugin effort's later phases wire in the producers.
+  manifest); ``file``/``line`` are ``None``.
 
 One variant is reserved for the plugin system and not constructible
 yet: ``external-plugin`` (installed from outside sources). It is
@@ -104,7 +103,7 @@ class Origin:
         """Resource shipped with the app itself (the bundled-manifest
         publisher, other app-bundled publishers). ``source`` is a
         code-source identifier like
-        ``"agentworks.manifests.builtin/apt-sources.yaml"``.
+        ``"agentworks.manifests.builtin/vm-sites.yaml"``.
         Plugin-shipped resources do NOT use this variant; they get
         ``system_plugin`` (or the reserved ``external-plugin`` variant,
         once a later phase makes it constructible).

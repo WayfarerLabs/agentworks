@@ -132,8 +132,8 @@ def test_user_install_command_typo_in_agent_errors(tmp_path: Path) -> None:
 
 
 def test_known_apt_package_reference_resolves(tmp_path: Path) -> None:
-    """A reference to a known built-in entry (``gh`` among the built-in
-    apt-package entries today) finalizes cleanly.
+    """A reference to a known optional apt plugin entry (``gh``) finalizes
+    cleanly.
     """
     cfg = load_config(
         _write_cfg(
@@ -146,32 +146,17 @@ def test_known_apt_package_reference_resolves(tmp_path: Path) -> None:
     registry = build_registry(cfg)
     gh = registry.lookup("apt-package", "gh")
     assert gh.name == "gh"
-    # Cross-check: the bundled-manifest publisher attached built-in origin
-    # and the framework's finalize recorded the inbound reference from
+    # Cross-check: the optional plugin attached its origin and the framework's
+    # finalize recorded the inbound reference from
     # vm-template:default on the graph node.
-    assert gh.origin.variant == "built-in"
+    assert gh.origin.variant == "system-plugin"
+    assert gh.origin.plugin == "apt"
     assert any(u.source == ("vm-template", "default") for u in registry.graph.dependents_of("apt-package", "gh")), (
         "vm-template:default reference should be on the apt_package"
     )
 
 
 # -- apt-package -> apt-source edges ---------------------------------------
-
-
-def test_apt_source_kind_published_from_builtin_manifest(tmp_path: Path) -> None:
-    """The bundled-manifest publisher emits ``apt-source`` Resources with
-    ``built-in`` origin, parallel to ``apt-package`` / the
-    install-command kinds. The built-in manifests ship at least one
-    apt-source (``github`` today), so the registry has it after
-    ``build_registry``.
-    """
-    cfg = load_config(
-        _write_cfg(tmp_path / "config.toml"),
-        warn_issues=False,
-    )
-    registry = build_registry(cfg)
-    names = [name for name, source in registry.iter_kind_items("apt-source") if source.origin.variant == "built-in"]
-    assert names, "the built-in manifests should publish at least one apt_source"
 
 
 def test_apt_package_references_flow_to_apt_source(tmp_path: Path) -> None:
@@ -192,8 +177,8 @@ def test_apt_package_references_flow_to_apt_source(tmp_path: Path) -> None:
         warn_issues=False,
     )
     registry = build_registry(cfg)
-    # ``gh`` depends on the ``github-cli`` apt-source among the built-in
-    # entries; check the inbound edge lands on the source.
+    # ``gh`` depends on the ``github-cli`` apt-source in the optional apt
+    # plugin; check the inbound edge lands on the source.
     registry.lookup("apt-source", "github-cli")
     referencing_pkgs = [
         entry.source
@@ -232,16 +217,11 @@ def test_unknown_apt_source_reference_errors_via_framework(
         build_registry(cfg)
 
 
-def test_operator_declared_apt_source_layers_over_builtin(
+def test_operator_declared_apt_source_tracks_dependency_edges(
     tmp_path: Path,
 ) -> None:
-    """Operator-declared ``[apt_sources.<name>]`` in config.toml is
-    parsed and published by ``apt.publish_to`` with ``operator-declared``
-    origin. Publish order (the bundled manifests first, then
-    ``apt.publish_to``) plus the kind's ``builtin_override = "allow"``
-    policy is what lets the operator's declaration override the built-in
-    for the same name. The same layering pattern that already covers
-    apt_packages.
+    """A unique operator-declared apt source retains its origin and inbound
+    apt-package dependency edge after finalization.
     """
     cfg = load_config(
         _write_cfg(

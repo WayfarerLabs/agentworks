@@ -452,7 +452,7 @@ selector and sibling key as invalid. Fold them into one tagged table: the select
 `name`, and every sibling-table key moves beside it. Every document on the old shape has to move:
 one left behind leaves the whole resources directory unloadable.
 
-## Azure, Proxmox, 1Password, and Claude Code are now opt-in
+## System plugins are now opt-in
 
 These vendor- and tool-specific capabilities used to be built in and always available; they now ship
 as the `azure`, `proxmox`, `onepassword`, and `claude` system plugins, disabled by default. If your
@@ -486,6 +486,41 @@ sources = ["env-var", "prompt"]
 The rename does not change `agw secret describe --output json`: its `source` and `backend` fields
 remain distinct. `source` identifies the configured source instance, while `backend` identifies the
 capability that implements it.
+
+### Apt and user install-command catalogs moved to plugins
+
+The optional apt catalog now belongs to the disabled-by-default `apt` plugin. The optional user
+install-command catalog now belongs to the disabled-by-default `install-command` plugin. Existing
+template selectors keep their spelling and payload. Map each selector to its owning plugin:
+
+| Plugin            | Selectors                                                                                                                                                                                                                                     |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apt`             | `apt-source/github-cli`, `apt-source/hashicorp`, `apt-source/nodesource-v22`, `apt-source/ngrok-agent`, `apt-source/tofuutils-tenv`, `apt-package/gh`, `apt-package/terraform`, `apt-package/nodejs`, `apt-package/ngrok`, `apt-package/tenv` |
+| `install-command` | `user-install-command/oh-my-zsh`, `user-install-command/bun`, `user-install-command/fnm`, `user-install-command/nvm`, `user-install-command/starship`, `user-install-command/uv`                                                              |
+
+If your configuration selects rows from both lists, append both plugin names to the existing list.
+For example, retain an already enabled plugin rather than replacing the list:
+
+```toml
+# before
+[plugins]
+system = ["azure"]
+
+# after
+[plugins]
+system = ["azure", "apt", "install-command"]
+```
+
+Use `agw doctor` to confirm the plugins' states and `agw resource list --include-disabled` to
+inspect their rows. An operator-declared same-name apt package still wins, but it needs `apt`
+enabled when it keeps one of the shipped apt-source dependencies. Otherwise declare that source too
+or remove the dependency. Core continues to own apt and install-command kinds, validation,
+execution, runners, and initialization. Snap, mise, dotfiles, tmuxinator, and Claude
+marketplace/plugin setup remain core-owned.
+
+There is no migrator, compatibility alias, automatic enablement, or special remediation for this
+move. A disabled selected row produces the standard disabled-resource message; enable its owning
+plugin or replace/remove the dependency.
 
 ## Secret backend names now require configured sources
 

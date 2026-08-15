@@ -11,7 +11,7 @@ Both are ``declarable`` kinds under the ``error`` miss policy: a typo'd
 reference (an unknown apt-source named by a package, or an unknown
 apt-package named by a vm-template) surfaces as a framework
 ``ConfigError`` at ``build_registry`` time citing the reference's source.
-Built-in entries ship as bundled manifests under ``manifests/builtin/``;
+The optional app-shipped catalog is bundled with the ``apt`` system plugin;
 operators may add or override entries via YAML manifests. Manifest decoders
 delegate to ``_load_apt_sources`` and ``_load_apt_packages``.
 
@@ -60,9 +60,9 @@ class AptSourceEntry(DeclaredResource):
     when a package requires a source's key + list stanza before it can be
     installed. A first-class, system-declared Registry Resource: inherits the
     uniform metadata from ``DeclaredResource`` (the publisher stamps
-    ``origin`` as ``built-in`` for shipped entries or ``operator-declared`` for
-    config-added ones; ``references`` is attached by the framework's finalize
-    pass from the apt_packages that name it).
+    ``origin`` as ``system-plugin`` for app-shipped optional entries or
+    ``operator-declared`` for operator entries; ``references`` is attached by
+    the framework's finalize pass from the apt_packages that name it).
     """
 
     # The examples on these four are what a generated sample writes on the
@@ -181,11 +181,10 @@ def _load_apt_packages(
 
 
 # The operator apt publisher was deleted with the TOML resource surface
-# (ADR 0022): built-in apt entries ship as bundled YAML manifests
-# (``manifests/builtin/*.yaml``, via ``builtin_manifests.publish_to``), and
-# operator apt entries are YAML manifests too. ``_load_apt_sources`` /
-# ``_load_apt_packages`` above survive because the manifest apt decoders
-# still delegate to them.
+# (ADR 0022): app-shipped apt entries are bundled YAML manifests in the
+# optional ``apt`` system plugin, and operator apt entries are YAML manifests
+# too. ``_load_apt_sources`` / ``_load_apt_packages`` above survive because
+# the manifest apt decoders still delegate to them.
 
 
 # -- Framework kind strategies -------------------------------------------------
@@ -194,8 +193,8 @@ def _load_apt_packages(
 # ``apt_sources`` list, or in a ``[vm_templates.*].apt_packages`` list,
 # surfaces as a framework miss-policy error at ``build_registry`` time,
 # citing the reference's source. There is no auto-declare path: entries are
-# built-in (bundled manifests) or operator-declared, and references must
-# resolve to a known name.
+# app-shipped through an opt-in system plugin or operator-declared, and
+# references must resolve to a known name.
 #
 # ``apt-source`` was originally not a framework kind (only operator-facing
 # config referenced by name got promoted at first). It joined the framework
@@ -220,7 +219,9 @@ class _AptSourceKind:
 
         Apt packages reference a source by name; nothing installs a source on its own.
         In the stanza, `{arch}` stands for the VM's architecture (`amd64` or `arm64`).
-        Several sources ship built in; declaring one under a built-in's name replaces it.
+        Several sources ship through the optional `apt` plugin; declaring one under a plugin
+        source name replaces it. A package retaining a shipped source dependency still needs that
+        plugin enabled.
         """,
     )
     model: type[DeclaredResource] = AptSourceEntry
@@ -247,8 +248,9 @@ class _AptPackageKind:
         the sources first and the packages after.
 
         The indirection is what lets a template say `gh` without also knowing which
-        repository provides it. Several packages ship built in; declaring one under a
-        built-in's name replaces it.
+        repository provides it. Several packages ship through the optional `apt` plugin; declaring
+        one under a plugin catalog name replaces it. A package retaining a shipped source dependency
+        still needs the `apt` plugin enabled.
         """,
     )
     model: type[DeclaredResource] = AptPackageEntry

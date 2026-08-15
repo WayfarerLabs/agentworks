@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import difflib
 import html
+import importlib
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never, cast
@@ -51,7 +52,18 @@ if TYPE_CHECKING:
     from agentworks.db import Database
     from agentworks.guide.agent_mode import GuideMode
     from agentworks.guide.assessment import VerificationEvidence
+    from agentworks.plugins.base import Plugin
     from agentworks.resources import Registry
+
+
+# These two installed manifest-only plugins own first-party teaching packaged
+# beside their manifests. Import their private adapters only during a guide
+# request: importing a same-named submodule replaces that name on its package,
+# while these stable package anchors keep ordinary plugin registration I/O-free.
+_FIRST_PARTY_PLUGIN_GUIDE_PACKAGES = {
+    "apt": "agentworks.plugins.apt",
+    "install-command": "agentworks.plugins.install_command",
+}
 
 _MARKDOWN_PUNCTUATION_RE = re.compile(r"([\\`*_{}\[\]()<>#!|])")
 
@@ -88,6 +100,18 @@ class _EmptyInventory:
         return ()
 
 
+def _load_first_party_plugin_topics(
+    plugin_name: str,
+) -> tuple[TopicContribution, ...]:
+    """Load one curated package adapter inside guide-scoped construction."""
+    package = _FIRST_PARTY_PLUGIN_GUIDE_PACKAGES.get(plugin_name)
+    if package is None:
+        return ()
+    module = importlib.import_module(package)
+    loader = cast("Callable[[], tuple[TopicContribution, ...]]", module._load_guide_contributions)
+    return loader()
+
+
 def build_authored_catalog(*, strict_trusted_taxonomy: bool = False) -> GuideCatalog:
     """Collect records, optionally making trusted taxonomy drift a CI error."""
     from agentworks.plugins import SYSTEM_PLUGINS
@@ -117,7 +141,10 @@ def build_authored_catalog(*, strict_trusted_taxonomy: bool = False) -> GuideCat
         if strict_trusted_taxonomy:
             raise contribution_error from None
         release_issue = GuideCatalogIssue(contribution_error)
-    plugins = tuple((plugin, tuple(plugin.guide_topics)) for _, plugin in sorted(SYSTEM_PLUGINS.items()))
+    plugins: list[tuple[Plugin, tuple[object, ...]]] = []
+    for _, plugin in sorted(SYSTEM_PLUGINS.items()):
+        first_party_topics = _load_first_party_plugin_topics(plugin.name)
+        plugins.append((plugin, (*plugin.guide_topics, *first_party_topics)))
     resource_owners: list[tuple[str, str, str]] = []
     unavailable_resource_owners: set[str] = set()
     for plugin, _topics in plugins:
@@ -130,7 +157,7 @@ def build_authored_catalog(*, strict_trusted_taxonomy: bool = False) -> GuideCat
             unavailable_resource_owners.add(plugin.name)
     catalog = _build_guide_catalog(
         trusted,
-        plugins,
+        tuple(plugins),
         tuple(resource_owners),
         strict_trusted_taxonomy=strict_trusted_taxonomy,
         unavailable_plugin_resource_owners=frozenset(unavailable_resource_owners),

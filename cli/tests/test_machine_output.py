@@ -177,7 +177,7 @@ def test_origin_projection_has_fixed_safe_order_and_variant_fields() -> None:
     origins = [
         Origin.operator_declared(file=Path("é/resources.yaml"), line=7),
         Origin.auto_declared(source=("vm-template", "default")),
-        Origin.built_in(source="agentworks.manifests.builtin/apt.yaml"),
+        Origin.built_in(source="agentworks.manifests.builtin/vm-sites.yaml"),
         Origin.system_plugin(plugin="azure", source="agentworks.plugins.azure"),
     ]
 
@@ -204,7 +204,7 @@ def test_origin_projection_has_fixed_safe_order_and_variant_fields() -> None:
             "variant": "built-in",
             "file": None,
             "line": None,
-            "source": "agentworks.manifests.builtin/apt.yaml",
+            "source": "agentworks.manifests.builtin/vm-sites.yaml",
             "source_resource": None,
             "plugin": None,
         },

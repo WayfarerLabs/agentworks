@@ -1,8 +1,6 @@
-# Built-in apt sources: third-party apt repositories shipped with the
-# package. These are ordinary apt-source resources, published with a
-# built-in origin through the bundled-manifest loader (the same path
-# operators use for resources/*.yaml). Operators override an entry by
-# declaring a same-named apt-source; the built-in row is the base.
+# Optional apt sources published by the `apt` system plugin. Operators enable
+# this optional catalog with `[plugins].system = ["apt"]`; they can override an
+# entry by declaring a same-named apt-source resource.
 #
 # The {arch} placeholder in `source` is resolved at install time via
 # `dpkg --print-architecture` (amd64 or arm64).
