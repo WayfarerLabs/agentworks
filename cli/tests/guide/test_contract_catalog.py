@@ -288,6 +288,9 @@ def test_typed_records_reach_the_catalog_as_validated_copies() -> None:
 
     assert retained == original
     assert retained is not original
+    # The two above only prove the outer record was rebuilt; this one is the
+    # only cover for the nested block being copied rather than shared.
+    assert retained.blocks[0] is not original.blocks[0]
 
 
 def test_plugin_cannot_hide_reserved_core_topic() -> None:
@@ -568,6 +571,8 @@ def test_action_validation_deep_copies_and_normalizes() -> None:
     validated = validate_guide_action(original, "core")
     assert validated == original
     assert validated is not original
+    # As above: the only cover for the nested input record being copied.
+    assert validated.required_inputs[0] is not original.required_inputs[0]
 
 
 @pytest.mark.parametrize(

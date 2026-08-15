@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import json
 from enum import StrEnum
-from typing import TYPE_CHECKING, BinaryIO, assert_never, cast
+from pathlib import Path
+from typing import TYPE_CHECKING, BinaryIO, assert_never
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -94,46 +95,61 @@ def project_origin(origin: Origin | None) -> JsonObject | None:
     """Project safe, stable provenance fields without a display rendering.
 
     ``Origin`` expresses four variants through one set of broadly typed fields,
-    and its four classmethods are the only constructors, so the reads below take
-    the variant contract those factories pin rather than re-derive it.
+    so which fields a variant populates is a contract no type carries. Every
+    consumer defends it: ``declared_resource.py:232``, ``resources/render.py``
+    at :59 and :71, ``resources/inspect.py`` at :377, :396, and :561, whose
+    ``assert`` covers the same pair for the human rendering of the object this
+    projects. Without these checks a variant built outside its factory would
+    render ``None`` as text into the JSON v1 document.
     """
     if origin is None:
         return None
 
     if origin.variant == "operator-declared":
+        if not isinstance(origin.file, Path) or type(origin.line) is not int:
+            raise AssertionError("operator-declared origins require a file and line")
         return {
             "variant": origin.variant,
             "file": str(origin.file),
-            "line": cast("int", origin.line),
+            "line": origin.line,
             "source": None,
             "source_resource": None,
             "plugin": None,
         }
     if origin.variant == "auto-declared":
-        source_kind, source_name = cast("tuple[str, str]", origin.source)
+        if not (
+            isinstance(origin.source, tuple)
+            and len(origin.source) == 2
+            and all(isinstance(part, str) for part in origin.source)
+        ):
+            raise AssertionError("auto-declared origins require a two-string source resource")
         return {
             "variant": origin.variant,
             "file": None,
             "line": None,
             "source": None,
-            "source_resource": {"kind": source_kind, "name": source_name},
+            "source_resource": {"kind": origin.source[0], "name": origin.source[1]},
             "plugin": None,
         }
     if origin.variant == "built-in":
+        if not isinstance(origin.source, str):
+            raise AssertionError("built-in origins require a code source")
         return {
             "variant": origin.variant,
             "file": None,
             "line": None,
-            "source": cast("str", origin.source),
+            "source": origin.source,
             "source_resource": None,
             "plugin": None,
         }
     if origin.variant == "system-plugin":
+        if not isinstance(origin.plugin, str) or not isinstance(origin.source, str):
+            raise AssertionError("system-plugin origins require a plugin and code source")
         return {
             "variant": origin.variant,
             "file": None,
             "line": None,
-            "source": cast("str", origin.source),
+            "source": origin.source,
             "source_resource": None,
             "plugin": origin.plugin,
         }
