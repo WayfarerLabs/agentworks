@@ -88,7 +88,7 @@ class ArcadeMarkupTests(unittest.TestCase):
     def test_banner_projection_uses_model_state_flags_without_status_copy(self) -> None:
         projection = self.game.split("this.root.dataset.banner =", 1)[1].split(";", 1)[0]
         self.assertNotIn("status", projection)
-        for authority in ("launchReady", "failed", 'this.model.state === "generation-error"'):
+        for authority in ("launchReady", "failed"):
             self.assertIn(authority, projection)
 
     def test_mutations_catch_duplicate_authorities_wrong_order_and_missing_static_agent_state(self) -> None:

@@ -5,15 +5,16 @@ import test from "node:test";
 import { createRun, stepFlight } from "../static/lander-model.js";
 import {
     cameraLeftForPose,
+    createSiteForIndex,
     retainedChunkIndexes,
     siteScaffoldMembers,
     siteScaffoldPath,
     siteStructure,
+    STATIC_WORLD_SEED,
 } from "../static/lander-world.js";
 import { controllerClasses, controllerFixture } from "./lander-test-dom.mjs";
 
 const ROOT = new URL("../", import.meta.url);
-const DERIVED_URL = new URL("fixtures/lander-route-derived-v8.json", import.meta.url);
 
 function checkpointRun() {
     let model = createRun({ seed: 1, reducedMotion: true });
@@ -87,40 +88,33 @@ test("Phase 4L controls are exactly two ordered nonwrapping DOM lines with narro
     controller.destroy();
 });
 
-test("all canonical lattice columns render continuously from deck underside to independent feet", async () => {
-    const derived = JSON.parse(await readFile(DERIVED_URL, "utf8"));
-    for (const witness of derived.worldWitnesses) {
-        const canonical = witness.descriptor.site;
-        const site = {
-            seed: witness.descriptor.seed,
-            platformLeft: canonical.closedFootprint[0],
-            platformRight: canonical.closedFootprint[0] + 9.6,
-            platformTop: canonical.platformTop,
-            platformBottom: canonical.platformTop - 0.35,
-            supportFeet: canonical.supportFeet,
-        };
-        const structure = siteStructure(site);
-        const members = siteScaffoldMembers(site);
-        assert.equal((siteScaffoldPath(site).match(/M/g) ?? []).length, members.length);
-        assert.equal(structure.supportColumns.length, 3);
-        structure.supportColumns.forEach((column, index) => {
-            assert.equal(column.leftFoot, canonical.supportFeet[index * 2]);
-            assert.equal(column.rightFoot, canonical.supportFeet[index * 2 + 1]);
-            assert.equal(column.collider.top, site.platformBottom + 0.1);
-            assert.equal(column.collider.bottom, Math.min(column.leftFoot, column.rightFoot) - 0.1);
-            assert.deepEqual(
-                members
-                    .filter(
-                        (member) =>
-                            member.start[0] >= column.left &&
-                            member.start[0] <= column.right &&
-                            member.end[0] >= column.left &&
-                            member.end[0] <= column.right,
-                    )
-                    .slice(-(2 * column.levels.length + 1)).length,
-                2 * column.levels.length + 1,
-            );
-        });
+test("all canonical lattice columns render continuously from deck underside to independent feet", () => {
+    for (const seed of [11, 39, 41, STATIC_WORLD_SEED]) {
+        for (const index of [-4095, -100, 0, 100, 4095]) {
+            const site = createSiteForIndex(seed, index);
+            const structure = siteStructure(site);
+            const members = siteScaffoldMembers(site);
+            assert.equal((siteScaffoldPath(site).match(/M/g) ?? []).length, members.length);
+            assert.equal(structure.supportColumns.length, 3);
+            structure.supportColumns.forEach((column, index) => {
+                assert.equal(column.leftFoot, site.supportFeet[index * 2]);
+                assert.equal(column.rightFoot, site.supportFeet[index * 2 + 1]);
+                assert.equal(column.collider.top, site.platformBottom + 0.1);
+                assert.equal(column.collider.bottom, Math.min(column.leftFoot, column.rightFoot) - 0.1);
+                assert.deepEqual(
+                    members
+                        .filter(
+                            (member) =>
+                                member.start[0] >= column.left &&
+                                member.start[0] <= column.right &&
+                                member.end[0] >= column.left &&
+                                member.end[0] <= column.right,
+                        )
+                        .slice(-(2 * column.levels.length + 1)).length,
+                    2 * column.levels.length + 1,
+                );
+            });
+        }
     }
 });
 

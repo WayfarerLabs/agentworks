@@ -1,13 +1,10 @@
 import {
     cameraLeftForPose,
     classifySweptContact,
-    classifySweptContactFromBounds,
     COLLISION_MARGIN,
     CHUNK_WIDTH,
     createFirstSite,
     createSiteForIndex,
-    hullBounds,
-    hullForPose,
     LANDER_HULL,
     MAX_LANDING_ANGLE,
     MAX_LANDING_ANGULAR_SPEED,
@@ -20,15 +17,12 @@ import {
     retainedChunkIndexes,
     retainedSiteDescriptors,
     sampleUnit,
-    selectRouteProof,
     siteStructure,
     STATIC_WORLD_SEED,
     terrainVerticesForWindow,
     transformLocalPoint,
-    unsafeFeatures,
     worldTermini,
 } from "./lander-world.js";
-import { REFERENCE_PROOF_CATALOG } from "./lander-route-proofs.generated.js";
 
 export {
     classifySweptContact,
@@ -44,8 +38,13 @@ export {
 export const STEP_SECONDS = 1 / 120;
 export const MAX_FRAME_SECONDS = 0.1;
 export const MAX_CATCH_UP_STEPS = 12;
-export const GRAVITY = 3;
-export const ENGINE_ACCELERATION = 9;
+export const TRANSLATIONAL_MASS_NUMERATOR = 7;
+export const TRANSLATIONAL_MASS_DENOMINATOR = 10;
+export const TRANSLATIONAL_MASS = TRANSLATIONAL_MASS_NUMERATOR / TRANSLATIONAL_MASS_DENOMINATOR;
+export const GRAVITY_FORCE_COEFFICIENT = 3;
+export const ENGINE_FORCE_COEFFICIENT = 9;
+export const GRAVITY = 30 / 7;
+export const ENGINE_ACCELERATION = 90 / 7;
 export const TORQUE_ACCELERATION = 80;
 export const FUEL_FLOW = 1;
 export const FUEL_QUANTUM = 0.05;
@@ -54,10 +53,9 @@ export const TURNING_TOTAL = 0.8;
 export const MAX_THRUST_VECTOR = 30;
 export const ANGULAR_ASSIST_DIFFERENTIAL = 0.12;
 export const ANGULAR_ASSIST_FULL_SPEED = 15;
-export const BASE_ROUTE_ALLOWANCE = 13.4;
+export const BASE_ROUTE_ALLOWANCE = 22;
 
 export const FAILURE_STATUS = "Crashed!";
-export const GENERATION_ERROR_STATUS = "Mission generation failed. Use Exit mission to start a new run.";
 export const SUCCESS_STATUS = "Agent Deployed!";
 
 function freeze(value) {
@@ -65,17 +63,6 @@ function freeze(value) {
     else if (value && typeof value === "object") Object.values(value).forEach(freeze);
     return Object.freeze(value);
 }
-
-export const REFERENCE_COMMANDS = Object.freeze([
-    Object.freeze([0, 0]),
-    Object.freeze([0.72, 0.72]),
-    Object.freeze([0, 0.375]),
-    Object.freeze([0.375, 0]),
-    Object.freeze([0.2125, 0.5875]),
-    Object.freeze([0.5875, 0.2125]),
-    Object.freeze([0, 0]),
-    Object.freeze([0.72, 0.72]),
-]);
 
 const STEP_MILLISECONDS = STEP_SECONDS * 1000;
 const ZERO = Object.freeze({ left: 0, right: 0, vectorAngle: 0 });
@@ -199,6 +186,16 @@ export function refuelRatioForBase(baseNumber) {
     return 1 + 0.5 ** (baseNumber - 1);
 }
 
+export function quantumCeil(value) {
+    if (!Number.isFinite(value) || value < 0) throw new RangeError("Fuel allowance must be finite and non-negative");
+    return Math.ceil(value / FUEL_QUANTUM) * FUEL_QUANTUM;
+}
+
+export function predictedFuelAllowance(originSite, targetSite) {
+    const deckDelta = targetSite.platformTop - originSite.platformTop;
+    return quantumCeil(BASE_ROUTE_ALLOWANCE + Math.max(0, deckDelta) / 3);
+}
+
 function initialPose() {
     return { x: 30, y: 32, vx: 0.8, vy: -0.4, angle: 0, angularVelocity: 0 };
 }
@@ -252,7 +249,6 @@ export function createRun({ seed, reducedMotion = false } = {}) {
         retainedSites: [firstSite],
         activeSiteId: null,
         targetSiteId: 0,
-        targetRouteProof: null,
         touchdownPose: null,
         sequenceSeconds: 0,
         refuel: null,
@@ -277,215 +273,14 @@ function siteById(model, id) {
     return model.retainedSites.find((site) => site.id === id) ?? null;
 }
 
-function routeContext(proof, supplied = null) {
-    if (supplied) return supplied;
-    throw new Error(`Route proof ${proof.pairKey} requires an exact concrete context`);
-}
-
-function routeSiteInFrame(site, originCenter) {
-    const center = site.center - originCenter;
-    return {
-        ...site,
-        center,
-        nominalCenter: site.nominalCenter === undefined ? undefined : site.nominalCenter - originCenter,
-        closedFootprint: [center - 4.8, center + 13.8],
-        platformLeft: center - 4.8,
-        platformRight: center + 4.8,
-    };
-}
-
-function replayRouteProof(proof, fuel, suppliedContext = null) {
-    const firstRun = proof.runs[0];
-    const firstRequest = REFERENCE_COMMANDS[firstRun?.[0]];
-    if (!firstRequest || firstRun[1] !== 90 || firstRequest[0] + firstRequest[1] <= TURN_DIFFERENTIAL) {
-        throw new Error(`Route schedule ${proof.pairKey} must begin with exact [1,90] launch request`);
-    }
-    const context = routeContext(proof, suppliedContext);
-    const absoluteOrigin = context.originSite;
-    const absoluteTarget = context.targetSite;
-    const originCenter = absoluteOrigin.center;
-    const originSite = routeSiteInFrame(absoluteOrigin, originCenter);
-    const targetSite = routeSiteInFrame(absoluteTarget, originCenter);
-    let pose = context.pose
-        ? { ...context.pose, x: context.pose.x - originCenter }
-        : uprightPose(originSite);
-    let reserve = fuel;
-    let step = 0;
-    let launchCleared = false;
-    let maxHullTop = Math.max(...hullForPose(pose).map((point) => point.y));
-    let previousBounds = hullBounds(pose);
-    const absoluteSites = [absoluteOrigin, absoluteTarget];
-    const absoluteTerrainVertices =
-        context.terrainVertices ??
-        terrainVerticesForWindow(
-            context.seed,
-            absoluteSites,
-            absoluteOrigin.center - 20,
-            absoluteTarget.center + 20,
-        );
-    const terrainVertices = absoluteTerrainVertices.map(([x, y]) => [x - originCenter, y]);
-    const retainedSites = [originSite, targetSite];
-    const collisionModel = {
-        seed: context.seed,
-        retainedSites,
-        targetSiteId: targetSite.id,
-        terrainAuthority: "context",
-        terrainVertices,
-    };
-    const target = targetSite;
-    const ordinaryFeatures = unsafeFeatures(collisionModel, pose, target);
-    const launchFeatures = unsafeFeatures(collisionModel, pose, target, originSite.id);
-    collisionModel.collisionMaximumTop = Math.max(
-        29.2,
-        target.platformTop,
-        ...ordinaryFeatures.map((feature) => feature.bounds.top),
-        ...launchFeatures.map((feature) => feature.bounds.top),
-    );
-    for (const [commandIndex, count] of proof.runs) {
-        for (let index = 0; index < count; index += 1) {
-            const previous = pose;
-            const result = integratePose(
-                pose,
-                { left: REFERENCE_COMMANDS[commandIndex][0], right: REFERENCE_COMMANDS[commandIndex][1] },
-                reserve,
-            );
-            pose = result.pose;
-            maxHullTop = Math.max(maxHullTop, ...hullForPose(pose).map((point) => point.y));
-            const nextBounds = hullBounds(pose);
-            reserve = result.thrust.fuel;
-            step += 1;
-            const ignoreTopSiteId = !launchCleared ? originSite.id : null;
-            const contact = classifySweptContactFromBounds(collisionModel, previous, pose, previousBounds, nextBounds, {
-                angularTravel: result.angularTravel,
-                ignoreTopSiteId,
-                features: ignoreTopSiteId === null ? ordinaryFeatures : launchFeatures,
-            });
-            if (contact) {
-                const relative = {
-                    ...contact.pose,
-                    x: contact.pose.x - originSite.center,
-                    y: contact.pose.y - originSite.platformTop,
-                };
-                return {
-                    kind: contact.kind === "safe" ? "contact" : "collision",
-                    cause: contact.cause,
-                    step,
-                    pose: relative,
-                    burn: fuel - reserve,
-                    maxHullTop,
-                };
-            }
-            if (!launchCleared) {
-                const feet = [transformLocalPoint(pose, -1.6, 0), transformLocalPoint(pose, 1.6, 0)];
-                launchCleared = feet.every((foot) => foot.y > originSite.platformTop + 0.05);
-            }
-            previousBounds = nextBounds;
-            if (reserve === 0)
-                return {
-                    kind: "exhausted",
-                    step,
-                    pose: { ...pose, x: pose.x - originSite.center, y: pose.y - originSite.platformTop },
-                    burn: fuel,
-                };
-        }
-    }
-    return { kind: "incomplete", step, pose };
-}
-
-function samePose(actual, expected) {
-    return ["x", "y", "vx", "vy", "angle", "angularVelocity"].every(
-        (key) => Math.abs(actual[key] - expected[key]) <= 1e-9,
-    );
-}
-
-export function proveRouteProof(proof, suppliedContext = null) {
-    const successful = replayRouteProof(proof, proof.allowance, suppliedContext);
-    if (
-        successful.kind !== "contact" ||
-        successful.step !== proof.success.contactStep ||
-        Math.abs(successful.burn - proof.controllerBurn) > 1e-9 ||
-        Math.abs(successful.maxHullTop - proof.maxHullTop) > 1e-9 ||
-        !samePose(successful.pose, proof.success.pose)
-    ) {
-        throw new Error(`Route proof mismatch for ${proof.pairKey}: ${JSON.stringify({ successful })}`);
-    }
-    return proof;
-}
-
-function generationError(model) {
-    return {
-        ...model,
-        state: "generation-error",
-        commanded: { ...ZERO },
-        refuel: null,
-        status: GENERATION_ERROR_STATUS,
-    };
-}
-
-function provisionalProofContext(model, originSite, targetSite, contactPose) {
-    const poweredOrigin = { ...originSite, canCollected: true, powered: true, nocStage: 7 };
-    const retainedSites = model.retainedSites
-        .filter((site) => site.id !== originSite.id)
-        .concat(poweredOrigin, targetSite)
-        .sort((left, right) => left.id - right.id);
-    return freeze({
-        seed: model.seed,
-        completedSites: model.completedSites + 1,
-        refuelRatio: refuelRatioForBase(model.completedSites + 2),
-        generatorCursor: model.generatorCursor + 1,
-        pose: checkpointPoseForContact(originSite, contactPose),
-        fuel: null,
-        activeSiteId: originSite.id,
-        targetSiteId: targetSite.id,
-        retainedSites,
-        originSite: poweredOrigin,
-        targetSite,
-    });
-}
-
 function prepareService(model, contactPose) {
     const contacted = siteById(model, model.targetSiteId);
-    try {
-        const poweredBaseNumber = model.completedSites + 1;
-        const ratio = refuelRatioForBase(poweredBaseNumber);
-        if (model.refuelRatio !== ratio) throw new Error("Stored refuel ratio does not match mission progress");
-        if (contacted.id === MAX_SITE_INDEX) {
-            const serviced = { ...contacted, canCollected: true };
-            const award = BASE_ROUTE_ALLOWANCE * ratio;
-            const fromLevel = model.fuelGaugeReference > 0 ? clamp(model.fuel / model.fuelGaugeReference, 0, 1) : 0;
-            const fuelGaugeReference = model.fuel + award;
-            return {
-                ...model,
-                state: "landed",
-                pose: checkpointPoseForContact(contacted, contactPose),
-                commanded: { ...ZERO },
-                fuel: fuelGaugeReference,
-                fuelGaugeReference,
-                completedSites: model.completedSites + 1,
-                refuelRatio: refuelRatioForBase(poweredBaseNumber + 1),
-                generatorCursor: MAX_SITE_INDEX + 1,
-                activeSiteId: contacted.id,
-                targetSiteId: null,
-                targetRouteProof: null,
-                retainedSites: model.retainedSites.map((site) => (site.id === contacted.id ? serviced : site)),
-                touchdownPose: checkpointPoseForContact(contacted, contactPose),
-                sequenceSeconds: 0,
-                refuel: model.reducedMotion ? null : freeze({ siteId: contacted.id, fromLevel, progress: 0 }),
-                nocStage: 0,
-                agent: null,
-                status: "Touchdown confirmed. Fuel collected. Deploying agent.",
-            };
-        }
-        const candidate = createSiteForIndex(model.seed, model.generatorCursor);
-        const selectedProof = selectRouteProof(contacted, candidate, REFERENCE_PROOF_CATALOG);
-        const nextSite = freeze({ ...candidate, pairKey: selectedProof.pairKey, originSiteId: contacted.id });
+    const poweredBaseNumber = model.completedSites + 1;
+    const ratio = refuelRatioForBase(poweredBaseNumber);
+    if (model.refuelRatio !== ratio) throw new Error("Stored refuel ratio does not match mission progress");
+    if (contacted.id === MAX_SITE_INDEX) {
         const serviced = { ...contacted, canCollected: true };
-        const proof = proveRouteProof(selectedProof, provisionalProofContext(model, serviced, nextSite, contactPose));
-        const award = proof.allowance * ratio;
-        const sites = model.retainedSites
-            .filter((site) => site.id !== contacted.id)
-            .concat(serviced, nextSite)
-            .sort((a, b) => a.id - b.id);
+        const award = BASE_ROUTE_ALLOWANCE * ratio;
         const fromLevel = model.fuelGaugeReference > 0 ? clamp(model.fuel / model.fuelGaugeReference, 0, 1) : 0;
         const fuelGaugeReference = model.fuel + award;
         return {
@@ -497,11 +292,10 @@ function prepareService(model, contactPose) {
             fuelGaugeReference,
             completedSites: model.completedSites + 1,
             refuelRatio: refuelRatioForBase(poweredBaseNumber + 1),
-            generatorCursor: model.generatorCursor + 1,
+            generatorCursor: MAX_SITE_INDEX + 1,
             activeSiteId: contacted.id,
-            targetSiteId: nextSite.id,
-            targetRouteProof: proof,
-            retainedSites: sites,
+            targetSiteId: null,
+            retainedSites: model.retainedSites.map((site) => (site.id === contacted.id ? serviced : site)),
             touchdownPose: checkpointPoseForContact(contacted, contactPose),
             sequenceSeconds: 0,
             refuel: model.reducedMotion ? null : freeze({ siteId: contacted.id, fromLevel, progress: 0 }),
@@ -509,10 +303,36 @@ function prepareService(model, contactPose) {
             agent: null,
             status: "Touchdown confirmed. Fuel collected. Deploying agent.",
         };
-    } catch (error) {
-        console.error(error);
-        return generationError(model);
     }
+    const nextSite = freeze({ ...createSiteForIndex(model.seed, model.generatorCursor), originSiteId: contacted.id });
+    const serviced = { ...contacted, canCollected: true };
+    const award = predictedFuelAllowance(contacted, nextSite) * ratio;
+    const sites = model.retainedSites
+        .filter((site) => site.id !== contacted.id)
+        .concat(serviced, nextSite)
+        .sort((a, b) => a.id - b.id);
+    const fromLevel = model.fuelGaugeReference > 0 ? clamp(model.fuel / model.fuelGaugeReference, 0, 1) : 0;
+    const fuelGaugeReference = model.fuel + award;
+    return {
+        ...model,
+        state: "landed",
+        pose: checkpointPoseForContact(contacted, contactPose),
+        commanded: { ...ZERO },
+        fuel: fuelGaugeReference,
+        fuelGaugeReference,
+        completedSites: model.completedSites + 1,
+        refuelRatio: refuelRatioForBase(poweredBaseNumber + 1),
+        generatorCursor: model.generatorCursor + 1,
+        activeSiteId: contacted.id,
+        targetSiteId: nextSite.id,
+        retainedSites: sites,
+        touchdownPose: checkpointPoseForContact(contacted, contactPose),
+        sequenceSeconds: 0,
+        refuel: model.reducedMotion ? null : freeze({ siteId: contacted.id, fromLevel, progress: 0 }),
+        nocStage: 0,
+        agent: null,
+        status: "Touchdown confirmed. Fuel collected. Deploying agent.",
+    };
 }
 
 function crashFragments(model, pose, ordinal) {
@@ -625,7 +445,6 @@ function freezeCheckpoint(model) {
         fuelGaugeReference: model.fuelGaugeReference,
         activeSiteId: model.activeSiteId,
         targetSiteId: model.targetSiteId,
-        targetRouteProof: model.targetRouteProof,
         retainedChunks: [...model.retainedChunks],
         retainedSites: model.retainedSites.map((site) => ({ ...site })),
     });

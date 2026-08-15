@@ -240,25 +240,14 @@ class BuildAndInstallTests(RepositoryFixture):
         with self.assertRaisesRegex(ValueError, "JavaScript module import is absent from manifest"):
             site_builder._validate_local_references(changed, EXPECTED_FILES, "/")
 
-    def test_generated_proof_source_is_composed_without_growing_the_manifest(self) -> None:
+    def test_model_ships_byte_for_byte_without_generated_proof_composition(self) -> None:
         rendered, manifest = site_builder._render_artifact(self.root, "/")
-        model = rendered[Path("static/lander-model.js")].decode()
+        model_path = Path("static/lander-model.js")
         self.assertEqual(manifest, EXPECTED_FILES)
-        self.assertNotIn(site_builder.GENERATED_PROOF_SOURCE, manifest)
-        self.assertNotIn(site_builder.GENERATED_PROOF_IMPORT, model)
-        self.assertIn("const GENERATED_ROUTE_ROWS", model)
-        self.assertIn("export const REFERENCE_PROOF_CATALOG", model)
-
-        source = self.root / "website/static/lander-model.js"
-        source.write_text(
-            source.read_text(encoding="utf-8").replace(
-                site_builder.GENERATED_PROOF_IMPORT,
-                site_builder.GENERATED_PROOF_IMPORT.replace(".generated", ".missing"),
-            ),
-            encoding="utf-8",
-        )
-        with self.assertRaisesRegex(ValueError, "exactly one generated proof import"):
-            site_builder._render_artifact(self.root, "/")
+        self.assertEqual(rendered[model_path], (WEBSITE / model_path).read_bytes())
+        source = (WEBSITE / model_path).read_text(encoding="utf-8")
+        self.assertNotIn("lander-route-proofs", source)
+        self.assertNotIn("REFERENCE_PROOF", source)
 
     def test_collision_and_world_ship_separately_in_the_exact_manifest(self) -> None:
         rendered, manifest = site_builder._render_artifact(self.root, "/")
@@ -273,14 +262,13 @@ class BuildAndInstallTests(RepositoryFixture):
             with self.subTest(changed=changed), self.assertRaises(ValueError):
                 site_builder.validate_game_manifest(changed)
 
-    def test_generated_proof_projection_requires_exact_provenance(self) -> None:
-        generated = self.root / "website" / site_builder.GENERATED_PROOF_SOURCE
-        generated.write_text(
-            generated.read_text(encoding="utf-8").replace("// @generated", "// generated", 1),
-            encoding="utf-8",
-        )
-        with self.assertRaisesRegex(ValueError, "exact provenance marker"):
-            site_builder._render_artifact(self.root, "/")
+    def test_retired_route_projection_sources_are_absent(self) -> None:
+        for relative in (
+            "static/lander-route-proofs.generated.js",
+            "tools/derive_lander_routes.mjs",
+            "tools/project_lander_route_proofs.mjs",
+        ):
+            self.assertFalse((self.root / "website" / relative).exists())
 
     def test_authored_lander_modules_and_tests_stay_below_the_review_ceiling(self) -> None:
         authored = [

@@ -23,7 +23,7 @@ PROBE = r"""
 import { landerGameController as controller } from "/static/lander-game.js";
 import { advanceMissionSequence, classifySweptContact, createRun, stepFlight, updateRetention } from "/static/lander-model.js";
 import { MAX_NORMALIZED_DECK, STATIC_WORLD_SEED, TERRAIN_PROFILES, WORLD_MAX_X, WORLD_MIN_X,
-    createSiteForIndex, hullForPose, terrainHeightAt } from "/static/lander-world.js";
+    createSiteForIndex, hullForPose, normalizeDegrees, terrainHeightAt } from "/static/lander-world.js";
 
 if (controller.frameId !== null) cancelAnimationFrame(controller.frameId);
 controller.frameId = null;
@@ -147,25 +147,26 @@ const terrainContract = () => {
 const maximumKnotSweep = (direction) => {
     const model = {...createRun({seed: 41}), retainedSites: [], targetSiteId: null,
         terrainAuthority: "context", terrainVertices: []};
-    const pose = {x: 0, y: 35.8, vx: 0, vy: 0, angle: 0.9, angularVelocity: 0};
-    const angularTravel = direction * 53148;
-    const finalAngle = direction * Math.atan2(6.5, 1.6) * 180 / Math.PI;
-    const previous = {...pose, angle: finalAngle - direction * 152};
-    const next = {...previous, x: direction * 5687.1066666666675, angle: finalAngle};
+    const previous = {x: 0, y: 35.8, vx: 0, vy: 0,
+        angle: direction * .9, angularVelocity: 0};
+    const angularTravel = direction * 73091.33333333333;
+    const next = {...previous, x: direction * 11746.828095238097,
+        angle: normalizeDegrees(previous.angle + angularTravel)};
     const corner = hullForPose({...next, angle: previous.angle + angularTravel})
         .reduce((selected, candidate) => direction * candidate.x > direction * selected.x ? candidate : selected);
+    const edgeX = corner.x - direction * .001;
     const features = [{cause: "terminus", priority: 3,
-        segment: [{x: corner.x, y: corner.y - .01}, {x: corner.x, y: corner.y + .01}]}];
+        segment: [{x: edgeX, y: 20}, {x: edgeX, y: 50}]}];
     const staleInstrumentation = {};
     const staleContact = classifySweptContact(model, previous, next,
-        {angularTravel: direction * 50552, instrumentation: staleInstrumentation, features});
-    if (staleContact !== null || staleInstrumentation.visitedKnots !== 50554)
+        {angularTravel: direction * 53148, instrumentation: staleInstrumentation, features});
+    if (staleContact !== null || staleInstrumentation.visitedKnots !== 53150)
         throw new Error("maximum knot sweep final slabs are not authoritative");
     const classify = () => {
         const instrumentation = {};
         const contact = classifySweptContact(model, previous, next, {angularTravel, instrumentation, features});
         if (contact?.cause !== "terminus" || contact.kind !== "unsafe" || contact.time <= .9999 ||
-            instrumentation.visitedKnots !== 53150 || instrumentation.maxKnotHulls > 2 ||
+            instrumentation.visitedKnots !== 73094 || instrumentation.maxKnotHulls > 2 ||
             instrumentation.maxStack > 20 || instrumentation.prunedSlabs <= 50000 ||
             instrumentation.constructedKnotHulls >= 256) throw new Error("maximum knot sweep contract drifted");
         return instrumentation;
@@ -210,7 +211,7 @@ const serviceTarget = (model) => {
 };
 const warmup = (seed) => {
     let model = updateRetention(createRun({seed, reducedMotion: true}));
-    let proofPaths = 0;
+    let directAllowances = 0;
     let poweredCheckpoints = 0;
     controller.model = model;
     controller.render();
@@ -221,13 +222,13 @@ const warmup = (seed) => {
             controller.render();
         }
         model = serviceTarget(model);
-        if (model.targetRouteProof?.success && !("smallerFailure" in model.targetRouteProof)) proofPaths += 1;
+        if (model.targetSiteId !== null) directAllowances += 1;
         const active = model.retainedSites.find((site) => site.id === model.activeSiteId);
         if (active?.powered && active.nocStage === 7 && model.checkpoint) poweredCheckpoints += 1;
         controller.model = model;
         controller.render();
     }
-    return {completedSites: model.completedSites, proofPaths, poweredCheckpoints};
+    return {completedSites: model.completedSites, directAllowances, poweredCheckpoints};
 };
 const longevity = (seed) => {
     const warmupResult = warmup(seed);
@@ -235,7 +236,7 @@ const longevity = (seed) => {
     const frameValues = [];
     const frameStates = {};
     const maxima = {sites: 0, chunks: 0, terrainVertices: 0, document: 0, world: 0};
-    let proofPaths = 0;
+    let directAllowances = 0;
     let poweredCheckpoints = 0;
     let stabilizedDom = null;
     let model = updateRetention(createRun({seed, reducedMotion: true}));
@@ -250,7 +251,7 @@ const longevity = (seed) => {
         const started = performance.now();
         model = serviceTarget(model);
         generationValues.push(performance.now() - started);
-        if (model.targetRouteProof?.success && !("smallerFailure" in model.targetRouteProof)) proofPaths += 1;
+        if (model.targetSiteId !== null) directAllowances += 1;
         const active = model.retainedSites.find((site) => site.id === model.activeSiteId);
         if (active?.powered && active.nocStage === 7 && model.checkpoint) poweredCheckpoints += 1;
         maxima.sites = Math.max(maxima.sites, model.retainedSites.length);
@@ -261,7 +262,7 @@ const longevity = (seed) => {
         if (completed === 1) stabilizedDom = domCounts();
     }
     return {seed, warmup: warmupResult, completedSites: model.completedSites,
-        finalState: model.state, proofPaths,
+        finalState: model.state, directAllowances,
         poweredCheckpoints,
         generation: timingSummary(generationValues),
         frames: timingSummary(frameValues), frameStates,
@@ -477,12 +478,12 @@ class Phase4QBrowserTests(RepositoryFixture):
             with self.subTest(seed=witness["seed"], contract="longevity"):
                 self.assertEqual(witness["warmup"], {
                     "completedSites": 12,
-                    "proofPaths": 12,
+                    "directAllowances": 12,
                     "poweredCheckpoints": 12,
                 })
                 self.assertEqual(witness["completedSites"], 100)
                 self.assertEqual(witness["finalState"], "launching")
-                self.assertEqual(witness["proofPaths"], 100)
+                self.assertEqual(witness["directAllowances"], 100)
                 self.assertEqual(witness["poweredCheckpoints"], 100)
                 self.assertEqual(witness["generation"]["samples"], 100)
                 self.assertLess(witness["generation"]["p95"], 25)
@@ -511,11 +512,11 @@ class Phase4QBrowserTests(RepositoryFixture):
             self.assertEqual(row["timing"]["samples"], 10)
             self.assertLess(row["timing"]["p95"], 100)
             self.assertLess(row["timing"]["maximum"], 250)
-            self.assertEqual(row["instrumentation"]["visitedKnots"], 53150)
-            self.assertEqual(row["staleInstrumentation"]["visitedKnots"], 50554)
+            self.assertEqual(row["instrumentation"]["visitedKnots"], 73094)
+            self.assertEqual(row["staleInstrumentation"]["visitedKnots"], 53150)
             self.assertEqual(
                 row["instrumentation"]["visitedKnots"] - row["staleInstrumentation"]["visitedKnots"],
-                2596,
+                19944,
             )
             self.assertLessEqual(row["instrumentation"]["maxKnotHulls"], 2)
             self.assertLessEqual(row["instrumentation"]["maxStack"], 20)
@@ -527,10 +528,10 @@ class Phase4QBrowserTests(RepositoryFixture):
         terrain = result["terrain"]
         self.assertEqual(terrain["minimum"], 0.1)
         self.assertEqual(terrain["maximum"], 0.6)
-        self.assertGreater(terrain["maximumDeck"], 0.499)
+        self.assertEqual(round(terrain["maximumDeck"], 7), 0.4969375)
         self.assertLessEqual(terrain["maximumDeck"], terrain["deckLimit"])
         self.assertEqual(terrain["maximumOrdinal"], 5)
-        self.assertEqual([terrain["minimumSpacing"], terrain["maximumSpacing"]], [56, 136])
+        self.assertEqual([terrain["minimumSpacing"], terrain["maximumSpacing"]], [152, 232])
         expected = {
             "narrow": (320, 780),
             "zoomEquivalent": (320, 240),

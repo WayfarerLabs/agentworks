@@ -55,7 +55,6 @@ const projection = (model) => ({
     refuelRatio: model.refuelRatio, generatorCursor: model.generatorCursor,
     pose: structuredClone(model.pose), fuel: model.fuel, fuelGaugeReference: model.fuelGaugeReference,
     activeSiteId: model.activeSiteId, targetSiteId: model.targetSiteId,
-    targetRouteProof: structuredClone(model.targetRouteProof),
     retainedChunks: structuredClone(model.retainedChunks), retainedSites: structuredClone(model.retainedSites),
     commanded: structuredClone(model.commanded), refuel: structuredClone(model.refuel),
     agent: structuredClone(model.agent), checkpoint: structuredClone(model.checkpoint),

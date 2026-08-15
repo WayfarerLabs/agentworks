@@ -31,32 +31,32 @@ export const NOC_CONNECTOR_WIDTH = 2,
 export const TERRAIN_VERTEX_CADENCE = 16,
     TERRAIN_BLOCK_WIDTH = 512,
     TERRAIN_EPOCH_BLOCKS = 8,
-    TERRAIN_GRADE_LIMIT = 0.4,
-    TERRAIN_GRADE_CHANGE_LIMIT = 0.8,
+    TERRAIN_GRADE_LIMIT = 0.6,
+    TERRAIN_GRADE_CHANGE_LIMIT = 1.2,
     TERRAIN_NORMALIZED_MINIMUM = 0.1,
     TERRAIN_NORMALIZED_MAXIMUM = 0.6,
-    SITE_SPACING = 96;
+    SITE_SPACING = 192;
 export const SITE_CANDIDATE_OFFSETS = Object.freeze([0, 8, 16, 24, 32, 40]);
 export const SITE_CANDIDATE_ORDERS = Object.freeze([
     Object.freeze([0, 1, 2, 3, 4, 5]),
     Object.freeze([0, 5, 4, 3, 2, 1]),
 ]);
 export const MAX_NORMALIZED_DECK = 0.5;
-export const WORLD_MIN_X = -393216,
-    WORLD_MAX_X = 393216,
+export const WORLD_MIN_X = -786432,
+    WORLD_MAX_X = 786432,
     MIN_SITE_INDEX = -4095,
     MAX_SITE_INDEX = 4095,
     TERMINUS_WIDTH = 0.2;
 
 const TERRAIN_PROFILE_ROWS = [
-    ".35 .29 .19 .11 .21 .30 .39 .47 .42 .41 .36 .28 .38 .45 .40 .30 .23 .28 .33 .26 .20 .30 .25 .19 .29 .35 .29 .22 .16 .10 .17 .26 .35",
-    ".35 .43 .52 .42 .35 .34 .27 .36 .41 .49 .41 .36 .31 .26 .34 .43 .52 .47 .37 .43 .33 .29 .28 .23 .33 .40 .45 .38 .36 .28 .36 .44 .35",
-    ".35 .30 .25 .35 .43 .36 .28 .33 .43 .33 .24 .29 .20 .19 .14 .23 .32 .37 .32 .38 .48 .57 .49 .42 .47 .52 .42 .36 .46 .39 .37 .28 .35",
-    ".35 .45 .52 .46 .38 .43 .49 .54 .48 .38 .43 .49 .44 .39 .48 .53 .45 .36 .42 .50 .44 .36 .27 .35 .27 .18 .26 .36 .30 .25 .35 .44 .35",
-    ".35 .26 .33 .42 .50 .60 .50 .41 .48 .39 .38 .29 .39 .29 .23 .31 .38 .28 .19 .28 .23 .18 .25 .32 .42 .37 .32 .40 .35 .28 .19 .28 .35",
-    ".35 .41 .51 .41 .33 .39 .48 .38 .30 .28 .22 .27 .36 .42 .34 .31 .28 .20 .28 .37 .43 .51 .41 .33 .43 .48 .38 .31 .41 .43 .50 .43 .35",
-    ".35 .28 .33 .43 .35 .30 .38 .31 .22 .32 .37 .30 .36 .38 .44 .34 .28 .35 .45 .40 .32 .39 .34 .25 .32 .34 .35 .41 .31 .29 .24 .29 .35",
-    ".35 .29 .21 .15 .23 .32 .42 .35 .33 .28 .36 .38 .48 .42 .34 .43 .48 .39 .33 .25 .34 .40 .33 .23 .32 .35 .40 .31 .24 .16 .26 .27 .35",
+    ".35 .29 .25 .10 .25 .30 .39 .47 .42 .41 .36 .28 .38 .45 .40 .30 .23 .28 .33 .26 .20 .30 .25 .19 .29 .35 .29 .22 .16 .10 .17 .26 .35",
+    ".35 .45 .60 .45 .35 .34 .27 .36 .41 .49 .41 .36 .31 .26 .34 .43 .52 .47 .37 .43 .33 .29 .28 .23 .33 .40 .45 .38 .36 .28 .36 .44 .35",
+    ".35 .30 .25 .35 .43 .36 .28 .33 .43 .33 .24 .29 .20 .19 .14 .23 .32 .37 .32 .38 .45 .60 .45 .42 .47 .52 .42 .36 .46 .39 .37 .28 .35",
+    ".35 .45 .52 .46 .38 .43 .49 .54 .48 .38 .43 .49 .44 .39 .45 .60 .45 .36 .42 .50 .44 .36 .27 .35 .27 .18 .26 .36 .30 .25 .35 .44 .35",
+    ".35 .26 .33 .42 .45 .60 .45 .41 .48 .39 .38 .29 .39 .29 .23 .31 .38 .28 .19 .28 .23 .18 .25 .32 .42 .37 .32 .40 .35 .28 .19 .28 .35",
+    ".35 .45 .60 .45 .33 .39 .48 .38 .30 .28 .22 .27 .36 .42 .34 .31 .28 .20 .28 .37 .43 .51 .41 .33 .43 .48 .38 .31 .41 .43 .50 .43 .35",
+    ".35 .28 .33 .43 .35 .30 .38 .31 .22 .32 .37 .30 .36 .38 .44 .34 .28 .35 .45 .40 .32 .39 .34 .25 .32 .34 .35 .41 .31 .25 .10 .25 .35",
+    ".35 .29 .21 .15 .23 .32 .42 .35 .33 .28 .36 .38 .48 .42 .34 .43 .48 .39 .33 .25 .34 .40 .33 .23 .32 .35 .40 .31 .25 .10 .25 .27 .35",
 ];
 export const TERRAIN_PROFILES = freeze(
     Object.fromEntries(TERRAIN_PROFILE_ROWS.map((row, index) => [`S${index}`, row.split(" ").map(Number)])),
@@ -313,7 +313,6 @@ export function createSiteForIndex(seed, siteIndex, state = {}) {
             canCollected: state.canCollected ?? false,
             powered: state.powered ?? false,
             nocStage: state.nocStage ?? 0,
-            pairKey: state.pairKey ?? null,
             originSiteId: state.originSiteId ?? null,
         });
     }
@@ -322,26 +321,6 @@ export function createSiteForIndex(seed, siteIndex, state = {}) {
 
 export function createFirstSite(seed) {
     return createSiteForIndex(seed, 0);
-}
-
-function millimeters(value) {
-    const result = Math.round(value * 1000);
-    if (!Number.isSafeInteger(result)) throw new RangeError(`Value ${value} has no safe millimetre key`);
-    return result;
-}
-
-export function routePairKey(originSite, targetSite) {
-    return `r:${millimeters(targetSite.center - originSite.center)}:${millimeters(originSite.platformTop)}:${millimeters(targetSite.platformTop)}`;
-}
-
-export function selectRouteProof(originSite, targetSite, proofCatalog) {
-    if (targetSite.id !== originSite.id + 1) {
-        throw new Error(`Sites ${originSite.id}/${targetSite.id} are not one forward route leg`);
-    }
-    const key = routePairKey(originSite, targetSite);
-    const proof = proofCatalog[key];
-    if (!proof || proof.pairKey !== key) throw new Error(`Missing exact route proof ${key}`);
-    return proof;
 }
 
 export function terrainVerticesForWindow(seed, sites, left, right) {
@@ -622,12 +601,11 @@ function terrainCandidates(seed, bounds) {
     const left = Math.max(WORLD_MIN_X, bounds.left - COLLISION_MARGIN);
     const right = Math.min(WORLD_MAX_X, bounds.right + COLLISION_MARGIN);
     if (right < left) return [];
-    const first = Math.floor(left / TERRAIN_VERTEX_CADENCE);
-    const last = Math.ceil(right / TERRAIN_VERTEX_CADENCE);
+    const first = Math.max(-49152, Math.ceil(left / TERRAIN_VERTEX_CADENCE) - 1);
+    const last = Math.min(49151, Math.floor(right / TERRAIN_VERTEX_CADENCE));
     const result = [];
-    for (let index = first; index < last; index += 1) {
+    for (let index = first; index <= last; index += 1) {
         const x = index * TERRAIN_VERTEX_CADENCE;
-        if (x < WORLD_MIN_X || x + TERRAIN_VERTEX_CADENCE > WORLD_MAX_X) continue;
         const segment = [
             { x, y: terrainHeightAt(seed, x) },
             { x: x + TERRAIN_VERTEX_CADENCE, y: terrainHeightAt(seed, x + TERRAIN_VERTEX_CADENCE) },

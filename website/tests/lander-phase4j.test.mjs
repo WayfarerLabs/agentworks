@@ -231,10 +231,6 @@ test("outcome projection keeps structural banner/action states and source order"
     assert.equal(root.dataset.banner, "crashed");
     assert.equal(elements["lander-restart"].hidden, false);
     assert.equal(elements["lander-status"].textContent, controller.model.status);
-    controller.model = { ...ready, state: "generation-error" };
-    controller.render();
-    assert.equal(root.dataset.banner, "error");
-    assert.equal(elements["lander-restart"].hidden, true);
     controller.destroy();
 });
 

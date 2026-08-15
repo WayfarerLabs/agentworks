@@ -44,22 +44,24 @@ in-viewport descendants, and 44-pixel native actions. The witness also emits 12 
 artifacts across the three terrain seeds and four viewports without asserting authored prose or
 golden pixels. Inside Chromium it also services 100 real powered sites for each of seeds 11, 39, 41,
 and STATIC after a separate finite 12-site production-identical warmup for that seed. The measured
-100-site runs time generation plus the single keyed proof path and changed-state renders while
+100-site runs time generation plus direct allowance arithmetic and changed-state renders while
 enforcing the retention and world-DOM ceilings. Exact listener inventories and stabilized DOM counts
 must remain unchanged across all four runs. Run
 `python3 -m unittest discover -s website/tests -p 'test_lander_phase4q_browser.py'`. This is
 automated Chromium evidence; it does not replace the qualitative terrain or cross-engine acceptance
 below.
 
-The Phase 4T witness uses the successor 16/512 m straight-polyline corpus and the
+The Phase 4U witness uses the successor 16/512 m straight-polyline corpus and the
 terrain-independent six-candidate site order. It checks visible sharp reversals, normalized `.6`
 terrain away from pads, accepted decks at or below `.5`, native support feet, and candidate
-rejection without terrain mutation. The route witness covers all 312 exact keys and 736 concrete
-assignments, including `70/41/201` bootstrap/reuse/synthesis selections, exact contact through step
-4,332, 16 openings, and the sufficient 13.4 base allowance. Capture seed 11, 39, 41, and static
-evidence at `1000x780`, `320x780`, true `320x240`, and a true mobile/touch `667x320`; require inner,
-client, and scroll width/height equality with zero scroll before and after lifecycle. Screenshots
-are qualitative artifacts for operator inspection and are not golden-policed.
+rejection without terrain mutation. The geometry witness independently covers 512 profile/order
+assignments and 250 geometry classes, while test-owned non-exhaustive flight examples cover all 16
+openings plus the closest, farthest, maximum-rise, and maximum-fall representatives. Runtime
+allowance is the direct constant-time `quantumCeil(22 + max(0, deckDelta) / 3)` prediction; no route
+key, search, simulation, replay, or catalog is present. Capture seed 11, 39, 41, and static evidence
+at `1000x780`, `320x780`, true `320x240`, and a true mobile/touch `667x320`; require inner, client,
+and scroll width/height equality with zero scroll before and after lifecycle. Screenshots are
+qualitative artifacts for operator inspection and are not golden-policed.
 
 The Phase 4S witness supersedes the Phase 4R terrain corpus with global 16/512 m asymmetric
 straight-polyline superblock profiles, the visible physical world termini, concrete-contact-only
@@ -221,7 +223,7 @@ claiming 100 manually flown services.
 The actual simultaneous worst-case render contained ten terrain paths, three complete sites, eight
 crash fragments, five direct world children, and exactly 80 `#lander-world` descendants. Active
 frame callback time over 1,250 samples had p95 `0.9 ms`, maximum `26.5 ms`, and mean `0.433 ms`.
-Generation plus both proof replays across 100 deterministic services had p95 `7.2 ms`, maximum
+Generation plus direct allowance work across 100 deterministic services had p95 `7.2 ms`, maximum
 `15.3 ms`, and mean `6.071 ms`. Retention stayed at ten chunks and three sites while the camera
 moved in both directions. After garbage collection, observed JavaScript heap decreased from
 2,123,772 to 1,285,712 bytes, DOM nodes from 484 to 479, and browser-reported event listeners

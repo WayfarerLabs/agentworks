@@ -5,7 +5,6 @@ import { readFile } from "node:fs/promises";
 
 import { exactRootNumber, exactSegmentContact } from "../static/lander-collision.js";
 import { createRun, stepFlight } from "../static/lander-model.js";
-import { exactRouteSegmentContactTime } from "../tools/lander_route_collision.mjs";
 import {
     MAX_SITE_INDEX,
     MIN_SITE_INDEX,
@@ -17,6 +16,7 @@ import {
     classifySweptContact,
     createSiteForIndex,
     hullForPose,
+    normalizeDegrees,
     terrainHeightAt,
     terrainProfileForBlock,
     worldTermini,
@@ -96,7 +96,6 @@ test("production and independent exact roots preserve crossing, tangency, and co
     ];
     for (const vector of vectors) {
         assert.equal(exactRootNumber(exactSegmentContact(vector.left, vector.right, vector.segment)), vector.time);
-        assert.equal(exactRouteSegmentContactTime(vector.left, vector.right, vector.segment), vector.time);
     }
 });
 
@@ -253,8 +252,8 @@ test("seeded superprofiles preserve the exact closed band without a short silhou
         assert.equal(samples.at(-1), 0.35);
         assert.ok(samples.every((height) => height >= 0.1 && height <= 0.6));
         const grades = samples.slice(1).map((height, index) => (height - samples[index]) / 0.25);
-        assert.ok(grades.every((grade) => Math.abs(grade) <= 0.4 + 1e-12));
-        assert.ok(grades.slice(1).every((grade, index) => Math.abs(grade - grades[index]) <= 0.8 + 1e-12));
+        assert.ok(grades.every((grade) => Math.abs(grade) <= 0.6 + 1e-12));
+        assert.ok(grades.slice(1).every((grade, index) => Math.abs(grade - grades[index]) <= 1.2 + 1e-12));
     }
     for (const seed of [11, 39, 41, STATIC_WORLD_SEED]) {
         const ids = Array.from({ length: 128 }, (_, offset) => terrainProfileForBlock(seed, offset - 64).profile);
@@ -357,8 +356,8 @@ test("terminus and final service are physical and terminal without inventing a s
     assert.equal(terminal.generatorCursor, 4096);
     assert.equal(terminal.activeSiteId, MAX_SITE_INDEX);
     assert.equal(terminal.targetSiteId, null);
-    assert.equal(terminal.targetRouteProof, null);
-    assert.equal(terminal.fuel, run.fuel + 13.4);
+    assert.equal("targetRouteProof" in terminal, false);
+    assert.equal(terminal.fuel, run.fuel + 22);
 });
 
 test("maximum reachable signed angular sweeps find final-slab contact with bounded retention", () => {
@@ -374,29 +373,32 @@ test("maximum reachable signed angular sweeps find final-slab contact with bound
     const fullRotation = {};
     assert.equal(classifySweptContact(model, pose, pose, { angularTravel: 360, instrumentation: fullRotation }), null);
     assert.equal(fullRotation.visitedKnots, 362);
-    const extremeAngle = (Math.atan2(6.5, 1.6) * 180) / Math.PI;
     for (const direction of [-1, 1]) {
-        const angularTravel = direction * 53148;
-        const finalAngle = direction * extremeAngle;
-        const previous = { ...pose, angle: finalAngle - direction * 152 };
-        const next = { ...previous, x: direction * 5687.1066666666675, angle: finalAngle };
+        const angularTravel = direction * 73091.33333333333;
+        const previous = { ...pose, angle: direction * 0.9 };
+        const next = {
+            ...previous,
+            x: direction * 11746.828095238097,
+            angle: normalizeDegrees(previous.angle + angularTravel),
+        };
         const corner = hullForPose({ ...next, angle: previous.angle + angularTravel }).reduce((selected, candidate) =>
             direction * candidate.x > direction * selected.x ? candidate : selected,
         );
+        const edgeX = corner.x - direction * 0.001;
         const edge = [
-            { x: corner.x, y: corner.y - 0.01 },
-            { x: corner.x, y: corner.y + 0.01 },
+            { x: edgeX, y: 20 },
+            { x: edgeX, y: 50 },
         ];
         const staleInstrumentation = {};
         assert.equal(
             classifySweptContact(model, previous, next, {
-                angularTravel: direction * 50552,
+                angularTravel: direction * 53148,
                 instrumentation: staleInstrumentation,
                 features: [{ cause: "terminus", priority: 3, segment: edge }],
             }),
             null,
         );
-        assert.equal(staleInstrumentation.visitedKnots, 50554);
+        assert.equal(staleInstrumentation.visitedKnots, 53150);
         const instrumentation = {};
         const contact = classifySweptContact(model, previous, next, {
             angularTravel,
@@ -406,8 +408,8 @@ test("maximum reachable signed angular sweeps find final-slab contact with bound
         assert.equal(contact.kind, "unsafe");
         assert.equal(contact.cause, "terminus");
         assert.ok(contact.time > 0.9999);
-        assert.equal(instrumentation.visitedKnots, 53150);
-        assert.equal(instrumentation.visitedKnots - staleInstrumentation.visitedKnots, 2596);
+        assert.equal(instrumentation.visitedKnots, 73094);
+        assert.equal(instrumentation.visitedKnots - staleInstrumentation.visitedKnots, 19944);
         assert.ok(instrumentation.maxKnotHulls <= 2);
         assert.ok(instrumentation.maxStack <= 20);
         assert.ok(instrumentation.prunedSlabs > 50000);

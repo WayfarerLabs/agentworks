@@ -44,7 +44,6 @@ const ACTIVE_STATES = new Set([
     "launching",
     "crashing",
     "failed",
-    "generation-error",
 ]);
 const FLIGHT_CODES = new Set(["Space", "ArrowUp", "ArrowLeft", "ArrowRight", "KeyH", "KeyL"]);
 const ZERO_INPUT = Object.freeze({ left: 0, right: 0, vectorAngle: 0 });
@@ -875,13 +874,7 @@ export class LanderGameController {
         const failed = this.model.state === "failed";
         this.lander_restart.hidden = !failed;
         this.lander_restart.disabled = !failed;
-        this.root.dataset.banner = launchReady
-            ? "deployed"
-            : failed
-              ? "crashed"
-              : this.model.state === "generation-error"
-                ? "error"
-                : "none";
+        this.root.dataset.banner = launchReady ? "deployed" : failed ? "crashed" : "none";
     }
 
     destroy() {

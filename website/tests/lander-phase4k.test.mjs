@@ -7,25 +7,16 @@ import {
     MAX_LANDING_ANGULAR_SPEED,
     MAX_LANDING_DESCENT_SPEED,
     MAX_LANDING_HORIZONTAL_SPEED,
+    BASE_ROUTE_ALLOWANCE,
     createRun,
     mixDigitalInput,
+    predictedFuelAllowance,
     pointerEngineRequests,
     stepFlight,
 } from "../static/lander-model.js";
-import { REFERENCE_PROOFS, ROUTE_DIGESTS } from "../static/lander-route-proofs.generated.js";
 import { FakeElement, controllerClasses, controllerFixture } from "./lander-test-dom.mjs";
 
 const ROOT = new URL("../", import.meta.url);
-const EXPECTED_DIGESTS = Object.freeze({
-    assignmentDigest: "cd46a599456005c156a72c904d33ac2950446efad220a1a3db56553abdcbe48b",
-    bootstrapDigest: "ebaa368a38b262bb7839b621fd9785a379347e57e2217a6a2dc66466f9fa5c88",
-    geometryDigest: "65a491fd64bce20dfad6001d11206a9616e2313aa77fad8c363f00ff79e2a4ce",
-    outputDigest: "37acd7fbb5d068b9e83ddde8a80454d1cc88e83f018210588bb62e9cf121f08b",
-    physicsDigest: "e3af9abd8ba3677f67b6aee8fea1c6b46b2592799640469f76dd674e1f04406c",
-    predecessorGeometryDigest: "257da30dbbaa9af6910ad2beb344162f0321760169cafb29a8e80164f4507248",
-    proofDigest: "1c9177830b1ba25c7cdb2751466bfd57b1409ed9849f96dcd78392c5a3988640",
-    worldDigest: "d32a90ba482d41a874db740447838792a5927eee15b24cddf62ca98b6e0bfa1b",
-});
 
 async function controllerAt(model = createRun({ seed: 1 })) {
     const { LanderGameController } = await controllerClasses();
@@ -66,17 +57,14 @@ function inputSnapshot(controller) {
     };
 }
 
-test("landing profile and the finite route catalog remain exact", () => {
+test("landing profile and direct predicted allowance remain exact", () => {
     assert.deepEqual(
         [MAX_LANDING_HORIZONTAL_SPEED, MAX_LANDING_DESCENT_SPEED, MAX_LANDING_ANGLE, MAX_LANDING_ANGULAR_SPEED],
         [2.2, 3.6, 18, 26],
     );
-    assert.deepEqual(ROUTE_DIGESTS, EXPECTED_DIGESTS);
-    assert.equal(REFERENCE_PROOFS.length, 312);
-    assert.equal(new Set(REFERENCE_PROOFS.map(({ pairKey }) => pairKey)).size, 312);
-    assert.ok(
-        REFERENCE_PROOFS.every((proof) => proof.success.classification === "safe" && !("smallerFailure" in proof)),
-    );
+    assert.equal(BASE_ROUTE_ALLOWANCE, 22);
+    assert.equal(predictedFuelAllowance({ platformTop: 20 }, { platformTop: 20 }), 22);
+    assert.equal(predictedFuelAllowance({ platformTop: 20 }, { platformTop: 34.184 }), 26.75);
 });
 
 test("production, validator, and fake DOM sources contain no native Launch authority", async () => {

@@ -66,23 +66,23 @@ function stepMany(pose, request, fuel, count) {
     return { pose: current, fuel: reserve };
 }
 
-test("9.0 engine physics, true gimbal, assist, input arbitration, and plumes match fixed vectors", () => {
-    assert.equal(ENGINE_ACCELERATION, 9);
+test("rational-mass engine physics, true gimbal, assist, input arbitration, and plumes match fixed vectors", () => {
+    assert.equal(ENGINE_ACCELERATION, 90 / 7);
     assert.equal(MAX_THRUST_VECTOR, 30);
     assert.equal(TURNING_TOTAL, 0.8);
     assert.equal(TURN_DIFFERENTIAL, 0.375);
     const pose = { x: 10, y: 30, vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
     const gravity = stepMany(pose, { left: 0, right: 0 }, 30, 120);
-    close(gravity.pose.y, 28.4875);
-    close(gravity.pose.vy, -3);
+    close(gravity.pose.y, 27.839285714285715);
+    close(gravity.pose.vy, -4.285714285714286);
     close(gravity.fuel, 30);
     const collective = stepMany(pose, { left: 0.72, right: 0.72 }, 30, 120);
-    close(collective.pose.y, 35.0215);
-    close(collective.pose.vy, 9.96);
+    close(collective.pose.y, 37.17357142857143);
+    close(collective.pose.vy, 14.228571428571431);
     close(collective.fuel, 28.56);
     const turn = integratePose(pose, { left: 0, right: 0.375 }, 30);
-    close((turn.pose.vx - pose.vx) / STEP_SECONDS, -1.6875);
-    close((turn.pose.vy - pose.vy) / STEP_SECONDS, -0.0771642622275195);
+    close((turn.pose.vx - pose.vx) / STEP_SECONDS, -2.410714285714285);
+    close((turn.pose.vy - pose.vy) / STEP_SECONDS, -0.11023466032502771);
     close(turn.pose.angularVelocity, -0.25);
     close(turn.pose.angle, -0.00208333333333);
     close(turn.thrust.vectorAngle, -30);
@@ -297,7 +297,7 @@ test("safe landing creates next target, adds uncapped award, and begins service"
     assert.ok(landed.fuel > 100);
     close(landed.refuelRatio, 1.5);
     assert.equal(landed.targetSiteId, 1);
-    assert.ok(landed.targetRouteProof);
+    assert.equal("targetRouteProof" in landed, false);
 });
 
 test("accepted touchdown margins award from the centered immutable checkpoint", () => {
@@ -311,9 +311,7 @@ test("accepted touchdown margins award from the centered immutable checkpoint", 
         assert.equal(model.completedSites, 1);
         assert.equal(model.pose.x, target.center);
         assert.equal(model.checkpoint.pose.x, target.center);
-        assert.equal(model.targetRouteProof.success.classification, "safe");
-        assert.equal("smallerFailure" in model.targetRouteProof, false);
-        assert.ok(model.targetRouteProof.allowance >= model.targetRouteProof.controllerBurn);
+        assert.equal("targetRouteProof" in model, false);
     }
 });
 
@@ -820,8 +818,8 @@ test("fixed scheduler is frame-rate equivalent and bounds its input queue", () =
             model = result.model;
         }
         close(model.pose.x, 30.8);
-        close(model.pose.y, 30.0875);
-        close(model.pose.vy, -3.4);
+        close(model.pose.y, 29.43928571428572);
+        close(model.pose.vy, -4.685714285714279);
     }
     let clock = createSimulationClock(0);
     for (let index = 0; index < 64; index += 1)
@@ -898,7 +896,7 @@ test("retention and DOM reconciliation change only at bounded window keys", asyn
         [
             terrainFillPath(terrainVerticesForRange(crossing, 0, 100)),
             terrainPath(terrainVerticesForRange(crossing, 0, 100)),
-            "M-3932160 0V416M3932160 0V416",
+            "M-7864320 0V416M7864320 0V416",
         ],
     );
     controller.model = changed;
