@@ -1,153 +1,142 @@
-# FRD: The CLI Grammar Rework
+# CLI Grammar Correction, Functional Requirements
 
-- Status: Study-phase draft; requirements await verb-contract and operator review
-- Owner: `agw-ns-cli-grammer`, SDD lead; this working tree remains a review vehicle until the
-  operator rules on the verb contract
-- Date: 2026-08-10
-- Saga: `docs/sdd/2026-08-04-next-steps/`
-- Delivery: one cohesive child SDD (operator ruling, 2026-08-10: "this deserves to be done in one
-  cohesive whole") with a study-and-design cycle before implementation; ships inside the 0.14
-  breaking window or waits for the next one, never just after a cut
+- Status: Draft for operator review
+- Date: 2026-08-15
+- Depends on: `cli-surface-study.md`, `prior-art-research.md`, and `future-directions.md`
 
 ## Purpose
 
-The CLI surface grew group by group and its conventions drifted: verbs mean different things under
-different nouns, flags spell the same concept differently, three exit-code philosophies coexist, and
-load-bearing distinctions live in the operator's head rather than in artifacts. This effort fixes
-everything that does not align with a settled verb vocabulary, in one deliberate breaking release,
-and writes the vocabulary down so it cannot drift silently again.
+Make type explanation, relationship inspection, and fixed-destination schema installation say what
+they do. The change is intentionally narrow and gates 0.14.0.
 
-`cli-surface-study.md` is the synthesis and proposal set. `current-surface-audit.md` records the
-code-verified 71-endpoint inventory and downstream contracts. `node-model-study.md` records the
-declaration/live architecture boundary. `prior-art-research.md` tests the proposed vocabulary
-against primary external references. Inventory statements are facts at the recorded basis;
-vocabulary judgments remain proposals until individually ruled on.
+## Settled product decisions
 
-## Requirements
+1. `resource describe-kind` is renamed to `resource explain`.
+2. Relational inspection belongs under a new top-level `graph` namespace.
+3. `resource describe` is removed. Its relationships move to `graph`; no generic replacement card is
+   created because the remaining facts are covered by existing commands.
+4. `--write` is path-valued. The schema set's fixed-destination action is named `--install`.
+5. This is a pre-0.14 breaking cutover. Removed spellings do not receive aliases.
 
-- R1. **The verb contract is the first reviewed artifact.** Before any HLA or implementation, the
-  effort produces the normative verb vocabulary as its own document: every verb with a one-line
-  contract, the cross-cutting rules (flag semantics, exit codes, confirmation, output formats, the
-  `KIND/NAME` node grammar), and the noun-plane model. It builds on the study but is not the study:
-  every vocabulary or structure change is presented to the operator as a discrete decision, never
-  batched inside prose. Mechanical drift fixes (flag renames within one meaning, missing filters,
-  json coverage, exit-code conformance) may batch.
-- R2. **Settled rulings the contract starts from** (operator, 2026-08-09/10):
-  - `resource describe-kind` becomes `resource explain` (type documentation; answers on a broken
-    config; grammar leaves room for field-path drill-down without building it).
-  - `describe` is the kind-aware card for one specific node: `KIND/NAME` where the command is not
-    kind-locked and bare `NAME` where a group implies the kind. It does not own relationship
-    sections and points to `graph`. The top-level command home, retention of group commands, live
-    fact sets, and JSON equality boundary remain R3 decisions.
-  - A new top-level `agw graph` owns all relational views across declared resources and live
-    instances under the one node grammar.
-  - **`reinit` and `repair` are distinct verbs and both stay**: `reinit` = the resource supports
-    full idempotent re-initialization; `repair` = partial idempotent reconciliation of what can be
-    safely converged, where full re-initialization would destroy live work. The contract records
-    both definitions verbatim and every command adopts the verb its safety semantics earn.
-  - `--force` keeps exactly one meaning (dependency override on delete); the broken-session PID-kill
-    becomes its own flag. `--write` always takes a path. Destructive operations confirm and accept
-    `--yes` uniformly. Exit codes: 0/1/2 for the CLI's own semantics; child passthrough only for
-    run-a-child commands.
-- R3. **Open vocabulary decisions go to the operator individually** during the contract review, each
-  with the study's recommendation and pricing: the top-level `describe` unification, the `env`
-  group's shape, the `logs` ruling, the console repair/rebuild design under the corrected
-  reinit/repair taxonomy, the `session create` flag reshape, `resource kinds` versus bare `explain`,
-  JSON migration, graph truth/traversal/output, verify cardinality and output, the destructive
-  confirmation matrix, node metadata, config sync, VM rekey flag timing, and explain machine output.
-  None is pre-approved. The contract gives every decision a stable ID so review can approve, reject,
-  or amend it without implicitly accepting its neighbors. The inspection architecture boundary is
-  separately resolved through R10's HLA review.
-- R4. **The conventions get a permanent documented home.** The blessed verb contract lands as
-  permanent documentation (the cli-conventions rule and/or a reference doc the command surface
-  cites), written so a contributor adding a command can find the verb, flag, exit-code, and
-  confirmation rules without reading this SDD. The SDD remains deletable per the sdd skill.
-- R5. **In-code documentation that teaches wrong conventions is fixed in the same effort.** The
-  named example: `workspaces/manager` prose calling `repair` "the workspace analog of the vm reinit
-  / agent reinit convergence" conflates the two verbs and misled this effort's own study. The
-  implementation sweeps command docstrings and help text against the blessed contract so the code
-  teaches the same vocabulary the docs define.
-- R6. **Everything that does not align gets fixed or given an explicit disposition.** The study's
-  deviation worklist (as ratified through R1/R3) is implemented whole; declined symmetries and
-  deliberate exceptions are recorded with reasons in the permanent conventions doc, so the next
-  reader distinguishes a decision from an accident.
-- R7. **Breaking posture** per the saga's compatibility rulings: no compat aliases, no warn window;
-  removed spellings fail as unknown commands; renamed/reshaped commands and any JSON envelope
-  changes are documented in `docs/guides/upgrading-to-0.14.md` and the guide topics in the same PR
-  that makes them true. Completions are first-class work (the completion tree changes shape); sample
-  config and command reference ride along.
-- R8. **Coordination**: the safer-migrations effort's `agw database backup/restore` and the
-  installer-plugins effort's `resource enable/disable` land on their own schedules; the contract
-  reserves their spellings. The #462 operational-JSON contract governs any envelope changes.
-- R9. **Machine output is designed before renderers.** The HLA may not assume that generic describe
-  makes current `*.describe` JSON byte-identical. It records the #462-compatible disposition for
-  every existing v1 command ID and payload and defines stable IDs, schemas, ordering, enum policy,
-  and interaction behavior for generic describe, graph, env, and verify. It distinguishes a new
-  command with its own documented schema, retirement of an old command ID, and incompatible mutation
-  of an existing payload. Any incompatible v2 has an explicit compatibility period unless #462 and
-  the operator jointly rule otherwise.
-- R10. **The HLA compares and selects the generic inspection read boundary.** It does not mutate the
-  finalized declaration registry or present the incomplete orchestration graph as system inventory.
-  The HLA compares a request-scoped immutable snapshot with a constrained facade over existing
-  domain queries, including their current activation and repair side effects. The operator approves
-  the selected boundary through HLA review before implementation planning. The design spans
-  declaration resources and live VM, workspace, agent, session, and console instances and defines
-  identity, live provenance, direct and derived relation kinds, edge metadata, consistency,
-  traversal, ordering, cycles, side effects, and whether domain live probes are part of describe.
-- R11. **Environment output remains secret-safe.** Environment is a projection over explicitly
-  eligible live anchors, not a universal node kind. Generic operand parsing and completions reject
-  ineligible declarations. Machine output never exposes resolved secret-backed values by default;
-  the contract explicitly rules whether `--output json` and `--resolve` are incompatible or JSON
-  remains redacted. Tests use sentinel values to prove the boundary.
-- R12. **Output-selection vocabulary stays coherent.** New read commands use the established
-  `--output human|json` choice. Graph's deterministic human encoding, direction, depth, multi-root,
-  deduplication, and cycle behavior are specified. DOT, Mermaid, or another encoding ships only with
-  a named day-one consumer and does not overload `--format` to mean JSON selection.
-- R13. **Completion is part of the identity design.** The HLA specifies one cross-plane `KIND/NAME`
-  parser and completion source across Bash, Zsh, and PowerShell, including config failure, database
-  failure, deterministic ordering, and config-free kind discovery. Enumeration is prompt-free,
-  secret-resolution-free, remote-probe-free, and read-only; it skips renderer and live readiness
-  work. Static Click-tree discovery does not remove the requirement to update hand-written dynamic
-  mappings.
-- R14. **Safety semantics are enumerated, not inferred.** The verb contract includes a confirmation
-  matrix for delete, membership edits, rehome, console recreation/reinitialization, schema and
-  completion installation, and completion uninstall. `--yes` only bypasses a confirmation; `--force`
-  only overrides dependency protection; verb-specific destructive modes use explicit names. Ctrl-C
-  is 130, and all run-a-child commands, including editor launchers, preserve child status.
+## Functional requirements
 
-## Acceptance
+### Explanation
 
-- AC1. The blessed verb contract exists as permanent documentation, and every command's verb, flags,
-  exit codes, confirmation behavior, and output formats conform to it or carry a recorded exception.
-- AC2. Each R3 decision has a dated operator ruling recorded in this SDD before its implementation
-  lands.
-- AC3. A contributor-facing test or check pins the cheap-to-pin conventions (kind-locked describe
-  adapters share the generic fact record where retained; `--names-only`/`--output json` exclusivity;
-  exit codes on representative commands), so conformance outlives this effort. JSON byte equality is
-  required only where the approved versioned envelope contract permits it.
-- AC4. The upgrade guide walks an operator from every removed or renamed spelling to its
-  replacement; completions reflect the final tree on every supported shell.
-- AC5. Full gates green; the misleading in-code prose named in R5 reads correctly at HEAD.
-- AC6. Every existing v1 machine-output command has an explicit preservation, migration, or removal
-  disposition. New JSON payloads are contract-tested for identity, ordering, schema version,
-  interaction, and secret redaction.
-- AC7. Graph tests cover the approved node and edge taxonomy, direct versus derived provenance,
-  direction, depth, multiple roots, cycles, and deterministic human/JSON output from the approved
-  read boundary.
-- AC8. Generic identity parsing and completion tests cover every declaration and live kind on Bash,
-  Zsh, and PowerShell, including unavailable config/database sources. Sentinel tests prove
-  completion cannot prompt, resolve secrets, probe remotes, mutate the database, or trigger
-  readiness/render work.
-- AC9. A confirmation-table test suite covers every destructive command and proves that `--yes`,
-  `--force`, and verb-specific kill/rebuild controls retain exactly their approved meanings.
+- **FR1.** `agw resource explain TARGET` shall replace `agw resource describe-kind TARGET` at the
+  same resource-group level.
+- **FR2.** `TARGET` shall retain the current forms: a declarable `KIND`, a capability `KIND`, or one
+  capability implementation as `KIND/NAME`.
+- **FR3.** Explain shall render from the existing schema and field-documentation service. Its field
+  coverage, capability listing behavior, ordering, errors, and human output semantics shall not be
+  broadened as part of the rename.
+- **FR4.** Explain shall read no operator config, build no resource registry, open no database, and
+  work when config is missing or invalid and when a contributing plugin is installed but disabled.
+- **FR5.** Explain shall not add a bare kind-listing mode, field-path operand, or machine-output
+  mode in this effort. `resource kinds`, `resource sample`, and `resource schema` retain their
+  existing responsibilities.
 
-## Constraints and non-goals
+### Graph
 
-- Scope discipline per `target-state.md`'s "Requirements are priced like code": the per-kind detail
-  renderer ships with exactly its day-one consumers; every graph format and option needs a named
-  consumer; no mechanism without one.
-- Not this effort: `vm restore` (ledger), the credential-application rename deferred to the
-  harness-scope wave, guide's protocol shape (blessed as-is), and anything the R3 review declines.
-- A living mutable graph, a new orchestration scheduler, historical graph snapshots, and a general
-  path-query language are not required. A future why-path query may consume the approved read model
-  without being designed now.
+- **FR6.** The CLI shall add a top-level `agw graph` namespace with `agw graph show KIND/NAME` as
+  its initial relational-view subcommand.
+- **FR7.** The initial graph view shall require exactly one focal resource identity in the existing
+  `KIND/NAME` grammar. Omitting the focus or supplying more than one is a usage error. The command
+  shall expose the saga-required kind-filter, direction, depth, and output axes. The HLA shall pin
+  defaults, validation, and interaction among those axes before planning.
+- **FR8.** At minimum, the graph service shall represent every relationship currently unique to
+  `resource describe`: inbound declared-resource references and live-instance usage from the kind's
+  existing `instances` hook. Existing `source`, `usage`, optional `declared_by`, instance-kind, and
+  instance-name facts shall not be silently discarded.
+- **FR9.** Graph directions and depths shall have one documented orientation relative to the focal
+  node. Direct neighbors, unbounded traversal, repeated nodes, cycles, filtering, and deterministic
+  ordering shall have testable semantics.
+- **FR10.** Human output shall be deterministic and terminal-readable. Machine output shall use a
+  new command ID in the versioned JSON envelope and closed, typed node and edge records. Human and
+  JSON renderers shall project the same safe fact service.
+- **FR11.** Graph shall never disclose secret values. A secret resource may appear by identity and
+  safe metadata only, under the same no-reflection boundary as current machine output.
+- **FR12.** Graph shall be operationally read-only. It shall not create or migrate database state,
+  repair stored process state, activate resources, make provider or remote probes, resolve secret
+  values, or prompt.
+- **FR13.** A query shall demand only the sources required by its selected relationships. The HLA
+  shall specify database-open behavior and source-specific errors, including absent, stale,
+  malformed, and unreadable live state, before implementation planning.
+- **FR14.** The implementation shall reuse the frozen resource graph and existing per-kind instance
+  projections without inserting database rows into `Registry`, mutating `Registry.graph`, or
+  presenting an orchestration plan as complete inventory.
+
+### Removal of resource describe
+
+- **FR15.** `agw resource describe KIND/NAME` shall be removed in the same cutover that adds the
+  graph replacement for its relationships.
+- **FR16.** The `resource.describe` machine-output command and dynamic completion entries shall be
+  removed. The new graph view shall receive its own command ID and schema rather than pretending to
+  preserve the old card payload.
+- **FR17.** No generic describe command or reduced resource card shall replace it. Documentation
+  shall direct operators to `graph` for relationships and to existing inventory, diagnostics, edit,
+  and kind-specific commands for all other questions.
+
+### Writer semantics
+
+- **FR18.** Every option named `--write` in the resulting CLI shall take an explicit path.
+- **FR19.** `agw resource sample KIND --write PATH` shall retain its existing create, fill, append,
+  validation, inert-document, and schema-association behavior.
+- **FR20.** `agw resource schema --install` shall replace `resource schema --write`. It shall write
+  the whole schema set to the existing fixed `resources/.schema/` destination, take no `KIND`, and
+  retain current idempotent overwrite and reporting behavior.
+- **FR21.** Stdout forms `resource schema` and `resource schema KIND` shall remain unchanged.
+
+### Complete cutover
+
+- **FR22.** Command help, examples, errors, hints, completions, command IDs, tests, command
+  reference, current guides, embedded guide content, and the 0.14 upgrade guide shall use the new
+  grammar in the same implementation series.
+- **FR23.** Bash, zsh, and PowerShell completion generation and dynamic completion shall continue to
+  work with broken or missing config wherever the current explanation path does.
+- **FR24.** Touched resource-group help shall describe its resulting inventory, explanation,
+  authoring, and editing responsibilities rather than the removed generic inspector.
+- **FR25.** Directly encountered hygiene defects may ride with the change only when they concern a
+  touched command contract and are cheap to fix. Unrelated CLI consistency work shall be recorded
+  separately and shall not expand this SDD.
+
+## Quality requirements
+
+- **QR1.** Graph collection and rendering have service-level tests in addition to CLI tests.
+- **QR2.** Tests assert behavior, facts, schemas, and stable identifiers. They do not assert the
+  preferred wording of prose authored by this project.
+- **QR3.** The implementation keeps command modules thin and preserves lazy imports and fast help
+  and completion paths.
+- **QR4.** The new graph code has no network dependency and no ambient write side effects.
+- **QR5.** All changed documentation and completions ship with the code; no post-release repair is
+  part of the definition of done.
+
+## Acceptance criteria
+
+1. The old `resource describe-kind`, `resource describe`, and `resource schema --write` spellings
+   fail as unknown or invalid usage and are named in the 0.14 upgrade guide.
+2. `resource explain` passes the current `describe-kind` behavior suite under its new command and
+   identity.
+3. The graph view can reproduce the inbound reference and live-instance usage facts formerly shown
+   for a named resource, subject to its explicit direction and source-demand semantics.
+4. Graph output is deterministic, secret-safe, read-only, and equivalent across human and JSON fact
+   projections.
+5. `resource schema --install` writes exactly the fixed schema set that the old boolean writer did,
+   while every remaining `--write` requires a path.
+6. No active reference, completion entry, machine-output fixture, or operator-facing hint points to
+   a removed spelling except the upgrade guide's before-and-after explanation.
+7. Repository gates and the scoped implementation, completion, documentation, and live CLI tests
+   pass before the draft PR is presented for merge intent.
+
+## Out of scope
+
+- Generic concrete-object describe across declaration and live-instance kinds.
+- New relation providers beyond the minimum graph contract approved in HLA.
+- Field-level explain, explain JSON, graph path queries, DOT or Mermaid, and graph mutation.
+- Renames or flag cleanup outside the four settled corrections.
+- Compatibility aliases or a staged deprecation release.
+
+## Required operator review
+
+Approve or amend the functional boundary above. The remaining graph query choices listed in
+`cli-surface-study.md` are HLA decisions; they do not reopen the settled command ownership or expand
+the feature set.
