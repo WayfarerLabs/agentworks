@@ -738,15 +738,21 @@ translated by the same X-only world transform and is present in static and runti
 regenerated with chunks, and a retained terrain, site, or camera edge never acquires its class or
 collider.
 
-This domain is also the numeric-totality authority. At most 4,096 successful services can occur. The
-exact ratio sum is `4096+2*(1-2^-4096)<4098`; the maximum ordinary allowance is `19.45`, so opening
-fuel plus every possible award is strictly less than `15+19.45*4098=79721.1`. Use the conservative
-integral bound `F=79722`. Existing thrust and fuel arithmetic then gives total translational thrust
-impulse at most `9F=717498 m/s`, total angular impulse at most `80F=6377760 degrees/s`, and one-step
-unwrapped angular travel at most `6377760/120=53148 degrees`. A deliberately loose positive-Y bound
-is `40.5F^2=257401690002 m < 2^38 m`; terrain contact plus the corresponding ballistic fall bound
-keeps the first contact-crossing endpoint inside the same magnitude. The terminus inner faces and
-one-step velocity bound keep every collision endpoint within
+This domain is also the numeric-totality authority. At most 4,096 successful services can occur. For
+each one-indexed service, evaluate `ratio=1+0.5**(n-1)` as JavaScript Number: `ratio(53)` is exactly
+`1.0000000000000002`, and round-to-nearest-even makes `ratio(54)` and every later value exactly `1`.
+The exact dyadic sum of those 4,096 individually projected values is `4098-2^-52`; this is not a
+claim about a separately rounded Number accumulator. Evaluate the maximum ordinary allowance through
+the approved Number formula `Math.ceil((13.4+18.056/3)/.05)*.05`, which is exactly
+`19.450000000000003`. The executable monotone no-burn witness starts `worstFuel=15` and, for
+`n=1..4096` in ascending order, performs `worstFuel += 19.450000000000003*(1+0.5**(n-1))`; it ends
+at exactly `79721.09999999384 < 79722`. Use the conservative integral bound `F=79722`. Existing
+thrust and fuel arithmetic then gives total translational thrust impulse at most `9F=717498 m/s`,
+total angular impulse at most `80F=6377760 degrees/s`, and one-step unwrapped angular travel at most
+`6377760/120=53148 degrees`. A deliberately loose positive-Y bound is
+`40.5F^2=257401690002 m < 2^38 m`; terrain contact plus the corresponding ballistic fall bound keeps
+the first contact-crossing endpoint inside the same magnitude. The terminus inner faces and one-step
+velocity bound keep every collision endpoint within
 `393216+5979.156666666667=399195.1566666667 m < 399200 m` absolute X. These are derived
 reachable-state proofs, not new clamps, crashes, integration branches, or player-facing limits. They
 make every terrain index, rotation-knot count, rational polynomial coefficient, and dyadic isolating
@@ -2403,11 +2409,12 @@ All signed sites for the four review seeds terminate through index `+/-4095`, pr
 spacing, and leave site 4095's unchanged 46.2 m final-rail gap. No physics, control, landing,
 fuel-consumption, ratio, collision, finite-world, copy, or scrolling change is required.
 
-Phase 4T's larger derived maximum allowance updates only section 5.4's proof bound: total fuel is
-`<79721.1`, `F=79722`, maximum one-step translation is `(9F+.8)/120=5979.156666666667 m`, maximum
-unwrapped travel is 53,148 degrees, the stream has at most 53,150 knots, and
-`40.5F^2=257401690002<2^38`. These are proof/performance witnesses, not gameplay limits. Permanent
-v10 derivation and production replay remain final authority before any fixture is accepted.
+Phase 4T's larger derived maximum allowance updates only section 5.4's proof bound: the exact
+ascending Number witness with no intervening burn ends at `79721.09999999384`, so `F=79722`; maximum
+one-step translation is `(9F+.8)/120=5979.156666666667 m`, maximum unwrapped travel is 53,148
+degrees, the stream has at most 53,150 knots, and `40.5F^2=257401690002<2^38`. These are
+proof/performance witnesses, not gameplay limits. Permanent v10 derivation and production replay
+remain final authority before any fixture is accepted.
 
 ## 15. Verification matrix
 
@@ -2446,7 +2453,7 @@ six-template/smaller-failure data are absent, not aliases.
 | `node --test website/tests/lander-route-proofs.test.mjs`                | Reproduce generated proof source byte-for-byte from reviewed derived v9; replay all 312 success records over 736 assignments, one keyed lookup per exact distance/deck key, contact `<=4332`, and complete collision. Pin `B=13.4`, no-epsilon quantum ceiling, sufficient allowances, atomic digests, 16 openings, terminal record, signed longevity, and absence of `smallerFailure`/runtime search.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `node --test website/tests/lander-phase4t.test.mjs`                     | Independently pair every frozen/new profile and prove doubled sign reversals, halved cyclic means, `.20 -> .60` median strength, exact `.40/.80`, no adjacent 16 m reversal intervals, selector variety, candidate-order independence, six-candidate termination, exact cap/max/feet, spacing classes, Retry parity, and final-rail clearance. Kill a profile/candidate/order/threshold/normalization mutation without asserting authored prose.                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `node --test website/tests/lander-model.test.mjs`                       | Retain unchanged inclusive `2.2/3.6/18/26` landing limits, engine exhaustion arithmetic, fuel, ratio, checkpoint, Retry, zero-fuel, deployment, reduced-motion, hidden-time, collision integration, input, and scheduler vectors without growing this near-ceiling module. No assertion encodes authored prose.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `node --test website/tests/lander-phase4s.test.mjs`                     | Retain exact Phase 4S collision/terminus authority while deriving the updated fuel-domain bound: kill expansion-as-impact, endpoint-only contact, root/tangency/overlap loss, a stalled midpoint, shortest-arc knots, retained arrays, work-budget/retained-edge impact, invisible rails, final-site route lookup, terminal award/cursor/null-target drift, collision/world concatenation, or a 15th artifact. Exercise both signed maximum-reachable streams at exactly 53,150 knots and final-slab actual contact; preserve stable lifecycle counts and module ceilings.                                                                                                                                                                                                                                                                                                                                                  |
+| `node --test website/tests/lander-phase4s.test.mjs`                     | Retain exact Phase 4S collision/terminus authority while deriving the updated fuel-domain bound: pin ratio Numbers at `n=53/54`, maximum allowance `19.450000000000003`, ascending 4,096-award no-burn accumulation `79721.09999999384`, and `F=79722`; kill expansion-as-impact, endpoint-only contact, root/tangency/overlap loss, a stalled midpoint, shortest-arc knots, retained arrays, work-budget/retained-edge impact, invisible rails, final-site route lookup, terminal award/cursor/null-target drift, collision/world concatenation, an analytic-real ratio sum substituted for the executable Number loop, or a 15th artifact. Exercise both signed maximum-reachable streams at exactly 53,150 knots and final-slab actual contact; preserve stable lifecycle counts and module ceilings.                                                                                                                    |
 | `node --test website/tests/lander-phase4l.test.mjs`                     | Mutation-sensitive controller/DOM tests pin exactly two controls-line children in keyboard/touch order, Retry label-source and hint structure without asserting text, internal `RESTART` dispatch, crash focus stability, click/`r` teardown-render-focus order, shell focus with `preventScroll`, and no synthesized input. Existing outside-shell and native-button rejection coverage remains exact.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `node --test website/tests/lander-phase4m.test.mjs`                     | Mutation-sensitive controller/DOM tests pin five sky chunks, 20 stars, one or two deterministic landmarks in exactly two paths, the complete two-arc crescent, all three one/two-ring profiles, exact circle/ellipse intersections, omitted rear-center arcs, and complete foreground arcs. They retain static/dynamic descriptor equality, bounded reconciliation, `.24` parallax transforms, negative/positive camera following, bidirectional cue changes, pass/reverse/return, and the historical rejection of a generic horizontal-bound failure; Phase 4S's focused test owns the exact two-rail contact and camera-clamp exception. They also pin the exact opening half-gauge, post-award full reference without cap, `.9 s` deploy travel, unchanged refuel/power timing, hidden-time freeze, reduced-motion atomic projection, and structural copy/link/accessibility sources without embedding authored wording. |
 | Derivation CLI fixture verification                                     | Verify immutable geometry-v8 predecessor and derived-v8 schedule-bootstrap bytes/schema/digests/count; read only their pinned projections; generate temporary v9 output with v10 deriver, collision v2, and synthesizer v2. Enumerate 736 assignments / 312 numeric-sorted distance/deck keys, both candidate orders, and all 16 openings. Regenerate with pinned catalog, prefix, `12/269/6000` bounds, command order, integer-millimeter keys, `.5` cost/ties, first-safe selection, actual-X release layer, and 4,332-step ceiling; independent and production replays agree for every envelope/member and terminal vector. Reject partial fixtures or undeclared inputs.                                                                                                                                                                                                                                                |
@@ -2648,7 +2655,8 @@ geometry, weak or source-only scaffold/battery/signal parity, a battery `rx`, te
 pseudo-element, fewer/more than four bars and three signal paths, an asymmetric signal path,
 horizontal/reversed/mistimed stages, color-only meaning, route-pose canonicalization before
 selection, quantized route poses or non-deck world/geometry values, canonical pose precision drift,
-iterative refuel-ratio advancement, trusting a ratio inconsistent with
+iterative refuel-ratio advancement, an analytic-real or separately accumulated ratio sum in place of
+section 5.4's ascending executable Number loop, trusting a ratio inconsistent with
 `refuelRatioForBase(completedSites+1)`, runtime planning/search/fuel scan, more than one keyed
 lookup or defensive replay, an unreachable command, production-derived fixtures, geometry/derived
 schemas other than v9, deriver other than v10, collision recipe other than v2, synthesizer other
