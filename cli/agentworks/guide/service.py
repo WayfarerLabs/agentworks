@@ -19,6 +19,7 @@ from agentworks.guide.contract import (
     FieldReference,
     GuideBlock,
     GuideContributionError,
+    GuideTraversalError,
     ImplementationAnchor,
     InstanceList,
     KindAnchor,
@@ -423,6 +424,8 @@ def render_guide(
             registry = loaded_registry
         except AgentworksError as error:
             system_error = error
+    if registry is not None and not registry.is_finalized:
+        raise GuideTraversalError("guide facts require an already-finalized registry")
 
     all_names = static_names
     if registry is not None:
@@ -433,6 +436,7 @@ def render_guide(
                 raise _unknown(slug, all_names)
 
     requested_slots: list[tuple[str, TopicContribution | None]] = []
+    unavailable_topics: set[str] = set()
     for slug, value in validated_slots:
         if not isinstance(value, str):
             requested_slots.append((slug, value))
@@ -441,6 +445,7 @@ def render_guide(
             requested_slots.append((slug, _dynamic_topic(registry, value)))
         except KeyError:
             requested_slots.append((slug, _dynamic_topic(None, value)))
+            unavailable_topics.add(slug)
 
     selected_topics = tuple(topic for _slug, topic in requested_slots if topic is not None)
 
@@ -454,6 +459,13 @@ def render_guide(
         omitted = context_problems.setdefault(problem, {})
         for identity in identities:
             omitted.setdefault(identity, None)
+
+    for topic in selected_topics:
+        if topic.topic in unavailable_topics:
+            record_context_problem(
+                StateError("requested guide resource is unavailable"),
+                _live_block_identities(topic),
+            )
 
     owned_db = False
     if needs_live_context and registry is not None and system_error is None and db is None:
@@ -473,9 +485,9 @@ def render_guide(
         record_context_problem(system_error, all_live_identities)
 
     from agentworks.db import DatabaseDriverError
+    from agentworks.db.database import _is_read_only_error
 
     views = {}
-    unavailable_topics: set[str] = set()
     onboarding_snapshot = None
     onboarding_unavailable = any(topic.topic == "concept-onboarding" for topic in selected_topics)
     try:
@@ -495,15 +507,35 @@ def render_guide(
             for topic in selected_topics:
                 if not any(_requires_live_context(block) for block in topic.blocks):
                     continue
+                if topic.topic in unavailable_topics:
+                    continue
                 try:
                     views[str(topic.topic)] = build_guide_view(topic, registry, db)
+                except GuideContributionError:
+                    raise
+                except GuideTraversalError:
+                    anchor = topic.anchor
+                    if not isinstance(anchor, (ResourceAnchor, ImplementationAnchor)):
+                        raise
+                    try:
+                        registry.lookup(anchor.kind, anchor.name)
+                    except KeyError:
+                        unavailable_topics.add(str(topic.topic))
+                        record_context_problem(
+                            StateError("requested guide resource is unavailable"),
+                            _live_block_identities(topic),
+                        )
+                    else:
+                        raise
                 except AgentworksError as error:
                     unavailable_topics.add(str(topic.topic))
                     identities = tuple(
                         f"{topic.topic}/{block.id}" for block in topic.blocks if _requires_live_context(block)
                     )
                     record_context_problem(error, identities)
-    except DatabaseDriverError:
+    except DatabaseDriverError as error:
+        if _is_read_only_error(error):
+            raise GuideTraversalError("guide projection attempted to mutate read-only state") from None
         system_error = StateError(
             "state database rejected a guide projection",
             hint="Run a normal Agentworks command to inspect or repair the state database.",

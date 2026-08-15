@@ -45,6 +45,12 @@ DatabaseDriverError = sqlite3.DatabaseError
 """Driver failure type exposed so read-only consumers need no SQLite import."""
 
 
+def _is_read_only_error(error: BaseException) -> bool:
+    """Classify SQLite's primary read-only result without leaking the driver."""
+    code = getattr(error, "sqlite_errorcode", None)
+    return isinstance(code, int) and code & 0xFF == sqlite3.SQLITE_READONLY
+
+
 class Database:
     """Typed interface to the Agentworks state database."""
 

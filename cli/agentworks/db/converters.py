@@ -7,7 +7,7 @@ and decoding the JSON-encoded columns (``platform_metadata``,
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from agentworks.db.models import (
     AgentGrantRow,
@@ -20,6 +20,7 @@ from agentworks.db.models import (
     VMRow,
     WorkspaceRow,
 )
+from agentworks.errors import StateError
 
 if TYPE_CHECKING:
     import sqlite3
@@ -51,12 +52,14 @@ def _eq_or_in(column: str, value: str | list[str] | None) -> tuple[str, tuple[st
 def _to_vm(row: sqlite3.Row) -> VMRow:
     extra = row["extra_packages"]
     metadata = row["platform_metadata"]
+    extra_packages = cast("list[str]", _parse_vm_json(extra, row["name"], "extra_packages", list))
+    platform_metadata = cast("dict[str, str]", _parse_vm_json(metadata, row["name"], "platform_metadata", dict))
     return VMRow(
         name=row["name"],
         site=row["site"],
         template=row["template"],
         admin_template=row["admin_template"],
-        extra_packages=json.loads(extra) if extra else [],
+        extra_packages=extra_packages,
         provisioning_status=row["provisioning_status"],
         init_status=row["init_status"],
         tailscale_host=row["tailscale_host"],
@@ -68,9 +71,38 @@ def _to_vm(row: sqlite3.Row) -> VMRow:
         hostname=row["hostname"],
         created_at=row["created_at"],
         last_seen_at=row["last_seen_at"],
-        platform_metadata=json.loads(metadata) if metadata else {},
+        platform_metadata=platform_metadata,
         operator_stopped=bool(row["operator_stopped"]),
     )
+
+
+def _parse_vm_json(
+    raw: str | None,
+    vm_name: str,
+    column: str,
+    expected: type[list[object]] | type[dict[object, object]],
+) -> list[object] | dict[object, object]:
+    """Decode one VM JSON column into its persisted row shape."""
+    fallback: list[object] | dict[object, object] = expected()
+    if not raw:
+        return fallback
+    try:
+        decoded = json.loads(raw)
+    except json.JSONDecodeError:
+        decoded = None
+    valid = isinstance(decoded, expected)
+    if valid and expected is list:
+        valid = all(isinstance(item, str) for item in decoded)
+    elif valid:
+        valid = all(isinstance(key, str) and isinstance(value, str) for key, value in decoded.items())
+    if not valid:
+        raise StateError(
+            f"stored VM {column} data is malformed",
+            entity_kind="vm",
+            entity_name=vm_name,
+            hint="Run 'agw doctor' to inspect the state database.",
+        ) from None
+    return cast("list[object] | dict[object, object]", decoded)
 
 
 def _to_workspace(row: sqlite3.Row) -> WorkspaceRow:
