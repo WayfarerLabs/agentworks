@@ -29,16 +29,27 @@ class SkippedSource:
     reason: str
 
     def __post_init__(self) -> None:
-        # ``reason`` is not screened. It is a backend's own text: a source folds
-        # its ``Readiness`` straight from ``impl.backend_readiness()`` or
-        # ``impl.not_ready(config)`` (``secrets/sources.py``), and ``Readiness``
-        # validates nothing. Not re-checking a registered class's return is the
-        # doctrine, and the registration seam is where that class is vetted.
-        # ``source`` is screened, for the reason ``_safe_diagnostic_text`` gives.
+        # ``reason`` is screened like the names beside it, and registration is
+        # not what makes that unnecessary: registration vets a plugin's SHAPE
+        # (a non-empty, '/'-free name; types; call shapes), never the text it
+        # later produces. This field is a mixture. ``sources.py`` composes most
+        # of it from our own prose around a plugin-authored name that
+        # ``plugins/enablement.py`` baked in, and returns ``impl.not_ready()``
+        # wholesale in the remaining case.
+        #
+        # Escaping at the render sink, which is how the sibling plugin name on
+        # ``ResolutionOutcome.remediation_target`` is handled, cannot work here:
+        # that one survives as its own field so the sink can escape exactly it,
+        # while this one is already concatenated into first-party prose, so the
+        # sink would have to escape our punctuation along with it. Issue #545
+        # tracks escaping the name upstream, where it is still a separate token;
+        # until then this screen is what keeps a rendered row one row.
         if not self.reason:
             raise ValueError("a skipped source must say why it was skipped")
         if not _safe_diagnostic_text(self.source):
             raise ValueError("invalid skipped source name")
+        if not _safe_diagnostic_text(self.reason):
+            raise ValueError("invalid skipped source reason")
 
 
 @dataclass(frozen=True, slots=True)

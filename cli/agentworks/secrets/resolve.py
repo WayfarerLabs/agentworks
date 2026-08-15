@@ -57,10 +57,14 @@ class ActiveSource:
     def __post_init__(self) -> None:
         # Examined and kept, as this object's own cross-field invariant rather
         # than as input validation: three fields are assembled here from three
-        # separate lookups, and nothing in their types says they agree. The
-        # second is what lets every backend downcast ``config`` to its declared
-        # model without re-checking, including the ``isinstance`` guards inside
-        # ``onepassword``. Types cannot express either agreement.
+        # separate lookups, and nothing in their types says they agree.
+        #
+        # The config half is stronger than the backends act on. ``onepassword``
+        # still re-checks its config model and raises (``backend.py:312,325``),
+        # and given this invariant those two branches are unreachable on the
+        # only path that constructs an ``ActiveSource``. That makes them
+        # candidates for this effort, not evidence for it; they are another
+        # file and another lane.
         if self.source.backend.name != self.backend_class.name:
             raise StateError(
                 f"secret-source/{self.source.name} selects {self.source.backend.name!r}, "
@@ -307,11 +311,10 @@ def active_sources(config: Config, registry: Registry) -> tuple[ActiveSource, ..
         if registry.graph.enablement_of("secret-backend", source.backend.name) is Enablement.disabled:
             # ``origin.plugin`` is set only by the ``system-plugin`` variant, so it
             # doubles as the variant test, exactly as the other disabled-row tails
-            # read it (``resources.access.ensure_reference_enabled``). Truthy, not
-            # ``is not None``, for the same reason that precedent is: an empty
-            # attribution names no plugin an operator could enable.
+            # read it (``resources.access.ensure_reference_enabled``). No empty-string
+            # case to normalize: registration requires a non-empty plugin name.
             origin = getattr(registry.lookup("secret-backend", source.backend.name), "origin", None)
-            disabled_backend_plugin = getattr(origin, "plugin", None) or None
+            disabled_backend_plugin = getattr(origin, "plugin", None)
         validated = validate_capability_config(
             kind="secret-backend",
             config=source.backend.tagged,
@@ -584,8 +587,10 @@ def resolve_batch(
             # or SDK actually runs. Anything raised there beyond the declared
             # failure vocabulary becomes this source's per-secret ``unexpected``
             # outcome rather than ending the command. The timeout declaration
-            # read above is deliberately outside: it does no I/O, so a raise
-            # from it is a first-party bug and should surface as one.
+            # read above is deliberately outside: both implementations of that
+            # hook today return a declared config value and do no I/O, so a
+            # raise from it is a first-party bug and should surface as one. A
+            # future implementation that does I/O there belongs inside this.
             unexpected = True
         if timed_out or failure_kind is not None or unexpected:
             if timed_out:

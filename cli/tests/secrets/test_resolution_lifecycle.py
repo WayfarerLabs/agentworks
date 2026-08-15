@@ -497,7 +497,6 @@ def test_a_source_name_that_passes_validate_name_can_still_forge_a_row() -> None
     """
     forged = "envvar\n"
     validate_name(forged, max_length=MAX_FREEFORM_NAME_LENGTH)
-    assert len(f"source={forged}; rest".splitlines()) > 1
     with pytest.raises(ValueError):
         ResolutionOutcome(
             name="token",

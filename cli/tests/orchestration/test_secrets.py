@@ -313,6 +313,38 @@ def test_preview_rows_reject_a_source_name_validate_name_accepts() -> None:
         )
 
 
+def test_a_plugin_name_cannot_split_a_skipped_source_row() -> None:
+    """A plugin names itself, and registration vets that name's shape, never its
+    content: ``registration.py`` rejects only an empty or '/'-bearing name. The
+    name then reaches a rendered line through ``Readiness.reason``, which
+    ``sources.py`` builds by concatenating it into our own prose, so no render
+    sink can escape it alone the way ``remediation_target`` is escaped.
+
+    Driven through the real concatenation rather than a hand-built row: if issue
+    #545 lands and the name is escaped upstream, this stops raising and fails
+    here, which is the signal to revisit the screen rather than a silent pass.
+    """
+    from agentworks.capabilities.secret_backend.env_var import EnvVarBackend
+    from agentworks.resources.graph import DependencyState, Enablement
+    from agentworks.secrets.preview import SkippedSource
+
+    forged = "onepassword\nSecret: token = leaked-value"
+    decl = SecretSourceDecl(name="op", backend=CapabilityBlock.of("env-var"))
+    deps = {
+        ("secret-backend", "env-var"): DependencyState(
+            enablement=Enablement.disabled,
+            readiness=None,
+            impl=EnvVarBackend,
+            # Exactly what plugins/enablement.py builds for a disabled plugin row.
+            disabled_reason=f"enable plugin `{forged}`",
+        )
+    }
+    readiness = decl.not_ready(deps)
+    assert readiness.reason is not None
+    with pytest.raises(ValueError):
+        SkippedSource(source="op", reason=readiness.reason)
+
+
 def test_prediction_rejects_a_non_enum_policy_with_nothing_to_predict() -> None:
     """A caller-supplied ``"refuse"`` is equal to the enum but not identical to it.
 

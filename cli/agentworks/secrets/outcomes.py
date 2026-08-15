@@ -139,9 +139,11 @@ _UNSAFE_DIAGNOSTIC_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
 def _safe_diagnostic_text(value: str) -> bool:
     """Reject text that can alter or forge a rendered diagnostic line.
 
-    Boundary: operator-authored input rendered as text. Every name-shaped
-    field on a value-free row is operator-written, and none of them is
-    guaranteed newline-free by the time it renders:
+    Boundary: operator-authored input rendered as text. This screens three
+    fields, and each is operator-written and reaches no validator that
+    guarantees it newline-free. (It is not the row's whole threat model:
+    ``remediation_target`` is PLUGIN-written and is handled by escaping at
+    the render sink instead, below.)
 
     - a secret NAME reaches no naming validator at all, because ``secret``
       auto-declares any name a config reference uses (``secrets.kinds``);
@@ -177,7 +179,7 @@ class ResolutionOutcome:
         if self.category is not rule.category or self.remediation is not rule.remediation:
             raise ValueError("invalid resolution outcome category or remediation")
         if (self.source is not None) is not rule.source_required:
-            raise ValueError("invalid resolution outcome source")
+            raise ValueError("this resolution outcome detail disagrees about carrying a source")
         if not rule.identifier_allowed and self.identifier is not None:
             raise ValueError("this resolution outcome detail forbids an identifier")
         if (self.remediation_target is not None) is not rule.remediation_target_required:
@@ -198,10 +200,16 @@ def _escape_plugin_target(target: str) -> str:
     to be non-empty and '/'-free, so the remediation line escapes rather
     than trusts it.
 
-    This is not the only place a plugin name reaches a rendered line:
-    ``plugins/enablement.py`` builds one into a ``DisabledMark.reason``,
-    which folds into a source's ``Readiness.reason`` and renders verbatim
-    through the preview path. That one is unescaped today.
+    Escaping works here because the name arrives as its own field, so this
+    escapes exactly it. That is not the only route a plugin name takes to a
+    rendered line: ``plugins/enablement.py`` builds one into a
+    ``DisabledMark.reason``, which ``secrets/sources.py`` concatenates into a
+    source's ``Readiness.reason``, which reaches an operator at
+    ``secrets/inspect.py:541`` and ``doctor.py:772`` and as a JSON field at
+    ``secrets/inspect.py:370`` (safe there, since the encoder escapes). By
+    then the name is inside our own prose and no sink can escape it alone, so
+    ``SkippedSource`` screens that text instead. Issue #545 tracks escaping it
+    upstream, where it is still a separate token.
     """
     escaped: list[str] = []
     for char in target:
