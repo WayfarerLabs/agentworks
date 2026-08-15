@@ -113,9 +113,6 @@ otherwise; the slug does global namespacing. Anything under `<system-slug>-*` on
 - Every main bump or PR test includes a **code-quality pass**: run the `agentworks-reviewer` agent
   over the new delta (post-merge range or PR branch) alongside the live retest (operator ruling,
   2026-07-26).
-- Delegated testers run well at the lighter tier, given a charter that carries the inventory,
-  budget, and prefix; a scoped test run does not need the standard tier that `agentic-dev-process`
-  section 4 defaults to.
 - Charters explicitly AUTHORIZE authoring scratch resources: when a surface can't be exercised
   through standing inventory (e.g. a secret-backed env template for `env show --resolve`), the
   tester should CREATE a prefixed scratch resource, test against it, and delete it, not report the

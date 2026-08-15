@@ -184,3 +184,7 @@ When a charter goes to an `agentworks-tester` subagent, inject the relevant sect
 which are the sections marked "inject" there. That is the part the subagent cannot know. Its own
 definition already carries the method, the synchronous-long-ops discipline, and the
 instruction-versus-data distinction, so restating those in a charter adds nothing.
+
+Launch it at the lighter tier. A delegated tester runs well there when the charter carries the
+inventory, budget, and prefix, so a scoped test run does not need the standard tier that
+`agentic-dev-process` section 4 defaults to.
