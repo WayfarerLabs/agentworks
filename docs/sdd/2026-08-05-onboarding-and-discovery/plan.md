@@ -1,6 +1,6 @@
 # Plan: Agentworks Assistance, Discovery, and Management
 
-- Status: Active, Phase 3
+- Status: Active, trail-sign revision
 - FRD: `docs/sdd/2026-08-05-onboarding-and-discovery/frd.md`
 - HLA: `docs/sdd/2026-08-05-onboarding-and-discovery/hla.md`
 
@@ -11,12 +11,17 @@
   `agentworks-reviewer` review before its checkbox is completed.
 - Run `./scripts/lint-files.sh --fix` and check its exit code before every commit.
 - CLI changes include completions and permanent docs in the same commit.
+- Published PR reviews follow the repository review protocol: the author posts a recommendation and
+  waits for authenticated operator direction before changing the branch.
 - Main is authoritative. Wave 2 branch content informs coordination but is not an implementation
   dependency.
 - After the draft artifact PR, each implementation phase is an intentionally separate ready-to-merge
   PR because it is independently usable and keeps main green. Later phases build only on merged
   predecessors.
 - Completed checkboxes are immutable.
+- Requirement and acceptance-criterion references inside completed Phases 0 through 3 refer to the
+  pre-trail-sign FRD implemented by PR #480. They are historical records, not references to the
+  revised identifiers in the current FRD.
 - Terminology follows the FRD: **Agentworks assistant agent** is any external agent that can accept
   the canonical prompt, invoke and interpret the CLI, and use appropriate operator-approved
   workstation access. Claude Code and Codex are native integrations, not limits on the role.
@@ -388,22 +393,10 @@ installed no-topic agent guide owns source-review and continuing assistance.
       bodies; remove remaining authored-prose policing from the touched tests; and treat a missing
       configuration file uniformly as successful guide input for indexes and selected topics while
       preserving nonzero exits for malformed configuration.
-- [ ] PR #480 contains the complete Phase 3 feature, passes its repo and live feature gates, and
-      merges normally to `main` with a conventional `feat:` title. Release-please then regenerates
-      the separate 0.14 release PR from that mainline feature, adding the version, changelog,
-      manifest, and lockfile deltas. Candidate-wheel and live harness gates run from the regenerated
-      release PR before it merges, after which release-please tags and the publish workflow ships
-      the same reviewed artifact. Candidate probes inspect the exact release-PR commit that built
-      their wheel and name that test-only substitution; the post-tag PyPI smoke exercises production
-      `vVERSION` review.
 - [x] Both generated package projections contain the exact same top-level guide handoff and bind by
       construction to one shared guided and non-interactive guide fixture covering refusal, rerun
       no-op behavior, post-upgrade current not-yet-adopted capability reporting, the canonical
       release-notes handoff for temporal history, and JSON v1 consumption.
-- [ ] Per-harness live probes validate Claude Code and Codex model interpretation without a
-      bootstrap orchestration driver. Clean-home marketplace installation and exact artifact parity
-      are proven; provider-backed first-VM/session acceptance remains pending an approved live
-      inventory.
 - [x] Canonical projection checks prove the thin bootstrap contains no startup disclosure. The
       no-topic guide emits the R12 disclosure once before continuing assistance, and selected topics
       do not repeat it. Guide probes pin the resulting authorization envelope, prove a multi-step
@@ -426,42 +419,86 @@ installed no-topic agent guide owns source-review and continuing assistance.
 Definition of done: R1, R2, R3, R10, R11, R12, R13, R16, AC1, AC2, AC3, AC7, AC8, AC10, AC14, and
 AC15 hold for both native packages and the universal zero-plugin copy/paste path.
 
-## Phase 4: registry inventory and specific-resource projection
+The completed Phase 3 checkboxes above preserve the full implementation journey. PR #480 merged on
+2026-08-12. The trail-sign destination intentionally supersedes its guide exit behavior for
+environmental live-context failures. No-topic ignores environmental state and exits 0 because it
+does not load that state. A selected topic with unavailable live context renders its available
+content with one warning and short placeholders, then exits 0. Release publication belongs to the
+saga's release sequence, not to this child plan. The operator's 2026-08-13 trail-sign ruling
+supersedes the remaining broad registry and repeated-wrapper acceptance phases with the smaller
+destination below.
 
-The Phase 1 release gate now owns schema-derived kind and implementation pages because the 0.14
-migration topic requires them. This phase retains only runtime registry inventory and
-specific-resource depth that does not block the first release.
+## Phase 4: trail-sign simplification
 
-- [ ] After the descriptor inventory merges, registry inventory renders capability kinds and
-      implementations, including enablement/readiness, without a hand-maintained adapter table.
-- [ ] Specific-resource topics delegate to the same service fact source as instance describe.
-- [ ] Adding a registered implementation or resource changes the guide inventory with no topic
-      switchboard edit, pinned by fixture-plugin tests.
-- [ ] Full registry integration gates pass; step reviewed by `agentworks-reviewer` and a fresh-eyes
-      reviewer; valid findings resolved.
-- [ ] Always-green ready-to-merge PR opened and saga-lead review requested.
+- [ ] Replace the ordinary no-topic overviews with two concise trail signs backed by one fixed
+      destination tuple. Agent mode renders the seven concept destinations; human mode renders only
+      the new-installation and existing-installation choices. Both point to completion and
+      `agw guide --names-only` for deeper discovery. Done when: no-topic output contains no
+      walkthrough, action records, live facts, exhaustive topic list, or duplicated destination
+      source, and one structural test resolves every fixed slug through the selected-topic path.
+- [ ] Short-circuit the ordinary no-topic request after argument and evidence validation. It must
+      bypass both topic catalogs and every live dependency described by the HLA. Done when:
+      instrumented behavior is identical and successful for absent, valid, and malformed
+      configuration, and contributed-topic failures do not appear on this catalog-free path.
+- [ ] Make `concept-onboarding` the single home of the complete startup posture, current-adoption
+      assessment, and first VM/session sequence. Link progressively to `concept-source-review`
+      without copying its actions or detailed teaching. Make every ongoing concept topic stand alone
+      under the current operator instruction without duplicating the onboarding posture. Done when:
+      onboarding is complete without treating no-topic as a handbook, source-review action ownership
+      is unchanged, and a returning operator can enter each ongoing topic directly.
+- [ ] Make selected-topic live context fail soft. Derive whether live state is needed from the
+      existing closed block types, load it once per response only when required, and reuse the
+      existing error collection and unavailable rendering paths. On configuration, registry,
+      database, or projection failure, render static blocks, prepend one deduplicated diagnostics
+      section naming omitted topic/block identities, render short placeholders for affected live
+      blocks, and exit 0. A valid known-kind resource request degrades instead of becoming falsely
+      unknown. Invalid requests and requested guide-content defects stay nonzero. Done when:
+      structural tests cover a static topic with a forbidden loader, malformed configuration, shared
+      multi-topic failure, exact-resource degradation, and the remaining error boundary without
+      asserting authored wording. Include well-formed onboarding evidence whose live assessment is
+      unavailable: it remains unapplied, uses the shared warning and derived-assessment placeholder,
+      and exits 0 without changing malformed or provably invalid evidence failures.
+- [ ] Keep `--names-only` completion-safe: always return valid static names, add live names when
+      available, and omit only names that cannot be established when live context fails. Do not emit
+      diagnostics into names-only output or optimize its existing registry cost in this round. Done
+      when: focused tests cover healthy and degraded inventories and completion generation is
+      unchanged.
+- [ ] Review all touched guide summaries and connective teaching in human register and remove
+      redundant explanation. Do not add wording pins, phrase blacklists, or snapshots of authored
+      prose. Done when: the rendered pages are correct by review and tests cover only behavior,
+      structure, action ownership, and safe side effects.
+- [ ] Update permanent CLI documentation for the trail signs, onboarding destination, fail-soft
+      selected-topic behavior, and best-effort names-only inventory. Record completion code and
+      sample configuration as unaffected. Run focused guide and completion tests, the full
+      non-integration suite, Ruff, formatting, mypy, Rulesync drift, locked-SDD, and file lint. Done
+      when: all applicable gates are green.
+- [ ] Complete the required project review and merge one ready implementation PR.
 
-Definition of done: R8 and AC5 project runtime registry and specific-resource facts without a
-hand-maintained switchboard.
+Definition of done: FRD R1 through R5 and acceptance criteria 1 through 6 hold, with no new guide
+contract, state, diagnostic protocol, or authorization mechanism.
 
-## Phase 5: acceptance, promotion, and closeout
+PR #509's artifact gate has merged, but the simplification pass's Wave 1 guide-machinery item
+remains unchecked. Coordinate shared production files with that item and preserve its wholesale
+ownership of `cli/tests/guide/test_contract_catalog.py` and `cli/tests/guide/test_assessment.py`.
+Put this round's behavior in a new focused test module or unaffected renderer/service tests.
 
-- [ ] Fresh-operator acceptance matrix run for Claude Code, Codex, and README-only paths with
-      evidence for all 15 FRD acceptance criteria.
-- [ ] No telemetry, general-feedback prompt, or non-bug manual-relay request ships; acceptance runs
-      retain their own timing and unexplained-intervention evidence as test artifacts.
-- [ ] `concept-reporting-bugs` is tested to redact sensitive evidence, point at the repository bug
-      template, require explicit operator authorization for external submission, and never
-      auto-submit an issue.
-- [ ] All load-bearing guide, JSON, contribution, packaging, and security contracts promoted to
-      permanent docs so deleting this SDD would not remove operating knowledge.
-- [ ] `./scripts/lint-files.sh --fix`, focused tests, full test suite, typing, completion
-      generation, package build, and locked-SDD checks pass.
-- [ ] Final `agentworks-reviewer` and fresh-eyes diff reviews complete with all valid findings
-      resolved; Copilot comments on ready PRs triaged.
-- [ ] `locked.md` created with final state and date, while recognizing the lock takes effect only
-      after merge to `main`.
-- [ ] Final ready-to-merge PR reviewed by saga lead and handed off with commit and test evidence.
+## Phase 5: representative acceptance and closeout
 
-Definition of done: every FRD requirement and acceptance criterion is evidenced, permanent docs are
-self-sufficient, and the effort is ready to merge and lock.
+- [ ] Run one provider-backed journey from an exact reviewed candidate wheel through the no-topic
+      trail sign and `concept-onboarding` to a verified VM and started session. Label the candidate
+      substitution rather than claiming the not-yet-published stable bootstrap was exercised. After
+      publication, run one bounded canonical-prompt smoke that installs the exact stable release,
+      verifies it, and reaches the trail sign. Use generated-package parity and focused
+      clean-install probes for native wrappers rather than repeating the provider journey three
+      times. Done when: evidence records the exact versions, provider resources, observed results,
+      cleanup, and any operator intervention. This evidence does not replace the saga's release-PR,
+      publication, or final custom-domain gates.
+- [ ] Confirm permanent guide, assistance, JSON, and contribution documentation is self-sufficient;
+      no current behavior relies on this SDD. Promote only missing current facts, not design
+      history.
+- [ ] Run final applicable gates and the required project, integration, and saga reviews.
+- [ ] Create `locked.md` with the final state and date, then hand off the always-green closeout PR
+      with commit and test evidence.
+
+Definition of done: FRD R6 and acceptance criteria 7 and 8 hold, the implementation is represented
+accurately in permanent artifacts, and the effort is ready to lock.

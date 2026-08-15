@@ -1,5 +1,11 @@
 # Phase 3 Agentworks Assistance Packaging and Guide Companion LLD
 
+Status note, 2026-08-14: this LLD records the implemented Phase 3 package and release design. The
+trail-sign revision in `frd.md` and `hla.md` supersedes its no-topic intent map, live index, guide
+failure behavior, startup-disclosure placement, and source-review-entry placement. The canonical
+bootstrap and generated packages remain unchanged. `concept-onboarding` owns the complete startup
+posture; other selected topics stand alone and degrade unavailable live content visibly.
+
 - Status: Revised draft for the Phase 3 design gate within the full-feature PR
 - FRD: `docs/sdd/2026-08-05-onboarding-and-discovery/frd.md`
 - HLA: `docs/sdd/2026-08-05-onboarding-and-discovery/hla.md`
