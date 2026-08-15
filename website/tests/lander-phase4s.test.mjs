@@ -196,6 +196,55 @@ test("context terrain and midpoint streaming are authoritative", () => {
     assert.equal(instrumentation.maxStack, 8);
 });
 
+test("solid-below terrain presence is downward-unbounded at time zero", () => {
+    const procedural = { ...createRun({ seed: 11 }), retainedSites: [], targetSiteId: null };
+    const radius = Math.hypot(1.6, 6.5);
+    const angle = (Math.atan2(1.6, 6.5) * 180) / Math.PI;
+    const ground = terrainHeightAt(11, -80);
+    const buried = { x: -80, y: ground - radius - 0.03, vx: 0, vy: 0, angle, angularVelocity: 0 };
+    const proceduralContact = classifySweptContact(
+        procedural,
+        buried,
+        { ...buried, y: buried.y + 0.04, angle: buried.angle + 10 },
+        { angularTravel: 10 },
+    );
+    assert.equal(radius, 6.694027188471824);
+    assert.equal(angle, 13.828650972280156);
+    assert.equal(ground, 13.2);
+    assert.equal(proceduralContact.kind, "unsafe");
+    assert.equal(proceduralContact.cause, "terrain");
+    assert.equal(proceduralContact.time, 0);
+    assert.equal(proceduralContact.pose.y, 6.475972811528175);
+    assert.equal(proceduralContact.pose.angle, 13.828650972280116);
+
+    const context = {
+        ...procedural,
+        terrainAuthority: "context",
+        terrainVertices: [],
+    };
+    const segment = [
+        { x: -1, y: radius + 0.03 },
+        { x: 2, y: radius + 0.03 },
+    ];
+    assert.equal(segment[0].y, 6.724027188471824);
+    const fixedPrevious = { ...buried, x: 0, y: 0 };
+    const fixedNext = { ...fixedPrevious, x: 0.019 };
+    const fixedContact = classifySweptContact(context, fixedPrevious, fixedNext, {
+        angularTravel: 0,
+        features: [{ cause: "terrain", priority: 4, segment, solidBelow: true }],
+    });
+    assert.equal(fixedContact.kind, "unsafe");
+    assert.equal(fixedContact.cause, "terrain");
+    assert.equal(fixedContact.time, 0);
+    assert.equal(
+        classifySweptContact(context, fixedPrevious, fixedNext, {
+            angularTravel: 0,
+            features: [{ cause: "terrain", priority: 4, segment }],
+        }),
+        null,
+    );
+});
+
 test("seeded superprofiles preserve the exact closed band without a short silhouette period", () => {
     assert.deepEqual(Object.keys(TERRAIN_PROFILES), ["S0", "S1", "S2", "S3", "S4", "S5", "S6", "S7"]);
     for (const samples of Object.values(TERRAIN_PROFILES)) {

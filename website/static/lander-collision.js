@@ -26,6 +26,14 @@ export const affineHullEnclosure = (left, right, radius) => ({
     bottom: Math.min(left.y, right.y) - radius,
     top: Math.max(left.y, right.y) + radius,
 });
+export function boundsOverlap(left, right, margin = 0, downward = false) {
+    return (
+        left.right >= right.left - margin &&
+        left.left <= right.right + margin &&
+        left.top >= right.bottom - margin &&
+        (downward || left.bottom <= right.top + margin)
+    );
+}
 export function hasInteriorAngleKnot(start, travel) {
     const end = start + travel;
     if (travel > 0) return Math.floor(start) + 1 <= Math.ceil(end) - 1;

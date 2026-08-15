@@ -1,4 +1,4 @@
-import { affineHullEnclosure, compareExactRoots, exactRootNumber, exactSegmentContact, exactZeroRoot, hasInteriorAngleKnot } from "./lander-collision.js";
+import { affineHullEnclosure, boundsOverlap, compareExactRoots, exactRootNumber, exactSegmentContact, exactZeroRoot, hasInteriorAngleKnot } from "./lander-collision.js";
 
 export const STATIC_WORLD_SEED = 0x41475731,
     CHUNK_WIDTH = 50;
@@ -676,9 +676,8 @@ function terrainCandidates(seed, bounds) {
             { x, y: terrainHeightAt(seed, x) },
             { x: x + TERRAIN_VERTEX_CADENCE, y: terrainHeightAt(seed, x + TERRAIN_VERTEX_CADENCE) },
         ];
-        const bottom = Math.min(segment[0].y, segment[1].y);
         const top = Math.max(segment[0].y, segment[1].y);
-        if (top >= bounds.bottom - COLLISION_MARGIN && bottom <= bounds.top + COLLISION_MARGIN) {
+        if (top >= bounds.bottom - COLLISION_MARGIN) {
             result.push({ cause: "terrain", priority: 4, segment, solidBelow: true });
         }
     }
@@ -694,7 +693,7 @@ function contextTerrainCandidates(vertices, bounds) {
             ],
             candidate = { cause: "terrain", priority: 4, segment, solidBelow: true };
         candidate.bounds = candidateBounds(candidate);
-        return overlaps(candidate.bounds, bounds, COLLISION_MARGIN) ? [candidate] : [];
+        return boundsOverlap(candidate.bounds, bounds, COLLISION_MARGIN, candidate.solidBelow) ? [candidate] : [];
     });
 }
 const contextTerrainCache = new WeakMap();
@@ -716,15 +715,6 @@ function expandedEnclosure(left, right, expansion = 0) {
             key,
             value + (key === "left" || key === "bottom" ? -expansion : expansion),
         ]),
-    );
-}
-
-function overlaps(left, right, margin = 0) {
-    return (
-        left.right >= right.left - margin &&
-        left.left <= right.right + margin &&
-        left.top >= right.bottom - margin &&
-        left.bottom <= right.top + margin
     );
 }
 
@@ -764,7 +754,9 @@ function contactForCandidate(leftHull, rightHull, candidate) {
 }
 
 function candidatesForBounds(model, bounds, fixed, target, terrainIsFixed) {
-    const candidates = fixed.filter((candidate) => overlaps(candidateBounds(candidate), bounds, COLLISION_MARGIN));
+    const candidates = fixed.filter((candidate) =>
+        boundsOverlap(candidateBounds(candidate), bounds, COLLISION_MARGIN, candidate.solidBelow),
+    );
     if (!terrainIsFixed) candidates.push(...terrainCandidates(model.seed, bounds));
     if (
         target &&
@@ -782,7 +774,8 @@ function candidatesForBounds(model, bounds, fixed, target, terrainIsFixed) {
 }
 
 function hasCandidateForBounds(model, bounds, fixed, target, terrainIsFixed) {
-    if (fixed.some((candidate) => overlaps(candidateBounds(candidate), bounds, COLLISION_MARGIN))) return true;
+    if (fixed.some((candidate) => boundsOverlap(candidateBounds(candidate), bounds, COLLISION_MARGIN, candidate.solidBelow)))
+        return true;
     if (!terrainIsFixed && terrainCandidates(model.seed, bounds).length) return true;
     return Boolean(
         target &&
@@ -933,7 +926,11 @@ export function classifySweptContactFromBounds(model, previous, next, previousBo
             });
             contextTerrainCache.set(model, terrainFeatures);
         }
-        fixed.push(...terrainFeatures.filter((candidate) => overlaps(candidate.bounds, swept, COLLISION_MARGIN)));
+        fixed.push(
+            ...terrainFeatures.filter((candidate) =>
+                boundsOverlap(candidate.bounds, swept, COLLISION_MARGIN, candidate.solidBelow),
+            ),
+        );
     } else if (terrainIsFixed) fixed.push(...terrainCandidates(model.seed, swept));
     let termini;
     if (swept.left <= WORLD_MIN_X + COLLISION_MARGIN) {
