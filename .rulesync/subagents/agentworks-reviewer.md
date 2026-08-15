@@ -369,7 +369,7 @@ All business logic lives in the service layer; the CLI is a thin translation lay
 where error handling discipline lives; typed exceptions are how the service layer communicates
 failure to whichever client is calling it.
 
-**Service layer** (the `*manager.py` modules under `cli/agentworks/<domain>/`):
+**Service layer** (the `manager/` packages under `cli/agentworks/<domain>/`):
 
 - Exposes synchronous, typed function APIs that other clients can call directly.
 - Signals errors by raising typed exceptions from `agentworks.errors`, organized by _kind_ of error:

@@ -3,7 +3,7 @@ Please also reference the following rules as needed. The list below is provided 
 rules[10]:
   - path: @.codex/memories/cli-conventions.md
     description: CLI command shape and naming conventions
-    applyTo[3]: **/agentworks/cli/**/*.py,**/completions/**/*.py,**/agentworks/**/manager.py
+    applyTo[3]: **/agentworks/cli/**/*.py,**/completions/**/*.py,**/agentworks/**/manager/**/*.py
   - path: @.codex/memories/code-style.md
     description: General style and formatting guidelines
   - path: @.codex/memories/development-principles.md

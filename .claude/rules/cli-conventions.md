@@ -2,7 +2,7 @@
 paths:
   - '**/agentworks/cli/**/*.py'
   - '**/completions/**/*.py'
-  - '**/agentworks/**/manager.py'
+  - '**/agentworks/**/manager/**/*.py'
 ---
 # CLI Conventions
 

@@ -1,6 +1,7 @@
 ---
 description: CLI command shape and naming conventions
-applyTo: '**/agentworks/cli/**/*.py,**/completions/**/*.py,**/agentworks/**/manager.py'
+applyTo: >-
+  **/agentworks/cli/**/*.py,**/completions/**/*.py,**/agentworks/**/manager/**/*.py
 ---
 # CLI Conventions
 
