@@ -14,7 +14,7 @@ def test_secret_decl_defaults() -> None:
     assert d.backend_mappings == {}
 
 
-def test_secret_decl_carries_mappings_keyed_by_backend_name() -> None:
+def test_secret_decl_carries_mappings_keyed_by_source_name() -> None:
     d = SecretDecl(
         name="x",
         description="X",

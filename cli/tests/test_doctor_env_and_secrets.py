@@ -143,7 +143,7 @@ def test_secret_resolves_via_prompt_when_env_var_unset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When env-var has nothing and prompt is in the chain, doctor reports
-    the secret as resolving via prompt -- prompt is just another backend."""
+    the secret as resolving via prompt, which is another active source."""
     monkeypatch.delenv("AW_SECRET_SHARED", raising=False)
     cfg = _write_config(
         tmp_path,
@@ -168,7 +168,7 @@ def test_secret_not_available_when_env_var_unset_and_prompt_opted_out(
 ) -> None:
     """When prompt is opted out via backend_mappings.prompt = false AND
     env-var has no value, doctor reports the secret as WARN (config is
-    valid but no backend in the chain would resolve it)."""
+    valid but no source in the chain would resolve it)."""
     monkeypatch.delenv("AW_SECRET_OPTED_OUT", raising=False)
     cfg = _write_config(
         tmp_path,
@@ -249,10 +249,10 @@ def test_secret_backends_group_skips_disabled_plugin_backend(tmp_path: Path, mon
     assert "not enabled in [plugins].system" in (roster["plugin onepassword"].message or "")
 
 
-def test_check_secrets_flags_a_not_ready_only_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """R9.6: a secret whose only attempting backend is not-ready is at-risk;
-    ``_check_secrets`` warns and names the not-ready backend rather than
-    falsely predicting resolution via it (lockstep with the resolution skip)."""
+def test_check_secrets_flags_a_not_ready_only_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """R9.6: a secret whose only attempting source selects a not-ready backend
+    is at-risk. ``_check_secrets`` warns rather than falsely predicting
+    resolution through that source (lockstep with the resolution skip)."""
     monkeypatch.setattr("shutil.which", lambda name: None)  # op absent
     cfg = _write_config(
         tmp_path,
@@ -342,7 +342,7 @@ def test_mapping_to_undeclared_kind_hard_errors_at_build(tmp_path: Path) -> None
 def test_mapping_to_multiple_undeclared_kinds_hard_errors_at_build(tmp_path: Path) -> None:
     """With two unknown-source mappings, the first dangling edge the
     resolve pass reaches hard-errors at ``build_registry`` (naming that
-    backend); the build never gets far enough to enumerate both, unlike the
+    source); the build never gets far enough to enumerate both, unlike the
     old tolerant per-secret doctor row that listed them sorted."""
     cfg = _write_config(
         tmp_path,
@@ -496,7 +496,7 @@ spec:
 
 def _sp_site_config(tmp_path: Path) -> Path:
     """An operator config declaring an azure site with a service
-    principal, whose client secret only the prompt backend could
+    principal, whose client secret only the prompt source could
     supply."""
     cfg = _write_config(
         tmp_path,

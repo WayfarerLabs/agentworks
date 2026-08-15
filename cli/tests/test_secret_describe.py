@@ -2,8 +2,8 @@
 
 Per FRD R10, four sections: header (name, kind, origin, description),
 usages (one row per matching requirement, deduplicated by source+text),
-backend mappings (per-active-backend disposition), resolution preview
-(which active backend would resolve, or "not available").
+source mappings (one per active source, including its backend disposition),
+resolution preview (which active source would resolve, or "not available").
 """
 
 from __future__ import annotations
@@ -190,10 +190,10 @@ def test_no_usages_for_unreferenced_operator_declared_secret(tmp_path: Path) -> 
 # -- Backend mappings section ----------------------------------------------
 
 
-def test_backend_mappings_show_each_active_backend(tmp_path: Path) -> None:
-    """One mapping per active backend in the resolver chain order. The
-    env-var backend shows its derived identifier; the prompt backend has
-    no static identifier.
+def test_source_mappings_show_each_active_source(tmp_path: Path) -> None:
+    """One mapping per active source in precedence order. Each mapping retains
+    the selected backend implementation fact: env-var shows its derived
+    identifier, while prompt has no static identifier.
     """
     cfg = _write_cfg(
         tmp_path,
@@ -216,7 +216,7 @@ def test_backend_mappings_show_each_active_backend(tmp_path: Path) -> None:
     assert prompt.identifier is None
 
 
-def test_backend_mapping_respects_operator_override(tmp_path: Path) -> None:
+def test_source_mapping_respects_operator_override(tmp_path: Path) -> None:
     """An operator's ``backend_mappings.env-var = "CUSTOM"`` overrides
     the framework default.
     """
@@ -235,9 +235,9 @@ def test_backend_mapping_respects_operator_override(tmp_path: Path) -> None:
     assert env_var.identifier == "CUSTOM_API_KEY"
 
 
-def test_backend_mapping_respects_opt_out(tmp_path: Path) -> None:
-    """An operator's ``backend_mappings.env-var = false`` skips that
-    backend for this secret; ``would_attempt`` is False.
+def test_source_mapping_respects_opt_out(tmp_path: Path) -> None:
+    """An operator's ``backend_mappings.env-var = false`` skips that source
+    for this secret; ``would_attempt`` is False.
     """
     cfg = _write_cfg(
         tmp_path,
@@ -310,12 +310,12 @@ def test_resolution_preview_falls_through_to_prompt(tmp_path: Path) -> None:
 # -- Readiness-aware describe (R9.1 / R9.6) ---------------------------------
 
 
-def test_not_ready_backend_annotated_and_skipped_in_preview(tmp_path: Path, monkeypatch) -> None:
-    """R9.1 / R9.6: a not-ready mapped backend (onepassword with no ``op`` on
-    PATH) keeps its mapping shown but flagged ``(not ready: <reason>)`` in
-    Backend mappings, is shown as skipped in the Resolution preview, and does
-    NOT count toward "would attempt via X": the chain falls through to prompt.
-    Readiness is offline (no store probe)."""
+def test_not_ready_source_annotated_and_skipped_in_preview(tmp_path: Path, monkeypatch) -> None:
+    """R9.1 / R9.6: mapped source ``work-op`` selects the onepassword backend,
+    which is not-ready without ``op`` on PATH. The source keeps its Backend
+    mappings row with a not-ready annotation, is shown as skipped in the
+    Resolution preview, and does not count toward "would attempt via X": the
+    chain falls through to prompt. Readiness is offline (no store probe)."""
     monkeypatch.setattr("shutil.which", lambda name: None)  # op absent -> not ready
     cfg = _write_cfg(
         tmp_path,
@@ -389,10 +389,10 @@ def test_render_shows_not_ready_annotation_and_skip(
 def test_interactive_optimism_preview_unchanged_under_readiness(tmp_path: Path, monkeypatch) -> None:
     """LLD e acceptance line: the interactive-optimism preview is UNCHANGED.
     Readiness is the offline layer UNDER interactive-optimism: with an earlier
-    not-ready onepassword skipped, a ready ``prompt`` is STILL previewed as the
-    resolving backend on ``would_attempt`` alone (never probed for a TTY or
-    interaction). Readiness (offline) and interactivity (optimistic) stay
-    orthogonal; no surface conflates them."""
+    not-ready onepassword source skipped, a ready ``prompt`` source is STILL
+    previewed as resolving on its backend's ``would_attempt`` alone (never
+    probed for a TTY or interaction). Readiness (offline) and interactivity
+    (optimistic) stay orthogonal; no surface conflates them."""
     monkeypatch.setattr("shutil.which", lambda name: None)
     cfg = _write_cfg(
         tmp_path,
@@ -423,9 +423,9 @@ def test_interactive_optimism_preview_unchanged_under_readiness(tmp_path: Path, 
     assert desc.resolution.category is PreviewCategory.ATTEMPTABLE
 
 
-def test_resolution_preview_not_available_when_no_backend_attempts(tmp_path: Path) -> None:
-    """A secret opted out of every active backend resolves via no
-    backend; the preview reports "not available".
+def test_resolution_preview_not_available_when_no_source_attempts(tmp_path: Path) -> None:
+    """A secret opted out of every active source has no resolution attempt;
+    the preview reports "not available".
 
     Construction: a chain with only ``env-var`` (no prompt fallback)
     and an explicit ``backend_mappings.env-var = false`` opt-out.

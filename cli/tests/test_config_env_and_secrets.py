@@ -562,7 +562,8 @@ def test_reachability_scope_is_operator_declared_only(tmp_path: Path) -> None:
 def test_reachability_keying_is_would_attempt_readiness_blind(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Reachability preservation invariant (LLD d): the build-time check is
     keyed on WOULD-ATTEMPT (the frozen edges), READINESS-BLIND. A secret whose
-    only opted-in backend is onepassword, forced NOT-READY, is still reachable
+    only opted-in source is team-op, whose onepassword backend is forced
+    NOT-READY, is still reachable
     (the build succeeds); it would fail only at resolution, exactly as today."""
     from agentworks.plugins.onepassword.backend import OnePasswordBackend
     from agentworks.resources.graph import Readiness

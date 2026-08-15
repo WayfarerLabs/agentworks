@@ -169,7 +169,7 @@ def test_sweep_fails_fast_non_interactively_on_a_prompt_only_secret(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Issue #202, re-pinned at the sweep. A secret only the prompt
-    backend could supply, under ``--non-interactive``: the sweep refuses
+    source could supply, under ``--non-interactive``: the sweep refuses
     before any prompt or mutation rather than letting the command reach
     a resolve-end failure. Interactive, the same graph passes and the
     value check defers to resolve time.
