@@ -94,7 +94,7 @@ deliberately narrow `cli-conventions.md`.
   runtime check that a first-party enum is an enum) at 152 call sites, one of which validates the
   value the same expression just constructed (`cli/commands/secret.py:134-136`).
   `test_phase7_retired_enforcement.py:229-268` is additionally a wording blacklist over README,
-  docs, and production source. Ten permanent test files are named after transient plan phase 7.
+  docs, and production source. Nine permanent test files are named after transient plan phase 7.
 - **S2** Backend classes treated as hostile protocol peers: bare `except Exception` plus type-checks
   around every return from the three in-repo backends
   (`resolve.py:87-94, 351-360, 556-573, 612-624`), a `_BATCH_TOKEN` construction sentinel defeated
@@ -135,10 +135,13 @@ deliberately narrow `cli-conventions.md`.
   consumer compares `interaction` by identity and `InteractionPolicy` is a `StrEnum`, a value that
   is equal but not identical takes the not-refuse branch and resolves through an interactive source
   in a run that meant to refuse. The `prompt` dispatch raises on that, so `prompt` fails loud while
-  `onepassword` and every future interactive backend fail silent and permissive. Unreachable today
-  (plugins are a hardcoded tuple, and nothing constructs an `InteractionPolicy` from outside), so it
-  is filed as issue 529 against the external-plugin loader effort rather than fixed here; when this
-  is promoted, the safety half travels with it, and no backend's safety should depend on its name.
+  `onepassword` and every future interactive backend fail silent and permissive. No first-party path
+  constructs a non-enum policy value: `verify_secrets` is absent from `agentworks.secrets.__all__`,
+  its only production caller is `cli/commands/secret.py:147`, and its `interaction` parameter is
+  typed `InteractionPolicy`, so reaching the path means importing an unexported function and passing
+  an untyped value, which mypy rejects in-repo. It is therefore filed as issue 529 against the
+  external-plugin loader effort rather than fixed here; when this is promoted, the safety half
+  travels with it, and no backend's safety should depend on its name.
 - **S10** LLD prose in permanent docstrings: 45-line docstring over a 10-line body
   (`base.py:187-218`), 57-line module docstring litigating design history, a 16-line Typer help
   docstring describing internals.
