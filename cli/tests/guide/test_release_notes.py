@@ -38,6 +38,7 @@ from agentworks.release_notes import (
     topic_version,
     version_topic,
 )
+from agentworks.version import resolve_version
 
 EXPECTED_RELEASES = (
     "0.13.0",
@@ -74,27 +75,32 @@ def _broken() -> object:
     raise ConfigError("test configuration is unavailable")
 
 
-def test_canonical_changelog_has_one_section_for_every_actual_release_tag() -> None:
+def test_canonical_changelog_has_tagged_history_and_optional_current_release() -> None:
     history = read_release_history()
     repository = Path(__file__).parents[3]
     tags = subprocess.run(
-        ["git", "tag", "--list", "v*", "--sort=-version:refname"],
+        ["git", "tag", "--merged", "HEAD", "--list", "v*", "--sort=-version:refname"],
         cwd=repository,
         check=True,
         capture_output=True,
         text=True,
     ).stdout.splitlines()
     stable_tags = tuple(tag.removeprefix("v") for tag in tags if re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag))
-    bounded_tags = tuple(
-        version for version in stable_tags if (0, 2, 0) <= tuple(int(part) for part in version.split(".")) <= (0, 13, 0)
+    tagged_history = tuple(
+        version for version in stable_tags if tuple(int(part) for part in version.split(".")) >= (0, 2, 0)
     )
+    current_version = resolve_version()
+    known_history = tagged_history or EXPECTED_RELEASES
+    expected_history = known_history
+    if current_version != known_history[0]:
+        assert tuple(int(part) for part in current_version.split(".")) > tuple(
+            int(part) for part in known_history[0].split(".")
+        )
+        expected_history = (current_version, *known_history)
 
-    assert history.versions == EXPECTED_RELEASES
-    # An ordinary CI checkout is intentionally shallow and has no tag refs. The
-    # frozen expected inventory remains the regression gate there; when refs are
-    # present locally, also audit it directly against the canonical Git tags.
-    if stable_tags:
-        assert bounded_tags == EXPECTED_RELEASES
+    # Release-please writes the current version's section before its tag exists.
+    # Every older section must still correspond exactly to the tagged history.
+    assert history.versions == expected_history
     assert "0.1.0" not in history.versions
 
 
