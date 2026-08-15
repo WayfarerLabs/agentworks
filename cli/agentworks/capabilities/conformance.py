@@ -1,4 +1,19 @@
-"""Non-constructing registration conformance for capability classes."""
+"""Non-constructing registration conformance for capability classes.
+
+Boundary, shared by every check here: a capability class arriving from
+outside our type checking. ``plugins/registration.py`` is the only
+production caller, so what these checks face is a class a plugin module
+handed the framework, and dynamically loaded third-party code is outside
+our mypy run.
+
+Core built-ins reach the same checks through a different door and at a
+different moment: ``tests/capabilities/test_capability_descriptors.py``'s
+``test_every_registered_builtin_impl_conforms`` runs this whole chain over
+every seated implementation of every kind. That is the right instrument for
+our own tree, where a non-conforming built-in is a bug to fail the build on
+rather than a class to refuse at startup, and refusing one at startup would
+brick the CLI instead of helping anyone.
+"""
 
 from __future__ import annotations
 
@@ -67,6 +82,13 @@ def _metadata_error(impl: type) -> str | None:
 
 
 def _constructibility_error(impl: type) -> str | None:
+    """Prove the class could be constructed, structurally and without doing it.
+
+    One half of the seam the framework keeps at registration (call shape is
+    the other): a class that leaves an operation unimplemented fails at the
+    first operation instead of at the moment it was seated, far from the
+    author who can fix it.
+    """
     if inspect.isabstract(impl):
         unimplemented = ", ".join(sorted(getattr(impl, "__abstractmethods__", ())))
         return f"it is abstract (unimplemented operations: {unimplemented})"
@@ -296,7 +318,11 @@ def _version_error(descriptor: CapabilityKindDescriptor, impl: type) -> str | No
 
     Trivially satisfied while there is one version, which is the point: the
     declaration and the comparison both exist before the first incompatible
-    change, so nothing has to be retrofitted when one arrives.
+    change, so nothing has to be retrofitted when one arrives. Without it, a
+    class written against an older contract seats cleanly and goes wrong
+    later, at a call site with no idea a contract ever revved. That is what
+    the version check is for, and it is why it stays while the annotation
+    comparisons beside it did not.
 
     Exact equality, deliberately: a contract change is a hard cutover, and
     every impl migrates before the descriptor's number moves. Supporting two

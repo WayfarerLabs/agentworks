@@ -542,8 +542,11 @@ The check is **nominal and never constructs the implementation**, so it says the
 every class registry. It replaced an `isinstance(impl, type)` gate and a `cast`, under which a class
 that merely looked plausible seated fine and failed later, far from the mistake. `register_plugin`
 runs it in its validation pass before any registry is mutated, so a non-conforming implementation is
-a typed error naming the plugin and seating stays all-or-nothing. Built-in implementations are held
-to the same contract by the descriptor table's own self-test.
+a typed error naming the plugin and seating stays all-or-nothing. Built-in implementations seat by
+plain assignment at import and are held to the same contract at a different moment, by the
+descriptor table's own self-test, which runs the whole chain over every seated implementation of
+every kind. That split is deliberate: a plugin's mistake is refused at its own boundary, while a
+built-in's is our bug to fail the build on rather than a class to refuse at startup.
 
 ### Modeling a Config That Has Variants
 

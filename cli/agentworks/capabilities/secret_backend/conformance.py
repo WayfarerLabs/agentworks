@@ -83,7 +83,10 @@ def _classmethod_conformance_error(
     name: str,
     parameters: tuple[_ParameterContract, ...],
 ) -> str | None:
-    """Check one classmethod's call shape without binding or constructing its owner."""
+    """Check one classmethod's call shape without binding or constructing its owner.
+
+    Boundary as named on :func:`_secret_backend_conformance_error`.
+    """
     raw = inspect.getattr_static(impl, name)
     if not isinstance(raw, classmethod):
         return f"its {name} must be declared as @classmethod"
