@@ -212,6 +212,16 @@ def _reset_backend() -> None:
     _BrokerCapturingBackend.brokers = []
 
 
+def test_policy_construction_rejects_a_non_enum_interaction() -> None:
+    """The totality the eight boundary check sites cannot buy: a seventh construction that
+    took ``interaction`` from a parameter and never checked it would still raise here.
+    Every consumer compares the field by identity, so a plain ``"refuse"`` is the value
+    that resolves through an interactive source in a run that meant to refuse.
+    """
+    with pytest.raises(StateError):
+        ResolutionPolicy(interaction="refuse", completion=CompletionPolicy.COMPLETE)  # type: ignore[arg-type]
+
+
 def test_partial_reveal_rejects_a_non_enum_policy_before_any_source_work() -> None:
     """``resolve_partial_for_reveal`` constructs a ``ResolutionPolicy``, so it is a
     consumer and checks its own argument rather than trusting ``show_env``, its only
