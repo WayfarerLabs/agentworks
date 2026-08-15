@@ -54,10 +54,12 @@ the mechanism itself and stay as written.
   CLIENT_SECRET / TENANT_ID / SUBSCRIPTION_ID / RESOURCE_GROUP / REGION). agentworks resolves the SP
   client secret as the `azure-client-secret` secret via env-var backend, so agw commands need
   `export AW_SECRET_AZURE_CLIENT_SECRET="$AGW_TESTING_AZURE_CLIENT_SECRET"`. The non-secret IDs go
-  in `~/.config/agentworks/resources/azure.yaml` (spec.platform_config: subscription_id,
-  resource_group, region, service_principal{tenant_id, client_id}); the RG must already exist.
-  Subscription `<azure-subscription>`; region `<azure-region>` (quota) for the VM; the RG's own
-  region (`<azure-rg-region>`) can differ from the VM's. Authorized to switch RGs on quota problems.
+  in `~/.config/agentworks/resources/azure.yaml`, under the tagged `spec.platform`:
+  `subscription_id`, `resource_group`, `region`, and
+  `auth: {mode: service-principal, tenant_id, client_id, secret}`, where `secret` is the NAME of the
+  secret holding the client secret. The RG must already exist. Subscription `<azure-subscription>`;
+  region `<azure-region>` (quota) for the VM; the RG's own region (`<azure-rg-region>`) can differ
+  from the VM's. Authorized to switch RGs on quota problems.
 - AZURE RG CAUTION: `<azure-resource-group>` is the host owner's PERSONAL, SHARED resource group
   (used for test VMs "for now", 2026-07-31). Strict `<system-slug>-` naming; delete only by exact VM
   name; NEVER bulk-operate, `az group delete`, or touch any resource you did not create. Azure VMs
@@ -71,19 +73,19 @@ the mechanism itself and stay as written.
   agentworks resolves the secret as the `aws-secret-access-key` secret via env-var backend, so agw
   commands need `export AW_SECRET_AWS_SECRET_ACCESS_KEY="$AGW_TESTING_AWS_SECRET_ACCESS_KEY"`. Site
   config `~/.config/agentworks/resources/ec2.yaml` uses the tagged shape under `spec.platform`:
-  `name` (`aws-ec2`), `region`, and a `credentials` block with `access_key_id` and
-  `access_key_secret`. `access_key_id` is a plain identifier (not secret); `access_key_secret` is
-  the NAME of the secret. Region `<aws-region>` (chosen for proximity to the operator). Account
-  `<aws-account-id>`, dedicated IAM user `<iam-user>` with a least-privilege EC2+SSM policy
-  region-pinned to `<aws-region>` (no EIP actions; the platform uses auto-assigned public IPs, never
-  Elastic IPs). GOTCHAS: a brand-new/dormant AWS account is "blocked, not recognized as valid" until
-  AWS activates it (identity/billing); the access-key-id and secret must be a MATCHED pair (mismatch
-  results in `SignatureDoesNotMatch` at runup). Exposure model: empty security group is the deny
-  baseline (zero ingress; no deny rule to install, unlike azure's NSG); ephemeral
-  (proto,port,cidr)-tuple allows scoped to the operator /32 for bootstrap + transient_route, revoked
-  after. LEAK-WITNESS SWEEP (boto3, `<aws-region>`): running instances tagged `agentworks:vm`,
-  non-default security groups, volumes; all must be empty after delete (EIPs omitted by design).
-  Instances cost money; always terminate + sweep.
+  `name` (`aws-ec2`), `region`, and `auth: {mode: access-key, access_key_id, access_key_secret}`.
+  `access_key_id` is a plain identifier (not secret); `access_key_secret` is the NAME of the secret.
+  Region `<aws-region>` (chosen for proximity to the operator). Account `<aws-account-id>`,
+  dedicated IAM user `<iam-user>` with a least-privilege EC2+SSM policy region-pinned to
+  `<aws-region>` (no EIP actions; the platform uses auto-assigned public IPs, never Elastic IPs).
+  GOTCHAS: a brand-new/dormant AWS account is "blocked, not recognized as valid" until AWS activates
+  it (identity/billing); the access-key-id and secret must be a MATCHED pair (mismatch results in
+  `SignatureDoesNotMatch` at runup). Exposure model: empty security group is the deny baseline (zero
+  ingress; no deny rule to install, unlike azure's NSG); ephemeral (proto,port,cidr)-tuple allows
+  scoped to the operator /32 for bootstrap + transient_route, revoked after. LEAK-WITNESS SWEEP
+  (boto3, `<aws-region>`): running instances tagged `agentworks:vm`, non-default security groups,
+  volumes; all must be empty after delete (EIPs omitted by design). Instances cost money; always
+  terminate + sweep.
 - System slug: `<system-slug>`. It prefixes Lima instance names and tailnet hostnames automatically,
   so entity names stay bare (no extra prefix duplication).
 - Tailnet: this host and test VMs join the operator's tailnet. Deleted VMs leave offline machine
