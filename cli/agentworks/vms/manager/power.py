@@ -9,6 +9,7 @@ from agentworks import output
 from agentworks.capabilities.base import RunContext
 from agentworks.db import VMStatus
 from agentworks.errors import StateError, UserAbort
+from agentworks.secrets.policy import require_exact_interaction_policy
 
 from ._helpers import (
     _guard_failed_vm,
@@ -185,9 +186,16 @@ def delete_vm(
     logout uses a hold-only span. ``UserAbort`` is the one exception
     the best-effort spans may not downgrade: an abort at the
     boundary's secret prompt or inside an op span must keep the row.
+    ``interaction`` is checked HERE rather than being left to the
+    boundary's resolver: the boundary sits inside the best-effort span,
+    which would downgrade the rejection to a warning and then delete the
+    row and the operator's SSH entry while skipping the backend delete,
+    orphaning the VM the span exists to protect (#329). The span
+    tolerates a broken backend, not a malformed argument.
     """
     import agentworks.vms.manager as _mgr
 
+    require_exact_interaction_policy(interaction)
     vm = _require_vm(db, name)
 
     # Check for workspaces (which contain agents and sessions)

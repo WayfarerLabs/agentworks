@@ -30,7 +30,7 @@ from agentworks.secrets.outcomes import (
     _safe_diagnostic_text,
     complete_resolution_error,
 )
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import InteractionPolicy, require_exact_interaction_policy
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -687,7 +687,13 @@ def resolve_partial_for_reveal(
     *,
     interaction: InteractionPolicy,
 ) -> PartialResolution:
-    """Resolve independent values for the explicit env reveal surface."""
+    """Resolve independent values for the explicit env reveal surface.
+
+    Published and module-level: ``show_env`` forwards to this, but nothing stops another
+    caller reaching it directly, so it checks its own ``interaction`` rather than trusting
+    the one caller it has today.
+    """
+    require_exact_interaction_policy(interaction)
     broker = OutputInteractionBroker(secrets) if interaction is InteractionPolicy.ALLOW else None
     batch = resolve_batch(
         secrets,

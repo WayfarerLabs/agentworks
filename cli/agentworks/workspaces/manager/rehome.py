@@ -15,6 +15,7 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.path_rendering import format_host_path
+from agentworks.secrets.policy import require_exact_interaction_policy
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.manager._common import _guard_vm_status, _workspace_scope
 from agentworks.workspaces.manager.repair import _rehome_partial_state_hint
@@ -35,7 +36,14 @@ def rehome_workspace(
     yes: bool = False,
     interaction: InteractionPolicy,
 ) -> None:
-    """Move a workspace to a new directory path."""
+    """Move a workspace to a new directory path.
+
+    ``interaction`` is checked first, ahead of the session-status guard:
+    the guard opens SSH transports and repairs stored PIDs, and the
+    boundary that would otherwise reject the policy is past all of it, so
+    a rejected rehome would already have touched the VM and the rows.
+    """
+    require_exact_interaction_policy(interaction)
     ws = db.get_workspace(name)
     if ws is None:
         raise NotFoundError(

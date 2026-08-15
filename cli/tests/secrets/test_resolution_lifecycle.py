@@ -22,7 +22,7 @@ from agentworks.capabilities.secret_backend.client import (
     SecretLookupRequest,
     SecretSourceClient,
 )
-from agentworks.errors import ExternalError, SecretUnavailableError
+from agentworks.errors import ExternalError, SecretUnavailableError, StateError
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.resources.graph import Readiness
 from agentworks.schema import AgwModel, AgwRootModel, CapabilityBlock
@@ -42,6 +42,7 @@ from agentworks.secrets.resolve import (
     OutputInteractionBroker,
     ResolutionPolicy,
     resolve_batch,
+    resolve_partial_for_reveal,
 )
 
 _VALUE_SENTINEL = "secret-value-sentinel"
@@ -209,6 +210,20 @@ def _reset_backend() -> None:
     _Backend.values = {}
     _Backend.failure = None
     _BrokerCapturingBackend.brokers = []
+
+
+def test_partial_reveal_rejects_a_non_enum_policy_before_any_source_work() -> None:
+    """``resolve_partial_for_reveal`` constructs a ``ResolutionPolicy``, so it is a
+    consumer and checks its own argument rather than trusting ``show_env``, its only
+    caller today, to have checked. It is module-level and importable, and "it has one
+    caller" is what left the fault this check exists to close reachable."""
+    with pytest.raises(StateError):
+        resolve_partial_for_reveal(
+            [SecretDecl(name="token", description="")],
+            [_source()],
+            interaction="refuse",  # type: ignore[arg-type]
+        )
+    assert _Backend.events == []
 
 
 def test_one_lazy_client_turn_and_redacted_batch() -> None:

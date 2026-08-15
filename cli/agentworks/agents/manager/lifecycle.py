@@ -19,6 +19,7 @@ from agentworks.errors import (
     UserAbort,
 )
 from agentworks.naming import validate_name
+from agentworks.secrets.policy import require_exact_interaction_policy
 from agentworks.vms.manager import gated_vm_boundary
 
 from ._common import MAX_AGENT_NAME_LENGTH, _require_vm, agent_scope
@@ -415,10 +416,17 @@ def reinit_agent(
     names. Nothing here is created, so there is no realization log and
     nothing to unwind; a failed reinit leaves the agent re-runnable, as
     before.
+
+    ``interaction`` is checked first, ahead of the re-point persist: the
+    boundary resolver below would reject it too, but only after the row
+    already points at the new template, which is the state the re-point
+    ordering exists to prevent.
     """
 
     from agentworks.agents.templates import resolve_template
     from agentworks.bootstrap import load_request_registry
+
+    require_exact_interaction_policy(interaction)
 
     # build_registry runs first so framework miss-policies fire before
     # template / DB / VM business logic.

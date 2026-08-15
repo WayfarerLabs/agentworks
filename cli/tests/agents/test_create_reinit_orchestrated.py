@@ -18,7 +18,7 @@ from agentworks.agents import grants as agent_grants
 from agentworks.agents import initializer as agent_initializer
 from agentworks.agents import manager as agent_manager
 from agentworks.capabilities.base import RunContext
-from agentworks.errors import ExternalError, NotFoundError
+from agentworks.errors import ExternalError, NotFoundError, StateError
 from agentworks.output import Role
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import InteractionPolicy
@@ -418,6 +418,38 @@ def test_reinit_unknown_update_template_raises_and_keeps_the_row(
     assert resolve_counter == []  # refused before any secret resolve
     row = db.get_agent("dev")
     assert row is not None and row.template == "default"  # unchanged
+
+
+def test_reinit_non_enum_policy_raises_before_the_repoint_is_persisted(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The boundary resolver rejects a non-enum policy too, but only after the
+    re-point is already persisted. ``reinit_agent`` checks first, so a refused
+    reinit never leaves the row pointing at a template it never converged on."""
+    config = make_config()
+    _seed_vm(db)
+    db.insert_agent("dev", "box", "agt-dev", template="default")
+
+    def _boom(*a: Any, **k: Any) -> None:
+        raise AssertionError("setup must not run for a rejected policy")
+
+    monkeypatch.setattr(agent_initializer, "create_agent_on_vm", _boom)
+
+    with pytest.raises(StateError):
+        agent_manager.reinit_agent(
+            db,
+            config,
+            name="dev",
+            update_template="other",
+            interaction="refuse",  # type: ignore[arg-type]
+        )
+
+    assert resolve_counter == []
+    row = db.get_agent("dev")
+    assert row is not None and row.template == "default"
 
 
 def test_reinit_update_template_persists_before_convergence_so_a_mid_failure_keeps_the_new_binding(

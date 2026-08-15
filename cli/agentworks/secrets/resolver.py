@@ -22,6 +22,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError
+from agentworks.secrets.policy import require_exact_interaction_policy
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -58,8 +59,6 @@ class Resolver:
         *,
         interaction: InteractionPolicy,
     ) -> None:
-        from agentworks.secrets.policy import require_exact_interaction_policy
-
         require_exact_interaction_policy(interaction)
         self._config = config
         self._registry = registry
