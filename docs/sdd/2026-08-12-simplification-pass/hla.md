@@ -17,6 +17,15 @@ The system has exactly these trust boundaries today:
    execution is not interior; it can be old-version, corrupt, truncated, concurrently held, or
    modified out of band. `inspect_schema`'s classification and backup qualification are boundary
    work and stay.
+5. **Arguments arriving from a caller our type checker does not check**: a plugin, another client,
+   an operator's or tester's own script. `verify_secrets` is the standing example, reached by a
+   tester's script with a bare string where every in-repo caller passes the enum. Ask who can call a
+   function, not what constructs its values: provenance is set by every entry point that can supply
+   a value, not only by the sites where our own code builds one. Count the callers that exist, not
+   the ones you can imagine. While every call site sits inside our own type-checked code the value
+   is interior; the day a loader, a client, or a service front end can call in, it is not. That is
+   operator ruling 1 applied to provenance: the boundary is designed against the real channel when
+   the channel exists, not held open for one that might.
 
 Everything else, first-party typed values produced and consumed within one execution under mypy
 strict, is interior. Interior guarantees are carried by types, frozen dataclasses, and
