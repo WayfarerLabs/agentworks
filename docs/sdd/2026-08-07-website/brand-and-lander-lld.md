@@ -1711,7 +1711,7 @@ record order, and emits one compact row per record after the exact shared prefix
 `REFERENCE_PROOFS`, and the direct-key `REFERENCE_PROOF_CATALOG`. Permanent tests rerun this
 projection to a temporary path and require byte equality with the reviewed generated source; build
 tests mutation-kill a missing/renamed import or provenance marker and prove the final artifact still
-has exactly 13 entries.
+has exactly 14 entries.
 
 `ROUTE_DIGESTS` contains exactly `assignmentDigest,bootstrapDigest,geometryDigest,outputDigest,`
 `physicsDigest,proofDigest,worldDigest`, copied from derived v8 without recomputation by the
