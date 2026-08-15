@@ -77,18 +77,21 @@ def _to_vm(row: sqlite3.Row) -> VMRow:
 
 
 def _parse_vm_json(
-    raw: str | None,
+    raw: object,
     vm_name: str,
     column: str,
     expected: type[list[object]] | type[dict[object, object]],
 ) -> list[object] | dict[object, object]:
     """Decode one VM JSON column into its persisted row shape."""
     fallback: list[object] | dict[object, object] = expected()
-    if not raw:
+    if raw is None or raw == "":
         return fallback
-    try:
-        decoded = json.loads(raw)
-    except json.JSONDecodeError:
+    if isinstance(raw, str):
+        try:
+            decoded = json.loads(raw)
+        except json.JSONDecodeError:
+            decoded = None
+    else:
         decoded = None
     valid = isinstance(decoded, expected)
     if valid and expected is list:

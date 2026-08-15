@@ -502,6 +502,8 @@ def render_guide(
                 try:
                     onboarding_snapshot = build_onboarding_snapshot(registry, db)
                     onboarding_unavailable = False
+                except (GuideContributionError, GuideTraversalError):
+                    raise
                 except AgentworksError as error:
                     record_context_problem(error, ("concept-onboarding/derived-plan",))
             for topic in selected_topics:
