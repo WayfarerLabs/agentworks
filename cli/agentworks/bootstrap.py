@@ -63,10 +63,10 @@ def build_registry(
     capability and manifest rows), then the built-in secret-source rows, then
     the operator's YAML ``ManifestSet``
     (``Config.publish_to`` is a no-op now: config.toml is settings only, ADR
-    0022). Plugin rows publish unconditionally; rows from a disabled plugin are
-    weak and marked disabled at finalize by the injected
-    ``plugin_enablement_source``. Operator rows may replace built-in rows only
-    where the kind's ``builtin_override`` allows.
+    0022). Plugin rows publish unconditionally and every opted-out plugin row
+    is marked disabled at finalize by the injected ``plugin_enablement_source``.
+    Disabled plugin manifest rows additionally publish weak. Operator rows may
+    replace built-in rows only where the kind's ``builtin_override`` allows.
 
     When ``manifests`` is None (the standard path), the resources
     directory next to the loaded config file (``<config-dir>/resources/``)
