@@ -824,40 +824,28 @@ def _parse_block(value: object, source: str, topic: str, index: int) -> GuideBlo
     return TopicLinks(BlockId(block_id))
 
 
-def _action_record_value(value: object) -> dict[str, object]:
-    if type(value) is not GuideAction:
-        return {"id": object()}
-    action = value
-    inputs: list[dict[str, object]] = []
-    if type(action.required_inputs) is tuple:
-        for item in cast("tuple[object, ...]", action.required_inputs):
-            if type(item) is ActionInput:
-                inputs.append(
-                    {
-                        "name": item.name,
-                        "description": item.description,
-                        "required": item.required,
-                        "sensitive": item.sensitive,
-                    }
-                )
-            else:
-                inputs.append({"name": object()})
-    else:
-        inputs = cast("list[dict[str, object]]", object())
-    command: object = action.command
-    if command is not None and type(command) is not tuple:
-        command = object()
-    verification: object = action.verification
-    if verification is not None and type(verification) is not tuple:
-        verification = object()
+def _action_record_value(action: GuideAction) -> dict[str, object]:
+    """Project a typed action into the decoded shape the parser reads.
+
+    Both keys for the command-or-manual pair are always present so the parser
+    sees the same absent-as-``None`` shape decoded data gives it.
+    """
     return {
         "id": action.id,
         "precondition": action.precondition,
-        "required_inputs": inputs,
-        "consent": action.consent.value if type(action.consent) is ConsentBoundary else object(),
-        "command": command,
+        "required_inputs": [
+            {
+                "name": item.name,
+                "description": item.description,
+                "required": item.required,
+                "sensitive": item.sensitive,
+            }
+            for item in action.required_inputs
+        ],
+        "consent": action.consent.value,
+        "command": action.command,
         "expected_state": action.expected_state,
-        "verification": verification,
+        "verification": action.verification,
         "refusal_alternative": action.refusal_alternative,
         "manual_steps": action.manual_steps,
     }
@@ -1057,9 +1045,7 @@ def _is_literal_action_token(token: object, input_names: set[str]) -> bool:
 
 
 def validate_guide_action(action: GuideAction, source: str) -> GuideAction:
-    """Validate an inert action and return a normalized frozen copy."""
+    """Validate an inert action's content and return a normalized frozen copy."""
     if type(source) is not str or not source:
         raise _error(GuideContributionError, "<invalid-source>", None, "source", "must be a non-blank string")
-    if type(action) is not GuideAction:
-        raise _error(GuideContributionError, source, None, "value", "must be a GuideAction record")
     return _parse_action(_action_record_value(action), source, None, "value")

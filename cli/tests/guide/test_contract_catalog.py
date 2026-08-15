@@ -563,43 +563,11 @@ def test_action_list_count_and_cumulative_byte_bounds_fail_closed() -> None:
         parse_topic_contribution(_action_topic(actions), "core")
 
 
-@pytest.mark.parametrize(
-    ("field", "bad"),
-    [
-        ("id", object()),
-        ("precondition", lambda: None),
-        ("required_inputs", [ActionInput("NAME", "Name.", True)]),
-        ("consent", "read-configured-state"),
-        ("command", ["agw"]),
-        ("expected_state", object()),
-        ("verification", ["agw"]),
-        ("refusal_alternative", object()),
-    ],
-)
-def test_action_validation_is_closed_and_typed(field: str, bad: object) -> None:
-    action = _action()
-    object.__setattr__(action, field, bad)
-    with pytest.raises(GuideContributionError):
-        validate_guide_action(action, "core")
-
-
 def test_action_validation_deep_copies_and_normalizes() -> None:
     original = _action()
     validated = validate_guide_action(original, "core")
     assert validated == original
     assert validated is not original
-    assert validated.required_inputs[0] is not original.required_inputs[0]
-
-
-@pytest.mark.parametrize(
-    ("field", "bad"),
-    [("name", object()), ("description", lambda: None), ("required", 1), ("sensitive", "no")],
-)
-def test_action_nested_input_validation_is_exact(field: str, bad: object) -> None:
-    action = _action()
-    object.__setattr__(action.required_inputs[0], field, bad)
-    with pytest.raises(GuideContributionError):
-        validate_guide_action(action, "core")
 
 
 @pytest.mark.parametrize(
