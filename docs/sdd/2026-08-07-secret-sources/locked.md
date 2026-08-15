@@ -125,49 +125,45 @@ not edit the saga SDD.
 ## Supersession (2026-08-14)
 
 The `2026-08-12-simplification-pass` effort's wave 1 deleted `validate_interaction_policy` and the
-`phase7` test corpus that enforced its use, so the conventions this SDD's `operator-surfaces-lld.md`
+`phase7` corpus that enforced its use, so the conventions this SDD's `operator-surfaces-lld.md`
 records as normative no longer describe HEAD. Recorded here because that LLD is the only place on
-`main` that still specified the mechanism as current design, and this directory is locked.
+`main` that still specified the mechanism as current design, and this directory is locked. The LLD
+sections stating those requirements, principally its lines 145-153, 184-189, 396-400, 556-566, and
+669-677, are superseded in full.
 
-What went: the function itself (`secrets/policy.py`), its 152 production call sites, and the AST
-guard that required `interaction = validate_interaction_policy(interaction)` as the first executable
-statement of every public service and policy-parameter internal boundary, with its stored-policy,
-CLI-root, and directed-edge variants. The LLD sections that describe those requirements, principally
-its lines 145-153, 184-189, 396-400, 556-566, and 669-677, are superseded in full.
+What went: the interior half. The 152 call sites that re-checked a first-party `InteractionPolicy`
+already carried by a typed parameter, and the AST guard requiring
+`interaction = validate_interaction_policy(interaction)` as the first executable statement of every
+policy boundary. A value forwarded between our own functions within one execution under strict mypy
+is interior by the trust-boundary doctrine the simplification pass landed in
+`development-principles` principle 3, so those checks bought nothing.
 
-Why: the value reaching every one of those call sites is a first-party `InteractionPolicy` produced
-and consumed within a single execution under strict mypy, either a typed parameter or a value
-constructed one expression earlier by `ordinary_interaction_policy()` or a ternary over a Typer
-boolean. That is interior by the trust-boundary doctrine the simplification pass landed in
-`development-principles` principle 3, so the check re-verified a guarantee the type system already
-carried. The operator-input boundary here is the CLI flag and the TTY probe, and both are crossed
-before an `InteractionPolicy` value exists.
+What stayed, at the boundary that deletion first got wrong: `interaction` is still checked once on
+arrival, by `require_exact_interaction_policy` at the four published services that consume a policy
+rather than forward one (`secrets.verification.verify_secrets`,
+`secrets.orchestration.resolve_for_command`, `secrets.resolver.Resolver.__init__`, and
+`env.show.show_env`). Every path to `resolve_batch` crosses one of them. `InteractionPolicy` is a
+`StrEnum` and every consumer compares it by identity, so a value that is equal but not identical (a
+plain `"refuse"`) takes the not-refuse branch and resolves through an interactive source in a run
+that meant to refuse. That is reachable through this published service surface, which is why it is
+checked there: these functions take `interaction` from callers outside our type checking, and a
+probe against a configured OnePassword source reproduced the fault before the check was added.
+Forwarding a checked policy onward is not rechecked, and that is the whole difference from the
+152-site convention this note supersedes.
 
-What is untouched, which is the part that matters for anyone reading this lock: **every interaction
-behavior recorded under "What shipped" still holds.** The `InteractionPolicy` enum,
-caller-authorized prompting, fail-before-prompt ordering, `agw secret verify`'s refuse-by-default
-posture and its final `--allow-interaction` opt-in, and the forwarding of an explicit policy across
-every boundary are all unchanged. What was removed is a runtime re-check that a first-party enum was
-that enum, plus the lexical enforcement of where that re-check had to appear. No call site changed
-which policy it passes, and no operator-visible behavior changes.
+Every interaction behavior recorded under "What shipped" still holds: the enum, caller-authorized
+prompting, fail-before-prompt ordering, `agw secret verify`'s refuse-by-default posture and its
+final `--allow-interaction` opt-in, and the forwarding of an explicit policy across every boundary.
+No call site changed which policy it passes, and no operator-visible behavior changes. One coverage
+question was checked rather than assumed: the corpus's lexical assertion that auth-key acquisition
+and `_ensure_tailscale` sit inside the activation hold is covered observationally, with
+failure-unwind and single-release coverage the lexical pin could not see, in
+`cli/tests/vms/test_lifecycle_orchestrated.py` and `cli/tests/vms/test_vm_nodes.py`.
 
-One coverage question was checked rather than assumed. The corpus's lexical assertion that auth-key
-acquisition and `_ensure_tailscale` sit inside the activation hold was not that property's only
-guard; it is covered observationally, with failure-unwind and single-release coverage the lexical
-pin could not see, in `cli/tests/vms/test_lifecycle_orchestrated.py` and
-`cli/tests/vms/test_vm_nodes.py`.
-
-One residual is recorded rather than fixed, because fixing it here would reintroduce the interior
-check this note just retired. Every consumer compares `interaction` by identity, and
-`InteractionPolicy` is a `StrEnum`, so a value that is equal but not identical (a plain `"refuse"`)
-would take the not-refuse branch and resolve through an interactive source in a run that meant to
-refuse. That is unreachable today: no config, deserialization, or plugin path produces an
-`InteractionPolicy` value, and `plugins/__init__.py` registers a hardcoded tuple rather than
-discovering anything. It becomes reachable the moment a third-party backend can be loaded, which is
-why it is filed as issue 529 against the external-plugin loader effort rather than left as a
-comment. The same issue records that `resolve.py`'s hardcoded `name == "prompt"` dispatch currently
-makes this fail loud for one backend and silent for every other, which is an accident of that
-special case rather than a property of the gate.
+Issue 529 keeps the half not fixed here: `resolve.py` dispatches the interaction broker on a
+hardcoded `name == "prompt"`, so the underlying identity comparison fails loud for that one backend
+and silent for every other. That is an accident of a built-in-name special case rather than a
+property of the gate, and no backend's safety should depend on its name.
 
 This note narrows the interaction-policy validation convention only. The source-and-backend model,
 the resolution protocol, the value-free outcome vocabulary, the trust-boundary statement, and the

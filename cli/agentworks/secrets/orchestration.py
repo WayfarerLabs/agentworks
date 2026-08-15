@@ -63,7 +63,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.env.merge import effective_env
 from agentworks.errors import StateError
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import InteractionPolicy, require_exact_interaction_policy
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -249,6 +249,7 @@ def resolve_for_command(
     call it -- they inherit the env captured at shell-create time and
     consume no secrets.
     """
+    require_exact_interaction_policy(interaction)
     decls = compute_needed_secrets(targets, registry, extra_decls=extra_decls)
     if not decls:
         return {}
