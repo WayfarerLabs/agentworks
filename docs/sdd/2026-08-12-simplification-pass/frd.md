@@ -64,12 +64,11 @@ Settled inputs, recorded for traceability:
     offers a handle; where only wording we author discriminates, the assertion goes and the branch
     coverage goes with it (R2.4). No case matches our own wording. [hla.md](hla.md) doctrine 2
     carries the cases.
-11. **2026-08-14 (caller-supplied arguments)**: an argument crossing a published surface is a trust
-    boundary, not interior state, ruled after PR #523 deleted an interior-looking enum check that
-    four review lenses cleared and a live `interaction="refuse"` call then resolved a real secret. A
-    value's provenance is set by every entry point that can supply it, not only by the sites where
-    our own code constructs one. R1.1 carries it into `development-principles`; [hla.md](hla.md)
-    doctrine 1 carries the enumeration.
+11. **2026-08-14 (caller-supplied arguments)**: an argument arriving from a caller our type checker
+    does not check is a trust boundary, not interior state, ruled after PR #523 deleted an
+    interior-looking enum check that four review lenses cleared and a live `interaction="refuse"`
+    call then resolved a real secret. R1.1 carries it into `development-principles`;
+    [hla.md](hla.md) doctrine 1 carries the enumeration and the provenance test it turns on.
 
 ## Requirements
 
@@ -110,9 +109,10 @@ no shipped consumer; delete validation whose input is clearly interior. A replac
 where a real, regressable invariant would otherwise go unguarded, and a test is never sufficient
 justification for a new production contract.
 
-- R2.1: Before any validator is deleted, its input's provenance is classified against the R1.1
-  boundary list; validators guarding operator input, external processes, arguments crossing a
-  published surface, or persisted cross-execution state stay.
+- R2.1: Before any validator is deleted, its input's provenance is classified against the boundary
+  list in [hla.md](hla.md) doctrine 1, and a validator guarding any of those boundaries stays. The
+  list lives there and nowhere else: this requirement carried a partial copy through two revisions,
+  and both times the copy was missing the boundary that mattered.
 - R2.2: No wave 1 PR introduces a new production type, changes a shipped contract, or requires an
   LLD. Work that turns out to need any of those is set aside for the reassessment instead.
 - R2.3: Real coverage gaps found beneath deleted ceremony are closed in the same PR where the
