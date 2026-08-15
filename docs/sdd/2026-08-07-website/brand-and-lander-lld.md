@@ -2359,12 +2359,16 @@ the section 5.2 autocorrelation maxima below `.09`. Tests recompute numeric auth
 authored prose or screenshots.
 
 Disposable Chromium rendered seed 11 at `1000 by 780`, seed 41 at `320 by 780`, static at the real
-`320 by 240` short-height viewport, and seed 39 at touch-landscape `667 by 320`. Direct inspection
-found strict straight/miter facets, materially sharper irregular peaks and valleys without
-per-sample chatter, unchanged local decks, and supports ending at untouched native feet. The
-disposable scene reported exact client/scroll equality and zero scroll at every viewport; these
-screenshots are qualitative review artifacts only, not shipped golden images or prose-policing
-tests. Implementation must repeat the witness against the actual shared Lander/404 artifact.
+`320 by 240` short-height viewport, and seed 39 at touch-landscape `667 by 320`. The disposable page
+declares `width=device-width,initial-scale=1`; the refreshed seed-39 capture used CDP mobile
+emulation with DPR 1 and five touch points. Window inner size, visual viewport, root and body
+client/scroll metrics, CDP layout viewport, and CDP content size were all exactly `667 by 320`, with
+visual scale `1`, scroll `(0,0)`, and footer bottom `320`. Direct inspection found strict
+straight/miter facets, materially sharper irregular peaks and valleys without per-sample chatter,
+unchanged local decks, and supports ending at untouched native feet. The other three disposable
+viewports likewise reported exact client/scroll equality and zero scroll. These screenshots are
+qualitative review artifacts only, not shipped golden images or prose-policing tests. Implementation
+must repeat the witness against the actual shared Lander/404 artifact.
 
 Independent candidate closure covers both seeded orders, 16 nominal phases, 736 assignments, 312
 distance/deck keys, and all ordinals through the terminating sixth candidate. Accepted normalized
