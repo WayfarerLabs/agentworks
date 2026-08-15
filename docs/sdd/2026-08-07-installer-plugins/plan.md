@@ -62,9 +62,9 @@ behavior accurately.
 ## Phase 3: verification and closeout
 
 - [x] Run scoped lint, type, and test gates, then the full repository gates required by CI.
-- [ ] Build and install the wheel in an isolated environment and load both plugins' manifests and
+- [x] Build and install the wheel in an isolated environment and load both plugins' manifests and
       guide content through package resources.
-- [ ] Exercise the shipped CLI in an isolated home with each plugin disabled and enabled, including
+- [x] Exercise the shipped CLI in an isolated home with each plugin disabled and enabled, including
       list, use gating, guide, completion, and doctor scenarios.
 - [ ] Obtain clean independent implementation, documentation, and fresh-eyes reviews; resolve every
       valid finding.
