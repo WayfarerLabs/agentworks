@@ -84,8 +84,13 @@ token:
 ```
 
 Within that arm, omitting `token.secret` or writing `secret: null` selects the default secret name.
-A retired TOML scalar may still become the accepted scalar shorthand, but write the canonical tagged
-spelling above during this migration. No `minted` arm exists in the current contract.
+Version 0.13 YAML also allowed an outer `provider.token: null`, which selected the same default as
+omission. Version 0.14 rejects that outer null. Delete the line to preserve the default, or replace
+it with `token: {mode: secret}` to make the choice explicit. A retired TOML scalar may still become
+the accepted scalar shorthand, but write the canonical tagged spelling above during this migration.
+No `minted` arm exists in the current contract. Tagged `mode: stored` was only a pre-release 0.14
+snapshot spelling, not a 0.13 spelling; replace it with `mode: secret` if one of those snapshots
+wrote it.
 
 Write one manifest at a time at its pre-recorded intended path while leaving every retired TOML
 section in place. The edit must consume its existing expected identity without changing the
@@ -104,7 +109,8 @@ A retired outer field written as explicit null selected the same mode as omissio
 retired null line and write `auth: {mode: ambient}`, `auth: {mode: ambient}`, or
 `placement: {mode: local}`, respectively. A manifest that omitted the old outer field needs no shape
 edit because the new tagged field has the same default. Convert a retained scalar token to the
-canonical tagged secret arm while preserving its secret name.
+canonical tagged secret arm while preserving its secret name. For a version 0.13 outer
+`provider.token: null`, delete the line or write `token: {mode: secret}`.
 
 ## Review authentication, placement, and changed secret references
 
