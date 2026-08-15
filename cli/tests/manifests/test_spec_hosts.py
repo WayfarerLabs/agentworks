@@ -24,8 +24,8 @@ from ._specs import WHERE, decode, decode_issues, rejection
 #: table of cases: every sweep below applies ONE claim to all four, and
 #: what breaks a claim is the shared decode path, so the useful report is
 #: every host that stopped answering rather than one red id per host.
-#: ``test_capability_shape.py::test_decode_refuses_exactly_the_three_retired_sibling_shapes``
-#: is what pins this list against the descriptor table.
+#: ``test_capability_shape.py::test_retired_capability_shapes_fail_decode_or_build``
+#: exercises a retired sibling spelling for each host in this list.
 _HOSTS = [
     ("vm-site", "lab", "platform", "lima"),
     ("git-credential", "gh", "provider", "github"),
