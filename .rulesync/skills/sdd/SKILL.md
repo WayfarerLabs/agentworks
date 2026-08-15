@@ -93,23 +93,33 @@ applies to everything around those boxes instead (narration, correction framing,
 done, and unchecked boxes of the abandoned direction all strip), with exactly one short note
 recording the supersession, which is what the reviewer's exception keys on.
 
-Mutability also follows ownership. An agent working an effort edits that effort's SDD artifacts and
-no other's: do not update another SDD's content (a saga SDD's ledger, a sibling effort's plan)
-unless specifically instructed to, and treat such an instruction as the exception, not standard
-process. When work surfaces an inconsistency in another SDD (a stale claim, a checkbox that no
-longer matches reality, a statement your change invalidates), flag it to the operator rather than
-editing it yourself. If you also have a working communication channel to that SDD's owner, flag it
-there too: for a transferred child artifact (FRD, HLA, plan, implementation) the owner is its effort
-lead, and for saga artifacts and rulings it is the saga lead; until such channels exist, the
-operator is the reliable route.
+Mutability also follows ownership, which one rule settles everywhere: **requirements belong to
+whoever requested the work, and the response belongs to whoever does it.** A saga lead owns the FRD
+of every child it seeds, and where no saga seeded the effort the operator requested it and owns its
+FRD; either way the FRD is an input to the effort, even when the effort's own lead drafted the text.
+The effort lead owns the response, meaning everything the effort produces in answer, from the HLA
+onward. One level down it is the same relationship: a lead owns the charter it hands a subagent, and
+the subagent owns the work done under it. Authorship is not ownership, so drafting an accepted
+document does not make it yours to revise. Amendments travel back to the owner as a request, never
+as a direct edit, and a subagent no more rewrites its charter than a lead rewrites its FRD;
+recording a decision that is already made, such as appending an operator ruling to a rulings list,
+is transcription rather than authorship, and the effort's lead does it without asking. You can only
+grant what you own, which is why no lead delegates its FRD downward.
 
-Ownership runs inside an effort as well as between efforts. Every artifact in an effort's feature
-directory belongs to its lead, whether or not anything here names it, and a delegated agent modifies
-or creates one only where its charter grants that authority for that artifact. The lead may grant it
-for anything, up to and including the FRD; delegating an artifact is a normal lead decision, not an
-exception. Absent the grant, flag what you found in the terms you would have used to fix it, and
-leave the file alone. New files cut both ways: in your own effort's directory they need a grant,
-while adding one to another effort's is the sanctioned message channel below.
+Between efforts, ownership is a hard boundary: do not update another effort's artifacts (a saga
+SDD's ledger, a sibling effort's plan) unless specifically instructed to, and treat such an
+instruction as the exception, not standard process. When work surfaces an inconsistency there (a
+stale claim, a checkbox that no longer matches reality, a statement your change invalidates), flag
+it to the operator rather than editing it yourself, and flag it to the artifact's owner too wherever
+you have a working channel; until such channels exist, the operator is the reliable route.
+
+The charter is how an owner delegates. Every artifact in an effort's feature directory has an owner,
+whether or not anything here names it, and a delegated agent modifies or creates one only where its
+charter grants that authority for that artifact. A lead grants freely across what it owns;
+delegating an artifact is a normal lead decision, not an exception. Absent the grant, flag what you
+found in the terms you would have used to fix it, and leave the file alone. New files cut both ways:
+in your own effort's directory they need a grant, while adding one to another effort's is the
+sanctioned message channel below.
 
 One sanctioned channel does exist: new-file message passing. Adding a NEW file to another SDD's
 feature directory as a message is fine (a saga delivering seed notes into an adopted child's
@@ -120,7 +130,7 @@ there is no rename sweep to do and no inference to draw from an older name. A se
 overwrites an existing message file, because overwriting is an edit to another effort's artifact and
 can destroy a message the recipient has not read yet; a follow-up is always a new file. A delivered
 message file belongs to the receiving effort once read: integrate it into your own artifacts, then
-keep or delete it, on the same grant terms as any other artifact in that directory.
+keep or delete it, on the same grant terms as the effort's own artifacts.
 
 Delivery semantics: messages deliver via `main`, never by committing to another effort's live
 branch. A branch is mutable state under its owner's control (a rebase or force-push can silently
@@ -356,14 +366,12 @@ The settled rules for the species:
 - Saga state lives on `main`: every change (a new child SDD, a status change, a design revision) is
   a PR, and child SDDs reference their saga SDD so the coordination is discoverable from any effort.
 - The saga lead seeds each child SDD with its FRD plus any constraints the saga has already settled,
-  and reviews the child's PRs. A separately launched effort lead owns the child's HLA, plan, and
-  implementation from the start, per the ordinary process. Seeding PRs are ready, not draft: their
-  content is limited by design, but they are intended to merge as-is (see PR Review). Ownership of
-  the seeded FRD transfers to the effort lead when the seeding PR merges: from then on it is the
-  child's artifact like the rest of its SDD, the effort lead revises it when it turns out wrong
-  (keeping the saga lead informed of material revisions), and the saga lead stops editing it like
-  any other child artifact. Settled saga constraints recorded in the FRD still bind; the effort lead
-  flags disagreement rather than reopening them unilaterally.
+  and reviews the child's PRs. A separately launched effort lead owns everything the child produces
+  in answer, from the HLA onward, per the ordinary process. Seeding PRs are ready, not draft: their
+  content is limited by design, but they are intended to merge as-is (see PR Review). The seeded FRD
+  is what the saga asked for, so it stays the saga lead's for the life of the child: when it turns
+  out wrong, the effort lead flags it and requests the change, and the saga lead makes it or
+  declines and says why.
 - The saga's artifacts, ledger included, are the saga lead's to maintain. Child effort leads do not
   update the saga SDD to mark their own progress; the saga lead tracks child status from merged PRs.
   Child leads flag inconsistencies they notice to the operator instead (see Artifact Mutability's
