@@ -326,7 +326,7 @@ export function createFirstSite(seed) {
 
 function millimeters(value) {
     const result = Math.round(value * 1000);
-    if (Math.abs(result / 1000 - value) > 1e-12) throw new Error(`Value ${value} is not millimetre exact`);
+    if (!Number.isSafeInteger(result)) throw new RangeError(`Value ${value} has no safe millimetre key`);
     return result;
 }
 

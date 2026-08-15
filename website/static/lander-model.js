@@ -282,6 +282,18 @@ function routeContext(proof, supplied = null) {
     throw new Error(`Route proof ${proof.pairKey} requires an exact concrete context`);
 }
 
+function routeSiteInFrame(site, originCenter) {
+    const center = site.center - originCenter;
+    return {
+        ...site,
+        center,
+        nominalCenter: site.nominalCenter === undefined ? undefined : site.nominalCenter - originCenter,
+        closedFootprint: [center - 4.8, center + 13.8],
+        platformLeft: center - 4.8,
+        platformRight: center + 4.8,
+    };
+}
+
 function replayRouteProof(proof, fuel, suppliedContext = null) {
     const firstRun = proof.runs[0];
     const firstRequest = REFERENCE_COMMANDS[firstRun?.[0]];
@@ -289,18 +301,30 @@ function replayRouteProof(proof, fuel, suppliedContext = null) {
         throw new Error(`Route schedule ${proof.pairKey} must begin with exact [1,90] launch request`);
     }
     const context = routeContext(proof, suppliedContext);
-    const { originSite, targetSite } = context;
-    let pose = context.pose ?? uprightPose(originSite);
+    const absoluteOrigin = context.originSite;
+    const absoluteTarget = context.targetSite;
+    const originCenter = absoluteOrigin.center;
+    const originSite = routeSiteInFrame(absoluteOrigin, originCenter);
+    const targetSite = routeSiteInFrame(absoluteTarget, originCenter);
+    let pose = context.pose
+        ? { ...context.pose, x: context.pose.x - originCenter }
+        : uprightPose(originSite);
     let reserve = fuel;
     let step = 0;
     let launchCleared = false;
     let maxHullTop = Math.max(...hullForPose(pose).map((point) => point.y));
     let previousBounds = hullBounds(pose);
-    const rawSites = [originSite, targetSite];
-    const terrainVertices =
+    const absoluteSites = [absoluteOrigin, absoluteTarget];
+    const absoluteTerrainVertices =
         context.terrainVertices ??
-        terrainVerticesForWindow(context.seed, rawSites, originSite.center - 20, targetSite.center + 20);
-    const retainedSites = rawSites;
+        terrainVerticesForWindow(
+            context.seed,
+            absoluteSites,
+            absoluteOrigin.center - 20,
+            absoluteTarget.center + 20,
+        );
+    const terrainVertices = absoluteTerrainVertices.map(([x, y]) => [x - originCenter, y]);
+    const retainedSites = [originSite, targetSite];
     const collisionModel = {
         seed: context.seed,
         retainedSites,

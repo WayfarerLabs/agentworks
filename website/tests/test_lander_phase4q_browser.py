@@ -148,7 +148,7 @@ const maximumKnotSweep = (direction) => {
     const model = {...createRun({seed: 41}), retainedSites: [], targetSiteId: null,
         terrainAuthority: "context", terrainVertices: []};
     const pose = {x: 0, y: 35.8, vx: 0, vy: 0, angle: 0.9, angularVelocity: 0};
-    const angularTravel = direction * 50552;
+    const angularTravel = direction * 53148;
     const finalAngle = direction * Math.atan2(6.5, 1.6) * 180 / Math.PI;
     const previous = {...pose, angle: finalAngle - direction * 152};
     const next = {...previous, x: direction * 5687.1066666666675, angle: finalAngle};
@@ -156,11 +156,16 @@ const maximumKnotSweep = (direction) => {
         .reduce((selected, candidate) => direction * candidate.x > direction * selected.x ? candidate : selected);
     const features = [{cause: "terminus", priority: 3,
         segment: [{x: corner.x, y: corner.y - .01}, {x: corner.x, y: corner.y + .01}]}];
+    const staleInstrumentation = {};
+    const staleContact = classifySweptContact(model, previous, next,
+        {angularTravel: direction * 50552, instrumentation: staleInstrumentation, features});
+    if (staleContact !== null || staleInstrumentation.visitedKnots !== 50554)
+        throw new Error("maximum knot sweep final slabs are not authoritative");
     const classify = () => {
         const instrumentation = {};
         const contact = classifySweptContact(model, previous, next, {angularTravel, instrumentation, features});
         if (contact?.cause !== "terminus" || contact.kind !== "unsafe" || contact.time <= .9999 ||
-            instrumentation.visitedKnots !== 50554 || instrumentation.maxKnotHulls > 2 ||
+            instrumentation.visitedKnots !== 53150 || instrumentation.maxKnotHulls > 2 ||
             instrumentation.maxStack > 20 || instrumentation.prunedSlabs <= 50000 ||
             instrumentation.constructedKnotHulls >= 256) throw new Error("maximum knot sweep contract drifted");
         return instrumentation;
@@ -171,7 +176,7 @@ const maximumKnotSweep = (direction) => {
     for (let repetition = 0; repetition < 10; repetition += 1) {
         const started = performance.now(); instrumentation = classify(); values.push(performance.now() - started);
     }
-    return {direction, timing: timingSummary(values), instrumentation};
+    return {direction, timing: timingSummary(values), instrumentation, staleInstrumentation};
 };
 const maximumKnotWitness = () => {
     const beforeDom = domCounts(); const beforeCleanup = controller.cleanups.length;
@@ -506,7 +511,12 @@ class Phase4QBrowserTests(RepositoryFixture):
             self.assertEqual(row["timing"]["samples"], 10)
             self.assertLess(row["timing"]["p95"], 100)
             self.assertLess(row["timing"]["maximum"], 250)
-            self.assertEqual(row["instrumentation"]["visitedKnots"], 50554)
+            self.assertEqual(row["instrumentation"]["visitedKnots"], 53150)
+            self.assertEqual(row["staleInstrumentation"]["visitedKnots"], 50554)
+            self.assertEqual(
+                row["instrumentation"]["visitedKnots"] - row["staleInstrumentation"]["visitedKnots"],
+                2596,
+            )
             self.assertLessEqual(row["instrumentation"]["maxKnotHulls"], 2)
             self.assertLessEqual(row["instrumentation"]["maxStack"], 20)
             self.assertGreater(row["instrumentation"]["prunedSlabs"], 50000)

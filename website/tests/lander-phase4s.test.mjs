@@ -376,7 +376,7 @@ test("maximum reachable signed angular sweeps find final-slab contact with bound
     assert.equal(fullRotation.visitedKnots, 362);
     const extremeAngle = (Math.atan2(6.5, 1.6) * 180) / Math.PI;
     for (const direction of [-1, 1]) {
-        const angularTravel = direction * 50552;
+        const angularTravel = direction * 53148;
         const finalAngle = direction * extremeAngle;
         const previous = { ...pose, angle: finalAngle - direction * 152 };
         const next = { ...previous, x: direction * 5687.1066666666675, angle: finalAngle };
@@ -387,6 +387,16 @@ test("maximum reachable signed angular sweeps find final-slab contact with bound
             { x: corner.x, y: corner.y - 0.01 },
             { x: corner.x, y: corner.y + 0.01 },
         ];
+        const staleInstrumentation = {};
+        assert.equal(
+            classifySweptContact(model, previous, next, {
+                angularTravel: direction * 50552,
+                instrumentation: staleInstrumentation,
+                features: [{ cause: "terminus", priority: 3, segment: edge }],
+            }),
+            null,
+        );
+        assert.equal(staleInstrumentation.visitedKnots, 50554);
         const instrumentation = {};
         const contact = classifySweptContact(model, previous, next, {
             angularTravel,
@@ -396,7 +406,8 @@ test("maximum reachable signed angular sweeps find final-slab contact with bound
         assert.equal(contact.kind, "unsafe");
         assert.equal(contact.cause, "terminus");
         assert.ok(contact.time > 0.9999);
-        assert.equal(instrumentation.visitedKnots, 50554);
+        assert.equal(instrumentation.visitedKnots, 53150);
+        assert.equal(instrumentation.visitedKnots - staleInstrumentation.visitedKnots, 2596);
         assert.ok(instrumentation.maxKnotHulls <= 2);
         assert.ok(instrumentation.maxStack <= 20);
         assert.ok(instrumentation.prunedSlabs > 50000);
