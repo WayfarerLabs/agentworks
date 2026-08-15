@@ -64,6 +64,7 @@ EXPECTED_FILES = frozenset(
         Path("security/index.html"),
         Path("assets/agw-favicon.svg"),
         Path("assets/agw-rocket.svg"),
+        Path("static/lander-collision.js"),
         Path("static/lander-game.js"),
         Path("static/lander-model.js"),
         Path("static/lander-world.js"),

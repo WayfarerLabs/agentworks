@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { exactRootNumber, exactSegmentContact } from "../static/lander-collision-source.js";
+import { readFile } from "node:fs/promises";
+
+import { exactRootNumber, exactSegmentContact } from "../static/lander-collision.js";
 import { createRun, stepFlight } from "../static/lander-model.js";
 import { exactRouteSegmentContactTime } from "../tools/lander_route_collision.mjs";
 import {
@@ -21,6 +23,20 @@ import {
 } from "../static/lander-world.js";
 
 const ZERO = Object.freeze({ left: 0, right: 0 });
+const ROOT = new URL("../", import.meta.url);
+
+test("collision is one separately shipped leaf module rather than build-composed world bytes", async () => {
+    const [collision, world, build] = await Promise.all(
+        ["static/lander-collision.js", "static/lander-world.js", "build.py"].map((path) =>
+            readFile(new URL(path, ROOT), "utf8"),
+        ),
+    );
+    assert.doesNotMatch(collision, /^\s*import\s/m);
+    assert.equal(world.match(/from "\.\/lander-collision\.js"/g)?.length, 1);
+    assert.doesNotMatch(world, /COLLISION_DOUBLE_VIEW/);
+    assert.match(build, /Path\("static\/lander-collision\.js"\)/);
+    assert.doesNotMatch(build, /_compose_lander_world|lander-collision-source/);
+});
 
 test("production and independent exact roots preserve crossing, tangency, and collinear overlap", () => {
     const vectors = [

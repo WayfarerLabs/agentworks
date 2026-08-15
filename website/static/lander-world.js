@@ -1,4 +1,4 @@
-import { compareExactRoots, exactRootNumber, exactSegmentContact, exactZeroRoot } from "./lander-collision-source.js";
+import { compareExactRoots, exactRootNumber, exactSegmentContact, exactZeroRoot } from "./lander-collision.js";
 
 export const STATIC_WORLD_SEED = 0x41475731,
     CHUNK_WIDTH = 50;

@@ -260,6 +260,19 @@ class BuildAndInstallTests(RepositoryFixture):
         with self.assertRaisesRegex(ValueError, "exactly one generated proof import"):
             site_builder._render_artifact(self.root, "/")
 
+    def test_collision_and_world_ship_separately_in_the_exact_manifest(self) -> None:
+        rendered, manifest = site_builder._render_artifact(self.root, "/")
+        collision = Path("static/lander-collision.js")
+        world = Path("static/lander-world.js")
+        self.assertEqual(manifest, EXPECTED_FILES)
+        self.assertEqual(rendered[collision], (WEBSITE / collision).read_bytes())
+        self.assertEqual(rendered[world], (WEBSITE / world).read_bytes())
+        self.assertIn(b'from "./lander-collision.js"', rendered[world])
+        self.assertNotIn(rendered[collision], rendered[world])
+        for changed in (manifest - {collision}, manifest | {Path("static/lander-extra.js")}):
+            with self.subTest(changed=changed), self.assertRaises(ValueError):
+                site_builder.validate_game_manifest(changed)
+
     def test_generated_proof_projection_requires_exact_provenance(self) -> None:
         generated = self.root / "website" / site_builder.GENERATED_PROOF_SOURCE
         generated.write_text(
@@ -271,7 +284,7 @@ class BuildAndInstallTests(RepositoryFixture):
 
     def test_authored_lander_modules_and_tests_stay_below_the_review_ceiling(self) -> None:
         authored = [
-            WEBSITE / "static/lander-collision-source.js",
+            WEBSITE / "static/lander-collision.js",
             WEBSITE / "static/lander-game.js",
             WEBSITE / "static/lander-model.js",
             WEBSITE / "static/lander-world.js",
@@ -281,6 +294,10 @@ class BuildAndInstallTests(RepositoryFixture):
         for path in authored:
             with self.subTest(path=path.relative_to(REPO_ROOT)):
                 self.assertLess(len(path.read_text(encoding="utf-8").splitlines()), 1_000)
+        rendered, _ = site_builder._render_artifact(self.root, "/")
+        for relative in (Path("static/lander-world.js"), Path("static/lander-collision.js")):
+            with self.subTest(emitted=relative):
+                self.assertLess(len(rendered[relative].decode().splitlines()), 1_000)
 
     def test_output_rejects_dot_traversal(self) -> None:
         target = Path(self.temporary.name) / "parent" / ".." / "escaped"

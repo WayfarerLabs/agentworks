@@ -181,7 +181,9 @@ operator inspection; no test approves wording or golden pixels.
       advances none of them, input and pointer capture clear, and the first visible frame only
       resets timing.
 - [ ] Keep the network panel open for the complete three-site run. After initial same-origin HTML,
-      CSS, three modules, and SVG loads, the game makes no request and creates no durable storage.
+      CSS, four modules, and SVG loads, the game makes no request and creates no durable storage.
+      Confirm the exact 14-file artifact ships `lander-world.js` and its leaf `lander-collision.js`
+      separately, with no concatenated duplicate collision authority.
 - [ ] Record active frame p95, 100-site retention counts, and direct generation plus one-proof
       replay p95/max on the pre-merge Chromium machine. Required ceilings are 4 ms frame p95, 25 ms
       generation p95, and 50 ms generation maximum.

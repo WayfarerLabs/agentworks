@@ -125,6 +125,7 @@ manifesto/index.html
 lander/index.html
 security/index.html
 static/lander-game.js
+static/lander-collision.js
 static/lander-model.js
 static/lander-world.js
 static/onboarding-copy.js
@@ -165,7 +166,9 @@ claim that one quantum less makes the physical route impossible.
 
 The projection command deterministically converts the reviewed record order into a compact,
 source-only generated module. The builder verifies its provenance, composes it into
-`static/lander-model.js`, and still emits the exact 13-file artifact; no fourteenth module ships.
+`static/lander-model.js`, and emits the exact 14-file artifact. The separate shipped
+`static/lander-collision.js` is the leaf dependency of `static/lander-world.js`; the builder copies
+both authored modules byte-for-byte and never concatenates them.
 
 During a run, the model retains at most five terrain chunk indexes while the DOM always uses exactly
 two terrain paths plus one permanent physical-terminus path, the active and target sites plus one
@@ -337,7 +340,7 @@ the publishing workflow first runs from a merged `main` commit.
 5. Set `agentworks.build` as this repository's custom domain. Do not mutate DNS yet.
 6. On the same already verified implementation merge-push workflow, use GitHub's **Re-run all
    jobs**. Prove the rerun checked out the same source SHA, normalized `site_base=/`, built and
-   uploaded the exact root-base thirteen-file artifact, and deployed that artifact successfully. If
+   uploaded the exact root-base fourteen-file artifact, and deployed that artifact successfully. If
    the deployment fails or cannot be verified, execute the activation rollback below.
 7. Re-inventory DNS. Only after the same-SHA root deployment is proven, obtain explicit operator
    approval for the exact cutover and then change only the identified parking records.
@@ -361,7 +364,7 @@ verified, leave all DNS records unchanged and detach the repository custom-domai
 the WayfarerLabs organization verification and its TXT record, along with every unrelated DNS
 record. On the same latest verified `main` push workflow, use **Re-run all jobs** again. Verify that
 `configure-pages` selected `/agentworks/`, that the rerun checked out the same source SHA, and that
-the exact project-base thirteen-file artifact deployed successfully. Verify that same SHA at
+the exact project-base fourteen-file artifact deployed successfully. Verify that same SHA at
 `https://wayfarerlabs.github.io/agentworks/`, then stop. Retry custom-domain activation only through
 the full reviewed sequence above.
 

@@ -47,6 +47,7 @@ EXPECTED_GAME_IDS = frozenset(
 EXPECTED_GAME_FILES = frozenset(
     {
         Path("static/lander.css"),
+        Path("static/lander-collision.js"),
         Path("static/lander-game.js"),
         Path("static/lander-model.js"),
         Path("static/lander-world.js"),
@@ -421,7 +422,7 @@ def validate_game_contract(template: str) -> None:
 
 
 def validate_game_manifest(manifest: frozenset[Path]) -> None:
-    """Require the exact four-file game closure inside the complete artifact."""
+    """Require the exact five-file game closure inside the complete artifact."""
     found = frozenset(path for path in manifest if path.name.startswith("lander"))
     if found != EXPECTED_GAME_FILES:
         raise ValueError(f"game artifact closure differs: {sorted(found)}")
