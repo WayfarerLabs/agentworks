@@ -1,9 +1,9 @@
 # Plan: The agentworks.build Website
 
-- Status: Phase 4T sharper-terrain and deck-cap refinement in design; canonical assistance
-  integrated
+- Status: Phase 4T implemented and independently reviewed; operator acceptance pending; canonical
+  assistance integrated
 - Date: 2026-08-07
-- Last revised: 2026-08-14
+- Last revised: 2026-08-15
 - FRD: `frd.md`
 - HLA: `hla.md`
 - Research: `prior-art-research.md`
@@ -1157,20 +1157,20 @@ authorities.
 
 ## Phase 4T: sharper relief and bounded platform height
 
-- [ ] Amend and independently review `brand-and-lander-lld.md` for profile-by-profile doubled
+- [x] Amend and independently review `brand-and-lander-lld.md` for profile-by-profile doubled
       reversal counts, halved cyclic mean spacing, doubled typical reversal strength, maximum
       absolute grade `0.40`, maximum adjacent-grade change `0.80`, and unchanged normalized terrain
       band `[0.1,0.6]` with strict straight segments and no sawtooth chatter.
-- [ ] Pin and prove a deterministic bounded site-candidate order. Select each nominal candidate
+- [x] Pin and prove a deterministic bounded site-candidate order. Select each nominal candidate
       before reading terrain, then accept only when the unchanged `max footprint terrain + 2.5 m`
       deck is at or below normalized `0.5`; never clamp the deck, flatten/lower terrain, or shape a
       profile around accepted sites.
-- [ ] Regenerate terrain, assignment, route, world, and proof fixtures atomically. Exhaustively
+- [x] Regenerate terrain, assignment, route, world, and proof fixtures atomically. Exhaustively
       certify every accepted spacing/deck geometry, opening, sufficient allowance, terminal state,
       forward/reverse 100-site run, and candidate-search termination without changing controls,
       physics, landing tolerance, fuel/refuel semantics, service timing, sky, copy, collision, or
       finite-world behavior.
-- [ ] Add mutation-sensitive world/model/derivation/static and real-browser evidence for doubled
+- [x] Add mutation-sensitive world/model/derivation/static and real-browser evidence for doubled
       reversal density/strength, exact `.40/.80` bounds, terrain values through `.60`, rejected deck
       candidates above `.5`, accepted exact local decks at or below `.5`, native support feet, route
       reachability, fixed `25/16` projection, and zero scrolling at every required viewport.

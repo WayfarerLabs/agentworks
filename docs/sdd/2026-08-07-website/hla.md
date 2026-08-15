@@ -1,9 +1,9 @@
 # HLA: The agentworks.build Website
 
-- Status: Phase 4T sharper-terrain and deck-cap refinement in design; canonical assistance
-  integrated
+- Status: Phase 4T implemented and independently reviewed; operator acceptance pending; canonical
+  assistance integrated
 - Date: 2026-08-07
-- Last revised: 2026-08-14
+- Last revised: 2026-08-15
 - FRD: `frd.md`
 - Research: `prior-art-research.md`
 - Brand direction: `brand-direction.md`

@@ -1,9 +1,9 @@
 # FRD: The agentworks.build Website
 
-- Status: Phase 4T sharper-terrain and deck-cap refinement in design; canonical assistance
-  integrated
+- Status: Phase 4T implemented and independently reviewed; operator acceptance pending; canonical
+  assistance integrated
 - Date: 2026-08-07
-- Last revised: 2026-08-14
+- Last revised: 2026-08-15
 - Seeded by: the saga lead, at operator request. This is a standalone effort, deliberately NOT a
   child of the 2026-08-04-next-steps saga (see that saga's `target-state.md` out-of-scope section
   for the recorded relationship). It follows the ordinary SDD process: the effort lead owns the HLA
