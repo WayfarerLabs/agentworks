@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.secrets.inspect import (
-    _BACKEND_CELL_WIDTH,
     _NAME_CELL_WIDTH,
+    _SOURCE_CELL_WIDTH,
     SecretRow,
     SecretSourceCell,
     SecretTable,
@@ -263,11 +263,11 @@ def test_render_secret_table_caps_long_backend_identifier(
     captured_output: CapturedOutput,
 ) -> None:
     """The LIST view truncates a long backend identifier to
-    ``_BACKEND_CELL_WIDTH`` with a trailing ``...`` so it cannot blow the
+    ``_SOURCE_CELL_WIDTH`` with a trailing ``...`` so it cannot blow the
     table width out. Built directly (no op wiring): the account-first
     onepassword identifier here comfortably exceeds the cap."""
     long_ident = "my.1password.com: op://Employee/Registry/token"
-    assert len(long_ident) > _BACKEND_CELL_WIDTH
+    assert len(long_ident) > _SOURCE_CELL_WIDTH
     table = SecretTable(
         sources=("onepassword",),
         rows=(
@@ -289,11 +289,11 @@ def test_render_secret_table_caps_long_backend_identifier(
     )
     render_secret_table(table)
 
-    truncated = long_ident[: _BACKEND_CELL_WIDTH - 3] + "..."
-    assert len(truncated) == _BACKEND_CELL_WIDTH
+    truncated = long_ident[: _SOURCE_CELL_WIDTH - 3] + "..."
+    assert len(truncated) == _SOURCE_CELL_WIDTH
     joined = "\n".join(captured_output.info)
     # The identifier appears truncated, and the full form never does, so the
-    # onepassword column width is bounded by ``_BACKEND_CELL_WIDTH``.
+    # onepassword source column width is bounded by ``_SOURCE_CELL_WIDTH``.
     assert truncated in joined
     assert long_ident not in joined
     data_line = next(line for line in captured_output.info if line.startswith("reg "))
