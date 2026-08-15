@@ -64,6 +64,12 @@ Settled inputs, recorded for traceability:
     offers a handle; where only wording we author discriminates, the assertion goes and the branch
     coverage goes with it (R2.4). No case matches our own wording. [hla.md](hla.md) doctrine 2
     carries the cases.
+11. **2026-08-14 (caller-supplied arguments)**: an argument crossing a published surface is a trust
+    boundary, not interior state, ruled after PR #523 deleted an interior-looking enum check that
+    four review lenses cleared and a live `interaction="refuse"` call then resolved a real secret. A
+    value's provenance is set by every entry point that can supply it, not only by the sites where
+    our own code constructs one. R1.1 carries it into `development-principles`; [hla.md](hla.md)
+    doctrine 1 carries the enumeration.
 
 ## Requirements
 
@@ -77,7 +83,7 @@ Settled inputs, recorded for traceability:
   `globs`, then drop the filter from the twelve broad rules; `cli-conventions.md` keeps its narrow
   globs on purpose. If the probe surfaces a reason this simple shape cannot work, escalate to the
   operator rather than building a delivery mechanism.
-- R1.1: The trust-boundary doctrine (the four boundaries, interior trust, and the
+- R1.1: The trust-boundary doctrine (the five boundaries, interior trust, and the
   validator-names-its-boundary convention; hla.md doctrine 1) is folded into
   `development-principles` as a compact amendment. In the same amendment, principle 3 gains a
   test-quality counterweight (operator direction, 2026-08-13): a test earns its place by guarding an
@@ -105,8 +111,8 @@ where a real, regressable invariant would otherwise go unguarded, and a test is 
 justification for a new production contract.
 
 - R2.1: Before any validator is deleted, its input's provenance is classified against the R1.1
-  boundary list; validators guarding operator input, external processes, or persisted
-  cross-execution state stay.
+  boundary list; validators guarding operator input, external processes, arguments crossing a
+  published surface, or persisted cross-execution state stay.
 - R2.2: No wave 1 PR introduces a new production type, changes a shipped contract, or requires an
   LLD. Work that turns out to need any of those is set aside for the reassessment instead.
 - R2.3: Real coverage gaps found beneath deleted ceremony are closed in the same PR where the

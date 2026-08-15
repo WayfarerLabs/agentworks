@@ -89,11 +89,15 @@ and treat deleting a worthless test as the same virtue as writing a worthy one.
 
 Validate at boundaries; trust the interior. The trust boundaries are operator-authored input
 (config, manifests, CLI arguments, environment), external processes and services, packaged evidence
-rendered as text (release-notes bodies), and persisted state that crosses executions (a value our
-own code wrote last run can be old, corrupt, truncated, or concurrently held). Everything else,
-first-party typed values produced and consumed within one execution under strict typing, is
-interior: its guarantees are carried by types, frozen shapes, and registration-time checks, not
-runtime re-validation. A validator that survives this test names its boundary in its docstring.
+rendered as text (release-notes bodies), persisted state that crosses executions (a value our own
+code wrote last run can be old, corrupt, truncated, or concurrently held), and caller-supplied
+arguments crossing a published surface, meaning one we have declared callable from outside the code
+path that builds its inputs; an internal helper that merely happens to be importable is not one. Ask
+who can call this, not what constructs this: a value's provenance is set by every entry point that
+can supply it, not only by the sites where our own code builds one. Everything else, first-party
+typed values produced and consumed within one execution under strict typing, is interior: its
+guarantees are carried by types, frozen shapes, and registration-time checks, not runtime
+re-validation. A validator that survives this test names its boundary in its docstring.
 
 ### 4. Don't overengineer, but don't be afraid to refactor
 

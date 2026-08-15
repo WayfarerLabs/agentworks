@@ -17,6 +17,11 @@ The system has exactly these trust boundaries today:
    execution is not interior; it can be old-version, corrupt, truncated, concurrently held, or
    modified out of band. `inspect_schema`'s classification and backup qualification are boundary
    work and stay.
+5. **Caller-supplied arguments crossing a published surface**: an entry point we have declared
+   callable from outside the code path that builds its inputs, `verify_secrets` being the standing
+   example. Ask who can call a function, not what constructs its values: provenance is set by every
+   entry point that can supply a value, not only by the sites where our own code builds one. An
+   internal helper that merely happens to be importable is not a published surface.
 
 Everything else, first-party typed values produced and consumed within one execution under mypy
 strict, is interior. Interior guarantees are carried by types, frozen dataclasses, and
