@@ -45,12 +45,13 @@ def _actions() -> tuple[GuideAction, ...]:
         GuideAction(
             ActionId("verify-apt-plugin"),
             "The operator wants a read-only check after deciding whether to enable the apt catalog.",
-            (),
+            (ActionInput("CONFIG_PATH", "The config.toml file to inspect.", True, False),),
             ConsentBoundary.READ_CONFIGURED_STATE,
-            ("agw", "guide", "apt-package/gh"),
-            "The apt-package/gh State block reports its system-plugin origin and enabled or disabled registry state.",
+            None,
+            "[plugins].system in CONFIG_PATH contains apt when configured enabled and omits apt when disabled.",
             None,
             "Do not read configured state; the plugin state remains unchanged.",
+            "Read only CONFIG_PATH. Inspect [plugins].system for apt without editing CONFIG_PATH.",
         ),
     )
     return tuple(validate_guide_action(action, f"system-plugin:apt:{_TOPIC}") for action in actions)

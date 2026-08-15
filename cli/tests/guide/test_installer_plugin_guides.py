@@ -46,21 +46,21 @@ def test_installer_plugin_imports_do_not_read_guide_resources(monkeypatch: pytes
         importlib.import_module(module)
 
 
-def test_installer_plugin_verification_actions_read_only_configured_resources() -> None:
+def test_installer_plugin_verification_actions_are_manual_config_reads() -> None:
     apt_contributions = importlib.import_module("agentworks.plugins.apt.guide_contributions").guide_contributions
     install_command_contributions = importlib.import_module(
         "agentworks.plugins.install_command.guide_contributions"
     ).guide_contributions
 
-    expected_commands = {
-        "verify-apt-plugin": ("agw", "guide", "apt-package/gh"),
-        "verify-install-command-plugin": ("agw", "guide", "user-install-command/uv"),
-    }
     for contribution in (*apt_contributions(), *install_command_contributions()):
         actions = next(block.actions for block in contribution.blocks if isinstance(block, ActionList))
         verification = next(action for action in actions if str(action.id).startswith("verify-"))
         assert verification.consent is ConsentBoundary.READ_CONFIGURED_STATE
-        assert verification.command == expected_commands[str(verification.id)]
+        assert verification.command is None
+        assert verification.manual_steps is not None
+        assert [(item.name, item.required, item.sensitive) for item in verification.required_inputs] == [
+            ("CONFIG_PATH", True, False)
+        ]
 
 
 def test_unavailable_first_party_guide_content_keeps_descriptor_and_unrelated_topics(
