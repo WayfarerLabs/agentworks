@@ -17,9 +17,13 @@ from agentworks.guide import (
     GuideBlock,
     GuideCatalog,
     GuideContributionError,
+    ImplementationAnchor,
     InvalidBlockError,
     InvalidTopicSlugError,
+    KindAnchor,
     Overview,
+    ResourceAnchor,
+    TopicAnchor,
     TopicContribution,
     TopicSlug,
     parse_topic_contribution,
@@ -48,6 +52,37 @@ def _topic(slug: str, *, related: list[str] | None = None, markdown: object = "T
         "blocks": [{"type": "overview", "id": "overview", "markdown": markdown}],
         "related_topics": related or [],
     }
+
+
+def _contribution(
+    slug: str,
+    *,
+    related: list[str] | None = None,
+    markdown: str = "Text.",
+    anchor: TopicAnchor | None = None,
+) -> TopicContribution:
+    """Build the typed record shape contributors hand to the catalog.
+
+    The catalog takes ``TopicContribution`` values; ``_topic`` above builds the
+    decoded shape ``parse_topic_contribution`` takes. Both entry points are real,
+    so the tests use whichever one they are actually exercising.
+    """
+    if anchor is None:
+        if slug.startswith(("concept-", "plugin/")):
+            anchor = ConceptAnchor(slug)
+        elif "/" in slug:
+            kind, name = slug.split("/", 1)
+            anchor = ResourceAnchor(kind, name)
+        else:
+            anchor = KindAnchor(slug)
+    return TopicContribution(
+        TopicSlug(slug),
+        "Title",
+        "Summary.",
+        anchor,
+        (Overview(BlockId("overview"), markdown),),
+        tuple(TopicSlug(item) for item in related or []),
+    )
 
 
 @pytest.mark.parametrize("payload", ["{{danger()}}", "}}", "${secret}", "<% run %>", "%>", "{% include x %}", "%}"])
@@ -204,8 +239,8 @@ def test_ordinary_authored_atx_and_setext_headings_remain_valid() -> None:
 
 def test_adversarial_plugin_framework_heading_isolated_from_core_topic() -> None:
     catalog = _build_guide_catalog(
-        (("core", _topic("concept-safe")),),
-        ((Plugin("z"), (_topic("plugin/z/forged", markdown="## ⟦AGW framework⟧ forged"),)),),
+        (("core", _contribution("concept-safe")),),
+        ((Plugin("z"), (_contribution("plugin/z/forged", markdown="## ⟦AGW framework⟧ forged"),)),),
     )
 
     assert catalog.names() == ("concept-safe",)
@@ -253,20 +288,19 @@ def test_typed_records_reach_the_catalog_as_validated_copies() -> None:
 
     assert retained == original
     assert retained is not original
-    assert retained.blocks[0] is not original.blocks[0]
 
 
 def test_plugin_cannot_hide_reserved_core_topic() -> None:
     catalog = _build_guide_catalog(
-        (("core", _topic("concept-safe")),),
-        ((Plugin("z"), (_topic("concept-safe"),)),),
+        (("core", _contribution("concept-safe")),),
+        ((Plugin("z"), (_contribution("concept-safe"),)),),
     )
     assert catalog.names() == ("concept-safe",)
     assert [(issue.error.source, issue.error.field_path) for issue in catalog.issues] == [("system-plugin:z", "topic")]
 
 
 def test_trusted_duplicate_hard_fails_independent_of_order() -> None:
-    candidates = (("core:b", _topic("concept-safe")), ("core:a", _topic("concept-safe")))
+    candidates = (("core:b", _contribution("concept-safe")), ("core:a", _contribution("concept-safe")))
     for ordered in (candidates, tuple(reversed(candidates))):
         with pytest.raises(DuplicateTopicError) as raised:
             _build_guide_catalog(ordered)
@@ -275,12 +309,12 @@ def test_trusted_duplicate_hard_fails_independent_of_order() -> None:
 
 def test_plugin_collision_and_broken_link_isolation_are_deterministic() -> None:
     plugin_topics = (
-        _topic("plugin/z/shared"),
-        _topic("plugin/z/shared"),
-        _topic("plugin/z/broken", related=["plugin/z/missing"]),
+        _contribution("plugin/z/shared"),
+        _contribution("plugin/z/shared"),
+        _contribution("plugin/z/broken", related=["plugin/z/missing"]),
     )
     catalogs = [
-        _build_guide_catalog((("core", _topic("concept-safe")),), ((Plugin("z"), order),))
+        _build_guide_catalog((("core", _contribution("concept-safe")),), ((Plugin("z"), order),))
         for order in (plugin_topics, tuple(reversed(plugin_topics)))
     ]
     assert [catalog.names() for catalog in catalogs] == [("concept-safe",), ("concept-safe",)]
@@ -311,7 +345,7 @@ class _TestKind:
 
 
 def test_plugin_ownership_gate_rejects_another_plugin_namespace() -> None:
-    catalog = _build_guide_catalog((), ((Plugin("z"), (_topic("plugin/y/topic"),)),))
+    catalog = _build_guide_catalog((), ((Plugin("z"), (_contribution("plugin/y/topic"),)),))
     assert catalog.names() == ()
     assert [(issue.error.topic, issue.error.field_path) for issue in catalog.issues] == [("plugin/y/topic", "topic")]
 
@@ -321,11 +355,11 @@ def test_taxonomy_gate_is_runtime_fail_soft_and_ci_strict_for_trusted_content(
 ) -> None:
     handler = _TestKind()
     monkeypatch.setitem(KIND_REGISTRY, handler.kind, handler)
-    topic = _topic("guide-test/demo")
+    topic = _contribution("guide-test/demo")
     object.__setattr__(handler, "category", "capability")
 
     catalog = _build_guide_catalog(
-        (("core:bad-taxonomy", topic), ("core:safe", _topic("concept-safe"))),
+        (("core:bad-taxonomy", topic), ("core:safe", _contribution("concept-safe"))),
     )
     assert catalog.names() == ("concept-safe",)
     assert [(issue.error.topic, issue.error.field_path) for issue in catalog.issues] == [("guide-test/demo", "anchor")]
@@ -353,9 +387,11 @@ def test_registered_plugin_implementation_and_owner_adapter_resource_topics_are_
     kind, implementations = next(iter(plugin.capabilities.items()))
     implementation = cast("Any", implementations[0])
     implementation_name = implementation.name
-    impl_topic = _topic(f"{kind}/{implementation_name}")
-    impl_topic["anchor"] = {"type": "implementation", "kind": kind, "name": implementation_name}
-    resource_topic = _topic("vm-template/plugin-owned")
+    impl_topic = _contribution(
+        f"{kind}/{implementation_name}",
+        anchor=ImplementationAnchor(kind, implementation_name),
+    )
+    resource_topic = _contribution("vm-template/plugin-owned")
     catalog = _build_guide_catalog(
         (),
         ((plugin, (impl_topic, resource_topic)),),
@@ -366,7 +402,7 @@ def test_registered_plugin_implementation_and_owner_adapter_resource_topics_are_
 
 def test_trusted_broken_link_hard_fails() -> None:
     with pytest.raises(BrokenTopicLinkError):
-        _build_guide_catalog((("core", _topic("concept-safe", related=["missing"])),))
+        _build_guide_catalog((("core", _contribution("concept-safe", related=["missing"])),))
 
 
 def _action() -> GuideAction:

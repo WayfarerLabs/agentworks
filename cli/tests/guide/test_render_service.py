@@ -341,16 +341,12 @@ def test_config_descriptions_are_labeled_and_markdown_escaped() -> None:
 
 
 @pytest.mark.parametrize(
-    ("description", "field_path"),
-    [
-        ("Reserved ⟦AGW framework⟧ delimiter", "summary"),
-        ("x" * (2 * 1024 + 1), "summary"),
-    ],
+    "description",
+    ["Reserved ⟦AGW framework⟧ delimiter", "x" * (2 * 1024 + 1)],
     ids=["framework-delimiter", "over-cap"],
 )
 def test_operator_descriptions_cannot_smuggle_reserved_or_unbounded_text_into_a_topic(
     description: str,
-    field_path: str,
 ) -> None:
     """The one operator-controlled string in a live topic meets the contract's caps."""
     registry = _registry_describing(description)
@@ -358,7 +354,7 @@ def test_operator_descriptions_cannot_smuggle_reserved_or_unbounded_text_into_a_
     with pytest.raises(GuideContributionError) as raised:
         _dynamic_topic(registry, "vm-template/demo")  # type: ignore[arg-type]
 
-    assert raised.value.field_path == field_path
+    assert raised.value.field_path == "summary"
     assert description not in str(raised.value)
 
 

@@ -9,8 +9,7 @@ from __future__ import annotations
 
 import json
 from enum import StrEnum
-from pathlib import Path
-from typing import TYPE_CHECKING, BinaryIO, assert_never
+from typing import TYPE_CHECKING, BinaryIO, assert_never, cast
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -82,9 +81,11 @@ def write_json_envelope(command: MachineOutputCommand, data: JsonObject, stream:
     """Write one JSON v1 document directly to a byte stream.
 
     Callers pass stdout's binary buffer, never the presentation output handler,
-    so terminal formatting cannot enter a machine-readable response.  A buffered
-    binary stream writes the whole document or raises, so one write is the whole
-    response.
+    so terminal formatting cannot enter a machine-readable response.  That
+    buffer writes the whole document or raises, so one write is the whole
+    response.  The parameter cannot narrow to ``io.BufferedIOBase`` to carry
+    that: click's ``get_binary_stream`` is annotated ``BinaryIO``, so every
+    call site would need a cast.
     """
     stream.write(encode_json_envelope(command, data))
 
@@ -92,60 +93,47 @@ def write_json_envelope(command: MachineOutputCommand, data: JsonObject, stream:
 def project_origin(origin: Origin | None) -> JsonObject | None:
     """Project safe, stable provenance fields without a display rendering.
 
-    ``Origin`` expresses four variants through one set of broadly typed
-    fields, so which fields are populated is a per-variant contract the type
-    checker cannot carry.  These checks enforce that contract rather than
-    re-check types; without them a variant built outside its factory would
-    render ``None`` as text into the JSON v1 document.
+    ``Origin`` expresses four variants through one set of broadly typed fields,
+    and its four classmethods are the only constructors, so the reads below take
+    the variant contract those factories pin rather than re-derive it.
     """
     if origin is None:
         return None
 
     if origin.variant == "operator-declared":
-        if not isinstance(origin.file, Path) or type(origin.line) is not int:
-            raise AssertionError("operator-declared origins require a file and line")
         return {
             "variant": origin.variant,
             "file": str(origin.file),
-            "line": origin.line,
+            "line": cast("int", origin.line),
             "source": None,
             "source_resource": None,
             "plugin": None,
         }
     if origin.variant == "auto-declared":
-        if not (
-            isinstance(origin.source, tuple)
-            and len(origin.source) == 2
-            and all(isinstance(part, str) for part in origin.source)
-        ):
-            raise AssertionError("auto-declared origins require a two-string source resource")
+        source_kind, source_name = cast("tuple[str, str]", origin.source)
         return {
             "variant": origin.variant,
             "file": None,
             "line": None,
             "source": None,
-            "source_resource": {"kind": origin.source[0], "name": origin.source[1]},
+            "source_resource": {"kind": source_kind, "name": source_name},
             "plugin": None,
         }
     if origin.variant == "built-in":
-        if not isinstance(origin.source, str):
-            raise AssertionError("built-in origins require a code source")
         return {
             "variant": origin.variant,
             "file": None,
             "line": None,
-            "source": origin.source,
+            "source": cast("str", origin.source),
             "source_resource": None,
             "plugin": None,
         }
     if origin.variant == "system-plugin":
-        if not isinstance(origin.plugin, str) or not isinstance(origin.source, str):
-            raise AssertionError("system-plugin origins require a plugin and code source")
         return {
             "variant": origin.variant,
             "file": None,
             "line": None,
-            "source": origin.source,
+            "source": cast("str", origin.source),
             "source_resource": None,
             "plugin": origin.plugin,
         }

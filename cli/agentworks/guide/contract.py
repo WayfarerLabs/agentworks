@@ -878,15 +878,14 @@ _BLOCK_DISCRIMINATORS: dict[type[GuideBlock], str] = {
 }
 
 
-def _decoded_contribution(value: object, source: str) -> object:
-    """Project a typed contribution into the decoded shape, passing others through.
+def _decoded_contribution(value: TopicContribution) -> dict[str, object]:
+    """Project a typed contribution into the decoded shape the parser reads.
 
     Contributions arrive as frozen ``TopicContribution`` records, while the
     contract's rules (byte caps, markdown safety, anchor grammar) are defined
-    over the decoded shape, so the catalog converts before it validates.
+    over the decoded shape, so the catalog converts before it validates.  The
+    record's own types carry its shape; what the parser then judges is content.
     """
-    if type(value) is not TopicContribution:
-        return value
     anchor = value.anchor
     anchor_value: dict[str, object]
     if isinstance(anchor, ConceptAnchor):
@@ -898,11 +897,8 @@ def _decoded_contribution(value: object, source: str) -> object:
     else:
         anchor_value = {"type": "implementation", "kind": anchor.kind, "name": anchor.name}
     block_values: list[dict[str, object]] = []
-    for index, block in enumerate(value.blocks):
-        discriminator = _BLOCK_DISCRIMINATORS.get(type(block))
-        if discriminator is None:
-            raise _error(InvalidBlockError, source, None, f"blocks[{index}]", "is not a known block type")
-        block_value: dict[str, object] = {"type": discriminator, "id": block.id}
+    for block in value.blocks:
+        block_value: dict[str, object] = {"type": _BLOCK_DISCRIMINATORS[type(block)], "id": block.id}
         if isinstance(block, (Overview, Teaching, AgentContract)):
             block_value["markdown"] = block.markdown
         elif isinstance(block, FieldReference):

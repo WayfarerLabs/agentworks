@@ -140,7 +140,7 @@ def build_authored_catalog(*, strict_trusted_taxonomy: bool = False) -> GuideCat
         if strict_trusted_taxonomy:
             raise contribution_error from None
         release_issue = GuideCatalogIssue(contribution_error)
-    plugins: list[tuple[Plugin, tuple[object, ...]]] = []
+    plugins: list[tuple[Plugin, tuple[TopicContribution, ...]]] = []
     for _, plugin in sorted(SYSTEM_PLUGINS.items()):
         first_party_topics = _load_first_party_plugin_topics(plugin.name)
         plugins.append((plugin, (*plugin.guide_topics, *first_party_topics)))

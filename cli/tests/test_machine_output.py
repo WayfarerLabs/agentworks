@@ -168,23 +168,6 @@ def test_origin_projection_has_fixed_safe_order_and_variant_fields() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    "origin",
-    [
-        Origin(variant="operator-declared", file=None, line=7),
-        Origin(variant="built-in", source=None),
-        Origin(variant="auto-declared", source=()),
-        Origin(variant="auto-declared", source=("kind", cast(str, 7))),
-        Origin(variant="system-plugin", plugin=None, source="agentworks.plugins.example"),
-        Origin(variant="system-plugin", plugin="example", source=None),
-    ],
-)
-def test_origin_projection_rejects_variants_built_outside_their_factory(origin: Origin) -> None:
-    """One dataclass carries four variants, so only the factories pin the shape."""
-    with pytest.raises(AssertionError):
-        project_origin(origin)
-
-
 def test_reference_projections_preserve_graph_order_duplicates_and_nullable_declarers() -> None:
     entries = (
         ReferenceEntry(source=("vm-template", "base"), usage="a secret"),
