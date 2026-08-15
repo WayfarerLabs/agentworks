@@ -20,6 +20,7 @@ from agentworks.env.identity import ResourceContext, per_context_identity_env
 from agentworks.env.merge import effective_env
 from agentworks.errors import ValidationError
 from agentworks.secrets.outcomes import format_outcome
+from agentworks.secrets.policy import require_exact_interaction_policy
 
 if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
@@ -88,6 +89,7 @@ def show_env(
 
     Raises ``ValidationError`` when no context flag is provided.
     """
+    require_exact_interaction_policy(interaction)
     ctx = _resolve_context(
         db,
         vm_name=vm_name,

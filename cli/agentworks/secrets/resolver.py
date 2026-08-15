@@ -58,6 +58,9 @@ class Resolver:
         *,
         interaction: InteractionPolicy,
     ) -> None:
+        from agentworks.secrets.policy import require_exact_interaction_policy
+
+        require_exact_interaction_policy(interaction)
         self._config = config
         self._registry = registry
         self._interaction = interaction

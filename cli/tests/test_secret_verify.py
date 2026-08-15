@@ -23,7 +23,7 @@ from agentworks.capabilities.secret_backend.client import (
 from agentworks.capabilities.secret_backend.prompt import PromptBackend, PromptSourceConfig
 from agentworks.cli import app
 from agentworks.config import load_config
-from agentworks.errors import NotFoundError, UserAbort, ValidationError
+from agentworks.errors import NotFoundError, StateError, UserAbort, ValidationError
 from agentworks.plugins import SYSTEM_PLUGINS
 from agentworks.plugins.onepassword.backend import (
     OnePasswordBackend,
@@ -339,6 +339,28 @@ def test_verify_refuses_interactive_source_without_construction(monkeypatch: pyt
         interaction=InteractionPolicy.REFUSE,
     )
     assert outcome.detail is ResolutionDetail.INTERACTION_REFUSED
+    assert _Backend.events == []
+
+
+def test_verify_rejects_non_enum_policy_before_any_source_work(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A caller-supplied ``"refuse"`` is equal to the enum but not identical to it.
+
+    Every consumer branches by identity, so without the boundary check this call would
+    take the not-refuse path and attempt the interactive source it meant to refuse.
+    """
+    registry = _registry("token")
+    monkeypatch.setattr(
+        "agentworks.secrets.resolve.active_sources",
+        lambda config, candidate: [_source(backend_class=_InteractiveBackend)],
+    )
+    with pytest.raises(StateError):
+        verify_secrets(
+            SimpleNamespace(),  # type: ignore[arg-type]
+            registry,  # type: ignore[arg-type]
+            ["token"],
+            interaction="refuse",  # type: ignore[arg-type]
+        )
+    assert registry.lookups == []
     assert _Backend.events == []
 
 
