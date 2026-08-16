@@ -93,12 +93,14 @@ locked.
       no-topic guide is a catalog-free trail sign, `concept-onboarding` owns the walkthrough,
       selected topics fail soft on environmental failure with doctor as the health authority, and
       the release-test fix (PR #539) fixed every future release PR's CI
-- [ ] One-wave guide-value deletion (operator ruling 2026-08-15; survey PR #543): after corrected PR
-      #548, remove all 141 fixed command-duplicating blocks, the dormant kind fallback, runtime
-      resource topics, and directly orphaned guide machinery in one onboarding-owned effort. Replace
-      `_dynamic_topic`/generic-view assessment use with a smaller parity-preserving projector first.
-      The temporary gap is permitted only on unreleased `main`; the CLI grammar rewrite remains a
-      hard 0.14.0 release gate
+- [x] One-wave guide-value deletion complete (PR #556, merged 2026-08-16; ruling of 2026-08-15 via
+      survey PR #543): all 141 command-duplicating blocks, the dormant kind fallback, runtime
+      resource topics, and the directly orphaned machinery removed at net -2,948 lines, with the
+      bounded parity-preserving projector replacing `_dynamic_topic`/generic-view assessment use.
+      Tester passed the exact wheel; the consolidated edge round (collateral rules, 0.14 upgrade
+      guide, locked-SDD discharge entry, structural consent tests, `assert_never`) landed at the
+      merged head. The temporary gap stands on unreleased `main` only; the CLI grammar rewrite
+      remains the hard 0.14.0 release gate
 - [ ] Remaining phases (wave 2 adoption, closeout) per the effort's per-phase PR plan. The README
       bootstrap shipped with the assistance phase (PR #480), so the bootstraps gate is satisfied;
       the generated block pins version 0.14.0 or newer and resolves when the release ships
@@ -198,6 +200,11 @@ item shrinks to a verification sweep.
 - [ ] Wave 1 in progress: the phase7 corpus deleted with the caller-supplied boundary check landed
       (PR #523), criteria sharpened and executable (PR #524), fifth trust boundary ruled (PR #533);
       remaining items run against the merged criteria
+- [x] Wave 1 interior-secrets item closed (PR #546, merged 2026-08-16): the trust-boundary reduction
+      with the two exact interaction-policy entry checks kept as their own reach-buying category
+      (the locked note's position-scoped three stand), both retained name screens now
+      mutation-protected, and the S2/S7 findings corrected in place; `ResolutionPreview.name`'s
+      ordering fragility filed as #554 rather than absorbed
 - [x] Wave 1 guide and machine-output items closed (PR #548, 2026-08-16): G8 dead surface, G2
       typed-to-dict round trips, G6 defensive surface, and the G11 parity gap, with the stdout write
       loop restored as real short-write protection and struck from the finding that had
@@ -518,10 +525,12 @@ open-ended research placeholder.
     now has a longer runway by ruling, not by slip: **0.14.0 waits for the CLI grammar rewrite**
     (operator, 2026-08-12), and the simplification pass is adopted as a child and runs before it.
     The current serial spine is: completed wave 0, corrected PR #548 (merged 2026-08-16 with the
-    #551 LLD supersession), the onboarding child's one-wave guide-value deletion (now the active
-    spine item), the grammar rewrite, and the pass's reassessment. Other wave 1 deletions and wave 2
-    run independently; the reassessment still waits for them. The spine is the only open 0.14 gate:
-    the breaking-truth task and the installer-plugins moves both closed their lanes ("This lane is
+    #551 LLD supersession), the completed one-wave guide-value deletion (PR #556, merged
+    2026-08-16), the grammar rewrite (now the active and final spine item before the reassessment;
+    its HLA checkpoint is approved and its branch rebases over the guide deletion before
+    implementation), and the pass's reassessment. Other wave 1 deletions and wave 2 run
+    independently; the reassessment still waits for them. The spine is the only open 0.14 gate: the
+    breaking-truth task and the installer-plugins moves both closed their lanes ("This lane is
     closed" on each entry above), and the README bootstrap gate is satisfied (PR #480; see the
     onboarding entry).
 
