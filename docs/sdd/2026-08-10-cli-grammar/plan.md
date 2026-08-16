@@ -258,20 +258,21 @@ history contains retired spellings.
 
 ### 4.1 Automated gates
 
-- [ ] Run focused resource graph/query, database, CLI, machine-output, completion, schema, edit,
+- [x] Run focused resource graph/query, database, CLI, machine-output, completion, schema, edit,
       secret-describe, and plugin tests; retain the active-reference search as reviewed cutover
       evidence rather than a prose-policing test.
-- [ ] Run `uv run ruff check .`, `uv run mypy agentworks tests`, and
+- [x] Run `uv run ruff check .`, `uv run mypy agentworks tests`, and
       `uv run pytest tests/ -m 'not integration'` from `cli/`.
-- [ ] Run `./scripts/lint-files.sh`, `git diff --check`, `./scripts/check-locked-sdds.sh`, and
+- [x] Run `./scripts/lint-files.sh`, `git diff --check`, `./scripts/check-locked-sdds.sh`, and
       `./scripts/rulesync-upgen.sh --check`.
-- [ ] Confirm every commit at a handoff is green and the branch remains based on current `main`.
+- [x] Confirm every commit at a handoff is green and the branch remains based on current `main`
+      (`ca924ff1` at final automated verification).
 
 ### 4.2 Independent review and live CLI testing
 
-- [ ] Run private Agentworks reviewer cycles after the graph-service batch and after the atomic
+- [x] Run private Agentworks reviewer cycles after the graph-service batch and after the atomic
       cutover; resolve every material finding and obtain clean re-review.
-- [ ] Run the required fresh-eyes code review for the code-heavy implementation and triage it
+- [x] Run the required fresh-eyes code review for the code-heavy implementation and triage it
       independently of the project-values review.
 - [ ] Invoke the Agentworks integration tester under the repository's integration-testing and test
       environment protocols with a bounded, residue-free charter.
