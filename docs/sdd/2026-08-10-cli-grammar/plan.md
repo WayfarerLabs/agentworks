@@ -135,19 +135,19 @@ presentation service can be deleted without losing edit lookup behavior.
 
 ### 2.1 Implement closed facts and deterministic traversal
 
-- [ ] Add the frozen identities, query, node, edge, and result records specified by
+- [x] Add the frozen identities, query, node, edge, and result records specified by
       `graph-query-lld.md`.
-- [ ] Implement breadth-first shortest-distance traversal for dependencies, dependents, and
+- [x] Implement breadth-first shortest-distance traversal for dependencies, dependents, and
       per-expansion mixed `both`, with positive finite depths and unbounded `all`.
-- [ ] Expand resource nodes once, keep live nodes terminal, record edges to already-known nodes, and
+- [x] Expand resource nodes once, keep live nodes terminal, record edges to already-known nodes, and
       retain distinct parallel facts while collapsing exact duplicates.
-- [ ] After reachability settles, collect the allowlisted induced declared subgraph among reached
+- [x] After reachability settles, collect the allowlisted induced declared subgraph among reached
       resource nodes without discovering nodes or touching live state.
-- [ ] Apply the specified total node, neighbor, and edge ordering, including explicit null sort
+- [x] Apply the specified total node, neighbor, and edge ordering, including explicit null sort
       keys.
-- [ ] Cover defaults, every direction/depth mode, direction-changing paths, cycles, diamonds,
+- [x] Cover defaults, every direction/depth mode, direction-changing paths, cycles, diamonds,
       parallel edges, boundary cross edges, no-neighbor results, and names with legacy punctuation.
-- [ ] Move former card assertions for inbound declaration relationships, usage, provenance, and
+- [x] Move former card assertions for inbound declaration relationships, usage, provenance, and
       registry graph facts into the additive graph-query tests before the card service is removed.
 
 Definition of done: a pure service test can fully assert the returned safe fact graph without CLI,
@@ -155,24 +155,24 @@ renderer, config, database, resource-object reflection, or insertion-order depen
 
 ### 2.2 Implement demand-driven live projection
 
-- [ ] Add the four-state, single-use live source and exact source-demand predicate from the LLD.
-- [ ] Classify only a definite missing database as an empty source; retain permission/path/open
+- [x] Add the four-state, single-use live source and exact source-demand predicate from the LLD.
+- [x] Classify only a definite missing database as an empty source; retain permission/path/open
       failures as typed whole-query errors.
-- [ ] Open one `Database(read_only=True)` and one read transaction per demanded request, reuse both
+- [x] Open one `Database(read_only=True)` and one read transaction per demanded request, reuse both
       for every eligible kind hook, and close on all exits.
-- [ ] Construct that lazy source from the canonical `agentworks.db.DB_PATH`; do not add a config
+- [x] Construct that lazy source from the canonical `agentworks.db.DB_PATH`; do not add a config
       field or a second database-path resolution rule.
-- [ ] Copy each projected instance immediately into a terminal live node and intrinsic
+- [x] Copy each projected instance immediately into a terminal live node and intrinsic
       `live instance -> resource` edge; count it as one hop regardless of summarized config depth.
-- [ ] Treat live-edge `relationship=uses` as the fixed convention of `live-usage`, never as an
+- [x] Treat live-edge `relationship=uses` as the fixed convention of `live-usage`, never as an
       inferred capability facet or declaration verb.
-- [ ] Keep live edges frontier-collected only. Do not synthesize them during the induced declared
+- [x] Keep live edges frontier-collected only. Do not synthesize them during the induced declared
       pass, and prove a boundary node does not demand or imply uncollected live facts.
-- [ ] Test absent, stale, newer, malformed, busy, unreadable, hook-failure, and close-on-error
+- [x] Test absent, stale, newer, malformed, busy, unreadable, hook-failure, and close-on-error
       paths; assert no partial human or JSON output.
-- [ ] Add representative broad-registry and repeated-hook-kind scale coverage and record observed
+- [x] Add representative broad-registry and repeated-hook-kind scale coverage and record observed
       query counts.
-- [ ] Move former card assertions for live instance usage into the additive live-projection tests
+- [x] Move former card assertions for live instance usage into the additive live-projection tests
       before the card service is removed.
 
 Definition of done: declaration-only and depth-bound queries never inspect the database, demanded
@@ -181,15 +181,15 @@ demand end to end.
 
 ### 2.3 Implement two projections over one result
 
-- [ ] Add the flat, distance-grouped human renderer from the graph LLD; arrows always retain
+- [x] Add the flat, distance-grouped human renderer from the graph LLD; arrows always retain
       intrinsic orientation and indentation never encodes discovery ancestry.
-- [ ] Add the explicit safe-scalar `graph.show` JSON projector with the fixed field set and
+- [x] Add the explicit safe-scalar `graph.show` JSON projector with the fixed field set and
       `depth_limit: null` for `all`.
-- [ ] Encode the complete JSON envelope before writing stdout and retain terminal-control escaping.
-- [ ] Test service grouping and JSON records structurally. Feed the human renderer unique identity,
+- [x] Encode the complete JSON envelope before writing stdout and retain terminal-control escaping.
+- [x] Test service grouping and JSON records structurally. Feed the human renderer unique identity,
       relationship, usage, and provenance facts and prove complete, ordered, once-only projection
       without pinning authored labels, whitespace, or explanatory prose.
-- [ ] Prove neither renderer reaches registry, database, config, handlers, resource rows, origins,
+- [x] Prove neither renderer reaches registry, database, config, handlers, resource rows, origins,
       secrets, or arbitrary attributes.
 
 Definition of done: both outputs are deterministic projections of the same completed `GraphResult`,
