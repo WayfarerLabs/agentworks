@@ -1,7 +1,7 @@
 # Child SDDs
 
 - Status: Active ledger
-- Last updated: 2026-08-15
+- Last updated: 2026-08-16
 
 This is the saga's tracking document, the analog of an ordinary SDD's `plan.md`. Completed
 checkboxes are immutable records, per the standard rule. The saga SDD locks when every entry here is
@@ -187,10 +187,11 @@ item shrinks to a verification sweep.
       lives in `vms/manager/inspect.py`, and the two absence checks read as scoped to production and
       test surfaces, this SDD's own findings excluded. The implementing lead folds both on first
       touch; the plan is mutable until lock
-- [ ] Wave 1: eight deletion work items, unordered by design, each judged locally and green on the
-      full suite. How many PRs they land as is the child's call: its plan already allows the prose
-      sweep to span several, and the saga lead has recommended batching by domain to about three so
-      the round count matches the work rather than the item count
+- [ ] Wave 1: nine deletion work items (per the pass's plan at HEAD; the W1 website-workflow
+      replacement stands alone beside the sweep), unordered by design, each judged locally and green
+      on the full suite. How many PRs they land as is the child's call: its plan already allows the
+      prose sweep to span several, and the saga lead has recommended batching by domain to about
+      three so the round count matches the work rather than the item count
 - [x] Wave 0 closed on branch (a) (PRs #515/#518, 2026-08-14): the twelve broad rules deliver
       unconditionally, verified by fresh-session and worktree probes; issue #511 closed, with the
       recorded limit that rules propagate at session boundaries, not merge boundaries
@@ -519,19 +520,16 @@ open-ended research placeholder.
     The current serial spine is: completed wave 0, corrected PR #548 (merged 2026-08-16 with the
     #551 LLD supersession), the onboarding child's one-wave guide-value deletion (now the active
     spine item), the grammar rewrite, and the pass's reassessment. Other wave 1 deletions and wave 2
-    run independently; the reassessment still waits for them. Open 0.14 gates: that spine, the
-    installer-plugins moves (now scope-reduced to the bucketing), and the breaking-truth task. The
-    README bootstrap gate is satisfied (PR #480; see the onboarding entry).
+    run independently; the reassessment still waits for them. The spine is the only open 0.14 gate:
+    the breaking-truth task and the installer-plugins moves both closed their lanes ("This lane is
+    closed" on each entry above), and the README bootstrap gate is satisfied (PR #480; see the
+    onboarding entry).
 
-    Besides wave 2, four other lanes run in parallel with the spine, and these are the boundaries
-    that keep them apart: onboarding trail-sign work until the one-wave guide deletion joins the
-    spine after #548, the breaking-truth task (`env/entry.py` and the token union, while the pass
-    owns the inert descriptor fields), the installer-plugins bucketing (independent), and the
-    grammar rewrite's design and seeding (only its implementation waits). Wave 1's eight deletion
-    work items are unordered by design and are themselves the largest parallelism available. One
-    coordination hazard is recorded: the pass's website items touch test files the continuous-lander
-    effort (#486) is actively changing, so those sequence behind #486 or coordinate with that lead
-    first.
+    Besides wave 2, the lanes still running in parallel with the spine are the remaining wave 1
+    deletion items and the grammar rewrite's design and seeding (only its implementation waits).
+    Wave 1's nine deletion work items are unordered by design and are themselves the largest
+    parallelism available. The previously recorded #486 coordination hazard is discharged: #486
+    merged on 2026-08-16, so the pass's website items are unblocked.
 
     Discharged in this round: the breaking-truth brief is seeded on `refactor/breaking-truth-0-14`,
     the trail-sign message to the onboarding effort rides this PR, and the supersession note for
