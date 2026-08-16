@@ -1,12 +1,15 @@
 # ruff: noqa: F405
 
-import html
 import json
+import sys
 import threading
+import time
 from functools import partial
 from html.parser import HTMLParser
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from typing import Callable
 
+from lander_chromium_phase4k import DevToolsConnection, _devtools_target
 from site_test_support import *  # noqa: F403
 
 
@@ -214,38 +217,79 @@ document.querySelector("#result").textContent = JSON.stringify({
         encoding="utf-8",
     )
     server = ThreadingHTTPServer(("127.0.0.1", 0), partial(QuietHandler, directory=str(output)))
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread = threading.Thread(target=server.serve_forever, daemon=True, name="site-geometry-browser-server")
     thread.start()
     profile = tempfile.TemporaryDirectory()
+    process: subprocess.Popen[bytes] | None = None
+    connection: DevToolsConnection | None = None
     try:
         port = server.server_address[1]
-        completed = subprocess.run(
+        process = subprocess.Popen(
             (
                 chromium,
                 "--headless",
                 "--disable-gpu",
                 "--no-sandbox",
-                "--hide-scrollbars",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--remote-allow-origins=*",
+                "--remote-debugging-port=0",
                 f"--user-data-dir={profile.name}",
-                f"--window-size={width},1000",
-                "--virtual-time-budget=1000",
-                "--dump-dom",
-                f"http://127.0.0.1:{port}/geometry.html",
+                "about:blank",
             ),
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=20,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
+        connection = DevToolsConnection(_devtools_target(Path(profile.name), process))
+        for domain in ("Runtime", "Page"):
+            connection.call(f"{domain}.enable")
+        connection.call(
+            "Emulation.setDeviceMetricsOverride",
+            {"width": width, "height": 1000, "deviceScaleFactor": 1, "mobile": False},
+        )
+        loaded_url = f"http://127.0.0.1:{port}/geometry.html"
+        connection.call("Page.navigate", {"url": loaded_url})
+        readiness = (
+            f"location.href === {json.dumps(loaded_url)} && "
+            "document.readyState === 'complete' && "
+            "document.querySelector('#result')?.textContent !== 'pending'"
+        )
+        for _ in range(200):
+            if connection.evaluate(readiness):
+                break
+            time.sleep(0.025)
+        else:
+            raise AssertionError("Chromium did not return responsive layout geometry")
+        result = connection.evaluate("JSON.parse(document.querySelector('#result').textContent)")
+        if not isinstance(result, dict):
+            raise AssertionError("Chromium returned invalid responsive layout geometry")
+        return result
     finally:
-        profile.cleanup()
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
-    match = re.search(r'<pre id="result">([^<]+)</pre>', completed.stdout)
-    if match is None or match.group(1) == "pending":
-        raise AssertionError(f"Chromium did not return layout geometry: {completed.stderr[-1000:]}")
-    return json.loads(html.unescape(match.group(1)))
+        active_error = sys.exception()
+        cleanup_errors: list[BaseException] = []
+
+        def cleanup(action: Callable[[], object]) -> None:
+            try:
+                action()
+            except BaseException as error:
+                cleanup_errors.append(error)
+
+        if connection is not None:
+            cleanup(connection.close)
+        if process is not None and process.poll() is None:
+            cleanup(process.terminate)
+            if process.poll() is None:
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    cleanup(process.kill)
+                    cleanup(lambda: process.wait(timeout=5))
+        cleanup(server.shutdown)
+        cleanup(server.server_close)
+        cleanup(lambda: thread.join(timeout=5))
+        cleanup(profile.cleanup)
+        if active_error is None and cleanup_errors:
+            raise cleanup_errors[0]
 
 
 class GeneratedDocumentTests(RepositoryFixture):
@@ -597,6 +641,65 @@ class GeneratedDocumentTests(RepositoryFixture):
         self.assertEqual(narrow["display"], "block")
         self.assertLessEqual(narrow_title["bottom"], narrow_toc["top"])
         self.assertLessEqual(narrow_toc["bottom"], narrow_body["top"])
+
+    def test_chromium_geometry_owns_the_devtools_process_and_cleanup(self) -> None:
+        class FakeProcess:
+            def __init__(self) -> None:
+                self.terminated = False
+                self.killed = False
+
+            def poll(self) -> int | None:
+                return 0 if self.terminated or self.killed else None
+
+            def terminate(self) -> None:
+                self.terminated = True
+
+            def kill(self) -> None:
+                self.killed = True
+
+            def wait(self, timeout: float | None = None) -> int:
+                del timeout
+                return 0
+
+        class FakeConnection:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict[str, object] | None]] = []
+                self.closed = False
+
+            def call(self, method: str, params: dict[str, object] | None = None) -> dict[str, object]:
+                self.calls.append((method, params))
+                return {}
+
+            def evaluate(self, expression: str) -> object:
+                if expression.startswith("JSON.parse"):
+                    return {"display": "block", "title": {}, "toc": {}, "body": {}}
+                return True
+
+            def close(self) -> None:
+                self.closed = True
+
+        process = FakeProcess()
+        connection = FakeConnection()
+        with (
+            mock.patch.object(shutil, "which", return_value="chromium-test"),
+            mock.patch.object(subprocess, "Popen", return_value=process) as spawn,
+            mock.patch(f"{__name__}._devtools_target", return_value="ws://chromium.test"),
+            mock.patch(f"{__name__}.DevToolsConnection", return_value=connection),
+        ):
+            result = browser_geometry(self.output, 390)
+
+        command = spawn.call_args.args[0]
+        self.assertIn("--remote-debugging-port=0", command)
+        self.assertNotIn("--dump-dom", command)
+        self.assertEqual(command[-1], "about:blank")
+        self.assertEqual(result["display"], "block")
+        self.assertTrue(connection.closed)
+        self.assertTrue(process.terminated)
+        self.assertFalse(process.killed)
+        self.assertFalse(any(
+            thread.name == "site-geometry-browser-server" and thread.is_alive()
+            for thread in threading.enumerate()
+        ))
 
     def test_pinned_color_contrasts_meet_text_component_and_status_thresholds(
         self,

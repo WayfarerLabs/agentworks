@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -66,6 +67,14 @@ document.documentElement.dataset.phase4mReady = "true";
 """
 
 
+def _readiness_expression(url: str) -> str:
+    return (
+        f"location.href === {json.dumps(url)} && "
+        "document.readyState === 'complete' && "
+        "document.documentElement?.dataset.phase4mReady === 'true'"
+    )
+
+
 def browser_phase4m_contract(output: Path) -> dict[str, object]:
     chromium = next(
         (candidate for name in ("google-chrome", "chromium", "chromium-browser") if (candidate := shutil.which(name))),
@@ -108,9 +117,11 @@ def browser_phase4m_contract(output: Path) -> dict[str, object]:
         connection = DevToolsConnection(_devtools_target(Path(profile.name), process))
         for domain in ("Runtime", "Page"):
             connection.call(f"{domain}.enable")
-        connection.call("Page.navigate", {"url": f"http://127.0.0.1:{server.server_address[1]}/lander/"})
+        loaded_url = f"http://127.0.0.1:{server.server_address[1]}/lander/"
+        connection.call("Page.navigate", {"url": loaded_url})
+        readiness = _readiness_expression(loaded_url)
         for _ in range(240):
-            if connection.evaluate("document.documentElement.dataset.phase4mReady === 'true'"):
+            if connection.evaluate(readiness):
                 return connection.evaluate("phase4m")
             time.sleep(0.025)
         raise AssertionError("Phase 4M browser probe did not initialize")
@@ -134,6 +145,14 @@ def browser_phase4m_contract(output: Path) -> dict[str, object]:
 
 
 class Phase4MBrowserTests(RepositoryFixture):
+    def test_readiness_waits_for_the_navigated_complete_document_with_a_null_safe_root(self) -> None:
+        url = "http://127.0.0.1:8765/lander/"
+        self.assertEqual(
+            _readiness_expression(url),
+            f'location.href === "{url}" && document.readyState === \'complete\' && '
+            "document.documentElement?.dataset.phase4mReady === 'true'",
+        )
+
     def test_real_chromium_projects_free_exploration_parallax_and_honest_fuel(self) -> None:
         result = browser_phase4m_contract(self.build())
         self.assertEqual(result["opening"], {"fuel": 15, "reference": 30, "level": 0.5})
