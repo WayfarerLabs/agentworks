@@ -198,10 +198,10 @@ item shrinks to a verification sweep.
       (PR #523), criteria sharpened and executable (PR #524), fifth trust boundary ruled (PR #533);
       remaining items run against the merged criteria
 - [x] Wave 1 guide and machine-output items closed (PR #548, 2026-08-16): G8 dead surface, G2
-      typed-to-dict round trips, G6 defensive surface, and the G11 parity gap, with the stdout
-      write loop restored as real short-write protection and struck from the finding that had
-      misclassified it. The onboarding effort's guide-contract LLD supersession landed as its own
-      PR #551 through that artifact's owner. The website batch unblocked when PR #486 merged
+      typed-to-dict round trips, G6 defensive surface, and the G11 parity gap, with the stdout write
+      loop restored as real short-write protection and struck from the finding that had
+      misclassified it. The onboarding effort's guide-contract LLD supersession landed as its own PR
+      #551 through that artifact's owner. The website batch unblocked when PR #486 merged
 - [ ] Wave 2 in progress: rules seventeen to ten (PR #521), process-tree fact refresh (PR #535),
       testing-trio consolidation (PR #538), artifact ownership default (PR #540, one-clause
       follow-up owed per its post-merge review, absorbed and closed by PR #549's ownership model)
@@ -518,10 +518,10 @@ open-ended research placeholder.
     (operator, 2026-08-12), and the simplification pass is adopted as a child and runs before it.
     The current serial spine is: completed wave 0, corrected PR #548 (merged 2026-08-16 with the
     #551 LLD supersession), the onboarding child's one-wave guide-value deletion (now the active
-    spine item), the grammar rewrite, and the pass's reassessment. Other wave 1
-    deletions and wave 2 run independently; the reassessment still waits for them. Open 0.14 gates:
-    that spine, the installer-plugins moves (now scope-reduced to the bucketing), and the
-    breaking-truth task. The README bootstrap gate is satisfied (PR #480; see the onboarding entry).
+    spine item), the grammar rewrite, and the pass's reassessment. Other wave 1 deletions and wave 2
+    run independently; the reassessment still waits for them. Open 0.14 gates: that spine, the
+    installer-plugins moves (now scope-reduced to the bucketing), and the breaking-truth task. The
+    README bootstrap gate is satisfied (PR #480; see the onboarding entry).
 
     Besides wave 2, four other lanes run in parallel with the spine, and these are the boundaries
     that keep them apart: onboarding trail-sign work until the one-wave guide deletion joins the
