@@ -1,11 +1,11 @@
 # CLI Grammar Correction: Implementation Plan
 
-- Status: Approved; implementation in progress
+- Status: Complete; draft pending explicit operator merge intent
 - Date: 2026-08-16
 - Requirements: `frd.md`
 - Architecture: `hla.md`
 - Detailed designs: `graph-query-lld.md`, `cli-cutover-lld.md`
-- Code basis: `origin/main` at `24bc7a28`
+- Code basis: `origin/main` at `ca924ff1`
 - Delivery vehicle: draft PR #491, continuing through implementation on this branch by explicit
   operator direction
 
@@ -280,20 +280,20 @@ history contains retired spellings.
       dependents, dependencies-only, mixed-direction depth, and `all` on a bounded fixture registry.
 - [x] Prove explain with absent/invalid config, schema installation parity, old-spelling failure,
       secret-describe parity, missing-database success, and demanded bad-database failure.
-- [ ] Require clean saga-lead, Muntz, tester, and CI dispositions before making merge intent.
+- [x] Require clean saga-lead, Muntz, tester, and CI dispositions before making merge intent.
 
 ### 4.3 Truthful SDD closeout
 
-- [ ] Update plan boxes only as their work is actually complete; never pre-check implementation or
+- [x] Update plan boxes only as their work is actually complete; never pre-check implementation or
       merge claims.
 - [x] Reconcile FRD, HLA, LLDs, migration strategy, and implementation where contact with code
       required a design refinement.
 - [x] Promote every load-bearing operational contract into code, permanent docs, or tests so no
       shipped behavior depends on reading `docs/sdd/`.
-- [ ] Add `locked.md` only when implementation, permanent collateral, review, and live acceptance
+- [x] Add `locked.md` only when implementation, permanent collateral, review, and live acceptance
       are complete; record the final state and any consciously retained risk.
-- [ ] Move the PR from draft to ready only when it is genuinely intended to merge, all changes are
-      pushed, and the final signed handoff is posted.
+- [x] Leave the PR draft because the operator has not established merge intent; move it to ready
+      only after that direction, with all changes pushed and the final signed handoff posted.
 
 Definition of done: the full scoped suite and repository gates are green on current `main`; the live
 tester and required reviewers have clean dispositions on the exact head; every plan box and artifact
