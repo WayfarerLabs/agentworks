@@ -143,7 +143,11 @@ deliberately narrow `cli-conventions.md`.
   builds `bytes`, `!!set` builds a `set`, and a dated mapping key builds a non-string key. All are
   reachable from a secret's `backend_mappings` in operator-authored YAML, and a manifest carrying
   `!!binary` there is rejected by `require_exact_json_value` and by nothing else. The guard names a
-  live boundary and correctly stays.
+  live boundary and correctly stays. The scrubbing claim is disproved with it: those names are not
+  in fact already validated, because `validate_name` accepts a trailing newline (`$` matches before
+  it under `re.match`, filed as #542), so the scrub guards against a validator that lies rather than
+  re-checking a certified value. PR #546 restored it with two tests written to fail once #542 lands,
+  so the guard retires itself.
 - **S8** `direct_backend_source_error` (`sources.py:268-325`): a transitional bridge outside the
   `retired_shapes.py` quarantine, containing the one plugin-specific branch in an otherwise generic
   module, parsing the retired mapping shape its own upgrade guide says is not parsed.
