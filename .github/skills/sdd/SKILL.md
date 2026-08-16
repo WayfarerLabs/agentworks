@@ -92,17 +92,17 @@ done, and unchecked boxes of the abandoned direction all strip), with exactly on
 recording the supersession, which is what the reviewer's exception keys on.
 
 Mutability follows ownership, and one rule settles it everywhere: **requirements belong to the
-operator, and the response belongs to whoever does the work.** The FRD is requirements, and so is
-every document it references. The response is everything the effort produces in answer, from the HLA
-onward, so it is the effort lead's. One level down the relationship repeats: a lead owns the charter
-it hands a subagent, and the subagent owns the work done under it.
+operator, and the response belongs to whoever does the work.** Requirements are the FRD, together
+with any document it names as carrying requirements. The response is everything the effort produces
+in answer, from the HLA onward, so it is the effort lead's. One level down the relationship repeats:
+a lead owns the charter it hands a subagent, and the subagent owns the work done under it.
 
 A saga lead or an effort lead may draft requirements, and the operator's merge of the PR is the
-consent that makes them the operator's. A saga lead assigns rather than owns: it allocates
-requirements across its children and often authors their revisions, but the content is the
-operator's. Authorship is never ownership, so drafting an accepted document does not make it yours
-to revise. An amendment travels to the owner as a request, never as a direct edit, and a subagent no
-more rewrites its charter than a lead rewrites its FRD. Anyone may decline a request, since
+consent that makes them the operator's; until then the drafting lead applies findings directly.
+After it, authorship is never ownership: a saga lead assigns rather than owns, allocating
+requirements across its children and often authoring their revisions, but the content is the
+operator's. An amendment travels to the owner as a request, never as a direct edit, and a subagent
+no more rewrites its charter than a lead rewrites its FRD. Anyone may decline a request, since
 declining preserves the status quo and needs no authority, and the requester may escalate past a
 decline; only the operator grants a requirements change. You can only grant what you own, which is
 why no lead delegates its FRD downward. Recording a decision its owner already made is transcription
@@ -110,14 +110,15 @@ rather than authorship: append it verbatim to the artifact's rulings section and
 anything past that is a request.
 
 Every artifact has an owner whether or not anything here names it, and the charter is how an owner
-delegates: an agent modifies or creates one only where its charter grants that authority, a lead
-grants freely across what it owns, and granting is normal rather than exceptional. Absent the grant,
-flag what you found in the terms you would have used to fix it and leave the file alone: to the
-owner where you have a channel, and otherwise up your own chain, which ends at the operator.
-Position decides none of it. Creating an artifact needs the same grant as editing one wherever the
-directory sits, an authorized edit to another effort's directory travels as an ordinary PR to `main`
-that the effort picks up on its next rebase, and only a file delivered into an effort whose
-artifacts are none of yours is a message, per the sanctioned channel below.
+delegates: an agent modifies or creates one only where its charter grants that authority, and a lead
+grants freely across what it owns. A grant covers one task; authority returns to the granter when
+that task ends. Absent the grant, flag what you found in the terms you would have used to fix it and
+leave the file alone: to the owner where you have a channel, and otherwise up your own chain, which
+ends at the operator. Position decides none of it. Creating an artifact needs the same grant as
+editing one wherever the directory sits, an owner-authorized edit to another effort's directory
+travels as an ordinary PR to `main` that the effort picks up on its next rebase, and only a file
+delivered into an effort whose artifacts are none of yours is a message, per the sanctioned channel
+below.
 
 One sanctioned channel does exist: new-file message passing. Adding a NEW file to another SDD's
 feature directory as a message is fine (a saga delivering seed notes into an adopted child's
@@ -345,7 +346,8 @@ The settled rules for the species:
   directory without its date prefix (`saga:next-steps`). Sagas can run concurrently, so the label is
   what lets a saga lead's watch enumerate its own surface rather than infer it. That surface is
   everything the lead seeds and reviews, which is wider than the children that gate the lock. The
-  effort applies it when it opens the PR; work no saga lead watches carries no such label.
+  effort applies it when it opens the PR, a PR amending a child's requirements included; work no
+  saga lead watches carries no such label.
 - A saga constrains only its own scope. Work outside the saga is not paused by it and can be picked
   off whenever bandwidth allows; the saga's target-state should say explicitly what is out of scope
   so that boundary stays crisp.
