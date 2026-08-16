@@ -365,13 +365,8 @@ class FinalizeContext:
         """The projected implementation class for ``kind``/``name``, or
         ``None`` for a name miss.
 
-        An unregistered capability ``kind`` is REFUSED rather than answered
-        with ``None``, for the reason :meth:`rows_of` gives: the empty
-        answer a wrong key produces is indistinguishable from the legitimate
-        name miss, so a typo would read as "no such implementation" instead
-        of as the framework bug it is. This is not boundary validation; the
-        kinds arrive as literals from in-repo callers. It is the same
-        loud-failure posture ``descriptor_for`` takes on the same mistake.
+        An unregistered ``kind`` is refused rather than answered with
+        ``None``, for the reason :meth:`rows_of` gives.
         """
         from agentworks.errors import StateError
 
