@@ -3,7 +3,7 @@
 - Status: Approved by the operator for implementation design
 - Date: 2026-08-15
 - Implements: `frd.md`
-- Code basis: `origin/main` at `bcde4983`
+- Code basis: `origin/main` at `4550c3dd`
 
 ## Summary
 
@@ -76,8 +76,8 @@ pure read over frozen tuples.
 
 Declared traversal crosses an explicit allowlist containing `uses` and `inherits`. A later
 relationship enum value does not silently join graph traversal: its producer and graph semantics
-must be decided together. In addition to the existing enum-coverage test, graph owns a test
-requiring every relationship to receive an explicit traverse-or-exclude decision.
+must be decided together. Graph owns a test requiring the named traversal set to equal the current
+relationship enum, so a new value forces that decision.
 
 ### A2. A dedicated query service owns traversal and fact assembly
 
@@ -109,47 +109,18 @@ or name is a typed not-found error from the service boundary.
 
 ### A3. The result is a closed, renderer-independent graph snapshot
 
-The service returns frozen records with no resource, handler, implementation, database, or config
-objects attached.
-
-```text
-ResourceIdentity
-  kind: string
-  name: string
-
-GraphIdentity
-  node_type: resource | live-instance
-  kind: string
-  name: string
-
-GraphQuery
-  focus: ResourceIdentity
-  direction: dependencies | dependents | both
-  depth_limit: positive integer | None       # None means all
-
-GraphNode
-  node_type: resource | live-instance
-  kind: string
-  name: string
-  distance: non-negative integer
-
-GraphEdge
-  edge_type: declared | live-usage
-  source: GraphIdentity
-  target: GraphIdentity
-  relationship: uses | inherits
-  usage: string | None
-  declared_by: ResourceIdentity | None
-
-GraphResult
-  query: GraphQuery
-  nodes: tuple[GraphNode, ...]
-  edges: tuple[GraphEdge, ...]
-```
+The service returns one frozen `GraphResult` containing the normalized query, flat typed nodes with
+shortest distance, and intrinsically oriented typed edges with safe relationship metadata. It
+contains no resource, handler, implementation, database, or config objects. `ResourceIdentity`
+remains the resource-access value; `GraphIdentity` is an internal typed edge endpoint; and the
+closed machine node is intentionally flat rather than nesting another identity object. The
+graph-query LLD owns the exact record fields and JSON v1 shape.
 
 Declared edges retain their intrinsic `resource source -> resource target` orientation and carry the
 producer's relationship, usage, and explicit `declared_by` value. A missing `declared_by` remains
-null rather than being replaced with the source.
+null rather than being replaced with the source. Direction controls reachability, not arrow
+direction. A cycle or induced cross edge in a dependencies query can therefore point toward the
+focus, and the human renderer must make that orientation legible rather than flipping it.
 
 A live edge has intrinsic `live instance -> resource` orientation because the instance depends on
 the resource. Its `edge_type` is `live-usage`, its relationship is `uses`, and usage and
@@ -235,6 +206,9 @@ one coherent persisted-state snapshot rather than a mix of independently timed r
 The read-only connection performs no migration, directory creation, or logical write. Like the
 repository's other SQLite read-only consumers, it may participate in SQLite's WAL coordination; that
 driver bookkeeping is not persisted Agentworks state and does not grant application write authority.
+Graph is an explicit foreground request, so it keeps `Database(read_only=True)` with the database
+API's ordinary driver timeout. It does not adopt the completion probe's special 0.1-second timeout,
+which exists to keep speculative TAB presses responsive.
 
 If a demanded present database is stale, newer, malformed, busy, or unreadable, the query fails as a
 whole with a source-specific typed error and no partial human or JSON result. The command cannot
@@ -258,33 +232,11 @@ The exact terminal typography belongs in the graph-query LLD and renderer tests.
 constraint is that indentation never encodes traversal ancestry and no renderer chooses or drops
 facts.
 
-JSON uses the existing version-1 envelope with command `graph.show`. Its closed `data` shape is:
-
-```json
-{
-  "query": {
-    "focus": { "kind": "vm-platform", "name": "azure-vm" },
-    "direction": "both",
-    "depth_limit": 2
-  },
-  "nodes": [{ "node_type": "resource", "kind": "vm-platform", "name": "azure-vm", "distance": 0 }],
-  "edges": [
-    {
-      "edge_type": "declared",
-      "source": { "node_type": "resource", "kind": "vm-site", "name": "production" },
-      "target": { "node_type": "resource", "kind": "vm-platform", "name": "azure-vm" },
-      "relationship": "uses",
-      "usage": "the platform selected by vm-site:production",
-      "declared_by": null
-    }
-  ]
-}
-```
-
-`depth_limit` is null for `--depth all`; it is never the string `"all"` in machine output. Every
-node and edge record carries the complete fixed field set shown by its type. The projector copies
-only these explicit safe scalars, encodes fully before writing stdout, and never reflects resource
-objects, database rows, config blocks, secret values, provider metadata, or arbitrary attributes.
+JSON uses the existing version-1 envelope with command `graph.show`. The graph-query LLD is the
+single exact owner of its closed field set and representative document. Architecturally,
+`depth_limit` is null for `--depth all`, every record is complete, and projection copies only
+explicit safe scalars before the first stdout write. It never reflects resource objects, database
+rows, config blocks, secret values, provider metadata, or arbitrary attributes.
 
 ### A7. Explanation stays config-free and unchanged below the command name
 
@@ -324,14 +276,17 @@ The command registry and JSON command enum change in one coherent cut:
 - rename the CLI/completion identity `resource.describe-kind` to `resource.explain`; and
 - replace schema `--write` with `--install` while leaving sample `--write PATH` intact.
 
-No alias, warning, dual command ID, fallback dispatcher, or deprecated record remains.
-
 ### A9. Completions and documentation follow command ownership
 
 Graph focus completion reuses the config-backed resource-reference candidate source so completion
 offers exact `KIND/NAME` registry identities. Direction has the three closed values; depth suggests
 positive common values and `all` without trying to enumerate an unbounded integer grammar. Explain
 keeps the config-free kind and capability-implementation completer under its new command identity.
+
+The shared `resource list --names-only` candidate source finalizes the registry but does not open
+the database. All eight completers backed by that source retain exactly the identities and order
+they produce with a healthy database, while unavailable database state no longer suppresses them.
+Ordinary human and JSON resource inventory remain database-backed.
 
 Bash, zsh, and PowerShell generation consume the same introspected command tree and dynamic mapping.
 No shell receives a hand-maintained grammar variant.
@@ -398,13 +353,16 @@ The implementation plan should separate service facts from CLI presentation and 
   visibility, and no migration or logical write;
 - identical service facts feeding deterministic flat human output and the exact closed `graph.show`
   JSON shape, with no secret or raw-object reflection;
+- intrinsic edge orientation, including a dependencies result whose induced cycle or cross edge
+  points toward the focus;
 - first-slash focus parsing and legacy names containing double hyphens;
 - rename-only config-free explanation, unchanged `secret describe`, schema-install parity, and
-  complete removal of the generic resource card and old machine ID; and
+  complete removal of the generic resource card and old machine ID;
 - migration of every resource-describe test that was serving as a convenient fact assertion to its
   surviving owner, rather than blanket deletion with the presentation tests; and
 - generated completion parity across bash, zsh, and PowerShell with broken or absent config on the
-  config-free explanation path.
+  config-free explanation path, plus identical registry-only resource candidates across healthy and
+  unavailable database states.
 
 Representative broad registries and repeated hook-owning resources also receive service-level scale
 tests. The graph-query LLD records the expected traversal, induced-edge, and per-kind projection
@@ -415,25 +373,23 @@ authored human prose.
 
 ## Delivery and coordination
 
-By explicit operator direction, the existing draft artifact PR remains the single delivery vehicle
-through implementation rather than merging ahead under the active-saga default. Its public artifact
-handoff supplies the coordination surface, and its implementation plan uses responsibility-aligned,
-always-green commits. Internal graph storage, query primitives, database read-transaction support,
-and their tests may be introduced in earlier commits without changing the CLI. The command
-registration, old command and machine-ID removal, generated completions, active documentation,
-resource-group help, hints, and cutover tests move together in one collateral-complete commit. No
-commit exposes new grammar with stale ownership or active teaching. The PR remains draft with no
-merge intent until the operator says otherwise.
+The implementation plan owns the operator-directed delivery vehicle and draft posture. Internal
+graph storage, query primitives, database read-transaction support, their tests, and the 39
+fact-assertion migrations they own are introduced in earlier commits without changing the CLI. The
+command registration, old command and machine-ID removal, generated completions, active
+documentation, resource-group help, hints, residual presentation-test deletion, and cutover tests
+move together in one collateral-complete commit. No commit exposes new grammar with stale ownership
+or active teaching.
 
 Implementation ordering inherited from the saga is:
 
 1. preserve the landed post-cut guide surface and do not recreate deleted guide machinery; and
 2. keep the complete grammar correction as a 0.14.0 release gate.
 
-The PR review thread adds two coordination steps to reconfirm at implementation kickoff: publish the
-dying command/test list so the simplification sweep can avoid ownership collisions, and coordinate
-cutover timing with the harness-integration descriptor deletion work. These are coordination notes,
-not architectural dependencies or authority to widen this effort.
+The dying command/test list remains the coordination boundary for other efforts. Simplification
+items C1/C5 are complete at `docs/sdd/2026-08-12-simplification-pass/plan.md`; they removed inert
+descriptor machinery without adding facets. This effort still leaves the first concrete multi-facet
+descriptor and renderer to the future harness-integration work.
 
 ## LLDs to produce in the plan
 

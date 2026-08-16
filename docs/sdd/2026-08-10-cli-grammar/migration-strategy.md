@@ -41,14 +41,16 @@ silently throughout active 0.14 guidance rather than presented as user migration
 
 ### CLI and services
 
-1. Seat the graph fact and traversal service independently of rendering.
-2. Add `graph show`, its human renderer, and its JSON projector.
+1. Seat the graph and resource-access facts independently of rendering, moving parser, identity,
+   origin, and edit-location assertions to those additive owners.
+2. Add the graph traversal service, human renderer, and JSON projector, moving declared and live
+   relationship assertions to that additive owner.
 3. Rename explain while retaining its config-free reference service.
 4. Rename schema installation mode while retaining its writer service.
 5. Remove resource describe and its presentation service after relationship and fact-map tests pass.
 
-Each commit leaves owned tests and documentation coherent. The draft PR remains the single vehicle,
-with commits separated by responsibility.
+Each commit leaves owned tests and documentation coherent. The implementation plan owns the
+single-vehicle exception; commits remain separated by responsibility.
 
 ### Machine output
 
@@ -62,6 +64,8 @@ with commits separated by responsibility.
   config-free resource-kind completer.
 - Remove `resource.describe` completion entries.
 - Add graph target, direction, depth, and output completion without adding a kind filter.
+- Make all eight `resource list --names-only` completion paths registry-only while preserving the
+  exact healthy-database candidate identities and order.
 - Regenerate and verify bash, zsh, and PowerShell artifacts.
 
 ### Documentation and guide coordination
@@ -70,11 +74,10 @@ Update active instructions in one sweep: the command reference, `cli/README.md`,
 resources and active platform guides, 0.14 upgrade guide, surviving module READMEs, hints, help, and
 examples.
 
-A separate effort owns deletion of redundant guide routes. Rebase or coordinate before the
-documentation sweep, do not edit a route it deletes, and do not recreate that route through
-generated teaching. Run an active-reference sweep for removed spellings across tracked source,
-configuration, documentation, completion, and test files. Only upgrade guidance and clearly
-historical records may retain them.
+PR #556 has deleted the redundant guide routes. Preserve that landed surface: do not restore or
+regenerate its resource topics, schema adapters, or generic guide projection. Run an
+active-reference sweep for removed spellings across tracked source, configuration, documentation,
+completion, and test files. Only upgrade guidance and clearly historical records may retain them.
 
 Historical ADRs and locked SDDs are not mechanically rewritten.
 

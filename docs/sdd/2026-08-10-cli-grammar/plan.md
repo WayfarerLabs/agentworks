@@ -1,11 +1,11 @@
 # CLI Grammar Correction: Implementation Plan
 
-- Status: Draft for final artifact checkpoint review
+- Status: Draft for cleaned final-artifact re-review
 - Date: 2026-08-16
 - Requirements: `frd.md`
 - Architecture: `hla.md`
 - Detailed designs: `graph-query-lld.md`, `cli-cutover-lld.md`
-- Code basis: `origin/main` at `bcde4983`
+- Code basis: `origin/main` at `4550c3dd`
 - Delivery vehicle: draft PR #491, continuing through implementation on this branch by explicit
   operator direction
 
@@ -17,10 +17,12 @@ reviewed artifacts before implementation. The public draft artifact checkpoint s
 coordination surface without an early artifact merge, and the PR retains no merge intent until the
 operator says otherwise. Commits provide the reviewable layering:
 
-1. additive frozen-graph, database, and resource-access primitives with tests;
-2. an unregistered graph-query service, records, renderers, and tests;
+1. additive frozen-graph, database, and resource-access primitives with their owning tests and
+   assertion migrations;
+2. an unregistered graph-query service, records, renderers, and the relationship/live-fact assertion
+   migrations they now own;
 3. one collateral-complete CLI cutover containing registrations, removals, machine IDs, completions,
-   active documentation, hints, and cutover tests; and
+   active documentation, hints, residual presentation-test deletion, and cutover tests; and
 4. verification evidence, truthful plan updates, and SDD closeout.
 
 The branch is already rebased over the survey-approved guide deletion merged in PR #556. That
@@ -28,15 +30,14 @@ prerequisite is satisfied at this plan's basis. Every later implementation rebas
 post-deletion surface and must not restore removed guide views, runtime resource topics, schema
 adapters, or generic guide fact projections.
 
-At final-artifact basis `bcde4983`, the saga records this grammar rewrite as the active final spine
-item before reassessment. Simplification items C1/C5 remain uncompleted and owned by that effort;
-this branch's overlap boundary is therefore explicit: it does not modify capability descriptors or
-introduce facet models. Implementation kickoff rechecks and records that status after its required
-rebase.
+At final-cleanup basis `4550c3dd`, the saga records this grammar rewrite as the active final spine
+item before reassessment. Simplification items C1/C5 are now complete in
+`docs/sdd/2026-08-12-simplification-pass/plan.md`; they deleted inert descriptor generality without
+introducing capability facets. This branch's overlap boundary remains unchanged: it does not modify
+capability descriptors or introduce facet models. The future harness-integration work owns the first
+real multi-facet descriptor and explain rendering.
 
-No compatibility layer is part of any phase. The old command spellings and `resource.describe`
-machine ID disappear at the cutover; they do not coexist with the replacements at a handoff or
-mergeable commit.
+The compatibility posture is owned by the FRD and migration strategy; no phase weakens it.
 
 ## Final artifact gate
 
@@ -53,8 +54,9 @@ Implementation begins only after this final artifact set passes the operator-dir
       material redesign.
 - [ ] In this final artifact checkpoint handoff, deliver the dying-command inventory to the parent
       saga and simplification effort. At implementation kickoff, record the rebased `main` SHA and
-      whether simplification items C1/C5 have landed; if not, preserve the explicit overlap boundary
-      that this effort does not change capability descriptors or introduce facet models.
+      the completed C1/C5 status from `docs/sdd/2026-08-12-simplification-pass/plan.md`; preserve
+      the explicit overlap boundary that this effort does not change capability descriptors or
+      introduce facet models.
 - [ ] Record the clean artifact disposition in the PR handoff before implementation starts.
 
 ## Dying-command and ownership inventory
@@ -84,8 +86,9 @@ records may retain one.
 - [ ] Add `DependencyGraph.incoming_edges_of(kind, name)` without changing `dependents_of`, its
       reduced `ReferenceEntry` projection, or any existing closure.
 - [ ] Keep `uses` and `inherits` in a graph-query-specific explicit traversal allowlist.
-- [ ] Add a relationship-coverage test that requires every enum member to be explicitly traversed or
-      excluded by graph query; do not rely only on the existing closure-membership test.
+- [ ] Add a relationship-coverage test that requires the explicit graph-query traversal set to equal
+      the current relationship enum; a future enum member must force a new design decision rather
+      than silently joining or being excluded from traversal.
 - [ ] Prove full inbound edges preserve source, relationship, usage, and optional `declared_by`,
       including parallel facts and inheritance.
 
@@ -118,6 +121,9 @@ public `Database` API, and every pre-existing database consumer retains its beha
 - [ ] Repoint `edit_location` to the new resolver while retaining its tolerant invalid-manifest
       fallback, typed unknown-kind/name errors, and origin-specific edit guidance.
 - [ ] Add focused parser/resolver/edit tests, including `session/legacy--name`.
+- [ ] Move the former card assertions for parser failures, row identity/origin, whether a row can be
+      edited, and declaration location into these additive access/edit tests before the card service
+      is removed.
 
 Definition of done: `resource edit` no longer imports or calls the describe service, and the old
 presentation service can be deleted without losing edit lookup behavior.
@@ -138,6 +144,8 @@ presentation service can be deleted without losing edit lookup behavior.
       keys.
 - [ ] Cover defaults, every direction/depth mode, direction-changing paths, cycles, diamonds,
       parallel edges, boundary cross edges, no-neighbor results, and names with legacy punctuation.
+- [ ] Move former card assertions for inbound declaration relationships, usage, provenance, and
+      registry graph facts into the additive graph-query tests before the card service is removed.
 
 Definition of done: a pure service test can fully assert the returned safe fact graph without CLI,
 renderer, config, database, resource-object reflection, or insertion-order dependence.
@@ -161,6 +169,8 @@ renderer, config, database, resource-object reflection, or insertion-order depen
       paths; assert no partial human or JSON output.
 - [ ] Add representative broad-registry and repeated-hook-kind scale coverage and record observed
       query counts.
+- [ ] Move former card assertions for live instance usage into the additive live-projection tests
+      before the card service is removed.
 
 Definition of done: declaration-only and depth-bound queries never inspect the database, demanded
 queries see one coherent snapshot, and the platform-to-site-to-live-VM case proves depth and source
@@ -184,8 +194,10 @@ machine output is a closed v1 contract, and rendering cannot change graph member
 
 ## Phase 3: collateral-complete CLI cutover
 
-All work in this phase lands in one commit and one handoff. A partial registration or stale-doc
-midpoint may exist only in private uncommitted work, never at a pushed review boundary.
+The user-visible grammar and collateral boundary in this phase lands in one commit and one handoff.
+The 39 fact assertions across 14 files that currently use `describe_resource` as a shortcut migrate
+with their additive owners in phases 1 and 2. A partial registration or stale-doc midpoint may exist
+only in private uncommitted work, never at a pushed review boundary.
 
 ### 3.1 Register the new grammar
 
@@ -204,8 +216,8 @@ midpoint may exist only in private uncommitted work, never at a pushed review bo
 
 - [ ] Delete `resource describe`, its DTO/service/renderer/projector, describe-only helpers,
       completion entry, CLI tests, and `resource.describe` command ID.
-- [ ] Migrate each fact assertion named in the dying inventory to its surviving owner before
-      deleting presentation-only tests.
+- [ ] Verify every fact assertion named in the dying inventory is already green under its phase-1 or
+      phase-2 owner, then delete only the residual presentation-specific tests with the card.
 - [ ] Leave `secret describe`, its reduced inbound relationship view, live grouping, human output,
       and `secret.describe` JSON records unchanged.
 - [ ] Add `GRAPH_SHOW = "graph.show"` to the closed machine-command enum and no compatibility ID.
@@ -218,6 +230,13 @@ midpoint may exist only in private uncommitted work, never at a pushed review bo
 - [ ] Make `resource list --names-only` registry-only so graph/edit completion remains available
       when the database is absent, stale, newer, malformed, busy, or unreadable; keep config and
       finalized-registry failures silent.
+- [ ] Remove `sites`, `ws_templates`, `git_credentials`, `session_templates`, `vm_templates`,
+      `agent_templates`, `admin_templates`, and `resource_refs` from the database-backed completion
+      inventory. Update its four inventory/probe tests so all eight paths share the registry-only
+      contract.
+- [ ] Prove the registry-only names path never calls `get_db` or `open_completion_database`, and
+      that a healthy database produces an identical candidate set and order. Ordinary human and JSON
+      resource-list paths remain database-backed.
 - [ ] Remove old dynamic identities, regenerate/show bash, zsh, and PowerShell output, and test
       missing/broken-config behavior for each relevant path.
 - [ ] Update active help, errors, hints, command reference, `cli/README.md`, sample-config comments,
@@ -271,6 +290,11 @@ history contains retired spellings.
       are complete; record the final state and any consciously retained risk.
 - [ ] Move the PR from draft to ready only when it is genuinely intended to merge, all changes are
       pushed, and the final signed handoff is posted.
+
+Definition of done: the full scoped suite and repository gates are green on current `main`; the live
+tester and required reviewers have clean dispositions on the exact head; every plan box and artifact
+matches observed implementation; permanent collateral owns every shipped contract; and the PR has no
+merge intent until the operator explicitly changes it.
 
 ## Requirement traceability
 

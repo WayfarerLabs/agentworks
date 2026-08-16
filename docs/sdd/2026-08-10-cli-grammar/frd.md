@@ -25,6 +25,8 @@ say what they do. The change is intentionally narrow and gates 0.14.0.
    framework adds named facets, the implementation target explains all of its facets together by
    default, while the capability-kind target owns their shared vocabulary. The planned first
    consumer is harness integration.
+8. `resource list --names-only` is a registry-identity projection. It does not depend on the state
+   database, while ordinary human and JSON resource inventory remain database-backed.
 
 ## Functional requirements
 
@@ -112,7 +114,11 @@ say what they do. The change is intentionally narrow and gates 0.14.0.
   reference, surviving guides, and the 0.14 upgrade guide shall use the new grammar in the same
   implementation series.
 - **FR24.** Bash, zsh, and PowerShell completion generation and dynamic completion shall continue to
-  work with broken or missing config wherever the current explanation path does.
+  work with broken or missing config wherever the current explanation path does. Every completer
+  backed by `resource list --names-only` shall retain the same candidate identities and order it has
+  with a healthy database, while remaining available when the database is absent, stale, newer,
+  malformed, busy, or unreadable. Config and finalized-registry failures shall still yield no
+  candidates.
 - **FR25.** The implementation shall coordinate with the separate guide-cleanup effort. It shall not
   preserve, update, or regenerate a guide route that effort removes as redundant.
 - **FR26.** Touched resource-group help shall describe its resulting inventory, explanation,
@@ -143,7 +149,11 @@ say what they do. The change is intentionally narrow and gates 0.14.0.
    fields.
 7. No active reference, completion entry, machine-output fixture, or operator-facing hint points to
    a removed spelling except the upgrade guide and clearly historical records.
-8. Repository gates and scoped implementation, completion, documentation, and live CLI tests pass
+8. `resource list --names-only` emits the same identities in the same order with or without a
+   healthy state database. All eight completion paths that consume it remain available across
+   unavailable database states, while ordinary human and JSON resource inventory keep their current
+   database-backed behavior.
+9. Repository gates and scoped implementation, completion, documentation, and live CLI tests pass
    before merge intent.
 
 ## Out of scope

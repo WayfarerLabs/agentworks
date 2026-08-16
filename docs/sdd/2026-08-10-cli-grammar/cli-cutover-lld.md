@@ -2,11 +2,11 @@
 
 <!-- cspell:ignore sdds -->
 
-- Status: Draft for final artifact checkpoint review
+- Status: Draft for cleaned final-artifact re-review
 - Date: 2026-08-16
 - Implements: `frd.md` FR1-FR5 and FR15-FR26
 - Refines: `hla.md` A2 and A7-A9
-- Code basis: `origin/main` at `bcde4983`
+- Code basis: `origin/main` at `4550c3dd`
 
 ## Purpose and boundary
 
@@ -15,11 +15,9 @@ graph records, traversal, lazy live projection, rendering, and graph JSON facts.
 the command tree, the shared resource-identity access seam, retirement of the generic resource card,
 completion wiring, permanent collateral, and the atomic cutover commit.
 
-By explicit operator direction, the existing draft artifact PR is the only implementation vehicle;
-its public final-artifact handoff supplies the active-saga coordination point without an early
-artifact merge. There is no alias, warning, fallback dispatcher, compatibility ID, new graph
-operation, facet label, or deprecation runway. A new spelling replaces an unreleased spelling
-silently. The 0.14 upgrade guide maps the shipped `resource describe` break only.
+The implementation plan owns the operator-directed delivery exception and draft posture; the FRD and
+migration strategy own the no-compatibility cutover. This LLD adds no graph operation or facet label
+beyond those requirements. The 0.14 upgrade guide maps the shipped `resource describe` break only.
 
 ## Ownership and file plan
 
@@ -215,10 +213,12 @@ The migration map for assertions is intentional:
 | Whether a row is editable and its source location                    | `test_resource_edit.py` and `edit_location` tests.                                                                      |
 | Plugin and domain parity tests that used the card as a shortcut      | The concrete registry row, explicit graph fact, list projection, or kind-specific service that the test actually needs. |
 
-This includes the current direct uses in plugin, VM, session-template, apt, resource-instance, and
-machine-output tests. The implementation must migrate each assertion before deleting the service. It
-must not retain `describe_resource` as a test helper or replace all deleted assertions with weaker
-absence checks.
+This includes 28 direct `describe_resource` call sites anchoring 39 fact assertions across 14
+current plugin, VM, session-template, apt, resource-instance, and machine-output test files. Parser,
+identity/origin, and edit-location assertions move with the phase-1 access seam. Declared and live
+relationship assertions move with the phase-2 graph service. Those additive commits are green before
+the cutover deletes residual presentation tests and the service. The implementation must not retain
+`describe_resource` as a test helper or replace the deleted assertions with weaker absence checks.
 
 `secret describe` is excluded from the deletion. It retains its own service, reduced `dependents_of`
 view, live grouping, human sections, and exact `secret.describe` JSON record. Adding full incoming
@@ -236,14 +236,22 @@ graph edges is additive and does not migrate secret behavior.
 
 The retired `("resource.describe", "ref")` and `("resource.describe-kind", "target")` entries
 disappear. `resource_kinds` continues to invoke the config-free `agw resource kinds --names-only`
-path in all three shells. `resource_refs` continues to invoke the config-backed
-`agw --completion-probe resource list --names-only` path in all three shells. That names-only path
-must finalize the registry but bypass `get_db` and call `list_resources(..., db=None)`, because its
-candidate set is declared resource identities and does not need live `used_by_count` facts. Thus
-explain completion remains available with absent or broken config; graph and edit completion remain
-available with a valid registry even when the database is absent, stale, newer, malformed, busy,
-unreadable, or otherwise unusable; and all config or registry failures still yield no candidates.
-The ordinary human and JSON `resource list` paths retain their current database-backed behavior.
+path in all three shells.
+
+Add one exact `RESOURCE_LIST_DYNAMIC_COMPLETIONS` inventory containing `sites`, `ws_templates`,
+`git_credentials`, `session_templates`, `vm_templates`, `agent_templates`, `admin_templates`, and
+`resource_refs`. All eight invoke `agw resource list --names-only` with their existing filters and
+stderr suppression, but no longer pass `--completion-probe` or appear in
+`DATABASE_BACKED_DYNAMIC_COMPLETIONS`. The CLI names-only branch must finalize the registry, bypass
+`get_db` and therefore `open_completion_database`, and call `list_resources(..., db=None)`. Its
+candidate identities and ordering must be byte-for-byte identical to the current healthy-database
+path because the database supplied only `used_by_count` values that names-only never renders.
+
+Thus explain completion remains available with absent or broken config; every resource-list-backed
+completion remains available with a valid registry when the database is absent, stale, newer,
+malformed, busy, unreadable, or otherwise unusable; and all config or registry failures still yield
+no candidates. The ordinary human and JSON `resource list` paths retain their current
+database-backed behavior.
 
 Direction and output are Click choices emitted from the Typer tree. Depth offers static useful
 candidates `1`, `2`, `3`, and `all`; it does not pretend to enumerate all positive integers or use
@@ -271,12 +279,24 @@ path and test all of the following structurally:
 - every dynamic mapping still points to a real command parameter and every completer ID exists in
   all three shell renderer maps;
 - each shell invokes config-free kinds completion for explain without the completion probe, and
-  invokes resource-reference completion for graph with the completion probe and its existing stderr
-  suppression;
+  invokes all eight resource-list-backed completers without the completion probe and with their
+  existing stderr suppression;
 - explain completes during missing and invalid config; graph focus preserves the config/registry
   failure behavior of config-backed resource refs but still completes during absent, stale, newer,
   malformed, busy, and unreadable database states;
 - static graph choices and schema `--install` are emitted by all three shells.
+
+The four existing completion tests that encode the old database classification change explicitly:
+
+- `test_database_backed_snippets_share_hidden_probe_contract` moves all eight completers to the
+  registry-only side of the marker assertion;
+- `test_generated_database_backed_invocations_all_carry_hidden_probe_marker` no longer treats
+  `resource list` as a database-backed command path;
+- `test_legacy_database_completion_recognizes_shipped_option_shapes` no longer recognizes the old
+  resource-list shape as database-backed; and
+- `test_marker_probe_refuses_stale_database_for_every_dynamic_path_without_side_effects` continues
+  to cover only the remaining database-backed paths, while new resource-list cases prove success and
+  identical candidates across unavailable and healthy database states.
 
 ## Documentation, hints, and historical records
 
@@ -314,7 +334,7 @@ command registration, exit behavior, command IDs, hints emitted by owned code pa
 structure. The sweep must also confirm that no current operator-facing phrase points to the removed
 generic inspector.
 
-## One collateral-complete cutover commit
+## One collateral-complete command cutover commit
 
 The graph storage, query service, records, renderers, lazy database source, shared identity access,
 edit repointing, and their tests land in the earlier additive commits named by the plan. The
@@ -327,8 +347,8 @@ commit, with no pushed partial registration or stale active teaching:
 3. Rename explain and the schema installer, then remove the generic resource card and its machine
    command.
 4. Update completion mappings and generated bash, zsh, and PowerShell output.
-5. Update permanent collateral, active hints, upgrade map, resource help, and the migrated test
-   suite.
+5. Update permanent collateral, active hints, upgrade map, resource help, residual presentation-test
+   deletion, and cutover tests. The 39 fact assertions already moved with their additive owners.
 
 The commit is complete only when every observable surface describes the final grammar. It must never
 publish both old and new command identities, leave a removed machine ID in the enum, or teach a

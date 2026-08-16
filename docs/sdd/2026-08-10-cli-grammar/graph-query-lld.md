@@ -2,11 +2,11 @@
 
 <!-- cspell:words contextmanager deque popleft -->
 
-- Status: Draft for final artifact checkpoint review
+- Status: Draft for cleaned final-artifact re-review
 - Date: 2026-08-16
 - Implements: `frd.md` FR6-FR14 and QR1-QR4
 - Architecture: `hla.md` A1-A6
-- Code basis: `origin/main` at `bcde4983`
+- Code basis: `origin/main` at `4550c3dd`
 
 ## Scope and invariants
 
@@ -125,11 +125,11 @@ class GraphDistanceGroup:
     edges: tuple[GraphEdge, ...]
 ```
 
-`GraphQuery.__post_init__` rejects a non-`None` `depth_limit` unless `type(depth_limit) is int` and
-it is positive. `GraphNode.__post_init__` rejects a negative distance. Its identity fields stay
-direct so the closed record matches the machine contract without a flattening step.
-`GraphEdge.__post_init__` enforces the variant relationship that Python's type system cannot
-express:
+`GraphQuery` and `GraphNode` do not revalidate first-party typed values: the CLI depth parser owns
+operator input validation and BFS is the only distance producer. `GraphNode` keeps identity fields
+direct because it is the closed flat machine record. `GraphIdentity` is the internal typed endpoint
+used by edges, not a second nested JSON node shape. `GraphEdge.__post_init__` enforces the variant
+relationship that Python's type system cannot express:
 
 - `declared` requires two resource endpoints, an allowlisted relationship, and a non-`None` usage;
 - `live-usage` requires a live-instance source, resource target, relationship `uses`, and null
@@ -185,12 +185,12 @@ Graph query owns a separate, explicit relationship decision:
 GRAPH_TRAVERSED_RELATIONSHIPS = frozenset(
     {RefRelationship.USES, RefRelationship.INHERITS}
 )
-GRAPH_EXCLUDED_RELATIONSHIPS: frozenset[RefRelationship] = frozenset()
 ```
 
-`test_every_relationship_has_an_explicit_graph_query_decision` asserts the two sets are disjoint and
-their union equals `set(RefRelationship)`. Traversal and the induced pass both test membership in
-`GRAPH_TRAVERSED_RELATIONSHIPS`; neither uses a negative filter or the closure-specific sets.
+`test_every_relationship_is_explicitly_traversed` asserts this set equals `set(RefRelationship)`. A
+future enum member therefore forces an explicit graph design change instead of silently joining or
+being excluded from traversal. Traversal and the induced pass both test membership in this named
+set; neither uses a negative filter or the closure-specific sets.
 
 ## Canonical keys and exact deduplication
 
@@ -269,7 +269,6 @@ with live_source:
     focus_id = resource_graph_identity(focus)
     distance = {focus_id: 0}
     queue = deque([focus_id])
-    rows = {focus_id: resolved_focus.resource}
     edges_by_key = {}
 
     while queue:
@@ -279,10 +278,11 @@ with live_source:
             continue
 
         # The queue contains resources only.
-        row = rows.get(current)
-        if row is None:
-            row = registry.lookup(current.kind, current.name)
-            rows[current] = row
+        row = (
+            resolved_focus.resource
+            if current == focus_id
+            else registry.lookup(current.kind, current.name)
+        )
         candidates = []
 
         if direction in {DEPENDENCIES, BOTH}:
@@ -383,6 +383,11 @@ the failure. Existing `AgentworksError` subclasses from open, including stale, n
 busy errors, propagate unchanged. An untyped filesystem/driver open exception is framed as
 `StateError(entity_kind="database")` with its cause.
 
+Do not pass completion's 0.1-second database timeout. Graph is an explicit foreground request and
+keeps the database API's ordinary driver timeout; the tight completion bound exists only to keep a
+speculative TAB press from blocking the shell. Busy state still becomes the existing typed
+whole-query error.
+
 `instances_for` invokes the exact kind handler with `(db, registry, row)` and consumes its iterable
 inside the source boundary. Every `InstanceRef` is copied immediately into graph records by BFS. Any
 `Exception` raised while calling or consuming the hook is wrapped in
@@ -399,6 +404,11 @@ closes.
 `Database.__init__` records `_read_only = read_only` and initializes `_read_tx_active = False` on
 both construction paths. The existing `_tx_depth` remains the write-transaction nesting state.
 
+Add one new guard at the start of the existing `transaction()` method: when `_read_only` is true,
+raise `StateError(entity_kind="database")` before changing `_tx_depth`. This is new behavior; the
+current method has no read-only mode guard. No `_read_tx_active` guard is needed there because a
+read transaction can exist only on an instance that this first guard rejects.
+
 Add this public context manager:
 
 ```python
@@ -409,8 +419,8 @@ def read_transaction(self) -> Iterator[None]:
             "a read transaction requires a read-only database",
             entity_kind="database",
         )
-    if self._tx_depth != 0 or self._read_tx_active:
-        raise StateError("database transaction nesting is unsafe", entity_kind="database")
+    if self._read_tx_active:
+        raise StateError("a read transaction cannot be nested", entity_kind="database")
 
     self._read_tx_active = True
     try:
@@ -427,11 +437,12 @@ def read_transaction(self) -> Iterator[None]:
 later hook read remains in it. `rollback()` ends the read transaction without expressing a logical
 write commit.
 
-The existing `transaction()` rejects `_read_only` instances with `StateError` before changing
-`_tx_depth`. `read_transaction()` rejects writable instances and nested entry. No code shares or
-increments `_tx_depth` for a read transaction. Existing writable nesting and per-method commit
-behavior remain unchanged. `Database.close()` remains callable after either context exits; the live
-source orders exit before close.
+The new `transaction()` guard rejects read-only instances before changing `_tx_depth`.
+`read_transaction()` rejects writable instances and nested read entry. It does not inspect
+`_tx_depth`: the writable-instance guard already excludes every instance on which a write
+transaction can be active. No code shares or increments `_tx_depth` for a read transaction. Existing
+writable nesting and per-method commit behavior remain unchanged. `Database.close()` remains
+callable after either context exits; the live source orders exit before close.
 
 Tests prove that a writer committing after the read transaction's first query is invisible to a
 second query in that transaction, then visible after exit. They also prove exception rollback,
@@ -469,8 +480,9 @@ benchmark wall time becomes a correctness gate.
 `group_graph_result(result) -> tuple[GraphDistanceGroup, ...]` lives in `graph_query.py`, not the
 human renderer. It builds an identity-to-distance map from `result.nodes`, assigns each edge to the
 maximum endpoint distance, and returns ascending nonempty distance groups. Nodes and edges retain
-their already-canonical result order. It raises `AssertionError` if an edge endpoint is absent,
-which is an internal construction invariant rather than operator input.
+their already-canonical result order. `show_graph` constructs every edge from reached endpoints, so
+grouping trusts endpoint membership rather than adding a check for an orphan that construction
+cannot produce.
 
 `render_graph_result(result)` calls that grouping function and emits this flat structure:
 
@@ -497,7 +509,9 @@ Distance N
 `Declared by` is omitted when null. `Edges` is omitted from a group with none. Every arrow retains
 intrinsic source-to-target orientation. Indentation denotes only fixed record sections and optional
 edge details; it never denotes discovery ancestry. The renderer does not compute distance, choose a
-parent, collapse a repeated node, discover an edge, or change ordering.
+parent, collapse a repeated node, discover an edge, or change ordering. Consequently a dependencies
+query over a cycle or induced cross edge may display an arrow that points toward the focus; the
+direction label describes reachability, not arrow rewriting.
 
 Tests assert `GraphDistanceGroup` membership, ordering, and one-time edge assignment structurally.
 Human renderer tests feed unique resource identities, live identities, relationship values, usage,
@@ -565,7 +579,7 @@ entire document and escapes terminal controls before its first write.
 | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `tests/resources/test_graph.py`       | Full incoming `uses` and `inherits` references preserve every field, order, duplicates, and object authority                           |
 | `tests/resources/test_graph.py`       | `dependents_of`, closures, readiness, and secret describe compatibility remain unchanged                                               |
-| `tests/resources/test_graph_query.py` | Relationship decision sets are disjoint and exhaustive over `RefRelationship`                                                          |
+| `tests/resources/test_graph_query.py` | The explicit traversed relationship set equals `RefRelationship`; a new enum member forces design work                                 |
 | `tests/resources/test_graph_query.py` | Defaults, each direction, finite 1/2/N, and `all`                                                                                      |
 | `tests/resources/test_graph_query.py` | Mixed `both` path changes direction per expansion; monotonic-union implementation would fail                                           |
 | `tests/resources/test_graph_query.py` | Cycles, diamonds, known-node edges, self-edge defense, and shortest distance                                                           |
@@ -580,9 +594,10 @@ entire document and escapes terminal controls before its first write.
 | `tests/resources/test_graph_query.py` | Platform to site to live VM proves depth 1 no demand and depth 2 demand                                                                |
 | `tests/resources/test_graph_query.py` | Total node/neighbor/edge order is identical under reversed construction order and null keys                                            |
 | `tests/resources/test_graph_query.py` | Grouping assigns every edge once at maximum endpoint distance without ancestry                                                         |
+| `tests/resources/test_graph_query.py` | Dependencies output retains an induced cycle/cross edge whose intrinsic arrow points toward focus                                      |
 | `tests/resources/test_graph_query.py` | Broad registry and repeated-hook query-count scale contracts                                                                           |
 | `tests/resources/test_graph_query.py` | JSON projector exact fields, nulls, enums, order, empty edges, legacy punctuation, and poison-object exclusion                         |
-| `tests/db/test_read_transaction.py`   | Mode misuse, unsafe nesting, first-read snapshot, concurrent writer, exception rollback, reuse after exit, and close after exit        |
+| `tests/db/test_read_transaction.py`   | Mode misuse, nested read, first-read snapshot, concurrent writer, exception rollback, reuse after exit, and close after exit           |
 | `tests/test_machine_output.py`        | Envelope version/command, encode-before-write, short writes, and DEL/C1 escaping with graph data                                       |
 | CLI tests owned by cutover            | Unknown focus, no-neighbor success, human/JSON parity, and no stdout on whole-query source failure                                     |
 
@@ -593,7 +608,7 @@ facts that were already available before rendering.
 
 Return to the effort lead instead of improvising if implementation requires any of the following:
 
-- a relationship beyond the explicit `RefRelationship` decision sets;
+- a relationship beyond the explicit `RefRelationship` traversal set;
 - live nodes that expand, live facts synthesized during the induced pass, or live facts treated as
   complete inventory;
 - a writable/migrating database, a second database or read transaction in one query, or degraded
