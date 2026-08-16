@@ -157,11 +157,8 @@ class CapabilityKindDescriptor:
     manifest_section: HostSurface
     """How the kind is selected in its host's manifest spec.
 
-    Required, because every capability kind is selected from some
-    declarable kind's spec. A kind with no declarable host would be a
-    capability nothing can ask for, so the day one exists is the day this
-    field becomes optional, and the type checker names every consumer that
-    then has to decide what to do about it."""
+    Required: all four kinds declare one, and the dataclass refuses a
+    record without it."""
 
     config_schema: ConfigContract
     """What a config model offered for this kind must be.
@@ -177,17 +174,6 @@ class CapabilityKindDescriptor:
 
     mapping_host: MappingHost | None = None
     """The declarable map field hosting :attr:`mapping_schema`."""
-
-    # One field is deliberately NOT added yet, recorded with the trigger
-    # that would create it so it is neither built early nor reinvented:
-    #
-    #   consumer_gating -> the first NEW consuming surface that
-    #                      consolidates gating derivation. Nothing here
-    #                      changes gating behavior today, so there is
-    #                      nothing to carry.
-    #
-    # Snapshot/restore needs no field at all: it iterates the table, so
-    # participation is membership and a flag could only be wrong.
 
 
 @cache

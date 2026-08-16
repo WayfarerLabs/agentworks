@@ -31,12 +31,14 @@ if TYPE_CHECKING:
 class CapabilityAdapter(Protocol):
     """The uniform contract each capability kind implements.
 
-    Seating is split into a FALLIBLE ``prepare`` (build the registry
-    payload, no mutation) and a PURE ``seat`` (write the prepared payload),
-    so all failure-prone work happens before any registry is touched.
-    ``matches`` is the exact-class idempotency check. Keeping preparation
-    separate means registration can finish every validation and collision
-    check before any registry write.
+    Seating is split into ``prepare`` (build the registry payload, no
+    mutation) and ``seat`` (write the prepared payload), so registration
+    finishes every conformance and collision check before it touches a
+    registry. ``matches`` is the exact-class idempotency check.
+
+    Neither half can fail today: every registry stores the class itself, so
+    ``prepare`` is a pass-through. The split is what ``register_plugin``
+    orders its work around, not a claim about where errors come from.
     """
 
     kind: str
