@@ -226,12 +226,12 @@ This has three implications:
 3. **Ship permanent doc changes alongside the code that backs them.** Permanent docs (architecture
    docs in `docs/arch/`, ADRs, operator guides, module READMEs, skills, rules) must reflect
    observable system reality at HEAD on `main`. The tiebreaker test runs in both directions:
-   - A doc that claims a behavior not yet true at HEAD is **premature** -- don't merge it ahead of
-     the code.
-   - A doc that omits a behavior already true at HEAD is **stale** -- don't defer the update.
+   - A doc that claims a behavior not yet true at HEAD is **premature**; don't merge it ahead of the
+     code.
+   - A doc that omits a behavior already true at HEAD is **stale**; don't defer the update.
 
    So when a code change alters reality, the matching doc change rides in the same PR. In multi-PR
-   efforts the doc update lands in the PR that _makes the doc claim true_ -- not the first PR in the
+   efforts the doc update lands in the PR that _makes the doc claim true_, not the first PR in the
    sequence and not a "polish" PR at the end of the SDD. Edge cases will be fuzzy (upstream pin
    advances, multi-deployment rollouts, doc changes that need to wait for a tag to be cut in another
    repo); the principle is lockstep with the change that makes the doc factual, not deferred to the
@@ -291,7 +291,7 @@ When deleting:
   hitting the leftover `locked.md` should land on useful pointer information, not a bare tombstone.
 - Do the deletion as its own deliberate change (PR or commit), not as a side effect of other work.
   The deletion is the change.
-- Active SDDs (no `locked.md` yet) are not candidates -- they're still load-bearing for in-progress
+- Active SDDs (no `locked.md` yet) are not candidates; they're still load-bearing for in-progress
   work.
 
 The balance to hold: lean toward deletion when reading the SDD might actively mislead, and lean
@@ -396,8 +396,8 @@ choice in the plan.
 
 ## PR Review
 
-Significant changes to SDD artifacts -- whether net-new specs or material revisions to existing ones
--- should go through a draft PR for review before the work is merged. The aim is to surface concerns
+Significant changes to SDD artifacts (whether net-new specs or material revisions to existing ones)
+should go through a draft PR for review before the work is merged. The aim is to surface concerns
 about requirements, architecture, or plan early, while changes are still cheap.
 
 Ready versus draft is purely a merge-intent signal, and it should be set accordingly. The
