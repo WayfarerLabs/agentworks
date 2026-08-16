@@ -98,32 +98,57 @@ shares no files with the website work; it waits on the sweep instead, per group 
       every verbatim pin; rewrite the real policy invariants (least-privilege permissions,
       credential non-persistence, main-only deploy, source-SHA/artifact binding, double-build diff)
       as focused checks over a proper YAML load. Done when: suite green, no hardcoded workflow text
-      beyond the keys each check reads. **Done**: 834 lines become 12 checks in 380, and every one
-      of them was proven by mutation rather than by inspection: 30 violations applied to the real
-      workflows, each failing the check that owns it and none passing. Nothing pins wording, step
-      names, action versions, or formatting; where two places in a file must agree the check derives
-      one from the other (the artifact path from the build command's `--output`, deploy's
-      `artifact_name` from the upload's `name`, the verified step from the `steps.<id>.outputs`
-      expression the job output references, the required-result count from `needs`). **The item's
-      one false premise was the location**: a "proper YAML load" cannot happen in the website suite
-      at all, because that suite runs as `python3 -m unittest` on a runner with no package
-      installation step, and PyYAML is not in the standard library nor documented in the
-      `actions/runner-images` manifest. The file therefore lands at
-      `cli/tests/test_workflow_policy.py`, where PyYAML is already a first-party dependency and the
-      required `test` job runs it, following `cli/tests/assistance/test_contract.py`, which already
-      tests repository-root artifacts from there for the same reason. The alternative, adding an
-      install step to the two workflow jobs under test, would have edited the artifacts being
-      verified and broken the website suite's no-installation property for one test. Three guards
-      beyond the five named invariants were kept because the deleted closed-shape assertions were
-      their only home and each is a real bypass: the fail-fast shell (a
+      beyond the keys each check reads. **Done**: 834 lines become 16 checks in 532 (measured with
+      `wc -l` at the final head; an earlier revision of this note said 380, which no counting
+      supports and which is corrected here). Nothing pins wording, step names, action versions, or
+      formatting; where two places in a file must agree the check derives one from the other (the
+      artifact path from the build command's `--output`, deploy's `artifact_name` from the upload's
+      `name`, the verified step from the `steps.<id>.outputs` expression the job output references,
+      the required-result count from `needs`). **The item's one false premise was the location**: a
+      "proper YAML load" cannot happen in the website suite at all, because that suite runs as
+      `python3 -m unittest` on a runner with no package installation step, and PyYAML is not in the
+      standard library nor documented in the `actions/runner-images` manifest. The file therefore
+      lands at `cli/tests/test_workflow_policy.py`, where PyYAML is already a first-party dependency
+      and the required `test` job runs it, following `cli/tests/assistance/test_contract.py`, which
+      already tests repository-root artifacts from there for the same reason. The alternative,
+      adding an install step to the two workflow jobs under test, would have edited the artifacts
+      being verified and broken the website suite's no-installation property for one test. Seven
+      guards beyond the five named invariants are kept because the deleted closed-shape assertions
+      were their only home and each is a real bypass: the fail-fast shell (a
       `defaults.run.shell: bash {0}` drops `-e`, which alone disarms the double-build diff),
-      unskippable deploy-path steps (`if` or `continue-on-error` on a test step publishes an
-      unverified artifact), and first-party actions only in the workflow holding the Pages token.
-      Three were dropped deliberately: pinned action versions, the exact step-key sets and step
-      order, and duplicate-key detection, which a real YAML load cannot see and which protects
-      against a malformed file rather than a regression. **R2.3 applies once**: nothing checked that
-      `ci-success` needs every other job, which is the single property branch protection depends on
-      and the one an added job silently breaks; that check is new and fails on a synthetic job.
+      `BASH_ENV` at any of its three levels, a `working-directory` default over the deploy path,
+      unskippable deploy-path steps and jobs (`if` or `continue-on-error` on a test step publishes
+      an unverified artifact), first-party actions only, no shell step or checkout in the
+      write-scoped job, and the build job's website suites derived from `ci.website`'s. **R2.3
+      applies twice**: nothing checked that `ci-success` needs every other job, which is the single
+      property branch protection depends on and the one an added job silently breaks; and nothing
+      bound that job's `REQUIRED_RESULTS` to the `join(needs.*.result)` expression, so literal
+      `success` words would have left the required check green while it stopped gating. Both checks
+      are new.
+
+      **The evidence standard changed mid-item and that is the durable lesson.** The first head's
+      proof was 30 author-chosen mutations, each failing the check that owns it. That is the wrong
+      proof: mutations chosen by the author of the checks can only show each check bites what it was
+      written to bite, and cannot find a stated policy with no owning check. The integration tester
+      and the complexity review lane each independently walked through two such policies, and running
+      the deleted file's own mutation corpus against the replacement, which should have happened
+      before the deletion merged, found two more. The corpus now stands at 39 violations from the
+      deleted file and both review lanes, 35 caught. Three of the four not caught are form-only edits
+      a real YAML load cannot see, and are declared drops on that ground: a duplicate top-level key,
+      which resolves last-wins exactly as Actions resolves it, twice, and a trailing `# comment` on a
+      permission value, which is not data. **The fourth is a defense that moved, not a gap.** It
+      inserts a tree-mutating step into the build job, and the guarantee is still held: the
+      pre-upload source verifier rejects tracked and untracked drift at runtime, and this suite
+      executes that rejection rather than asserting about it. Holding it structurally instead would
+      mean asserting the build job's `run` steps are exactly some derived set, which re-pins step
+      shape and reintroduces the form-policing this item exists to remove. Three method lessons go to
+      the reassessment: a deleted policing file's mutation corpus is recoverable from history on
+      demand, extracted here from the merge base by parsing the old file's AST rather than
+      transcribing it, and should be run against the replacement before the deletion merges; the
+      runner that does it stays evidence rather than a committed artifact, since its only consumer is
+      that one-time proof; and a replacement policy suite ships a sentence-to-check map, since a
+      policy sentence with no owning check is invisible to any author-selected corpus.
+
 - [ ] Prose/form-policing sweep across the estate (absorbed survey list plus G12, C10, D4, P6, and
       the #470 manifesto pin). **This enumeration is the exclusion list and nothing else is
       excluded**: W1's workflow test, S1's corpus and wording-pin trims, W4/W6 in the contained
@@ -134,8 +159,22 @@ shares no files with the website work; it waits on the sweep instead, per group 
       Any other overlap the inventory turns up is an ordering question for the lead, not an
       ownership one: a general rule keyed on what another item names or edits excluded the gcp
       files, `test_schema_adapter.py`, and `test_view.py`, which `findings.md` names _for_ the
-      sweep. The sweep records each overlap it finds, keeps the file, and raises the ordering. The
-      sweep's first step commits an exact decision inventory derived from the absorbed survey, one
+      sweep. The sweep records each overlap it finds, keeps the file, and raises the ordering.
+
+      **Three website overlaps raised 2026-08-16 by the contained-trims work, recorded here rather
+      than in a PR body so the sweep's executor finds them.** First, W5 is not on the exclusion list
+      above, which names W4 and W6 only, yet `test_lander_404.py` is W5's file and carries sweep
+      rows of its own; the W5 change rewrote about 90 lines of it by deleting duplicated fixtures,
+      so the sweep should re-read it rather than inventory it from the pre-#486 basis. Second,
+      `website/tests/test_site_documents.py` has two owners: the W4 palette rows and the W8 browser
+      row belong to the trims item, while the CSS declaration list and the four-word
+      `fake_terminal` blacklist in `test_shared_css_pins_tokens_reflow_focus_and_terminal_cues` are
+      sweep rows and were deliberately left untouched. That blacklist is the shape
+      `no-prose-policing-tests` calls worse than useless, so it is a delete row, not a convert row.
+      Third, this plan expected the sweep's website rows in the same PR as the website work; they
+      are not in it, so they remain wholly the sweep's.
+
+      The sweep's first step commits an exact decision inventory derived from the absorbed survey, one
       row per test or assertion group (a file mixing wholly-policing tests with embedded prose
       assertions gets multiple rows), each row marked delete, convert, or keep. Keep behavioral,
       structural, and security tests; delete the rest; convert to structural form only where a real
@@ -143,6 +182,7 @@ shares no files with the website work; it waits on the sweep instead, per group 
       mostly by deletion (R2.4). May land as several PRs. Done when: delete rows are gone at HEAD,
       convert rows point at the landed structural replacement, and keep rows name the invariant that
       earns the assertion.
+
 - [x] Delete guide dead surface and interior re-validation (G8's guide-module members and G2;
       `JsonScalar` lives in `machine_output.py` and belongs to the G6 item below); fix the vacuous
       monkeypatch test and add the persisted-enum parity test (G11, R2.3). This item owns
@@ -239,16 +279,17 @@ shares no files with the website work; it waits on the sweep instead, per group 
       checked where it ships rather than transcribed; the `--hot` and `--status` pairs were dropped
       rather than converted, since both tokens are declared in `site.css` and referenced by nothing
       while the lander paints those colors as literals in `lander.css`. W6 exported
-      `UNDERWAY_STATUS`. **The done-condition is unachievable as written and is the item's error**:
-      the suite has eleven hard Chromium launches, not one. Ten belong to the Lander arcade
-      contracts in four `test_lander_phase4*_browser.py` files, which is W10's deferred lander-scope
-      decision, not this item's. **W8's own premise did not survive execution either, on three
-      counts.** The two tests are not duplicates: the CSS test asserts declarations appear in the
-      stylesheet, the browser test asserts the computed geometry resolves, and only the second can
-      detect an override or a cascade change, so under this SDD's own observational-twin rule
-      (`hla.md`) the browser test is the keeper and the CSS pin is the deletable one. The manual
-      checklist does not cover it; that document is the Lander arcade checklist and carries no
-      long-form table-of-contents row. And the flake evidence is stale: the checklist's "Chromium CI
+      `UNDERWAY_STATUS`. **The done-condition, which read "Done when: suite green without Chromium
+      installed", is unachievable and is the item's error**: the suite has eleven hard Chromium
+      launches, not one. Ten belong to the Lander arcade contracts in four
+      `test_lander_phase4*_browser.py` files, which is W10's deferred lander-scope decision, not
+      this item's. **W8's own premise did not survive execution either, on three counts.** The two
+      tests are not duplicates: the CSS test asserts declarations appear in the stylesheet, the
+      browser test asserts the computed geometry resolves, and only the second can detect an
+      override or a cascade change, so under this SDD's own observational-twin rule (`hla.md`) the
+      browser test is the keeper and the CSS pin is the deletable one. The manual checklist does not
+      cover it; that document is the Lander arcade checklist and carries no long-form
+      table-of-contents row. And the flake evidence is stale: the checklist's "Chromium CI
       reliability correction" entry, dated 2026-08-15 and landed after the finding was written,
       records that the timeout was a harness defect (`--dump-dom` owning both readiness and
       shutdown), replaced by DevTools-owned readiness and termination and validated at 40
