@@ -15,7 +15,10 @@ import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
+from agentworks.resources import DatabaseLiveSource, GraphDirection, show_graph
+from agentworks.resources.access import ResourceIdentity
 from agentworks.resources.inspect import describe_resource
+from agentworks.resources.reference import RefRelationship
 from tests.conftest import ManifestDoc, write_manifests
 
 if TYPE_CHECKING:
@@ -131,18 +134,23 @@ def test_newly_uniform_kinds_auto_declared_default_gets_synth_description(tmp_pa
     assert desc.description == f"(auto) auto-declared default {kind}"
 
 
-def test_describe_returns_usage_entries(tmp_path: Path) -> None:
+def test_graph_query_returns_inbound_usage_facts(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(cfg_file, manifests=[_VM_DEFAULT])
     registry = _load(cfg_file)
 
-    desc = describe_resource(registry, "secret", "tailscale-auth-key")
-    assert len(desc.references) >= 1
-    # Each entry carries (source, text) -- the renderer formats this
-    # as ``<file:line> -- <text>``.
-    for entry in desc.references:
-        assert isinstance(entry.source, tuple) and len(entry.source) == 2
-        assert entry.usage
+    result = show_graph(
+        registry,
+        ResourceIdentity("secret", "tailscale-auth-key"),
+        GraphDirection.DEPENDENTS,
+        1,
+        DatabaseLiveSource(tmp_path / "absent.db"),
+    )
+    inbound = [edge for edge in result.edges if edge.target.kind == "secret"]
+    assert inbound
+    assert all(edge.source.kind and edge.source.name for edge in inbound)
+    assert all(edge.relationship is RefRelationship.USES for edge in inbound)
+    assert all(edge.usage for edge in inbound)
 
 
 # -- CLI surface ------------------------------------------------------------

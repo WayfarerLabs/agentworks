@@ -24,8 +24,10 @@ from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGI
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.manifests import load_manifests
+from agentworks.resources import DatabaseLiveSource, GraphDirection, show_graph
+from agentworks.resources.access import ResourceIdentity
 from agentworks.resources.graph import FinalizeContext
-from agentworks.resources.inspect import describe_resource
+from agentworks.resources.reference import RefRelationship
 from agentworks.schema import AgwModel, CapabilityBlock
 from agentworks.sessions.template import SessionTemplate
 from agentworks.sessions.templates import resolve_from_dict
@@ -339,6 +341,18 @@ def test_harness_integration_row_lists_its_declaring_template(tmp_path: Path) ->
     )
     config = _config(tmp_path, "")
     registry = build_registry(config, load_manifests(root))
-    desc = describe_resource(registry, "harness-integration", "shell")
-    sources = {entry.source for entry in desc.references}
-    assert ("session-template", "htop") in sources
+    result = show_graph(
+        registry,
+        ResourceIdentity("harness-integration", "shell"),
+        GraphDirection.DEPENDENTS,
+        1,
+        DatabaseLiveSource(tmp_path / "absent.db"),
+    )
+    assert any(
+        edge.source.kind == "session-template"
+        and edge.source.name == "htop"
+        and edge.target.kind == "harness-integration"
+        and edge.target.name == "shell"
+        and edge.relationship is RefRelationship.USES
+        for edge in result.edges
+    )

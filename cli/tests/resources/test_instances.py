@@ -21,12 +21,14 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 from textwrap import dedent
-from typing import Any
+from typing import Any, cast
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.db import Database, SessionMode
-from agentworks.resources import KIND_REGISTRY, InstanceRef, Registry
+from agentworks.resources import KIND_REGISTRY, DatabaseLiveSource, GraphDirection, InstanceRef, Registry, show_graph
+from agentworks.resources.access import ResourceIdentity
+from agentworks.resources.graph_query import GraphEdgeType, GraphNodeType
 from tests.conftest import ManifestDoc, write_manifests
 
 
@@ -587,52 +589,54 @@ def test_list_resources_populates_used_by_count_when_db_provided(
     assert all(row.used_by_count is None for row in listing_no_db.rows)
 
 
-def test_describe_resource_populates_used_by_when_db_provided(
+def test_graph_query_projects_live_usage_when_database_is_present(
     tmp_path: Path,
 ) -> None:
-    """``describe_resource(registry, kind, name, db=...)`` populates the
-    ``used_by`` tuple. Without ``db``, ``used_by`` stays ``None`` and the
-    describe renderer omits the section.
-    """
+    """Live usage is copied into closed graph nodes and edges."""
     db, registry = _seed_basic(tmp_path)
-    from agentworks.resources.inspect import describe_resource
+    result = show_graph(
+        registry,
+        ResourceIdentity("vm-template", "custom"),
+        GraphDirection.DEPENDENTS,
+        1,
+        DatabaseLiveSource(tmp_path / "test.db"),
+    )
+    db.close()
+    assert {
+        (node.node_type, node.kind, node.name, node.distance)
+        for node in result.nodes
+        if node.node_type is GraphNodeType.LIVE_INSTANCE
+    } == {(GraphNodeType.LIVE_INSTANCE, "vm", "vm-custom", 1)}
+    live_edges = [edge for edge in result.edges if edge.edge_type is GraphEdgeType.LIVE_USAGE]
+    assert [(edge.source.kind, edge.source.name, edge.target.kind, edge.target.name) for edge in live_edges] == [
+        ("vm", "vm-custom", "vm-template", "custom")
+    ]
 
-    desc = describe_resource(registry, "vm-template", "custom", db=db)
-    assert desc.used_by is not None
-    assert {r.instance_name for r in desc.used_by} == {"vm-custom"}
 
-    desc_no_db = describe_resource(registry, "vm-template", "custom")
-    assert desc_no_db.used_by is None
-
-
-def test_describe_resource_returns_none_used_by_for_no_instance_kinds(
+def test_graph_query_does_not_demand_live_state_for_no_instance_kinds(
     tmp_path: Path,
 ) -> None:
-    """A kind without an `instances` hook (e.g. secret_backend) yields
-    ``used_by = None`` even with a db: the renderer treats None as
-    "kind has no instance concept" and omits the section. Uses
-    ``secret-backend`` rather than ``apt-package`` because every config
-    publishes at least one secret_backend (the always-materialized
-    ``env-var`` and ``prompt`` defaults), so the assertion isn't
-    fixture-dependent.
-    """
+    """A kind without an instance hook never inspects the database path."""
     cfg = tmp_path / "config.toml"
     _write_base(cfg)
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
-    db = Database(tmp_path / "no_instance_test.db")
 
-    from agentworks.resources.inspect import describe_resource
+    class _UninspectedPath:
+        def stat(self) -> None:
+            raise AssertionError("database path was inspected")
 
-    # secret-backend kinds (env-var, prompt) have no ``instances`` method;
-    # describe_resource must return ``used_by = None`` for them.
     backend_names = [name for name, _ in registry.iter_kind_items("secret-backend")]
     assert backend_names, "expected at least one secret_backend in the registry"
     for name in backend_names:
-        desc = describe_resource(registry, "secret-backend", name, db=db)
-        assert desc.used_by is None, (
-            f"secret_backend {name!r} should yield used_by=None (kind has no instance concept) but got {desc.used_by!r}"
+        result = show_graph(
+            registry,
+            ResourceIdentity("secret-backend", name),
+            GraphDirection.DEPENDENTS,
+            1,
+            DatabaseLiveSource(cast("Path", _UninspectedPath())),
         )
+        assert all(edge.edge_type is not GraphEdgeType.LIVE_USAGE for edge in result.edges)
 
 
 def _column_cells(stdout: str, header: str, next_header: str) -> list[str]:
