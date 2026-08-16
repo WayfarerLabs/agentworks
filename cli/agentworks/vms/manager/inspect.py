@@ -53,12 +53,6 @@ class VMListing:
     vms: tuple[VMListRow, ...]
 
 
-class VMIssueCode(StrEnum):
-    """Closed JSON v1 outcome vocabulary for a VM inspection issue."""
-
-    UNAVAILABLE = "unavailable"
-
-
 class VMInspectionIssueSource(StrEnum):
     """Closed failure stages that JSON v1 may disclose for VM inspection."""
 
@@ -68,10 +62,15 @@ class VMInspectionIssueSource(StrEnum):
     PLATFORM_STATUS = "platform_status"
 
 
+# The only outcome JSON v1 discloses for a VM inspection issue: the stage named
+# by the issue's source could not report. Every issue this module raises is that
+# outcome, so the JSON code is a constant rather than a per-issue fact.
+_VM_ISSUE_CODE_UNAVAILABLE = "unavailable"
+
+
 @dataclass(frozen=True)
 class VMIssue:
     source: VMInspectionIssueSource
-    code: VMIssueCode = VMIssueCode.UNAVAILABLE
 
 
 @dataclass(frozen=True)
@@ -339,9 +338,9 @@ def vm_description_data(description: VMDescription) -> JsonObject:
 
 def _project_vm_issue(issue: VMIssue) -> JsonObject:
     """Project only the closed issue vocabulary, failing shut on bad facts."""
-    if not isinstance(issue.source, VMInspectionIssueSource) or not isinstance(issue.code, VMIssueCode):
-        raise AssertionError("VM issues require closed source and code values")
-    return {"source": issue.source.value, "code": issue.code.value}
+    if not isinstance(issue.source, VMInspectionIssueSource):
+        raise AssertionError("VM issues require a closed source value")
+    return {"source": issue.source.value, "code": _VM_ISSUE_CODE_UNAVAILABLE}
 
 
 # NOTE on ``_ensure_tailscale`` (start_vm), ``_tailscale_logout``

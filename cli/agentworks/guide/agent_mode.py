@@ -17,12 +17,14 @@ class GuideMode(Enum):
 
 @dataclass(frozen=True, slots=True)
 class HarnessSignature:
-    name: str
+    """One environment variable and exact value that identifies an agent harness."""
+
     variable: str
     value: str
 
 
-HARNESS_SIGNATURES = (HarnessSignature("claude-code", "CLAUDECODE", "1"),)
+# Claude Code sets CLAUDECODE=1 in the sessions it starts.
+HARNESS_SIGNATURES = (HarnessSignature("CLAUDECODE", "1"),)
 
 
 def select_guide_mode(

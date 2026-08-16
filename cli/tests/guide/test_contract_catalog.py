@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any, cast, get_args
 
 import pytest
 
@@ -14,18 +14,23 @@ from agentworks.guide import (
     ConsentBoundary,
     DuplicateTopicError,
     GuideAction,
+    GuideBlock,
     GuideCatalog,
     GuideContributionError,
+    ImplementationAnchor,
     InvalidBlockError,
     InvalidTopicSlugError,
+    KindAnchor,
     Overview,
+    ResourceAnchor,
+    TopicAnchor,
     TopicContribution,
     TopicSlug,
     parse_topic_contribution,
     validate_guide_action,
 )
 from agentworks.guide.catalog import _build_guide_catalog
-from agentworks.guide.contract import is_valid_topic_slug
+from agentworks.guide.contract import _BLOCK_DISCRIMINATORS, is_valid_topic_slug
 from agentworks.plugins.base import Plugin
 from agentworks.resources import KIND_REGISTRY
 
@@ -47,6 +52,37 @@ def _topic(slug: str, *, related: list[str] | None = None, markdown: object = "T
         "blocks": [{"type": "overview", "id": "overview", "markdown": markdown}],
         "related_topics": related or [],
     }
+
+
+def _contribution(
+    slug: str,
+    *,
+    related: list[str] | None = None,
+    markdown: str = "Text.",
+    anchor: TopicAnchor | None = None,
+) -> TopicContribution:
+    """Build the typed record shape contributors hand to the catalog.
+
+    The catalog takes ``TopicContribution`` values; ``_topic`` above builds the
+    decoded shape ``parse_topic_contribution`` takes. Both entry points are real,
+    so the tests use whichever one they are actually exercising.
+    """
+    if anchor is None:
+        if slug.startswith(("concept-", "plugin/")):
+            anchor = ConceptAnchor(slug)
+        elif "/" in slug:
+            kind, name = slug.split("/", 1)
+            anchor = ResourceAnchor(kind, name)
+        else:
+            anchor = KindAnchor(slug)
+    return TopicContribution(
+        TopicSlug(slug),
+        "Title",
+        "Summary.",
+        anchor,
+        (Overview(BlockId("overview"), markdown),),
+        tuple(TopicSlug(item) for item in related or []),
+    )
 
 
 @pytest.mark.parametrize("payload", ["{{danger()}}", "}}", "${secret}", "<% run %>", "%>", "{% include x %}", "%}"])
@@ -203,8 +239,8 @@ def test_ordinary_authored_atx_and_setext_headings_remain_valid() -> None:
 
 def test_adversarial_plugin_framework_heading_isolated_from_core_topic() -> None:
     catalog = _build_guide_catalog(
-        (("core", _topic("concept-safe")),),
-        ((Plugin("z"), (_topic("plugin/z/forged", markdown="## ⟦AGW framework⟧ forged"),)),),
+        (("core", _contribution("concept-safe")),),
+        ((Plugin("z"), (_contribution("plugin/z/forged", markdown="## ⟦AGW framework⟧ forged"),)),),
     )
 
     assert catalog.names() == ("concept-safe",)
@@ -234,7 +270,12 @@ def test_unknown_nested_field_and_duplicate_block_are_rejected() -> None:
         parse_topic_contribution(value, "source")
 
 
-def test_programmatic_records_are_revalidated_and_copied() -> None:
+def test_every_guide_block_variant_has_a_decoded_discriminator() -> None:
+    """A new block variant must reach the decoded shape, which no type can force."""
+    assert set(get_args(GuideBlock.__value__)) == set(_BLOCK_DISCRIMINATORS)
+
+
+def test_typed_records_reach_the_catalog_as_validated_copies() -> None:
     original = TopicContribution(
         TopicSlug("concept-safe"),
         "Safe",
@@ -242,43 +283,27 @@ def test_programmatic_records_are_revalidated_and_copied() -> None:
         ConceptAnchor("concept-safe"),
         (Overview(BlockId("overview"), "Text."),),
     )
-    parsed = parse_topic_contribution(original, "core")
-    assert parsed == original
-    assert parsed is not original
 
+    (retained,) = _build_guide_catalog((("core", original),)).topics
 
-@pytest.mark.parametrize("field", ["topic", "title", "summary", "anchor", "blocks", "related_topics"])
-def test_malformed_programmatic_records_fail_with_typed_errors_without_execution(field: str) -> None:
-    called = False
-
-    def payload() -> None:
-        nonlocal called
-        called = True
-
-    original = TopicContribution(
-        TopicSlug("concept-safe"),
-        "Safe",
-        "Summary.",
-        ConceptAnchor("concept-safe"),
-        (Overview(BlockId("overview"), "Text."),),
-    )
-    object.__setattr__(original, field, payload)
-    with pytest.raises(GuideContributionError):
-        parse_topic_contribution(original, "core")
-    assert not called
+    assert retained == original
+    assert retained is not original
+    # The two above only prove the outer record was rebuilt; this one is the
+    # only cover for the nested block being copied rather than shared.
+    assert retained.blocks[0] is not original.blocks[0]
 
 
 def test_plugin_cannot_hide_reserved_core_topic() -> None:
     catalog = _build_guide_catalog(
-        (("core", _topic("concept-safe")),),
-        ((Plugin("z"), (_topic("concept-safe"),)),),
+        (("core", _contribution("concept-safe")),),
+        ((Plugin("z"), (_contribution("concept-safe"),)),),
     )
     assert catalog.names() == ("concept-safe",)
     assert [(issue.error.source, issue.error.field_path) for issue in catalog.issues] == [("system-plugin:z", "topic")]
 
 
 def test_trusted_duplicate_hard_fails_independent_of_order() -> None:
-    candidates = (("core:b", _topic("concept-safe")), ("core:a", _topic("concept-safe")))
+    candidates = (("core:b", _contribution("concept-safe")), ("core:a", _contribution("concept-safe")))
     for ordered in (candidates, tuple(reversed(candidates))):
         with pytest.raises(DuplicateTopicError) as raised:
             _build_guide_catalog(ordered)
@@ -287,12 +312,12 @@ def test_trusted_duplicate_hard_fails_independent_of_order() -> None:
 
 def test_plugin_collision_and_broken_link_isolation_are_deterministic() -> None:
     plugin_topics = (
-        _topic("plugin/z/shared"),
-        _topic("plugin/z/shared"),
-        _topic("plugin/z/broken", related=["plugin/z/missing"]),
+        _contribution("plugin/z/shared"),
+        _contribution("plugin/z/shared"),
+        _contribution("plugin/z/broken", related=["plugin/z/missing"]),
     )
     catalogs = [
-        _build_guide_catalog((("core", _topic("concept-safe")),), ((Plugin("z"), order),))
+        _build_guide_catalog((("core", _contribution("concept-safe")),), ((Plugin("z"), order),))
         for order in (plugin_topics, tuple(reversed(plugin_topics)))
     ]
     assert [catalog.names() for catalog in catalogs] == [("concept-safe",), ("concept-safe",)]
@@ -323,7 +348,7 @@ class _TestKind:
 
 
 def test_plugin_ownership_gate_rejects_another_plugin_namespace() -> None:
-    catalog = _build_guide_catalog((), ((Plugin("z"), (_topic("plugin/y/topic"),)),))
+    catalog = _build_guide_catalog((), ((Plugin("z"), (_contribution("plugin/y/topic"),)),))
     assert catalog.names() == ()
     assert [(issue.error.topic, issue.error.field_path) for issue in catalog.issues] == [("plugin/y/topic", "topic")]
 
@@ -333,11 +358,11 @@ def test_taxonomy_gate_is_runtime_fail_soft_and_ci_strict_for_trusted_content(
 ) -> None:
     handler = _TestKind()
     monkeypatch.setitem(KIND_REGISTRY, handler.kind, handler)
-    topic = _topic("guide-test/demo")
+    topic = _contribution("guide-test/demo")
     object.__setattr__(handler, "category", "capability")
 
     catalog = _build_guide_catalog(
-        (("core:bad-taxonomy", topic), ("core:safe", _topic("concept-safe"))),
+        (("core:bad-taxonomy", topic), ("core:safe", _contribution("concept-safe"))),
     )
     assert catalog.names() == ("concept-safe",)
     assert [(issue.error.topic, issue.error.field_path) for issue in catalog.issues] == [("guide-test/demo", "anchor")]
@@ -365,9 +390,11 @@ def test_registered_plugin_implementation_and_owner_adapter_resource_topics_are_
     kind, implementations = next(iter(plugin.capabilities.items()))
     implementation = cast("Any", implementations[0])
     implementation_name = implementation.name
-    impl_topic = _topic(f"{kind}/{implementation_name}")
-    impl_topic["anchor"] = {"type": "implementation", "kind": kind, "name": implementation_name}
-    resource_topic = _topic("vm-template/plugin-owned")
+    impl_topic = _contribution(
+        f"{kind}/{implementation_name}",
+        anchor=ImplementationAnchor(kind, implementation_name),
+    )
+    resource_topic = _contribution("vm-template/plugin-owned")
     catalog = _build_guide_catalog(
         (),
         ((plugin, (impl_topic, resource_topic)),),
@@ -378,7 +405,7 @@ def test_registered_plugin_implementation_and_owner_adapter_resource_topics_are_
 
 def test_trusted_broken_link_hard_fails() -> None:
     with pytest.raises(BrokenTopicLinkError):
-        _build_guide_catalog((("core", _topic("concept-safe", related=["missing"])),))
+        _build_guide_catalog((("core", _contribution("concept-safe", related=["missing"])),))
 
 
 def _action() -> GuideAction:
@@ -456,8 +483,9 @@ def test_action_ids_are_unique_across_action_blocks() -> None:
         {"type": "action-list", "id": "first", "actions": [_action_value()]},
         {"type": "action-list", "id": "second", "actions": [_action_value()]},
     ]
-    with pytest.raises(InvalidBlockError, match="duplicate action IDs"):
+    with pytest.raises(InvalidBlockError) as raised:
         parse_topic_contribution(topic, "core")
+    assert raised.value.field_path == "blocks"
 
 
 @pytest.mark.parametrize(
@@ -483,8 +511,10 @@ def test_action_list_never_interpolates_sensitive_inputs() -> None:
     assert isinstance(inputs, list)
     assert isinstance(inputs[0], dict)
     inputs[0]["sensitive"] = True
-    with pytest.raises(GuideContributionError, match="sensitive input"):
+    with pytest.raises(GuideContributionError) as raised:
         parse_topic_contribution(_action_topic([action]), "core")
+    # The rejection lands on the interpolating token, not the block or the input.
+    assert raised.value.field_path == "blocks[0].actions[0].command[2]"
 
 
 @pytest.mark.parametrize(
@@ -522,36 +552,28 @@ def test_action_list_prose_preserves_exact_inert_inline_literals() -> None:
 
 
 def test_action_list_count_and_cumulative_byte_bounds_fail_closed() -> None:
-    with pytest.raises(InvalidBlockError, match="32-action limit"):
+    # Both bounds reject at the same field path, so each rejected payload has an
+    # accepted twin that isolates which of the two the rejection came from.
+    parse_topic_contribution(
+        _action_topic([_action_value(action_id=f"action-{index}") for index in range(32)]),
+        "core",
+    )
+    with pytest.raises(InvalidBlockError) as raised:
         parse_topic_contribution(
             _action_topic([_action_value(action_id=f"action-{index}") for index in range(33)]),
             "core",
         )
+    assert raised.value.field_path == "blocks[0].actions"
+
     actions = [_action_value(action_id=f"action-{index}", manual=True) for index in range(17)]
     for action in actions:
+        action["manual_steps"] = "x" * 1024
+    parse_topic_contribution(_action_topic(actions), "core")
+    for action in actions:
         action["manual_steps"] = "x" * (8 * 1024)
-    with pytest.raises(InvalidBlockError, match="131072-byte action-data limit"):
+    with pytest.raises(InvalidBlockError) as raised:
         parse_topic_contribution(_action_topic(actions), "core")
-
-
-@pytest.mark.parametrize(
-    ("field", "bad"),
-    [
-        ("id", object()),
-        ("precondition", lambda: None),
-        ("required_inputs", [ActionInput("NAME", "Name.", True)]),
-        ("consent", "read-configured-state"),
-        ("command", ["agw"]),
-        ("expected_state", object()),
-        ("verification", ["agw"]),
-        ("refusal_alternative", object()),
-    ],
-)
-def test_action_validation_is_closed_and_typed(field: str, bad: object) -> None:
-    action = _action()
-    object.__setattr__(action, field, bad)
-    with pytest.raises(GuideContributionError):
-        validate_guide_action(action, "core")
+    assert raised.value.field_path == "blocks[0].actions"
 
 
 def test_action_validation_deep_copies_and_normalizes() -> None:
@@ -559,18 +581,8 @@ def test_action_validation_deep_copies_and_normalizes() -> None:
     validated = validate_guide_action(original, "core")
     assert validated == original
     assert validated is not original
+    # As above: the only cover for the nested input record being copied.
     assert validated.required_inputs[0] is not original.required_inputs[0]
-
-
-@pytest.mark.parametrize(
-    ("field", "bad"),
-    [("name", object()), ("description", lambda: None), ("required", 1), ("sensitive", "no")],
-)
-def test_action_nested_input_validation_is_exact(field: str, bad: object) -> None:
-    action = _action()
-    object.__setattr__(action.required_inputs[0], field, bad)
-    with pytest.raises(GuideContributionError):
-        validate_guide_action(action, "core")
 
 
 @pytest.mark.parametrize(
@@ -669,10 +681,13 @@ def test_related_topics_apply_the_canonical_slug_grammar(related: str) -> None:
 
 
 def test_related_topic_values_have_an_explicit_byte_bound() -> None:
+    longest = "k" * 63 + "/" + "s" * 253
+
+    assert parse_topic_contribution(_topic("concept-safe", related=[longest]), "plugin:z").related_topics == (longest,)
+
     with pytest.raises(InvalidTopicSlugError) as raised:
-        parse_topic_contribution(_topic("concept-safe", related=["a" * 318]), "plugin:z")
+        parse_topic_contribution(_topic("concept-safe", related=[longest + "s"]), "plugin:z")
     assert raised.value.field_path == "related_topics[0]"
-    assert "317-byte limit" in str(raised.value)
 
 
 def test_resource_topics_accept_actual_ordinary_and_secret_name_limits() -> None:

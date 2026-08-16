@@ -95,8 +95,10 @@ class Plugin:
         """Normalize descriptor contribution containers without validating them.
 
         ``capabilities`` becomes an immutable ``MappingProxyType`` whose values
-        are tuples, and ``guide_topics`` becomes a tuple. Semantic validation
-        remains deferred to ``register_plugin`` or guide-scoped catalog build.
+        are tuples, and ``guide_topics`` becomes a tuple. The annotations carry
+        the element shapes: nothing downstream re-derives them. What stays
+        deferred is semantic validation of the content each element holds, to
+        ``register_plugin`` or guide-scoped catalog build.
         """
         normalized = {kind: tuple(impls) for kind, impls in self.capabilities.items()}
         object.__setattr__(self, "capabilities", MappingProxyType(normalized))

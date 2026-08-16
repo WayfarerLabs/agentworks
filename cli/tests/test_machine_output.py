@@ -10,15 +10,12 @@ from typing import cast
 import pytest
 
 from agentworks.machine_output import (
-    JsonObject,
     JsonValue,
     MachineOutputCommand,
     OutputFormat,
     encode_json_envelope,
-    project_instance_reference,
     project_instance_references,
     project_origin,
-    project_reference,
     project_references,
     write_json_envelope,
 )
@@ -28,6 +25,8 @@ from agentworks.resources.reference import ReferenceEntry
 
 
 class _ShortWriteStream:
+    """A raw stream that accepts a few bytes per call, as a non-blocking pipe does."""
+
     def __init__(self) -> None:
         self.document = bytearray()
         self.write_calls = 0
@@ -40,6 +39,8 @@ class _ShortWriteStream:
 
 
 class _PartialThenZeroStream:
+    """A stream that accepts one byte and then stalls forever."""
+
     def __init__(self) -> None:
         self.document = bytearray()
         self._wrote_once = False
@@ -53,6 +54,8 @@ class _PartialThenZeroStream:
 
 
 class _NoneWriteStream:
+    """A raw stream reporting the ``EAGAIN`` shape, where ``write`` returns ``None``."""
+
     def write(self, data: bytes) -> None:
         return None
 
@@ -150,21 +153,19 @@ def test_writer_retries_short_writes_until_the_document_is_complete() -> None:
     assert stream.write_calls > 1
 
 
-@pytest.mark.parametrize("stream", [_PartialThenZeroStream(), _NoneWriteStream()])
-def test_writer_fails_when_the_stream_makes_no_progress(stream: object) -> None:
-    with pytest.raises(OSError, match="JSON output stream made no progress"):
+@pytest.mark.parametrize("build_stream", [_PartialThenZeroStream, _NoneWriteStream])
+def test_writer_fails_when_the_stream_makes_no_progress(build_stream: type[object]) -> None:
+    stream = build_stream()
+
+    with pytest.raises(OSError):
         write_json_envelope(MachineOutputCommand.DOCTOR, {"count": 3}, stream)  # type: ignore[arg-type]
 
     if isinstance(stream, _PartialThenZeroStream):
         assert bytes(stream.document) == encode_json_envelope(MachineOutputCommand.DOCTOR, {"count": 3})[:1]
 
 
-def test_invalid_or_unserializable_input_writes_no_partial_document() -> None:
+def test_unserializable_input_writes_no_partial_document() -> None:
     stream = io.BytesIO()
-    with pytest.raises(TypeError, match="data must be an object"):
-        write_json_envelope(MachineOutputCommand.DOCTOR, cast(JsonObject, []), stream)
-    assert stream.getvalue() == b""
-
     with pytest.raises(TypeError):
         write_json_envelope(MachineOutputCommand.DOCTOR, {"bad": cast(JsonValue, object())}, stream)
     assert stream.getvalue() == b""
@@ -225,30 +226,19 @@ def test_origin_projection_has_fixed_safe_order_and_variant_fields() -> None:
 
 
 @pytest.mark.parametrize(
-    ("origin", "message"),
+    "origin",
     [
-        (Origin(variant="operator-declared", file=None, line=7), "operator-declared origins require a file and line"),
-        (Origin(variant="built-in", source=None), "built-in origins require a code source"),
-        (
-            Origin(variant="auto-declared", source=()),
-            "auto-declared origins require a two-string source resource",
-        ),
-        (
-            Origin(variant="auto-declared", source=("kind", cast(str, 7))),
-            "auto-declared origins require a two-string source resource",
-        ),
-        (
-            Origin(variant="system-plugin", plugin=None, source="agentworks.plugins.example"),
-            "system-plugin origins require a plugin and code source",
-        ),
-        (
-            Origin(variant="system-plugin", plugin="example", source=None),
-            "system-plugin origins require a plugin and code source",
-        ),
+        Origin(variant="operator-declared", file=None, line=7),
+        Origin(variant="built-in", source=None),
+        Origin(variant="auto-declared", source=()),
+        Origin(variant="auto-declared", source=("kind", cast(str, 7))),
+        Origin(variant="system-plugin", plugin=None, source="agentworks.plugins.example"),
+        Origin(variant="system-plugin", plugin="example", source=None),
     ],
 )
-def test_origin_projection_rejects_malformed_variant_contracts(origin: Origin, message: str) -> None:
-    with pytest.raises(AssertionError, match=message):
+def test_origin_projection_rejects_variants_built_outside_their_factory(origin: Origin) -> None:
+    """One dataclass carries four variants, so only the factories pin the shape."""
+    with pytest.raises(AssertionError):
         project_origin(origin)
 
 
@@ -293,40 +283,6 @@ def test_reference_projections_preserve_graph_order_duplicates_and_nullable_decl
     ]
 
 
-@pytest.mark.parametrize(
-    ("reference", "message"),
-    [
-        (
-            ReferenceEntry(source=(), usage="a secret"),
-            "reference sources require a two-string identity",
-        ),
-        (
-            ReferenceEntry(source=("secret", cast(str, 7)), usage="a secret"),
-            "reference sources require a two-string identity",
-        ),
-        (
-            ReferenceEntry(source=("template", "base"), usage=cast(str, 7)),
-            "reference usage must be a string",
-        ),
-        (
-            ReferenceEntry(source=("template", "base"), usage="a secret", declared_by=()),
-            "reference declarers require a two-string identity",
-        ),
-        (
-            ReferenceEntry(
-                source=("template", "base"),
-                usage="a secret",
-                declared_by=("template", cast(str, 7)),
-            ),
-            "reference declarers require a two-string identity",
-        ),
-    ],
-)
-def test_reference_projection_rejects_malformed_records(reference: ReferenceEntry, message: str) -> None:
-    with pytest.raises(AssertionError, match=message):
-        project_reference(reference)
-
-
 def test_instance_reference_projections_preserve_order_and_duplicates() -> None:
     references = (
         InstanceRef(instance_kind="vm", instance_name="alpha"),
@@ -344,15 +300,3 @@ def test_instance_reference_projections_preserve_order_and_duplicates() -> None:
         ["kind", "name"],
         ["kind", "name"],
     ]
-
-
-@pytest.mark.parametrize(
-    "reference",
-    [
-        InstanceRef(instance_kind=cast(str, 7), instance_name="alpha"),
-        InstanceRef(instance_kind="vm", instance_name=cast(str, 7)),
-    ],
-)
-def test_instance_reference_projection_rejects_malformed_records(reference: InstanceRef) -> None:
-    with pytest.raises(AssertionError, match="instance references require string kind and name"):
-        project_instance_reference(reference)

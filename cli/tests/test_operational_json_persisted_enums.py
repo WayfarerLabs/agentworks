@@ -4,20 +4,24 @@ from __future__ import annotations
 
 import contextlib
 import json
-from enum import StrEnum
+from enum import Enum
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
+import pytest
 from typer.testing import CliRunner
 
 from agentworks.cli import app
-from agentworks.db import PID_STOPPED, SessionMode, SessionStatus, VMStatus
+from agentworks.db import PID_STOPPED, InitStatus, ProvisioningStatus, SessionMode, SessionStatus, VMStatus
+from agentworks.db.projections import (
+    project_session_mode,
+    project_vm_initialization_status,
+    project_vm_provisioning_status,
+)
 from agentworks.secrets.policy import InteractionPolicy
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
-
-    import pytest
+    from collections.abc import Callable, Iterator
 
     from agentworks.config import Config
     from agentworks.db import Database
@@ -161,38 +165,41 @@ def test_real_list_and_describe_clis_never_echo_invalid_persisted_enums(
     assert all_output.count(b"unknown") >= 4
 
 
-def test_future_domain_members_do_not_expand_frozen_json_v1_vocabularies(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from agentworks.db import models
-    from agentworks.db.projections import (
-        project_session_mode,
-        project_vm_initialization_status,
-        project_vm_provisioning_status,
-    )
+def _members_lost_in_projection(persisted: type[Enum], project: Callable[[object], str]) -> list[object]:
+    """Return the persisted members the projection would not render verbatim."""
+    return [member.value for member in persisted if project(member.value) != member.value]
 
-    class FutureProvisioningStatus(StrEnum):
+
+# Each persisted enum beside the frozen JSON v1 vocabulary that has to carry
+# every one of its members. A member the output side lacks does not raise; it
+# renders as the ``unknown`` sentinel, so the fact disappears silently.
+_PERSISTED_PROJECTIONS: tuple[tuple[type[Enum], Callable[[object], str]], ...] = (
+    (ProvisioningStatus, project_vm_provisioning_status),
+    (InitStatus, project_vm_initialization_status),
+    (SessionMode, project_session_mode),
+)
+
+
+@pytest.mark.parametrize(
+    ("persisted", "project"),
+    _PERSISTED_PROJECTIONS,
+    ids=[persisted.__name__ for persisted, _ in _PERSISTED_PROJECTIONS],
+)
+def test_every_persisted_enum_member_survives_its_json_v1_projection(
+    persisted: type[Enum],
+    project: Callable[[object], str],
+) -> None:
+    assert _members_lost_in_projection(persisted, project) == []
+
+
+def test_the_parity_check_catches_a_persisted_member_the_output_vocabulary_lacks() -> None:
+    """Prove the check above can fail, using a member no output vocabulary has."""
+
+    class FutureProvisioningStatus(Enum):
         PENDING = "pending"
         QUEUED = "queued"
 
-    class FutureInitializationStatus(StrEnum):
-        PENDING = "pending"
-        DEFERRED = "deferred"
-
-    class FutureSessionMode(StrEnum):
-        ADMIN = "admin"
-        OBSERVER = "observer"
-
-    monkeypatch.setattr(models, "ProvisioningStatus", FutureProvisioningStatus)
-    monkeypatch.setattr(models, "InitStatus", FutureInitializationStatus)
-    monkeypatch.setattr(models, "SessionMode", FutureSessionMode)
-
-    assert project_vm_provisioning_status(FutureProvisioningStatus.PENDING.value) == "pending"
-    assert project_vm_initialization_status(FutureInitializationStatus.PENDING.value) == "pending"
-    assert project_session_mode(FutureSessionMode.ADMIN.value) == "admin"
-    assert project_vm_provisioning_status(FutureProvisioningStatus.QUEUED.value) == "unknown"
-    assert project_vm_initialization_status(FutureInitializationStatus.DEFERRED.value) == "unknown"
-    assert project_session_mode(FutureSessionMode.OBSERVER.value) == "unknown"
+    assert _members_lost_in_projection(FutureProvisioningStatus, project_vm_provisioning_status) == ["queued"]
 
 
 def test_projection_boundaries_close_manual_invalid_facts() -> None:

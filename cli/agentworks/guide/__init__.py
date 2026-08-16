@@ -11,9 +11,7 @@ from agentworks.guide.assessment import (
     VerificationEvidence,
     VerificationOutcome,
     assess_onboarding,
-    guided_actions,
     onboarding_actions,
-    replayable_actions,
 )
 from agentworks.guide.catalog import GuideCatalog, GuideCatalogIssue
 from agentworks.guide.contract import (
@@ -122,9 +120,7 @@ __all__ = [
     "build_guide_view",
     "parse_topic_contribution",
     "render_guide",
-    "guided_actions",
     "onboarding_actions",
-    "replayable_actions",
     "select_guide_mode",
     "validate_guide_action",
 ]

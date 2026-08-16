@@ -13,14 +13,13 @@ from agentworks.guide.contract import (
     InstanceList,
     KindAnchor,
     ResourceAnchor,
-    TopicContribution,
-    parse_topic_contribution,
 )
 from agentworks.resources import KIND_REGISTRY
 from agentworks.resources.graph import Enablement
 
 if TYPE_CHECKING:
     from agentworks.db import Database
+    from agentworks.guide.contract import TopicContribution
     from agentworks.resources import Origin, Registry
     from agentworks.resources.kind import ResourceKind
 
@@ -83,10 +82,9 @@ _CONCEPT_RESOLVER_ROOTS: dict[str, frozenset[GuideRoot]] = {
 class GuideView:
     """A frozen fact snapshot exposing only anchor-permitted traversals."""
 
-    __slots__ = ("_inbound", "_instances", "_inventory", "_kind", "_me", "_outbound", "_permitted_roots", "_sealed")
+    __slots__ = ("_inbound", "_instances", "_inventory", "_me", "_outbound", "_permitted_roots", "_sealed")
 
     _me: GuideResourceFact | None
-    _kind: GuideResourceFact | None
     _instances: tuple[GuideInstanceFact, ...]
     _inbound: tuple[GuideRelationship, ...]
     _outbound: tuple[GuideRelationship, ...]
@@ -99,7 +97,6 @@ class GuideView:
         token: object,
         *,
         me: GuideResourceFact | None,
-        kind: GuideResourceFact | None,
         instances: tuple[GuideInstanceFact, ...],
         inbound: tuple[GuideRelationship, ...],
         outbound: tuple[GuideRelationship, ...],
@@ -109,7 +106,6 @@ class GuideView:
         if token is not _CONSTRUCTION_TOKEN:
             raise TypeError("GuideView must be built with build_guide_view")
         object.__setattr__(self, "_me", me)
-        object.__setattr__(self, "_kind", kind)
         object.__setattr__(self, "_instances", instances)
         object.__setattr__(self, "_inbound", inbound)
         object.__setattr__(self, "_outbound", outbound)
@@ -126,11 +122,6 @@ class GuideView:
         if self._me is None:
             raise GuideTraversalError("this guide topic has no me resource")
         return self._me
-
-    def kind(self) -> GuideResourceFact:
-        if self._kind is None:
-            raise GuideTraversalError("this guide topic has no kind")
-        return self._kind
 
     def instances(self) -> tuple[GuideInstanceFact, ...]:
         return self._instances
@@ -198,20 +189,24 @@ def _live_instance_facts(registry: Registry, db: Database) -> tuple[GuideInstanc
 
 
 def build_guide_view(contribution: TopicContribution, registry: Registry, db: Database) -> GuideView:
-    """Eagerly copy permitted facts from an already-finalized registry."""
-    validated = parse_topic_contribution(contribution, "guide-view")
-    anchor = validated.anchor
+    """Eagerly copy permitted facts from an already-finalized registry.
+
+    Every contribution reaching here has already been through
+    ``parse_topic_contribution``: the catalog parses authored and plugin
+    topics, and the service parses schema and live-resource topics as it
+    builds them.
+    """
+    anchor = contribution.anchor
     if not registry.is_finalized:
         raise GuideTraversalError("guide facts require an already-finalized registry")
 
     me: GuideResourceFact | None = None
-    kind_fact: GuideResourceFact | None = None
     instances: tuple[GuideInstanceFact, ...] = ()
     inbound: tuple[GuideRelationship, ...] = ()
     outbound: tuple[GuideRelationship, ...] = ()
     permitted: frozenset[GuideRoot] = frozenset()
     if isinstance(anchor, ConceptAnchor):
-        has_inventory = any(isinstance(block, InstanceList) for block in validated.blocks)
+        has_inventory = any(isinstance(block, InstanceList) for block in contribution.blocks)
         permitted = _CONCEPT_RESOLVER_ROOTS.get(anchor.name, frozenset())
         if has_inventory != bool(permitted):
             raise GuideTraversalError(
@@ -235,8 +230,7 @@ def build_guide_view(contribution: TopicContribution, registry: Registry, db: Da
         handler = KIND_REGISTRY.get(anchor.kind)
         if handler is None:
             raise GuideTraversalError(f"unknown resource kind {anchor.kind!r}")
-        kind_fact = _kind_fact(anchor.kind, handler)
-        me = kind_fact
+        me = _kind_fact(anchor.kind, handler)
         instances = tuple(
             GuideInstanceFact(anchor.kind, name) for name, _ in sorted(registry.iter_kind_items(anchor.kind))
         )
@@ -258,7 +252,6 @@ def build_guide_view(contribution: TopicContribution, registry: Registry, db: Da
                 f"guide resource {anchor.kind}/{anchor.name} is absent from the finalized registry"
             ) from None
         me = _resource_fact(registry, anchor.kind, anchor.name, resource)
-        kind_fact = _kind_fact(anchor.kind, handler)
         hook = getattr(handler, "instances", None)
         if hook is not None:
             instances = tuple(
@@ -279,7 +272,6 @@ def build_guide_view(contribution: TopicContribution, registry: Registry, db: Da
     return GuideView(
         _CONSTRUCTION_TOKEN,
         me=me,
-        kind=kind_fact,
         instances=instances,
         inbound=inbound,
         outbound=outbound,

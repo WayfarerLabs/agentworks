@@ -114,23 +114,52 @@ the sweep instead, per group 4 above.
       mostly by deletion (R2.4). May land as several PRs. Done when: delete rows are gone at HEAD,
       convert rows point at the landed structural replacement, and keep rows name the invariant that
       earns the assertion.
-- [ ] Delete guide dead surface and interior re-validation (G8's guide-module members and G2;
-      `JsonScalar` and `VMIssueCode` live in `machine_output.py` and belong to the G6 item below);
-      fix the vacuous monkeypatch test and add the persisted-enum parity test (G11, R2.3). This item
-      owns `cli/tests/guide/test_contract_catalog.py` and `cli/tests/guide/test_assessment.py` in
-      full, their prose pins included (both excluded from the sweep above; `test_assessment.py`
-      directly tests the G8 surfaces this item deletes). Done when: suite green,
-      `parse_topic_contribution` accepts only decoded data, the parity test fails on a synthetic new
-      member, no reference to this item's deleted G8 members remains at HEAD, and the two owned
-      files' prose pins carry the same delete/convert/justified-keep outcomes the sweep requires.
+- [x] Delete guide dead surface and interior re-validation (G8's guide-module members and G2;
+      `JsonScalar` lives in `machine_output.py` and belongs to the G6 item below); fix the vacuous
+      monkeypatch test and add the persisted-enum parity test (G11, R2.3). This item owns
+      `cli/tests/guide/test_contract_catalog.py` and `cli/tests/guide/test_assessment.py` in full,
+      their prose pins included (both excluded from the sweep above; `test_assessment.py` directly
+      tests the G8 surfaces this item deletes). Done when: suite green, `parse_topic_contribution`
+      accepts only decoded data, the parity test fails on a synthetic new member, no reference to
+      this item's deleted G8 members remains at HEAD, and the two owned files' prose pins carry the
+      same delete/convert/justified-keep outcomes the sweep requires. **Done** (PR #548): every G8
+      member gone with no remaining references, both halves of the G2 round trip gone
+      (`parse_topic_contribution` and `_action_record_value`), and G11's vacuous monkeypatch
+      replaced by a parity check that walks the real enums and fails on a synthetic member.
+      `VMIssueCode` was a plan correction: it lives at `vms/manager/inspect.py:56`, not in
+      `machine_output.py`, and the deletion landed there scoped to that symbol alone because the
+      file also carries G5, which is out of scope for this pass. **G3 is resolved here** and no
+      later item owns it: the manifest resource `description` is operator-authored text, so boundary
+      1, and the round trip being deleted was the only thing applying the summary byte cap and the
+      framework-delimiter screen to it, so the check moved to where the text enters, matching what
+      `_schema_topic` already did. G3 overstated the gap and so did this PR's first account of it:
+      on `main` the check ran one step late, at `view.py:202` inside `build_guide_view`, and was
+      absent only on the degraded `system_error` path that never builds a view. The consequence is
+      ruled and deliberate: a description that fails the check now fails the whole `agw guide`
+      invocation rather than degrading one target, which is the loud-refusal-at-entry posture
+      boundary 1 asks for, recorded here so the reassessment reads it as a decision rather than an
+      accident.
 - [ ] Delete inert descriptor generality (C1, C5): `RegistryPolicy`, `kind_strategy`,
       `contract_version` plumbing, unreachable fallbacks, their pinning tests. Done when: suite
       green, four descriptors construct without the deleted fields.
-- [ ] Delete `machine_output` defensive surface (G6): assert-guards on frozen dataclasses, double
-      projections, identity comprehensions, the stdout retry loop; `schema_version` becomes a named
-      constant. This item owns `machine_output.py` wholesale, so G8's `JsonScalar` and `VMIssueCode`
-      deletions land here. Done when: suite green, JSON output byte-identical for a fixture corpus
-      captured before the change, and no reference to the two deleted types remains at HEAD.
+- [x] Delete `machine_output` defensive surface (G6): assert-guards on frozen dataclasses, double
+      projections, identity comprehensions; `schema_version` becomes a named constant. This item
+      owns `machine_output.py` wholesale, so G8's `JsonScalar` deletion lands here. Done when: suite
+      green, JSON output byte-identical for a fixture corpus captured before the change, and no
+      reference to the deleted type remains at HEAD. **Done** (PR #548): the named constant, the
+      double projections, the identity comprehensions, and an unreachable trailing `raise` replaced
+      by `assert_never`, byte-identical across the captured corpus. The item carries two corrections
+      forward. **The stdout retry loop is struck from this item and from G6**, which named it as
+      defensive surface on a false premise: `sys.stdout.buffer` is a `BufferedWriter` only when
+      stdout is buffered, and under `python -u` or `PYTHONUNBUFFERED` it is a raw `FileIO` whose
+      `write` returns a short count instead of raising, so a single unchecked write hands a machine
+      consumer truncated JSON at exit code 0. It was deleted here on this item's instruction, held
+      by three published review lanes, and restored byte-identical with the short-write test the
+      invariant never had. No later item deletes it. Second, `project_origin`'s variant guards and
+      two nested defensive-copy assertions were deleted and restored: removing the guards made
+      `project_origin` the lone undefended consumer of `Origin`'s variant contract, and the real
+      inconsistency (seven consumer files defending one contract three ways) is filed as #547 rather
+      than fixed in passing.
 - [ ] Delete clearly-interior secrets validation (per-call type checks on in-repo backend returns
       and the annotation-equality plus forbidden-override halves of conformance, S2; lookalike and
       re-scrub checks on our own parsers' outputs, S7), keeping the constructibility and call-shape

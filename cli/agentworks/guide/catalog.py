@@ -16,6 +16,7 @@ from agentworks.guide.contract import (
     Sample,
     TopicContribution,
     UnknownGuideTopicError,
+    _decoded_contribution,
     parse_topic_contribution,
 )
 from agentworks.resources import KIND_REGISTRY
@@ -27,7 +28,7 @@ if TYPE_CHECKING:
 @dataclass(frozen=True, slots=True)
 class _GuideContributionCandidate:
     source: str
-    value: object
+    value: TopicContribution
     trusted: bool
     plugin: str | None = None
     owned_topics: frozenset[str] = frozenset()
@@ -118,8 +119,8 @@ def _issue_key(error: GuideContributionError) -> tuple[str, str, str, str]:
 
 
 def _build_guide_catalog(
-    trusted: tuple[tuple[str, object], ...],
-    system_plugins: tuple[tuple[Plugin, tuple[object, ...]], ...] = (),
+    trusted: tuple[tuple[str, TopicContribution], ...],
+    system_plugins: tuple[tuple[Plugin, tuple[TopicContribution, ...]], ...] = (),
     plugin_resource_owners: tuple[tuple[str, str, str], ...] = (),
     *,
     strict_trusted_taxonomy: bool = False,
@@ -150,7 +151,7 @@ def _build_guide_catalog(
     issues: list[GuideContributionError] = []
     for candidate in candidates:
         try:
-            topic = parse_topic_contribution(candidate.value, candidate.source)
+            topic = parse_topic_contribution(_decoded_contribution(candidate.value), candidate.source)
             ownership = _ownership_error(candidate, topic)
             if ownership is not None:
                 raise ownership

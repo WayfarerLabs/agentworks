@@ -23,7 +23,6 @@ from agentworks.guide.contract import (
     GuideTraversalError,
     ImplementationAnchor,
     InstanceList,
-    KindAnchor,
     Overview,
     Relationships,
     ReleaseNotes,
@@ -141,7 +140,7 @@ def build_authored_catalog(*, strict_trusted_taxonomy: bool = False) -> GuideCat
         if strict_trusted_taxonomy:
             raise contribution_error from None
         release_issue = GuideCatalogIssue(contribution_error)
-    plugins: list[tuple[Plugin, tuple[object, ...]]] = []
+    plugins: list[tuple[Plugin, tuple[TopicContribution, ...]]] = []
     for _, plugin in sorted(SYSTEM_PLUGINS.items()):
         first_party_topics = _load_first_party_plugin_topics(plugin.name)
         plugins.append((plugin, (*plugin.guide_topics, *first_party_topics)))
@@ -215,16 +214,30 @@ def _schema_topic(slug: str) -> TopicContribution:
 
 
 def _dynamic_topic(registry: Registry | None, slug: str) -> TopicContribution:
+    """Build one live-resource topic through the same validation as every other.
+
+    The summary can carry an operator's manifest or config ``description``, so
+    the contract's caps and reserved-delimiter rejection run here, where that
+    text enters the guide, rather than at render time.
+    """
     if slug in describable_targets():
         return _schema_topic(slug)
     if "/" not in slug:
         handler = KIND_REGISTRY[slug]
-        return TopicContribution(
-            TopicSlug(slug),
-            f"{slug} resources",
-            _configuration_description(handler.description) if handler.description else f"Current {slug} resources.",
-            KindAnchor(slug),
-            (InstanceList(BlockId("inventory")),),
+        return parse_topic_contribution(
+            {
+                "topic": slug,
+                "title": f"{slug} resources",
+                "summary": (
+                    _configuration_description(handler.description)
+                    if handler.description
+                    else f"Current {slug} resources."
+                ),
+                "anchor": {"type": "kind", "kind": slug},
+                "blocks": [{"type": "instance-list", "id": "inventory"}],
+                "related_topics": (),
+            },
+            f"resource:{slug}",
         )
     kind, name = slug.split("/", 1)
     handler = KIND_REGISTRY[kind]
@@ -235,19 +248,25 @@ def _dynamic_topic(registry: Registry | None, slug: str) -> TopicContribution:
         description = getattr(resource, "description", None)
         if isinstance(description, str) and description.strip():
             summary = _configuration_description(description)
-    anchor = ImplementationAnchor(kind, name) if handler.category == "capability" else ResourceAnchor(kind, name)
-    return TopicContribution(
-        TopicSlug(slug),
-        title,
-        summary,
-        anchor,
-        (
-            State(BlockId("state")),
-            Relationships(BlockId("relationships")),
-            InstanceList(BlockId("instances")),
-            TopicLinks(BlockId("related")),
-        ),
-        (TopicSlug(kind),),
+    return parse_topic_contribution(
+        {
+            "topic": slug,
+            "title": title,
+            "summary": summary,
+            "anchor": {
+                "type": "implementation" if handler.category == "capability" else "resource",
+                "kind": kind,
+                "name": name,
+            },
+            "blocks": [
+                {"type": "state", "id": "state"},
+                {"type": "relationships", "id": "relationships"},
+                {"type": "instance-list", "id": "instances"},
+                {"type": "topic-links", "id": "related"},
+            ],
+            "related_topics": (kind,),
+        },
+        f"resource:{slug}",
     )
 
 

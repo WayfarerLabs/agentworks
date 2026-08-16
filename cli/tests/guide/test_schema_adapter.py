@@ -577,13 +577,13 @@ def test_capability_topics_never_contribute_samples() -> None:
     assert any(isinstance(block, FieldReference) for block in implementation.blocks)
     assert not any(isinstance(block, Sample) for block in (*kind.blocks, *implementation.blocks))
 
-    invalid = {
-        "topic": "vm-platform",
-        "title": "Platforms",
-        "summary": "Capability kind.",
-        "anchor": {"type": "kind", "kind": "vm-platform"},
-        "blocks": [{"type": "sample", "id": "sample"}],
-    }
+    invalid = TopicContribution(
+        TopicSlug("vm-platform"),
+        "Platforms",
+        "Capability kind.",
+        KindAnchor("vm-platform"),
+        (Sample(BlockId("sample")),),
+    )
     with pytest.raises(GuideContributionError, match="sample block requires a declarable kind"):
         _build_guide_catalog(
             (("core", invalid),),
