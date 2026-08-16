@@ -2,6 +2,10 @@
 
 - Status: Design-track artifact, draft for review
 - Date: 2026-08-05
+- Amendment (2026-08-16): PR #560 deleted `registry_policy` and `kind_strategy` from the shipped
+  descriptor as generality nothing consumed, along with the reserved-field comment this document's
+  `consumer_gating` row cites. The rows below record the day-one design as decided; the shipped
+  contract at HEAD is the code.
 - Inputs: the capability and declarative-schema perspectives (`inputs/`), the declarative-schema
   SDD's phase 2 HLA and plan, `target-state.md`'s settled rulings, and code reconnaissance recorded
   in `starting-state.md`

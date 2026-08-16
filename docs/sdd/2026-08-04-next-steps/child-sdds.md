@@ -205,6 +205,13 @@ item shrinks to a verification sweep.
       (the locked note's position-scoped three stand), both retained name screens now
       mutation-protected, and the S2/S7 findings corrected in place; `ResolutionPreview.name`'s
       ordering fragility filed as #554 rather than absorbed
+- [x] Wave 1 descriptor-generality item closed (PR #560, merged 2026-08-16): `registry_policy`,
+      `kind_strategy`, `manifest_section`'s optionality, and the dead fallbacks deleted; the
+      tester's boundary-5 catch closed at the conformance seam with a typed registration refusal of
+      non-callable `config_for`; `contract_version` withdrawn from all waves by ruling 12; the dead
+      discriminator-branch family closed around one type-enforcing guard. This merge, with #531,
+      satisfies the operator's harness-integration precondition: the window is open until the
+      grammar rewrite's breaking PRs land. The saga's descriptor-contract amendment rides this round
 - [x] Wave 1 guide and machine-output items closed (PR #548, 2026-08-16): G8 dead surface, G2
       typed-to-dict round trips, G6 defensive surface, and the G11 parity gap, with the stdout write
       loop restored as real short-write protection and struck from the finding that had
