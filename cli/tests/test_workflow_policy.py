@@ -56,6 +56,14 @@ INTERPRETERS = frozenset({"python3", "node"})
 # and is meant to read like one.
 DEPLOYMENT_ACTIONS = frozenset({"actions/deploy-pages"})
 
+# The closed set of environment keys permitted on the jobs whose scripts this suite
+# executes or relies on. Enumerated rather than filtered for the same reason as the
+# actions above: a key that redirects tooling reaches the verifiers and the diff just
+# as well as one that makes bash source a file first, and the list of ways to do that
+# is not knowable in advance. `PATH`, `GIT_CONFIG_GLOBAL`, `LD_PRELOAD`, `PYTHONPATH`,
+# and `BASH_ENV` are all rejected here by shape, none of them by name.
+SCRIPT_ENVIRONMENT = frozenset({"EXPECTED_SHA", "PAGES_BASE_PATH", "SITE_BASE", "REQUIRED_RESULTS"})
+
 # The two shapes that read a result per required job: the wildcard join, which covers
 # every entry by construction, or one explicit reference each.
 NEEDS_RESULT = re.compile(r"\$\{\{\s*needs\.([A-Za-z0-9_-]+)\.result\s*\}\}")
@@ -83,6 +91,11 @@ def _steps(job: dict[str, Any]) -> list[dict[str, Any]]:
 def _deploy_path_jobs() -> dict[str, dict[str, Any]]:
     """Every job that runs repository code on the way to a published artifact."""
     return {f"pages.{name}": job for name, job in _jobs(PAGES).items()} | {"ci.website": _jobs(CI)["website"]}
+
+
+def _guarded_jobs() -> dict[str, dict[str, Any]]:
+    """The deploy path plus the gate: every job whose script this suite depends on."""
+    return _deploy_path_jobs() | {"ci.ci-success": _jobs(CI)["ci-success"]}
 
 
 def _write_scoped(job: dict[str, Any]) -> bool:
@@ -314,34 +327,52 @@ def test_every_site_build_is_proven_reproducible_before_it_is_used() -> None:
 
 
 def test_nothing_reconfigures_the_shell_the_deploy_path_scripts_depend_on() -> None:
-    """The verification and build scripts run in the environment they were written for.
+    """The verification and build scripts run under the shell they were written for.
 
-    Three ways to disarm them without touching a line of their text. A custom shell
-    template such as ``bash {0}`` drops ``-eo pipefail``, so every unchecked command
-    becomes an ignored failure. ``BASH_ENV`` names a file bash sources before each
-    script, which can redefine ``git`` or ``diff`` and neutralize both the source
-    verifiers and the double-build diff; it is settable at workflow, job, and step
-    level, so all three are checked. A ``working-directory`` default would point the
-    same scripts at a different tree. ``ci.yml``'s other jobs legitimately set a
-    working directory, so that one is scoped to the deploy path.
+    A custom shell template such as ``bash {0}`` drops ``-eo pipefail``, so every
+    unchecked command becomes an ignored failure, and a ``working-directory`` default
+    would point the same scripts at a different tree. ``ci.yml``'s other jobs
+    legitimately set a working directory, so that one is scoped to the deploy path.
+    What those scripts may read from the environment is the allowlist below.
     """
     for name, workflow in (("ci.yml", CI), ("pages.yml", PAGES)):
         shells = [workflow.get("defaults", {}).get("run", {}).get("shell")]
-        environments = [workflow.get("env", {})]
         for job in _jobs(workflow).values():
             shells.append(job.get("defaults", {}).get("run", {}).get("shell"))
-            environments.append(job.get("env", {}))
-            for step in _steps(job):
-                shells.append(step.get("shell"))
-                environments.append(step.get("env", {}))
+            shells.extend(step.get("shell") for step in _steps(job))
         for shell in shells:
             assert shell in (None, "bash"), f"{name}: unexpected shell {shell!r}"
-        for environment in environments:
-            assert "BASH_ENV" not in environment, f"{name}: BASH_ENV is set"
         assert "defaults" not in workflow, f"{name}: workflow-wide defaults reach the deploy path"
 
     for name, job in _deploy_path_jobs().items():
         assert "defaults" not in job, f"{name}: job defaults reach scripts written for the repository root"
+
+
+def test_only_named_environment_keys_reach_the_guarded_scripts() -> None:
+    """The scripts see an enumerated environment, deny-by-default.
+
+    Banning the keys someone already thought of is a blacklist, and this file has
+    already been through that once: ``BASH_ENV`` was banned by name, while ``PATH``,
+    ``GIT_CONFIG_GLOBAL``, ``LD_PRELOAD``, and ``PYTHONPATH`` each reach the same
+    tooling by another road. So the permitted keys are enumerated instead, at every
+    level that can set one, and anything else fails without this check needing to know
+    what it does. The gate job is in scope alongside the deploy path because its
+    script decides whether main is protected at all.
+    """
+    referenced = set()
+    for name, job in _guarded_jobs().items():
+        for scope in (job.get("env", {}), *(step.get("env", {}) for step in _steps(job))):
+            for key in scope:
+                assert key in SCRIPT_ENVIRONMENT, f"{name}: {key} is not a permitted environment key"
+                referenced.add(key)
+
+    # Kept minimal for the same reason as the action allowlist: a key is permitted
+    # only together with the step that reads it.
+    assert referenced == SCRIPT_ENVIRONMENT, "the allowlist permits a key nothing sets"
+
+    # A workflow-level env reaches every job, including the guarded ones.
+    for name, workflow in (("ci.yml", CI), ("pages.yml", PAGES)):
+        assert not workflow.get("env", {}), f"{name}: workflow-wide env reaches the guarded jobs"
 
 
 def test_no_deploy_path_step_or_job_can_be_skipped_or_swallow_a_failure() -> None:
