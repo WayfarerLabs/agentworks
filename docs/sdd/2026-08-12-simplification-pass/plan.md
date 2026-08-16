@@ -98,7 +98,7 @@ shares no files with the website work; it waits on the sweep instead, per group 
       every verbatim pin; rewrite the real policy invariants (least-privilege permissions,
       credential non-persistence, main-only deploy, source-SHA/artifact binding, double-build diff)
       as focused checks over a proper YAML load. Done when: suite green, no hardcoded workflow text
-      beyond the keys each check reads. **Done**: 834 lines become 16 checks in 594, counted at the
+      beyond the keys each check reads. **Done**: 834 lines become 16 checks in 635, counted at the
       final head with `wc -l` and `grep -c '^def test_'`. Earlier revisions of this note carried 380
       lines, then 16 checks in 532, none of which any counting supported; the pattern is the reason
       the reassessment's retrospective figures get re-measured rather than carried forward. Nothing
@@ -135,9 +135,9 @@ shares no files with the website work; it waits on the sweep instead, per group 
       and the complexity review lane each independently walked through two such policies, and running
       the deleted file's own mutation corpus against the replacement, which should have happened
       before the deletion merged, found two more. The corpus now stands at 39 violations from the
-      deleted file, both review lanes, one deny-by-default probe, and five environment violations, 42
-      caught, and with the 30 author mutations it is 76 violations each labelled with the property
-      it attacks, every stated property having at least one. Three of the four are form-only edits
+      deleted file, both review lanes, one deny-by-default probe, and eight environment and script
+      violations, 45 caught, and with the 30 author mutations it is 79 violations each labelled with
+      the property it attacks, every stated property having at least one. Three of the four are
       a real YAML load cannot see, and are declared drops on that ground: a duplicate top-level key,
       which resolves last-wins exactly as Actions resolves it, twice, and a trailing `# comment` on a
       permission value, which is not data. **The fourth is a defense that moved, not a gap.** It
@@ -171,19 +171,25 @@ shares no files with the website work; it waits on the sweep instead, per group 
       copy of what the code already expresses and is one step from someone asserting it in a test.
       And the blacklist lesson above, which is the one that reaches past workflows.
 
-      **The environment predicate got the same conversion** (`BASH_ENV` banned by name became an
-      allowlist of the four keys the guarded jobs actually set), because `PATH`, `GIT_CONFIG_GLOBAL`,
-      `LD_PRELOAD`, and `PYTHONPATH` each reached the same tooling and all four passed. Two
-      blacklist-shaped predicates are **left in place and filed rather than fixed**, which is a drawn
-      line and not an oversight: the shell-operator set guarding fail-fast, and the `if` and
-      `continue-on-error` step-key bans. The step keys are closed by GitHub's schema, so no invented
-      mechanism reaches them. The shell operators are not, and the merge-base probe found the one
-      place this branch is genuinely behind `main`: `set +e` carries no operator token, so the branch
-      misses it while `main` catches it through verbatim script pinning. The mitigation offered for
-      that risk does not hold on inspection, since the pre-upload verifier checks the worktree rather
-      than the artifact, and `ci.website` has no verifier after its build at all, so a swallowed diff
-      is an unreproducible build nobody notices. The allowlist form is an executable set for those
-      scripts; it is the filed item's content, and it is the last one of this class.
+      **Two more predicates got the same conversion, and the second was found by comparing against
+      what was deleted.** `BASH_ENV` banned by name became an allowlist of the four environment keys
+      the guarded jobs actually set, after `PATH`, `GIT_CONFIG_GLOBAL`, `LD_PRELOAD`, and
+      `PYTHONPATH` each reached the same tooling and passed. Then running the three probes against
+      the deleted file at the merge base showed the branch genuinely behind `main` on one property:
+      `set +e` carries no shell operator token, so the operator blacklist missed it while `main`
+      caught it by pinning the script verbatim. That was the deciding fact for merging, and it is
+      why the comparison is worth running before a policing file is deleted rather than after. The
+      risk was first filed on the reasoning that the drift verifier stood behind fail-fast; **that
+      reasoning was wrong**, since the pre-upload verifier inspects the worktree rather than the
+      built artifact and `ci.website` has no verifier after its build at all, so a swallowed diff is
+      an unreproducible build nobody notices. So it was fixed rather than filed: each line of the two
+      build scripts invokes one command from an allowlist derived from what they run, and each line
+      must be a single invocation, which is a separate property because an allowlist alone passes
+      `python3 a || python3 b`. Lines are split at their control operators using Python's own
+      shell-punctuation classification rather than a list maintained here. That subsumes the
+      blacklist in both directions, so it is retired rather than left beside the allowlist. The `if`
+      and `continue-on-error` step-key bans stay filed and unfixed, which is a drawn line rather than
+      an oversight: GitHub's schema closes that vocabulary, so no invented mechanism reaches them.
 
 - [ ] Prose/form-policing sweep across the estate (absorbed survey list plus G12, C10, D4, P6, and
       the #470 manifesto pin). **This enumeration is the exclusion list and nothing else is
