@@ -145,5 +145,7 @@ def test_old_kind_is_not_an_alias(tmp_path: Path) -> None:
     cfg = load_config(_write_cfg(tmp_path / "config.toml"), warn_issues=False)
     registry = build_registry(cfg)
 
-    with pytest.raises(NotFoundError, match="unknown kind 'harness'"):
+    with pytest.raises(NotFoundError) as exc:
         resolve_resource(registry, ResourceIdentity("harness", "shell"))
+    assert exc.value.entity_kind == "resource-kind"
+    assert exc.value.entity_name == "harness"
