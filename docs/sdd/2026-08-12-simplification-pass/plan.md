@@ -137,6 +137,16 @@ shares no files with the website work; it waits on the sweep instead, per group 
       rather than asserted: the one offered here, that a drift verifier stood behind fail-fast, was
       false on inspection.
 
+      Two further tester findings arrived after the narrowing, both deliberate-actor shaped
+      (overwriting built output, replacing the gate script) and so outside the promise this file now
+      makes. The accident-grade property behind the first was taken: the gate check claimed the
+      results were consumed when it holds only that they are wired, and it is narrowed, since two
+      claims that outran their checks were already corrected here. The second was not taken and is
+      returned to the operator, because its premise does not hold: the pre-upload source verifier
+      already sits between the determinism diff and the upload, so "nothing between them" is false at
+      HEAD, and separating an inserted post-processing step from the verifier needs that step
+      identified by its environment key, which is the machinery this round removed.
+
 - [ ] Prose/form-policing sweep across the estate (absorbed survey list plus G12, C10, D4, P6, and
       the #470 manifesto pin). **This enumeration is the exclusion list and nothing else is
       excluded**: W1's workflow test, S1's corpus and wording-pin trims, W4/W6 in the contained
