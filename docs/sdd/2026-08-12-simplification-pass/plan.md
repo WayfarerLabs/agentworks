@@ -147,11 +147,26 @@ the sweep instead, per group 4 above.
       and both its consumer branches, `kind_strategy`, `manifest_section`'s optionality with the
       five narrowing guards it forced, and `offered_model`'s two `getattr` fallbacks are gone;
       `contract_version` still refuses a mismatched impl, re-verified here by the same mutation PR
-      #546 used. Suite 7358 to 7354. Every deletion was controlled one at a time: the four
-      `registry_policy` and `offered_model` sites each left the suite green, so each was decoration,
-      while deleting `kind_strategy` failed exactly
+      #546 used. Collected tests 7361 to 7357 (`pytest --collect-only`, the three deselected
+      integration tests included in both totals); the earlier note said 7358 to 7354, which was the
+      selected count, and the reassessment should cite the collected one. Every deletion was
+      controlled one at a time, and seven of the eight sites were decoration: the two
+      `registry_policy` branches, the two `offered_model` fallbacks, `_declared_model`'s fallback,
+      and the two conformance re-checks each left the suite green, the last two proven never entered
+      at all by replacing them with assertions. Deleting `kind_strategy` failed exactly
       `test_kind_strategy_is_the_object_in_kind_registry` and nothing else, which is the self-test
       C1 describes.
+
+      **Three sites in the same family were not in the item's inventory and are deleted anyway**,
+      because leaving them would teach the pattern this item removes: `_declared_model`'s fallback
+      one function from `offered_model`'s, `_model_error`'s unreachable `contract is None` raise
+      with the optionality that forced it, and `_contract_error`'s `isinstance` re-check on a field
+      typed `type`. Two documentation claims went with them. `CapabilityKindDescriptor`'s reserved
+      `consumer_gating` comment was speculative generality relocated from a field into prose, and
+      `CapabilityAdapter`'s docstring claimed a FALLIBLE `prepare` that returns its argument, which
+      described the constructed-singleton arm a prior effort deleted; this item removed the last
+      artifact tying that sentence to the policy, so the orphan was this item's to fix. The
+      prepare/seat split itself is untouched.
 
       **Two of the item's targets did not survive classification, and findings.md carries both
       corrections.** `discriminator`/`input_domain` are not inert: the entry counted the four
@@ -160,15 +175,36 @@ the sweep instead, per group 4 above.
       production consumers branching on each. **`config_for()`'s hook is an R2.2 set-aside, not a
       deletion**: `capabilities/README.md` carries it in the capability authoring contract that
       `contract_version` versions, so removing it is the shipped-contract change this wave excludes,
-      and it goes to the reassessment with the contract rev it implies. Its fallbacks and its
-      speculative docstring were still this item's to take, and were taken.
+      and it goes to the reassessment with the contract rev it implies. The sharper reason is that
+      it is an override point on a public base class, so "zero overrides" is a claim about this
+      repository and nothing else, and even here `tests/capabilities/test_capability_config.py`
+      overrides it. `plugins/__init__.py` states the design intent that external loading later
+      becomes another way to obtain a `module.PLUGIN` rather than a new authoring contract, so
+      deleting the hook now means the loader effort re-adds it. Its fallbacks and its speculative
+      docstring were still this item's to take, and were taken.
+
+      **The caller enumeration behind the `manifest_section` narrowing is restated, because the
+      premise first recorded was true but not the one carrying the weight.** "No registration API
+      accepts a caller's descriptor" holds, yet a caller-constructed descriptor does reach
+      production through an existing in-repo channel:
+      `tests/secrets/test_sources.py::test_false_reaches_the_selected_model_when_the_descriptor_disables_opt_out`
+      monkeypatches `descriptor_for` with a `dataclasses.replace()`d record. The premise that
+      actually carries the narrowing is narrower and was verified at HEAD: `decode._hosting_descriptors`
+      and `spec_model.hosted_capability` are the only two readers of `manifest_section`, both reach
+      the table through `capability_descriptors()` rather than `descriptor_for`, and nothing
+      monkeypatches `capability_descriptors`. So no descriptor with `manifest_section=None` can
+      reach either one.
 
       One check was preserved rather than deleted, and is recorded as a decision: `capability_class`
       was refusing an unregistered kind incidentally, through the `descriptor_for` call it made only
-      to read `registry_policy`. Deleting the field would have dropped that refusal and left two
-      sibling accessors on `FinalizeContext` taking opposite postures on the same typo, so the
-      refusal is now spelled explicitly the way `rows_of` spells it, and R2.3's regression test
-      (which `rows_of` already had and this one did not) lands with it, proven by mutation.
+      to read `registry_policy`, so deleting the field would have dropped the refusal too. The
+      reason it stays is sibling consistency, not coverage. `rows_of` sits one method down on the
+      same dataclass, takes the same posture on the same typo, and has seven call sites across six
+      modules; two accessors on one object answering the same mistake two different ways is a
+      cognitive-load cost every future reader pays (principle 6). **This is not an R2.3 replacement
+      and should not be read as one**: removing the refusal fails exactly one test, the one this
+      item added, and the single production caller passes a string literal, so the gap it closes is
+      hypothetical rather than real.
 
 - [x] Delete `machine_output` defensive surface (G6): assert-guards on frozen dataclasses, double
       projections, identity comprehensions; `schema_version` becomes a named constant. This item
@@ -264,5 +300,15 @@ ledger.)
       retrospective numbers (lines, test counts, suite wall time, always-on bytes); the surviving
       findings; and a per-subsystem proposal or an explicit drop for each. Done when: delivered to
       the operator, after waves 1 and 2 are complete and the grammar rewrite has landed.
+
+      **Descriptor-generality residue**, surfaced by the C1/C5 item and left for this pass because
+      each needs a decision rather than a deletion. `impl_class` (`config.py:582`) is an identity
+      cast standing in for a type the registries do not declare; typing them `dict[str, type]` would
+      delete it and its four call sites together, which is a signature change across the capability
+      registries rather than a local subtraction. The `prepare`/`seat` split in
+      `plugins/registration.py` was shaped around a fallible `prepare` that no longer exists, so
+      what remains is a two-phase protocol whose two phases are a pass-through and a dict write.
+      `config_for()`'s hook is the third, recorded above with the contract rev it implies.
+
 - [ ] Write `locked.md` once the reassessment is delivered. Remaining candidates live in the
       reassessment, not in this plan.

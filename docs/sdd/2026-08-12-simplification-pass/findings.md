@@ -187,11 +187,14 @@ deliberately narrow `cli-conventions.md`.
   `ConfigContract`, which has a fifth instance the entry did not count, `secret-backend`'s
   `mapping_schema`, where `discriminator=None` and `input_domain=JSON_NATIVE`
   (`secret_backend/kinds.py:106-107`) are exactly what distinguishes a map-key-selected surface from
-  a tagged one. Both are read in production: `conformance.py:156` branches on the JSON-native domain
-  and four sites in `config.py` plus `spec_model.py:210` branch on a null discriminator. Uniform
-  across the four `config_schema` values is true and says nothing, because the arm that varies is
-  the one the field exists for. `RegistryPolicy`, `kind_strategy`, and `manifest_section` were
-  correct and are deleted.)
+  a tagged one. Both are read in production: `conformance.py:149` branches on the JSON-native
+  domain, and the discriminator has six consumers, four in `config.py` plus `spec_model.py:210` and
+  `conformance.py:168`. Uniform across the four `config_schema` values is true and says nothing,
+  because the arm that varies is the one the field exists for. (Line numbers are this branch's
+  head.) `RegistryPolicy` and `kind_strategy` were correct and are deleted. `manifest_section` was
+  correct as originally written and is NOT deleted: the field stays required at `descriptor.py:157`,
+  and what went is the optionality plus the five narrowing guards the `| None` forced on `decode`
+  and `spec_model`.)
 - **C2** Eight of eighteen classified `FieldShape` shapes have zero shipped instances; two have one.
   `_shape.py` is 1,383 lines (ceiling: 1,000), including the two-level `X`/`item_X` mirror whose
   unshipped half is speculative by its own docstring, while `reference_marker_error` already refuses
