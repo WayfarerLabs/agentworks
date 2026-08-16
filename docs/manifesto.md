@@ -74,7 +74,7 @@ run containers, and genuine multi-user collaboration.
 The VM provides the hard isolation boundary. Within it, ordinary Linux users, groups, and filesystem
 permissions provide further separation and controlled collaboration between agents.
 
-### Identity and Workload Are Separable
+### Identity and Workload Should Be Separable
 
 Many tools in the agentic ecosystem conflate identity and workload within a single overarching
 "agent" abstraction. That conflation can make it difficult to manage workloads effectively,
@@ -83,18 +83,16 @@ including its credentials, permissions, memory, and other durable state. It also
 decades of systems practice, which generally treats identity and workload as distinct concerns with
 independent lifecycles.
 
-Agentworks separates who performs work from the unit of work itself. Agents are identities. Sessions
-are workloads that run in a workspace as either an agent or the VM's admin user. Creating an agent
-does not start a workload, and creating a session does not require creating a new identity.
+Agentworks separates who performs work from the unit of work itself. Agents and the admin user are
+identities. Sessions are workloads that run in a workspace as either an agent or the VM's admin
+user. Creating an agent does not start a workload, and creating a session does not require creating
+a new identity.
 
 That separation lets identity and workload lifecycles vary independently. Sessions come and go with
 the work. An operator can reuse a durable agent across many sessions, tie an ephemeral agent to a
 single session, or choose another lifecycle model that suits their particular needs. A durable agent
 can carry tools, credentials, harness context, memory, and interactive authentication across those
 sessions.
-
-Reproducible identity setup belongs in a template. Valuable state that cannot be reproduced belongs
-to the identity, while the session remains the disposable unit of work.
 
 ### Set the Context, Tools, and Guardrails, Then Get Out of the Way
 
@@ -116,6 +114,26 @@ and models operate unimpeded. Agentworks aims to be exactly that.
 Built-in "auto" modes do not change this requirement. Their authorization layer can accelerate
 routine work, but it is not a security boundary. Auto modes should operate inside a least-privilege
 environment so that a mistaken authorization remains contained.
+
+### Harness-Agnostic Infrastructure Is Worth Building
+
+Harnesses increasingly provide capabilities beyond their core model interaction, including
+cross-session messaging, workflow orchestration, and operator communication channels. These features
+can be incredibly useful, and operators should take advantage of them when they help. But relying
+exclusively on a harness-specific implementation makes that capability unavailable to workloads
+using other harnesses and ties the operator's infrastructure to one vendor's product decisions.
+
+Given how quickly the industry is moving, unnecessary dependence on any one harness is a liability.
+
+When a capability is broadly useful across agentic workloads, Agentworks believes it is worth
+implementing at the platform layer, even when popular harnesses already provide something similar. A
+shared capability can work across harnesses, survive changes in any one of them, and provide a
+stable foundation on which harness-specific features can coexist.
+
+This does not mean recreating every harness feature or hiding meaningful differences behind weak or
+forced abstractions. It means deliberately identifying compelling harness-independent contracts and
+implementing the ones that truly belong at the platform layer, while leaving operators free to use
+richer harness-specific behavior wherever it serves them.
 
 ### Consistency Beats Unbounded Choice
 
