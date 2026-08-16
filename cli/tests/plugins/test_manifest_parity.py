@@ -3,10 +3,11 @@
 
 A not-enabled plugin's bundled DECLARABLE rows are published (weak), disabled by
 the same overlay that disables its capability rows, hidden from the default
-``list`` but shown by ``describe``, and REFUSED AT USE with the enable hint
-(never an unknown-name error, never a silent use). Enabling the plugin makes
-them consumable. Driven by a manifest-only fixture plugin (empty capabilities,
-so no seating needed) injected via ``SYSTEM_PLUGINS``.
+``resource list`` but shown by ``resource list --include-disabled``, and
+REFUSED AT USE with the enable hint (never an unknown-name error, never a
+silent use). Enabling the plugin makes them consumable. Driven by a
+manifest-only fixture plugin (empty capabilities, so no seating needed)
+injected via ``SYSTEM_PLUGINS``.
 """
 
 from __future__ import annotations
@@ -99,7 +100,7 @@ def test_manifest_rows_enabled_when_plugin_enabled(monkeypatch: pytest.MonkeyPat
     assert registry.graph.enablement_of("agent-template", "fixture-agent-tmpl") is Enablement.enabled
 
 
-# -- Disabled hides from list, shows by describe with the Disabled line ----------
+# -- Disabled hides from the default list, include-disabled shows it ------------
 
 
 def test_disabled_manifest_hidden_from_list_shown_with_include_disabled(monkeypatch: pytest.MonkeyPatch) -> None:

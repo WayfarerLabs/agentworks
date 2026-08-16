@@ -2,7 +2,7 @@
 ``(harness_integration, harness_integration_config)`` pair,
 the manifest flat-field rejection, the pair-inheritance rules (FRD R5,
 including the multi-parent divergence), and the harness-integration
-reference / describe surfaces.
+reference / graph surfaces.
 
 The flat-TOML hoist and its two conflict errors (FRD R6) were pinned here
 against the migrator's frozen TOML reader. Both are gone (operator ruling,
@@ -308,7 +308,7 @@ def test_undeclared_default_resolves_to_shell_empty() -> None:
     assert resolved.harness_integration_config == {}
 
 
-# -- describe / reference surfaces (FRD R2, R8) ------------------------------
+# -- Graph / reference surfaces (FRD R2, R8) ---------------------------------
 
 
 def test_declared_harness_integration_emits_a_reference() -> None:

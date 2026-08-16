@@ -38,7 +38,7 @@ def test_an_unknown_layout_lists_the_ones_that_exist() -> None:
         assert layout in message
 
 
-def test_the_layouts_reach_the_describe_surface_as_choices() -> None:
+def test_the_layouts_reach_the_explain_surface_as_choices() -> None:
     """What the inversion buys: a validator would have left ``choices``
     empty, so ``agw resource explain`` could not list the layouts (FR10)
     and the emitted schema could not enumerate them."""

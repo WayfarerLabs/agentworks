@@ -2,7 +2,8 @@
 
 The hook projects "what live DB instances depend on this Resource per
 the current config?" -- the dynamic dimension that backs the USED BY
-column and the ``Used by:`` describe section. This module covers:
+column, graph live-usage edges, and secret describe's ``Used by:``
+section. This module covers:
 
 - Template kinds (vm_template, agent_template, workspace_template,
   session_template, admin_template, named_console_template): DB-row
