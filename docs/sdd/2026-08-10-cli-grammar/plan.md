@@ -204,51 +204,51 @@ only in private uncommitted work, never at a pushed review boundary.
 
 ### 3.1 Register the new grammar
 
-- [ ] Add top-level `graph` registration and `graph show FOCUS` with closed direction/depth/output
+- [x] Add top-level `graph` registration and `graph show FOCUS` with closed direction/depth/output
       parsing and defaults.
-- [ ] Load config and a finalized registry with host-readiness probing disabled; never use writable
+- [x] Load config and a finalized registry with host-readiness probing disabled; never use writable
       `get_db`, resolve secrets, prompt, activate resources, or call providers/remotes.
-- [ ] Rename `resource describe-kind` to `resource explain` without changing its resolver, renderer,
+- [x] Rename `resource describe-kind` to `resource explain` without changing its resolver, renderer,
       target forms, errors, ordering, or config-free behavior.
-- [ ] Replace schema `--write` with flag-only `--install`, retaining exact whole-set destination,
+- [x] Replace schema `--write` with flag-only `--install`, retaining exact whole-set destination,
       validation, overwrite, and reporting behavior.
-- [ ] Update resource-group help to the resulting inventory, explanation, authoring, and editing
+- [x] Update resource-group help to the resulting inventory, explanation, authoring, and editing
       responsibilities.
 
 ### 3.2 Remove the generic resource card atomically
 
-- [ ] Delete `resource describe`, its DTO/service/renderer/projector, describe-only helpers,
+- [x] Delete `resource describe`, its DTO/service/renderer/projector, describe-only helpers,
       completion entry, CLI tests, and `resource.describe` command ID.
-- [ ] Verify every fact assertion named in the dying inventory is already green under its phase-1 or
+- [x] Verify every fact assertion named in the dying inventory is already green under its phase-1 or
       phase-2 owner, then delete only the residual presentation-specific tests with the card.
-- [ ] Leave `secret describe`, its reduced inbound relationship view, live grouping, human output,
+- [x] Leave `secret describe`, its reduced inbound relationship view, live grouping, human output,
       and `secret.describe` JSON records unchanged.
-- [ ] Add `GRAPH_SHOW = "graph.show"` to the closed machine-command enum and no compatibility ID.
-- [ ] Assert old spellings fail as unknown/invalid use rather than warning or dispatching.
+- [x] Add `GRAPH_SHOW = "graph.show"` to the closed machine-command enum and no compatibility ID.
+- [x] Assert old spellings fail as unknown/invalid use rather than warning or dispatching.
 
 ### 3.3 Update completions and permanent teaching
 
-- [ ] Map graph focus to the config-backed `resource_refs` source, explain to config-free
+- [x] Map graph focus to the config-backed `resource_refs` source, explain to config-free
       `resource_kinds`, and direction/depth to their static candidates.
-- [ ] Make `resource list --names-only` registry-only so graph/edit completion remains available
+- [x] Make `resource list --names-only` registry-only so graph/edit completion remains available
       when the database is absent, stale, newer, malformed, busy, or unreadable; keep config and
       finalized-registry failures silent.
-- [ ] Remove `sites`, `ws_templates`, `git_credentials`, `session_templates`, `vm_templates`,
+- [x] Remove `sites`, `ws_templates`, `git_credentials`, `session_templates`, `vm_templates`,
       `agent_templates`, `admin_templates`, and `resource_refs` from the database-backed completion
       inventory. Update its four inventory/probe tests so all eight paths share the registry-only
       contract.
-- [ ] Prove the registry-only names path never calls `get_db` or `open_completion_database`, and
+- [x] Prove the registry-only names path never calls `get_db` or `open_completion_database`, and
       that a healthy database produces an identical candidate set and order. Ordinary human and JSON
       resource-list paths remain database-backed.
-- [ ] Remove old dynamic identities, regenerate/show bash, zsh, and PowerShell output, and test
+- [x] Remove old dynamic identities, regenerate/show bash, zsh, and PowerShell output, and test
       missing/broken-config behavior for each relevant path.
-- [ ] Update active help, errors, hints, command reference, `cli/README.md`, sample-config comments,
+- [x] Update active help, errors, hints, command reference, `cli/README.md`, sample-config comments,
       surviving guide contributions, domain/capability/plugin READMEs, resource and platform guides,
       and the 0.14 upgrade guide.
-- [ ] Preserve historical records deliberately and perform a reviewed one-time active-reference
+- [x] Preserve historical records deliberately and perform a reviewed one-time active-reference
       search for `resource describe`, `describe-kind`, `resource.describe`, and schema `--write`; do
       not commit a test that polices repository-authored prose.
-- [ ] Do not recreate any guide topic or adapter removed by PR #556.
+- [x] Do not recreate any guide topic or adapter removed by PR #556.
 
 Definition of done: every observable owner presents one coherent grammar at the commit, the three
 shells agree with the Typer tree, active docs match behavior, and only the upgrade map or clear
