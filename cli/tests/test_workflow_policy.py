@@ -3,10 +3,11 @@
 ``pages.yml`` is the only thing that mints a GitHub Pages deployment for
 agentworks.build, and ``ci.yml``'s ``ci-success`` job is the single required check on
 main. The properties asserted here are the ones an ordinary edit can break without
-anyone noticing: least-privilege token scopes, credentials that never persist past
-checkout **in the deploy path**, deployment tied to main and to the exact commit that
-was tested, an artifact that is exactly the directory the verified build wrote, and
-build scripts that abort on the first failure.
+anyone noticing: write scopes on one job and an enumerated allowlist of what may run
+beside them, credentials that never persist past checkout **in the deploy path**,
+deployment tied to main and to the exact commit that was tested, an artifact that is
+exactly the directory the verified build wrote, and build scripts that abort on the
+first failure.
 
 The deploy path is the scope, not the repository. ``ci.yml``'s other five jobs check
 out with the default settings and are covered by nothing here; they neither build the
@@ -47,6 +48,14 @@ STEP_OUTPUT = re.compile(r"\$\{\{\s*steps\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z0-
 SHELL_OPERATORS = frozenset({"|", "||", "&", "&&", ";", ";;", ">", ">>", "<"})
 INTERPRETERS = frozenset({"python3", "node"})
 
+# The closed set of actions permitted inside a job that holds write scopes. Derived
+# from what publishing actually requires rather than from what the file happens to
+# contain: minting the deployment needs `deploy-pages` and nothing else, while
+# `configure-pages` and `upload-pages-artifact` do their work in the read-only build
+# job and have no business beside the token. Widening this set is a security decision
+# and is meant to read like one.
+DEPLOYMENT_ACTIONS = frozenset({"actions/deploy-pages"})
+
 # The two shapes that read a result per required job: the wildcard join, which covers
 # every entry by construction, or one explicit reference each.
 NEEDS_RESULT = re.compile(r"\$\{\{\s*needs\.([A-Za-z0-9_-]+)\.result\s*\}\}")
@@ -79,6 +88,12 @@ def _deploy_path_jobs() -> dict[str, dict[str, Any]]:
 def _write_scoped(job: dict[str, Any]) -> bool:
     """Whether this job's token can change anything, read from its grants not its name."""
     return "write" in set(job.get("permissions", {}).values())
+
+
+def _action(step: dict[str, Any]) -> str | None:
+    """The action a step runs, without its version segment; ``None`` for a script step."""
+    uses = step.get("uses")
+    return None if uses is None else str(uses).split("@", 1)[0]
 
 
 def _website_test_commands(job: dict[str, Any]) -> set[tuple[str, ...]]:
@@ -370,22 +385,38 @@ def test_the_deploy_path_runs_only_first_party_actions() -> None:
                 assert step["uses"].startswith("actions/"), f"{name}: {step['uses']}"
 
 
-def test_the_write_scoped_job_neither_checks_out_nor_runs_repository_code() -> None:
-    """The job holding the deployment token executes nothing of ours at all.
+def test_the_write_scoped_job_runs_only_the_named_deployment_action() -> None:
+    """The job holding the deployment token runs an allowlist, deny-by-default.
 
     ``pages: write`` plus ``id-token: write`` is the whole authority to publish and to
-    mint an OIDC token, so that job is confined to first-party deploy actions. A
-    ``run:`` step there is invisible to the first-party check above, which only reads
-    steps with ``uses``, and a checkout would put repository code within its reach in
-    the first place. Identified by grant rather than by name, so a rename cannot move
-    the boundary.
+    mint an OIDC token, so what may execute beside it is enumerated rather than
+    filtered. Enumerating the forbidden instead is a blacklist, and a blacklist of
+    execution mechanisms fails the way ``no-prose-policing-tests`` says a blacklist of
+    wordings fails: it rejects what someone already thought of while the same
+    capability, phrased through a mechanism the list has not heard of, goes straight
+    through. This check earned that shape the hard way, over two rounds that each
+    banned one mechanism (a ``run:`` script, then a checkout) and were bypassed by the
+    next one (``actions/github-script``, which executes authored JavaScript with the
+    job's token). A step that is not on the list now fails whatever it is, without this
+    check needing to have heard of it.
+
+    The job is selected by its grants rather than by its name, so a rename cannot move
+    the boundary, and the version segment is ignored because this file does not pin
+    action versions.
     """
     scoped = {name: job for name, job in _jobs(PAGES).items() if _write_scoped(job)}
     assert scoped, "no write-scoped job found; the grants moved"
+
+    permitted = set()
     for name, job in scoped.items():
         for step in _steps(job):
-            assert "run" not in step, f"{name} runs a shell step"
-            assert not str(step.get("uses", "")).startswith("actions/checkout@"), f"{name} checks out"
+            action = _action(step)
+            assert action in DEPLOYMENT_ACTIONS, f"{name}: {step.get('name')!r} is not a permitted deployment action"
+            permitted.add(action)
+
+    # An allowlist widens by accreting entries nothing uses, so it is kept minimal:
+    # granting an action here is only ever done together with the step that needs it.
+    assert permitted == DEPLOYMENT_ACTIONS, "the allowlist permits an action no write-scoped job runs"
 
     # Nothing in CI holds a write scope, so nothing there needs the same confinement.
     assert not [name for name, job in _jobs(CI).items() if _write_scoped(job)]
