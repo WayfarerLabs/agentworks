@@ -89,3 +89,26 @@ time.
 Recorded in the simplification pass's `findings.md` under the descriptor item: `impl_class` and its
 four call sites, the registry typing, and the tagged-versus-untagged `ConfigContract` split (making
 them different types deletes the guard that now carries that invariant alone).
+
+## Recipient's integration note (saga lead, 2026-08-16, operator-directed)
+
+The operator merged this message as routed planning input over the integration tester's published
+block on PR #562, then directed the tester's factual corrections be incorporated here so the future
+charter starts from checked facts. They are, verbatim in substance:
+
+1. **The sketch's declaration name collides with shipped API.** `Capability.config` already exists
+   as a bound-instance property in `capabilities/base.py`; a subclass declaring `config = SomeModel`
+   shadows it, handing capability operations the model class where they expect the validated config
+   instance. Any adopted shape either picks a non-colliding declaration name or explicitly designs
+   and migrates the existing bound-config API. The sketch above is one shape worth considering, not
+   a design; the operator expects a more elegant solution to emerge when the work is scheduled.
+2. **The inventory over-merges and under-counts.** `_declared_model()` reads the separate
+   `mapping_model` contract, a distinct surface rather than a fourth spelling of facet config, and
+   collapsing it into the facet migration would be wrong; `offered_model()` has five production call
+   sites, not seven; the tree carries fourteen concrete `config_model` declarations, not four
+   implementations; and the registries are already precisely typed, with the erasure living at the
+   heterogeneous mutable descriptor accessor rather than the registry typing.
+
+Everything else in the message stands as written: the three preserved constraints, the
+who-constructs-versus-who-calls-in caution, the early call-site discovery walk, and the
+fold-the-typing-into-the-same-change advice.

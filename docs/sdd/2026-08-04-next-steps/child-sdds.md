@@ -310,7 +310,12 @@ coordinates with the pending resource-CLI grammar decision.
 
 Planned children, seeded when their prerequisites land (see `phasing.md`):
 
-- Wave 4: harness scope framework
+- Wave 4: harness scope framework. Seed material on record: the capability config shape note
+  (`message-2026-08-16-capability-config-shape.md`, merged PR #562 with the integration tester's
+  factual corrections incorporated as a recipient's note per operator direction), carrying the
+  `config_at(level)` shape sketch, the three preserved `base.py` constraints, the
+  who-constructs-versus-who-calls-in caution, and the pre-design call-site discovery walk. The
+  capability-API reevaluation is chartered into this wave's seed, not scheduled sooner
 - Wave 5: session observability phase 1
 - Wave 6: agentic artifacts and distillation
 - Wave 7: structured control
