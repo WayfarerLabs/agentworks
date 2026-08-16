@@ -476,15 +476,41 @@ destination below.
       malformed values to a typed, non-echoing `StateError`. Persisted state crosses executions and
       is therefore a trust boundary; the guide can omit affected live facts without broad exception
       handling, while unrelated converter behavior remains outside this round.
-- [ ] Complete the required project review and merge one ready implementation PR.
+- [x] Complete the required project review and merge one ready implementation PR (PR #537,
+      2026-08-15).
 
 Definition of done: FRD R1 through R5 and acceptance criteria 1 through 6 hold, with no new guide
 contract, state, diagnostic protocol, or authorization mechanism.
 
-PR #509's artifact gate has merged, but the simplification pass's Wave 1 guide-machinery item
-remains unchecked. Coordinate shared production files with that item and preserve its wholesale
-ownership of `cli/tests/guide/test_contract_catalog.py` and `cli/tests/guide/test_assessment.py`.
-Put this round's behavior in a new focused test module or unaffected renderer/service tests.
+PR #509's artifact gate merged before this phase. Its contemporary guide-machinery ownership note
+was honored by the trail-sign implementation; the one-wave follow-up below supersedes that split by
+operator ruling without changing this completed phase's record.
+
+## Phase 4 follow-up: command-owned guide deletion
+
+- [ ] After corrected PR #548 merges, remove in one effort all 141 fixed blocks approved by
+      `guide-value-survey.md`, the dormant kind fallback, and every runtime resource topic. Keep the
+      59 concept, synthesis, navigation, evidence, and action blocks. Replace removed content with
+      concise command signposts rather than another presentation layer.
+- [ ] Before deleting `_dynamic_topic` or generic `GuideView`, move the retained onboarding
+      assessment to the smallest projector that reproduces its resource, instance, relationship,
+      verification, unavailable-state, and next-action behavior. Do not preserve rendered-live-block
+      machinery merely to reuse its records.
+- [ ] Delete the contract variants, renderer branches, catalog paths, view surface, and tests whose
+      last guide consumer leaves in this wave. Preserve manifest-reference, sample, operational
+      JSON, release-note, resource-hook, and assessment records with non-guide or retained
+      consumers.
+- [ ] Update permanent guide documentation and command signposts for the temporary unreleased state.
+      Record that completions and sample configuration are either updated or unaffected. The CLI
+      grammar child restores `resource explain` and `graph show`; 0.14.0 must not ship before it.
+- [ ] Run focused guide/completion tests, the full non-integration suite, Ruff, formatting, mypy,
+      Rulesync drift, locked-SDD, and file lint. Complete the required project and integration
+      review on one ready deletion PR.
+
+Definition of done: one guide surface remains for concepts, workflow synthesis, navigation,
+evidence, bounded actions, and the onboarding assessment; command-owned raw fact presentation and
+its orphaned guide machinery are absent; the assessment uses its smaller projector; and the saga's
+CLI grammar release gate is explicit and still open.
 
 ## Phase 5: representative acceptance and closeout
 

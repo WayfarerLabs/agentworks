@@ -141,18 +141,21 @@ off whenever bandwidth allows, on its own merits and its own schedule.
   holds unreleased breaking changes, urgent operator fixes ship from a `0.13.x` backport branch.
 
   **Ruling (operator, 2026-08-12):** the grammar rewrite is no longer conditional. 0.14.0 does not
-  ship until it lands, so it joins the cut as a hard gate. **Sequence (operator, 2026-08-13, revised
-  the same day):** the simplification pass runs before the grammar rewrite, not after it. The order
-  is (1) that pass's wave 0, which establishes that always-on rules actually reach the agents they
-  bind (issue #511) and lands the deletion criteria, (2) its wave 1 deletions, (3) the grammar
-  rewrite, (4) its reassessment. Rewriting the CLI grammar over a surface that still carries the
-  deletable scaffolding means the rewrite carries it too. The pass's wave 2 (process and rule
-  subtraction) is not on this spine: it runs fully in parallel on its own session, file-disjoint
-  from wave 1, and the reassessment and lock wait for both waves. The onboarding trail-sign round
-  also runs alongside rather than ahead, split by boundary: the simplification pass owns guide
-  machinery, the onboarding effort owns guide content. The 0.14 breaking-truth items (S5, C3, C4,
-  C7) run as their own dispatched task in parallel, since folding them into the grammar rewrite
-  would grow an already massive effort (operator, 2026-08-13).
+  ship until it lands, so it joins the cut as a hard gate. **Original sequence (operator,
+  2026-08-13, revised the same day):** the simplification pass runs before the grammar rewrite, not
+  after it. The original order was (1) that pass's wave 0, which establishes that always-on rules
+  actually reach the agents they bind (issue #511) and lands the deletion criteria, (2) its wave 1
+  deletions, (3) the grammar rewrite, (4) its reassessment. Rewriting the CLI grammar over a surface
+  that still carries the deletable scaffolding means the rewrite carries it too. **Amendment
+  (operator, 2026-08-15):** wave 0 is complete, and corrected PR #548 is the only remaining
+  simplification-pass prerequisite. The onboarding effort then takes a one-time combined boundary
+  and removes all survey-approved guide content plus its directly orphaned machinery in one wave
+  before the grammar rewrite. Other wave 1 deletions and wave 2 run independently; the pass's
+  reassessment and lock still wait for both. The temporary guide gap is accepted only on unreleased
+  `main`; the grammar rewrite gates 0.14.0 and restores the settled command destinations before
+  release. The 0.14 breaking-truth items (S5, C3, C4, C7) run as their own dispatched task in
+  parallel, since folding them into the grammar rewrite would grow an already massive effort
+  (operator, 2026-08-13).
 
 - **Later:** remaining waves map to releases as they prove out; no need to pin numbers now.
 
