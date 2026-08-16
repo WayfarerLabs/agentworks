@@ -19,58 +19,46 @@ class _ParameterContract:
 
 
 #: The call shape of every classmethod the resolution loop invokes on a
-#: registered backend class, as ``(operation, parameters after cls)``.
-#: ``backend_readiness`` takes none. These are the names and kinds
-#: ``resolve.py`` actually calls with, so a mismatch here is a TypeError at
-#: the first source turn rather than at registration.
-_OPERATION_CONTRACTS: tuple[tuple[str, tuple[_ParameterContract, ...]], ...] = (
-    ("backend_readiness", ()),
-    (
-        "would_attempt",
-        (
-            _ParameterContract("secret_name", inspect.Parameter.POSITIONAL_OR_KEYWORD),
-            _ParameterContract("mapping_present", inspect.Parameter.KEYWORD_ONLY),
-        ),
+#: registered backend class, keyed by operation and valued by its parameters
+#: after ``cls``. ``backend_readiness`` takes none. These are the names and
+#: kinds ``resolve.py`` actually calls with, so a mismatch here is a
+#: TypeError at the first source turn rather than at registration.
+_OPERATION_CONTRACTS: dict[str, tuple[_ParameterContract, ...]] = {
+    "backend_readiness": (),
+    "would_attempt": (
+        _ParameterContract("secret_name", inspect.Parameter.POSITIONAL_OR_KEYWORD),
+        _ParameterContract("mapping_present", inspect.Parameter.KEYWORD_ONLY),
     ),
-    (
-        "describe_lookup",
-        (
-            _ParameterContract("secret_name", inspect.Parameter.POSITIONAL_OR_KEYWORD),
-            _ParameterContract("mapping", inspect.Parameter.POSITIONAL_OR_KEYWORD),
-        ),
+    "describe_lookup": (
+        _ParameterContract("secret_name", inspect.Parameter.POSITIONAL_OR_KEYWORD),
+        _ParameterContract("mapping", inspect.Parameter.POSITIONAL_OR_KEYWORD),
     ),
-    (
-        "external_operation_timeout",
-        (_ParameterContract("config", inspect.Parameter.POSITIONAL_OR_KEYWORD),),
+    "external_operation_timeout": (_ParameterContract("config", inspect.Parameter.POSITIONAL_OR_KEYWORD),),
+    "create_client": (
+        _ParameterContract("source_name", inspect.Parameter.KEYWORD_ONLY),
+        _ParameterContract("config", inspect.Parameter.KEYWORD_ONLY),
+        _ParameterContract("interaction_broker", inspect.Parameter.KEYWORD_ONLY),
+        _ParameterContract("remaining_time", inspect.Parameter.KEYWORD_ONLY),
     ),
-    (
-        "create_client",
-        (
-            _ParameterContract("source_name", inspect.Parameter.KEYWORD_ONLY),
-            _ParameterContract("config", inspect.Parameter.KEYWORD_ONLY),
-            _ParameterContract("interaction_broker", inspect.Parameter.KEYWORD_ONLY),
-            _ParameterContract("remaining_time", inspect.Parameter.KEYWORD_ONLY),
-        ),
-    ),
-)
+}
 
 
 def _secret_backend_conformance_error(impl: type[SecretBackend]) -> str | None:
     """Check the class-only facts and call shapes specific to secret backends.
 
     Boundary: a capability class arriving at registration from outside our
-    type checking. ``register_plugin`` seats whatever class a plugin module
-    hands it, and dynamically loaded third-party code is outside our mypy
-    run, so the shape the resolution loop calls with is checked once here
-    rather than trusted. What it checks is deliberately narrow: whether the
-    class is callable the way ``resolve.py`` calls it. Return values and
-    annotations are not re-checked, at registration or per call.
+    type checking. ``register_plugin`` is exported from the ``plugins``
+    package's public API and seats whatever class it is handed, so the shape
+    the resolution loop calls with is checked once here rather than trusted.
+    What it checks is deliberately narrow: whether the class is callable the
+    way ``resolve.py`` calls it. Return values and annotations are not
+    re-checked, at registration or per call.
     """
     interactive = getattr(impl, "interactive", None)
     if type(interactive) is not bool:
         return f"its interactive class attribute is {interactive!r}, not a bool"
 
-    for name, parameters in _OPERATION_CONTRACTS:
+    for name, parameters in _OPERATION_CONTRACTS.items():
         error = _classmethod_conformance_error(impl, name=name, parameters=parameters)
         if error is not None:
             return error

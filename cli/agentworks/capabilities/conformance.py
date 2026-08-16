@@ -1,10 +1,9 @@
 """Non-constructing registration conformance for capability classes.
 
 Boundary, shared by every check here: a capability class arriving from
-outside our type checking. ``plugins/registration.py`` is the only
-production caller, so what these checks face is a class a plugin module
-handed the framework, and dynamically loaded third-party code is outside
-our mypy run.
+outside our type checking. ``plugins.register_plugin`` is the only
+production caller, and it is exported from the package's public API, so
+any caller can hand it a class our mypy run never saw.
 
 Core built-ins reach the same checks through a different door and at a
 different moment: ``tests/capabilities/test_capability_descriptors.py``'s

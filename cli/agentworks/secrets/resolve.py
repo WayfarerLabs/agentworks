@@ -112,16 +112,12 @@ class ResolutionPolicy:
     is the totality half of the check the note above
     ``require_exact_interaction_policy`` describes.
 
-    ``completion`` is checked for a different and weaker reason, recorded
-    rather than dressed up as the same thing: it has no external channel
-    today, every value comes from a first-party literal, and no published
-    function takes it as a parameter. What it shares with ``interaction`` is
-    the failure mode. ``resolve_batch`` compares both by identity, so a plain
-    ``"complete"`` would silently take the partial branch and prompt through
-    a batch that was already doomed. One object, one rule, and a reader who
-    finds one field checked and the other bare has to work out which of two
-    reasons applies. The check costs a ``type()`` comparison in a constructor
-    that already runs one.
+    ``completion`` is not a boundary, and is checked anyway. Every value
+    comes from a first-party literal and no published function takes it as a
+    parameter, but ``resolve_batch`` compares both fields by identity, so a
+    plain ``"complete"`` would silently take the partial branch and prompt
+    through a batch that was already doomed. One object, one rule, for the
+    cost of a ``type()`` comparison.
     """
 
     interaction: InteractionPolicy
