@@ -181,6 +181,22 @@ shares no files with the website work; it waits on the sweep instead, per group 
       convert rows point at the landed structural replacement, and keep rows name the invariant that
       earns the assertion.
 
+      **Step one is done**: [sweep-inventory.md](sweep-inventory.md), 1,160 rows (642 delete, 191
+      convert, 327 keep), batched into six PRs by shape, with group 3 cut into four sub-batches by
+      subsystem because 377 rows is too big for one review round. That artifact is deleted when the
+      sweep closes; its header says so.
+
+      **Three corrections to this item's own enumeration, verified at HEAD 2026-08-16.** Two of the
+      files it names for the sweep no longer exist: `test_schema_adapter.py` and
+      `guide/test_view.py` were both deleted by PR `8043d438`, "remove command-owned fact views".
+      The same commit retired **the #470 manifesto pin** that the first line of this item lists as
+      part of the estate, replacing the verbatim block-text comparison with a structural link
+      assertion, so that part of the estate was already gone before the sweep started. The
+      exclusion list itself is unaffected and still exhaustive; what changed is the inventory's
+      expected yield, and `findings.md` G12 carries the detail. The inventory found ten overlaps in
+      all, including the three website ones above, all recorded in its own overlaps section rather
+      than restated here.
+
 - [x] Delete guide dead surface and interior re-validation (G8's guide-module members and G2;
       `JsonScalar` lives in `machine_output.py` and belongs to the G6 item below); fix the vacuous
       monkeypatch test and add the persisted-enum parity test (G11, R2.3). This item owns
