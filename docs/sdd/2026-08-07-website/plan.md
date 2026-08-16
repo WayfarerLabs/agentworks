@@ -1226,9 +1226,19 @@ matrix remains qualitative safety evidence rather than runtime authority.
       deck/support bounds, translational response with unchanged rotation, constant-time fuel
       arithmetic and absence of live replay, real collision, bounded retention, fixed `25/16`
       projection, and zero vertical scrolling at every required viewport.
-- [ ] Run complete website/repository gates, cold code review, and fresh-eyes browser review.
+- [x] Run complete website/repository gates, cold code review, and fresh-eyes browser review.
       Refresh port 8766 only at an exact reviewed green head, then obtain operator hands-on
       acceptance before marking Phase 4U or the PR complete.
+
+Final readiness evidence (2026-08-15): the operator accepted the exact Phase 4U product in current
+Chrome and Edge at `807cee65`. The product head had already passed the complete local and hosted
+gates, independent code review, and fresh-eyes browser review. The operator then directed this PR to
+absorb the recurring Chromium CI reliability defect visible on other PRs, including PR #402. The
+follow-up replaces the responsive geometry witness's hanging `--dump-dom` subprocess with bounded,
+explicitly cleaned DevTools ownership and makes the Phase 4M navigation readiness check exact-URL,
+complete-document, and null-root safe. The permanent regression suite covers readiness exhaustion,
+terminate-timeout/kill fallback, primary-error preservation, and cleanup-error surfacing; the
+browser checklist carries the concrete failed-run and repeated-execution evidence.
 
 Definition of done: ordinary play retains the accepted straight, full-band terrain but permits
 sharper navigable peaks and valleys through exact `.60/1.20` limits; accepted platforms average

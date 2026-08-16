@@ -207,7 +207,7 @@ operator inspection; no test approves wording or golden pixels.
 - Source: `998e8a77b62659437acf00433441793ef46ef193`
 - Browser: repository-selected headless Chromium through the DevTools Protocol
 - Tester: Phase 4U implementation gate and qualitative screenshot inspection
-- Outcome: PASS for the automated evidence; operator Chrome/Edge acceptance remains pending
+- Outcome: PASS; the operator subsequently accepted the exact Phase 4U product in Chrome and Edge
 
 The exact source passed all 103 Node lander tests in 4.90 seconds and all 157 website Python tests,
 including the real-Chromium witnesses, in 36.694 seconds. The focused Phase 4Q Chromium module also
@@ -223,6 +223,31 @@ touch `667x320`; the touch case reported inner, document-client, and document-sc
 exactly `667x320` with scroll position zero. The straight sharper facets, normalized-band relief,
 local decks, native supports, footer actions, and fixed scene remained visible without vertical
 growth or scroll. These observations are run evidence, not golden-image assertions.
+
+### Chromium CI reliability correction
+
+- Date: 2026-08-15
+- Source: `d7241554d2615ba057f8e56b882a76cc26709299`
+- Failure evidence: PR #402 CI runs `31885456373` and `31885547704`
+- Outcome: PASS for the corrected harnesses
+
+Both cited Website jobs failed when Chrome's `--dump-dom` process did not exit before the existing
+20-second timeout in the responsive long-form geometry test. The page had no corresponding layout
+failure; the harness delegated both readiness and process completion to the same browser subprocess,
+so a stuck shutdown produced a false CI failure.
+
+The corrected witness retains the original wide/narrow geometry assertions but owns Chrome through
+the DevTools Protocol. It waits for the exact navigated URL, complete document, and populated
+result; then it explicitly closes the socket and terminates the browser before stopping the server
+and removing the isolated profile. The Phase 4M witness now uses the same exact-URL and
+complete-document readiness boundary with null-safe document-root access, closing a separate
+navigation race observed during local full-suite runs.
+
+Before commit, the responsive geometry witness passed 40 consecutive two-viewport iterations and the
+Phase 4M witness passed 30 consecutive real-Chromium iterations without a failure. The complete
+website suite then passed 159 of 159 tests in 34.391 seconds. A structural cleanup witness rejects a
+return to `--dump-dom` and verifies DevTools closure, owned-process termination, and server-thread
+cleanup.
 
 ### Historical route-proof automated execution record
 
