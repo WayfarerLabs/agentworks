@@ -24,7 +24,6 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, Union, get_args, get_
 from pydantic import BaseModel
 
 from agentworks.capabilities.descriptor import ConfigContract, ModelInputDomain
-from agentworks.errors import StateError
 from agentworks.schema import (
     RefMarker,
     model_is_complete,
@@ -61,10 +60,6 @@ def conformance_error(descriptor: CapabilityKindDescriptor, impl: type) -> str |
 
 def _contract_error(descriptor: CapabilityKindDescriptor, impl: type) -> str | None:
     contract = descriptor.implementation_contract
-    if not isinstance(contract, type):
-        raise StateError(
-            f"the {descriptor.kind} descriptor's implementation_contract is {contract!r}, which is not a class"
-        )
     if not issubclass(impl, contract):
         return f"it does not derive from {contract.__name__}, the {descriptor.kind} implementation contract"
     return None
@@ -121,10 +116,8 @@ def _model_error(
     descriptor: CapabilityKindDescriptor,
     impl: type,
     attribute_name: str,
-    contract: ConfigContract | None,
+    contract: ConfigContract,
 ) -> str | None:
-    if contract is None:
-        raise StateError(f"the {descriptor.kind} descriptor has no contract for {attribute_name}")
     model = getattr(impl, attribute_name, None)
     if model is None:
         return (

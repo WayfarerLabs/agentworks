@@ -543,10 +543,14 @@ def _mapping_descriptor(kind: str) -> CapabilityKindDescriptor:
 
 
 def _declared_model(impl: type, attribute_name: str) -> type[BaseModel]:
-    model = getattr(impl, attribute_name, None)
-    if not isinstance(model, type):
-        raise StateError(f"{impl.__name__} declares no {attribute_name}")
-    return cast("type[BaseModel]", model)
+    """The model class ``impl`` declares under ``attribute_name``.
+
+    Both callers read ``impl`` out of a kind's live registry, and the
+    attribute is in that kind's ``required_attributes``, so registration
+    has already checked that it is present, is a class, and derives from
+    the kind's contract base (``conformance.py``'s ``_model_error``).
+    """
+    return cast("type[BaseModel]", getattr(impl, attribute_name))
 
 
 def _build_union(
