@@ -1,6 +1,6 @@
 # CLI Grammar Correction, Functional Requirements
 
-- Status: Revised after operator disposition, ready for artifact re-review
+- Status: Approved by the operator for HLA
 - Date: 2026-08-15
 - Depends on: `cli-surface-study.md`, `prior-art-research.md`, and `future-directions.md`
 
