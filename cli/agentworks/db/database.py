@@ -72,6 +72,9 @@ class Database:
         backs a TAB press and must fail fast rather than block the shell.
         """
         assert timeout is None or read_only, "timeout only applies to the read-only path"
+        self._read_only = read_only
+        self._read_tx_active = False
+        self._tx_depth = 0
         db_path = path or _db.DB_PATH
         if read_only:
             from agentworks.db.backup import _connect_ro, _is_busy
@@ -112,13 +115,11 @@ class Database:
             self._conn = connection
             self._conn.row_factory = sqlite3.Row
             self._conn.execute("PRAGMA foreign_keys = ON")
-            self._tx_depth = 0
             return
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(db_path))
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
-        self._tx_depth = 0
         try:
             self._reject_future_schema()
             self._conn.execute("PRAGMA journal_mode = WAL")
@@ -138,6 +139,10 @@ class Database:
         Inside this context, CRUD methods skip their per-call commits and
         defer to the enclosing transaction.
         """
+        if self._read_only:
+            from agentworks.errors import StateError
+
+            raise StateError("a write transaction requires a writable database", entity_kind="database")
         if self._tx_depth > 0:
             self._tx_depth += 1
             try:
@@ -151,6 +156,29 @@ class Database:
                 yield
         finally:
             self._tx_depth = 0
+
+    @contextmanager
+    def read_transaction(self) -> Iterator[None]:
+        """Hold one snapshot across reads on a read-only database."""
+        from agentworks.errors import StateError
+
+        if not self._read_only:
+            raise StateError(
+                "a read transaction requires a read-only database",
+                entity_kind="database",
+            )
+        if self._read_tx_active:
+            raise StateError("a read transaction cannot be nested", entity_kind="database")
+
+        self._read_tx_active = True
+        try:
+            self._conn.execute("BEGIN")
+            try:
+                yield
+            finally:
+                self._conn.rollback()
+        finally:
+            self._read_tx_active = False
 
     def _commit_unless_in_tx(self) -> None:
         """Commit pending changes unless inside an explicit transaction()."""

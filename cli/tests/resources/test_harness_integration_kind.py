@@ -19,8 +19,8 @@ from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGI
 from agentworks.config import load_config
 from agentworks.errors import ConfigError, NotFoundError
 from agentworks.resources import KIND_REGISTRY, NoUnreferencedDefaultError
+from agentworks.resources.access import ResourceIdentity, resolve_resource
 from agentworks.resources.inspect import (
-    describe_resource,
     list_kinds,
     list_resources,
 )
@@ -130,14 +130,15 @@ def test_resource_kinds_lists_harness_integration(tmp_path: Path) -> None:
     assert row.description
 
 
-def test_resource_describe_renders_the_shell_row(tmp_path: Path) -> None:
+def test_resource_access_resolves_the_shell_row(tmp_path: Path) -> None:
     cfg = load_config(_write_cfg(tmp_path / "config.toml"), warn_issues=False)
     registry = build_registry(cfg)
-    desc = describe_resource(registry, "harness-integration", "shell")
-    assert desc.kind == "harness-integration"
-    assert desc.name == "shell"
-    assert desc.origin is not None
-    assert desc.origin.variant == "built-in"
+    identity = ResourceIdentity("harness-integration", "shell")
+    resolved = resolve_resource(registry, identity)
+    assert resolved.identity is identity
+    assert resolved.resource is registry.lookup("harness-integration", "shell")
+    assert resolved.origin is not None
+    assert resolved.origin.variant == "built-in"
 
 
 def test_old_kind_is_not_an_alias(tmp_path: Path) -> None:
@@ -145,4 +146,4 @@ def test_old_kind_is_not_an_alias(tmp_path: Path) -> None:
     registry = build_registry(cfg)
 
     with pytest.raises(NotFoundError, match="unknown kind 'harness'"):
-        describe_resource(registry, "harness", "shell")
+        resolve_resource(registry, ResourceIdentity("harness", "shell"))

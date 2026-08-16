@@ -102,7 +102,7 @@ def test_auto_declared_resource_has_no_file_to_edit(tmp_path: Path) -> None:
         edit_location(registry, "secret", "tailscale-auth-key")
 
 
-def test_unknown_kind_and_name_reuse_describe_errors(tmp_path: Path) -> None:
+def test_unknown_kind_and_name_use_shared_resource_errors(tmp_path: Path) -> None:
     registry = _registry(tmp_path)
     with pytest.raises(NotFoundError, match="unknown kind"):
         edit_location(registry, "nope", "x")
@@ -199,7 +199,8 @@ def test_cli_edit_requires_editor_env(tmp_path: Path, monkeypatch) -> None:
     assert "$EDITOR is not set" in result.output
 
 
-def test_cli_edit_rejects_token_without_slash(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("token", ["secret", "/npm-token", "secret/"])
+def test_cli_edit_rejects_invalid_identity(token: str, tmp_path: Path, monkeypatch) -> None:
     from typer.testing import CliRunner
 
     from agentworks.cli import app
@@ -209,7 +210,7 @@ def test_cli_edit_rejects_token_without_slash(tmp_path: Path, monkeypatch) -> No
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
     monkeypatch.setenv("EDITOR", "test-editor")
 
-    result = CliRunner().invoke(app, ["resource", "edit", "secret"])
+    result = CliRunner().invoke(app, ["resource", "edit", token])
     assert result.exit_code != 0
     assert "expected KIND/NAME" in str(result.exception)
 

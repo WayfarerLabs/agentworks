@@ -7,8 +7,10 @@ answered by re-walking ``dependencies(context)`` or reading a ``references``
 field off each resource dataclass:
 
 - ``edges_of``: a node's outbound reference edges (who it points at).
+- ``incoming_edges_of``: a node's full inbound reference edges (who points at it).
 - ``dependents_of``: a node's inbound references (who points at it), the
-  replacement for the removed per-resource ``references`` field.
+  reduced compatibility projection that replaced the removed per-resource
+  ``references`` field.
 - ``runtime_reachable_from`` / ``composed_from``: the two transitive closures of
   ``edges_of`` from a node, over what it NEEDS and over what it is MADE OF
   (FR17: an inheritance edge is source composition, not a runtime need). There
@@ -28,7 +30,8 @@ is a pure read of ``_nodes`` (no recomputation). Nodes are keyed by
 capability rows, which carry their exact implementation class in ``impl`` for
 every capability kind, so consumers reach a capability's code off the graph rather
 than the live registry. ``readiness_of`` / ``enablement_of`` return stored
-verdicts; ``edges_of`` / ``dependents_of`` are the two edge directions;
+verdicts; ``edges_of`` / ``incoming_edges_of`` expose full edges in both
+directions while ``dependents_of`` retains its reduced inbound projection;
 ``runtime_reachable_from`` and ``composed_from`` are the two transitive
 closures. The retention was introduced by the 2026-07 registry-readiness
 refactor.
@@ -179,15 +182,17 @@ class _Node:
     """One node in the graph: a published resource keyed by ``(kind, name)``.
 
     ``outbound`` is this node's declared edges (full ``ResourceReference``s,
-    which carry target kind/name, usage, and source). ``inbound`` is the
-    ``ReferenceEntry`` list of who points at this node, derived from the same
-    edge walk and moved off the resource dataclass (caller inventory E).
+    which carry target kind/name, usage, and source). ``incoming`` retains the
+    same full references on their target node. ``inbound`` is the reduced
+    ``ReferenceEntry`` compatibility projection derived from those references
+    and moved off the resource dataclass (caller inventory E).
     ``impl`` is the exact capability implementation class for capability nodes,
     ``None`` otherwise.
     """
 
     key: tuple[str, str]
     outbound: tuple[ResourceReference, ...]
+    incoming: tuple[ResourceReference, ...]
     inbound: tuple[ReferenceEntry, ...]
     enablement: Enablement
     readiness: Readiness
@@ -209,6 +214,11 @@ class DependencyGraph:
         """This node's outbound reference edges. Raises ``KeyError`` on an
         unknown key (callers hold canonical keys from ``iter_kind_items``)."""
         return self._nodes[(kind, name)].outbound
+
+    def incoming_edges_of(self, kind: str, name: str) -> tuple[ResourceReference, ...]:
+        """This node's full incoming reference edges. Raises ``KeyError`` on
+        an unknown key, matching :meth:`edges_of` and :meth:`dependents_of`."""
+        return self._nodes[(kind, name)].incoming
 
     def dependents_of(self, kind: str, name: str) -> tuple[ReferenceEntry, ...]:
         """Who references this node (its inbound ``ReferenceEntry`` list). The
@@ -455,9 +465,9 @@ def build_graph(
     ``all_outbound`` is keyed by source in source-emission order (each
     resource's ``dependencies()`` appended contiguously during the finalize
     walk), so a node's ``outbound`` preserves first-encountered order per LLD
-    (a). ``all_refs`` is keyed by target; ``inbound`` projects each edge to the
-    inbound ``ReferenceEntry`` on its target, preserving that target's
-    incoming order.
+    (a). ``all_refs`` is keyed by target; ``incoming`` retains its full edges
+    and ``inbound`` projects each edge to the compatibility ``ReferenceEntry``
+    shape, both preserving that target's incoming order.
 
     ``readiness`` is the verdict map the fold (:func:`fold_readiness`) produced,
     keyed by node; a node absent from it is stored ``ready`` (a node the fold
@@ -488,6 +498,7 @@ def build_graph(
             nodes[key] = _Node(
                 key=key,
                 outbound=tuple(all_outbound.get(key, ())),
+                incoming=tuple(all_refs.get(key, ())),
                 inbound=tuple(inbound.get(key, ())),
                 enablement=opt_in.get(key, Enablement.enabled),
                 readiness=verdicts.get(key, Readiness.ready()),

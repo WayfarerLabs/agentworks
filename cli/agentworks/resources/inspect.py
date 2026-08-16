@@ -416,38 +416,11 @@ def describe_resource(
     ``used_by`` stays ``None`` and the describe view omits the
     "Used by:" section.
     """
-    from agentworks.errors import NotFoundError
-    from agentworks.resources import KIND_REGISTRY
+    from agentworks.resources.access import ResourceIdentity, resolve_resource
 
-    if kind not in KIND_REGISTRY:
-        known = sorted(KIND_REGISTRY.keys())
-        raise NotFoundError(
-            f"unknown kind {kind!r}",
-            entity_kind="resource-kind",
-            entity_name=kind,
-            hint=f"known kinds: {', '.join(known)}",
-        )
-
-    try:
-        resource = registry.lookup(kind, name)
-    except KeyError:
-        # Tailor the hint: if the kind has any published resources, point
-        # at the scoped list. If it's empty (a known kind with no current
-        # rows), tell the operator directly so they don't run a query
-        # that returns "No resources match.".
-        has_any = any(True for _ in registry.iter_kind_items(kind))
-        if has_any:
-            hint = f"check `agw resource list --kind {kind}` for available names"
-        else:
-            hint = f"no {kind} resources are currently published"
-        raise NotFoundError(
-            f"no {kind} named {name!r} in the registry",
-            entity_kind=kind,
-            entity_name=name,
-            hint=hint,
-        ) from None
-
-    origin = getattr(resource, "origin", None)
+    resolved = resolve_resource(registry, ResourceIdentity(kind=kind, name=name))
+    resource = resolved.resource
+    origin = resolved.origin
     # describe is an EXPLICIT lookup by name, so it always renders the named row
     # even when disabled (an operator debugging a specific disabled resource
     # asked for it by name), annotating its state off the binary opt-in axis.
@@ -530,14 +503,15 @@ def edit_location(registry: Registry, kind: str, name: str) -> tuple[Path, int]:
     - built-in: not on disk in editable form.
     - auto-declared: nothing on disk at all.
 
-    Reuses ``describe_resource``'s validated lookup so unknown kinds and
-    names error identically across the resource group.
+    Uses the shared validated resource resolver so unknown kinds and names
+    retain the resource group's typed errors without constructing a card.
     """
     from agentworks.errors import ValidationError
     from agentworks.resources import KIND_REGISTRY
+    from agentworks.resources.access import ResourceIdentity, resolve_resource
 
-    desc = describe_resource(registry, kind, name)
-    origin = desc.origin
+    resolved = resolve_resource(registry, ResourceIdentity(kind=kind, name=name))
+    origin = resolved.origin
     if origin is None or origin.variant != "operator-declared":
         variant = origin.variant if origin is not None else "unknown-origin"
         # Capability kinds have no declarable form; a sample pointer

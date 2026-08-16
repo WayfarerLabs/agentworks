@@ -327,15 +327,11 @@ def resource_edit(
     from agentworks import output
     from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
-    from agentworks.errors import ValidationError
+    from agentworks.resources.access import parse_resource_identity
     from agentworks.resources.inspect import edit_location
 
-    kind, slash, name = ref.partition("/")
-    if not slash or not name:
-        raise ValidationError(
-            f"expected KIND/NAME, got {ref!r}",
-            hint="Example: agw resource edit secret/npm-token",
-        )
+    identity = parse_resource_identity(ref)
+    kind, name = identity.kind, identity.name
 
     # Same $EDITOR contract as `agw config edit`; checked before the
     # (comparatively slow) registry build so the common misconfiguration

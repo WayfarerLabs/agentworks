@@ -110,18 +110,16 @@ def test_operator_yaml_entry_declared_at_points_at_operator_file(
 # structurally impossible, since config.toml now hard-errors on [apt_sources.*].
 
 
-def test_describe_surfaces_location_for_manifest_entry(tmp_path: Path) -> None:
-    """The describe path surfaces the location for a manifest-loaded
-    entry: an apt plugin source's origin points at its bundled file.
-    """
+def test_resource_access_surfaces_origin_for_manifest_entry(tmp_path: Path) -> None:
+    """Resource access retains a bundled apt source's origin."""
     from agentworks.bootstrap import build_registry
     from agentworks.config import load_config
-    from agentworks.resources.inspect import describe_resource
+    from agentworks.resources.access import ResourceIdentity, resolve_resource
 
     cfg = load_config(_write_operator_config(tmp_path), warn_issues=False)
     registry = build_registry(cfg)
 
-    desc = describe_resource(registry, "apt-source", "github-cli")
+    resolved = resolve_resource(registry, ResourceIdentity("apt-source", "github-cli"))
 
-    assert desc.origin is not None
-    assert desc.origin.source == "agentworks.plugins.apt/manifests/apt-sources.yaml"
+    assert resolved.origin is not None
+    assert resolved.origin.source == "agentworks.plugins.apt/manifests/apt-sources.yaml"

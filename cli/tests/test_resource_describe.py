@@ -15,7 +15,6 @@ import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
-from agentworks.errors import NotFoundError
 from agentworks.resources.inspect import describe_resource
 from tests.conftest import ManifestDoc, write_manifests
 
@@ -75,11 +74,7 @@ def test_describes_operator_declared_resource(tmp_path: Path) -> None:
 
     desc = describe_resource(registry, "secret", "my-key")
 
-    assert desc.kind == "secret"
-    assert desc.name == "my-key"
     assert desc.description == "operator-typed note"
-    assert desc.origin is not None
-    assert desc.origin.variant == "operator-declared"
 
 
 def test_describes_template_kind_description(tmp_path: Path) -> None:
@@ -106,8 +101,6 @@ def test_describes_auto_declared_resource_carries_synth_description(
 
     desc = describe_resource(registry, "secret", "tailscale-auth-key")
 
-    assert desc.origin is not None
-    assert desc.origin.variant == "auto-declared"
     # Phase 2a polish: synth text drives the description column for
     # auto-declared rows.
     assert desc.description.startswith("(auto) ")
@@ -135,8 +128,6 @@ def test_newly_uniform_kinds_auto_declared_default_gets_synth_description(tmp_pa
 
     desc = describe_resource(registry, kind, "default")
 
-    assert desc.origin is not None
-    assert desc.origin.variant == "auto-declared"
     assert desc.description == f"(auto) auto-declared default {kind}"
 
 
@@ -152,41 +143,6 @@ def test_describe_returns_usage_entries(tmp_path: Path) -> None:
     for entry in desc.references:
         assert isinstance(entry.source, tuple) and len(entry.source) == 2
         assert entry.usage
-
-
-# -- Error handling ---------------------------------------------------------
-
-
-def test_unknown_kind_raises_not_found_with_hint(tmp_path: Path) -> None:
-    cfg_file = tmp_path / "config.toml"
-    _write_base(cfg_file)
-    registry = _load(cfg_file)
-
-    with pytest.raises(NotFoundError) as excinfo:
-        describe_resource(registry, "not_a_real_kind", "x")
-
-    assert excinfo.value.entity_kind == "resource-kind"
-    assert excinfo.value.entity_name == "not_a_real_kind"
-    # Hint enumerates the known kinds so the operator can recover
-    # without separately invoking ``agw resource list``.
-    assert "known kinds:" in (excinfo.value.hint or "")
-
-
-def test_unknown_name_under_known_kind_raises_not_found_with_hint(
-    tmp_path: Path,
-) -> None:
-    cfg_file = tmp_path / "config.toml"
-    _write_base(cfg_file)
-    registry = _load(cfg_file)
-
-    with pytest.raises(NotFoundError) as excinfo:
-        describe_resource(registry, "secret", "ghost-secret")
-
-    assert excinfo.value.entity_kind == "secret"
-    assert excinfo.value.entity_name == "ghost-secret"
-    # Hint points the operator at the cross-kind list scoped to this
-    # kind so they can see what *is* available.
-    assert "agw resource list --kind secret" in (excinfo.value.hint or "")
 
 
 # -- CLI surface ------------------------------------------------------------
@@ -238,24 +194,6 @@ def test_cli_describe_unknown_kind_exits_nonzero(tmp_path: Path, monkeypatch) ->
 
     result = CliRunner().invoke(app, ["resource", "describe", "no_such_kind/name"])
     assert result.exit_code != 0
-
-
-def test_cli_describe_rejects_token_without_slash(tmp_path: Path, monkeypatch) -> None:
-    """The single-token grammar is KIND/NAME: a bare kind (or a token
-    with an empty name half) errors with the example hint before any
-    registry work."""
-    from typer.testing import CliRunner
-
-    from agentworks.cli import app
-
-    cfg_file = tmp_path / "config.toml"
-    _write_base(cfg_file)
-    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
-
-    for token in ("secret", "secret/"):
-        result = CliRunner().invoke(app, ["resource", "describe", token])
-        assert result.exit_code != 0
-        assert "expected KIND/NAME" in str(result.exception)
 
 
 def test_an_apt_entry_with_no_description_reads_the_same_as_before(tmp_path: Path) -> None:
