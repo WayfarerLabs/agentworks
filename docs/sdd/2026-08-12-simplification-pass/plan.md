@@ -160,11 +160,41 @@ the sweep instead, per group 4 above.
       `project_origin` the lone undefended consumer of `Origin`'s variant contract, and the real
       inconsistency (seven consumer files defending one contract three ways) is filed as #547 rather
       than fixed in passing.
-- [ ] Delete clearly-interior secrets validation (per-call type checks on in-repo backend returns
+- [x] Delete clearly-interior secrets validation (per-call type checks on in-repo backend returns
       and the annotation-equality plus forbidden-override halves of conformance, S2; lookalike and
       re-scrub checks on our own parsers' outputs, S7), keeping the constructibility and call-shape
       checks at registration with their boundary named. Done when: suite green, every surviving
-      check's docstring names its boundary.
+      check's docstring names its boundary. **Done** (PR #546): suite green, and every surviving
+      check names its boundary. The per-call type checks around in-repo backend returns are gone,
+      with conformance's annotation-equality and return-annotation comparisons and the `@final` MRO
+      walk; what stays at registration is constructibility, contract version, and call shape, named
+      to the channel that actually exists (`plugins.register_plugin` is in the package's public API
+      and seats whatever class it is handed) rather than to a future loader. The headline -739 is a
+      test number and should not be reported alone: production grew +34 lines, 166 of the 305 added
+      being the chartered boundary prose.
+
+      **Both halves of S7 were overturned by executing them, so both checks stay**, and findings.md
+      carries the corrections. The lookalike claim is false: `manifests/loader.py`'s `_StrictLoader`
+      really does emit `datetime.date`, `bytes`, and `set` into a secret's `backend_mappings` from
+      operator-authored YAML tags, and `require_exact_json_value` is the only thing that rejects
+      them. The re-scrub claim is false one layer down: `validate_name("envvar\n")` returns cleanly,
+      because `NAME_RE` anchors with `$` under `re.match`, so the source scrubs were deleted and
+      restored with tests that fail when #542 retires the defect rather than passing silently. A
+      pass finding disproved by running it is the evidence standard working against the pass itself.
+
+      The classification also added two checks rather than removing them, because it found them
+      missing: `preview_operation_resolution` and `predict_resolution` now check their own
+      interaction policy, which makes #523's rule total instead of true by the ordering of unrelated
+      call sites. Two undeclared drops are recorded here so the reassessment does not have to
+      rediscover them: the deleted containment tests included redaction guards, whose invariant now
+      holds because a backend exception escapes `resolve_batch` and ends the command instead of
+      becoming a row (verified by execution); and dropping the returned-mapping check turns a
+      wrong-name mapping from loud-and-terminal into silently soft-missing into the next source,
+      which no producer can do today but is a fail-open direction change. The review round added the
+      two R2.3 regression tests for the retained diagnostic-name screens on `ResolutionOutcome` and
+      `ResolutionPreview`, which the integration tester showed nothing could detect the removal of.
+      Deferred root causes are #542, #544, and #545.
+
 - [ ] Contained gcp test dedup (P5), after the sweep lands: a shared gcp test fixture module. Done
       when: suite green, the extended-operation fake and `_api_error` each defined once.
 - [ ] Contained website test trims (W4, W5, W6, W8), after PR #486 merges (ruling 8): shared fixture
