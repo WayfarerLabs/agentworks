@@ -13,6 +13,14 @@
 > action names a concrete consent boundary. `HarnessSignature` is the two-field `(variable, value)`
 > record, so the Claude Code signature is `HarnessSignature("CLAUDECODE", "1")`. This note preserves
 > the original design record while making the simplification contract authoritative.
+>
+> **Phase 4 completion (PR #556):** The command-owned guide deletion removes `GuideView`, its
+> generic builder, schema/runtime topics, and the `InstanceList`, `State`, `Relationships`,
+> `FieldReference`, and `Sample` variants. With every retained contribution anchored only to its own
+> topic slug, `ConceptAnchor` and the redundant `anchor` field are also removed. The surviving
+> onboarding assessment receives only identity, verdict, instance, and relationship records from its
+> direct projector. The records and APIs below remain historical Phase 1 design, not current
+> requirements.
 
 ## Module and package-data layout
 

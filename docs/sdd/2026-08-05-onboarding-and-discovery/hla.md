@@ -6,6 +6,12 @@
   presentation and guide-failure claims; landed component contracts remain historical implementation
   records.
 
+> **Phase 4 supersession (PR #556):** Selected guide topics no longer contain schema or runtime
+> resource blocks, and names-only discovery no longer adds schema or live resource topics. Authored
+> concept, plugin, and release topics remain; only `concept-onboarding` loads live context, through
+> a direct bounded assessment projector rather than `GuideView`. The live-block and schema-catalog
+> sections below remain as the design record this deletion superseded.
+
 ## Destination
 
 The shipped system has four layers:

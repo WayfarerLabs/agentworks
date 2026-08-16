@@ -130,7 +130,7 @@ def write_cfg(
     ``settings`` is settings-only TOML appended after the ``[operator]``
     block (``[secret_config]``, ``[plugins]``, and so on). Resource
     declarations are ``manifests``, never settings: config.toml carries no
-    resource topics (ADR 0022).
+    resource declarations (ADR 0022).
     """
     pub = config_dir / "id.pub"
     priv = config_dir / "id"

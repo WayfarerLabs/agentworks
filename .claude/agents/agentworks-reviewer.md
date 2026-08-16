@@ -433,17 +433,19 @@ Look for:
 
 #### Guide contribution drift and safety
 
-Changes to a resource kind, capability implementation, plugin, or documented operator workflow must
-update the corresponding colocated `agw guide` contribution. Review the implementation and its guide
-teaching together rather than accepting either in isolation. The `keep-collateral-in-sync` rule
-states the standard, including the consent boundary guide content must never cross.
+Changes to a retained guide concept, workflow, plugin-owned topic, release link, or action must
+update the contribution owned by the relevant core, subsystem, or plugin package. Review the
+implementation and its retained guide teaching together rather than accepting either in isolation.
+The `keep-collateral-in-sync` rule states the standard, including the consent boundary guide content
+must never cross.
 
 Look for:
 
-- Missing topics, or teaching, relationships, examples, and agent contracts that describe behavior
-  which the implementation no longer has.
-- Hand-stated dynamic facts that can drift from the finalized registry, readiness graph, or stored
-  instance rows instead of using the guide's safe projection.
+- Retained teaching, relationships, examples, and agent contracts that describe behavior which the
+  implementation no longer has.
+- Guide content that restates command-owned resource, schema, graph, or runtime facts instead of
+  signposting their current command, or onboarding projection expanded beyond its bounded assessment
+  facts.
 - Content or rendering that resolves or exposes secrets, inspects the workstation, connects to a VM,
   performs remote work, mutates state, or treats rendering as operator consent.
 - Suggested operations that cross a consent boundary without an inert scoped action record, an

@@ -10,19 +10,18 @@ from agentworks.config import Config
 from agentworks.db import Database
 from agentworks.errors import BusyStateError, StateError
 from agentworks.guide import GuideMode, GuideTraversalError
-from agentworks.guide.service import render_guide
-from agentworks.resources import Registry
+from agentworks.guide.assessment import GuideIdentity, OnboardingSnapshot
+from agentworks.guide.service import build_onboarding_snapshot, render_guide
+from agentworks.resources import Origin, Registry
 from agentworks.vms.template import VMTemplate
 from tests.conftest import held_exclusive_lock
 
 
-class _LiveRegistry:
-    is_finalized = True
-
-    def iter_kind_items(self, kind: str):  # noqa: ANN201
-        if kind == "vm-template":
-            return iter((("demo", VMTemplate(name="demo")),))
-        return iter(())
+def _live_registry() -> Registry:
+    registry = Registry.empty()
+    registry.add("vm-template", "demo", VMTemplate(name="demo"), Origin.built_in(source="test"))
+    registry.finalize()
+    return registry
 
 
 def test_read_only_database_handles_uri_significant_path_without_migrating(
@@ -70,14 +69,42 @@ def test_render_guide_constructs_database_read_only(
     monkeypatch.setattr(db_package, "DB_PATH", path)
     monkeypatch.setattr(db_package, "Database", DatabaseSpy)
     response = render_guide(
-        ("vm-template",),
+        ("concept-onboarding",),
         GuideMode.AGENT,
         load_config_fn=lambda: cast("Config", object()),
-        load_registry_fn=lambda config: cast("Registry", _LiveRegistry()),
+        load_registry_fn=lambda config: _live_registry(),
     )
 
     assert response.exit_code == 0
     assert constructed == [True]
+
+
+def test_missing_database_still_projects_finalized_registry_facts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentworks.db as db_package
+    import agentworks.guide.service as guide_service
+
+    monkeypatch.setattr(db_package, "DB_PATH", tmp_path / "absent.db")
+    snapshots: list[OnboardingSnapshot] = []
+
+    def capture(registry: Registry, db: Database) -> OnboardingSnapshot:
+        snapshot = build_onboarding_snapshot(registry, db)
+        snapshots.append(snapshot)
+        return snapshot
+
+    monkeypatch.setattr(guide_service, "build_onboarding_snapshot", capture)
+    response = render_guide(
+        ("concept-onboarding",),
+        GuideMode.AGENT,
+        load_config_fn=lambda: cast("Config", object()),
+        load_registry_fn=lambda config: _live_registry(),
+    )
+
+    assert response.exit_code == 0
+    assert len(snapshots) == 1
+    assert GuideIdentity("vm-template", "demo") in {fact.identity for fact in snapshots[0].resources}
 
 
 def test_render_guide_frames_accidental_read_only_write(
@@ -91,17 +118,17 @@ def test_render_guide_frames_accidental_read_only_write(
     Database(path).close()
     monkeypatch.setattr(db_package, "DB_PATH", path)
 
-    def accidental_write(topic: object, registry: object, db: Database) -> object:
+    def accidental_write(registry: object, db: Database) -> object:
         db.insert_vm("forbidden", site="local", hostname="forbidden")
         raise AssertionError("read-only write unexpectedly succeeded")
 
-    monkeypatch.setattr(guide_service, "build_guide_view", accidental_write)
+    monkeypatch.setattr(guide_service, "build_onboarding_snapshot", accidental_write)
     with pytest.raises(GuideTraversalError):
         render_guide(
-            ("vm-template",),
+            ("concept-onboarding",),
             GuideMode.AGENT,
             load_config_fn=lambda: cast("Config", object()),
-            load_registry_fn=lambda config: cast("Registry", _LiveRegistry()),
+            load_registry_fn=lambda config: _live_registry(),
         )
 
 
@@ -131,14 +158,14 @@ def test_render_guide_degrades_malformed_persisted_vm_json(
     monkeypatch.setattr(db_package, "DB_PATH", path)
 
     response = render_guide(
-        ("concept-management",),
+        ("concept-onboarding",),
         GuideMode.AGENT,
         load_config_fn=lambda: cast("Config", object()),
-        load_registry_fn=lambda config: cast("Registry", _LiveRegistry()),
+        load_registry_fn=lambda config: _live_registry(),
     )
 
     assert response.exit_code == 0
-    assert "concept-management/inventory" in response.markdown
+    assert "concept-onboarding/derived-plan" in response.markdown
 
 
 def test_render_guide_surfaces_busy_not_malformed_under_a_held_lock(
@@ -175,10 +202,10 @@ def test_render_guide_surfaces_busy_not_malformed_under_a_held_lock(
 
     with held_exclusive_lock(path):
         response = render_guide(
-            ("vm-template",),
+            ("concept-onboarding",),
             GuideMode.AGENT,
             load_config_fn=lambda: cast("Config", object()),
-            load_registry_fn=lambda config: cast("Registry", _LiveRegistry()),
+            load_registry_fn=lambda config: _live_registry(),
         )
 
     assert response.exit_code == 0

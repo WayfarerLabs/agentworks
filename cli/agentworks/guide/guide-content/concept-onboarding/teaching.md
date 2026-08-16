@@ -1,6 +1,7 @@
-Progressive onboarding starts with discovery. Read kind and implementation topics, inspect existing
-state, and prefer explicit verification commands when prediction is insufficient. A disabled or
-not-ready item is information, not permission to repair it.
+Progressive onboarding starts with discovery. Read `agw resource kinds --output json` and
+`agw resource list --include-disabled --output json`, inspect existing operational state, and prefer
+explicit verification commands when prediction is insufficient. A disabled or not-ready item is
+information, not permission to repair it.
 
 For a clean setup, follow one visible, repeatable sequence:
 

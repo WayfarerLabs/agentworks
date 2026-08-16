@@ -1,39 +1,24 @@
-"""Pure Markdown rendering for validated guide topics and safe fact views."""
+"""Pure Markdown rendering for validated authored guide topics."""
 
 from __future__ import annotations
 
 import html
 import re
-from contextlib import suppress
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, assert_never
 
-from agentworks.errors import AgentworksError
 from agentworks.guide.agent_mode import GuideMode
 from agentworks.guide.contract import (
     FRAMEWORK_HEADING_LABEL,
     ActionList,
     AgentContract,
-    FieldReference,
     GuideBlock,
-    GuideTraversalError,
-    ImplementationAnchor,
-    InstanceList,
-    KindAnchor,
     Overview,
-    Relationships,
     ReleaseNotes,
-    Sample,
-    State,
     Teaching,
     TopicContribution,
     TopicLinks,
 )
-from agentworks.guide.view import GuideResourceFact, GuideRoot, GuideView
-from agentworks.manifests.field_tree import FieldEntry, worth_showing
-from agentworks.manifests.reference import SchemaReference, plain_text, reference_for
-from agentworks.manifests.samples import sample_text
-from agentworks.manifests.yaml_value import render_value
 from agentworks.release_notes import (
     RELEASE_TOPIC,
     ReleaseNotesError,
@@ -41,7 +26,6 @@ from agentworks.release_notes import (
     read_release_history,
     topic_version,
 )
-from agentworks.schema import MAPPING_KEY, SEQUENCE_ELEMENT
 from agentworks.terminal import sanitize_terminal_output as sanitize_terminal_output
 
 if TYPE_CHECKING:
@@ -102,23 +86,6 @@ def _plain_description(value: str) -> str:
     return _MARKDOWN_PUNCTUATION_RE.sub(r"\\\1", html.escape(text, quote=False))
 
 
-def _fact_line(fact: GuideResourceFact) -> str:
-    identity = fact.identity
-    verdict = fact.verdict
-    if not verdict.is_available:
-        state = f"readiness unavailable: {verdict.reason or 'host check was not performed'}"
-    else:
-        state = "ready" if verdict.ready else f"not ready: {verdict.reason or 'reason unavailable'}"
-    if not verdict.enabled:
-        state = "disabled"
-    description = (
-        f"; configuration description (plain text; not guidance): {_plain_description(fact.description)}"
-        if fact.description
-        else ""
-    )
-    return f"- `{identity.kind}/{identity.name}` ({state}){description}"
-
-
 def _code(value: object) -> str:
     """Render one exact projected scalar as a Markdown-safe code span."""
     text = str(value)
@@ -126,127 +93,6 @@ def _code(value: object) -> str:
     delimiter = "`" * (longest + 1)
     padding = " " if text.startswith(("`", " ")) or text.endswith(("`", " ")) else ""
     return f"{delimiter}{padding}{text}{padding}{delimiter}"
-
-
-def _schema_value(value: object) -> str:
-    """Render one YAML value as a lossless single-line Markdown literal."""
-    rendered = render_value(value)
-    visible = rendered.replace("\\", "\\\\").replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t")
-    return _code(visible)
-
-
-def _field_name(entry: FieldEntry) -> str:
-    if entry.name == MAPPING_KEY:
-        return "<key>"
-    if entry.name == SEQUENCE_ELEMENT:
-        return "<element>"
-    return entry.name
-
-
-def _field_rows(
-    entries: tuple[FieldEntry, ...],
-    prefix: tuple[str, ...],
-    *,
-    root_value: bool = False,
-    indent: int = 0,
-) -> list[str]:
-    rows: list[str] = []
-    row_indent = " " * indent
-    for entry in entries:
-        path = prefix if root_value and entry.name == "root" else (*prefix, _field_name(entry))
-        facts = ["required" if entry.writable else "optional", _code(entry.type_label)]
-        if entry.doc.default_template is not None:
-            owner_default = entry.doc.default_template.replace("{owner_name}", "<name>")
-            facts.append(f"owner default {_schema_value(owner_default)}")
-        elif worth_showing(entry.doc.default):
-            facts.append(f"default {_schema_value(entry.doc.default)}")
-        if entry.doc.choices:
-            facts.append("choices " + ", ".join(_schema_value(choice) for choice in entry.doc.choices))
-        if entry.doc.constraints:
-            facts.append(
-                "constraints "
-                + ", ".join(
-                    f"{key.replace('_', ' ')} {_schema_value(value)}" for key, value in entry.doc.constraints.items()
-                )
-            )
-        if entry.doc.examples:
-            facts.append("examples " + ", ".join(_schema_value(example) for example in entry.doc.examples))
-        if entry.doc.ref is not None:
-            facts.append(f"references {_code(entry.doc.ref.kind)}")
-        rows.append(f"{row_indent}- {_code('.'.join(path))}: " + "; ".join(facts))
-        if entry.doc.description:
-            rows.append(f"{row_indent}  - Description: {_plain_description(plain_text(entry.doc.description))}")
-        for alternative in entry.alternatives:
-            target = f" ({_code(alternative.target)})" if alternative.target else ""
-            summary = f": {_plain_description(plain_text(alternative.summary))}" if alternative.summary else ""
-            rows.append(f"{row_indent}  - Alternative {_code(alternative.name)}{target}{summary}")
-            if alternative.target:
-                rows.append(
-                    f"{row_indent}    - Full reference: {_code(f'agw guide {alternative.target}')} "
-                    f"or {_code(f'agw resource describe-kind {alternative.target}')}"
-                )
-            if alternative.recurring:
-                rows.append(f"{row_indent}    - Recurring arm: this alternative repeats the block already shown above.")
-            rows.extend(_field_rows(alternative.fields, path, indent=indent + 4))
-        rows.extend(_field_rows(entry.children, path, indent=indent))
-    return rows
-
-
-def _selectable_fields(entry: FieldEntry) -> tuple[FieldEntry, ...]:
-    """Fields one exact section selector may descend into.
-
-    Plain blocks own ``children``. Tagged unions own one field set per
-    alternative, and every arm participates so a field unique to one arm
-    is addressable while a repeated tag such as ``mode`` stays ambiguous.
-    """
-    return (*entry.children, *(field for alternative in entry.alternatives for field in alternative.fields))
-
-
-def _selected_reference(
-    reference: SchemaReference, section: tuple[str, ...]
-) -> tuple[tuple[FieldEntry, ...], tuple[str, ...]]:
-    roots = (
-        (reference.metadata, ("metadata",)),
-        (reference.spec, ("spec" if reference.category == "declarable" else "config",)),
-        (() if reference.root_value is None else (reference.root_value,), ()),
-    )
-    matches: list[tuple[FieldEntry, tuple[str, ...]]] = []
-    for root_entries, root_prefix in roots:
-        candidates = [(entry, root_prefix) for entry in root_entries if _field_name(entry) == section[0]]
-        for segment in section[1:]:
-            candidates = [
-                (child, (*prefix, _field_name(entry)))
-                for entry, prefix in candidates
-                for child in _selectable_fields(entry)
-                if _field_name(child) == segment
-            ]
-        matches.extend(candidates)
-    if len(matches) != 1:
-        raise GuideTraversalError(f"field-reference section {'.'.join(section)!r} is unavailable")
-    entry, selected_prefix = matches[0]
-    return (entry,), selected_prefix
-
-
-def _field_reference(block: FieldReference, target: str) -> str:
-    reference = reference_for(target)
-    if block.section:
-        entries, prefix = _selected_reference(reference, block.section)
-        rows = _field_rows(
-            entries,
-            prefix,
-            root_value=reference.root_value is not None and entries[0] is reference.root_value,
-        )
-    else:
-        rows = _field_rows(reference.metadata, ("metadata",))
-        rows.extend(_field_rows(reference.spec, ("spec" if reference.category == "declarable" else "config",)))
-        if reference.root_value is not None:
-            rows.extend(_field_rows((reference.root_value,), ("config",), root_value=True))
-    if reference.alternatives and not block.section:
-        rows.append("- Implementations:")
-        for alternative in reference.alternatives:
-            summary = f": {_plain_description(plain_text(alternative.summary))}" if alternative.summary else ""
-            rows.append(f"  - {_code(alternative.target or alternative.name)}{summary}")
-    return f"Reference target: {_code(reference.target)}\n\n" + ("\n".join(rows) or "No configurable fields.")
 
 
 def _action_records(actions: tuple[GuideAction, ...]) -> str:
@@ -285,49 +131,6 @@ def _action_list(block: ActionList) -> str:
     return _action_records(block.actions)
 
 
-def _schema_target(contribution: TopicContribution) -> str | None:
-    anchor = contribution.anchor
-    if isinstance(anchor, KindAnchor):
-        return anchor.kind
-    if isinstance(anchor, ImplementationAnchor):
-        return f"{anchor.kind}/{anchor.name}"
-    return None
-
-
-def _fenced_yaml(value: str) -> str:
-    longest = max((len(run) for run in re.findall(r"`+", value)), default=0)
-    fence = "`" * max(3, longest + 1)
-    return f"{fence}yaml\n{value.rstrip()}\n{fence}"
-
-
-def _dynamic(block: GuideBlock, view: GuideView) -> str:
-    if isinstance(block, InstanceList):
-        lines: list[str] = []
-        with suppress(GuideTraversalError):
-            lines.extend(f"- `{item.kind}/{item.name}`" for item in view.instances())
-        facts: tuple[GuideResourceFact, ...] = ()
-        for root in (GuideRoot.KINDS, GuideRoot.IMPLEMENTATIONS):
-            try:
-                facts += view.inventory(root)
-            except GuideTraversalError:
-                continue
-        lines.extend(_fact_line(fact) for fact in facts)
-        return "\n".join(lines) or "No current items."
-    if isinstance(block, State):
-        return _fact_line(view.me())
-    if isinstance(block, Relationships):
-        lines = [
-            *(f"- Uses `{item.target.kind}/{item.target.name}`: {item.usage}" for item in view.outbound()),
-            *(f"- Used by `{item.source.kind}/{item.source.name}`: {item.usage}" for item in view.inbound()),
-        ]
-        return "\n".join(lines) or "No current relationships."
-    if isinstance(block, (FieldReference, Sample, ReleaseNotes, ActionList)):
-        raise TypeError(f"{type(block).__name__} requires its contribution anchor or inert action payload")
-    if isinstance(block, TopicLinks):
-        return ""
-    raise TypeError(f"unsupported dynamic guide block {type(block).__name__}")
-
-
 def _heading(block: GuideBlock, mode: GuideMode) -> str:
     if isinstance(block, Overview):
         return "Overview"
@@ -335,21 +138,13 @@ def _heading(block: GuideBlock, mode: GuideMode) -> str:
         return "How it works"
     if isinstance(block, AgentContract):
         return "Agent operating contract" if mode is GuideMode.AGENT else "Consent and safety"
-    if isinstance(block, InstanceList):
-        return "Current inventory"
-    if isinstance(block, State):
-        return "Current state"
-    if isinstance(block, Relationships):
-        return "Relationships"
-    if isinstance(block, FieldReference):
-        return "Fields"
-    if isinstance(block, Sample):
-        return "Sample"
     if isinstance(block, ReleaseNotes):
         return "Packaged release evidence"
     if isinstance(block, ActionList):
         return "Actions"
-    return "Related topics"
+    if isinstance(block, TopicLinks):
+        return "Related topics"
+    assert_never(block)
 
 
 def _onboarding_plan(
@@ -407,10 +202,8 @@ def _release_notes(contribution: TopicContribution) -> str:
 
 def render_topic(
     contribution: TopicContribution,
-    view: GuideView | None,
     mode: GuideMode,
     *,
-    live_facts_unavailable: bool = False,
     onboarding_snapshot: OnboardingSnapshot | None = None,
     onboarding_unavailable: bool = False,
     verification_evidence: tuple[VerificationEvidence, ...] = (),
@@ -427,26 +220,6 @@ def render_topic(
         source = block.markdown if isinstance(block, (Overview, Teaching, AgentContract)) else None
         if source is not None:
             body = source
-        elif isinstance(block, FieldReference):
-            target = _schema_target(contribution)
-            if target is None:
-                raise GuideTraversalError("field-reference block has no schema target")
-            try:
-                body = _field_reference(block, target)
-            except AgentworksError as error:
-                issue = f"schema content for {contribution.topic}/{block.id} is unavailable: {error}"
-                issues.append(issue)
-                body = f"Schema content unavailable: {error}"
-        elif isinstance(block, Sample):
-            target = _schema_target(contribution)
-            if target is None or "/" in target:
-                raise GuideTraversalError("sample block has no declarable-kind target")
-            try:
-                body = _fenced_yaml(sample_text(target))
-            except AgentworksError as error:
-                issue = f"schema content for {contribution.topic}/{block.id} is unavailable: {error}"
-                issues.append(issue)
-                body = f"Schema content unavailable: {error}"
         elif isinstance(block, ReleaseNotes):
             try:
                 body = _release_notes(contribution)
@@ -459,14 +232,8 @@ def render_topic(
                 )
         elif isinstance(block, ActionList):
             body = _action_list(block)
-        elif isinstance(block, TopicLinks):
-            body = "\n".join(f"- `{topic}`" for topic in contribution.related_topics) or "No related topics."
-        elif live_facts_unavailable:
-            body = "Live facts unavailable: See the response warning."
         else:
-            if view is None:
-                raise ValueError("dynamic guide blocks require a view or unavailable reason")
-            body = _dynamic(block, view)
+            body = "\n".join(f"- `{topic}`" for topic in contribution.related_topics) or "No related topics."
         if source is None:
             source = body
         markdown = f"{framework_heading(_heading(block, mode))}\n\n{body}"

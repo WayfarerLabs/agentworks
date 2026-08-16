@@ -7,8 +7,6 @@ from importlib.resources import files
 from agentworks.guide.contract import (
     AgentContract,
     BlockId,
-    ConceptAnchor,
-    InstanceList,
     Overview,
     Teaching,
     TopicContribution,
@@ -28,12 +26,10 @@ def guide_contributions() -> tuple[TopicContribution, ...]:
             TopicSlug("concept-secrets"),
             "Secrets",
             "Understand secret declarations, sources, and typed proof without exposing secret values.",
-            ConceptAnchor("concept-secrets"),
             (
                 Overview(BlockId("overview"), _markdown("overview")),
                 AgentContract(BlockId("agent-contract"), _markdown("agent-contract")),
                 Teaching(BlockId("teaching"), _markdown("teaching")),
-                InstanceList(BlockId("inventory")),
             ),
         ),
     )

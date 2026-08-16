@@ -5,6 +5,12 @@
   #444, boundary default filling from PR #446, and git-token structural unions from PR #455
 - Parent design: `hla.md` and `guide-contract-lld.md`
 
+> **Phase 4 supersession (PR #556):** This adapter's entire guide presentation surface is deleted.
+> `FieldReference`, `Sample`, schema-derived topics, and `describable_targets` have no retained
+> guide consumer. The underlying schema/reference/sample services remain command-owned by
+> `agw resource describe-kind`, `agw resource sample`, and `agw resource schema`; the design below
+> is the historical record of the removed adapter.
+
 ## Scope
 
 This adapter closes the narrow Phase 1 release gate created when the automated resource migrator was

@@ -85,3 +85,7 @@ name per line, no header, no formatting, and no round-trips that make pressing T
 `agw resource list` is the one deliberate divergence: it emits `kind/name`, because two kinds can
 publish the same name, and every backend slices the prefix off shell-side. A registry-backed
 completer that forgets the slice emits `kind/name` candidates.
+
+Guide topic completion is intentionally authored-only: `agw guide --names-only` emits installed
+core, plugin-authored, and packaged release-note topics without loading configuration, registry, or
+state. Resource and kind completion use their command-owned list surfaces instead.

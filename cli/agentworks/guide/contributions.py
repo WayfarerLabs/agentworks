@@ -10,11 +10,9 @@ from agentworks.guide.contract import (
     ActionList,
     AgentContract,
     BlockId,
-    ConceptAnchor,
     ConsentBoundary,
     GuideAction,
     GuideBlock,
-    InstanceList,
     Overview,
     ReleaseNotes,
     Teaching,
@@ -51,7 +49,6 @@ def _concept(
     title: str,
     summary: str,
     *,
-    inventory: bool = False,
     release_notes: bool = False,
     related_topics: tuple[str, ...] = (),
     actions: tuple[GuideAction, ...] = (),
@@ -61,8 +58,6 @@ def _concept(
         AgentContract(BlockId("agent-contract"), _markdown(slug, "agent-contract")),
         Teaching(BlockId("teaching"), _markdown(slug, "teaching")),
     )
-    if inventory:
-        blocks += (InstanceList(BlockId("inventory")),)
     if release_notes:
         blocks += (ReleaseNotes(BlockId("release-notes")),)
     if actions:
@@ -73,7 +68,6 @@ def _concept(
         TopicSlug(slug),
         title,
         summary,
-        ConceptAnchor(slug),
         blocks,
         tuple(TopicSlug(topic) for topic in related_topics),
     )
@@ -204,12 +198,12 @@ def _migration_actions() -> tuple[GuideAction, ...]:
                 ),
                 ActionInput(
                     "MANIFEST_KIND",
-                    "The pre-recorded declarable kind for the live sample and field reference.",
+                    "The pre-recorded declarable kind for agw resource sample and describe-kind.",
                     True,
                 ),
                 ActionInput(
                     "CAPABILITY_TARGET",
-                    "The optional kind/name field-reference target when the manifest has tagged capability config.",
+                    "The optional kind/name describe-kind target when the manifest has tagged capability config.",
                     False,
                 ),
                 ActionInput(
@@ -220,17 +214,17 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             ),
             ConsentBoundary.MUTATE_AGENTWORKS,
             None,
-            "MANIFEST_PATH contains one resource rewritten against the live sample and field reference for "
-            "MANIFEST_KIND and, when present, the separate field reference for CAPABILITY_TARGET. "
+            "MANIFEST_PATH contains one resource rewritten against agw resource sample and describe-kind for "
+            "MANIFEST_KIND and, when present, describe-kind for CAPABILITY_TARGET. "
             "Any retired presence shape uses the documented field mapping, including the outer-null mode mapping. "
             "A git-credential token uses the canonical tagged secret arm; a version 0.13 outer token null is "
             "deleted or rewritten as token: {mode: secret}, while an existing scalar's secret name is preserved. "
             "EXPECTED_IDENTITIES remains byte-for-byte unchanged.",
             None,
             "Keep the last validated manifest set and do not remove any retired TOML section.",
-            "Edit only MANIFEST_PATH, whether it is pre-existing or TOML-derived. Use the live sample and "
-            "field-reference topic for MANIFEST_KIND. When tagged capability config is present, also use the "
-            "separate field-reference topic for CAPABILITY_TARGET. Replace a retired service_principal, "
+            "Edit only MANIFEST_PATH, whether it is pre-existing or TOML-derived. Use agw resource sample "
+            "MANIFEST_KIND and agw resource describe-kind MANIFEST_KIND. When tagged capability config is "
+            "present, also use agw resource describe-kind CAPABILITY_TARGET. Replace a retired service_principal, "
             "credentials, or vm_host shape with auth service-principal, auth access-key, or placement ssh, "
             "respectively, moving the retired value's fields into the selected arm. For an outer explicit null, "
             "delete the retired line and write auth ambient, auth "
@@ -242,7 +236,7 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             "Require "
             "MANIFEST_PATH to equal the selected "
             "EXPECTED_IDENTITIES entry's pre-recorded file. Never add, remove, or change a baseline entry. Do "
-            "not copy a schema from this migration topic.",
+            "not copy schema text from this guide topic.",
         ),
         GuideAction(
             ActionId("review-null-secret-fields"),
@@ -265,7 +259,8 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             "Leave the site manifests unchanged and block cutover until the intent can be established.",
             "Inspect only SITE_MANIFESTS. Classify Proxmox token_secret, Azure auth.mode and service-principal "
             "auth.secret, AWS auth.mode and access-key auth.access_key_secret, and Lima placement.mode against "
-            "the live implementation field references. Omitted auth selects ambient; omitted placement selects "
+            "agw resource describe-kind for the affected implementations. Omitted auth selects ambient; "
+            "omitted placement selects "
             "local. An outer explicit null means auth ambient, auth ambient, or placement local, respectively. "
             "Inside a credential arm, an omitted or null secret reference selects its well-known default name. "
             "If a retired service_principal, credentials, or vm_host shape remains, record its required current "
@@ -273,7 +268,8 @@ def _migration_actions() -> tuple[GuideAction, ...]:
         ),
         GuideAction(
             ActionId("remove-retired-sections"),
-            "Every manifest has been rewritten against the live references and all authentication, placement, "
+            "Every manifest has been rewritten against the command-owned schema and sample references and all "
+            "authentication, placement, "
             "and secret-reference choices have been reviewed.",
             (
                 ActionInput("CONFIG_PATH", "The config.toml file selected for final cutover.", True),
@@ -474,7 +470,6 @@ def guide_contributions() -> tuple[TopicContribution, ...]:
             "concept-onboarding",
             "Agentworks onboarding",
             "Start safely, assess current adoption, and use one durable authorization envelope for in-scope work.",
-            inventory=True,
             related_topics=(
                 "concept-source-review",
                 "concept-manifesto",
@@ -486,7 +481,6 @@ def guide_contributions() -> tuple[TopicContribution, ...]:
             "concept-management",
             "Resource management",
             "Configure and operate declared resources, capability implementations, and live instances deliberately.",
-            inventory=True,
             related_topics=("concept-migration",),
         ),
         _concept(

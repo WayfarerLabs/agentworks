@@ -15,8 +15,50 @@ from agentworks.guide.contract import (
     is_valid_topic_slug,
     validate_guide_action,
 )
-from agentworks.guide.view import GuideIdentity, GuideInstanceFact, GuideRelationship, GuideResourceFact
 from agentworks.resource_names import MAX_RESOURCE_NAME_LENGTH, RESOURCE_NAME_RE
+
+
+@dataclass(frozen=True, slots=True)
+class GuideIdentity:
+    """One resource or stored-instance identity used by onboarding."""
+
+    kind: str
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
+class GuideVerdict:
+    """Enablement and readiness facts used by onboarding."""
+
+    enabled: bool
+    ready: bool
+    reason: str | None
+    is_available: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class GuideResourceFact:
+    """A bounded finalized-registry resource fact used by onboarding."""
+
+    identity: GuideIdentity
+    verdict: GuideVerdict
+
+
+@dataclass(frozen=True, slots=True)
+class GuideRelationship:
+    """One finalized dependency edge used by onboarding."""
+
+    source: GuideIdentity
+    target: GuideIdentity
+    usage: str
+
+
+@dataclass(frozen=True, slots=True)
+class GuideInstanceFact:
+    """One stored handler-owned instance identity used by onboarding."""
+
+    kind: str
+    name: str
 
 
 class OnboardingStatus(Enum):
@@ -47,7 +89,7 @@ class VerificationEvidence:
 
 @dataclass(frozen=True, slots=True)
 class OnboardingSnapshot:
-    """Bounded facts composed from anchor-scoped guide views."""
+    """Bounded facts projected directly for the onboarding assessment."""
 
     resources: tuple[GuideResourceFact, ...]
     instances: tuple[GuideInstanceFact, ...]
@@ -227,8 +269,8 @@ _ACTION_RECORDS = (
         "and data is an object. Require matching session, template, VM, workspace, and Agentworks-managed agent "
         "identity, plus data.session.status exactly running.",
         ("agw", "session", "describe", "$SESSION_NAME", "--output", "json"),
-        "Create or start nothing. Keep the exact input checklist and command for later, and use the live VM "
-        "and session topics for manual preparation.",
+        "Create or start nothing. Keep the exact input checklist and command for later, and use `agw vm --help` "
+        "and `agw session --help` for manual preparation.",
     ),
 )
 
@@ -365,7 +407,7 @@ def assess_onboarding(
             OnboardingFinding(
                 GuideIdentity("onboarding", "projected-state"),
                 OnboardingStatus.UNVERIFIABLE,
-                "The supplied guide view exposes no assessable facts.",
+                "The supplied onboarding snapshot exposes no assessable facts.",
             )
         )
 

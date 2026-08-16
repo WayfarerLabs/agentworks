@@ -434,3 +434,17 @@ Before encoding any constraint, first ask whether the forbidden combination shou
 meaning. Then protect the common spelling with defaults, scalar shorthands, or untagged structural
 unions. Finally weigh earlier editor feedback against the manifest cost paid by every operator. The
 permanent, worked rule lives in `cli/agentworks/capabilities/README.md`.
+
+## 2026-08-16: guide-only target enumeration was correctly deleted
+
+The command-owned guide deletion supersedes this lock's instruction to retain `describable_targets`.
+That function existed only to enumerate schema-derived `agw guide` topics; those topics and their
+`FieldReference` and `Sample` blocks are now removed. Keeping an otherwise orphaned enumerator would
+preserve the deleted presentation layer without a consumer.
+
+The schema facts remain owned by the resource commands. `agw resource describe-kind <target>`
+resolves one requested kind or implementation through `reference_for`, whose
+`capability_kind_reference` and `implementation_reference` paths remain live, while declarable-kind
+enumeration remains a registry concern. This dated entry supersedes only the earlier reservation of
+`describable_targets`; the schema services retained by command callers remain part of the shipped
+contract.

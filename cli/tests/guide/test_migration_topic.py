@@ -115,7 +115,6 @@ def test_migration_actions_make_inventory_backups_and_verification_distinct() ->
     ]
     assert edit.manual_steps is not None
     assert "pre-existing or TOML-derived expected identity" in edit.required_inputs[0].description
-    assert "separate field-reference topic" in edit.manual_steps
     assert "whether it is pre-existing or TOML-derived" in edit.manual_steps
     assert "delete the retired line and write auth ambient, auth ambient, or placement local" in edit.manual_steps
     assert "No minted arm exists" in edit.manual_steps
@@ -425,8 +424,8 @@ def test_migration_teaching_covers_cutover_validation_backends_and_auth_choices(
 
 def test_migration_action_payload_is_mode_identical() -> None:
     topic = _topic("concept-migration")
-    human = render_topic(topic, None, GuideMode.HUMAN)
-    agent = render_topic(topic, None, GuideMode.AGENT)
+    human = render_topic(topic, GuideMode.HUMAN)
+    agent = render_topic(topic, GuideMode.AGENT)
 
     human_actions = next(block for block in human.blocks if block.key.block_id == "actions")
     agent_actions = next(block for block in agent.blocks if block.key.block_id == "actions")

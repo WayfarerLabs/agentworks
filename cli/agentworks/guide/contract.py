@@ -28,8 +28,6 @@ _MAX_TOPIC_MARKDOWN_BYTES = 256 * 1024
 _MAX_BLOCKS = 64
 _MAX_RELATED_TOPICS = 64
 _MAX_TOPIC_SLUG_BYTES = 63 + 1 + MAX_RESOURCE_NAME_LENGTH
-_MAX_SECTION_ITEMS = 32
-_MAX_SECTION_ITEM_BYTES = 256
 _MAX_ACTIONS = 32
 _MAX_ACTION_BYTES = 128 * 1024
 _MAX_ACTION_INPUTS = 32
@@ -61,10 +59,6 @@ class InvalidTopicSlugError(GuideContributionError):
     """A contribution uses an invalid or mismatched topic slug."""
 
 
-class InvalidAnchorError(GuideContributionError):
-    """A contribution uses an invalid anchor."""
-
-
 class InvalidBlockError(GuideContributionError):
     """A contribution uses an invalid block."""
 
@@ -87,7 +81,7 @@ class UnknownGuideTopicError(NotFoundError):
 
 
 class GuideTraversalError(ValidationError):
-    """The current guide anchor does not permit a requested traversal."""
+    """The current guide projection cannot complete a requested traversal."""
 
 
 def is_valid_topic_segment(value: object) -> bool:
@@ -116,31 +110,6 @@ def is_valid_topic_slug(value: object) -> bool:
 
 
 @dataclass(frozen=True, slots=True)
-class ConceptAnchor:
-    name: str
-
-
-@dataclass(frozen=True, slots=True)
-class KindAnchor:
-    kind: str
-
-
-@dataclass(frozen=True, slots=True)
-class ResourceAnchor:
-    kind: str
-    name: str
-
-
-@dataclass(frozen=True, slots=True)
-class ImplementationAnchor:
-    kind: str
-    name: str
-
-
-type TopicAnchor = ConceptAnchor | KindAnchor | ResourceAnchor | ImplementationAnchor
-
-
-@dataclass(frozen=True, slots=True)
 class Overview:
     id: BlockId
     markdown: str
@@ -159,32 +128,6 @@ class AgentContract:
 
 
 @dataclass(frozen=True, slots=True)
-class InstanceList:
-    id: BlockId
-
-
-@dataclass(frozen=True, slots=True)
-class State:
-    id: BlockId
-
-
-@dataclass(frozen=True, slots=True)
-class Relationships:
-    id: BlockId
-
-
-@dataclass(frozen=True, slots=True)
-class FieldReference:
-    id: BlockId
-    section: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class Sample:
-    id: BlockId
-
-
-@dataclass(frozen=True, slots=True)
 class ReleaseNotes:
     id: BlockId
 
@@ -200,19 +143,7 @@ class TopicLinks:
     id: BlockId
 
 
-type GuideBlock = (
-    Overview
-    | Teaching
-    | AgentContract
-    | InstanceList
-    | State
-    | Relationships
-    | FieldReference
-    | Sample
-    | ReleaseNotes
-    | ActionList
-    | TopicLinks
-)
+type GuideBlock = Overview | Teaching | AgentContract | ReleaseNotes | ActionList | TopicLinks
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,7 +151,6 @@ class TopicContribution:
     topic: TopicSlug
     title: str
     summary: str
-    anchor: TopicAnchor
     blocks: tuple[GuideBlock, ...]
     related_topics: tuple[TopicSlug, ...] = ()
 
@@ -665,32 +595,11 @@ def _action_bytes(action: GuideAction) -> int:
     return sum(len(value.encode("utf-8")) for value in values)
 
 
-def _parse_anchor(value: object, source: str, topic: str) -> TopicAnchor:
-    data = _mapping(value, {"type", "name", "kind"}, {"type"}, source=source, topic=topic, path="anchor")
-    discriminator = data["type"]
-    if type(discriminator) is not str:
-        raise _error(InvalidAnchorError, source, topic, "anchor.type", "has an unknown discriminator")
-    if discriminator == "concept":
-        data = _mapping(value, {"type", "name"}, {"type", "name"}, source=source, topic=topic, path="anchor")
-        return ConceptAnchor(_string(data["name"], source=source, topic=topic, path="anchor.name"))
-    if discriminator == "kind":
-        data = _mapping(value, {"type", "kind"}, {"type", "kind"}, source=source, topic=topic, path="anchor")
-        return KindAnchor(_string(data["kind"], source=source, topic=topic, path="anchor.kind"))
-    if discriminator in {"resource", "implementation"}:
-        data = _mapping(
-            value, {"type", "kind", "name"}, {"type", "kind", "name"}, source=source, topic=topic, path="anchor"
-        )
-        kind = _string(data["kind"], source=source, topic=topic, path="anchor.kind")
-        name = _string(data["name"], source=source, topic=topic, path="anchor.name")
-        return ResourceAnchor(kind, name) if discriminator == "resource" else ImplementationAnchor(kind, name)
-    raise _error(InvalidAnchorError, source, topic, "anchor.type", "has an unknown discriminator")
-
-
 def _parse_block(value: object, source: str, topic: str, index: int) -> GuideBlock:
     path = f"blocks[{index}]"
     data = _mapping(
         value,
-        {"type", "id", "markdown", "section", "actions"},
+        {"type", "id", "markdown", "actions"},
         {"type", "id"},
         source=source,
         topic=topic,
@@ -701,11 +610,6 @@ def _parse_block(value: object, source: str, topic: str, index: int) -> GuideBlo
         "overview",
         "teaching",
         "agent-contract",
-        "instance-list",
-        "state",
-        "relationships",
-        "field-reference",
-        "sample",
         "release-notes",
         "action-list",
         "topic-links",
@@ -747,35 +651,6 @@ def _parse_block(value: object, source: str, topic: str, index: int) -> GuideBlo
         if discriminator == "teaching":
             return Teaching(BlockId(block_id), markdown)
         return AgentContract(BlockId(block_id), markdown)
-    if discriminator == "field-reference":
-        exact = _mapping(value, {"type", "id", "section"}, {"type", "id"}, source=source, topic=topic, path=path)
-        raw = exact.get("section", ())
-        if type(raw) not in {tuple, list}:
-            raise _error(InvalidBlockError, source, topic, f"{path}.section", "must contain non-blank strings")
-        section = cast("list[object] | tuple[object, ...]", raw)
-        if len(section) > _MAX_SECTION_ITEMS:
-            raise _error(
-                InvalidBlockError,
-                source,
-                topic,
-                f"{path}.section",
-                f"exceeds the {_MAX_SECTION_ITEMS}-item limit",
-            )
-        normalized_items: list[str] = []
-        for section_index, item in enumerate(section):
-            item_path = f"{path}.section[{section_index}]"
-            normalized_items.append(
-                _bounded_string(
-                    item,
-                    source=source,
-                    topic=topic,
-                    path=item_path,
-                    max_bytes=_MAX_SECTION_ITEM_BYTES,
-                    error_type=InvalidBlockError,
-                ).strip()
-            )
-        normalized = tuple(normalized_items)
-        return FieldReference(BlockId(block_id), normalized)
     if discriminator == "action-list":
         exact = _mapping(
             value,
@@ -811,14 +686,6 @@ def _parse_block(value: object, source: str, topic: str, index: int) -> GuideBlo
             )
         return ActionList(BlockId(block_id), actions)
     _mapping(value, {"type", "id"}, {"type", "id"}, source=source, topic=topic, path=path)
-    if discriminator == "instance-list":
-        return InstanceList(BlockId(block_id))
-    if discriminator == "state":
-        return State(BlockId(block_id))
-    if discriminator == "relationships":
-        return Relationships(BlockId(block_id))
-    if discriminator == "sample":
-        return Sample(BlockId(block_id))
     if discriminator == "release-notes":
         return ReleaseNotes(BlockId(block_id))
     return TopicLinks(BlockId(block_id))
@@ -855,11 +722,6 @@ _BLOCK_DISCRIMINATORS: dict[type[GuideBlock], str] = {
     Overview: "overview",
     Teaching: "teaching",
     AgentContract: "agent-contract",
-    InstanceList: "instance-list",
-    State: "state",
-    Relationships: "relationships",
-    FieldReference: "field-reference",
-    Sample: "sample",
     ReleaseNotes: "release-notes",
     ActionList: "action-list",
     TopicLinks: "topic-links",
@@ -870,27 +732,15 @@ def _decoded_contribution(value: TopicContribution) -> dict[str, object]:
     """Project a typed contribution into the decoded shape the parser reads.
 
     Contributions arrive as frozen ``TopicContribution`` records, while the
-    contract's rules (byte caps, markdown safety, anchor grammar) are defined
+    contract's rules (byte caps and markdown safety) are defined
     over the decoded shape, so the catalog converts before it validates.  The
     record's own types carry its shape; what the parser then judges is content.
     """
-    anchor = value.anchor
-    anchor_value: dict[str, object]
-    if isinstance(anchor, ConceptAnchor):
-        anchor_value = {"type": "concept", "name": anchor.name}
-    elif isinstance(anchor, KindAnchor):
-        anchor_value = {"type": "kind", "kind": anchor.kind}
-    elif isinstance(anchor, ResourceAnchor):
-        anchor_value = {"type": "resource", "kind": anchor.kind, "name": anchor.name}
-    else:
-        anchor_value = {"type": "implementation", "kind": anchor.kind, "name": anchor.name}
     block_values: list[dict[str, object]] = []
     for block in value.blocks:
         block_value: dict[str, object] = {"type": _BLOCK_DISCRIMINATORS[type(block)], "id": block.id}
         if isinstance(block, (Overview, Teaching, AgentContract)):
             block_value["markdown"] = block.markdown
-        elif isinstance(block, FieldReference):
-            block_value["section"] = block.section
         elif isinstance(block, ActionList):
             block_value["actions"] = [_action_record_value(action) for action in block.actions]
         block_values.append(block_value)
@@ -898,7 +748,6 @@ def _decoded_contribution(value: TopicContribution) -> dict[str, object]:
         "topic": value.topic,
         "title": value.title,
         "summary": value.summary,
-        "anchor": anchor_value,
         "blocks": block_values,
         "related_topics": value.related_topics,
     }
@@ -910,8 +759,8 @@ def parse_topic_contribution(value: object, source: str) -> TopicContribution:
         raise _error(GuideContributionError, "<invalid-source>", None, "source", "must be a non-blank string")
     data = _mapping(
         value,
-        {"topic", "title", "summary", "anchor", "blocks", "related_topics"},
-        {"topic", "title", "summary", "anchor", "blocks"},
+        {"topic", "title", "summary", "blocks", "related_topics"},
+        {"topic", "title", "summary", "blocks"},
         source=source,
         topic=None,
         path="",
@@ -926,16 +775,8 @@ def parse_topic_contribution(value: object, source: str) -> TopicContribution:
     )
     if not is_valid_topic_slug(topic):
         raise _error(InvalidTopicSlugError, source, topic, "topic", "is not a valid topic slug")
-    anchor = _parse_anchor(data["anchor"], source, topic)
-    expected = anchor.name if isinstance(anchor, ConceptAnchor) else anchor.kind
-    if isinstance(anchor, (ResourceAnchor, ImplementationAnchor)):
-        expected += f"/{anchor.name}"
-    if (
-        topic != expected
-        or isinstance(anchor, ConceptAnchor)
-        and not (topic.startswith("concept-") or topic.startswith("plugin/"))
-    ):
-        raise _error(InvalidTopicSlugError, source, topic, "anchor", "does not match the topic slug")
+    if not (topic.startswith("concept-") or topic.startswith("plugin/")):
+        raise _error(InvalidTopicSlugError, source, topic, "topic", "is not a guide-owned topic slug")
     raw_blocks = data["blocks"]
     if type(raw_blocks) not in {tuple, list}:
         raise _error(InvalidBlockError, source, topic, "blocks", "must be a sequence")
@@ -965,18 +806,7 @@ def parse_topic_contribution(value: object, source: str) -> TopicContribution:
     action_ids = [action.id for block in blocks if isinstance(block, ActionList) for action in block.actions]
     if len(action_ids) != len(set(action_ids)):
         raise _error(InvalidBlockError, source, topic, "blocks", "contains duplicate action IDs")
-    permitted: dict[type[object], tuple[type[object], ...]] = {
-        InstanceList: (ConceptAnchor, KindAnchor, ResourceAnchor, ImplementationAnchor),
-        State: (ResourceAnchor, ImplementationAnchor),
-        Relationships: (ResourceAnchor, ImplementationAnchor),
-        FieldReference: (KindAnchor, ImplementationAnchor),
-        Sample: (KindAnchor,),
-        ReleaseNotes: (ConceptAnchor,),
-    }
     for index, block in enumerate(blocks):
-        supported = permitted.get(type(block))
-        if supported is not None and not isinstance(anchor, supported):
-            raise _error(InvalidBlockError, source, topic, f"blocks[{index}]", "is not supported by this anchor")
         if isinstance(block, ReleaseNotes) and not (
             topic == "concept-release-notes" or topic.startswith("concept-release-notes/v")
         ):
@@ -1026,7 +856,6 @@ def parse_topic_contribution(value: object, source: str) -> TopicContribution:
         TopicSlug(topic),
         title,
         summary,
-        anchor,
         blocks,
         related,
     )

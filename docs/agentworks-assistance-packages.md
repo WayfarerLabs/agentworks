@@ -47,23 +47,25 @@ authorization context needed for Agentworks work.
 troubleshooting, release notes, migration, secrets, and bug reporting. Human mode offers two paths:
 onboarding for a new installation and management for an existing installation. This request does not
 load the topic catalogs, configuration, registry, or state database. Use shell completion or
-`agw guide --names-only` to discover the complete installed topic inventory.
+`agw guide --names-only` to discover the installed authored, plugin-authored, and packaged
+release-note topic inventory.
 
-`concept-onboarding` is the first-setup and current-adoption destination. It contains the startup
-security posture, reports available current facts, and derives the next first-VM or first-session
-step. Its related topics include `concept-source-review`, which separately owns the optional focused
-and full read-only source-review actions.
+`concept-onboarding` is the first-setup and current-adoption destination and the only guide topic
+that projects live context. It contains the startup security posture, derives a bounded assessment
+from finalized registry, relationship, and stored-instance facts, and selects the next first-VM or
+first-session step. Its related topics include `concept-source-review`, which separately owns the
+optional focused and full read-only source-review actions.
 
-A selected topic always renders its installed teaching when that teaching is valid. If
-configuration, the registry, the state database, or live projection is unavailable, the response
-shows one warning, names the omitted topic blocks, and leaves a short placeholder at each omission.
-The command exits 0 because the requested guidance rendered; use `agw doctor` to determine
-installation health. Invalid topic syntax, unknown topics, malformed verification evidence, and
-invalid requested guide content remain errors.
+A selected authored topic renders its installed teaching when that teaching is valid. Topics other
+than `concept-onboarding` do not load configuration, the registry, or the state database. Onboarding
+degrades an unavailable live assessment to one warning while preserving its installed teaching. The
+command exits 0 because the requested guidance rendered; use `agw doctor` to determine installation
+health. Invalid topic syntax, unknown topics, malformed verification evidence, and invalid requested
+guide content remain errors.
 
 `agw guide --names-only` prints one valid topic name per line. It always returns static names and
-adds live resource names when they can be established. A live-context failure omits only those
-best-effort names, emits no diagnostic prose, and does not fail shell completion.
+does not load live context. Raw kind, resource, relationship, schema, and sample discovery belongs
+to the corresponding command completion and inspection surfaces.
 
 ## Maintaining generated packages
 

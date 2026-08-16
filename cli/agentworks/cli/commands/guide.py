@@ -11,10 +11,9 @@ import typer
 
 from agentworks.cli._app import app
 from agentworks.guide.agent_mode import select_guide_mode
-from agentworks.guide.assessment import VerificationEvidence, VerificationOutcome
+from agentworks.guide.assessment import GuideIdentity, VerificationEvidence, VerificationOutcome
 from agentworks.guide.contract import ActionId
 from agentworks.guide.service import render_guide
-from agentworks.guide.view import GuideIdentity
 
 _EVIDENCE_RE = re.compile(
     r"(?P<action>[a-z][a-z0-9-]*):(?P<kind>[a-z][a-z0-9-]*)/"
@@ -67,7 +66,7 @@ def guide(
         ),
     ] = None,
 ) -> None:
-    """Show guide destinations or render selected guidance and safe facts."""
+    """Show guide destinations or render selected authored guidance."""
     explicit: Literal["agent", "human"] | None = None if agent is None else ("agent" if agent else "human")
     mode = select_guide_mode(explicit, os.environ, sys.stdout.isatty())
     verification_evidence = _parse_evidence(evidence or [])

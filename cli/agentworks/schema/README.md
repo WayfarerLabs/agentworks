@@ -22,12 +22,12 @@ model config. This document covers the derivation layer.
 | D7  | Registration conformance        | marker and structural-union checks                 |
 | D8  | Readiness over raw config       | platform `not_ready` implementations               |
 | D9  | Release-scoped migration advice | retired-shape declarations and manifest decode     |
-| D10 | Guides and reference prose      | `docs/guides/` and capability `TopicProse`         |
+| D10 | Reference prose                 | Kind and capability `TopicProse`                   |
 | D11 | Manifest envelope validation    | `manifests/envelope.py`                            |
 | D12 | YAML 1.1 spelling support       | `manifests/emit.py` spelling tables                |
 
-The field tree, `describe-kind`, generated samples, and guide service records consume D3. Add a
-consumer of D3 when possible instead of walking models again.
+The field tree, `describe-kind`, and generated samples consume D3. Add a consumer of D3 when
+possible instead of walking models again.
 
 ## Soundness requirements
 

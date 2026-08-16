@@ -5,17 +5,12 @@ Every schema fact an operator reads is DERIVED (from the model, by
 the paragraphs a human wrote about what a kind or a capability is FOR.
 It is the whole authored layer, and it is deliberately tiny.
 
-**The prose is shared, so it is written voice-neutral.** Two surfaces
-render it: ``agw resource describe-kind`` (a reference surface) and, once
-the onboarding-and-discovery effort's ``agw guide`` lands, its topic pages
-(a teaching surface). Teaching register belongs in that effort's own
-``Teaching`` block, not here; an overview that says "let's start by" reads
-wrong the moment someone hits it looking up a field.
+The prose is written in a voice-neutral reference register for
+``agw resource describe-kind``. An overview that says "let's start by"
+reads wrong when someone is looking up a field.
 
-**Where the third field went.** The onboarding topic-content contract
-names three authored strings: ``title``, ``summary``, and an ``Overview``
-block. The ``summary`` is not here because it already exists: every
-resource kind declares ``ResourceKind.description`` (the line
+**Where the summary went.** It already exists: every resource kind
+declares ``ResourceKind.description`` (the line
 ``agw resource kinds`` prints) and every capability implementation
 declares ``description`` (the line its registry row carries). Restating
 either here would be two authored strings for one fact, which is the drift
@@ -26,13 +21,10 @@ the description.
 strategy, in the domain package that owns the kind; a capability
 implementation's is a ``ClassVar`` on the implementation class; a plugin's
 rides the classes it registers. There is no catalog and no registry here,
-by agreement: the onboarding effort owns the topic envelope (slugs,
-anchors, block vocabulary, related topics, duplicate detection), and a
-second one built here would be the thing it then had to adapt.
+because the command derives its target inventory from the kind and
+capability registries.
 
-Prose is INERT. No placeholders, no interpolation, no templating. If it
-ever needs dynamic content, it adopts the guide's locked-down template
-vocabulary rather than inventing a second dialect.
+Prose is INERT. No placeholders, interpolation, or templating.
 """
 
 from __future__ import annotations
@@ -55,9 +47,8 @@ class TopicProse:
 
     title: str
     """The display title (``"VM sites"``), used as the heading of the
-    field reference and available to the guide's topic pages. The
-    identifier an operator types (``vm-site``) is not this: it is read off
-    the kind."""
+    field reference. The identifier an operator types (``vm-site``) is not
+    this: it is read off the kind."""
 
     overview: str
     """Markdown prose: what this is, what it is for, and what an operator
@@ -72,9 +63,9 @@ class TopicProse:
         cleaned = inspect.cleandoc(self.overview)
         if not self.title.strip() or not cleaned:
             # Enforced rather than documented: an empty title or overview
-            # would render as a blank section on two surfaces, and the
-            # contract's answer for "nothing useful to say" is to
-            # contribute no prose at all, not to contribute empty prose.
+            # would render as a blank section, and the contract's answer
+            # for "nothing useful to say" is to contribute no prose at
+            # all, not to contribute empty prose.
             raise StateError("TopicProse requires a non-empty title and overview")
         object.__setattr__(self, "overview", cleaned)
 

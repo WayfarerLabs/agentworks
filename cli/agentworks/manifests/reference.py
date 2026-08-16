@@ -1,12 +1,10 @@
 """What a kind or a capability implementation accepts, collected once.
 
-The service layer behind BOTH schema-derived operator surfaces: the
-generated sample (``manifests/skeleton.py``, reached through
-``agw resource sample``) and the field reference
-(``manifests/describe.py``, reached through ``agw resource describe-kind``).
-The onboarding effort's ``agw guide`` calls the same functions for its
-``FieldReference`` and ``Sample`` blocks rather than scraping rendered CLI
-output, which is why the records here carry facts and not text.
+The service layer behind both schema-derived operator surfaces: the generated
+sample (``manifests/skeleton.py``, reached through ``agw resource sample``) and
+the field reference (``manifests/describe.py``, reached through
+``agw resource describe-kind``). The records here carry facts and not rendered
+text so both command surfaces derive from the same authority.
 
 One collector, two presenters. The alternative (each surface walking the
 stream itself) is two walks that agree until one of them learns something,
@@ -29,7 +27,7 @@ from typing import TYPE_CHECKING, Literal
 
 from agentworks.errors import ValidationError
 from agentworks.manifests.field_tree import Alternative, FieldEntry, field_tree, root_entry
-from agentworks.manifests.spec_model import declarable_kinds, hosted_capability, metadata_model, spec_model
+from agentworks.manifests.spec_model import hosted_capability, metadata_model, spec_model
 from agentworks.resources import KIND_REGISTRY
 from agentworks.schema import UNSET
 from agentworks.topics import prose_of, summary_of
@@ -44,7 +42,6 @@ __all__ = [
     "FieldEntry",
     "SchemaReference",
     "capability_kind_reference",
-    "describable_targets",
     "implementation_reference",
     "kind_reference",
     "plain_text",
@@ -89,25 +86,6 @@ class SchemaReference:
     """Set when the config IS a value rather than a mapping (a secret
     backend's per-secret mapping may be a bare string), in which case
     ``spec`` is empty and this describes what may be written."""
-
-
-def describable_targets() -> tuple[str, ...]:
-    """Every target :func:`reference_for` accepts, sorted.
-
-    A declared service API rather than something a CLI surface consumes:
-    shell completion for ``describe-kind`` uses the config-free kinds
-    completer (which is deliberately narrower, since it must answer on a
-    host whose config does not load), and the unknown-kind refusal lists
-    the kind registry. This is for a caller that wants to ENUMERATE what
-    can be documented, which is what the guide's catalog does.
-    """
-    from agentworks.capabilities.config import registered_implementations
-
-    targets = list(declarable_kinds())
-    for descriptor in _capability_descriptors():
-        targets.append(descriptor.kind)
-        targets.extend(f"{descriptor.kind}/{name}" for name in registered_implementations(descriptor.kind))
-    return tuple(sorted(targets))
 
 
 def reference_for(target: str) -> SchemaReference:
@@ -208,9 +186,9 @@ def plain_text(text: str) -> str:
 
     Only one transform, and only because it is the one that fires on every
     line: a model's attribute docstrings use RST-style ``double backticks``
-    for code, which markdown consumers (emitted schema descriptions, the
-    guide's topic pages) render as a code span and a plain-text reader sees
-    as noise. The record keeps the author's text; the presenters call this.
+    for code, which markdown consumers render as a code span and a
+    plain-text reader sees as noise. The record keeps the author's text;
+    the presenters call this.
     """
     return text.replace("``", "`")
 
@@ -236,7 +214,7 @@ def _named(metadata: tuple[FieldEntry, ...], kind: str) -> tuple[FieldEntry, ...
     available, and is obviously a placeholder.
 
     Attached to the record rather than handled in a presenter, so both
-    presenters (and the guide) see the same field.
+    command presenters see the same field.
     """
     return tuple(_document_name(entry, kind) if entry.name == "name" else entry for entry in metadata)
 

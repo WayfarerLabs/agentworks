@@ -492,19 +492,19 @@ operator ruling without changing this completed phase's record.
       `GuideView.kind()`, `ConsentBoundary.NONE`, and the three-argument `HarnessSignature` as
       superseded in the active guide LLD and names their surviving replacement shapes. Keep the
       original Phase 1 design text as journey history rather than rewriting it in place.
-- [ ] After corrected PR #548 merges, remove in one effort all 141 fixed blocks approved by
+- [x] After corrected PR #548 merges, remove in one effort all 141 fixed blocks approved by
       `guide-value-survey.md`, the dormant kind fallback, and every runtime resource topic. Keep the
       59 concept, synthesis, navigation, evidence, and action blocks. Replace removed content with
       concise command signposts rather than another presentation layer.
-- [ ] Before deleting `_dynamic_topic` or generic `GuideView`, move the retained onboarding
+- [x] Before deleting `_dynamic_topic` or generic `GuideView`, move the retained onboarding
       assessment to the smallest projector that reproduces its resource, instance, relationship,
       verification, unavailable-state, and next-action behavior. Do not preserve rendered-live-block
       machinery merely to reuse its records.
-- [ ] Delete the contract variants, renderer branches, catalog paths, view surface, and tests whose
+- [x] Delete the contract variants, renderer branches, catalog paths, view surface, and tests whose
       last guide consumer leaves in this wave. Preserve manifest-reference, sample, operational
       JSON, release-note, resource-hook, and assessment records with non-guide or retained
       consumers.
-- [ ] Update permanent guide documentation and command signposts for the temporary unreleased state.
+- [x] Update permanent guide documentation and command signposts for the temporary unreleased state.
       Record that completions and sample configuration are either updated or unaffected. The CLI
       grammar child restores `resource explain` and `graph show`; 0.14.0 must not ship before it.
 - [ ] Run focused guide/completion tests, the full non-integration suite, Ruff, formatting, mypy,

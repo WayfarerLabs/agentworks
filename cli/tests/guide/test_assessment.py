@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import ClassVar, cast
+from typing import cast
 
 import pytest
 from typer.testing import CliRunner
@@ -12,16 +12,16 @@ from typer.testing import CliRunner
 from agentworks.cli import app
 from agentworks.config import Config
 from agentworks.db import Database
-from agentworks.errors import ValidationError
+from agentworks.errors import StateError, ValidationError
 from agentworks.guide import (
     ActionId,
     GuideAction,
     GuideIdentity,
     GuideInstanceFact,
     GuideMode,
-    GuideOrigin,
     GuideRelationship,
     GuideResourceFact,
+    GuideTraversalError,
     GuideVerdict,
     OnboardingSnapshot,
     OnboardingStatus,
@@ -49,9 +49,6 @@ def _fact(
     reason = None if enabled and ready else f"{name} projected reason"
     return GuideResourceFact(
         GuideIdentity(kind, name),
-        "capability" if kind.endswith("backend") else "declarable",
-        None,
-        GuideOrigin("operator-declared", None),
         GuideVerdict(enabled, ready, reason, is_available=available),
     )
 
@@ -72,24 +69,6 @@ def _evidence(action: str, kind: str, name: str, outcome: VerificationOutcome) -
 def _action(action_id: str) -> GuideAction:
     """Look one canonical action up by identity, so ordering is never pinned."""
     return next(action for action in onboarding_actions() if action.id == ActionId(action_id))
-
-
-class _CountedSnapshotFact:
-    comparisons: ClassVar[int] = 0
-
-    def __init__(self, value: int) -> None:
-        self.value = value
-
-    def __hash__(self) -> int:
-        return hash(self.value)
-
-    def __eq__(self, other: object) -> bool:
-        type(self).comparisons += 1
-        return isinstance(other, type(self)) and self.value == other.value
-
-
-class _CountedSnapshotRelationship(_CountedSnapshotFact):
-    comparisons: ClassVar[int] = 0
 
 
 def test_mixed_projected_facts_relationships_and_instances_keep_individual_statuses() -> None:
@@ -585,7 +564,7 @@ def test_action_validation_occurs_only_when_guide_operation_requests_records(
     assert calls == list(module._ACTION_RECORDS)
 
 
-def test_real_views_compose_snapshot_and_render_target_scoped_evidence(
+def test_direct_projection_composes_snapshot_and_renders_target_scoped_evidence(
     monkeypatch: pytest.MonkeyPatch,
     db: Database,
 ) -> None:
@@ -605,6 +584,7 @@ def test_real_views_compose_snapshot_and_render_target_scoped_evidence(
     @dataclass(frozen=True)
     class Node:
         reqs: tuple[ResourceReference, ...] = ()
+        description: str | None = None
         origin: Origin | None = None
 
         def dependencies(self, context: object) -> tuple[ResourceReference, ...]:
@@ -616,7 +596,10 @@ def test_real_views_compose_snapshot_and_render_target_scoped_evidence(
     registry.add(
         "assessment-test",
         "source",
-        Node((ResourceReference("target", "assessment-test", "source uses target", ("assessment-test", "source")),)),
+        Node(
+            (ResourceReference("target", "assessment-test", "source uses target", ("assessment-test", "source")),),
+            description="Source resource.",
+        ),
         origin,
     )
     registry.add("assessment-test", "target", Node(), origin)
@@ -693,7 +676,6 @@ def test_snapshot_does_not_rebuild_global_implementation_inventory_for_each_reso
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import agentworks.guide.service as guide_service
-    import agentworks.guide.view as guide_view
 
     class Handler:
         def __init__(self, category: str) -> None:
@@ -729,7 +711,6 @@ def test_snapshot_does_not_rebuild_global_implementation_inventory_for_each_reso
 
     handlers = {"snapshot-capability": Handler("capability"), "snapshot-resource": Handler("declarable")}
     monkeypatch.setattr(guide_service, "KIND_REGISTRY", handlers)
-    monkeypatch.setattr(guide_view, "KIND_REGISTRY", handlers)
     registry = SnapshotRegistry()
 
     snapshot = build_onboarding_snapshot(registry, SimpleNamespace())  # type: ignore[arg-type]
@@ -740,49 +721,144 @@ def test_snapshot_does_not_rebuild_global_implementation_inventory_for_each_reso
     assert registry.iterated_kinds == ["snapshot-capability", "snapshot-resource"]
 
 
-def test_snapshot_deduplication_keeps_first_seen_order_without_linear_membership_work(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_snapshot_deduplication_keeps_first_seen_order(monkeypatch: pytest.MonkeyPatch) -> None:
     import agentworks.guide.service as guide_service
 
     class Handler:
         category = "declarable"
 
+        def instances(self, db: object, registry: object, resource: object):
+            if cast("SimpleNamespace", resource).name == "first":
+                yield InstanceRef("vm", "a")
+                yield InstanceRef("vm", "b")
+            else:
+                yield InstanceRef("vm", "b")
+                yield InstanceRef("vm", "a")
+
+    class Graph:
+        def readiness_of(self, kind: str, name: str) -> Readiness:
+            return Readiness.ready()
+
+        def enablement_of(self, kind: str, name: str) -> Enablement:
+            return Enablement.enabled
+
+        def edges_of(self, kind: str, name: str):
+            if name == "first":
+                return (SimpleNamespace(kind="snapshot-test", name="second", usage="uses"),)
+            return ()
+
+        def dependents_of(self, kind: str, name: str):
+            if name == "second":
+                return (SimpleNamespace(source=("snapshot-test", "first"), usage="uses"),)
+            return ()
+
     class SnapshotRegistry:
+        is_finalized = True
+        graph = Graph()
+
         def iter_kind_items(self, kind: str):
             assert kind == "snapshot-test"
-            return iter((("first", SimpleNamespace()), ("second", SimpleNamespace())))
+            return iter(
+                (
+                    ("first", SimpleNamespace(name="first")),
+                    ("second", SimpleNamespace(name="second")),
+                )
+            )
 
         def lookup(self, kind: str, name: str) -> object:
             assert kind == "snapshot-test"
-            return SimpleNamespace()
-
-    instance_facts = tuple(_CountedSnapshotFact(value) for value in range(64))
-    relationship_facts = tuple(_CountedSnapshotRelationship(value) for value in range(64))
-    _CountedSnapshotFact.comparisons = 0
-    _CountedSnapshotRelationship.comparisons = 0
-    calls = 0
-
-    def fake_view(*args: object, **kwargs: object) -> SimpleNamespace:
-        nonlocal calls
-        calls += 1
-        facts = instance_facts if calls == 1 else tuple(reversed(instance_facts))
-        relationships = relationship_facts if calls == 1 else tuple(reversed(relationship_facts))
-        return SimpleNamespace(
-            me=lambda: _fact("snapshot-test", str(calls)),
-            instances=lambda: facts,
-            outbound=lambda: relationships if calls == 1 else (),
-            inbound=lambda: () if calls == 1 else relationships,
-        )
+            return SimpleNamespace(name=name)
 
     monkeypatch.setattr(guide_service, "KIND_REGISTRY", {"snapshot-test": Handler()})
-    monkeypatch.setattr(guide_service, "build_guide_view", fake_view)
 
     snapshot = build_onboarding_snapshot(SnapshotRegistry(), SimpleNamespace())  # type: ignore[arg-type]
 
-    captured_instances = cast(tuple[_CountedSnapshotFact, ...], snapshot.instances)
-    captured_relationships = cast(tuple[_CountedSnapshotRelationship, ...], snapshot.relationships)
-    assert tuple(fact.value for fact in captured_instances) == tuple(range(64))
-    assert tuple(relationship.value for relationship in captured_relationships) == tuple(range(64))
-    assert _CountedSnapshotFact.comparisons <= len(instance_facts)
-    assert _CountedSnapshotRelationship.comparisons <= len(relationship_facts)
+    assert snapshot.instances == (GuideInstanceFact("vm", "a"), GuideInstanceFact("vm", "b"))
+    assert snapshot.relationships == (
+        GuideRelationship(
+            GuideIdentity("snapshot-test", "first"),
+            GuideIdentity("snapshot-test", "second"),
+            "uses",
+        ),
+    )
+
+
+def test_snapshot_requires_finalized_registry() -> None:
+    registry = SimpleNamespace(is_finalized=False)
+
+    with pytest.raises(GuideTraversalError):
+        build_onboarding_snapshot(cast("Registry", registry), cast("Database", SimpleNamespace()))
+
+
+def test_missing_finalized_lookup_remains_a_typed_traversal_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    import agentworks.guide.service as guide_service
+
+    class RegistryWithMissingLookup:
+        is_finalized = True
+
+        def iter_kind_items(self, kind: str):
+            return iter((("missing", object()),))
+
+        def lookup(self, kind: str, name: str) -> object:
+            raise KeyError((kind, name))
+
+    monkeypatch.setattr(
+        guide_service,
+        "KIND_REGISTRY",
+        {"snapshot-test": SimpleNamespace(category="declarable")},
+    )
+
+    with pytest.raises(GuideTraversalError):
+        build_onboarding_snapshot(
+            cast("Registry", RegistryWithMissingLookup()),
+            cast("Database", SimpleNamespace()),
+        )
+
+
+def test_handler_failures_degrade_only_the_onboarding_assessment(monkeypatch: pytest.MonkeyPatch) -> None:
+    import agentworks.guide.service as guide_service
+
+    failure = StateError("projected instance state is unavailable")
+
+    class Handler:
+        kind = "snapshot-test"
+        category = "declarable"
+        description = "Snapshot test resources."
+        miss_policy = "error"
+        auto_declare_names: frozenset[str] = frozenset()
+        builtin_override = "allow"
+
+        def instances(self, db: object, registry: object, resource: object):
+            raise failure
+            yield
+
+    @dataclass(frozen=True)
+    class Node:
+        origin: Origin | None = None
+
+        def dependencies(self, context: object) -> tuple[ResourceReference, ...]:
+            return ()
+
+    monkeypatch.setitem(KIND_REGISTRY, "snapshot-test", Handler())
+    registry = Registry.empty()
+    registry.add("snapshot-test", "one", Node(), Origin.built_in(source="test"))
+    registry.finalize()
+    monkeypatch.setattr(guide_service, "KIND_REGISTRY", {"snapshot-test": Handler()})
+    captured: list[StateError] = []
+    real_framed_error = guide_service._framed_error
+
+    def capture(error: StateError) -> str:
+        captured.append(error)
+        return real_framed_error(error)
+
+    monkeypatch.setattr(guide_service, "_framed_error", capture)
+    response = render_guide(
+        ("concept-onboarding",),
+        GuideMode.AGENT,
+        load_config_fn=lambda: cast("Config", SimpleNamespace()),
+        load_registry_fn=lambda config: registry,
+        db=cast("Database", SimpleNamespace()),
+    )
+
+    assert response.exit_code == 0
+    assert captured == [failure]

@@ -1,6 +1,6 @@
-The implementation inventory is global: it includes capability implementations from every domain,
-not configured secret sources or their order. For this topic, use its `secret-backend` rows to find
-the implementations a source can select. A configured source's readiness predicts whether it can
+`agw resource list --kind secret-backend --include-disabled --output json` lists secret-backend
+capability implementations, not configured secret sources or their order. Use those rows to find the
+implementations a source can select. A configured source's readiness predicts whether it can
 participate; preview never proves that a particular secret resolves.
 
 Use `agw resource sample secret-source` to start a source manifest and
