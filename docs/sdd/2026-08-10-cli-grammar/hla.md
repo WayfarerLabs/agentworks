@@ -3,7 +3,7 @@
 - Status: Approved by the operator for implementation design
 - Date: 2026-08-15
 - Implements: `frd.md`
-- Code basis: `origin/main` at `4550c3dd`
+- Code basis: `origin/main` at `24bc7a28`
 
 ## Summary
 

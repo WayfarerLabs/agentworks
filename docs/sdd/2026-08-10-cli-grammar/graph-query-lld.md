@@ -6,7 +6,7 @@
 - Date: 2026-08-16
 - Implements: `frd.md` FR6-FR14 and QR1-QR4
 - Architecture: `hla.md` A1-A6
-- Code basis: `origin/main` at `4550c3dd`
+- Code basis: `origin/main` at `24bc7a28`
 
 ## Scope and invariants
 

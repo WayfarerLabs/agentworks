@@ -6,7 +6,7 @@
 - Date: 2026-08-16
 - Implements: `frd.md` FR1-FR5 and FR15-FR26
 - Refines: `hla.md` A2 and A7-A9
-- Code basis: `origin/main` at `4550c3dd`
+- Code basis: `origin/main` at `24bc7a28`
 
 ## Purpose and boundary
 

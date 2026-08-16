@@ -1,11 +1,11 @@
 # CLI Grammar Correction: Implementation Plan
 
-- Status: Draft for cleaned final-artifact re-review
+- Status: Approved; implementation in progress
 - Date: 2026-08-16
 - Requirements: `frd.md`
 - Architecture: `hla.md`
 - Detailed designs: `graph-query-lld.md`, `cli-cutover-lld.md`
-- Code basis: `origin/main` at `4550c3dd`
+- Code basis: `origin/main` at `24bc7a28`
 - Delivery vehicle: draft PR #491, continuing through implementation on this branch by explicit
   operator direction
 
@@ -30,12 +30,13 @@ prerequisite is satisfied at this plan's basis. Every later implementation rebas
 post-deletion surface and must not restore removed guide views, runtime resource topics, schema
 adapters, or generic guide fact projections.
 
-At final-cleanup basis `4550c3dd`, the saga records this grammar rewrite as the active final spine
-item before reassessment. Simplification items C1/C5 are now complete in
+At implementation-kickoff basis `24bc7a28`, the saga records this grammar rewrite as the active
+final spine item before reassessment. Simplification items C1/C5 are now complete in
 `docs/sdd/2026-08-12-simplification-pass/plan.md`; they deleted inert descriptor generality without
 introducing capability facets. This branch's overlap boundary remains unchanged: it does not modify
 capability descriptors or introduce facet models. The future harness-integration work owns the first
-real multi-facet descriptor and explain rendering.
+real multi-facet descriptor and explain rendering. The capability-shape note newly present at this
+basis is explicitly input to that future work and does not expand this implementation.
 
 The compatibility posture is owned by the FRD and migration strategy; no phase weakens it.
 
@@ -43,21 +44,23 @@ The compatibility posture is owned by the FRD and migration strategy; no phase w
 
 Implementation begins only after this final artifact set passes the operator-directed checkpoint.
 
-- [ ] Obtain reviews of the exact artifact head from the saga lead, Muntz complexity lane, and
-      integration tester.
-- [ ] Classify every material finding against the approved FRD and operator rulings.
-- [ ] If findings are clear and require no requirement change, apply the operator-pre-authorized
+- [x] Obtain clean reviews of the exact artifact head from the saga lead and Muntz complexity lane.
+      The integration tester did not report during the sustained wait; the operator subsequently
+      approved the design and explicitly directed implementation to begin.
+- [x] Classify every material finding against the approved FRD and operator rulings.
+- [x] If findings are clear and require no requirement change, apply the operator-pre-authorized
       final cleanup round to the SDD artifacts.
-- [ ] Re-run the three review lanes on the cleaned exact head and confirm no material finding
-      remains.
-- [ ] Stop and raise any significant issue that requires product direction, scope expansion, or a
+- [x] Re-run the saga-lead and Muntz lanes on the cleaned exact head and confirm no material finding
+      remains; record the operator's implementation direction as disposition of the absent tester
+      response rather than inventing a review result.
+- [x] Stop and raise any significant issue that requires product direction, scope expansion, or a
       material redesign.
-- [ ] In this final artifact checkpoint handoff, deliver the dying-command inventory to the parent
+- [x] In this final artifact checkpoint handoff, deliver the dying-command inventory to the parent
       saga and simplification effort. At implementation kickoff, record the rebased `main` SHA and
       the completed C1/C5 status from `docs/sdd/2026-08-12-simplification-pass/plan.md`; preserve
       the explicit overlap boundary that this effort does not change capability descriptors or
       introduce facet models.
-- [ ] Record the clean artifact disposition in the PR handoff before implementation starts.
+- [x] Record the clean artifact disposition in the PR handoff before implementation starts.
 
 ## Dying-command and ownership inventory
 
