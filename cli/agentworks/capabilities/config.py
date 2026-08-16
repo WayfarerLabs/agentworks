@@ -172,9 +172,6 @@ def validate_capability_config(
     if impl is None:
         return None
     hint = reference_hint(kind, selected)
-    if descriptor.config_schema.discriminator is None:
-        model = offered_model(impl)
-        return _validated(model, config, owner=owner, location=location, hint=hint, provenance=provenance)
     union = capability_config_union(kind)
     validated = _validated(union, config, owner=owner, location=location, hint=hint, provenance=provenance)
     # The union is a root model, so the thing the capability was written
@@ -379,8 +376,8 @@ def capability_config_union(kind: str) -> type[BaseModel]:
     discriminator = descriptor.config_schema.discriminator
     if discriminator is None:
         raise StateError(
-            f"the {kind} capability kind dispatches its config by map key, not by a tagged union, "
-            f"so there is no union to assemble"
+            f"the {kind} capability kind declares an untagged config_schema, so there is no union to "
+            f"assemble; only a mapping contract may be untagged"
         )
     arms = _arms(descriptor)
     key = (kind, frozenset(arms.items()))
@@ -503,11 +500,18 @@ def offered_model(impl: type) -> type[BaseModel]:
     the framework asks. That is what lets a capability whose methods run at
     several levels arrive as an ordinary registration.
 
-    ``impl`` is a seated capability class: every caller reads it out of a
-    kind's live registry, and registration refuses any class that does not
-    derive from its kind's ``implementation_contract``, all four of which
-    derive from ``Capability``. The hook is therefore always there to call,
-    which is what the cast says.
+    ``impl`` is a ``Capability`` subclass, which is what the cast says. It
+    is NOT necessarily a seated one: most callers read it out of a kind's
+    live registry, but ``Capability.__init__`` passes its own
+    ``type(self)``, so a bare subclass that never registers reaches here
+    too, which is the case ``descriptor_for_impl`` documents when it
+    answers ``None`` rather than raising.
+
+    That the hook is CALLABLE is a separate guarantee with a separate
+    owner: ``conformance.py``'s ``_config_hook_error``, at the registration
+    seam, refuses any class whose ``config_for`` is not callable. The call
+    below is unconditional because that seam holds, not because the type
+    annotation does.
     """
     return cast("type[Capability]", impl).config_for()
 
