@@ -16,7 +16,7 @@ import pytest
 from pydantic import BaseModel, Discriminator, Field
 
 from agentworks.capabilities.config import registered_implementations
-from agentworks.errors import ConfigError
+from agentworks.errors import ConfigError, ValidationError
 from agentworks.manifests.describe import reference_lines
 from agentworks.manifests.field_tree import field_tree, root_entry
 from agentworks.manifests.loader import load_manifests
@@ -433,6 +433,21 @@ def test_the_quoted_boolean_warning_describes_this_loader(tmp_path: Path) -> Non
 
 
 # --- the CLI ----------------------------------------------------------
+
+
+def test_unknown_kind_hint_enumerates_every_kind_in_sorted_order() -> None:
+    with pytest.raises(ValidationError) as exc:
+        reference_for("vm-platfrom")
+
+    hint = exc.value.hint
+    assert hint is not None
+    expected_kinds = sorted(KIND_REGISTRY)
+    kind_pattern = re.compile(
+        r"(?<![a-z0-9-])("
+        + "|".join(re.escape(kind) for kind in sorted(expected_kinds, key=len, reverse=True))
+        + r")(?![a-z0-9-])"
+    )
+    assert kind_pattern.findall(hint) == expected_kinds
 
 
 def test_describe_kind_is_a_clean_cli_error_for_an_unknown_target(

@@ -11,6 +11,7 @@ guards and raw ``KeyError`` tracebacks reaching operators.
 
 from __future__ import annotations
 
+import re
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from textwrap import dedent
@@ -20,6 +21,7 @@ import pytest
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.errors import NotFoundError, ValidationError
+from agentworks.resources import KIND_REGISTRY
 from agentworks.resources.access import (
     ResourceIdentity,
     admin_template,
@@ -107,6 +109,15 @@ def test_resolve_resource_rejects_unknown_kind_before_name_lookup(
 
     assert exc.value.entity_kind == "resource-kind"
     assert exc.value.entity_name == "not-a-kind"
+    hint = exc.value.hint
+    assert hint is not None
+    expected_kinds = sorted(KIND_REGISTRY)
+    kind_pattern = re.compile(
+        r"(?<![a-z0-9-])("
+        + "|".join(re.escape(kind) for kind in sorted(expected_kinds, key=len, reverse=True))
+        + r")(?![a-z0-9-])"
+    )
+    assert kind_pattern.findall(hint) == expected_kinds
 
 
 def test_resolve_resource_rejects_missing_name_under_known_kind(tmp_path: Path) -> None:
