@@ -83,24 +83,31 @@ def write_json_envelope(command: MachineOutputCommand, data: JsonObject, stream:
 
     Callers pass stdout's binary buffer, never the presentation output handler,
     so terminal formatting cannot enter a machine-readable response.  That
-    buffer writes the whole document or raises, so one write is the whole
-    response.  The parameter cannot narrow to ``io.BufferedIOBase`` to carry
-    that: click's ``get_binary_stream`` is annotated ``BinaryIO``, so every
-    call site would need a cast.
+    buffer is not always a buffered writer: under ``python -u`` or
+    ``PYTHONUNBUFFERED`` it is a raw ``FileIO``, whose ``write`` can deliver
+    only part of a large document to a non-blocking pipe and report the short
+    count rather than raising.  Writing until the document is out is what keeps
+    a machine consumer from receiving truncated JSON at exit code 0; a stream
+    that stops making progress raises instead.
     """
-    stream.write(encode_json_envelope(command, data))
+    document = encode_json_envelope(command, data)
+    offset = 0
+    while offset < len(document):
+        written = stream.write(document[offset:])
+        if written is None or written <= 0:
+            raise OSError("JSON output stream made no progress")
+        offset += written
 
 
 def project_origin(origin: Origin | None) -> JsonObject | None:
     """Project safe, stable provenance fields without a display rendering.
 
     ``Origin`` expresses four variants through one set of broadly typed fields,
-    so which fields a variant populates is a contract no type carries. Every
-    consumer defends it: ``declared_resource.py:232``, ``resources/render.py``
-    at :59 and :71, ``resources/inspect.py`` at :377, :396, and :561, whose
-    ``assert`` covers the same pair for the human rendering of the object this
-    projects. Without these checks a variant built outside its factory would
-    render ``None`` as text into the JSON v1 document.
+    so which fields a variant populates is a contract no type carries, and every
+    consumer defends it in its own way. Issue #547 holds the inventory of those
+    sites and the case for settling the contract in one place. Until then,
+    without these checks a variant built outside its factory would render
+    ``None`` as text into the JSON v1 document.
     """
     if origin is None:
         return None

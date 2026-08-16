@@ -24,6 +24,42 @@ from agentworks.resources.kind import InstanceRef
 from agentworks.resources.reference import ReferenceEntry
 
 
+class _ShortWriteStream:
+    """A raw stream that accepts a few bytes per call, as a non-blocking pipe does."""
+
+    def __init__(self) -> None:
+        self.document = bytearray()
+        self.write_calls = 0
+
+    def write(self, data: bytes) -> int:
+        self.write_calls += 1
+        accepted = min(3, len(data))
+        self.document.extend(data[:accepted])
+        return accepted
+
+
+class _PartialThenZeroStream:
+    """A stream that accepts one byte and then stalls forever."""
+
+    def __init__(self) -> None:
+        self.document = bytearray()
+        self._wrote_once = False
+
+    def write(self, data: bytes) -> int:
+        if self._wrote_once:
+            return 0
+        self._wrote_once = True
+        self.document.extend(data[:1])
+        return 1
+
+
+class _NoneWriteStream:
+    """A raw stream reporting the ``EAGAIN`` shape, where ``write`` returns ``None``."""
+
+    def write(self, data: bytes) -> None:
+        return None
+
+
 def test_output_formats_are_closed_to_human_and_json() -> None:
     assert list(OutputFormat) == [OutputFormat.HUMAN, OutputFormat.JSON]
     assert OutputFormat("human") is OutputFormat.HUMAN
@@ -105,6 +141,27 @@ def test_writer_writes_directly_without_ansi_presentation_bytes() -> None:
         "command": "doctor",
         "data": {"message": "\x1b[31mnot terminal formatting\x1b[0m"},
     }
+
+
+def test_writer_retries_short_writes_until_the_document_is_complete() -> None:
+    stream = _ShortWriteStream()
+    expected = encode_json_envelope(MachineOutputCommand.DOCTOR, {"count": 3})
+
+    write_json_envelope(MachineOutputCommand.DOCTOR, {"count": 3}, stream)
+
+    assert bytes(stream.document) == expected
+    assert stream.write_calls > 1
+
+
+@pytest.mark.parametrize("build_stream", [_PartialThenZeroStream, _NoneWriteStream])
+def test_writer_fails_when_the_stream_makes_no_progress(build_stream: type[object]) -> None:
+    stream = build_stream()
+
+    with pytest.raises(OSError):
+        write_json_envelope(MachineOutputCommand.DOCTOR, {"count": 3}, stream)  # type: ignore[arg-type]
+
+    if isinstance(stream, _PartialThenZeroStream):
+        assert bytes(stream.document) == encode_json_envelope(MachineOutputCommand.DOCTOR, {"count": 3})[:1]
 
 
 def test_unserializable_input_writes_no_partial_document() -> None:

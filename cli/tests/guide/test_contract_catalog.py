@@ -552,18 +552,28 @@ def test_action_list_prose_preserves_exact_inert_inline_literals() -> None:
 
 
 def test_action_list_count_and_cumulative_byte_bounds_fail_closed() -> None:
-    # Each payload trips exactly one bound: 33 small actions stay well under the
-    # byte cap, and 17 maximal manual steps stay under the action count.
-    with pytest.raises(InvalidBlockError):
+    # Both bounds reject at the same field path, so each rejected payload has an
+    # accepted twin that isolates which of the two the rejection came from.
+    parse_topic_contribution(
+        _action_topic([_action_value(action_id=f"action-{index}") for index in range(32)]),
+        "core",
+    )
+    with pytest.raises(InvalidBlockError) as raised:
         parse_topic_contribution(
             _action_topic([_action_value(action_id=f"action-{index}") for index in range(33)]),
             "core",
         )
+    assert raised.value.field_path == "blocks[0].actions"
+
     actions = [_action_value(action_id=f"action-{index}", manual=True) for index in range(17)]
     for action in actions:
+        action["manual_steps"] = "x" * 1024
+    parse_topic_contribution(_action_topic(actions), "core")
+    for action in actions:
         action["manual_steps"] = "x" * (8 * 1024)
-    with pytest.raises(InvalidBlockError):
+    with pytest.raises(InvalidBlockError) as raised:
         parse_topic_contribution(_action_topic(actions), "core")
+    assert raised.value.field_path == "blocks[0].actions"
 
 
 def test_action_validation_deep_copies_and_normalizes() -> None:
