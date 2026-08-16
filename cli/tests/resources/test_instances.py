@@ -490,8 +490,10 @@ def test_secret_instances_admin_secret_not_attributed_to_agent_session(
     """A secret referenced only from ``[admin.env]`` is NOT counted as
     "used by" an agent-mode session even though both sessions live on
     the same VM. The projection answers "what does this session's shell
-    see?" not "what does this session's VM need provisioned?". The
-    admin secret surfaces under admin-template's own ``Used by:`` row.
+    see?" not "what does this session's VM need provisioned?". The admin
+    dependency remains on the admin-template; graph live-usage edges carry
+    the VM identities that use that template, while resource list exposes
+    only their count.
     """
     cfg = tmp_path / "config.toml"
     _write_base(

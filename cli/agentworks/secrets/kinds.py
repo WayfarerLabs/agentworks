@@ -154,9 +154,10 @@ class _SecretKind:
         A secret referenced only from ``[admin.env]`` is NOT counted as
         "used by" an agent-mode session even though the VM's admin user
         needs it for ``agw vm shell``. The projection is operator-facing
-        ("does my agent see this secret?"), and the admin user's own
-        dependencies surface via admin-template's own ``Used by:`` entry
-        (every VM).
+        ("does my agent see this secret?"). The admin user's dependency
+        remains on the admin-template; graph live-usage edges carry the VM
+        identities that use that template, while resource list exposes only
+        their count.
 
         ``vm-template`` is always included because the session's VM
         bootstrap (apt packages, tailscale auth key, etc.) is a hard
