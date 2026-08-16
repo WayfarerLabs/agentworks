@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
+from agentworks.bootstrap import build_registry
+from agentworks.config import load_config
 from agentworks.errors import BusyStateError, NotFoundError, StateError
 from agentworks.machine_output import MachineOutputCommand, encode_json_envelope
 from agentworks.origin import Origin
@@ -36,6 +38,7 @@ from agentworks.resources.graph_query import (
 from agentworks.resources.graph_render import render_graph_result
 from agentworks.resources.kind import InstanceRef
 from agentworks.resources.reference import RefRelationship, ResourceReference
+from tests.conftest import ManifestDoc, write_cfg
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
@@ -273,6 +276,28 @@ def test_no_neighbor_and_legacy_punctuation_are_preserved(monkeypatch: pytest.Mo
     assert result.edges == ()
 
 
+def test_real_registry_inbound_edges_retain_relationship_and_usage(tmp_path: Path) -> None:
+    config_path = write_cfg(
+        tmp_path,
+        ManifestDoc("vm-template", "default", {"apt": ["zsh"]}),
+    )
+    registry = build_registry(load_config(config_path, warn_issues=False))
+    result = show_graph(
+        registry,
+        ResourceIdentity("secret", "tailscale-auth-key"),
+        GraphDirection.DEPENDENTS,
+        1,
+        DatabaseLiveSource(tmp_path / "absent.db"),
+    )
+    inbound = [
+        edge for edge in result.edges if edge.target.kind == "secret" and edge.target.name == "tailscale-auth-key"
+    ]
+    assert inbound
+    assert all(edge.source.kind and edge.source.name for edge in inbound)
+    assert all(edge.relationship is RefRelationship.USES for edge in inbound)
+    assert all(edge.usage for edge in inbound)
+
+
 def test_registry_and_focus_validation_precede_live_source_demand(monkeypatch: pytest.MonkeyPatch) -> None:
     path = _PresentPath()
     unfinished = Registry.empty()
@@ -360,6 +385,16 @@ class _FakeDatabase:
             raise self.close_error
 
 
+class _QueryCountingDatabase(_FakeDatabase):
+    def list_vms(self) -> tuple[()]:
+        self.counts["list_vms"] += 1
+        return ()
+
+    def list_sessions(self) -> tuple[()]:
+        self.counts["list_sessions"] += 1
+        return ()
+
+
 class _InstanceHandler:
     def __init__(self, values: Callable[[str], Iterator[InstanceRef]]) -> None:
         self.values = values
@@ -369,6 +404,18 @@ class _InstanceHandler:
         del db, registry
         self.calls.append(row.name)
         return self.values(row.name)
+
+
+class _ListQueryHandler:
+    def __init__(self, query: Callable[[Database], Sequence[object]]) -> None:
+        self.query = query
+        self.calls: list[str] = []
+
+    def instances(self, db: Database, registry: Registry, row: _Row) -> tuple[InstanceRef, ...]:
+        del registry
+        self.calls.append(row.name)
+        self.query(db)
+        return ()
 
 
 def _install_fake_database(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
@@ -756,26 +803,73 @@ def test_control_signal_and_close_failure_propagate_after_cleanup(
 def test_repeated_hook_scale_uses_one_source_and_one_query_per_expansion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    counts = _install_fake_database(monkeypatch)
+    from agentworks.resources import graph_query
+
+    counts = {
+        "database": 0,
+        "transaction_enter": 0,
+        "transaction_exit": 0,
+        "close": 0,
+        "list_vms": 0,
+        "list_sessions": 0,
+    }
+    _QueryCountingDatabase.counts = counts
+    _QueryCountingDatabase.exit_error = None
+    _QueryCountingDatabase.close_error = None
+    monkeypatch.setattr(graph_query, "Database", _QueryCountingDatabase)
+
+    identities = [("kind-a" if index % 2 == 0 else "kind-b", f"resource-{index:03}") for index in range(40)]
+    references_by_source: dict[tuple[str, str], list[ResourceReference]] = {}
+    for source_identity, target_identity in zip(identities, identities[1:], strict=False):
+        references_by_source.setdefault(source_identity, []).append(
+            ResourceReference(
+                name=target_identity[1],
+                kind=target_identity[0],
+                usage=f"{source_identity[1]}-TO-{target_identity[1]}",
+                source=source_identity,
+            )
+        )
+
+    KIND_REGISTRY.pop("kind-a", None)
+    KIND_REGISTRY.pop("kind-b", None)
+    registry = Registry.empty()
+    for kind, name in identities:
+        registry.add(
+            kind,
+            name,
+            _Row(name, tuple(references_by_source.get((kind, name), ()))),
+            Origin.built_in(source="tests.graph-query"),
+        )
+    registry.finalize()
+    handler_a = _ListQueryHandler(lambda db: db.list_vms())
+    handler_b = _ListQueryHandler(lambda db: db.list_sessions())
+    monkeypatch.setitem(KIND_REGISTRY, "kind-a", handler_a)
+    monkeypatch.setitem(KIND_REGISTRY, "kind-b", handler_b)
+
     path = _PresentPath()
-    names = [f"resource-{index:03}" for index in range(40)]
-    references = [_ref(names[index], names[index + 1]) for index in range(len(names) - 1)]
-    handler = _InstanceHandler(lambda name: iter(()))
-    registry = _registry(monkeypatch, names, references, handler=handler)
     source = DatabaseLiveSource(cast("Path", path))
-    assert source.supports("node") is True
+    assert source.supports("kind-a") is True
+    assert source.supports("kind-b") is True
     assert path.stat_count == 0
     result = show_graph(
         registry,
-        ResourceIdentity("node", names[0]),
+        ResourceIdentity(*identities[0]),
         GraphDirection.BOTH,
         None,
         source,
     )
     assert len(result.nodes) == 40
     assert path.stat_count == 1
-    assert counts == {"database": 1, "transaction_enter": 1, "transaction_exit": 1, "close": 1}
-    assert handler.calls == names
+    assert counts == {
+        "database": 1,
+        "transaction_enter": 1,
+        "transaction_exit": 1,
+        "close": 1,
+        "list_vms": 20,
+        "list_sessions": 20,
+    }
+    assert handler_a.calls == [name for kind, name in identities if kind == "kind-a"]
+    assert handler_b.calls == [name for kind, name in identities if kind == "kind-b"]
 
 
 def test_grouping_assigns_each_edge_once_at_maximum_endpoint_distance() -> None:
@@ -802,35 +896,125 @@ def test_grouping_assigns_each_edge_once_at_maximum_endpoint_distance() -> None:
 
 
 def test_human_projection_emits_every_unique_fact_once_in_result_order(captured_output: Any) -> None:
-    source = GraphIdentity(GraphNodeType.RESOURCE, "source-kind", "SOURCE_NODE_SENTINEL")
-    target = GraphIdentity(GraphNodeType.RESOURCE, "target-kind", "TARGET_NODE_SENTINEL")
-    edge = GraphEdge(
+    focus = GraphIdentity(GraphNodeType.RESOURCE, "focus-kind", "FOCUS_NODE_SENTINEL")
+    declared_target = GraphIdentity(GraphNodeType.RESOURCE, "target-kind", "DECLARED_TARGET_SENTINEL")
+    null_source = GraphIdentity(GraphNodeType.RESOURCE, "null-kind", "NULL_SOURCE_SENTINEL")
+    live = GraphIdentity(GraphNodeType.LIVE_INSTANCE, "live-kind", "LIVE_NODE_SENTINEL")
+    declared_edge = GraphEdge(
         GraphEdgeType.DECLARED,
-        source,
-        target,
+        focus,
+        declared_target,
         RefRelationship.INHERITS,
-        "USAGE_FACT_SENTINEL",
+        "DECLARED_USAGE_SENTINEL",
         ResourceIdentity("declarer-kind", "DECLARER_FACT_SENTINEL"),
     )
+    null_provenance_edge = GraphEdge(
+        GraphEdgeType.DECLARED,
+        null_source,
+        focus,
+        RefRelationship.USES,
+        "NULL_PROVENANCE_USAGE_SENTINEL",
+        None,
+    )
+    live_edge = GraphEdge(
+        GraphEdgeType.LIVE_USAGE,
+        live,
+        null_source,
+        RefRelationship.USES,
+        None,
+        None,
+    )
     result = GraphResult(
-        GraphQuery(ResourceIdentity("source-kind", "SOURCE_NODE_SENTINEL"), GraphDirection.DEPENDENCIES, 1),
+        GraphQuery(ResourceIdentity("focus-kind", "FOCUS_NODE_SENTINEL"), GraphDirection.BOTH, 1),
         (
-            GraphNode(GraphNodeType.RESOURCE, "source-kind", "SOURCE_NODE_SENTINEL", 0),
-            GraphNode(GraphNodeType.RESOURCE, "target-kind", "TARGET_NODE_SENTINEL", 1),
+            GraphNode(GraphNodeType.RESOURCE, "focus-kind", "FOCUS_NODE_SENTINEL", 0),
+            GraphNode(GraphNodeType.RESOURCE, "null-kind", "NULL_SOURCE_SENTINEL", 1),
+            GraphNode(GraphNodeType.RESOURCE, "target-kind", "DECLARED_TARGET_SENTINEL", 1),
+            GraphNode(GraphNodeType.LIVE_INSTANCE, "live-kind", "LIVE_NODE_SENTINEL", 1),
         ),
-        (edge,),
+        (declared_edge, null_provenance_edge, live_edge),
+    )
+    groups = group_graph_result(result)
+    assert groups[1].nodes == result.nodes[1:]
+    assert groups[1].edges == result.edges
+
+    render_graph_result(result)
+    messages = [message for _, _, message in captured_output.lines]
+    assert sum("DECLARED_USAGE_SENTINEL" in message for message in messages) == 1
+    assert sum("NULL_PROVENANCE_USAGE_SENTINEL" in message for message in messages) == 1
+    assert sum("DECLARER_FACT_SENTINEL" in message for message in messages) == 1
+    assert sum("DECLARED_TARGET_SENTINEL" in message for message in messages) == 2
+    assert sum("LIVE_NODE_SENTINEL" in message for message in messages) == 2
+    assert sum("NULL_SOURCE_SENTINEL" in message for message in messages) == 3
+    edge_facts = [
+        ("FOCUS_NODE_SENTINEL", "DECLARED_TARGET_SENTINEL", RefRelationship.INHERITS.value),
+        ("NULL_SOURCE_SENTINEL", "FOCUS_NODE_SENTINEL", RefRelationship.USES.value),
+        ("LIVE_NODE_SENTINEL", "NULL_SOURCE_SENTINEL", RefRelationship.USES.value),
+    ]
+    edge_positions: list[int] = []
+    for source_name, target_name, relationship in edge_facts:
+        matching = [
+            index
+            for index, message in enumerate(messages)
+            if source_name in message and target_name in message and relationship in message
+        ]
+        assert len(matching) == 1
+        edge_positions.append(matching[0])
+    assert edge_positions == sorted(edge_positions)
+    node_positions = [
+        next(index for index, message in enumerate(messages) if marker in message)
+        for marker in ("NULL_SOURCE_SENTINEL", "DECLARED_TARGET_SENTINEL", "LIVE_NODE_SENTINEL")
+    ]
+    assert node_positions == sorted(node_positions)
+    assert max(node_positions) < min(edge_positions)
+    assert edge_positions[0] < next(
+        index for index, message in enumerate(messages) if "DECLARED_USAGE_SENTINEL" in message
+    )
+    assert any("LIVE_NODE_SENTINEL" in message and "NULL_SOURCE_SENTINEL" in message for message in messages)
+
+
+def test_human_projection_sanitizes_controls_from_every_dynamic_fact(captured_output: Any) -> None:
+    controls = "\x00\x07\x1b\x7f\x80\x9f"
+
+    def unsafe(marker: str) -> str:
+        return f"{marker[:1]}{controls}{marker[1:]}"
+
+    source = GraphIdentity(GraphNodeType.LIVE_INSTANCE, unsafe("live-kind"), unsafe("LIVE-NAME"))
+    target = GraphIdentity(GraphNodeType.RESOURCE, unsafe("resource-kind"), unsafe("RESOURCE-NAME"))
+    result = GraphResult(
+        GraphQuery(ResourceIdentity(unsafe("focus-kind"), unsafe("FOCUS-NAME")), GraphDirection.BOTH, 1),
+        (
+            GraphNode(GraphNodeType.RESOURCE, target.kind, target.name, 0),
+            GraphNode(GraphNodeType.LIVE_INSTANCE, source.kind, source.name, 1),
+        ),
+        (
+            GraphEdge(GraphEdgeType.LIVE_USAGE, source, target, RefRelationship.USES, None, None),
+            GraphEdge(
+                GraphEdgeType.DECLARED,
+                target,
+                target,
+                RefRelationship.INHERITS,
+                unsafe("USAGE-FACT"),
+                ResourceIdentity(unsafe("declarer-kind"), unsafe("DECLARER-NAME")),
+            ),
+        ),
     )
     render_graph_result(result)
     messages = [message for _, _, message in captured_output.lines]
-    assert sum("USAGE_FACT_SENTINEL" in message for message in messages) == 1
-    assert sum("DECLARER_FACT_SENTINEL" in message for message in messages) == 1
-    edge_position = next(
-        index
-        for index, message in enumerate(messages)
-        if "SOURCE_NODE_SENTINEL" in message and "TARGET_NODE_SENTINEL" in message
-    )
-    usage_position = next(index for index, message in enumerate(messages) if "USAGE_FACT_SENTINEL" in message)
-    assert edge_position < usage_position
+    rendered = "".join(messages)
+    assert all(control not in rendered for control in controls)
+    for marker in (
+        "focus-kind",
+        "FOCUS-NAME",
+        "resource-kind",
+        "RESOURCE-NAME",
+        "live-kind",
+        "LIVE-NAME",
+        "USAGE-FACT",
+        "declarer-kind",
+        "DECLARER-NAME",
+    ):
+        assert marker in rendered
 
 
 def test_json_projection_has_only_the_closed_safe_scalar_shape_and_nulls() -> None:
