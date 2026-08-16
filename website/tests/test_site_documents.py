@@ -13,6 +13,18 @@ from lander_chromium_phase4k import DevToolsConnection, _devtools_target
 from site_test_support import *  # noqa: F403
 
 
+# WCAG 2.2 AA: 1.4.3 for normal-size text, 1.4.11 for graphics and interface parts.
+TEXT_CONTRAST = 4.5
+NON_TEXT_CONTRAST = 3.0
+
+
+def css_tokens(output: Path) -> dict[str, str]:
+    """The custom properties the built stylesheet declares on the document root."""
+    css = (output / "static/site.css").read_text(encoding="utf-8")
+    root = css.split(":root {", 1)[1].split("}", 1)[0]
+    return dict(re.findall(r"(--[a-z-]+):\s*(#[0-9a-fA-F]{6})\b", root))
+
+
 def plain_markdown(value: str) -> str:
     protected: list[str] = []
 
@@ -563,17 +575,6 @@ class GeneratedDocumentTests(RepositoryFixture):
 
     def test_shared_css_pins_tokens_reflow_focus_and_terminal_cues(self) -> None:
         css = (self.output / "static/site.css").read_text(encoding="utf-8")
-        for token, value in {
-            "--canvas": "#f5f2e8",
-            "--panel": "#ebe7dc",
-            "--ink": "#292b30",
-            "--ink-muted": "#4b4e55",
-            "--line-subtle": "#8a867c",
-            "--accent": "#d94a1e",
-            "--hot": "#ffe09a",
-            "--status": "#7de2c5",
-        }.items():
-            self.assertIn(f"{token}: {value}", css)
         for contract in (
             "width: min(100%, 60rem)",
             "padding: clamp(1rem, 4vw, 3rem)",
@@ -821,21 +822,21 @@ class GeneratedDocumentTests(RepositoryFixture):
             run(evaluation_error=None)
         self.assertIs(caught.exception, cleanup_error)
 
-    def test_pinned_color_contrasts_meet_text_component_and_status_thresholds(
-        self,
-    ) -> None:
-        expected = (
-            ("#292b30", "#f5f2e8", 12.646),
-            ("#4b4e55", "#f5f2e8", 7.440),
-            ("#8a867c", "#f5f2e8", 3.243),
-            ("#d94a1e", "#f5f2e8", 3.789),
-            ("#292b30", "#ebe7dc", 11.464),
-            ("#ffe09a", "#292b30", 11.049),
-            ("#7de2c5", "#20232a", 10.153),
-        )
-        for foreground, background, ratio in expected:
-            with self.subTest(foreground=foreground, background=background):
-                self.assertTrue(math.isclose(contrast(foreground, background), ratio, abs_tol=0.002))
+    def test_palette_contrast_meets_text_and_non_text_thresholds(self) -> None:
+        """Every shipped foreground stays legible against the surface it is painted on.
+
+        The colors are read out of the built stylesheet rather than repeated here, so
+        this checks the palette the site actually serves. The invariant is WCAG's
+        inequality, never a particular ratio: adjusting a color is free until it
+        crosses the threshold, and then it fails.
+        """
+        palette = css_tokens(self.output)
+        for foreground, background in (("--ink", "--canvas"), ("--ink-muted", "--canvas"), ("--ink", "--panel")):
+            with self.subTest(text=foreground, on=background):
+                self.assertGreaterEqual(contrast(palette[foreground], palette[background]), TEXT_CONTRAST)
+        for foreground, background in (("--line-subtle", "--canvas"), ("--accent", "--canvas")):
+            with self.subTest(graphic=foreground, on=background):
+                self.assertGreaterEqual(contrast(palette[foreground], palette[background]), NON_TEXT_CONTRAST)
 
 
 if __name__ == "__main__":

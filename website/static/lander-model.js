@@ -57,6 +57,7 @@ export const BASE_ROUTE_ALLOWANCE = 22;
 
 export const FAILURE_STATUS = "Crashed!";
 export const SUCCESS_STATUS = "Agent Deployed!";
+export const UNDERWAY_STATUS = "Mission underway.";
 
 function freeze(value) {
     if (Array.isArray(value)) value.forEach(freeze);
@@ -259,7 +260,7 @@ export function createRun({ seed, reducedMotion = false } = {}) {
         crashOrdinal: 0,
         crash: null,
         termini: worldTermini(runSeed),
-        status: "Mission underway.",
+        status: UNDERWAY_STATUS,
         launchStarted: false,
         launchCleared: false,
     });
