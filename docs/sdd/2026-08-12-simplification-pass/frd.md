@@ -67,6 +67,10 @@ Settled inputs, recorded for traceability:
     interior-looking enum check that four review lenses cleared and a live `interaction="refuse"`
     call then resolved a real secret. R1.1 carries it into `development-principles`, whose principle
     3 carries the enumeration and the provenance test it turns on.
+12. **2026-08-15 (`contract_version`)**: "I am 100% certain that we need contract_version and we
+    honestly should be checking it from the get go, otherwise we invite code that silently goes off
+    the rails when we do (inevitably) rev contracts." Transcribed verbatim. C1's "inert
+    `contract_version`" is therefore wrong, and the field is not a deletion target in any wave.
 
 ## Requirements
 

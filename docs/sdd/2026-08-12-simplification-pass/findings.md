@@ -178,7 +178,11 @@ deliberately narrow `cli-conventions.md`.
 - **C1** Descriptor fields that do not vary: `RegistryPolicy` single-member enum with two dead
   consumer branches; `kind_strategy` with zero production readers (self-tested against its own
   duplicate); inert `contract_version`; `manifest_section` guarded for a `None` it never takes;
-  `discriminator`/`input_domain` identical across all four kinds.
+  `discriminator`/`input_domain` identical across all four kinds. (Corrected 2026-08-15, by operator
+  ruling 12: `contract_version` is not inert. It is required and it gates registration, verified by
+  mutation in PR #546, where setting `EnvVarBackend.contract_version = 1` fails
+  `test_every_registered_builtin_impl_conforms`. It is not a deletion target; the rest of the entry
+  stands.)
 - **C2** Eight of eighteen classified `FieldShape` shapes have zero shipped instances; two have one.
   `_shape.py` is 1,383 lines (ceiling: 1,000), including the two-level `X`/`item_X` mirror whose
   unshipped half is speculative by its own docstring, while `reference_marker_error` already refuses

@@ -139,9 +139,11 @@ the sweep instead, per group 4 above.
       invocation rather than degrading one target, which is the loud-refusal-at-entry posture
       boundary 1 asks for, recorded here so the reassessment reads it as a decision rather than an
       accident.
-- [ ] Delete inert descriptor generality (C1, C5): `RegistryPolicy`, `kind_strategy`,
-      `contract_version` plumbing, unreachable fallbacks, their pinning tests. Done when: suite
-      green, four descriptors construct without the deleted fields.
+- [ ] Delete inert descriptor generality (C1, C5): `RegistryPolicy`, `kind_strategy`, unreachable
+      fallbacks, their pinning tests. **`contract_version` is not in this item and is not a deletion
+      target** (operator ruling 12): it is required, it is checked at registration, and PR #546
+      verified the check by mutation. Done when: suite green, four descriptors construct without the
+      deleted fields, and `contract_version` still gates registration.
 - [x] Delete `machine_output` defensive surface (G6): assert-guards on frozen dataclasses, double
       projections, identity comprehensions; `schema_version` becomes a named constant. This item
       owns `machine_output.py` wholesale, so G8's `JsonScalar` deletion lands here. Done when: suite
