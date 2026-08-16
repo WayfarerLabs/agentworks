@@ -50,9 +50,13 @@ deliberately narrow `cli-conventions.md`.
   `TopicContribution`, converts it back to a dict (`_record_value`), and re-parses it with injected
   `object()` sentinels, defending against our own type annotations. Runs on every topic render via
   `view.py:202`.
-- **G3** The one genuinely operator-controlled string (manifest resource description) bypasses the
-  contract entirely: `service.py:199-203` builds contributions directly and feeds `render_index`
-  guarded only by ad-hoc escaping. The validation boundary is not on the untrusted path.
+- **G3** The one genuinely operator-controlled string (manifest resource description) reaches
+  `render_index` through contributions `service.py:199-203` builds directly, guarded only by ad-hoc
+  escaping. The validation boundary is not where the untrusted text enters. (Corrected during wave
+  1: late rather than absent. `build_guide_view` re-parsed the contribution at `view.py:202`, so the
+  byte cap and delimiter screen did run on the ordinary path, one step downstream; only the degraded
+  `system_error` path, which never builds a view, had no check at all.) **Resolved** by PR #548,
+  which moved the check to where the description enters.
 - **G4** Eleven `GuideBlock` variants over four actual payload shapes; parallel dispatch in six
   places. All variants have consumers; the cost is nominal-type ceremony, not dead code.
 - **G5** JSON adapters and human renderers are parallel field-by-field walks of the same trees (19
@@ -60,8 +64,12 @@ deliberately narrow `cli-conventions.md`.
   new field requires three edits. Design-pass scale, not a quick fix.
 - **G6** `machine_output.py`: `schema_version` is write-only (nothing branches on it anywhere);
   double projection of already-projected values; `AssertionError` guards re-checking frozen
-  dataclass field types; identity-map comprehensions; a hand-rolled partial-write retry loop against
-  a `BufferedWriter` that cannot partially write.
+  dataclass field types; identity-map comprehensions; a hand-rolled partial-write retry loop.
+  (Corrected during wave 1: the loop is load-bearing, not defensive surface, and is not a deletion
+  target. The `BufferedWriter` claim holds only while stdout is buffered; under `python -u` or
+  `PYTHONUNBUFFERED` the buffer is a raw `FileIO`, whose `write` returns a short count instead of
+  raising. Deleted and restored in PR #548, which added the short-write test the invariant never
+  had.)
 - **G7** Traversal permissions enforced twice: statically by the block-anchor table
   (`contract.py:985-996`) and dynamically by `view.py:148-151`, whose only caller catches and
   discards the dynamic denial.
