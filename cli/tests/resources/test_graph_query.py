@@ -967,6 +967,11 @@ def test_human_projection_emits_every_unique_fact_once_in_result_order(captured_
     ]
     assert node_positions == sorted(node_positions)
     assert max(node_positions) < min(edge_positions)
+    detail_counts = [
+        sum(level == 3 for _, level, _ in captured_output.lines[start + 1 : stop])
+        for start, stop in zip(edge_positions, [*edge_positions[1:], len(captured_output.lines)], strict=True)
+    ]
+    assert detail_counts == [2, 1, 0]
     assert edge_positions[0] < next(
         index for index, message in enumerate(messages) if "DECLARED_USAGE_SENTINEL" in message
     )
@@ -974,7 +979,7 @@ def test_human_projection_emits_every_unique_fact_once_in_result_order(captured_
 
 
 def test_human_projection_sanitizes_controls_from_every_dynamic_fact(captured_output: Any) -> None:
-    controls = "\x00\x07\x1b\x7f\x80\x9f"
+    controls = "\x00\x07\t\n\x1b\x7f\x80\x9f"
 
     def unsafe(marker: str) -> str:
         return f"{marker[:1]}{controls}{marker[1:]}"

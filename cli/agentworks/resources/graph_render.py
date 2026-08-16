@@ -8,7 +8,7 @@ from agentworks.terminal import sanitize_terminal_output
 
 
 def _safe(value: str) -> str:
-    return sanitize_terminal_output(value)
+    return sanitize_terminal_output(value).replace("\n", "").replace("\t", "")
 
 
 def _identity(value: GraphIdentity) -> str:
