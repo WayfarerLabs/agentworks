@@ -67,6 +67,7 @@ from agentworks.schema import (
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
+    from agentworks.capabilities.base import Capability
     from agentworks.capabilities.descriptor import CapabilityKindDescriptor
     from agentworks.declared_resource import DeclaredResource
     from agentworks.resources.reference import ConfigReference, ResourceReference
@@ -497,26 +498,18 @@ def registered_implementation(kind: str, name: str) -> type | None:
 def offered_model(impl: type) -> type[BaseModel]:
     """The config model ``impl`` offers.
 
-    Read through ``config_for`` when the implementation has it, never off
-    ``config_model`` directly, so a capability that overrides the hook is
-    honored everywhere the framework asks. That is what lets a capability
-    whose methods run at several levels arrive as an ordinary
-    registration.
+    Read through ``Capability.config_for``, never off ``config_model``
+    directly, so a capability that overrides the hook is honored everywhere
+    the framework asks. That is what lets a capability whose methods run at
+    several levels arrive as an ordinary registration.
 
-    Every capability implementation is nominal and inherits
-    ``Capability.config_for``. The fallback remains a defensive boundary
-    for a malformed internal caller, not an alternate implementation
-    contract.
+    ``impl`` is a seated capability class: every caller reads it out of a
+    kind's live registry, and registration refuses any class that does not
+    derive from its kind's ``implementation_contract``, all four of which
+    derive from ``Capability``. The hook is therefore always there to call,
+    which is what the cast says.
     """
-    resolve = getattr(impl, "config_for", None)
-    if callable(resolve):
-        return cast("type[BaseModel]", resolve())
-    model = getattr(impl, "config_model", None)
-    if model is None:
-        raise StateError(
-            f"{impl.__name__} declares no config_model, so the framework has no schema to validate its config against"
-        )
-    return cast("type[BaseModel]", model)
+    return cast("type[Capability]", impl).config_for()
 
 
 def _seated_impl(descriptor: CapabilityKindDescriptor, name: str) -> type | None:
