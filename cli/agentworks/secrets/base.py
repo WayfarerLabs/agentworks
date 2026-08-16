@@ -28,7 +28,15 @@ if TYPE_CHECKING:
 
 
 def require_exact_json_value(value: object) -> object:
-    """Reject Python lookalikes before pydantic can normalize them.
+    """Reject non-JSON-native values before pydantic can normalize them.
+
+    Boundary: operator-authored manifest input. ``backend_mappings`` is
+    carried losslessly to whichever backend model the selected source
+    declares, so what YAML produced has to be what the backend sees. The
+    manifest loader is pyyaml's ``SafeLoader``, whose tag set is wider than
+    JSON: ``!!timestamp`` builds a ``datetime.date``, ``!!binary`` builds
+    ``bytes``, ``!!set`` builds a ``set``, and ``!!pairs`` builds a list of
+    tuples. Any of those would reach a backend that was promised JSON.
 
     The validator is attached recursively, so a failure keeps the list index
     or mapping key that led to it. Checking ``type`` rather than
@@ -45,7 +53,12 @@ def require_exact_json_value(value: object) -> object:
 
 
 def require_exact_json_string(value: object) -> object:
-    """Reject mapping-key lookalikes before pydantic string normalization."""
+    """Reject non-string mapping keys before pydantic string normalization.
+
+    Boundary: the same manifest input :func:`require_exact_json_value`
+    names. YAML mapping keys are not string-only, so ``{1: "x"}`` and
+    ``{2020-01-02: "x"}`` are both loadable documents.
+    """
     if type(value) is not str:
         raise ValueError(f"must use exact JSON string keys (got {type(value).__name__})")
     return value

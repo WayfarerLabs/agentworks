@@ -3,19 +3,8 @@
 from __future__ import annotations
 
 import inspect
-import typing
-from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
-
-from pydantic import BaseModel
-
-from agentworks.capabilities.secret_backend.client import (
-    InteractionBroker,
-    RemainingTime,
-    SecretSourceClient,
-)
-from agentworks.schema import AgwModel
 
 if TYPE_CHECKING:
     from agentworks.capabilities.secret_backend.base import SecretBackend
@@ -23,77 +12,57 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class _ParameterContract:
+    """One parameter the resolution loop supplies, by name and by kind."""
+
     name: str
     kind: inspect._ParameterKind
-    annotation: object
+
+
+#: The call shape of every classmethod the resolution loop invokes on a
+#: registered backend class, keyed by operation and valued by its parameters
+#: after ``cls``. ``backend_readiness`` takes none. These are the names and
+#: kinds ``resolve.py`` actually calls with, so a mismatch here is a
+#: TypeError at the first source turn rather than at registration.
+_OPERATION_CONTRACTS: dict[str, tuple[_ParameterContract, ...]] = {
+    "backend_readiness": (),
+    "would_attempt": (
+        _ParameterContract("secret_name", inspect.Parameter.POSITIONAL_OR_KEYWORD),
+        _ParameterContract("mapping_present", inspect.Parameter.KEYWORD_ONLY),
+    ),
+    "describe_lookup": (
+        _ParameterContract("secret_name", inspect.Parameter.POSITIONAL_OR_KEYWORD),
+        _ParameterContract("mapping", inspect.Parameter.POSITIONAL_OR_KEYWORD),
+    ),
+    "external_operation_timeout": (_ParameterContract("config", inspect.Parameter.POSITIONAL_OR_KEYWORD),),
+    "create_client": (
+        _ParameterContract("source_name", inspect.Parameter.KEYWORD_ONLY),
+        _ParameterContract("config", inspect.Parameter.KEYWORD_ONLY),
+        _ParameterContract("interaction_broker", inspect.Parameter.KEYWORD_ONLY),
+        _ParameterContract("remaining_time", inspect.Parameter.KEYWORD_ONLY),
+    ),
+}
 
 
 def _secret_backend_conformance_error(impl: type[SecretBackend]) -> str | None:
-    """Check the class-only facts and operations specific to secret backends."""
-    from agentworks.resources.graph import Readiness
+    """Check the class-only facts and call shapes specific to secret backends.
 
+    Boundary: a capability class arriving at registration from outside our
+    type checking. ``register_plugin`` is exported from the ``plugins``
+    package's public API and seats whatever class it is handed, so the shape
+    the resolution loop calls with is checked once here rather than trusted.
+    What it checks is deliberately narrow: whether the class is callable the
+    way ``resolve.py`` calls it. Return values and annotations are not
+    re-checked, at registration or per call.
+    """
     interactive = getattr(impl, "interactive", None)
     if type(interactive) is not bool:
         return f"its interactive class attribute is {interactive!r}, not a bool"
 
-    operation_contracts = (
-        (
-            "backend_readiness",
-            (),
-            Readiness,
-        ),
-        (
-            "would_attempt",
-            (
-                _ParameterContract("secret_name", inspect.Parameter.POSITIONAL_OR_KEYWORD, str),
-                _ParameterContract("mapping_present", inspect.Parameter.KEYWORD_ONLY, bool),
-            ),
-            bool,
-        ),
-        (
-            "describe_lookup",
-            (
-                _ParameterContract("secret_name", inspect.Parameter.POSITIONAL_OR_KEYWORD, str),
-                _ParameterContract("mapping", inspect.Parameter.POSITIONAL_OR_KEYWORD, BaseModel | None),
-            ),
-            str | None,
-        ),
-        (
-            "external_operation_timeout",
-            (_ParameterContract("config", inspect.Parameter.POSITIONAL_OR_KEYWORD, AgwModel),),
-            float | None,
-        ),
-    )
-    for name, parameters, return_annotation in operation_contracts:
-        error = _classmethod_conformance_error(
-            impl,
-            name=name,
-            parameters=parameters,
-            return_annotation=return_annotation,
-            definition_globals={"AgwModel": AgwModel, "BaseModel": BaseModel, "Readiness": Readiness},
-        )
+    for name, parameters in _OPERATION_CONTRACTS.items():
+        error = _classmethod_conformance_error(impl, name=name, parameters=parameters)
         if error is not None:
             return error
-    return _create_client_conformance_error(impl)
-
-
-def _create_client_conformance_error(impl: type[SecretBackend]) -> str | None:
-    """Check the exact secret-backend factory shape fixed by the contract."""
-    return _classmethod_conformance_error(
-        impl,
-        name="create_client",
-        parameters=(
-            _ParameterContract("source_name", inspect.Parameter.KEYWORD_ONLY, str),
-            _ParameterContract("config", inspect.Parameter.KEYWORD_ONLY, AgwModel),
-            _ParameterContract(
-                "interaction_broker",
-                inspect.Parameter.KEYWORD_ONLY,
-                InteractionBroker | None,
-            ),
-            _ParameterContract("remaining_time", inspect.Parameter.KEYWORD_ONLY, RemainingTime),
-        ),
-        return_annotation=AbstractContextManager[SecretSourceClient],
-    )
+    return None
 
 
 def _classmethod_conformance_error(
@@ -101,35 +70,25 @@ def _classmethod_conformance_error(
     *,
     name: str,
     parameters: tuple[_ParameterContract, ...],
-    return_annotation: object,
-    definition_globals: dict[str, object] | None = None,
 ) -> str | None:
-    """Check one exact classmethod without binding or constructing its owner."""
-    owner = next(base for base in impl.__mro__ if name in base.__dict__)
+    """Check one classmethod's call shape without binding or constructing its owner.
+
+    Boundary as named on :func:`_secret_backend_conformance_error`.
+    """
     raw = inspect.getattr_static(impl, name)
     if not isinstance(raw, classmethod):
         return f"its {name} must be declared as @classmethod"
-    function = raw.__func__
-    declared = tuple(inspect.signature(function).parameters.values())
+    declared = tuple(inspect.signature(raw.__func__).parameters.values())
     if not declared:
         return f"its {name} must declare a 'cls' binding parameter"
+    # The binding parameter's SPELLING is not part of the contract: Python binds
+    # the class to whatever the first parameter is called. Its kind and default
+    # are, because either one stops the framework calling the method at all.
     binding = declared[0]
-    if binding.name != "cls":
-        return f"its {name} first parameter must be named 'cls' (got {binding.name!r})"
     if binding.kind is not inspect.Parameter.POSITIONAL_OR_KEYWORD:
-        return f"its {name} parameter 'cls' must be positional-or-keyword"
+        return f"its {name} parameter {binding.name!r} must be positional-or-keyword"
     if binding.default is not inspect.Parameter.empty:
-        return f"its {name} parameter 'cls' must not have a default"
-    if binding.annotation is not inspect.Parameter.empty:
-        return f"its {name} parameter 'cls' must not have an annotation"
-    try:
-        hints = typing.get_type_hints(
-            function,
-            globalns={**(definition_globals or {}), **function.__globals__},
-            localns=dict(vars(owner)),
-        )
-    except Exception as exc:  # noqa: BLE001 - stable output names only the exception type
-        return f"its {name} annotations could not be resolved: {type(exc).__name__}"
+        return f"its {name} parameter {binding.name!r} must not have a default"
     explicit = declared[1:]
     if len(explicit) != len(parameters):
         return f"its {name} must declare {len(parameters)} parameters after cls (got {len(explicit)})"
@@ -140,16 +99,6 @@ def _classmethod_conformance_error(
             return f"its {name} parameter {expected.name!r} must be {_kind_label(expected.kind)}"
         if parameter.default is not inspect.Parameter.empty:
             return f"its {name} parameter {expected.name!r} must not have a default"
-        actual = hints.get(expected.name)
-        if actual != expected.annotation:
-            return (
-                f"its {name} parameter {expected.name!r} must be annotated as "
-                f"{_type_label(expected.annotation)} "
-                f"(got {_type_label(actual)})"
-            )
-    actual_return = hints.get("return")
-    if actual_return != return_annotation:
-        return f"its {name} must return {_type_label(return_annotation)} (got {_type_label(actual_return)})"
     return None
 
 
@@ -161,16 +110,3 @@ def _kind_label(kind: inspect._ParameterKind) -> str:
         inspect.Parameter.KEYWORD_ONLY: "keyword-only",
         inspect.Parameter.VAR_KEYWORD: "variadic keyword",
     }[kind]
-
-
-def _type_label(annotation: object) -> str:
-    if annotation is None:
-        return "None"
-    if annotation == AbstractContextManager[SecretSourceClient]:
-        return "AbstractContextManager[SecretSourceClient]"
-    if isinstance(annotation, type):
-        if annotation.__module__ == "builtins":
-            return annotation.__name__
-        return f"{annotation.__module__}.{annotation.__qualname__}"
-    text = str(annotation)
-    return text.removeprefix("typing.").replace("collections.abc.", "")

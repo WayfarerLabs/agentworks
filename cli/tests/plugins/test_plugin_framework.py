@@ -234,15 +234,6 @@ class _BackendWithInstanceTimeout(ConformingSecretBackend):
         return None
 
 
-class _BackendWithWrongTimeoutReturn(ConformingSecretBackend):
-    name = "wrong-timeout-return-backend"
-    description = "mistakenly declares an integer-only timeout return"
-
-    @classmethod
-    def external_operation_timeout(cls, config: AgwModel) -> int:  # type: ignore[override]
-        return 1
-
-
 class _BackendWithZeroParameterFactory(ConformingSecretBackend):
     name = "zero-parameter-factory-backend"
     description = "mistakenly declares no classmethod binding parameter"
@@ -409,14 +400,12 @@ def test_a_mixed_valid_and_version_one_plugin_contribution_seats_nothing() -> No
     [
         (_BackendWithInstanceReadiness, "backend_readiness must be declared as @classmethod"),
         (_BackendWithInstanceTimeout, "external_operation_timeout must be declared as @classmethod"),
-        (_BackendWithWrongTimeoutReturn, r"external_operation_timeout must return float \| None"),
         (_BackendWithZeroParameterFactory, "create_client must declare a 'cls' binding parameter"),
         (_BackendWithNonBooleanInteractive, "interactive class attribute is 1, not a bool"),
     ],
     ids=(
         "instance-readiness-method",
         "instance-timeout-method",
-        "timeout-return",
         "zero-parameter-classmethod",
         "malformed-interactive",
     ),

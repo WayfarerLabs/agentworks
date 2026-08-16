@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import math
 import time
-from collections.abc import Mapping
 from contextlib import AbstractContextManager, suppress
 from dataclasses import dataclass
 from enum import StrEnum
@@ -33,7 +31,7 @@ from agentworks.secrets.outcomes import (
 from agentworks.secrets.policy import InteractionPolicy, require_exact_interaction_policy
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
     from types import TracebackType
 
     from pydantic import BaseModel
@@ -57,6 +55,16 @@ class ActiveSource:
     disabled_backend_plugin: str | None = None
 
     def __post_init__(self) -> None:
+        # Examined and kept, as this object's own cross-field invariant rather
+        # than as input validation: three fields are assembled here from three
+        # separate lookups, and nothing in their types says they agree.
+        #
+        # The config half is stronger than the backends act on. ``onepassword``
+        # still re-checks its config model and raises (``backend.py:312,325``),
+        # and given this invariant those two branches are unreachable on the
+        # only path that constructs an ``ActiveSource``. That makes them
+        # candidates for this effort, not evidence for it; they are another
+        # file and another lane.
         if self.source.backend.name != self.backend_class.name:
             raise StateError(
                 f"secret-source/{self.source.name} selects {self.source.backend.name!r}, "
@@ -83,15 +91,7 @@ class ActiveSource:
         mapping_present, mapping = self.mapping_for(secret)
         if mapping_present and mapping is False:
             return False
-        failed = False
-        try:
-            result = self.backend_class.would_attempt(secret.name, mapping_present=mapping_present)
-        except Exception:
-            failed = True
-            result = False
-        if failed or type(result) is not bool:
-            raise _BackendProtocolError from None
-        return result
+        return self.backend_class.would_attempt(secret.name, mapping_present=mapping_present)
 
     def describe_lookup(self, secret: SecretDecl) -> str | None:
         request, identifier = _lookup_projection(secret, self)
@@ -105,20 +105,40 @@ class CompletionPolicy(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ResolutionPolicy:
+    """The two authorities one resolution pass runs under.
+
+    ``interaction`` is the boundary. It arrives from callers our type checker
+    does not see, through the published service surface, and this constructor
+    is the totality half of the check the note above
+    ``require_exact_interaction_policy`` describes.
+
+    ``completion`` is not a boundary, and is checked anyway. Every value
+    comes from a first-party literal and no published function takes it as a
+    parameter, but ``resolve_batch`` compares both fields by identity, so a
+    plain ``"complete"`` would silently take the partial branch and prompt
+    through a batch that was already doomed. One object, one rule, for the
+    cost of a ``type()`` comparison.
+    """
+
     interaction: InteractionPolicy
     completion: CompletionPolicy
 
     def __post_init__(self) -> None:
-        # Both fields are compared by identity downstream, so both are checked here: no
-        # policy exists that was never checked. For what the entry-point checks buy on top
-        # of this one, see the note above ``require_exact_interaction_policy``.
         require_exact_interaction_policy(self.interaction)
         if type(self.completion) is not CompletionPolicy:
             raise StateError("completion must be an exact CompletionPolicy") from None
 
 
 class ResolutionBatch:
-    """A private value-bearing batch whose representation is always redacted."""
+    """A private value-bearing batch whose representation is always redacted.
+
+    The two constructor checks are this object's own cross-field invariant,
+    not input validation: a batch holds exactly one outcome per requested
+    name, and holds a value for exactly the names whose outcome resolved.
+    :meth:`complete_or_raise` hands out values on the strength of the
+    outcomes, so a batch where the two disagree would hand out the wrong
+    ones.
+    """
 
     __slots__ = ("_outcomes", "_values")
 
@@ -126,18 +146,12 @@ class ResolutionBatch:
         self,
         outcomes: Sequence[ResolutionOutcome],
         values: Mapping[str, str],
-        *,
-        _token: object,
     ) -> None:
-        if _token is not _BATCH_TOKEN:
-            raise TypeError("ResolutionBatch construction is internal")
         copied_outcomes = tuple(outcomes)
         names = tuple(outcome.name for outcome in copied_outcomes)
         if len(names) != len(set(names)):
             raise ValueError("resolution outcome names must be unique")
         copied_values = dict(values)
-        if any(type(name) is not str or type(value) is not str for name, value in copied_values.items()):
-            raise TypeError("resolution values must be strings")
         resolved_names = {
             outcome.name for outcome in copied_outcomes if outcome.category is ResolutionCategory.RESOLVED
         }
@@ -161,9 +175,6 @@ class ResolutionBatch:
         return f"ResolutionBatch(outcomes={len(outcomes)}, resolved={len(values)}, values=<redacted>)"
 
     __str__ = __repr__
-
-
-_BATCH_TOKEN = object()
 
 
 @dataclass(slots=True)
@@ -263,7 +274,6 @@ def active_sources(config: Config, registry: Registry) -> tuple[ActiveSource, ..
     from agentworks.config.references import SettingReference
     from agentworks.resources.graph import Enablement
     from agentworks.secrets.sources import (
-        SecretSourceDecl,
         direct_backend_source_error,
         registry_source_backend_lookup,
         source_backend_class,
@@ -291,25 +301,27 @@ def active_sources(config: Config, registry: Registry) -> tuple[ActiveSource, ..
                 hint=f"declared secret sources: {registered}",
             ) from None
         source, backend_class = selected
-        if not isinstance(source, SecretSourceDecl):
-            raise StateError(f"secret-source/{name} is not a SecretSourceDecl")
         if registry.graph.enablement_of("secret-source", name) is Enablement.disabled:
             continue
         disabled_backend_plugin: str | None = None
         if registry.graph.enablement_of("secret-backend", source.backend.name) is Enablement.disabled:
-            backend_row = registry.lookup("secret-backend", source.backend.name)
-            origin = getattr(backend_row, "origin", None)
-            if getattr(origin, "variant", None) == "system-plugin":
-                plugin = getattr(origin, "plugin", None)
-                if not isinstance(plugin, str) or not plugin or "/" in plugin:
-                    raise StateError(f"secret-backend/{source.backend.name} has invalid plugin attribution")
-                disabled_backend_plugin = plugin
+            # ``origin.plugin`` is set only by the ``system-plugin`` variant, so it
+            # doubles as the variant test, exactly as the other disabled-row tails
+            # read it (``resources.access.ensure_reference_enabled``). No empty-string
+            # case to normalize: registration requires a non-empty plugin name.
+            origin = getattr(registry.lookup("secret-backend", source.backend.name), "origin", None)
+            disabled_backend_plugin = getattr(origin, "plugin", None)
         validated = validate_capability_config(
             kind="secret-backend",
             config=source.backend.tagged,
             owner=RefOwner(kind="secret-source", name=name),
             location=source.error_location,
         )
+        # Examined and kept, and it is a narrowing rather than a re-check:
+        # ``validate_capability_config`` is generic over kinds and returns
+        # ``BaseModel | None``, while a secret backend's config contract is
+        # ``AgwModel``. mypy cannot know the kind here, so this is the honest
+        # else-branch of a cast we would otherwise be making silently.
         if validated is None or not isinstance(validated, AgwModel):
             raise StateError(f"secret-source/{name} has no validated backend config")
         active.append(
@@ -328,6 +340,15 @@ def _lookup_projection(
     secret: SecretDecl,
     source: ActiveSource,
 ) -> tuple[SecretLookupRequest | None, str | None]:
+    """Project one secret onto one source as a request and a safe identifier.
+
+    Boundary: operator-authored manifest input rendered as text. The
+    identifier a backend derives is the operator's own mapping value (the
+    ``env-var`` backend returns the variable name verbatim, and ``op://``
+    references likewise), and it lands in a rendered diagnostic line, so it
+    is screened once here for characters that could forge or alter that
+    line. Nothing else the backend returns is re-checked.
+    """
     from agentworks.capabilities.config import validate_capability_mapping
 
     mapping_present, mapping = source.mapping_for(secret)
@@ -351,20 +372,20 @@ def _lookup_projection(
             ) from None
         if validated is None:
             raise StateError(f"secret-source/{source.name} mapping validation selected no backend model")
-    identifier_failed = False
-    try:
-        identifier = source.backend_class.describe_lookup(secret.name, validated)
-    except Exception:
-        identifier_failed = True
-        identifier = None
-    if identifier_failed:
-        raise _BackendProtocolError from None
-    if identifier is not None and (type(identifier) is not str or not _safe_diagnostic_text(identifier)):
+    identifier = source.backend_class.describe_lookup(secret.name, validated)
+    if identifier is not None and not _safe_diagnostic_text(identifier):
         raise _BackendProtocolError
     return SecretLookupRequest(name=secret.name, mapping=validated), identifier
 
 
 class _BackendProtocolError(Exception):
+    """A lookup identifier is unsafe to render, so this secret gets no row here.
+
+    Raised only by :func:`_lookup_projection`, and caught per secret so one
+    unrenderable identifier costs that secret its attempt at this source
+    rather than failing the whole batch.
+    """
+
     __slots__ = ()
 
 
@@ -420,19 +441,15 @@ def _remaining_attemptable(
     sources: Sequence[ActiveSource],
     *,
     policy: ResolutionPolicy,
-) -> tuple[bool, str | None]:
+) -> bool:
     for source in sources:
         if not source.readiness.is_ready:
             continue
         if source.interactive and policy.interaction is InteractionPolicy.REFUSE:
             continue
-        try:
-            would_attempt = source.would_attempt(secret)
-        except _BackendProtocolError:
-            return False, source.name
-        if would_attempt:
-            return True, None
-    return False, None
+        if source.would_attempt(secret):
+            return True
+    return False
 
 
 def _check_boundary(remaining_time: RemainingTime) -> None:
@@ -447,7 +464,7 @@ def _drive_source(
     *,
     broker: InteractionBroker | None,
     timeout: float | None,
-) -> object:
+) -> Mapping[str, str]:
     budget = _MonotonicBudget.start(
         timeout,
         clock=time.monotonic,
@@ -510,8 +527,9 @@ def resolve_batch(
         if not projected:
             continue
         if not source.readiness.is_ready:
-            if not source.readiness.reason:
-                raise StateError(f"secret-source/{source.name} has invalid readiness") from None
+            # No reason check here: the reason is a backend's own text and this
+            # function never renders it. ``preview.py`` does render it, and keeps
+            # both its narrowing and ``SkippedSource``'s own emptiness invariant.
             for request, identifier in projected:
                 evidence[request.name].not_ready.append((source.name, identifier, source.disabled_backend_plugin))
             continue
@@ -524,18 +542,7 @@ def resolve_batch(
             terminal_exists = any(outcome.category is not ResolutionCategory.RESOLVED for outcome in outcomes.values())
             if not terminal_exists:
                 for secret in still_missing:
-                    attemptable, protocol_source = _remaining_attemptable(
-                        secret,
-                        sources[index:],
-                        policy=policy,
-                    )
-                    if protocol_source is not None:
-                        outcomes[secret.name] = _outcome(
-                            secret.name,
-                            ResolutionDetail.BACKEND_PROTOCOL,
-                            source=protocol_source,
-                        )
-                    elif not attemptable:
+                    if not _remaining_attemptable(secret, sources[index:], policy=policy):
                         outcomes[secret.name] = _collapse(
                             secret.name,
                             evidence[secret.name],
@@ -556,38 +563,31 @@ def resolve_batch(
         failure_kind: SecretClientFailureKind | None = None
         timed_out = False
         unexpected = False
-        try:
-            declared_timeout = source.backend_class.external_operation_timeout(source.config)
-        except Exception:
-            declared_timeout = None
-            unexpected = True
-        if unexpected:
-            for request in requests:
-                outcomes[request.name] = _outcome(
-                    request.name,
-                    ResolutionDetail.UNEXPECTED,
-                    source=source.name,
-                    identifier=identifiers[request.name],
-                )
-            continue
-        if declared_timeout is not None and (
-            type(declared_timeout) not in {int, float} or not math.isfinite(declared_timeout) or declared_timeout <= 0
-        ):
-            raise StateError(f"secret-source/{source.name} declared an invalid external-operation timeout")
-        timeout = None if declared_timeout is None else float(declared_timeout)
+        timeout = source.backend_class.external_operation_timeout(source.config)
+        # Empty rather than unbound, so a failure branch that ever stopped
+        # short of its ``continue`` would soft-miss this source instead of
+        # attributing the previous source's values to it.
+        returned: Mapping[str, str] = {}
         try:
             returned = _drive_source(source, requests, broker=broker, timeout=timeout)
         except UserAbort:
             raise
         except SecretClientTimeout:
             timed_out = True
-            returned = None
         except SecretClientFailure as failure:
             failure_kind = failure.kind
-            returned = None
         except Exception:
+            # Boundary: an external process or service. What this contains is
+            # exactly ``_drive_source``: client construction, context entry,
+            # ``prepare``, ``resolve``, and exit, which is where a provider CLI
+            # or SDK actually runs. Anything raised there beyond the declared
+            # failure vocabulary becomes this source's per-secret ``unexpected``
+            # outcome rather than ending the command. The timeout declaration
+            # read above is deliberately outside: both implementations of that
+            # hook today return a declared config value and do no I/O, so a
+            # raise from it is a first-party bug and should surface as one. A
+            # future implementation that does I/O there belongs inside this.
             unexpected = True
-            returned = None
         if timed_out or failure_kind is not None or unexpected:
             if timed_out:
                 detail = ResolutionDetail.DEADLINE_EXCEEDED
@@ -609,38 +609,11 @@ def resolve_batch(
                 )
             continue
 
-        returned_values: dict[str, str] = {}
-        returned_detail: ResolutionDetail | None = None
-        requested_names = frozenset(request.name for request in requests)
-        try:
-            if not isinstance(returned, Mapping):
-                returned_detail = ResolutionDetail.BACKEND_PROTOCOL
-            else:
-                for item in returned.items():
-                    if type(item) is not tuple or len(item) != 2:
-                        returned_detail = ResolutionDetail.BACKEND_PROTOCOL
-                        break
-                    raw_name, raw_value = item
-                    if type(raw_name) is not str or type(raw_value) is not str or raw_name not in requested_names:
-                        returned_detail = ResolutionDetail.BACKEND_PROTOCOL
-                        break
-                    returned_values[raw_name] = raw_value
-        except Exception:
-            returned_detail = ResolutionDetail.UNEXPECTED
-        if returned_detail is not None:
-            for request in requests:
-                outcomes[request.name] = _outcome(
-                    request.name,
-                    returned_detail,
-                    source=source.name,
-                )
-            continue
-
         for request in requests:
-            if request.name not in returned_values:
+            if request.name not in returned:
                 evidence[request.name].soft_missed.append((source.name, identifiers[request.name]))
                 continue
-            value = returned_values[request.name]
+            value = returned[request.name]
             if "\0" in value:
                 outcomes[request.name] = _outcome(
                     request.name,
@@ -665,7 +638,7 @@ def resolve_batch(
                 sources_empty=not sources,
             )
     ordered = tuple(outcomes[secret.name] for secret in deduped)
-    return ResolutionBatch(ordered, values, _token=_BATCH_TOKEN)
+    return ResolutionBatch(ordered, values)
 
 
 @dataclass(slots=True)

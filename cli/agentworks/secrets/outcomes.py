@@ -137,7 +137,28 @@ _UNSAFE_DIAGNOSTIC_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
 
 
 def _safe_diagnostic_text(value: str) -> bool:
-    """Reject text that can alter or forge a rendered diagnostic line."""
+    """Reject text that can alter or forge a rendered diagnostic line.
+
+    Boundary: operator-authored input rendered as text. This screens three
+    fields, and each is operator-written and reaches no validator that
+    guarantees it newline-free. (It is not the row's whole threat model:
+    ``remediation_target`` is PLUGIN-written and is handled by escaping at
+    the render sink instead, below.)
+
+    - a secret NAME reaches no naming validator at all, because ``secret``
+      auto-declares any name a config reference uses (``secrets.kinds``);
+    - a lookup IDENTIFIER is the operator's own mapping value verbatim;
+    - a SOURCE name does pass ``validate_name`` at manifest decode, and that
+      is not sufficient: ``NAME_RE`` anchors with ``$`` and is applied with
+      ``re.match``, and ``$`` matches before a trailing newline, so
+      ``"envvar\\n"`` validates cleanly. Rendering that source splits one
+      row into two and the remainder becomes a forged line. Issue #542
+      tracks the root cause; fixing it there tightens validation for every
+      resource kind, so it is not a change this guard waits on.
+
+    A validator upstream is a reason to check less carefully here only when
+    it actually rejects what this rejects.
+    """
     return all(unicodedata.category(char) not in _UNSAFE_DIAGNOSTIC_CATEGORIES for char in value)
 
 
@@ -158,17 +179,11 @@ class ResolutionOutcome:
         if self.category is not rule.category or self.remediation is not rule.remediation:
             raise ValueError("invalid resolution outcome category or remediation")
         if (self.source is not None) is not rule.source_required:
-            raise ValueError("invalid resolution outcome source")
+            raise ValueError("this resolution outcome detail disagrees about carrying a source")
         if not rule.identifier_allowed and self.identifier is not None:
-            raise ValueError("invalid resolution outcome identifier")
+            raise ValueError("this resolution outcome detail forbids an identifier")
         if (self.remediation_target is not None) is not rule.remediation_target_required:
             raise ValueError("invalid resolution outcome remediation target presence")
-        if rule.remediation_target_required and (
-            not isinstance(self.remediation_target, str)
-            or not self.remediation_target
-            or "/" in self.remediation_target
-        ):
-            raise ValueError("enable-plugin remediation target must be non-empty and '/'-free")
         if not _safe_diagnostic_text(self.name):
             raise ValueError("invalid resolution outcome name")
         if self.source is not None and not _safe_diagnostic_text(self.source):
@@ -178,6 +193,24 @@ class ResolutionOutcome:
 
 
 def _escape_plugin_target(target: str) -> str:
+    """Render a plugin name as ASCII, escaping everything else.
+
+    Boundary: a capability class registered from outside our type checking.
+    A plugin names itself, and ``register_plugin`` only requires that name
+    to be non-empty and '/'-free, so the remediation line escapes rather
+    than trusts it.
+
+    Escaping works here because the name arrives as its own field, so this
+    escapes exactly it. That is not the only route a plugin name takes to a
+    rendered line: ``plugins/enablement.py`` builds one into a
+    ``DisabledMark.reason``, which ``secrets/sources.py`` concatenates into a
+    source's ``Readiness.reason``, which reaches an operator at
+    ``secrets/inspect.py:541`` and ``doctor.py:772`` and as a JSON field at
+    ``secrets/inspect.py:370`` (safe there, since the encoder escapes). By
+    then the name is inside our own prose and no sink can escape it alone, so
+    ``SkippedSource`` screens that text instead. Issue #545 tracks escaping it
+    upstream, where it is still a separate token.
+    """
     escaped: list[str] = []
     for char in target:
         codepoint = ord(char)

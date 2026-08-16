@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import ItemsView, Iterator, Mapping
 from contextlib import AbstractContextManager
 from dataclasses import FrozenInstanceError
 from typing import Any, ClassVar, Literal
@@ -23,6 +22,7 @@ from agentworks.capabilities.secret_backend.client import (
     SecretSourceClient,
 )
 from agentworks.errors import ExternalError, SecretUnavailableError, StateError
+from agentworks.naming import MAX_FREEFORM_NAME_LENGTH, validate_name
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.resources.graph import Readiness
 from agentworks.schema import AgwModel, AgwRootModel, CapabilityBlock
@@ -483,16 +483,27 @@ def test_illegal_outcome_tuple_is_rejected() -> None:
         )
 
 
-@pytest.mark.parametrize("target", ["", "plugin/name"])
-def test_enable_plugin_outcome_rejects_only_registration_invalid_targets(target: str) -> None:
-    with pytest.raises(ValueError, match="non-empty and '/'-free"):
+def test_a_source_name_that_passes_validate_name_can_still_forge_a_row() -> None:
+    """Decode's naming validator is not sufficient to trust a source name here.
+
+    ``NAME_RE`` anchors with ``$`` and is applied through ``re.match``, and ``$``
+    matches before a trailing newline, so ``validate_name`` accepts ``"envvar\\n"``
+    and a manifest can declare it. Rendering that source splits one diagnostic
+    row into two. Issue #542 tracks the validator; this guard is what stands
+    between the hole and a forged line, so it is not redundant with decode.
+
+    No ``match=``: with a safe name and no identifier, the source check is the
+    only one in ``__post_init__`` that this construction can trip.
+    """
+    forged = "envvar\n"
+    validate_name(forged, max_length=MAX_FREEFORM_NAME_LENGTH)
+    with pytest.raises(ValueError):
         ResolutionOutcome(
             name="token",
             category=ResolutionCategory.UNAVAILABLE,
-            detail=ResolutionDetail.SOURCE_BACKEND_PLUGIN_DISABLED,
-            remediation=ResolutionRemediation.ENABLE_PLUGIN,
-            source="source",
-            remediation_target=target,
+            detail=ResolutionDetail.SOFT_MISS,
+            remediation=ResolutionRemediation.CONFIGURE_SOURCE,
+            source=forged,
         )
 
 
@@ -575,114 +586,6 @@ def test_one_source_receives_one_ordered_batch() -> None:
     assert _Backend.events == ["factory", "enter", "prepare", "resolve", "exit"]
     assert [outcome.name for outcome in batch.outcomes] == ["a", "b"]
     assert batch.complete_or_raise() == {"a": "1", "b": "2"}
-
-
-class _ProtocolClient(_Client):
-    returned: ClassVar[object] = {}
-
-    def resolve(
-        self,
-        requests: tuple[SecretLookupRequest, ...],
-        *,
-        remaining_time: RemainingTime,
-    ) -> Any:
-        self.events.append("resolve")
-        return self.returned
-
-
-class _ProtocolBackend(_Backend):
-    events: ClassVar[list[str]] = []
-    values: ClassVar[dict[str, str]] = {}
-    failure: ClassVar[BaseException | None] = None
-
-    @classmethod
-    def create_client(
-        cls,
-        *,
-        source_name: str,
-        config: AgwModel,
-        interaction_broker: InteractionBroker | None,
-        remaining_time: RemainingTime,
-    ) -> AbstractContextManager[SecretSourceClient]:
-        cls.events.append("factory")
-        return _Context(_ProtocolClient(cls.events, {}, None), cls.events)
-
-
-@pytest.mark.parametrize("returned", [{"extra": "value"}, {"token": object()}, object(), None])
-def test_provider_protocol_violation_fails_the_whole_attempted_batch(returned: object) -> None:
-    _ProtocolBackend.events = []
-    _ProtocolClient.returned = returned
-    batch = resolve_batch(
-        [SecretDecl(name="token", description="token")],
-        [_source(backend_class=_ProtocolBackend)],
-        policy=_policy(completion=CompletionPolicy.PARTIAL),
-        interaction_broker=None,
-    )
-    assert batch.outcomes[0].detail is ResolutionDetail.BACKEND_PROTOCOL
-
-
-class _HostileMapping(Mapping[str, str]):
-    def __init__(self, phase: str) -> None:
-        self.phase = phase
-
-    def __iter__(self) -> Iterator[str]:
-        if self.phase == "iteration":
-            raise RuntimeError("sentinel-hostile-iteration")
-        return iter(("token",))
-
-    def __len__(self) -> int:
-        return 1
-
-    def __getitem__(self, key: str) -> str:
-        if self.phase == "indexing":
-            raise RuntimeError("sentinel-hostile-indexing")
-        return "sentinel-provider-value"
-
-    def __contains__(self, key: object) -> bool:
-        if self.phase == "membership":
-            raise RuntimeError("sentinel-hostile-membership")
-        return super().__contains__(key)
-
-    def items(self) -> ItemsView[str, str]:
-        if self.phase == "items":
-            raise RuntimeError("sentinel-hostile-items")
-        return super().items()
-
-    def __repr__(self) -> str:
-        return f"_HostileMapping(sentinel-hostile-{self.phase})"
-
-
-@pytest.mark.parametrize("phase", ["items", "iteration", "indexing"])
-def test_hostile_provider_mapping_traversal_is_sanitized_and_value_free(phase: str) -> None:
-    _ProtocolBackend.events = []
-    _ProtocolClient.returned = _HostileMapping(phase)
-    batch = resolve_batch(
-        [SecretDecl(name="token", description="token")],
-        [_source(backend_class=_ProtocolBackend)],
-        policy=_policy(completion=CompletionPolicy.PARTIAL),
-        interaction_broker=None,
-    )
-
-    assert batch.outcomes[0].detail is ResolutionDetail.UNEXPECTED
-    with pytest.raises(ExternalError) as caught:
-        batch.complete_or_raise()
-    rendered = repr((str(caught.value), repr(caught.value), caught.value.args))
-    assert "sentinel-hostile" not in rendered
-    assert "sentinel-provider-value" not in rendered
-    assert caught.value.__cause__ is None
-    assert caught.value.__context__ is None
-
-
-def test_provider_membership_is_not_consulted_during_mapping_validation() -> None:
-    _ProtocolBackend.events = []
-    _ProtocolClient.returned = _HostileMapping("membership")
-    batch = resolve_batch(
-        [SecretDecl(name="token", description="token")],
-        [_source(backend_class=_ProtocolBackend)],
-        policy=_policy(),
-        interaction_broker=None,
-    )
-    assert batch.complete_or_raise() == {"token": "sentinel-provider-value"}
 
 
 @pytest.mark.parametrize("value", [f"{_VALUE_SENTINEL}\0x", f"x\0{_VALUE_SENTINEL}"])

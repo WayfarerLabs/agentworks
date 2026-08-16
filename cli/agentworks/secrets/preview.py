@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError
 from agentworks.secrets.outcomes import _safe_diagnostic_text
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import InteractionPolicy, require_exact_interaction_policy
 from agentworks.secrets.resolve import ActiveSource, _BackendProtocolError, _lookup_projection
 
 if TYPE_CHECKING:
@@ -29,8 +29,27 @@ class SkippedSource:
     reason: str
 
     def __post_init__(self) -> None:
-        if not self.reason or not _safe_diagnostic_text(self.source) or not _safe_diagnostic_text(self.reason):
-            raise ValueError("invalid skipped source")
+        # ``reason`` is screened like the names beside it, and registration is
+        # not what makes that unnecessary: registration vets a plugin's SHAPE
+        # (a non-empty, '/'-free name; types; call shapes), never the text it
+        # later produces. This field is a mixture. ``sources.py`` composes most
+        # of it from our own prose around a plugin-authored name that
+        # ``plugins/enablement.py`` baked in, and returns ``impl.not_ready()``
+        # wholesale in the remaining case.
+        #
+        # Escaping at the render sink, which is how the sibling plugin name on
+        # ``ResolutionOutcome.remediation_target`` is handled, cannot work here:
+        # that one survives as its own field so the sink can escape exactly it,
+        # while this one is already concatenated into first-party prose, so the
+        # sink would have to escape our punctuation along with it. Issue #545
+        # tracks escaping the name upstream, where it is still a separate token;
+        # until then this screen is what keeps a rendered row one row.
+        if not self.reason:
+            raise ValueError("a skipped source must say why it was skipped")
+        if not _safe_diagnostic_text(self.source):
+            raise ValueError("invalid skipped source name")
+        if not _safe_diagnostic_text(self.reason):
+            raise ValueError("invalid skipped source reason")
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +66,14 @@ class ResolutionPreview:
                 raise ValueError("attemptable preview requires a source")
         elif self.source is not None or self.identifier is not None:
             raise ValueError("unavailable preview forbids source and identifier")
+        # Boundary: the same operator-authored text a resolution outcome
+        # carries. See ``_safe_diagnostic_text``. ``source`` and ``identifier``
+        # reach this row's own rendered surfaces (``secret describe``,
+        # ``doctor``). ``name`` reaches none of them, and is screened for a
+        # different reason: ``describe_secret`` builds a preview before its
+        # renderer prints that same operator-chosen name in the header
+        # (``inspect.py``), so this is where a forged one is caught. Call
+        # order is what puts the catch here.
         if not _safe_diagnostic_text(self.name):
             raise ValueError("invalid preview name")
         if self.source is not None and not _safe_diagnostic_text(self.source):
@@ -119,5 +146,14 @@ def preview_operation_resolution(
     *,
     interaction: InteractionPolicy,
 ) -> ResolutionPreview:
-    """Predict whether an operation has a source under an exact interaction policy."""
+    """Predict whether an operation has a source under an exact interaction policy.
+
+    Checks its own ``interaction`` because this is a published entry point
+    that consumes the value and builds no ``ResolutionPolicy``, so the
+    constructor's totality never reaches it. ``_preview`` compares it by
+    identity, and a plain ``"refuse"`` predicts attemptable where the
+    operation would refuse. The check is first, before any source walk, so a
+    rejection costs nothing.
+    """
+    require_exact_interaction_policy(interaction)
     return _preview(secret, sources, interaction=interaction)

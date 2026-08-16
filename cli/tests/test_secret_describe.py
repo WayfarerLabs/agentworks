@@ -663,6 +663,50 @@ def test_render_omits_used_by_section_when_none(
     assert "Backend mappings:" in out
 
 
+# -- Names that reach the renderer unvalidated ------------------------------
+
+
+def test_an_auto_declared_name_cannot_add_a_line_to_the_rendering(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The operator's choice of name cannot lengthen describe's output.
+
+    The header renders the secret's name, and that name reached no naming
+    validator: the ``secret`` kind auto-declares any name a reference uses,
+    with no name restriction (``secrets/kinds.py``), so a manifest can put a
+    line separator in it. Splitting the header gives the operator a second
+    line that reads like one of ours.
+
+    ``ResolutionPreview`` screens the name on the way through, so describe
+    refuses before the renderer runs. The assertion is the property that
+    survives either answer, measured against the same manifest under a plain
+    name: an unavailable source chain keeps every other line identical, so
+    any growth is the split.
+    """
+    from agentworks.secrets.inspect import render_secret_description
+
+    def _rendered_line_count(directory: Path, name: str) -> int:
+        directory.mkdir()
+        cfg = write_cfg(
+            directory,
+            ManifestDoc("admin-template", "default", {"env": {"API_KEY": {"secret": name}}}),
+            settings="[secret_config]\nsources = []\n",
+            filename="c.toml",
+        )
+        config = load_config(cfg, warn_issues=False)
+        registry = build_registry(config)
+        try:
+            render_secret_description(describe_secret(config, registry, name))
+        except ValueError:
+            return 0
+        return len(capsys.readouterr().out.splitlines())
+
+    baseline = _rendered_line_count(tmp_path / "plain", "api-key")
+    assert baseline > 0
+    assert _rendered_line_count(tmp_path / "forged", "api-key\nSecret: forged") <= baseline
+
+
 # -- Missing-name behavior --------------------------------------------------
 
 

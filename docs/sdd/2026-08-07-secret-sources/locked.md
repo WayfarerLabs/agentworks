@@ -195,3 +195,59 @@ property of the gate, and no backend's safety should depend on its name.
 This note narrows the interaction-policy validation convention only. The source-and-backend model,
 the resolution protocol, the value-free outcome vocabulary, the trust-boundary statement, and the
 0.14 break recorded above are untouched.
+
+## Supersession (2026-08-15)
+
+The same effort's wave 1 (PR #546) deleted registration checks that both LLDs still specify as
+normative, so those sections no longer describe HEAD. Recorded here for the reason the note above
+gives: those LLDs are the only place on `main` that still state the mechanism as current design, and
+this directory is locked.
+
+Superseded in full:
+
+- `source-contract-lld.md` lines 167-175 ("Fixed ordinary lifecycle") and the conformance-order item
+  8 at line 191. They require registration to walk `impl.__mro__` for the first definer of
+  `preflight` and `runup`, reject any owner below `SecretBackend`, and emit two stable error
+  strings. The `@final` decorators and the empty bodies stay, and only the registration-time
+  re-proof goes: mypy reports a `@final` override, so the check was re-proving a first-party ABC's
+  own decorator against classes that had already type-checked.
+- `resolution-lifecycle-lld.md` lines 229-233, which require the four `create_client` parameters to
+  match the factory signature's "resolved annotations, and resolved return" exactly and pin the
+  binding parameter's name to `cls`, together with the stable-error items that give those
+  comparisons their messages (lines 261-262, 265-266, and 273-276) and the factory-signature row of
+  the test matrix at line 998. Annotation equality rejected Liskov-legal widening that mypy accepts,
+  and the binding parameter's spelling was never part of the contract, because Python binds the
+  class to whatever the first parameter is called.
+
+What stayed, each with its boundary now named in its own docstring: the class is constructible, it
+declares the supported contract version, and every operation the resolution loop invokes is a
+classmethod taking the parameter names and kinds that loop calls with. Those are what stop a
+registered class failing at the first source turn rather than at registration. The boundary is
+`plugins.register_plugin`, exported from the `plugins` package's public API and seating whatever
+class it is handed. That is the channel that exists today, not a future dynamic loader, and naming
+the real one is what makes the docstring's claim checkable.
+
+`source-contract-lld.md` line 260 is not superseded and was right when written: core built-ins are
+checked by the descriptor self-test just like plugin classes.
+`cli/tests/capabilities/test_capability_descriptors.py:438` still runs the whole chain over every
+seated implementation of every kind. The enforcement moment differs (registration for a plugin, CI
+for our own tree), which is the intended shape rather than a gap.
+
+Two corrections to the 2026-08-14 note above, which this PR outdated:
+
+- Its "`grep -rn "ResolutionPolicy(" cli/agentworks/` is the whole audit" is now half of one. That
+  grep settles totality and cannot find a published entry point that consumes `interaction` and
+  constructs no policy. `preview_operation_resolution` and `predict_resolution` are exactly that
+  shape and were unchecked; both now check on arrival. `secrets/policy.py` carries the two-half
+  recipe and, for the half with no clean grep, a criterion. Issue #544 sweeps the entry points that
+  satisfy the criterion and still do not check.
+- Its "Three entry points call the check themselves" paragraph is still exactly three at HEAD and
+  stays as written. The two additions belong to a different category and are counted separately:
+  those three buy POSITION, checking before consequential work, while the two new ones buy REACH,
+  since each can return successfully without any policy being constructed, so the check on arrival
+  is the only rejection there will ever be. Merging the counts would blur the distinction the
+  paragraph exists to draw.
+
+No shipped contract changed, and no operator-visible behavior changed. Every behavior recorded under
+"What shipped" holds, as do the source-and-backend model, the resolution protocol, the value-free
+outcome vocabulary, the trust-boundary statement, and the 0.14 break.

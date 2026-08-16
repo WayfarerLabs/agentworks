@@ -101,16 +101,16 @@ class ExampleBackend(SecretBackend):
         return nullcontext(ExampleClient())
 ```
 
-All five provider operations have exact registration-checked classmethod signatures.
-`backend_readiness`, `would_attempt`, `describe_lookup`, and `external_operation_timeout` match the
-ABC's parameter kinds, annotations, and returns. For `create_client`, all four arguments after `cls`
-are required and keyword-only. Annotation resolution is anchored to the defining class, so an
-inherited conforming method cannot change meaning in a registering subclass. Registration checks the
-timeout declaration's shape without invoking it or fabricating config; the resolution core validates
-each actual timeout as finite-positive or `None`. `create_client` does no blocking work and is
-resource-free. Acquisition belongs to context entry, authenticated read-only setup belongs to
-`prepare`, lookups belong to `resolve`, and cleanup belongs to context exit. The context and client
-are operation-local and are never cached in the registry.
+All five provider operations are registration-checked for the shape the resolution loop calls them
+with: declared as a `@classmethod`, and the parameters after `cls` matching the ABC's names, kinds,
+and required-ness. For `create_client`, all four arguments after `cls` are required and
+keyword-only. Types are the type checker's job, so annotations are not compared at registration and
+returns are not re-checked per call. Registration inspects the timeout declaration without invoking
+it or fabricating config; a timeout's actual value is validated where the operator writes it, by the
+source config model. `create_client` does no blocking work and is resource-free. Acquisition belongs
+to context entry, authenticated read-only setup belongs to `prepare`, lookups belong to `resolve`,
+and cleanup belongs to context exit. The context and client are operation-local and are never cached
+in the registry.
 
 `backend_readiness` is an offline, config-independent host-support verdict.
 `would_attempt(secret_name, mapping_present=...)` is total and performs no I/O. `describe_lookup`
@@ -120,7 +120,7 @@ with its finite positive source-turn timeout and enforces the supplied `remainin
 cancellable external boundary.
 
 `preflight` and `runup` are final no-ops. Secret resolution occurs before ordinary capability
-lifecycle work, and registration rejects direct or inherited overrides of either method.
+lifecycle work, and a backend is only ever used as a class, so neither method is ever called on one.
 
 Provider failures cross the boundary only through `SecretClientFailure` and `SecretClientTimeout`.
 `SecretClientFailure` fixes each failure kind to its allowed remediation and accepts no free-form

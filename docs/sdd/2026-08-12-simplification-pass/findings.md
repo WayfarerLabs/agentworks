@@ -109,7 +109,13 @@ deliberately narrow `cli-conventions.md`.
   550 lines later, MRO walks re-checking `@final` methods, and reflective signature conformance
   (`capabilities/secret_backend/conformance.py`, 176 lines + 839 test lines) that runs against
   exactly one class and rejects Liskov-legal widening mypy accepts. Built-ins are not
-  conformance-checked at all.
+  conformance-checked at all. Correction (2026-08-15, from PR #546): that last sentence was wrong
+  when written. `tests/capabilities/test_capability_descriptors.py:438`
+  (`test_every_registered_builtin_impl_conforms`) runs the whole conformance chain over every seated
+  implementation of every kind, and existed unchanged at this pass's merge base. The real
+  distinction is where and when, not whether: our own tree is checked by a test that fails the
+  build, a plugin's classes at registration. PR #546's argument for narrowing the registration
+  checks rests on that test existing, so the error mattered more than an ordinary stale line.
 - **S3** Client protocol wider than its implementers: `prepare` implemented by 0 of 3,
   `create_client(source_name=...)` read by 0 of 3, context manager needed by 1 of 3.
   `SecretClientFailure.remediation` is never read, and the constructor requires callers to pass a
@@ -131,7 +137,17 @@ deliberately narrow `cli-conventions.md`.
 - **S7** Adversarial validation of data our own parsers produce: triple defense on plugin directory
   names, Unicode-category scrubbing of already-validated resource names, `require_exact_json_value`
   rejecting "Python lookalikes" a YAML parser cannot emit. Contrast `line_safety.py` (43 lines),
-  which guards a real boundary correctly.
+  which guards a real boundary correctly. Correction (2026-08-15, from PR #546's execution): the
+  lookalike claim is disproved. `manifests/loader.py`'s `_StrictLoader` is a `SafeLoader` subclass,
+  and its tag set is wider than JSON: a plain `2020-01-02` builds a `datetime.date`, `!!binary`
+  builds `bytes`, `!!set` builds a `set`, and a dated mapping key builds a non-string key. All are
+  reachable from a secret's `backend_mappings` in operator-authored YAML, and a manifest carrying
+  `!!binary` there is rejected by `require_exact_json_value` and by nothing else. The guard names a
+  live boundary and correctly stays. The scrubbing claim is disproved with it: those names are not
+  in fact already validated, because `validate_name` accepts a trailing newline (`$` matches before
+  it under `re.match`, filed as #542), so the scrub guards against a validator that lies rather than
+  re-checking a certified value. PR #546 restored it with two tests written to fail once #542 lands,
+  so the guard retires itself.
 - **S8** `direct_backend_source_error` (`sources.py:268-325`): a transitional bridge outside the
   `retired_shapes.py` quarantine, containing the one plugin-specific branch in an otherwise generic
   module, parsing the retired mapping shape its own upgrade guide says is not parsed.

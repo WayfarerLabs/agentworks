@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -41,7 +42,13 @@ from agentworks.secrets.outcomes import (
     format_outcome,
 )
 from agentworks.secrets.policy import InteractionPolicy
-from agentworks.secrets.resolve import ActiveSource
+from agentworks.secrets.resolve import (
+    ActiveSource,
+    CompletionPolicy,
+    ResolutionPolicy,
+    active_sources,
+    resolve_batch,
+)
 from agentworks.secrets.verification import render_verification, verify_secrets
 from tests.conftest import ManifestDoc, write_cfg
 from tests.secrets.test_resolution_lifecycle import _Backend, _source
@@ -549,6 +556,53 @@ def test_service_and_renderer_reduce_unicode_separator_to_one_protocol_row(
     rendered = capsys.readouterr().out
     assert len(rendered.splitlines()) == 3
     assert "forged-row" not in rendered
+
+
+def test_an_auto_declared_name_cannot_split_one_outcome_into_two_rendered_rows(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """One outcome renders as one row whatever the operator named the secret.
+
+    A secret name reaches no naming validator anywhere: the ``secret`` kind
+    auto-declares any name a reference uses, with no name restriction
+    (``secrets/kinds.py``). The name on a rendered diagnostic row is
+    therefore operator-authored text arriving at a render boundary, and a
+    line separator inside it splits one row into two, the second carrying
+    the operator's own text where a resolution result belongs.
+
+    Driven from a manifest rather than a hand-built row, because the premise
+    the screen rests on is exactly that this name reaches the registry
+    unvalidated. ``ResolutionOutcome`` screens it, so no row is built at all;
+    what is asserted is the property that holds whichever way that goes,
+    which is that the table's body carries one line per outcome.
+    """
+    forged = "token\nSecret: forged"
+    config_path = write_cfg(
+        tmp_path,
+        ManifestDoc("admin-template", "default", {"env": {"API_KEY": {"secret": forged}}}),
+        settings="[secret_config]\nsources = []\n",
+    )
+    config = load_config(config_path, warn_issues=False)
+    registry = build_registry(config)
+    decl = registry.lookup("secret", forged)
+    assert decl.name == forged
+
+    outcomes: tuple[ResolutionOutcome, ...] = ()
+    with suppress(ValueError):
+        outcomes = resolve_batch(
+            [decl],
+            active_sources(config, registry),
+            policy=ResolutionPolicy(
+                interaction=InteractionPolicy.REFUSE,
+                completion=CompletionPolicy.COMPLETE,
+            ),
+            interaction_broker=None,
+        ).outcomes
+
+    render_verification(outcomes)
+    body = capsys.readouterr().out.splitlines()[2:]
+    assert len(body) == len(outcomes)
 
 
 def test_render_verification_uses_only_shared_outcome_fields(capsys: pytest.CaptureFixture[str]) -> None:

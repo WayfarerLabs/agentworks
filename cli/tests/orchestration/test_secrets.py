@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 import pytest
 
 from agentworks.errors import ConfigError, StateError
+from agentworks.naming import MAX_FREEFORM_NAME_LENGTH, validate_name
 from agentworks.orchestration.secrets import (
     ScopedSecrets,
     predict_resolution,
@@ -289,6 +290,83 @@ def test_prediction_respects_source_opt_out() -> None:
     decl = _decl("a", backend_mappings={"prompt": False})
     preview = predict_resolution([decl], _sources(prompt), interaction=InteractionPolicy.REFUSE)["a"]
     assert preview.category is PreviewCategory.UNAVAILABLE
+
+
+def test_preview_rows_reject_a_source_name_validate_name_accepts() -> None:
+    """The same decode hole ``ResolutionOutcome`` guards against reaches the two
+    preview rows, which render on the same surfaces (``secret describe``,
+    ``doctor``). ``validate_name`` accepts a trailing newline (issue #542), so
+    each row screens the source name itself."""
+    from agentworks.secrets.preview import PreviewCategory, ResolutionPreview, SkippedSource
+
+    forged = "envvar\n"
+    validate_name(forged, max_length=MAX_FREEFORM_NAME_LENGTH)
+    with pytest.raises(ValueError):
+        SkippedSource(source=forged, reason="not ready")
+    with pytest.raises(ValueError):
+        ResolutionPreview(
+            name="token",
+            category=PreviewCategory.ATTEMPTABLE,
+            source=forged,
+            identifier=None,
+            skipped_not_ready=(),
+        )
+
+
+def test_a_plugin_name_cannot_split_a_skipped_source_row() -> None:
+    """A plugin names itself, and registration vets that name's shape, never its
+    content: ``registration.py`` rejects only an empty or '/'-bearing name. The
+    name then reaches a rendered line through ``Readiness.reason``, which
+    ``sources.py`` builds by concatenating it into our own prose, so no render
+    sink can escape it alone the way ``remediation_target`` is escaped.
+
+    Driven through the real concatenation rather than a hand-built row: if issue
+    #545 lands and the name is escaped upstream, this stops raising and fails
+    here, which is the signal to revisit the screen rather than a silent pass.
+    """
+    from agentworks.capabilities.secret_backend.env_var import EnvVarBackend
+    from agentworks.resources.graph import DependencyState, Enablement
+    from agentworks.secrets.preview import SkippedSource
+
+    forged = "onepassword\nSecret: token = leaked-value"
+    decl = SecretSourceDecl(name="op", backend=CapabilityBlock.of("env-var"))
+    deps = {
+        ("secret-backend", "env-var"): DependencyState(
+            enablement=Enablement.disabled,
+            readiness=None,
+            impl=EnvVarBackend,
+            # Exactly what plugins/enablement.py builds for a disabled plugin row.
+            disabled_reason=f"enable plugin `{forged}`",
+        )
+    }
+    readiness = decl.not_ready(deps)
+    assert readiness.reason is not None
+    with pytest.raises(ValueError):
+        SkippedSource(source="op", reason=readiness.reason)
+
+
+def test_prediction_rejects_a_non_enum_policy_with_nothing_to_predict() -> None:
+    """A caller-supplied ``"refuse"`` is equal to the enum but not identical to it.
+
+    With no declarations the per-declaration preview below never runs, so this
+    entry point's own check is the only rejection there will ever be. Without
+    it the call returns an empty prediction and the operation proceeds on an
+    interaction policy nothing ever validated.
+    """
+    with pytest.raises(StateError):
+        predict_resolution([], _sources(_FakeSource("env-var")), interaction="refuse")  # type: ignore[arg-type]
+
+
+def test_operation_preview_rejects_a_non_enum_policy_before_walking_any_source() -> None:
+    """``_preview`` compares ``interaction`` by identity, so a plain ``"refuse"``
+    reports attemptable where the operation would refuse. Preview builds no
+    policy, so the constructor's totality never covers this call."""
+    from agentworks.secrets.preview import preview_operation_resolution
+
+    prompt = _FakeSource("prompt", interactive=True)
+    with pytest.raises(StateError):
+        preview_operation_resolution(_decl("a"), _sources(prompt), interaction="refuse")  # type: ignore[arg-type]
+    assert prompt.resolve_calls == []
 
 
 def test_prediction_covers_every_declaration() -> None:
