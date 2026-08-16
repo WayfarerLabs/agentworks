@@ -1,9 +1,9 @@
 # Simplification Pass: Functional Requirements
 
 Effort start: 2026-08-12. Parent: the `2026-08-04-next-steps` saga (adopted as a child by operator
-ruling, 2026-08-13; its `phasing.md` carries the ordering against the grammar rewrite). The saga
-lead currently owns these artifacts, pending handoff to an implementing effort lead. Evidence base:
-[findings.md](findings.md), the consolidated inventory from a seven-lane review of the
+ruling, 2026-08-13; its `phasing.md` carries the ordering against the grammar rewrite). The operator
+owns this FRD; the saga lead drafted it, and an implementing effort lead owns the response. Evidence
+base: [findings.md](findings.md), the consolidated inventory from a seven-lane review of the
 2026-08-06..12 merge window.
 
 ## Background
@@ -55,20 +55,18 @@ Settled inputs, recorded for traceability:
 9. **2026-08-14 (source-guard split)**: source-scanning guards do not delete as one shape. What
    decides a guard is what its assertion protects, not that it inspects source: a guard enforcing a
    boundary the type system cannot express stays, and a guard pinning how our code is written goes.
-   [hla.md](hla.md) doctrine 2 carries the split. The tiebreaker for a guard that reads as both, an
-   observational twin displacing it where one exists or is cheap, is the lead's, derived from the PR
-   #523 precedent rather than ruled here.
-10. **2026-08-14 (`match=` taxonomy)**: `match=` is decided per site by a three-case taxonomy rather
-    than one verdict, since deleting wholesale drops real branch coverage while preserving it by
-    adding a production discriminator is what R2.2 forbids. Discriminate structurally where the code
-    offers a handle; where only wording we author discriminates, the assertion goes and the branch
-    coverage goes with it (R2.4). No case matches our own wording. [hla.md](hla.md) doctrine 2
-    carries the cases.
+   The tiebreaker for a guard that reads as both, an observational twin displacing it where one
+   exists or is cheap, is the lead's, derived from the PR #523 precedent rather than ruled here.
+10. **2026-08-14 (`match=` taxonomy)**: `match=` is decided per site rather than by one verdict,
+    since deleting wholesale drops real branch coverage while preserving it by adding a production
+    discriminator is what R2.2 forbids. Discriminate structurally where the code offers a handle;
+    where only wording we author discriminates, the assertion goes and the branch coverage goes with
+    it (R2.4). Matching wording we author is never licensed.
 11. **2026-08-14 (caller-supplied arguments)**: an argument arriving from a caller our type checker
     does not check is a trust boundary, not interior state, ruled after PR #523 deleted an
     interior-looking enum check that four review lenses cleared and a live `interaction="refuse"`
-    call then resolved a real secret. R1.1 carries it into `development-principles`;
-    [hla.md](hla.md) doctrine 1 carries the enumeration and the provenance test it turns on.
+    call then resolved a real secret. R1.1 carries it into `development-principles`, whose principle
+    3 carries the enumeration and the provenance test it turns on.
 
 ## Requirements
 
@@ -83,13 +81,12 @@ Settled inputs, recorded for traceability:
   globs on purpose. If the probe surfaces a reason this simple shape cannot work, escalate to the
   operator rather than building a delivery mechanism.
 - R1.1: The trust-boundary doctrine (the five boundaries, interior trust, and the
-  validator-names-its-boundary convention; hla.md doctrine 1) is folded into
-  `development-principles` as a compact amendment. In the same amendment, principle 3 gains a
-  test-quality counterweight (operator direction, 2026-08-13): a test earns its place by guarding an
-  invariant that can actually regress; a test that can only fail when someone edits the thing it
-  restates is cost, not coverage; assert behavior at a boundary, not the shape of the
-  implementation, and deleting a worthless test is the same virtue as writing a worthy one. No new
-  rule file.
+  validator-names-its-boundary convention) is folded into `development-principles` as a compact
+  amendment. In the same amendment, principle 3 gains a test-quality counterweight (operator
+  direction, 2026-08-13): a test earns its place by guarding an invariant that can actually regress;
+  a test that can only fail when someone edits the thing it restates is cost, not coverage; assert
+  behavior at a boundary, not the shape of the implementation, and deleting a worthless test is the
+  same virtue as writing a worthy one. No new rule file.
 - R1.2: `no-prose-policing-tests` gains a short generalization: the rule's target is every authored
   artifact (prose, config files, workflow files, CSS tokens, the spelling of our own source), not
   prose alone; when two artifacts must agree, derive one from the other and test the derivation. No
@@ -110,9 +107,9 @@ where a real, regressable invariant would otherwise go unguarded, and a test is 
 justification for a new production contract.
 
 - R2.1: Before any validator is deleted, its input's provenance is classified against the boundary
-  list in [hla.md](hla.md) doctrine 1, and a validator guarding any of those boundaries stays. The
-  list lives there and nowhere else: this requirement carried a partial copy through two revisions,
-  and both times the copy was missing the boundary that mattered.
+  list in the `development-principles` rule, principle 3, and a validator guarding any of those
+  boundaries stays. That always-on rule is the list's only home: this requirement carried a partial
+  copy through two revisions, and both times the copy was missing the boundary that mattered.
 - R2.2: No wave 1 PR introduces a new production type, changes a shipped contract, or requires an
   LLD. Work that turns out to need any of those is set aside for the reassessment instead.
 - R2.3: Real coverage gaps found beneath deleted ceremony are closed in the same PR where the
@@ -151,15 +148,15 @@ justification for a new production contract.
   (operator, 2026-08-13): they run as their own dispatched task, briefed on the
   `refactor/breaking-truth-0-14` branch, in parallel with the deletion waves. That task owns
   `env/entry.py` and the token union; this pass owns the inert descriptor fields (C1, C5).
-  [migration-strategy.md](migration-strategy.md) is the task's authoritative strategy, read from
-  this directory.
+  [migration-strategy.md](migration-strategy.md) is designated as carrying that task's requirements,
+  read from this directory.
 - **Subsystem redesigns** (D1/D2 database classification and sentinels, S3/S4/S6 secrets protocol
   and resolve paths, G1/G3 guide boundary surgery, C8 `ResolvedSessionTemplate`, G5 JSON/human
   traversal, W7/W9/W10 website philosophy and lander scope, P1/P2 platform extractions, P4 error
   taxonomy): deferred to the R4 reassessment, proposed individually if still warranted.
 - **External-plugin trust design**: not designed or promoted in this pass. The checks kept by the
   wave 1 charter (constructibility, call-shape compatibility at registration) are the seam; findings
-  and the boundary sketch go into the reassessment as seed material for the loader effort.
+  and this pass's boundary sketch go into the reassessment as seed material for the loader effort.
 - **New rule-delivery machinery**: wave 0 resolves the delivery gap by removing the path filter
   (R1.0), never by building a delivery mechanism; anything beyond that shape escalates.
 - No new user-facing features, no harness changes, no SDD-directory cleanup beyond the directed
