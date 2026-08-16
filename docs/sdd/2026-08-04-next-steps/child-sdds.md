@@ -197,9 +197,14 @@ item shrinks to a verification sweep.
 - [ ] Wave 1 in progress: the phase7 corpus deleted with the caller-supplied boundary check landed
       (PR #523), criteria sharpened and executable (PR #524), fifth trust boundary ruled (PR #533);
       remaining items run against the merged criteria
+- [x] Wave 1 guide and machine-output items closed (PR #548, 2026-08-16): G8 dead surface, G2
+      typed-to-dict round trips, G6 defensive surface, and the G11 parity gap, with the stdout
+      write loop restored as real short-write protection and struck from the finding that had
+      misclassified it. The onboarding effort's guide-contract LLD supersession landed as its own
+      PR #551 through that artifact's owner. The website batch unblocked when PR #486 merged
 - [ ] Wave 2 in progress: rules seventeen to ten (PR #521), process-tree fact refresh (PR #535),
       testing-trio consolidation (PR #538), artifact ownership default (PR #540, one-clause
-      follow-up owed per its post-merge review)
+      follow-up owed per its post-merge review, absorbed and closed by PR #549's ownership model)
 - [ ] Wave 2: process and rule subtraction under a strict net-deletion constraint. Runs in parallel
       with wave 1 on its own session (operator, 2026-08-13), file-disjoint from it; the reassessment
       below waits for both waves
@@ -393,6 +398,13 @@ poller rule stands as merged in PR #481, and PR #489 closed unmerged.)
   delivered path-conditionally rather than to any one of them (see the simplification pass's wave 0
   entry for the inventory), so fixing one in isolation would only make it inconsistent with the
   rest.
+- **Requirements belong to the operator (operator-directed, PR #549, merged 2026-08-16):**
+  requirements are the FRD plus any document it designates as carrying requirements, owned by the
+  operator with the merge as consent; everything else is response and the effort lead's, whoever
+  produced it. Authorship is never ownership, amendments travel as requests, and a drafting lead
+  applies findings directly only until its draft merges. Ledger entries checked before this date
+  that say "ownership transferred to the effort lead" record the superseded transfer model
+  truthfully for their time and are not current teaching; the `sdd` skill is authoritative.
 - **Use the database, not its sidecars (operator, 2026-08-12, from issue #502):** read state through
   SQLite itself; do not inspect WAL files or other on-disk artifacts to guess whether a read is
   safe. The completion path had vetoed itself whenever any process held the database open, which
@@ -504,8 +516,9 @@ open-ended research placeholder.
 17. Gate status (2026-08-13, post-#480): PR #480 merged, so the assistance phase is done. The cut
     now has a longer runway by ruling, not by slip: **0.14.0 waits for the CLI grammar rewrite**
     (operator, 2026-08-12), and the simplification pass is adopted as a child and runs before it.
-    The current serial spine is: completed wave 0, corrected PR #548, the onboarding child's
-    one-wave guide-value deletion, the grammar rewrite, and the pass's reassessment. Other wave 1
+    The current serial spine is: completed wave 0, corrected PR #548 (merged 2026-08-16 with the
+    #551 LLD supersession), the onboarding child's one-wave guide-value deletion (now the active
+    spine item), the grammar rewrite, and the pass's reassessment. Other wave 1
     deletions and wave 2 run independently; the reassessment still waits for them. Open 0.14 gates:
     that spine, the installer-plugins moves (now scope-reduced to the bucketing), and the
     breaking-truth task. The README bootstrap gate is satisfied (PR #480; see the onboarding entry).
