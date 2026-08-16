@@ -84,15 +84,15 @@ records may retain one.
 
 ### 1.1 Preserve authoritative incoming edges
 
-- [ ] Extend the frozen graph node in `resources/graph.py` with full incoming `ResourceReference`
+- [x] Extend the frozen graph node in `resources/graph.py` with full incoming `ResourceReference`
       tuples seated directly from the target-keyed edge map.
-- [ ] Add `DependencyGraph.incoming_edges_of(kind, name)` without changing `dependents_of`, its
+- [x] Add `DependencyGraph.incoming_edges_of(kind, name)` without changing `dependents_of`, its
       reduced `ReferenceEntry` projection, or any existing closure.
-- [ ] Keep `uses` and `inherits` in a graph-query-specific explicit traversal allowlist.
-- [ ] Add a relationship-coverage test that requires the explicit graph-query traversal set to equal
+- [x] Keep `uses` and `inherits` in a graph-query-specific explicit traversal allowlist.
+- [x] Add a relationship-coverage test that requires the explicit graph-query traversal set to equal
       the current relationship enum; a future enum member must force a new design decision rather
       than silently joining or being excluded from traversal.
-- [ ] Prove full inbound edges preserve source, relationship, usage, and optional `declared_by`,
+- [x] Prove full inbound edges preserve source, relationship, usage, and optional `declared_by`,
       including parallel facts and inheritance.
 
 Definition of done: existing graph/readiness/secret tests pass unchanged, the frozen graph remains
@@ -101,13 +101,13 @@ directions.
 
 ### 1.2 Add a coherent read-only transaction boundary
 
-- [ ] Record the construction mode on `Database` and add the context-managed read transaction
+- [x] Record the construction mode on `Database` and add the context-managed read transaction
       specified by `graph-query-lld.md`.
-- [ ] Reject misuse on writable instances and unsafe nesting rather than silently sharing the
+- [x] Reject misuse on writable instances and unsafe nesting rather than silently sharing the
       write-oriented transaction helper.
-- [ ] Begin one explicit SQLite read transaction, retain the first-read snapshot through all graph
+- [x] Begin one explicit SQLite read transaction, retain the first-read snapshot through all graph
       instance hooks, and end it without committing a logical write.
-- [ ] Test concurrent-writer visibility, exception cleanup, close-after-transaction, and read-only
+- [x] Test concurrent-writer visibility, exception cleanup, close-after-transaction, and read-only
       write rejection without weakening existing stale/newer/malformed/busy behavior.
 
 Definition of done: one graph request can obtain a coherent persisted-state snapshot through the
@@ -115,16 +115,16 @@ public `Database` API, and every pre-existing database consumer retains its beha
 
 ### 1.3 Extract fact-minimal resource identity access
 
-- [ ] Add the shared first-slash parser and validated resource resolver described by
+- [x] Add the shared first-slash parser and validated resource resolver described by
       `cli-cutover-lld.md` to `resources/access.py`.
-- [ ] Preserve legacy names containing double hyphens, dots, and colons; reject a missing slash or
+- [x] Preserve legacy names containing double hyphens, dots, and colons; reject a missing slash or
       either empty side before registry work.
-- [ ] Return only identity, row, and origin facts needed by graph and edit; do not recreate the old
+- [x] Return only identity, row, and origin facts needed by graph and edit; do not recreate the old
       resource card.
-- [ ] Repoint `edit_location` to the new resolver while retaining its tolerant invalid-manifest
+- [x] Repoint `edit_location` to the new resolver while retaining its tolerant invalid-manifest
       fallback, typed unknown-kind/name errors, and origin-specific edit guidance.
-- [ ] Add focused parser/resolver/edit tests, including `session/legacy--name`.
-- [ ] Move the former card assertions for parser failures, row identity/origin, whether a row can be
+- [x] Add focused parser/resolver/edit tests, including `session/legacy--name`.
+- [x] Move the former card assertions for parser failures, row identity/origin, whether a row can be
       edited, and declaration location into these additive access/edit tests before the card service
       is removed.
 
