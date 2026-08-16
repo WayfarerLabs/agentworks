@@ -488,6 +488,10 @@ operator ruling without changing this completed phase's record.
 
 ## Phase 4 follow-up: command-owned guide deletion
 
+- [x] Before PR #548 merges, land a separate documentation prerequisite that marks
+      `GuideView.kind()`, `ConsentBoundary.NONE`, and the three-argument `HarnessSignature` as
+      superseded in the active guide LLD and names their surviving replacement shapes. Keep the
+      original Phase 1 design text as journey history rather than rewriting it in place.
 - [ ] After corrected PR #548 merges, remove in one effort all 141 fixed blocks approved by
       `guide-value-survey.md`, the dormant kind fallback, and every runtime resource topic. Keep the
       59 concept, synthesis, navigation, evidence, and action blocks. Replace removed content with

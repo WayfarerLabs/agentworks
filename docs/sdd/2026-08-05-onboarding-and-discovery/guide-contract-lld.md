@@ -6,6 +6,14 @@
 - Inputs: this effort's FRD, HLA, and plan; the roadmap target state; current CLI, registry, graph,
   secret, VM, transport, and declarative-schema contracts at HEAD
 
+> **Phase 4 supersession (PR #548):** Three Phase 1 members shown below are historical, not current
+> implementation requirements. `GuideView.kind()` is removed; selected-resource projection retains
+> `GuideView.me()`, while the planned command-owned guide deletion replaces the remaining generic
+> view use with the smallest onboarding projector. `ConsentBoundary.NONE` is removed; every retained
+> action names a concrete consent boundary. `HarnessSignature` is the two-field `(variable, value)`
+> record, so the Claude Code signature is `HarnessSignature("CLAUDECODE", "1")`. This note preserves
+> the original design record while making the simplification contract authoritative.
+
 ## Module and package-data layout
 
 The guide core is a library below Typer. Phase 1 adds these focused modules under
