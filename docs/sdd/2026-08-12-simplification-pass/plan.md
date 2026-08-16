@@ -350,6 +350,97 @@ R3.2 requires the after number to be lower.
       point at section 7a, and a top-tier consistency review over the changed tree per
       `agentic-dev-process` reports no new contradictions.
 
+      **The work is complete; the done-when is not, so the box stays open until the consistency
+      review comes back.** Two of the item's three halves were already finished when this round
+      started. **The trio consolidation and both PR3 restatements landed in PR #538 on
+      2026-08-15**: the model-tier vocabularies were unified onto `agentic-dev-process` section 4's
+      names, both "a published review informs" restatements became pointers at 7a, PR10's
+      three-times-stated placeholder policy became one statement with `inventory.local.md.example`
+      as the authoritative list, and the stale repo facts went. The item stayed unchecked and the
+      charter that dispatched this round described both halves as outstanding. **That is the effort
+      lead's error rather than a gap in the delegated lane**, and it was caught by reading the
+      target files at HEAD instead of trusting the brief's account of them, which is the same
+      discipline wave 1 kept learning about deletion premises. The cost was one round of
+      re-deriving finished work. Nothing from #538 was redone.
+
+      What this round adds is the journey-and-register half (PR7, PR8, PR9) plus one contradiction
+      the trio work did not reach. **Source `.rulesync/` 199,782 to 196,464 bytes (-3,318), and the
+      same -3,318 in each of `.claude/`, `.codex/`, and `.github/`, so -13,272 across the four
+      surfaces.** Always-on
+      rule bytes, which are the per-invocation figure R3.2 gates on, 33,449 to 32,421; against
+      [baseline.md](baseline.md)'s 33,863 that is -1,442 for the wave, of which the rules item's
+      PR #521 carried -1,648 and later unrelated rule growth gave 1,234 back.
+
+      **The contradiction is between `integration-testing` and `saga-lead` on when a surviving
+      mutation blocks a merge**, and it is the one the item's "diverged and contradictory copies"
+      framing was pointing at without knowing where. `saga-lead` (2026-08-07, the original) makes it
+      a blocker "when a checked plan box or a test name asserts it"; `integration-testing`
+      (2026-08-08) transcribed the protocol and made it a blocker "regardless of how the test names
+      read". The original is right on three independent grounds: the copy names `saga-lead` as the
+      reference implementation to follow, the qualifier is what makes the finding a blocker at all
+      (mutation survival is serious because it falsifies a claim the repo already made, and without
+      the qualifier every uncovered enforcement point becomes a blocker), and only the qualified
+      reading composes with the section 5 materiality bar the same protocol defers to. The
+      transcription is now a pointer, which is also where the deletion came from.
+
+      **Two things were left rather than removed, both because removing them is a rewrite.** PR7
+      directs section 1's exposition to `docs/manifesto.md`; nothing moved there, because that
+      document argues for the platform's design convictions rather than for development craft, and
+      because it sits outside this wave's file lane. The section was compacted in place instead
+      (2,753 to 2,061 bytes) and every criterion survives. PR9's "X, not Y" antithesis is still
+      pervasive (48, 56, and 19 instances in `sdd`, `agentworks-reviewer`, and `saga-lead`; a broad
+      regex counts 51 across the three testing files against about 59 at the finding's basis).
+      Removing its rhetorical half wholesale would rewrite the register and would take the operative
+      halves with it, since roughly a third of them rule out a real alternative a reader might pick.
+
+      R3.3's "no persona changes" was read as binding, matching #538's precedent of touching only
+      skills, so `agentworks-reviewer`, `agentworks-tester`, and `agentworks-dev` are untouched.
+      **Two stale facts in `agentworks-reviewer` are therefore reported rather than fixed**: its
+      scope-discipline check cites `sessions/nodes.py` as today's scope consumer, where no
+      `ctx.operation_scope` read exists at all (the consumer with exactly the described loud
+      behavior is `capabilities/harness_integration/base.py:287-298`), and its consistency-review
+      section says "the fourteen checks above" over sixteen, since checks 12a and 12b are full
+      checks. Both are contradictions of the kind the consistency review hunts.
+
+      **The consistency review ran and returned three fixes on this branch**, all absorbed above.
+      The principle 1 compaction had dropped a proposition rather than compressing it, and the
+      correction is recorded on PR7. The pointer replacing the transcribed protocol sent a testing
+      session after all four of `saga-lead`'s passes, one of which is "the one pass only the saga
+      lead can charter", so the pointer now generalizes that pass and promises tiers only where
+      `saga-lead` states them. And the `sdd` ownership rule contradicted itself one level down, in
+      the paragraph a delegated dev is pointed at as authoritative: everything outside requirements
+      is "the effort lead's, whoever produced it", yet "the subagent owns the work done under it".
+      The outlier sentence is deleted, since answerability decides no mutability question and the
+      grant paragraph already governs delegation correctly. Five further findings are pre-existing
+      and held by the lead against a running greenfield design review.
+
+      **An operator round then closed four more.** The terminology bullet's `Not "program"`
+      exclusion came back, the `PullRequestStack` claim got its probe date back, and the
+      willing-to-apply disclosure moved into pipeline step 7, where an instruction to make it
+      actually exists. **The lesson generalizes past those three: a live instruction sitting
+      adjacent to dead narration is this trim's characteristic hazard**, because the two share a
+      sentence or a bullet and the operative half leaves with the story. A scan of the other PR8
+      deletions for the same adjacency found two more.
+
+      The saga name's own 2026-08-08 attribution was the same shape and is **restored**: it left
+      inside the "replacing roadmap" parenthetical, and its only other home is
+      `2026-08-04-next-steps/target-state.md`, a saga artifact this skill schedules for promotion
+      and then deletion. The ruling that settled `Not "program"` was about that shape rather than
+      about that bullet, so it decides this instance too.
+
+      The message-naming grandfather clause **stays deleted**, and how it came to be flagged
+      matters more than the clause did. Its one pre-convention referent,
+      `2026-07-31-declarative-schema/onboarding-topic-content-contract-message.md`, sits in a
+      locked directory, so it cannot be renamed and no one consults that SDD for naming guidance;
+      the clause carried near-zero value against a cost paid on every load. But **it was deleted
+      on the belief that no such file existed, and that belief was never checked.** A right
+      deletion resting on an unverified premise is indistinguishable from a wrong one until
+      someone looks, which is this effort's signature failure in miniature and the reason the
+      record carries it rather than the clause.
+
+      The box stays open until the lead's re-review comes back clean; the review itself is the
+      lead's, not this item's.
+
 ## Reassess (R4)
 
 The reassessment waits for waves 1 and 2 **and for the CLI grammar rewrite landing**: the saga's
