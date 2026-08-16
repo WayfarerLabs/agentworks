@@ -6,32 +6,22 @@ topology: no LLD gates, no stacks, no central coordination beyond wave ordering.
 
 ## Doctrine 1: validate at boundaries, trust the interior
 
-The system has exactly these trust boundaries today:
+The authority is the `development-principles` rule, principle 3, which carries the five trust
+boundaries, the who-can-call-this provenance test, interior trust, and the convention that a
+surviving validator names its boundary in its docstring. R2.1 gates wave 1 on that list. What
+follows is only what this codebase adds to it.
 
-1. **Operator-authored input**: config TOML, YAML manifests, CLI arguments, environment.
-2. **External processes and services**: provider SDK responses, subprocess output (`op`,
-   `tailscale`, git), PyPI, GitHub content (per the `github-input-trust` rule).
-3. **Packaged-but-untrusted evidence**: release-notes bodies rendered as inert text.
-4. **Persisted state and filesystem artifacts that cross executions**: database files, backups,
-   restore inputs, and any operator-selected file. A value our own code wrote in a previous
-   execution is not interior; it can be old-version, corrupt, truncated, concurrently held, or
-   modified out of band. `inspect_schema`'s classification and backup qualification are boundary
-   work and stay.
-5. **Arguments arriving from a caller our type checker does not check**: a plugin, another client,
-   an operator's or tester's own script. `verify_secrets` is the standing example, reached by a
-   tester's script with a bare string where every in-repo caller passes the enum. Ask who can call a
-   function, not what constructs its values: provenance is set by every entry point that can supply
-   a value, not only by the sites where our own code builds one. Count the callers that exist, not
-   the ones you can imagine. While every call site sits inside our own type-checked code the value
-   is interior; the day a loader, a client, or a service front end can call in, it is not. That is
-   operator ruling 1 applied to provenance: the boundary is designed against the real channel when
-   the channel exists, not held open for one that might.
+Where those boundaries land here: provider SDK responses, subprocess output (`op`, `tailscale`,
+git), PyPI, and GitHub content (per the `github-input-trust` rule) are the external-process
+boundary. Database files, backups, restore inputs, and any operator-selected file cross executions,
+so `inspect_schema`'s classification and backup qualification are boundary work and stay.
+`verify_secrets` is the standing example of the caller-provenance boundary, reached by a tester's
+script with a bare string where every in-repo caller passes the enum; that is operator ruling 1
+applied to provenance, designing the boundary against the real channel when the channel exists
+rather than holding one open for a channel that might.
 
-Everything else, first-party typed values produced and consumed within one execution under mypy
-strict, is interior. Interior guarantees are carried by types, frozen dataclasses, and
-registration-time checks, not by runtime re-validation. Wave 1 applies this as a gate: classify the
-input's provenance, then delete only the clearly-interior validators; a surviving validator names
-its boundary in its docstring.
+Wave 1 applies the rule as a gate: classify the input's provenance, then delete only the
+clearly-interior validators.
 
 On the future external-plugin boundary: dynamically loaded third-party code is outside our mypy run,
 and importing it executes it, so the seam that stays is registration-time constructibility and
