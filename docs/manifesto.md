@@ -76,20 +76,22 @@ permissions provide further separation and controlled collaboration between agen
 
 ### Identity and Workload Are Separable
 
-Many tools in the agentic ecosystem conflate identity and workload, often into some overarching
-"agent" concept. That conflation can make it difficult to manage workloads, especially when the
-operator wants to run many workloads with the same fundamental identity, including its credentials,
-permissions, memory, and other durable state. It also cuts against decades of systems practice,
-which treats identity and workload as distinct lifecycles.
+Many tools in the agentic ecosystem conflate identity and workload within a single overarching
+"agent" abstraction. That conflation can make it difficult to manage workloads effectively,
+especially when the operator wants to run many workloads with the same fundamental identity,
+including its credentials, permissions, memory, and other durable state. It also cuts against
+decades of systems practice, which generally treats identity and workload as distinct concerns with
+independent lifecycles.
 
 Agentworks separates who performs work from the unit of work itself. Agents are identities. Sessions
 are workloads that run in a workspace as either an agent or the VM's admin user. Creating an agent
 does not start a workload, and creating a session does not require creating a new identity.
 
 That separation lets identity and workload lifecycles vary independently. Sessions come and go with
-the work. An operator can reuse a durable agent across many sessions or tie an ephemeral agent to a
-single session or short series of sessions. A durable agent can carry tools, credentials, harness
-context, memory, and interactive authentication across those sessions.
+the work. An operator can reuse a durable agent across many sessions, tie an ephemeral agent to a
+single session, or choose another lifecycle model that suits their particular needs. A durable agent
+can carry tools, credentials, harness context, memory, and interactive authentication across those
+sessions.
 
 Reproducible identity setup belongs in a template. Valuable state that cannot be reproduced belongs
 to the identity, while the session remains the disposable unit of work.
