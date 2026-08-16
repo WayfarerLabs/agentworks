@@ -32,7 +32,9 @@ below are subagent work; the role itself is not.
 - At session start, enumerate in-flight child PRs (`gh pr list --label saga:<name>`, since other
   sagas may be running) and check the ledger for efforts whose next PR is expected. Arm a background
   watch for each open draft flipping to ready (and for unexpected close or merge, so silence cannot
-  mask a surprise). Review a PR when it goes ready without waiting for the operator to ask, and
+  mask a surprise). A merge on a watched PR is also a ledger trigger: merged PRs are the ledger's
+  truth source, so fold each closure into the saga record promptly, batching several merges into one
+  round as needed. Review a PR when it goes ready without waiting for the operator to ask, and
   review a draft PR carrying the `review-requested` label whose head you have not yet reviewed (a
   checkpoint review; the label is author-owned and audience-free, so never remove it: track the last
   head you reviewed, exactly as with ready PRs).
