@@ -55,15 +55,13 @@ Settled inputs, recorded for traceability:
 9. **2026-08-14 (source-guard split)**: source-scanning guards do not delete as one shape. What
    decides a guard is what its assertion protects, not that it inspects source: a guard enforcing a
    boundary the type system cannot express stays, and a guard pinning how our code is written goes.
-   [hla.md](hla.md) doctrine 2 carries the split. The tiebreaker for a guard that reads as both, an
-   observational twin displacing it where one exists or is cheap, is the lead's, derived from the PR
-   #523 precedent rather than ruled here.
-10. **2026-08-14 (`match=` taxonomy)**: `match=` is decided per site by a three-case taxonomy rather
-    than one verdict, since deleting wholesale drops real branch coverage while preserving it by
-    adding a production discriminator is what R2.2 forbids. Discriminate structurally where the code
-    offers a handle; where only wording we author discriminates, the assertion goes and the branch
-    coverage goes with it (R2.4). No case matches our own wording. [hla.md](hla.md) doctrine 2
-    carries the cases.
+   The tiebreaker for a guard that reads as both, an observational twin displacing it where one
+   exists or is cheap, is the lead's, derived from the PR #523 precedent rather than ruled here.
+10. **2026-08-14 (`match=` taxonomy)**: `match=` is decided per site rather than by one verdict,
+    since deleting wholesale drops real branch coverage while preserving it by adding a production
+    discriminator is what R2.2 forbids. Discriminate structurally where the code offers a handle;
+    where only wording we author discriminates, the assertion goes and the branch coverage goes with
+    it (R2.4). No case matches our own wording.
 11. **2026-08-14 (caller-supplied arguments)**: an argument arriving from a caller our type checker
     does not check is a trust boundary, not interior state, ruled after PR #523 deleted an
     interior-looking enum check that four review lenses cleared and a live `interaction="refuse"`
