@@ -16,8 +16,6 @@ from agentworks.capabilities.vm_platform import BootstrapProgress, ProvisionRequ
 from agentworks.capabilities.vm_platform.tailscale_join import TAILSCALE_JOIN_STDIN_COMMAND
 from agentworks.db import VMRow, VMStatus
 from agentworks.errors import AlreadyExistsError, ConfigError, ConnectivityError, ProvisioningError, StateError
-from agentworks.guide import GuideMode
-from agentworks.guide.service import render_guide
 from agentworks.plugins.gcp.bootstrap import GCE_READINESS_COMMAND
 from agentworks.plugins.gcp.cleanup import InstanceState, RollbackReport
 from agentworks.plugins.gcp.errors import (
@@ -373,33 +371,6 @@ def _vm(result_metadata: dict[str, str]) -> VMRow:
         last_seen_at=None,
         platform_metadata=result_metadata,
     )
-
-
-def test_rendered_gcp_guide_teaches_safe_selected_zone_capacity_recovery() -> None:
-    def unavailable_config() -> object:
-        raise ConfigError("configuration intentionally unavailable")
-
-    rendered = render_guide(
-        ("vm-platform/gcp-gce",),
-        GuideMode.AGENT,
-        load_config_fn=unavailable_config,
-    ).markdown
-
-    assert "A definitive zonal instance-capacity failure names the selected" in rendered
-    assert "selected zone.\nRetry later or select another compatible zone" in rendered
-    assert "A global capacity\nfailure says only to retry later" in rendered
-    assert "inspect the named resource before retrying" in rendered
-    assert "Provider\ndiagnostics and credential material are never rendered" in rendered
-    assert "built-in catalog starts with `e2-standard-2`" in rendered
-    assert "preserving two\nsustained vCPUs" in rendered
-    assert "`e2-small` and `e2-medium` remain available" in rendered
-    assert "sustain\naggregate 0.5 and 1 vCPU with automatic bursting" in rendered
-    assert "order-independent and satisfies CPU plus memory" in rendered
-    assert "`pd-balanced` boundary" in rendered
-    assert "ZONE_RESOURCE_POOL_EXHAUSTED" not in rendered
-    assert _TAILSCALE_SENTINEL not in rendered
-    assert _SERVICE_SENTINEL not in rendered
-    assert "gcloud compute instances create" not in rendered
 
 
 def test_full_create_retains_secret_free_request_and_joins_once(

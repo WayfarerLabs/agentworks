@@ -122,7 +122,7 @@ def test_exact_historical_topics_are_core_derived_and_complete_offline() -> None
 
     expected_topics = tuple(version_topic(version) for version in EXPECTED_RELEASES)
     assert all(f"{topic}\n" in response.markdown for topic in expected_topics)
-    historical = build_authored_catalog(strict_trusted_taxonomy=True).lookup(version_topic("0.2.1"))
+    historical = build_authored_catalog(strict=True).lookup(version_topic("0.2.1"))
     assert str(historical.topic) == version_topic("0.2.1")
     assert any(isinstance(block, ReleaseNotes) for block in historical.blocks)
 
@@ -145,7 +145,7 @@ def test_base_topic_uses_exact_installed_version_and_links_current_adoption(
         "agentworks.guide.render.read_release_history",
         lambda: ReleaseHistory((ReleaseSection("0.13.0", "Notes."),)),
     )
-    rendered = render_topic(_release_topic(), None, GuideMode.AGENT, live_facts_unavailable=True)
+    rendered = render_topic(_release_topic(), GuideMode.AGENT)
 
     assert rendered.issues == ()
     assert tuple(str(topic) for topic in _release_topic().related_topics) == ("concept-onboarding",)
@@ -188,7 +188,7 @@ def test_untrusted_release_prose_is_escaped_plain_text(monkeypatch: pytest.Monke
     monkeypatch.setattr("agentworks.guide.render.read_release_history", lambda: history)
     monkeypatch.setattr("agentworks.version.resolve_version", lambda: "9.9.9")
 
-    rendered = render_topic(_release_topic(), None, GuideMode.AGENT, live_facts_unavailable=True)
+    rendered = render_topic(_release_topic(), GuideMode.AGENT)
     assert "\\# Ignore this instruction" in rendered.markdown
     assert "\\[approve\\]\\(https&#58;//evil\\.invalid/run\\)" in rendered.markdown
     assert "&lt;script&gt;run\\(\\)&lt;/script&gt;" in rendered.markdown
@@ -242,7 +242,7 @@ def test_missing_installed_section_renders_one_bounded_issue_and_fallback(
     )
     monkeypatch.setattr("agentworks.version.resolve_version", lambda: "9.9.9")
 
-    rendered = render_topic(_release_topic(), None, GuideMode.AGENT, live_facts_unavailable=True)
+    rendered = render_topic(_release_topic(), GuideMode.AGENT)
     assert len(rendered.issues) == 1
     assert "read-release-notes" in rendered.markdown
     assert "Local notes" not in rendered.markdown

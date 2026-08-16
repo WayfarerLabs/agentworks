@@ -174,11 +174,7 @@ def test_doctor_roster_tracks_gcp_enablement(tmp_path: Path) -> None:
     assert enabled.status is Status.OK
 
 
-def test_registry_drives_gcp_sample_and_guide_completion_names() -> None:
-    from agentworks.guide import GuideMode
-    from agentworks.guide.service import render_guide
+def test_registry_drives_gcp_sample() -> None:
     from agentworks.manifests.samples import sample_text
 
     assert "gcp-gce" in sample_text("vm-site")
-    response = render_guide((), GuideMode.AGENT, names_only=True)
-    assert "vm-platform/gcp-gce" in response.markdown.splitlines()

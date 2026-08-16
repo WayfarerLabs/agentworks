@@ -7,7 +7,7 @@ announces stale state and offers or automatically creates a pre-migration databa
 changing it; `agw doctor` only inspects. Restore a schema-compatible snapshot before a downgrade,
 and refresh generated shell code with `agw completion install` after upgrading.
 
-Work from the installed model. A bare kind topic, such as `agw guide vm-template`, includes its live
-sample and field reference. A capability implementation topic, such as `agw guide vm-platform/lima`,
-describes that implementation's tagged configuration. Keep an untouched backup and the expected
-resource identities until the normal inventory and doctor both prove the cutover.
+Work from the installed model. `agw resource sample KIND` provides a declarable manifest shape, and
+`agw resource describe-kind KIND` or `agw resource describe-kind KIND/NAME` provides the current
+field reference. Keep an untouched backup and the expected resource identities until the normal
+inventory and doctor both prove the cutover.

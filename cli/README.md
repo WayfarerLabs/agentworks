@@ -27,8 +27,15 @@ Use `concept-onboarding` for repeatable first setup and current adoption, `conce
 ongoing operation, `concept-release-notes` for the installed version's packaged canonical history,
 and `concept-source-review` for an optional read-only review of exact canonical source. Current
 facts are not a version-to-version delta. Use `agw guide --names-only` when a completion or tool
-needs the valid topic names; it returns static names plus any live names that can be established,
-without diagnostic prose when live context is unavailable.
+needs the valid topic names; it returns only installed authored, plugin-authored, and packaged
+release-note topics without loading configuration, the resource registry, or state.
+
+Raw resource, relationship, schema, and sample facts belong to commands rather than guide topics.
+During the unreleased 0.14 transition, use `agw resource kinds`, `agw resource list`,
+`agw resource describe-kind`, and `agw resource sample` for the command-owned facts that are
+available today. Resource explanation and graph display are being restored by the separate CLI
+grammar effort; they are not guide compatibility surfaces, and 0.14 remains release-gated until that
+work lands.
 
 ```bash
 # Initial setup

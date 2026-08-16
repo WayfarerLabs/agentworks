@@ -62,7 +62,7 @@ def test_installed_wheel_contains_every_authored_guide_block(tmp_path: Path) -> 
             (
                 "import agentworks; "
                 "from agentworks.guide.service import build_authored_catalog; "
-                "catalog = build_authored_catalog(strict_trusted_taxonomy=True); "
+                "catalog = build_authored_catalog(strict=True); "
                 "names = set(catalog.names()); "
                 "assert {'plugin/apt/overview', 'plugin/install-command/overview'} <= names; "
                 "assert not any(issue.error.source in {'system-plugin:apt', 'system-plugin:install-command'} "

@@ -42,10 +42,9 @@ does not add, remove, or change an entry.
 ## Rewrite one resource at a time
 
 Map each retired section family to a kind with the table below; ordinary top-level validation names
-only the unexpected root keys. Use `agw resource sample KIND` or `agw guide KIND` for a declarable
-manifest shape. Use `agw resource describe-kind KIND/NAME` or `agw guide KIND/NAME` for the tagged
-configuration of a capability implementation. The installed schema is authoritative. This topic
-deliberately does not copy its fields.
+only the unexpected root keys. Use `agw resource sample KIND` for a declarable manifest shape. Use
+`agw resource describe-kind KIND/NAME` for the tagged configuration of a capability implementation.
+The installed schema is authoritative. This topic deliberately does not copy its fields.
 
 The release-history mapping is:
 
@@ -115,8 +114,8 @@ canonical tagged secret arm while preserving its secret name. For a version 0.13
 ## Review authentication, placement, and changed secret references
 
 Inspect every pre-existing and TOML-derived site manifest, not only the files created during this
-migration. Use each implementation's live field reference because authentication and placement are
-tagged choices now:
+migration. Use each implementation's command-owned field reference because authentication and
+placement are tagged choices now:
 
 - Proxmox keeps `token_secret`. Omission or explicit null selects its well-known default secret
   name; a custom string selects that named secret. Proxmox has no no-secret mode.
@@ -153,11 +152,11 @@ OnePassword, move the old mapping's account to the source and make every mapping
 reference. The optional positive timeout is new source configuration. A direct configured-backend
 name such as `onepassword` is a hard 0.14 error, not a compatibility alias.
 
-After every manifest has been drafted and reviewed against the live references, remove all retired
-resource sections from `config.toml` in one edit. Then run `agw doctor --output json` to validate
-the whole manifest set. Parse exactly one JSON document and require `schema_version` to be the
-integer `1`, `command` to equal `doctor`, `data` to be an object, and the `Configuration` group to
-report the config file and config as valid. Use its `Manifest` and `Resource registry` facts for
+After every manifest has been drafted and reviewed against the command-owned references, remove all
+retired resource sections from `config.toml` in one edit. Then run `agw doctor --output json` to
+validate the whole manifest set. Parse exactly one JSON document and require `schema_version` to be
+the integer `1`, `command` to equal `doctor`, `data` to be an object, and the `Configuration` group
+to report the config file and config as valid. Use its `Manifest` and `Resource registry` facts for
 closed-world fields, strict types, non-nullable nulls, reference failures, and cycles. Any
 validation error returns the selected manifest to `edit-one-manifest`; keep the cutover config in
 place and repeat doctor after the edit.

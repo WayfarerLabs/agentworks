@@ -304,53 +304,24 @@ printf '%s\\0' "${{COMPREPLY[@]}}"
             assert "--allow-interaction" in block
             assert "--allow-interactive" not in block
 
-    def test_guide_topic_completion_stream_keeps_schema_targets_when_config_is_broken(self) -> None:
-        from agentworks.errors import ConfigError
+    def test_guide_topic_completion_stream_is_authored_only_and_does_not_load_live_context(self) -> None:
         from agentworks.guide import GuideMode
-        from agentworks.guide.service import render_guide
+        from agentworks.guide.service import build_authored_catalog, render_guide
 
-        def broken_config() -> object:
-            raise ConfigError("broken config")
-
-        response = render_guide((), GuideMode.AGENT, names_only=True, load_config_fn=broken_config)
-
-        assert response.exit_code == 0
-        names = response.markdown.splitlines()
-        assert "vm-template" in names
-        assert "vm-platform/wsl2" in names
-        assert "vm-platform/gcp-gce" in names
-
-    def test_guide_topic_completion_stream_omits_rejected_schema_target(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from dataclasses import replace
-
-        from agentworks.errors import ConfigError
-        from agentworks.guide import GuideMode
-        from agentworks.guide.service import render_guide
-        from agentworks.manifests.reference import reference_for
-
-        def invalid_reference(target: str):
-            reference = reference_for(target)
-            if target == "vm-template":
-                return replace(reference, summary="Untrusted ${SCHEMA_PAYLOAD}")
-            return reference
-
-        monkeypatch.setattr("agentworks.guide.service.reference_for", invalid_reference)
-
-        def broken_config() -> object:
-            raise ConfigError("broken config")
+        def forbidden(*args: object) -> object:
+            raise AssertionError("guide topic completion loaded live context")
 
         response = render_guide(
             (),
             GuideMode.AGENT,
             names_only=True,
-            load_config_fn=broken_config,  # type: ignore[arg-type]
+            load_config_fn=forbidden,  # type: ignore[arg-type]
+            load_registry_fn=forbidden,  # type: ignore[arg-type]
         )
 
         assert response.exit_code == 0
-        names = response.markdown.splitlines()
-        assert "agent-template" in names
-        assert "vm-template" not in names
-        assert "SCHEMA_PAYLOAD" not in response.markdown
+        assert tuple(response.markdown.splitlines()) == build_authored_catalog().names()
+        assert "vm-template" not in response.markdown.splitlines()
 
 
 class TestOptionFlagsInSpec:

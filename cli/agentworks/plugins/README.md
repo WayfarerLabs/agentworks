@@ -66,13 +66,11 @@ abstraction merely because a vendor bundle gains a second contribution.
 
 ### Guide contribution boundaries
 
-A plugin may contribute an implementation topic it owns, a declarable resource topic registered
-through its owner adapter, or a `plugin/<plugin>/<topic>` concept. It cannot claim core `concept-*`
-topics, bare kind topics, another plugin's namespace, or another owner's resource. The guide catalog
-isolates an invalid plugin topic while retaining valid core and plugin topics. The full index
-reports rejected content and exits 1, while an unrelated valid topic remains a clean response. A
-retained topic whose live projection is unavailable keeps its authored teaching, reports the scoped
-issue, and exits 1.
+A plugin may contribute a `plugin/<plugin>/<topic>` authored concept. It cannot claim core
+`concept-*` topics, resource or schema topics, or another plugin's namespace. The guide catalog
+isolates an invalid plugin topic while retaining valid core and plugin topics. An explicitly
+requested rejected topic reports its scoped issue and exits 1, while an unrelated valid topic
+remains a clean response. Names-only discovery returns retained authored topics without issue prose.
 
 Keep authored Markdown beside the owning package under `guide-content/`. A package-local adapter may
 load it only during a guide request and returns inert contributions. Do not turn `guide_topics` into
@@ -103,9 +101,8 @@ lowercase ASCII letters, digits, or `-`; or an exact registered input placeholde
 `~/file`, `--flag=value`, `*.yaml`, and `#comment`. Each title is limited to 256 UTF-8 bytes, each
 summary to 2 KiB, each authored block to 64 KiB, and one topic to 64 blocks, 64 related links, and
 256 KiB of authored markdown. Every related link must be a canonical topic slug no larger than 317
-UTF-8 bytes. A field-reference section accepts at most 32 path items of 256 UTF-8 bytes each. Keep
-authored files under the owning package's `guide-content/` directory so the wheel package-data
-assertion exercises them.
+UTF-8 bytes. Keep authored files under the owning package's `guide-content/` directory so the wheel
+package-data assertion exercises them.
 
 An `ActionList` contains inert `GuideAction` records, never an executor. Each action provides at
 most 32 inputs and exactly one of a literal-token command or bounded platform-neutral manual steps.
@@ -117,16 +114,6 @@ action data also counts toward the topic's 256 KiB bound. Rendered actions state
 consent boundary, expected result, optional verification, and useful refusal alternative without
 executing any operation. The same expression-marker scanner covers every rendered action prose field
 and input description. Command and verification tokens remain under the closed literal grammar.
-
-`FieldReference` and `Sample` blocks contain selectors only. They read
-`agentworks.manifests.reference` and `agentworks.manifests.samples` directly, never another CLI's
-text or a copied field list. Field references are valid only for kind and capability-implementation
-anchors. Samples are valid only for declarable bare kinds. Keep a resource topic linked to its bare
-kind instead of attaching schema blocks to the resource instance. Field descriptions and alternative
-summaries use the shared prose normalization. Literal defaults, examples, choices, and constraints
-retain their exact rendered values inside Markdown code spans sized and padded for their backticks
-and edge spaces. After YAML rendering, backslashes, carriage returns, line feeds, and tabs become
-distinct visible escape sequences so one scalar cannot break the reference row across lines.
 
 ## Shipping a plugin
 

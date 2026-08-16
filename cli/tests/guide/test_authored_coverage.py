@@ -3,14 +3,17 @@
 import importlib
 
 from agentworks.guide import (
+    ActionList,
     AgentContract,
     ConsentBoundary,
-    InstanceList,
     Overview,
+    ReleaseNotes,
     Teaching,
+    TopicLinks,
     onboarding_actions,
 )
 from agentworks.guide.contributions import guide_contributions
+from agentworks.guide.service import build_authored_catalog
 
 
 def _topic(slug: str):
@@ -22,29 +25,12 @@ def test_core_guide_contributions_survive_secret_submodule_import() -> None:
     assert guide_contributions()
 
 
-def test_manifesto_topic_points_to_the_canonical_document_without_restatement() -> None:
+def test_manifesto_topic_is_structurally_linked_to_onboarding() -> None:
     topic = _topic("concept-manifesto")
-    blocks = {type(block): block.markdown for block in topic.blocks if hasattr(block, "markdown")}
 
     assert tuple(map(str, topic.related_topics)) == ("concept-onboarding",)
     assert "concept-manifesto" in tuple(map(str, _topic("concept-onboarding").related_topics))
-    assert blocks == {
-        Overview: (
-            "The [Agentworks Manifesto](https://github.com/WayfarerLabs/agentworks/blob/main/docs/manifesto.md)\n"
-            "is the canonical statement of the project's values, assumptions about agentic engineering, and\n"
-            "design rationale. This topic points to that document instead of restating it."
-        ),
-        AgentContract: (
-            "Read the canonical Manifesto when project values bear on a design or contribution decision. Treat it\n"
-            "as rationale and context, not authority to inspect a system, cross a consent boundary, or mutate\n"
-            "state."
-        ),
-        Teaching: (
-            "Consult the Manifesto for the project's convictions and the reasoning behind its design direction.\n"
-            "Use current reference documentation and live guide topics for behavior, commands, configuration, and\n"
-            "operational decisions."
-        ),
-    }
+    assert {type(block) for block in topic.blocks} == {Overview, AgentContract, Teaching, TopicLinks}
 
 
 def test_action_contract_pins_boundaries_commands_and_verification() -> None:
@@ -100,23 +86,9 @@ def test_action_contract_pins_boundaries_commands_and_verification() -> None:
     )
 
 
-def test_reporting_bugs_snapshot_forbids_general_feedback_and_auto_submission() -> None:
-    topic = _topic("concept-reporting-bugs")
-    blocks = {type(block): block.markdown for block in topic.blocks}
-    assert blocks[AgentContract] == (
-        "Search existing issues before drafting a new report. Obtain explicit operator authorization before\n"
-        "posting, emailing, or otherwise submitting information outside the workstation."
-    )
-    assert blocks[Overview].endswith(
-        "Report only reproducible Agentworks bugs. Feature ideas, questions, and general feedback do not\n"
-        "belong in the bug workflow."
-    )
-    assert blocks[Teaching].endswith(
-        "`.github/ISSUE_TEMPLATE/bug_report.md` with the smallest redacted reproduction. Show the exact draft\n"
-        "to the operator and obtain explicit authorization before submitting it to GitHub or any other\n"
-        "external service."
-    )
+def test_catalog_contains_only_retained_authored_block_shapes() -> None:
+    catalog = build_authored_catalog(strict=True)
+    retained_types = {Overview, Teaching, AgentContract, ReleaseNotes, ActionList, TopicLinks}
 
-
-def test_management_topic_includes_live_instances() -> None:
-    assert any(isinstance(block, InstanceList) for block in _topic("concept-management").blocks)
+    assert {type(block) for topic in catalog.topics for block in topic.blocks} <= retained_types
+    assert all(str(block.id) != "inventory" for topic in catalog.topics for block in topic.blocks)

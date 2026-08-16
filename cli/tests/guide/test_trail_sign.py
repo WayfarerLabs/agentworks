@@ -36,7 +36,6 @@ def test_no_topic_trail_sign_bypasses_catalogs_and_live_context(
         raise AssertionError("catalog or live context was loaded")
 
     monkeypatch.setattr("agentworks.guide.service.build_authored_catalog", forbidden)
-    monkeypatch.setattr("agentworks.guide.service._build_schema_catalog", forbidden)
 
     response = render_guide(
         (),
@@ -94,7 +93,7 @@ def test_static_selected_topic_does_not_load_live_context() -> None:
     assert response.exit_code == 0
 
 
-def test_shared_live_failure_is_one_warning_with_every_omitted_identity() -> None:
+def test_shared_live_failure_is_one_warning_for_the_onboarding_assessment() -> None:
     response = render_guide(
         ("concept-onboarding", "concept-management"),
         GuideMode.AGENT,
@@ -103,29 +102,19 @@ def test_shared_live_failure_is_one_warning_with_every_omitted_identity() -> Non
 
     assert response.exit_code == 0
     assert response.markdown.count("fixture configuration is malformed") == 1
-    assert "concept-onboarding/inventory" in response.markdown
     assert "concept-onboarding/derived-plan" in response.markdown
-    assert "concept-management/inventory" in response.markdown
 
 
-def test_known_exact_resource_degrades_but_healthy_absence_is_unknown() -> None:
-    degraded = render_guide(("vm-template/missing",), GuideMode.AGENT, load_config_fn=_broken_config)
-    assert degraded.exit_code == 0
+def test_removed_exact_resource_topic_is_unknown_without_loading_context() -> None:
+    def forbidden(*args: object) -> object:
+        raise AssertionError("removed resource topic loaded live context")
 
-    class EmptyRegistry:
-        is_finalized = True
-
-        def iter_kind_items(self, kind: str):
-            return iter(())
-
-    config = cast("Config", object())
-    registry = cast("Registry", EmptyRegistry())
     with pytest.raises(UnknownGuideTopicError):
         render_guide(
             ("vm-template/missing",),
             GuideMode.AGENT,
-            load_config_fn=lambda: config,
-            load_registry_fn=lambda _config: registry,
+            load_config_fn=forbidden,  # type: ignore[arg-type]
+            load_registry_fn=forbidden,  # type: ignore[arg-type]
         )
 
 
@@ -174,22 +163,3 @@ def test_names_only_keeps_static_names_and_emits_no_diagnostic_lines() -> None:
     assert response.exit_code == 0
     names = set(response.markdown.splitlines())
     assert set(str(destination.slug) for destination in TRAIL_DESTINATIONS) <= names
-
-
-def test_names_only_omits_names_from_an_unfinalized_registry() -> None:
-    class UnfinalizedRegistry:
-        is_finalized = False
-
-        def iter_kind_items(self, kind: str):
-            return iter((("ghost", object()),))
-
-    response = render_guide(
-        (),
-        GuideMode.AGENT,
-        names_only=True,
-        load_config_fn=lambda: cast("Config", object()),
-        load_registry_fn=lambda _config: cast("Registry", UnfinalizedRegistry()),
-    )
-
-    assert response.exit_code == 0
-    assert "vm-template/ghost" not in response.markdown.splitlines()

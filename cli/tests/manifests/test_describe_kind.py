@@ -15,12 +15,14 @@ from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 import pytest
 from pydantic import BaseModel, Discriminator, Field
 
+from agentworks.capabilities.config import registered_implementations
 from agentworks.errors import ConfigError
 from agentworks.manifests.describe import reference_lines
 from agentworks.manifests.field_tree import field_tree, root_entry
 from agentworks.manifests.loader import load_manifests
-from agentworks.manifests.reference import SchemaReference, describable_targets, reference_for
+from agentworks.manifests.reference import SchemaReference, reference_for
 from agentworks.plugins import Plugin, seated_plugin
+from agentworks.resources import KIND_REGISTRY
 from agentworks.schema import AgwModel
 from tests.plugins._fixtures import ConformingVMPlatform
 from tests.schema._fixture_models import StringOrTableRoot, StringRoot
@@ -285,7 +287,16 @@ def test_every_arm_this_surface_names_is_one_it_also_answers_for(seated: None) -
     describable target rather than over a fixture, because the way this
     regresses is a NEW union nobody thought to add a case for.
     """
-    for target in describable_targets():
+    targets = tuple(
+        target
+        for kind, handler in sorted(KIND_REGISTRY.items())
+        for target in (
+            (kind,)
+            if handler.category == "declarable"
+            else (kind, *(f"{kind}/{name}" for name in registered_implementations(kind)))
+        )
+    )
+    for target in targets:
         reference = reference_for(target)
         roots = (*reference.metadata, *reference.spec)
         if reference.root_value is not None:
@@ -373,19 +384,6 @@ def test_each_element_arm_shows_that_arms_own_fields(seated: None) -> None:
 
     assert "size_gb (integer, optional, default 40)" in text
     assert "volume (string, required)" in text
-
-
-def test_a_seated_capability_is_addressable_and_an_unseated_one_is_not(seated: None) -> None:
-    assert "vm-platform/never-enabled" in describable_targets()
-
-
-def test_the_target_list_covers_kinds_and_implementations() -> None:
-    targets = describable_targets()
-
-    assert "secret" in targets
-    assert "vm-platform" in targets
-    assert "vm-platform/lima" in targets
-    assert "vm-platform/never-enabled" not in targets, "the fixture is seated only inside its fixture"
 
 
 # --- quoted booleans --------------------------------------------------
