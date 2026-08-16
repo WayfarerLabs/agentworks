@@ -46,7 +46,11 @@ class SourceContractTests(RepositoryFixture):
         )
         self.assertIn("<strong>Durable agents</strong>", content["HOME_IDENTITY"])
         self.assertIn("<strong>SSH-over-Tailscale control plane</strong>", content["HOME_IDENTITY"])
-        self.assertTrue(content["HOME_META_DESCRIPTION"].startswith("A toolkit for managing"))
+        home_contract = site_builder.CONTRACTS[0]
+        self.assertEqual(
+            content["HOME_META_DESCRIPTION"],
+            html.escape(str(home_contract.expected[1].value), quote=True),
+        )
         self.assertEqual(content["ONBOARDING_PROMPT"], html.escape(ONBOARDING_PROMPT, quote=False))
         for contract in site_builder.DOCUMENT_CONTRACTS:
             rendered = content[f"{contract.contract_id}_CONTENT"]
@@ -262,13 +266,12 @@ class SourceContractTests(RepositoryFixture):
     def test_home_selection_still_fails_on_missing_duplicate_or_drift(self) -> None:
         readme = self.root / "README.md"
         original = readme.read_text(encoding="utf-8")
+        expected = str(site_builder.CONTRACTS[0].expected[1].value)
+        pattern = re.compile(r"\s+".join(re.escape(part) for part in expected.split()))
         cases = (
             (original.replace("# Agentworks", "# Different", 1), "missing heading"),
             (original + "\n# Agentworks\n", "duplicate heading"),
-            (
-                original.replace("A toolkit for managing", "A partial toolkit for managing", 1),
-                "content drift",
-            ),
+            (pattern.sub(lambda match: f"{match.group(0)} drift", original, count=1), "content drift"),
         )
         for changed, reason in cases:
             readme.write_text(changed, encoding="utf-8")

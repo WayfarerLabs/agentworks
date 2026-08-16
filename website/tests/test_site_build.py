@@ -355,8 +355,10 @@ class BuildAndInstallTests(RepositoryFixture):
         before = snapshot(output)
         readme = self.root / "README.md"
         original_readme = readme.read_text(encoding="utf-8")
+        expected = str(site_builder.CONTRACTS[0].expected[1].value)
+        pattern = re.compile(r"\s+".join(re.escape(part) for part in expected.split()))
         readme.write_text(
-            original_readme.replace("A toolkit for managing", "A drifting toolkit for managing", 1),
+            pattern.sub(lambda match: f"{match.group(0)} drift", original_readme, count=1),
             encoding="utf-8",
         )
         with self.assertRaises(site_builder.ContractError):

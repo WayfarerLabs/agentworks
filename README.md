@@ -5,7 +5,10 @@
 [![Python](https://img.shields.io/pypi/pyversions/agentworks-cli.svg)](https://pypi.org/project/agentworks-cli/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A toolkit for managing agentic workloads: VMs, workspaces, agents, sessions, harnesses,
+AI coding agents can now do substantial work autonomously. Spinning up a few is easy; operating many
+safely, persistently, and concurrently is an infrastructure problem.
+
+Agentworks is a toolkit for that infrastructure: VMs, workspaces, agents, sessions, harnesses,
 configuration, secrets, and the systems that connect them.
 
 Create and manage an agentic fleet from your own workstation. **Durable agents** run as separate

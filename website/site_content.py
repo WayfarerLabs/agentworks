@@ -93,7 +93,11 @@ CONTRACTS: Final = (
         ((1, "Agentworks"),),
         (
             paragraph(
-                "A toolkit for managing agentic workloads: VMs, workspaces, agents, sessions, harnesses, "
+                "AI coding agents can now do substantial work autonomously. Spinning up a few is easy; "
+                "operating many safely, persistently, and concurrently is an infrastructure problem."
+            ),
+            paragraph(
+                "Agentworks is a toolkit for that infrastructure: VMs, workspaces, agents, sessions, harnesses, "
                 "configuration, secrets, and the systems that connect them."
             ),
             paragraph(
@@ -651,7 +655,7 @@ def extract_content(repo_root: Path) -> dict[str, str]:
     rendered = {
         home_contract.contract_id: _render_blocks(home_blocks, home_contract, {}),
         "HOME_META_DESCRIPTION": html.escape(
-            _plain_inline(str(home_blocks[0].value), home_contract, {}),
+            _plain_inline(str(home_blocks[1].value), home_contract, {}),
             quote=True,
         ),
         "ONBOARDING_PROMPT": html.escape(extract_assistance_prompt(repo_root), quote=False),
