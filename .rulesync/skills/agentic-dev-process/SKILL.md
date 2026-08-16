@@ -200,11 +200,8 @@ subagent: six categories, composition failures chief among them), in a fresh con
 explicitly at the top tier (section 4 applies here too: name the model, do not inherit). Never use
 the context that authored the changes; the whole point is a reader who has to work the tree out from
 what it says. It hunts pairwise contradictions, rules that silently override one another, gaps where
-one document assumes something another never establishes, and cross-references gone stale. Porting
-the process docs into a separate context and having independent reviewers read them as outsiders is
-a proven technique here: it surfaced four live contradictions that per-change reviews had passed.
-Findings route like any other review; triage them, push back on the wrong ones, and fix the valid
-ones.
+one document assumes something another never establishes, and cross-references gone stale. Findings
+route like any other review; triage them, push back on the wrong ones, and fix the valid ones.
 
 ## 6. Commit, push, and PR
 
@@ -297,20 +294,19 @@ ones.
   development-principles rule); every merged PR is complete and honest on its own terms.
 - **PR stack: a sequence of increments that together make up a full feature.** Agents build stacks
   as branch-targeted PR chains: each entry's PR targets its parent's branch, and GitHub retargets
-  the children when a parent merges and its branch is deleted. GitHub's native stacked-PR objects
-  (the GraphQL `PullRequestStack` type) are read-only today, verified empirically 2026-08-10: no
-  mutation, no gh verb, and branch targeting alone does not materialize them, so native stacks are
-  created only in the web UI for now. The chain form delivers the full layering regardless; adopt
-  the native objects when API or CLI write support arrives. Devs plow forward on later entries while
-  reviewers take earlier ones in bite-sized units, each with its own handoffs. **The cascade rule**:
-  a substantial change to entry N obligates the author to flip entries N+1 onward to draft until
-  each is rebased and re-handed-off; the stack makes "everything downstream, and only that, needs
-  reconsideration" a mechanical signal instead of a judgment call. Keep stacks to roughly two to
-  five entries: deeper stacks usually mean increments too thin to be honest working systems, and
-  rebase churn grows with depth. Merge bottom-up. Stacks are single-repo by construction; in a
-  poly-repo environment (not this repo today) the analog is coordinated non-stacked PRs with
-  cross-references and an agreed landing order. This practice is affordable because CI checks are
-  fast (about two minutes); protect that economy, because per-entry CI is the price of the layering.
+  the children when a parent merges and its branch is deleted. The chain is the whole mechanism:
+  GitHub's native stacked-PR objects (the GraphQL `PullRequestStack` type) were read-only when last
+  probed, 2026-08-10: no API or CLI call creates one, and branch targeting alone does not
+  materialize them. Devs plow forward on later entries while reviewers take earlier ones in
+  bite-sized units, each with its own handoffs. **The cascade rule**: a substantial change to entry
+  N obligates the author to flip entries N+1 onward to draft until each is rebased and
+  re-handed-off; the stack makes "everything downstream, and only that, needs reconsideration" a
+  mechanical signal instead of a judgment call. Keep stacks to roughly two to five entries: deeper
+  stacks usually mean increments too thin to be honest working systems, and rebase churn grows with
+  depth. Merge bottom-up. Stacks are single-repo by construction; in a poly-repo environment (not
+  this repo today) the analog is coordinated non-stacked PRs with cross-references and an agreed
+  landing order. This practice is affordable because CI checks are fast (about two minutes); protect
+  that economy, because per-entry CI is the price of the layering.
 
 ## 7. Get a fresh-eyes pass: Copilot if available, else a generic review here
 

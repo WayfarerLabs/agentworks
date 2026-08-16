@@ -125,9 +125,7 @@ below.
 One sanctioned channel does exist: new-file message passing. Adding a NEW file to another SDD's
 feature directory as a message is fine (a saga delivering seed notes into an adopted child's
 directory is the standing example); the restriction is on modifying existing artifacts you do not
-own. Name new message files `message-<YYYY>-<MM>-<DD>-<topic>.md`. The convention governs new
-messages only: message files delivered before it keep the names they already have, so there is no
-rename sweep to do and no inference to draw from an older name. A sender never overwrites an
+own. Name new message files `message-<YYYY>-<MM>-<DD>-<topic>.md`. A sender never overwrites an
 existing message file, because overwriting is an edit to another effort's artifact and can destroy a
 message the recipient has not read yet; a follow-up is always a new file. A delivered message file
 belongs to the receiving effort once read: integrate it into your own artifacts, then keep or delete
@@ -146,19 +144,16 @@ Task briefs outside any SDD: some ruled work is too small for an SDD and belongs
 (a follow-on the operator ruled, a cross-cutting fix with a named owner). These are dispatched, not
 messaged, and the difference matters: a message goes to a live effort and must survive its branch
 churn, so it delivers via `main`; a brief CREATES the work vehicle, and the assignee owns it from
-pickup, so it never needs to touch `main` at all. The current mechanism: the requester seeds a
-branch, naming it with the repo's conventional branch prefix for the eventual change (`feat/<slug>`,
-`fix/<slug>`, `chore/<slug>`, ...) since the seeded branch is the working branch the PR ships from,
-whose first commit adds a single brief file (`brief-<YYYY>-<MM>-<DD>-<topic>.md`; the distinct
-prefix keeps it from reading as the message channel above, whose semantics it does not share). It
-sits at the repo root for pickup discoverability, which stays clean because briefs never reach
-`main`. The brief carries the charter (what, why, the definition of done, where the authoritative
-spec lives, who reviews) and its own disposition, usually "delete this file before the PR goes
-ready" (keep-and-promote is the exception, and the brief says where the content goes). The assignee
-takes over the branch, does the work there, and disposes of the brief per its own instructions. The
-contract is mechanism-independent on purpose: a brief names its work, its reviewer, and its own
-disposition, and delivery may later move to other channels (including Agentworks-native messaging)
-without changing what a brief is.
+pickup, so it never needs to touch `main` at all. The requester seeds a branch, naming it with the
+repo's conventional branch prefix for the eventual change (`feat/<slug>`, `fix/<slug>`,
+`chore/<slug>`, ...) since the seeded branch is the working branch the PR ships from, whose first
+commit adds a single brief file (`brief-<YYYY>-<MM>-<DD>-<topic>.md`; the distinct prefix keeps it
+from reading as the message channel above, whose semantics it does not share). It sits at the repo
+root for pickup discoverability, which stays clean because briefs never reach `main`. The brief
+carries the charter (what, why, the definition of done, where the authoritative spec lives, who
+reviews) and its own disposition, usually "delete this file before the PR goes ready"
+(keep-and-promote is the exception, and the brief says where the content goes). The assignee takes
+over the branch, does the work there, and disposes of the brief per its own instructions.
 
 A running effort only sees messages that existed at its branch point, so a message that lands after
 the recipient's branch was cut needs two independent mechanisms. Neither side may assume the other
@@ -317,11 +312,9 @@ Most SDDs cover one development effort. A saga SDD is the meta case: an SDD that
 family of related efforts, generating and tracking ordinary child SDDs rather than shipping an
 implementation of its own. Use one when several efforts overlap enough that their ordering and
 shared contracts need a single owner. The name is borrowed deliberately from the distributed-systems
-saga (operator ruling, 2026-08-08, replacing the earlier "roadmap" term, which collided with
-date-anchored planning vocabulary and over-promised timeline semantics): child efforts commit
-independently and completely, intermediate states are visible on `main` rather than isolated, a lead
-orchestrates instead of locking, and the whole either runs to its lock or is deliberately
-compensated by unwinding.
+saga (operator ruling, 2026-08-08): child efforts commit independently and completely, intermediate
+states are visible on `main` rather than isolated, a lead orchestrates instead of locking, and the
+whole either runs to its lock or is deliberately compensated by unwinding.
 
 Compensation is deliberately minimal, not a hidden lifecycle. Only the operator can abandon a saga
 (in whole or in part), and the decision is a dated ruling recorded in target-state like any other.
@@ -333,17 +326,16 @@ real abandonment ever needs more protocol, it is designed then, as saga work.
 
 The settled rules for the species:
 
-- Its artifacts are not the standard set. The working set, established by the first saga SDD: an
-  `inputs/` folder holding perspectives and other source material; `starting-state.md`, an immutable
-  snapshot of where the system stood at saga start, frozen once underway so the full journey stays
-  visible; `current-state.md`, a dated snapshot of where the system is, updated in place at wave
-  boundaries (git history is the append-only record); `target-state.md`, where the system is going
-  across this saga (not a forever vision) and the home of every settled design ruling; `phasing.md`,
-  ordering only (dependency structure, waves, release mapping); and `child-sdds.md`, the inventory
-  and checkbox tracker that plays plan.md's role, whose completed checkboxes are immutable per the
-  standard rule. A saga SDD has no frd.md, hla.md, or plan.md of its own; those files live in the
-  child directories. The saga locks when current state and target state agree and every child is
-  locked. These forms are still young; refine them here as they prove out.
+- Its artifacts are not the standard set. The working set: an `inputs/` folder holding perspectives
+  and other source material; `starting-state.md`, an immutable snapshot of where the system stood at
+  saga start, frozen once underway so the full journey stays visible; `current-state.md`, a dated
+  snapshot of where the system is, updated in place at wave boundaries (git history is the
+  append-only record); `target-state.md`, where the system is going across this saga (not a forever
+  vision) and the home of every settled design ruling; `phasing.md`, ordering only (dependency
+  structure, waves, release mapping); and `child-sdds.md`, the inventory and checkbox tracker that
+  plays plan.md's role, whose completed checkboxes are immutable per the standard rule. A saga SDD
+  has no frd.md, hla.md, or plan.md of its own; those files live in the child directories. The saga
+  locks when current state and target state agree and every child is locked.
 - Every PR belonging to a saga carries a `saga:<name>` label, where the name is the saga's feature
   directory without its date prefix (`saga:next-steps`). Sagas can run concurrently, so the label is
   what lets a saga lead's watch enumerate its own surface rather than infer it. That surface is
