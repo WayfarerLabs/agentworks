@@ -21,9 +21,11 @@ keeping `resource kinds` is the conservative choice.
 
 ### Neighborhood and path queries are different operations
 
-Cargo's `tree` command shows that dependency views can grow explicit reverse-traversal and depth
-controls, and that repeated nodes need defined rendering. Those controls are additive future homes,
-not evidence that a fixed one-hop launch needs them.
+Cargo's `tree` command shows that dependency views can support explicit reverse traversal and depth
+controls, and that repeated nodes need defined rendering. Agentworks has a concrete launch consumer:
+a dependents query from a VM platform must be able to continue through sites to the live VMs using
+them. That supports direction and depth controls at launch, with explicit cycle and repetition
+semantics in HLA.
 
 Nix's `why-depends` answers a different question: why one node reaches another. It renders a path,
 not a neighborhood. That supports a future `graph path FROM TO` rather than interpreting two

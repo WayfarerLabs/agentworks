@@ -20,7 +20,7 @@ silently throughout active 0.14 guidance rather than presented as user migration
 | Before                                              | After                                                        | Notes                                             |
 | --------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------- |
 | `agw resource describe-kind TARGET`                 | `agw resource explain TARGET`                                | Same target forms and config-independent behavior |
-| `agw resource describe KIND/NAME` for relationships | `agw graph show KIND/NAME`                                   | Fixed one-hop, both-directions view               |
+| `agw resource describe KIND/NAME` for relationships | `agw graph show KIND/NAME`                                   | Defaults to one hop in both directions            |
 | `agw resource describe KIND/NAME` for card facts    | Existing inventory, doctor, edit, and kind-specific commands | No replacement generic card                       |
 | `agw resource schema --write`                       | `agw resource schema --install`                              | Same whole-set fixed destination                  |
 | `agw resource sample KIND --write PATH`             | Unchanged                                                    | `--write` remains path-valued                     |
@@ -41,7 +41,7 @@ silently throughout active 0.14 guidance rather than presented as user migration
 
 ### CLI and services
 
-1. Seat the graph fact service for the fixed neighborhood independently of rendering.
+1. Seat the graph fact and traversal service independently of rendering.
 2. Add `graph show`, its human renderer, and its JSON projector.
 3. Rename explain while retaining its config-free reference service.
 4. Rename schema installation mode while retaining its writer service.
@@ -61,7 +61,7 @@ with commits separated by responsibility.
 - Replace the `resource.describe-kind` target mapping with `resource.explain` and retain its
   config-free resource-kind completer.
 - Remove `resource.describe` completion entries.
-- Add graph target and output completion without adding kind, direction, or depth options.
+- Add graph target, direction, depth, and output completion without adding a kind filter.
 - Regenerate and verify bash, zsh, and PowerShell artifacts.
 
 ### Documentation and guide coordination
@@ -82,13 +82,19 @@ Historical ADRs and locked SDDs are not mechanically rewritten.
 
 1. Pin current explain, schema-install, resource-describe inbound/live relationships, and removed
    card facts. Pin outbound declarations independently from the frozen resource graph.
-2. Prove graph produces the fixed outbound, inbound, and live-usage neighborhood with retained
-   provenance, without claiming outbound parity with resource describe.
-3. Prove demand-driven sources, read-only database access, no secret resolution, and no interaction.
-4. Prove `secret describe` human and JSON contracts are unchanged.
-5. Cut command registrations, IDs, completions, and active documentation together.
-6. Run focused tests, full repository gates, generated completion checks, and live CLI acceptance.
-7. Run required independent reviews before merge intent.
+2. Prove graph defaults to the one-hop dependencies, dependents, and live-usage neighborhood with
+   retained relationship verbs and provenance, without claiming outbound parity with resource
+   describe.
+3. Prove each direction and finite or complete-closure depth, including the
+   platform-to-site-to-live-VM dependents case, has deterministic cycle-safe traversal. Prove `both`
+   may change direction at each expansion rather than combining two monotonic traversals.
+4. Prove demand-driven sources, read-only database access, no secret resolution, and no interaction.
+   A resource at the depth bound does not demand its live projection, and live-instance nodes are
+   terminal.
+5. Prove `secret describe` human and JSON contracts are unchanged.
+6. Cut command registrations, IDs, completions, and active documentation together.
+7. Run focused tests, full repository gates, generated completion checks, and live CLI acceptance.
+8. Run required independent reviews before merge intent.
 
 ## Rollback
 
