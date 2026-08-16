@@ -121,7 +121,7 @@ class AptPackageEntry(DeclaredResource):
 
         The registry attaches the corresponding ``ReferenceEntry`` to
         each ``AptSourceEntry`` during finalize, so
-        ``agw resource describe apt-source/github`` shows every apt-package
+        ``agw graph show apt-source/github`` shows every apt-package
         that depends on it.
         """
         from agentworks.resources.reference import ResourceReference
@@ -199,7 +199,7 @@ def _load_apt_packages(
 # ``apt-source`` was originally not a framework kind (only operator-facing
 # config referenced by name got promoted at first). It joined the framework
 # later so the ``apt-package -> apt-source`` dependency graph becomes visible
-# on ``agw resource describe apt-source/<name>``'s ``Referenced by:`` section,
+# as declared edges in ``agw graph show apt-source/<name>``,
 # and so unknown-source errors flow through the same miss-policy pipeline as
 # everything else.
 

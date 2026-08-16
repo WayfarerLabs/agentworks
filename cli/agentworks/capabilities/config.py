@@ -604,7 +604,7 @@ def reference_hint(kind: str, name: str) -> str:
     from the kind: a hand-kept per-capability steer would be a second
     description of a shape that is already rendered.
     """
-    return f"`agw resource describe-kind {kind}/{name}` prints this implementation's fields"
+    return f"`agw resource explain {kind}/{name}` prints this implementation's fields"
 
 
 def _validated(

@@ -30,7 +30,7 @@ from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.errors import StateError
 from agentworks.resources.graph import Enablement
-from agentworks.resources.inspect import describe_resource, list_resources
+from agentworks.resources.inspect import list_resources
 from tests.conftest import ManifestDoc, write_manifests
 
 if TYPE_CHECKING:
@@ -124,14 +124,13 @@ def test_core_platforms_stay_builtin(tmp_path: Path) -> None:
         assert registry.graph.enablement_of("vm-platform", name) is Enablement.enabled
 
 
-def test_disabled_row_hidden_from_list_shown_by_describe(tmp_path: Path) -> None:
+def test_disabled_row_is_present_but_hidden_from_default_list(tmp_path: Path) -> None:
     registry = build_registry(_config(tmp_path))
     default_rows = {(r.kind, r.name) for r in list_resources(registry).rows}
     assert ("vm-platform", "proxmox") not in default_rows
 
-    desc = describe_resource(registry, "vm-platform", "proxmox")
-    assert desc.disabled_reason is not None
-    assert "proxmox" in desc.disabled_reason
+    assert registry.lookup("vm-platform", "proxmox").origin.plugin == "proxmox"
+    assert registry.graph.enablement_of("vm-platform", "proxmox") is Enablement.disabled
 
 
 # -- the vm-site use-gate (R14) ----------------------------------------------

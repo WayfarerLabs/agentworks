@@ -40,7 +40,7 @@ def test_an_unknown_layout_lists_the_ones_that_exist() -> None:
 
 def test_the_layouts_reach_the_describe_surface_as_choices() -> None:
     """What the inversion buys: a validator would have left ``choices``
-    empty, so ``agw resource describe`` could not list the layouts (FR10)
+    empty, so ``agw resource explain`` could not list the layouts (FR10)
     and the emitted schema could not enumerate them."""
     (field,) = [doc for doc in iter_field_docs(NamedConsoleConfig) if doc.path == ("tmux_layout",)]
 

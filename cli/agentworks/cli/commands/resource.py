@@ -1,10 +1,4 @@
-"""``agentworks resource`` -- cross-kind inspection of the Resource Registry.
-
-Stops at framework-uniform fields (kind, name, origin, usage,
-description). Kind-specific detail (secret backend mappings, template
-inheritance chains, etc.) lives in the per-kind commands
-(``agw secret describe``, ...).
-"""
+"""``agentworks resource`` inventory, explanation, authoring, and editing."""
 
 from __future__ import annotations
 
@@ -34,7 +28,7 @@ if TYPE_CHECKING:
 
 resource_app = typer.Typer(
     name="resource",
-    help="Cross-kind inspection of the Resource Registry.",
+    help="Inventory, explain, author, and edit Resource Registry entries.",
     no_args_is_help=True,
 )
 app.add_typer(resource_app)
@@ -111,7 +105,7 @@ def resource_list(
 
     config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
     registry = load_request_registry(config, warn=output_format is OutputFormat.HUMAN)
-    db = get_db()
+    db = None if names_only else get_db()
     # ``list_resources`` validates ``origin_filter`` (typed
     # ``ValidationError`` from the service layer; see inspect.py); the
     # ``cast`` is purely a typing-layer bridge from typer's ``str | None``
@@ -211,71 +205,8 @@ def resource_kinds(
     render_kind_table(rows)
 
 
-@resource_app.command("describe")
-def resource_describe(
-    ref: Annotated[
-        str,
-        typer.Argument(
-            help="Resource as KIND/NAME (e.g. secret/npm-token, vm-template/dev).",
-        ),
-    ],
-    output_format: Annotated[
-        OutputFormat,
-        typer.Option(
-            "--output",
-            help="Output format: human or json. Default: human.",
-        ),
-    ] = OutputFormat.HUMAN,
-) -> None:
-    """Show the full per-resource detail view.
-
-    Three sections: a header (kind, name, description, origin), a
-    ``Referenced by:`` list (one row per inbound config reference), and
-    a ``Used by (per current config):`` list (one row per live DB
-    instance whose subgraph reaches this resource, grouped by
-    ``instance_kind``). Stops at framework-uniform fields; reach for
-    ``agw secret describe`` etc. for kind-specific detail (backend
-    mappings, inheritance chains, resolution preview).
-    """
-    from agentworks.bootstrap import load_request_registry
-    from agentworks.config import load_config
-    from agentworks.errors import ValidationError
-    from agentworks.resources.inspect import (
-        describe_resource,
-        render_resource_description,
-        resource_description_data,
-    )
-
-    # One KIND/NAME grammar across the resource group (`resource edit`
-    # and `resource list --names-only` use the same token); '/' cannot
-    # appear in names, so the first-slash split is unambiguous.
-    kind, slash, name = ref.partition("/")
-    if not slash or not name:
-        raise ValidationError(
-            f"expected KIND/NAME, got {ref!r}",
-            hint="Example: agw resource describe secret/npm-token",
-        )
-
-    config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
-    registry = load_request_registry(config, warn=output_format is OutputFormat.HUMAN)
-    db = get_db()
-    desc = describe_resource(registry, kind, name, db=db)
-    if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
-
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
-
-        write_json_envelope(
-            MachineOutputCommand.RESOURCE_DESCRIBE,
-            resource_description_data(desc),
-            get_binary_stream("stdout"),
-        )
-        return
-    render_resource_description(desc)
-
-
-@resource_app.command("describe-kind")
-def resource_describe_kind(
+@resource_app.command("explain")
+def resource_explain(
     target: Annotated[
         str,
         typer.Argument(
@@ -298,8 +229,7 @@ def resource_describe_kind(
     Reads no config and builds no registry, so it answers on a host whose
     config is broken, and it documents a capability whose plugin is not
     enabled. `agw resource sample KIND` prints the same fields as a
-    document to edit; `agw resource describe KIND/NAME` describes a
-    declared resource rather than a kind.
+    document to edit.
     """
     from agentworks.manifests.describe import render_reference
     from agentworks.manifests.reference import reference_for
@@ -458,10 +388,10 @@ def resource_schema(
             ),
         ),
     ] = None,
-    write: Annotated[
+    install: Annotated[
         bool,
         typer.Option(
-            "--write",
+            "--install",
             help=(
                 "Write the whole set (the any-kind schema plus one per kind) "
                 "under the resources directory instead of printing. The "
@@ -480,7 +410,7 @@ def resource_schema(
     hand-written manifest to get the same.
 
     The schema describes THIS host: a capability contributed by a plugin
-    appears in it once that plugin is installed, so re-run --write after
+    appears in it once that plugin is installed, so re-run --install after
     installing one.
     """
     from agentworks import output
@@ -493,18 +423,18 @@ def resource_schema(
         write_schema_set,
     )
 
-    if not write:
+    if not install:
         schema = envelope_schema() if kind is None else document_schema(kind)
         output.info(schema_json(schema).rstrip("\n"))
         return
 
     if kind is not None:
         raise ValidationError(
-            "--write writes the whole schema set, so it takes no kind",
+            "--install writes the whole schema set, so it takes no kind",
             hint=(
                 "A partial set would leave some manifest's modeline pointing "
                 "at a file that is not there. Drop the kind, or print one "
-                "kind's schema without --write."
+                "kind's schema without --install."
             ),
         )
 

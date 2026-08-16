@@ -43,8 +43,8 @@ does not add, remove, or change an entry.
 
 Map each retired section family to a kind with the table below; ordinary top-level validation names
 only the unexpected root keys. Use `agw resource sample KIND` for a declarable manifest shape. Use
-`agw resource describe-kind KIND/NAME` for the tagged configuration of a capability implementation.
-The installed schema is authoritative. This topic deliberately does not copy its fields.
+`agw resource explain KIND/NAME` for the tagged configuration of a capability implementation. The
+installed schema is authoritative. This topic deliberately does not copy its fields.
 
 The release-history mapping is:
 
@@ -93,13 +93,13 @@ wrote it.
 
 Write one manifest at a time at its pre-recorded intended path while leaving every retired TOML
 section in place. The edit must consume its existing expected identity without changing the
-baseline. Run `agw resource sample KIND` for the manifest shape and
-`agw resource describe-kind KIND` for its fields. When the manifest contains tagged capability
-configuration, run `agw resource describe-kind KIND/NAME` for that implementation. A config that
-still carries retired resource sections fails ordinary top-level validation, so commands that load
-it cannot validate the manifest set during this drafting phase. Read every field from those command
-surfaces and keep the immutable identity inventory as the loss check. Validation begins after the
-one-time TOML cutover below.
+baseline. Run `agw resource sample KIND` for the manifest shape and `agw resource explain KIND` for
+its fields. When the manifest contains tagged capability configuration, run
+`agw resource explain KIND/NAME` for that implementation. A config that still carries retired
+resource sections fails ordinary top-level validation, so commands that load it cannot validate the
+manifest set during this drafting phase. Read every field from those command surfaces and keep the
+immutable identity inventory as the loss check. Validation begins after the one-time TOML cutover
+below.
 
 The `edit-one-manifest` mutation applies to both pre-existing manifests and manifests derived from
 retired TOML. Replace a written legacy `service_principal`, `credentials`, or `vm_host` field with
@@ -115,8 +115,8 @@ canonical tagged secret arm while preserving its secret name. For a version 0.13
 ## Review authentication, placement, and changed secret references
 
 Inspect every pre-existing and TOML-derived site manifest, not only the files created during this
-migration. Run `agw resource describe-kind vm-platform/NAME` for each selected implementation
-because authentication and placement are tagged choices now:
+migration. Run `agw resource explain vm-platform/NAME` for each selected implementation because
+authentication and placement are tagged choices now:
 
 - Proxmox keeps `token_secret`. Omission or explicit null selects its well-known default secret
   name; a custom string selects that named secret. Proxmox has no no-secret mode.

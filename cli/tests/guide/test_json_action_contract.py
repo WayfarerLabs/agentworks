@@ -22,7 +22,7 @@ from tests.conftest import ManifestDoc, write_manifests
 _COVERED_OPERATIONS = {
     ("agw", "resource", "list"): "resource.list",
     ("agw", "resource", "kinds"): "resource.kinds",
-    ("agw", "resource", "describe"): "resource.describe",
+    ("agw", "graph", "show"): "graph.show",
     ("agw", "vm", "list"): "vm.list",
     ("agw", "vm", "describe"): "vm.describe",
     ("agw", "workspace", "list"): "workspace.list",

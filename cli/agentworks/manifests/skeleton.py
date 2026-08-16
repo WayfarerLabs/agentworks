@@ -171,7 +171,7 @@ def _alternatives_of(entry: FieldEntry, target: str) -> list[str]:
     being a list of words. Which pointer depends on the arms: a
     capability's arm has an address of its own, and an arm of any other
     union has none and never will, so the address that answers it is this
-    reference's own, where ``describe-kind`` expands every such arm in
+    reference's own, where ``explain`` expands every such arm in
     place.
     """
     if not entry.alternatives:
@@ -186,9 +186,9 @@ def _alternatives_of(entry: FieldEntry, target: str) -> list[str]:
     unshown = [alt for alt in entry.alternatives if alt.name != entry.rendered and not alt.recurring]
     addressed = next((alt for alt in unshown if alt.target), None)
     if addressed is not None:
-        lines.append(f"`agw resource describe-kind {addressed.target}` prints another one's fields.")
+        lines.append(f"`agw resource explain {addressed.target}` prints another one's fields.")
     elif unshown:
-        lines.append(f"`agw resource describe-kind {target}` prints every arm's fields.")
+        lines.append(f"`agw resource explain {target}` prints every arm's fields.")
     return lines
 
 

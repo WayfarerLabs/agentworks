@@ -312,7 +312,7 @@ def test_an_alternative_gets_an_address_only_when_the_address_exists() -> None:
 
     A kind's whole spec is collected under the capability it hosts, arms
     included, so any other tagged block an author writes inside one was
-    handed `agw resource describe-kind vm-platform/leaf`: a printed command
+    handed `agw resource explain vm-platform/leaf`: a printed command
     that fails. The registry decides, since it is what the command asks.
     """
     (element,) = field_tree(Nodes, "vm-platform")[0].children
@@ -429,7 +429,7 @@ SelfReaching.model_rebuild()
 def test_a_union_arm_reachable_from_itself_stops_rather_than_recurring() -> None:
     """``iter_field_docs`` threads a cycle guard, and the tree re-entered
     it from scratch for every expanded arm, so a self-reachable arm ran
-    until the interpreter gave up: ``describe-kind``, ``sample``, and the
+    until the interpreter gave up: ``explain``, ``sample``, and the
     guide's field reference all died on the same model.
 
     One level is expanded and the second is not, and ``rendered`` says so
@@ -549,7 +549,7 @@ def test_a_tagged_collection_arm_reachable_from_itself_stops_rather_than_recurri
     A group whose members are groups is finite as a model and unbounded as
     a document, so one level is expanded and the next says what may go
     there without opening it. Expanding the element outside the guard
-    would run until the interpreter gave up and take ``describe-kind``,
+    would run until the interpreter gave up and take ``explain``,
     ``sample``, and the guide's field reference down together.
     """
     (element,) = _entries_by_name(_reference(Nodes))["nodes"].children
@@ -654,7 +654,7 @@ def test_a_nested_tagged_union_expands_every_arm_because_none_is_addressable() -
     field-tree machinery expands it with no special casing.
 
     ``target`` is None on both, unlike a capability arm's: there is no
-    ``describe-kind`` address for one arm of an ordinary union, and
+    ``explain`` address for one arm of an ordinary union, and
     inventing one would print a command that fails. That is exactly why
     BOTH arms carry their fields here: an arm with no address and no
     fields is a word an operator cannot act on, and ``ssh`` was one, with

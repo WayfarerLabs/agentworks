@@ -14,9 +14,7 @@ from typer.testing import CliRunner
 from agentworks.cli import app
 from agentworks.doctor import HealthGroup, HealthReport
 from agentworks.origin import Origin
-from agentworks.resources.inspect import KindRow, ResourceDescription, ResourceListing, ResourceSummary
-from agentworks.resources.kind import InstanceRef
-from agentworks.resources.reference import ReferenceEntry
+from agentworks.resources.inspect import KindRow, ResourceListing, ResourceSummary
 from agentworks.secrets.inspect import (
     SecretDescription,
     SecretRow,
@@ -530,52 +528,23 @@ def test_secret_list_json_preserves_source_precedence_without_values(monkeypatch
     assert "value" not in result.stdout
 
 
-def test_resource_kinds_and_describe_json_use_closed_data_shapes(monkeypatch) -> None:
+def test_resource_kinds_json_uses_closed_data_shape(monkeypatch) -> None:
     from agentworks import bootstrap, config
-    from agentworks.cli.commands import resource
     from agentworks.resources import inspect
 
-    description = ResourceDescription(
-        kind="secret",
-        name="token",
-        origin=None,
-        description="test token",
-        references=(
-            ReferenceEntry(("vm-template", "default"), "first reference"),
-            ReferenceEntry(("vm-template", "default"), "first reference"),
-        ),
-        used_by=(InstanceRef("session", "one"),),
-        not_ready_reason=None,
-        disabled_reason="disabled",
-    )
     monkeypatch.setattr(config, "load_config", lambda **_kwargs: object())
     monkeypatch.setattr(bootstrap, "load_request_registry", lambda _config, **_kwargs: object())
-    monkeypatch.setattr(resource, "get_db", lambda: None)
     monkeypatch.setattr(
         inspect,
         "list_kinds",
         lambda _registry: [KindRow("secret", "declarable", 1, "secret configuration")],
     )
-    monkeypatch.setattr(inspect, "describe_resource", lambda *_args, **_kwargs: description)
 
     kinds = CliRunner().invoke(app, ["resource", "kinds", "--output", "json"])
-    describe = CliRunner().invoke(app, ["resource", "describe", "secret/token", "--output", "json"])
     _assert_human_baseline(
         ["resource", "kinds"],
         b"KIND    CATEGORY    RESOURCES  DESCRIPTION\nsecret  declarable  1          secret configuration\n",
     )
-    _assert_human_baseline(
-        ["resource", "describe", "secret/token"],
-        b"Resource: secret/token\n"
-        b"  Description: test token\n"
-        b"  Origin: unknown\n"
-        b"  Disabled: disabled\n\n"
-        b"Referenced by:\n"
-        b"  - vm-template/default: first reference\n\n"
-        b"Used by (per current config):\n"
-        b"  - session/one\n",
-    )
-
     assert kinds.exit_code == 0, kinds.output
     assert _json_document(kinds)["data"] == {
         "kinds": [
@@ -587,14 +556,6 @@ def test_resource_kinds_and_describe_json_use_closed_data_shapes(monkeypatch) ->
             },
         ],
     }
-    assert describe.exit_code == 0, describe.output
-    resource_data = _json_document(describe)["data"]
-    assert isinstance(resource_data, dict)
-    described = resource_data["resource"]
-    assert isinstance(described, dict)
-    assert described["origin"] is None
-    assert described["disabled_reason"] == "disabled"
-    assert len(described["references"]) == 2
 
 
 def test_secret_describe_json_preserves_nulls_and_source_order(monkeypatch) -> None:
@@ -736,33 +697,6 @@ def test_invalid_output_and_names_only_json_fail_before_config_or_service_work(m
     assert invalid.stderr_bytes
     assert incompatible.stderr_bytes
     assert calls == 0
-
-
-def test_unknown_name_json_uses_existing_stderr_error_route(monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
-    from agentworks import bootstrap, config
-    from agentworks import cli as cli_mod
-    from agentworks.cli.commands import resource
-    from agentworks.errors import NotFoundError
-    from agentworks.resources import inspect
-
-    monkeypatch.setattr(config, "load_config", lambda **_kwargs: object())
-    monkeypatch.setattr(bootstrap, "load_request_registry", lambda _config, **_kwargs: object())
-    monkeypatch.setattr(resource, "get_db", lambda: None)
-
-    def missing_resource(*_args: object, **_kwargs: object) -> ResourceDescription:
-        raise NotFoundError("resource secret/missing does not exist")
-
-    monkeypatch.setattr(inspect, "describe_resource", missing_resource)
-    monkeypatch.setattr(sys, "argv", ["agw", "resource", "describe", "secret/missing", "--output", "json"])
-
-    with pytest.raises(SystemExit) as exit_info:
-        cli_mod.main()
-
-    captured = capsys.readouterr()
-    assert exit_info.value.code == 1
-    assert captured.out == ""
-    assert "Error: resource secret/missing does not exist" in captured.err
-    assert "\x1b" not in captured.err
 
 
 def test_config_failure_json_writes_no_stdout_before_service_work(

@@ -41,6 +41,11 @@ Refresh them after upgrading:
 agw completion install
 ```
 
+The generic `agw resource describe KIND/NAME` command is removed. Use `agw graph show KIND/NAME` for
+declared and live relationships, `agw resource list` for inventory and origin, `agw doctor` for
+readiness, `agw resource edit` for an operator manifest location, and the resource's owning command
+for kind-specific details.
+
 ## TOML resource sections: removed
 
 Declaring resources in `config.toml` is no longer supported. `config.toml` is settings only. The
@@ -62,13 +67,13 @@ hand, "Handing the rewrite to an agent" below is the same procedure written as a
 Read this before you start, because it decides the order. Retired resource sections are unexpected
 top-level keys, so every command that loads config meets ordinary validation:
 
-- **`agw resource describe-kind <target>` reads no config at all.** It answers on a host whose
+- **`agw resource explain <target>` reads no config at all.** It answers on a host whose
   `config.toml` does not load, and it documents kinds and capability implementations whose plugin is
   not enabled.
 - **`agw resource sample <kind>` reads no config when it prints to stdout.** Copy or redirect that
   output into the intended resources file. `--write` needs a valid config to locate the resources
   directory, so use it only after the cutover.
-- **`agw resource schema [<kind>]` also prints without loading config.** `schema --write` needs a
+- **`agw resource schema [<kind>]` also prints without loading config.** `schema --install` needs a
   valid config, so schema-aware editor files can be generated after cutover (see
   ["Editing manifests with schema support"](resources.md#editing-manifests-with-schema-support) in
   the resources guide).
@@ -78,8 +83,8 @@ top-level keys, so every command that loads config meets ordinary validation:
   so they only answer once the last resource section is gone.
 
 The migration therefore has two phases. First draft every manifest with `agw resource sample <kind>`
-and inspect its fields with `agw resource describe-kind <target>` while keeping the saved inventory
-and backups unchanged. Then remove every retired section from `config.toml` in one pass and use
+and inspect its fields with `agw resource explain <target>` while keeping the saved inventory and
+backups unchanged. Then remove every retired section from `config.toml` in one pass and use
 `agw doctor` as the validation loop:
 
 ```console
@@ -181,28 +186,28 @@ metadata:
 spec: {}
 ```
 
-`agw resource describe-kind <kind>` is the authority on what a `spec` accepts, and it is worth
-running per kind rather than assuming: several field names read like something they are not (a
-vm-template sizes memory with `memory`, in GiB, not `memory_gib`).
+`agw resource explain <kind>` is the authority on what a `spec` accepts, and it is worth running per
+kind rather than assuming: several field names read like something they are not (a vm-template sizes
+memory with `memory`, in GiB, not `memory_gib`).
 
 For the three kinds whose `spec` carries a tagged capability table (`vm-site`'s `platform`,
 `git-credential`'s `provider`, `session-template`'s `harness_integration`), the kind's own output
 documents only ONE implementation's fields inline, the one it shows as an example, and lists the
-rest by name. `agw resource describe-kind <capability-kind>/<name>` is the form that documents a
-specific one:
+rest by name. `agw resource explain <capability-kind>/<name>` is the form that documents a specific
+one:
 
 ```bash
-agw resource describe-kind vm-platform/proxmox            # for [proxmox]
-agw resource describe-kind vm-platform/azure-vm           # for [azure]
-agw resource describe-kind git-credential-provider/azdo   # for a git_credentials section with provider = "azdo"
-agw resource describe-kind harness-integration/claude-code
+agw resource explain vm-platform/proxmox            # for [proxmox]
+agw resource explain vm-platform/azure-vm           # for [azure]
+agw resource explain git-credential-provider/azdo   # for a git_credentials section with provider = "azdo"
+agw resource explain harness-integration/claude-code
 ```
 
 Reach for it whenever the section you are rewriting selects an implementation other than the one
-shown inline. `describe-kind vm-site` renders lima's fields, so a `[proxmox]` section rewritten from
-that output alone will be missing fields; `describe-kind git-credential` renders github's, so azdo's
-required `org` never appears. The kind's output names the form for you at the end of the table's
-entry, and a wrong-fields error carries it as a hint.
+shown inline. `explain vm-site` renders lima's fields, so a `[proxmox]` section rewritten from that
+output alone will be missing fields; `explain git-credential` renders github's, so azdo's required
+`org` never appears. The kind's output names the form for you at the end of the table's entry, and a
+wrong-fields error carries it as a hint.
 
 ### Where to put the files
 
@@ -227,8 +232,8 @@ in the resources guide before editing an appended file.
 
 - **`[azure]` and `[proxmox]`** become `vm-site` manifests. The section name becomes the resource
   name, and the section's keys move inside the tagged `spec.platform` table rather than sitting
-  directly under `spec`. Take the platform's `name` from `agw resource describe-kind vm-platform`
-  rather than from the section header: `[proxmox]` does select the `proxmox` platform, but `[azure]`
+  directly under `spec`. Take the platform's `name` from `agw resource explain vm-platform` rather
+  than from the section header: `[proxmox]` does select the `proxmox` platform, but `[azure]`
   selects `azure-vm`, so only one of the two matches its old section name.
 
   An `azure-vm` site also carries one key no `[azure]` section had: it says how it authenticates, in
@@ -415,9 +420,9 @@ did. `info` rows are not failures; a not-ready site whose plugin is off is repor
 ### Handing the rewrite to an agent
 
 The rewrite is mechanical but it has to be done against what this build actually accepts, which is
-exactly the sort of work worth delegating to a coding agent with shell access: it can run
-`describe-kind` per kind and read the real field list instead of guessing, and it can iterate on the
-per-resource errors until `agw doctor` is clean.
+exactly the sort of work worth delegating to a coding agent with shell access: it can run `explain`
+per kind and read the real field list instead of guessing, and it can iterate on the per-resource
+errors until `agw doctor` is clean.
 
 Agentworks does not yet ship a command that drives this conversation for you, so give the agent the
 procedure above as its brief. What matters is that it gets the constraints, not just the goal:
@@ -425,16 +430,16 @@ procedure above as its brief. What matters is that it gets the constraints, not 
 - `[secret_backends.*]` sections are deleted, not rewritten. They are the one family in the saved
   inventory with no manifest form.
 - The work list comes from the saved config inventory, and the target shape comes from
-  `agw resource describe-kind <kind>` per kind. Field names are to be read from that output, never
+  `agw resource explain <kind>` per kind. Field names are to be read from that output, never
   recalled. Where a `spec` selects a capability implementation, the fields come from
-  `agw resource describe-kind <capability-kind>/<name>` (`vm-platform/proxmox`,
+  `agw resource explain <capability-kind>/<name>` (`vm-platform/proxmox`,
   `git-credential-provider/azdo`), because the kind's own output only details one implementation.
-- `describe-kind` is the AUTHORITATIVE field list, and for mode unions it is complete. Where a
-  platform's config carries one (`auth` on `azure-vm` and `aws-ec2`, `placement` on `lima`), the
+- `explain` is the AUTHORITATIVE field list, and for mode unions it is complete. Where a platform's
+  config carries one (`auth` on `azure-vm` and `aws-ec2`, `placement` on `lima`), the
   per-implementation output expands EVERY arm with that arm's own fields, so nothing about the modes
   has to be reconstructed from prose or from a second surface. `agw resource sample` is the surface
-  that shows one arm only; it says so in a comment naming the `describe-kind` that prints them all.
-- `describe-kind`, stdout `sample`, and stdout `schema` work while `config.toml` is invalid. Their
+  that shows one arm only; it says so in a comment naming the `explain` that prints them all.
+- `explain`, stdout `sample`, and stdout `schema` work while `config.toml` is invalid. Their
   `--write` forms, `list`, `secret list`, and config-dependent doctor checks do not. Doctor becomes
   the iteration loop after the one-time TOML cutover.
 - `config.toml` is all-or-nothing, so every resource section comes out in one pass at the end. That
@@ -564,8 +569,8 @@ reference-specific rewrite.
 
 Every kind's spec and every capability's config is now checked against a model the code declares,
 rather than by hand-written per-kind code. That is what makes `agw resource sample`,
-`agw resource describe-kind`, and `agw resource schema` possible, and it is why they cannot be out
-of date. It also means a manifest that used to load can now fail, in ways worth going through before
+`agw resource explain`, and `agw resource schema` possible, and it is why they cannot be out of
+date. It also means a manifest that used to load can now fail, in ways worth going through before
 you upgrade.
 
 ### How to work through it
@@ -588,7 +593,7 @@ somewhere else on purpose: when the offending value was inherited, the error nam
 DECLARED it and adds an `(inherited from <kind>/<name>)` tail, so the file and line are the parent's
 rather than the child you ran into it through.
 
-**Two commands keep working when nothing else does.** `agw resource describe-kind <kind>` (and
+**Two commands keep working when nothing else does.** `agw resource explain <kind>` (and
 `<capability-kind>/<name>`) documents every field the kind accepts, and `agw resource sample <kind>`
 prints the same fields as a document to edit. Neither reads your config, so both answer while it is
 unloadable. That is why every error points at them.
@@ -606,8 +611,7 @@ This is the change most likely to surface on a host that was quiet before. A mis
 plugin, and a `wsl2` site's config went unchecked anywhere except Windows. Both are hard errors
 everywhere now, so a config you have been carrying for months can fail on the first machine you
 upgrade even though nothing about that machine uses it. The fix is the same as any other unknown
-key: `agw resource describe-kind vm-platform/<name>` names the fields, and the error already does
-too.
+key: `agw resource explain vm-platform/<name>` names the fields, and the error already does too.
 
 What did NOT change is readiness and enablement themselves. A site whose plugin is off is still
 not-ready with an "enable plugin `<name>`" hint and still refused at use; it is only the question of
@@ -619,7 +623,7 @@ whether its config is well-formed that stopped being host-dependent.
 a hard error through ordinary model validation. Put one tagged table in place of the pair: the
 string selector becomes its `name`, and every key from the sibling table moves beside `name` with
 its value unchanged. If the sibling table already carries its own `name`, decide which selector is
-correct before merging. If it is not a table, run `agw resource describe-kind <target>` and place or
+correct before merging. If it is not a table, run `agw resource explain <target>` and place or
 remove that value deliberately rather than discarding it during the fold.
 
 ### Git credential token acquisition is tagged now
@@ -781,12 +785,12 @@ problem you did not have. A site with no `vm_host` key anywhere in it needs no e
 `limactl` here and reports not-ready without it; the built-in `lima-local` site is exactly
 `placement: {mode: local}` and needs no declaration.
 
-**Where the fields come from.** `agw resource describe-kind vm-platform/azure-vm` (and `/aws-ec2`,
+**Where the fields come from.** `agw resource explain vm-platform/azure-vm` (and `/aws-ec2`,
 `/lima`) documents the union with its default in the parenthetical and shows each mode's own fields
 under that mode, so the rewrites above are not the only place they are written down:
 
 ```console
-$ agw resource describe-kind vm-platform/azure-vm
+$ agw resource explain vm-platform/azure-vm
 [...]
   auth  (table, optional, default {mode: ambient})
     How this site authenticates to Azure: `{mode: ambient}` for the ambient credential
@@ -807,9 +811,9 @@ $ agw resource describe-kind vm-platform/azure-vm
 
 `agw resource sample vm-site` cannot do the same, because a document holds one arm: it prints lima's
 `placement` under a `# One of: local, ssh. Shown here: local.` line with only the `local` arm's
-`mode` in the document, and points at `agw resource describe-kind vm-site` for the rest. The emitted
-schema carries both arms too: `agw resource schema --write` writes `oneOf` with a `const` per mode,
-so a schema-aware editor completes and checks whichever arm you are writing (see
+`mode` in the document, and points at `agw resource explain vm-site` for the rest. The emitted
+schema carries both arms too: `agw resource schema --install` writes `oneOf` with a `const` per
+mode, so a schema-aware editor completes and checks whichever arm you are writing (see
 ["Editing manifests with schema support"](resources.md#editing-manifests-with-schema-support) in the
 resources guide).
 
@@ -834,7 +838,7 @@ GITHUB_TOKEN: {secret: github-token}
 ```
 
 The ordinary plaintext spellings remain `EDITOR: vim` and `EDITOR: {value: vim}`. The secret
-spelling remains `GITHUB_TOKEN: {secret: github-token}`. `agw resource schema --write` now rejects
+spelling remains `GITHUB_TOKEN: {secret: github-token}`. `agw resource schema --install` now rejects
 the two retired mappings in an editor as well as during manifest loading.
 
 To find likely flow-style entries in the normal manifest directory, run:
@@ -874,8 +878,8 @@ Values are no longer coerced. A quoted number is a string, and a string is not a
   harness integration's config block. The ones most likely to be sitting in an existing file are
   `shell`'s `command`, `resume_command`, and `required_commands`, `extra_args` on `claude-code` and
   `codex`, `codex`'s `writable_dirs`, a github credential's `repos`, and a `session-template`'s
-  `env`. `agw resource describe-kind` marks a field "or null" when null is legal, so it settles any
-  case not listed here, with one exception it does not mark: a field that NAMES a secret renders as
+  `env`. `agw resource explain` marks a field "or null" when null is legal, so it settles any case
+  not listed here, with one exception it does not mark: a field that NAMES a secret renders as
   "optional, defaults to `<name>`, names a secret" and takes an explicit `null` as well, which is
   what ["One meaning changed rather than one shape"](#one-meaning-changed-rather-than-one-shape)
   below is about. A platform's config block is mixed for that reason and because several of its
@@ -937,8 +941,8 @@ omitting `secret` from that arm.
 **If one of those lines is still in your file, you are the person this affects.** Nothing warns you,
 because to the loader an explicit `null` is now simply the ordinary way of taking the default, and
 nothing downstream can tell it apart from an omitted key: both resolve to the default-named secret,
-so `agw doctor` and `agw resource describe` look identical either way. Your file is the only place
-the evidence survives, which is why this one is a scan rather than a check:
+so `agw doctor` and the resource graph look identical either way. Your file is the only place the
+evidence survives, which is why this one is a scan rather than a check:
 
 ```bash
 grep -rniE '(token_secret|access_key_secret|secret):[[:space:]]*(null|~)?[[:space:]]*([,}]|$)' \
@@ -975,7 +979,7 @@ Then decide, per hit:
 - **If you meant a different secret, name it.** Which secret the field points at is the only thing
   it can express, and it is what you came here to set.
 - If you meant the default all along, leave it. Nothing changes for you except that the default is
-  now declared as a dependency, which `agw resource describe secret/proxmox-token` will show and
+  now declared as a dependency, which `agw graph show secret/proxmox-token` will show and
   `agw doctor` will check.
 
 Nothing rewrites your files, so the evidence stays where you left it: that `grep` answers the same

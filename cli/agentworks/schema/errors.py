@@ -678,7 +678,7 @@ def _missing_union_block(address: _Address) -> str | None:
     A missing union is different in kind. ``auth: is required`` tells an
     operator to write a field without telling them it is a choice, and
     the choice is the only hard part; the modes are two lookups away in
-    ``describe-kind``. This and :func:`_missing_tag` are one mistake a
+    ``explain``. This and :func:`_missing_tag` are one mistake a
     keystroke apart (the block absent, and the block present without its
     tag), so they answer with the same list.
 

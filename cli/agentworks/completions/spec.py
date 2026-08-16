@@ -28,18 +28,20 @@ COMPLETION_PROBE_OPTION = "--completion-probe"
 # database-backed.
 DATABASE_BACKED_DYNAMIC_COMPLETIONS: tuple[tuple[str, tuple[str, str]], ...] = (
     ("vms", ("vm", "list")),
-    ("sites", ("resource", "list")),
     ("workspaces", ("workspace", "list")),
-    ("ws_templates", ("resource", "list")),
-    ("git_credentials", ("resource", "list")),
     ("sessions", ("session", "list")),
     ("agents", ("agent", "list")),
     ("consoles", ("console", "list")),
-    ("session_templates", ("resource", "list")),
-    ("vm_templates", ("resource", "list")),
-    ("agent_templates", ("resource", "list")),
-    ("admin_templates", ("resource", "list")),
-    ("resource_refs", ("resource", "list")),
+)
+RESOURCE_LIST_DYNAMIC_COMPLETIONS: tuple[str, ...] = (
+    "sites",
+    "ws_templates",
+    "git_credentials",
+    "session_templates",
+    "vm_templates",
+    "agent_templates",
+    "admin_templates",
+    "resource_refs",
 )
 DATABASE_BACKED_DYNAMIC_COMPLETERS = frozenset(completer for completer, _path in DATABASE_BACKED_DYNAMIC_COMPLETIONS)
 DATABASE_BACKED_COMPLETION_PATHS = frozenset(path for _completer, path in DATABASE_BACKED_DYNAMIC_COMPLETIONS)
@@ -53,7 +55,6 @@ _LEGACY_VALUE_OPTIONS.update(
         ("session", "list"): frozenset({"--workspace", "--vm", "--agent"}),
         ("agent", "list"): frozenset({"--vm"}),
         ("console", "list"): frozenset({"--vm", "--workspace", "--agent"}),
-        ("resource", "list"): frozenset({"--kind", "--origin"}),
     }
 )
 
@@ -63,7 +64,6 @@ _LEGACY_FLAG_OPTIONS: dict[tuple[str, str], frozenset[str]] = {
 _LEGACY_FLAG_OPTIONS.update(
     {
         ("session", "list"): frozenset({"--admin", "--no-status"}),
-        ("resource", "list"): frozenset({"--include-disabled"}),
     }
 )
 
@@ -137,6 +137,7 @@ class ParamSpec:
     multiple: bool
     required: bool
     choices: list[str] | None = None
+    suggestions: list[str] | None = None
     dynamic_completer: str | None = None
 
 
@@ -182,7 +183,7 @@ class CommandSpec:
 #                        works even with a broken config)
 #   "resource_refs"   -> agw resource list --names-only
 #                        (kind/name per line, verbatim -- the candidate
-#                        IS the token for `resource describe KIND/NAME`)
+#                        IS a KIND/NAME token)
 #   "guide_topics"    -> agw guide --names-only
 #   "files"           -> native shell filesystem completion
 #
@@ -308,24 +309,23 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     # Secret inspection
     ("secret.describe", "name"): "secrets",
     ("secret.verify", "names"): "secrets",
-    # Resource inspection (describe took the single KIND/NAME
-    # grammar in the display-syntax unification)
+    # Resource inventory and graph/edit selectors.
     ("resource.list", "kind"): "resource_kinds",
-    ("resource.describe", "ref"): "resource_refs",
     ("resource.edit", "ref"): "resource_refs",
-    # `resource describe-kind` takes KIND or KIND/NAME, and completes from
+    ("graph.show", "focus"): "resource_refs",
+    # `resource explain` takes KIND or KIND/NAME, and completes from
     # the config-free kinds completer: every kind is a valid target, and
     # the KIND/NAME form addresses a capability implementation, which the
     # kind's own output lists. Completing implementations too would mean a
     # completer that builds a registry (so it would go quiet on a broken
     # config, which is exactly when this command is worth reaching for).
-    ("resource.describe-kind", "target"): "resource_kinds",
+    ("resource.explain", "target"): "resource_kinds",
     # Resource authoring. `resource sample`'s kind argument
     # is a plain string (no click.Choice: any typed kind must reach the
     # service layer for a clean domain error, issue #276), so it
     # completes via the same config-free kinds completer `resource list
     # --kind` uses. Capability kinds complete too, then fail with a
-    # kind-aware domain error pointing at `describe-kind` (a capability is
+    # kind-aware domain error pointing at `explain` (a capability is
     # not a document an operator writes, so there is nothing to sample).
     ("resource.sample", "kind"): "resource_kinds",
     # `resource schema`'s kind argument completes from the same config-free
@@ -333,6 +333,10 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     # plain string, so any typed kind reaches the service layer and gets a
     # clean domain error rather than a click.Choice parse failure.
     ("resource.schema", "kind"): "resource_kinds",
+}
+
+STATIC_COMPLETION_SUGGESTIONS: dict[tuple[str, str], tuple[str, ...]] = {
+    ("graph.show", "depth"): ("1", "2", "3", "all"),
 }
 
 
@@ -406,6 +410,7 @@ def _build_param_spec(param: _ClickParameter, command_path: str) -> ParamSpec:
     # (e.g. "vm.shell" not "agentworks.vm.shell")
     lookup_path = ".".join(command_path.split(".")[1:]) if "." in command_path else command_path
     dynamic = DYNAMIC_COMPLETIONS.get((lookup_path, param.name or ""))
+    suggestions = STATIC_COMPLETION_SUGGESTIONS.get((lookup_path, param.name or ""))
 
     # Click models variadic Arguments via `nargs=-1` (not `multiple`), and
     # `multiple=True` on Options. Normalize both into ParamSpec.multiple so
@@ -421,6 +426,7 @@ def _build_param_spec(param: _ClickParameter, command_path: str) -> ParamSpec:
         multiple=accepts_multi,
         required=param.required,
         choices=choices,
+        suggestions=None if suggestions is None else list(suggestions),
         dynamic_completer=dynamic,
     )
 
@@ -448,6 +454,7 @@ def _spec_to_dict(spec: CommandSpec) -> dict:  # type: ignore[type-arg]
                 "multiple": p.multiple,
                 "required": p.required,
                 "choices": p.choices,
+                "suggestions": p.suggestions,
                 "dynamic_completer": p.dynamic_completer,
             }
             for p in spec.params

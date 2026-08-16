@@ -248,7 +248,7 @@ def _validated_kinds(kind: str | None, all_kinds: bool) -> tuple[str, ...]:
                 f"{kind!r} is a capability kind; it has no sample manifest",
                 entity_kind="resource",
                 entity_name=kind,
-                hint=f"`agw resource describe-kind {kind}` documents it. Declarable kinds: {known}",
+                hint=f"`agw resource explain {kind}` documents it. Declarable kinds: {known}",
             )
         raise ValidationError(
             f"unknown kind {kind!r}",

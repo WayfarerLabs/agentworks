@@ -166,7 +166,7 @@ def test_the_shipped_optional_catalog_shape_expands_its_element(platform: str) -
     nesting, before it can see a collection at all
     (``schema/_shape.py:198-199``). Miss either peel and the field reads
     as an opaque scalar: no element, so a generated sample and a
-    describe-kind listing both stop telling an operator what goes inside
+    explain listing both stop telling an operator what goes inside
     a catalog entry, with nothing raised.
 
     Asserted against the element model's OWN field set rather than a list
@@ -692,7 +692,7 @@ def test_the_stream_offers_every_arm_the_emitted_schema_does() -> None:
     ``discriminator.mapping`` naming every tag it will dispatch on, and it
     does so without consulting anything in this package. An arm in the
     mapping and absent from the stream is a value an editor offers, the
-    loader accepts, and ``describe-kind`` never mentions, which is how a
+    loader accepts, and ``explain`` never mentions, which is how a
     collection of tagged blocks read as an opaque list of tables for as
     long as it did.
 

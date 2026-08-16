@@ -122,9 +122,9 @@ spec:
     verify_ssl: false
 ```
 
-`agw resource describe-kind vm-platform/proxmox` documents every field above with its type, whether
-it is required, and its default; `agw resource sample vm-site` prints a commented starter to edit.
-Two values map to things this guide produced rather than to anything Proxmox calls by that name:
+`agw resource explain vm-platform/proxmox` documents every field above with its type, whether it is
+required, and its default; `agw resource sample vm-site` prints a commented starter to edit. Two
+values map to things this guide produced rather than to anything Proxmox calls by that name:
 `token_id` is the `full-tokenid` the setup script printed, and `template_vmid` is the VMID you gave
 the template. `node` is the node name in the Proxmox UI sidebar, usually `pve`.
 

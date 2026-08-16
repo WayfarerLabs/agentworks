@@ -219,7 +219,7 @@ def _check_declared_name(doc: Document, owner: RefOwner, model: type[DeclaredRes
     which is an advisory rather than a refusal. Widening the refusal to
     every kind would reverse both, so it is the operator's call, not a
     cleanup. What was fixed instead is the over-promise: the ``name``
-    docstring (rendered into every sample and every ``describe-kind``)
+    docstring (rendered into every sample and every ``explain``)
     stated the character rule as a flat rule and now states it as the
     convention it is.
     """

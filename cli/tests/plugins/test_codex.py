@@ -29,7 +29,7 @@ from agentworks.config import load_config
 from agentworks.errors import StateError
 from agentworks.resources.access import ensure_recipe_enabled
 from agentworks.resources.graph import Enablement
-from agentworks.resources.inspect import describe_resource, list_resources
+from agentworks.resources.inspect import list_resources
 from tests.conftest import ManifestDoc, write_manifests
 
 if TYPE_CHECKING:
@@ -107,16 +107,15 @@ def test_install_command_row_is_disabled_system_plugin_by_default(tmp_path: Path
     assert registry.graph.enablement_of("user-install-command", "codex") is Enablement.disabled
 
 
-def test_disabled_rows_hidden_from_list_shown_by_describe(tmp_path: Path) -> None:
+def test_disabled_rows_are_present_but_hidden_from_default_list(tmp_path: Path) -> None:
     registry = build_registry(_config(tmp_path))
     default_rows = {(r.kind, r.name) for r in list_resources(registry).rows}
     assert ("harness-integration", "codex") not in default_rows
     assert ("user-install-command", "codex") not in default_rows
 
     for kind, name in (("harness-integration", "codex"), ("user-install-command", "codex")):
-        desc = describe_resource(registry, kind, name)
-        assert desc.disabled_reason is not None
-        assert "codex" in desc.disabled_reason
+        assert registry.lookup(kind, name).origin.plugin == "codex"
+        assert registry.graph.enablement_of(kind, name) is Enablement.disabled
 
 
 # -- the harness integration use-gate ----------------------------------------

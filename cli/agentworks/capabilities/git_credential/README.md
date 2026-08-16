@@ -27,8 +27,8 @@ actual git credential helper on the VM; the provider never does.
 ## Available Providers
 
 Two providers ship today, one per supported host. This list can change, so
-`agw resource describe-kind git-credential-provider` is the definitive set on any given install, and
-`agw resource describe-kind git-credential-provider/<name>` the definitive config for one.
+`agw resource explain git-credential-provider` is the definitive set on any given install, and
+`agw resource explain git-credential-provider/<name>` the definitive config for one.
 
 - **`github`** (built in) sources a GitHub PAT for `github.com`. It can optionally be scoped to
   exact repositories (`repos`), every repository under one `owner`, or the union of both, so several

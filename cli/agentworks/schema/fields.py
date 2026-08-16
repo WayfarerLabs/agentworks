@@ -2,7 +2,7 @@
 
 One walker over a model's declared fields, feeding every HUMAN
 presentation of it: the generated sample manifest and ``agw resource
-describe-kind`` today, and any later prose surface that documents a
+explain`` today, and any later prose surface that documents a
 field. :class:`FieldDoc` is therefore a shared source rather than a
 CLI-layer detail, so widen its shape deliberately, not incidentally.
 

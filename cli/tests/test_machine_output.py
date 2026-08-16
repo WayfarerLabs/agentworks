@@ -72,7 +72,7 @@ def test_machine_output_commands_are_the_complete_v1_contract() -> None:
     assert [command.value for command in MachineOutputCommand] == [
         "resource.list",
         "resource.kinds",
-        "resource.describe",
+        "graph.show",
         "vm.list",
         "vm.describe",
         "workspace.list",

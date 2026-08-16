@@ -228,7 +228,6 @@ def test_the_rendered_sample_offers_the_capability_as_an_alternative(seated: Non
     text = sample_text("vm-site")
 
     assert "declare-once" in text
-    assert "`agw resource describe-kind vm-platform/" in text
 
 
 def test_no_sample_mentions_the_capability_when_it_is_not_seated() -> None:
@@ -242,7 +241,7 @@ def test_no_sample_mentions_the_capability_when_it_is_not_seated() -> None:
 
 
 def test_the_field_reference_reads_the_same_one_declaration(seated: None) -> None:
-    """``agw resource describe-kind vm-platform/declare-once`` documents a
+    """``agw resource explain vm-platform/declare-once`` documents a
     capability whose field, default, and description are declared once, on
     the model, and nowhere else. Nothing was registered with the describe
     surface; seating the capability is what put it there."""

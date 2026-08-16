@@ -84,7 +84,7 @@ class ResourceReference:
     - ``usage``: prose describing what the declaring Resource needs the
       target for. The framework propagates this verbatim to the
       ``ReferenceEntry`` it attaches to the target during finalize, so the
-      same string appears in ``agw resource describe``'s "Referenced by:"
+      same string appears on ``agw graph show``'s declared edge
       section. Example: ``"the tailscale auth key for vm-template:default"``.
     - ``source``: ``(kind, name)`` pair identifying the declaring
       Resource. ``kind`` matches the declaring Resource's kind (e.g.,
@@ -181,7 +181,7 @@ class ReferenceEntry:
       name)`` pair -- the declaring Resource that needed this target.
     - ``usage``: the same prose the outbound ``ResourceReference.usage``
       carried. Same field name on both ends is intentional: one concept,
-      surfaced in both directions. ``agw resource describe``'s
+      surfaced in both directions. ``agw graph show``'s
       "Referenced by:" section renders this verbatim.
 
     Producers never construct ``ReferenceEntry`` directly; the framework

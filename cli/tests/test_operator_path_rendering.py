@@ -140,7 +140,7 @@ def test_doctor_spells_every_path_on_one_screen_the_same_way(home: Path) -> None
 _PATH_PRINTING_COMMANDS = [
     ("config init", ["config", "init"], "Config already exists:"),
     ("resource sample --write", ["resource", "sample", "vm-template", "--write", "s.yaml"], "sample to"),
-    ("resource schema --write", ["resource", "schema", "--write"], "schemas to"),
+    ("resource schema --install", ["resource", "schema", "--install"], "schemas to"),
     ("completion install", ["completion", "install", "--shell", "bash"], "Installed to"),
 ]
 

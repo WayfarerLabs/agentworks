@@ -52,9 +52,9 @@ integration effect session-scoped.
 
 ## Available Integrations
 
-Three integrations ship today. This list can change, so
-`agw resource describe-kind harness-integration` is the definitive set on any given install, and
-`agw resource describe-kind harness-integration/<name>` the definitive config for one.
+Three integrations ship today. This list can change, so `agw resource explain harness-integration`
+is the definitive set on any given install, and `agw resource explain harness-integration/<name>`
+the definitive config for one.
 
 - **`shell`** (built in) is the default. By default it simply opens the configured shell for the
   session's target user (agent or admin user). It can further be configured to run a specific
@@ -365,8 +365,8 @@ The surrounding wiring supplies the following behavior and debugging boundaries:
   "Building the pane command" below.
 - **Display:** `session list` / `session describe` show the resolved integration name by
   re-resolving the template read-only (no instance is built, no gate runs);
-  `resource list --kind harness-integration` and `resource describe harness-integration/<name>` show
-  the registry row.
+  `resource list --kind harness-integration` and `graph show harness-integration/<name>` show the
+  registry row.
 
 ### Best Practices
 
@@ -528,9 +528,8 @@ The checklist beyond code, per the repo rules:
 
 - **The integration's own `prose`** (a `TopicProse` beside its class) plus the attribute docstring
   on every config field. Between them those ARE the documentation:
-  `agw resource describe-kind harness-integration/<name>`, the generated sample, and the editor's
-  hover text all render them, and there is no sample manifest to hand-edit because samples are
-  rendered.
+  `agw resource explain harness-integration/<name>`, the generated sample, and the editor's hover
+  text all render them, and there is no sample manifest to hand-edit because samples are rendered.
 - **Do not add a field list to a guide.** `docs/guides/resources.md` and `cli/README.md` carry
   pointers to the rendered surfaces plus whatever an operator needs that is not a fact about a field
   (a tool's own behavior, a choice worth explaining). Add there only if you have something of that

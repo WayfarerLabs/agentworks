@@ -27,7 +27,7 @@ AW_SESSION_VERTICAL_LAYOUT: Final = "aw-session-vertical"
 # other way round: a runtime tuple cannot be the source of a ``Literal``,
 # so restating the values would be two lists to keep in sync, while
 # falling back to a validator would leave the choices out of the emitted
-# schema and out of what `agw resource describe` can list.
+# schema and out of what `agw resource explain` can list.
 TmuxLayout = Literal[
     "tiled",
     "even-vertical",

@@ -12,7 +12,7 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
     "files": "([System.Management.Automation.CompletionCompleters]::CompleteFilename($wordToComplete))",
     "vms": ('(agw --completion-probe vm list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
     "sites": (
-        "(agw --completion-probe resource list --kind vm-site --names-only 2>$null"
+        "(agw resource list --kind vm-site --names-only 2>$null"
         " | ForEach-Object { ($_ -split '/', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
@@ -20,12 +20,12 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         '(agw --completion-probe workspace list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "ws_templates": (
-        "(agw --completion-probe resource list --kind workspace-template --names-only 2>$null"
+        "(agw resource list --kind workspace-template --names-only 2>$null"
         " | ForEach-Object { ($_ -split '/', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "git_credentials": (
-        "(agw --completion-probe resource list --kind git-credential --names-only 2>$null"
+        "(agw resource list --kind git-credential --names-only 2>$null"
         " | ForEach-Object { ($_ -split '/', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
@@ -39,30 +39,28 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         '(agw --completion-probe console list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "session_templates": (
-        "(agw --completion-probe resource list --kind session-template --names-only 2>$null"
+        "(agw resource list --kind session-template --names-only 2>$null"
         " | ForEach-Object { ($_ -split '/', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "vm_templates": (
-        "(agw --completion-probe resource list --kind vm-template --names-only 2>$null"
+        "(agw resource list --kind vm-template --names-only 2>$null"
         " | ForEach-Object { ($_ -split '/', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "agent_templates": (
-        "(agw --completion-probe resource list --kind agent-template --names-only 2>$null"
+        "(agw resource list --kind agent-template --names-only 2>$null"
         " | ForEach-Object { ($_ -split '/', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "admin_templates": (
-        "(agw --completion-probe resource list --kind admin-template --names-only 2>$null"
+        "(agw resource list --kind admin-template --names-only 2>$null"
         " | ForEach-Object { ($_ -split '/', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "secrets": ('(agw secret list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
     "resource_kinds": ('(agw resource kinds --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
-    "resource_refs": (
-        '(agw --completion-probe resource list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'
-    ),
+    "resource_refs": ('(agw resource list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
     "guide_topics": ('(agw guide --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
 }
 
@@ -190,9 +188,10 @@ def _emit_param_completions(lines: list[str], spec: CommandSpec, token_offset: i
             opt = param.opts[0] if param.opts else f"--{param.name}"
             lines.append(f"{indent}    '{opt}' {{")
 
-            if param.choices:
+            values = param.choices or param.suggestions
+            if values:
                 _open_result_array(lines, f"{indent}        ")
-                for choice in param.choices:
+                for choice in values:
                     lines.append(
                         f"{indent}            [System.Management.Automation.CompletionResult]::new('{choice}',"
                         f" '{choice}', 'ParameterValue', '{choice}')"
@@ -216,11 +215,12 @@ def _emit_param_completions(lines: list[str], spec: CommandSpec, token_offset: i
     for i, param in enumerate(positional_args):
         pos_token = token_offset + 1 + i
         cmp_op = "-ge" if param.multiple else "-eq"
-        if param.choices:
+        values = param.choices or param.suggestions
+        if values:
             lines.append(f"{indent}# Positional: {param.name}")
             lines.append(f"{indent}if ($wordToComplete -notlike '-*' -and $tokenCount {cmp_op} {pos_token}) {{")
             _open_result_array(lines, f"{indent}    ")
-            for choice in param.choices:
+            for choice in values:
                 lines.append(
                     f"{indent}        [System.Management.Automation.CompletionResult]::new('{choice}',"
                     f" '{choice}', 'ParameterValue', '{choice}')"

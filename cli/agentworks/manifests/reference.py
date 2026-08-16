@@ -3,7 +3,7 @@
 The service layer behind both schema-derived operator surfaces: the generated
 sample (``manifests/skeleton.py``, reached through ``agw resource sample``) and
 the field reference (``manifests/describe.py``, reached through
-``agw resource describe-kind``). The records here carry facts and not rendered
+``agw resource explain``). The records here carry facts and not rendered
 text so both command surfaces derive from the same authority.
 
 One collector, two presenters. The alternative (each surface walking the
@@ -91,7 +91,7 @@ class SchemaReference:
 def reference_for(target: str) -> SchemaReference:
     """The reference for ``KIND`` or ``KIND/NAME``.
 
-    One grammar for both, and the same one ``agw resource describe`` and
+    One grammar for both, and the same one ``agw graph show`` and
     ``agw resource edit`` take, because ``vm-platform/lima`` names the same
     thing here as it does there: this surface answers what its config
     looks like, that one answers what the registry row says.
@@ -100,7 +100,7 @@ def reference_for(target: str) -> SchemaReference:
     if slash and not name:
         raise ValidationError(
             f"expected KIND or KIND/NAME, got {target!r}",
-            hint="Example: agw resource describe-kind vm-platform/lima",
+            hint="Example: agw resource explain vm-platform/lima",
         )
     handler = KIND_REGISTRY.get(kind)
     if handler is None:
@@ -116,7 +116,7 @@ def reference_for(target: str) -> SchemaReference:
                 f"{kind!r} is a declarable kind, so it has no implementations to select",
                 entity_kind="resource",
                 entity_name=target,
-                hint=f"Drop the name: `agw resource describe-kind {kind}`.",
+                hint=f"Drop the name: `agw resource explain {kind}`.",
             )
         return kind_reference(kind)
     return capability_kind_reference(kind) if not name else implementation_reference(kind, name)

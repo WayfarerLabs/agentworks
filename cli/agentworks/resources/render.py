@@ -1,6 +1,6 @@
 """Framework-layer rendering helpers shared by every kind's CLI describe
 view. ``format_origin_line`` lives here (not in any kind module) because
-the cross-kind ``agw resource describe`` and the per-kind commands
+the resource inventory and per-kind commands
 (``agw secret describe``, future ``agw vm describe`` ...) all render the
 same ``Origin`` shape; defining the renderer next to ``Origin`` keeps the
 layer correct.
@@ -33,7 +33,7 @@ def format_reference_entry(entry: ReferenceEntry) -> str:
     entirely true and still send an operator to a file with no such env
     var in it. The tail names the template that wrote it.
 
-    Shared by ``agw resource describe`` and ``agw secret describe``, which
+    Shared by ``agw resource list`` and ``agw secret describe``, which
     render the same list and must not drift.
     """
     line = f"{entry.source[0]}/{entry.source[1]}: {entry.usage}"

@@ -1,15 +1,6 @@
 """Service-layer introspection and rendering for ``agw resource`` commands.
 
-``list_resources`` / ``render_resource_table`` back ``agw resource list``;
-``describe_resource`` / ``render_resource_description`` back
-``agw resource describe KIND/NAME``.
-
-The cross-kind shape **stops at framework-uniform fields**: kind, name,
-origin (variant + sub-fields), usage list, description. Kind-specific
-detail (secret backend mappings, template inheritance chains, resolved
-field lookups) lives in the per-kind commands (``agw secret describe``,
-etc.); rendering it here would require semantic knowledge the cross-kind
-command intentionally doesn't carry.
+``list_resources`` / ``render_resource_table`` back ``agw resource list``.
 
 Description is reliably populated across kinds because the framework
 fills it generally: operator-declared resources carry the operator's
@@ -35,13 +26,10 @@ from typing import TYPE_CHECKING, Literal
 from agentworks import output
 from agentworks.machine_output import (
     JsonObject,
-    JsonValue,
-    project_instance_references,
     project_origin,
-    project_references,
 )
 from agentworks.resources.graph import Enablement
-from agentworks.resources.render import format_origin_line, format_reference_entry
+from agentworks.resources.render import format_origin_line
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -73,7 +61,7 @@ class ResourceSummary:
       column.
     - ``not_ready_reason`` is the resource's stored readiness verdict's reason,
       read off the graph (``None`` = ready, or the kind has no readiness
-      concept). The list view marks not-ready rows; describe shows the reason.
+      concept). The list view marks not-ready rows.
     - ``disabled`` is the row's opt-in axis (``enablement_of is disabled``).
       Only ever ``True`` on a row surfaced by ``list_resources(..., include_disabled=True)``,
       since disabled rows are otherwise skipped. The list view marks it with a
@@ -102,37 +90,6 @@ class ResourceListing:
     plugin_count: int
 
 
-@dataclass(frozen=True)
-class ResourceDescription:
-    """Per-resource detail view for ``agw resource describe``.
-
-    - ``references`` lists the inbound ``ReferenceEntry`` instances --
-      config points that name this Resource. Rendered as the
-      "Referenced by:" section.
-    - ``used_by`` lists the live DB instances that depend on this
-      Resource per the current config, projected via the kind's
-      ``instances`` hook. ``None`` for kinds with no instance concept;
-      rendered as the "Used by:" section (with a "(per current config)"
-      annotation when present).
-    """
-
-    kind: str
-    name: str
-    origin: Origin | None
-    description: str
-    references: tuple[ReferenceEntry, ...]
-    used_by: tuple[InstanceRef, ...] | None
-    not_ready_reason: str | None = None
-    disabled_reason: str | None = None
-    """The text of the ``Disabled:`` line, or ``None`` when the resource is
-    enabled. Derived from the row's ``system-plugin`` origin plus the opt-in
-    axis (``enablement_of``), NOT from a per-node reason (the frozen graph node
-    carries none; the disabling reason lives only on the transient
-    ``DisabledMark``). ``describe`` renders the named row even when disabled and
-    annotates it with this line, exactly as the doctor roster phrases the
-    state."""
-
-
 def resource_listing_data(listing: ResourceListing) -> JsonObject:
     """Project list facts into the closed ``resource.list`` JSON data shape."""
     return {
@@ -154,28 +111,6 @@ def resource_listing_data(listing: ResourceListing) -> JsonObject:
             "auto_declared": listing.auto_count,
             "built_in": listing.code_count,
             "system_plugin": listing.plugin_count,
-        },
-    }
-
-
-def resource_description_data(description: ResourceDescription) -> JsonObject:
-    """Project describe facts into the closed ``resource.describe`` JSON data shape."""
-    references: list[JsonValue] = [reference for reference in project_references(description.references)]
-    used_by: list[JsonValue] | None = (
-        None
-        if description.used_by is None
-        else [reference for reference in project_instance_references(description.used_by)]
-    )
-    return {
-        "resource": {
-            "kind": description.kind,
-            "name": description.name,
-            "origin": project_origin(description.origin),
-            "description": description.description,
-            "references": references,
-            "used_by": used_by,
-            "not_ready_reason": description.not_ready_reason,
-            "disabled_reason": description.disabled_reason,
         },
     }
 
@@ -326,9 +261,9 @@ def not_ready_reason_for(registry: Registry, kind: str, name: str) -> str | None
 
     Reads the fold's verdict off the graph (``readiness_of``), the single
     unified read (R10/R11): no recompute, no per-kind readiness hook dispatch,
-    no live-registry probe. Feeds the ``(not ready)`` list marker and the
-    ``Not ready:`` describe line; "enabled/disabled" is reserved for the opt-in
-    axis and never used for host readiness (R6/R9.1).
+    no live-registry probe. Feeds the ``(not ready)`` list marker;
+    "enabled/disabled" is reserved for the opt-in axis and never used for host
+    readiness (R6/R9.1).
     """
     return registry.graph.readiness_of(kind, name).reason
 
@@ -372,69 +307,11 @@ def _plugin_provenance(origin: Origin | None) -> str | None:
 
     Reads ``origin.plugin`` already on the row (no separate lookup), so a
     plugin's contributed resources are attributable in the list DESCRIPTION
-    cell and the describe header without the plugin being a resource (R12).
+    cell without the plugin being a resource (R12).
     """
     if origin is not None and origin.variant == "system-plugin" and origin.plugin:
         return f"from plugin {origin.plugin}"
     return None
-
-
-def _disabled_line_text(origin: Origin | None) -> str:
-    """The ``Disabled:`` line's text for a disabled row, derived from the row's
-    origin plus config the same way the doctor roster derives its state phrase
-    (from provenance, not a node reason): ``"not enabled in [plugins].system
-    (plugin <name>)"`` for a ``system-plugin`` row. The exact wording differs from the
-    roster's line because describe carries the plugin name inline while the
-    roster row already labels its plugin.
-
-    The disabling reason is NOT read off the frozen graph node (it carries
-    none; the reason lives only on the transient ``DisabledMark``), so the text
-    is reconstructed from provenance. A disabled row of any other origin (none
-    exists today: the plugin opt-in source is the sole producer) renders the
-    bare state word rather than a plugin phrase it cannot substantiate.
-    """
-    if origin is not None and origin.variant == "system-plugin" and origin.plugin:
-        return f"not enabled in [plugins].system (plugin {origin.plugin})"
-    return "disabled"
-
-
-def describe_resource(
-    registry: Registry,
-    kind: str,
-    name: str,
-    db: Database | None = None,
-) -> ResourceDescription:
-    """Build a ``ResourceDescription`` for ``agw resource describe``.
-
-    Raises ``NotFoundError`` if the kind isn't registered or the name
-    isn't in the registry. Service-layer-typed so CLI / future
-    API surfaces render uniformly (project's
-    service-layer-is-the-authority rule).
-
-    ``db`` is optional: when provided, the ``used_by`` field is
-    populated via the kind's ``instances`` hook. When ``None``,
-    ``used_by`` stays ``None`` and the describe view omits the
-    "Used by:" section.
-    """
-    from agentworks.resources.access import ResourceIdentity, resolve_resource
-
-    resolved = resolve_resource(registry, ResourceIdentity(kind=kind, name=name))
-    resource = resolved.resource
-    origin = resolved.origin
-    # describe is an EXPLICIT lookup by name, so it always renders the named row
-    # even when disabled (an operator debugging a specific disabled resource
-    # asked for it by name), annotating its state off the binary opt-in axis.
-    disabled = registry.graph.enablement_of(kind, name) is Enablement.disabled
-    return ResourceDescription(
-        kind=kind,
-        name=name,
-        origin=origin,
-        description=getattr(resource, "description", "") or "",
-        references=registry.graph.dependents_of(kind, name),
-        used_by=used_by_for(db, registry, kind, resource),
-        not_ready_reason=not_ready_reason_for(registry, kind, name),
-        disabled_reason=_disabled_line_text(origin) if disabled else None,
-    )
 
 
 @dataclass(frozen=True)
@@ -536,12 +413,6 @@ def edit_location(registry: Registry, kind: str, name: str) -> tuple[Path, int]:
     return origin.file, origin.line
 
 
-# ``_collect_used_by`` previously duplicated ``used_by_for``'s guard
-# structure with a near-identical body. Both call sites now go through
-# ``used_by_for`` (the describe builder calls it directly; the list
-# builder wraps it in ``_count_used_by``).
-
-
 # -- Renderers --------------------------------------------------------------
 
 
@@ -580,9 +451,9 @@ def render_resource_table(listing: ResourceListing) -> None:
         used_by_cell = "-" if row.used_by_count is None else str(row.used_by_count)
         # Not-ready rows are marked in the DESCRIPTION cell, never the
         # NAME cell: the rendered name must stay the exact selector an
-        # operator copies into `agw resource describe KIND/NAME`.
-        # `describe` carries the full reason. A system-plugin row also
-        # carries a `from plugin <name>` provenance annotation here.
+        # operator copies into commands that accept KIND/NAME.
+        # A system-plugin row also carries a `from plugin <name>` provenance
+        # annotation here.
         description_cell = row.description
         provenance = _plugin_provenance(row.origin)
         if provenance is not None:
@@ -615,56 +486,3 @@ def render_resource_table(listing: ResourceListing) -> None:
     output.info(_fmt(tuple("-" * w for w in widths)))
     for r in rendered:
         output.info(_fmt(r))
-
-
-def render_resource_description(desc: ResourceDescription) -> None:
-    """Emit a ``ResourceDescription`` as operator-friendly sections:
-    header (kind, name, description, origin), then the references list.
-    Mirrors the shape of ``agw secret describe`` minus the
-    secret-specific sections (backend mappings, resolution preview).
-    """
-    output.info(f"Resource: {desc.kind}/{desc.name}")
-    # A system-plugin resource carries a `from plugin <name>` provenance
-    # annotation in the header (read off the origin), so a plugin's contributed
-    # resources are attributable without the plugin being a resource (R12).
-    provenance = _plugin_provenance(desc.origin)
-    if desc.description:
-        description_line = f"{desc.description} ({provenance})" if provenance is not None else desc.description
-        output.detail(f"Description: {description_line}")
-    else:
-        output.detail(f"Description: {provenance}" if provenance is not None else "Description: (none)")
-    output.detail(f"Origin: {format_origin_line(desc.origin)}")
-    if desc.disabled_reason is not None:
-        output.detail(f"Disabled: {desc.disabled_reason}")
-    if desc.not_ready_reason is not None:
-        output.detail(f"Not ready: {desc.not_ready_reason}")
-
-    output.info("")
-    output.info("Referenced by:")
-    if not desc.references:
-        output.detail("(none recorded)")
-    else:
-        # Dedupe by (source, usage) preserving first-encounter order --
-        # same dedupe as agw secret describe.
-        seen: set[str] = set()
-        for entry in desc.references:
-            line = format_reference_entry(entry)
-            if line in seen:
-                continue
-            seen.add(line)
-            output.detail(f"- {line}")
-
-    if desc.used_by is not None:
-        output.info("")
-        output.info("Used by (per current config):")
-        if not desc.used_by:
-            output.detail("(no live instances)")
-        else:
-            # Group by instance_kind for readability; preserve
-            # first-encounter order within a kind.
-            grouped: dict[str, list[str]] = {}
-            for ref in desc.used_by:
-                grouped.setdefault(ref.instance_kind, []).append(ref.instance_name)
-            for instance_kind in grouped:
-                for instance_name in grouped[instance_kind]:
-                    output.detail(f"- {instance_kind}/{instance_name}")

@@ -1068,7 +1068,7 @@ def test_existing_envelope_encodes_graph_data_before_write_and_escapes_controls(
         (GraphNode(GraphNodeType.RESOURCE, "node", "name\x7f\x80", 0),),
         (),
     )
-    document = encode_json_envelope(MachineOutputCommand.DOCTOR, graph_result_data(result))
+    document = encode_json_envelope(MachineOutputCommand.GRAPH_SHOW, graph_result_data(result))
     assert b"\\u007f\\u0080" in document
     assert b"\x7f" not in document
     assert b"\xc2\x80" not in document

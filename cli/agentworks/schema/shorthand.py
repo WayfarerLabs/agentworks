@@ -12,16 +12,16 @@ place to be wrong about it:
   spelling at all;
 - **emitted JSON Schema** has to offer it as an arm, or a schema-aware
   editor red-underlines the form nearly every operator writes;
-- **the field-documentation stream** has to name it, or ``describe-kind``
+- **the field-documentation stream** has to name it, or ``explain``
   and the generated sample tell an operator to write the long form for no
-  reason, and ``describe-kind`` is what the resources guide calls the
+  reason, and ``explain`` is what the resources guide calls the
   authority on what a spec accepts.
 
 Before this class the fact was written twice (a before-validator and a
 hand-rolled ``__get_pydantic_json_schema__``, both on ``EnvEntry``) and
 the third consumer had no way to learn it, which is exactly the shape the
 defect took: the emitted schema offered ``{anyOf: [string, object]}`` for
-a field ``describe-kind`` rendered as a table alone. Declared here, all
+a field ``explain`` rendered as a table alone. Declared here, all
 three derive from the declaration and the walkers can read it off the
 class (:func:`scalar_shorthand_of`) without running any of the model's
 code.

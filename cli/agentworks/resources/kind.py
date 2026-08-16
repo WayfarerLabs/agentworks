@@ -36,7 +36,7 @@ class InstanceRef:
 
     Returned by ``ResourceKind.instances(...)``; rendered as the per-row
     contribution to ``agw resource list``'s ``USED BY`` column count and to
-    ``agw resource describe``'s ``Used by:`` section.
+    ``agw graph show``'s live-usage edges.
 
     Fields:
 
@@ -86,7 +86,7 @@ class ResourceKind(Protocol):
       kinds.
     - ``description``: one operator-facing line for ``agw resource
       kinds``. It is also the kind's SUMMARY on every schema-derived
-      surface (``agw resource describe-kind``, the generated sample's
+      surface (``agw resource explain``, the generated sample's
       header), which is why it is not authored a second time as prose.
     - ``prose``: the authored paragraphs about the kind (``TopicProse``:
       a display title and a markdown overview), colocated with the kind

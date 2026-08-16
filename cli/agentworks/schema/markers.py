@@ -94,7 +94,7 @@ class RefMarker:
       bad kind belongs, with the descriptor in hand.
     - ``usage``: prose describing what the referrer needs the target
       for, carried verbatim onto the target's ``ReferenceEntry`` and
-      into ``agw resource describe``'s "Referenced by:" section.
+      into ``agw graph show``'s declared edges.
       Required, because a marker without it degrades an
       operator-visible surface.
     - ``default_template``: the name to use when the field is omitted,

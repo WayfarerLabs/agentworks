@@ -124,7 +124,7 @@ class EnvelopeMetadata(AgwModel):
 
     description: SkipJsonSchema[str | None] = None
     """One operator-facing line saying what this resource is for, shown by
-    `agw resource list` and `agw resource describe`."""
+    `agw resource list`."""
 
     expires: SkipJsonSchema[Expiry | None] = None
     """When this resource stops being valid: a date (`2026-01-01`) or an

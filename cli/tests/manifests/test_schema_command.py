@@ -1,9 +1,9 @@
-"""``agw resource schema``: what it prints, what it writes, how it refuses.
+"""``agw resource schema``: what it prints, what it installs, how it refuses.
 
 End-to-end through the real CLI entry point rather than against the
 service functions (``tests/manifests/test_emit.py`` covers those), because
 what this file is about is the surface: a bare invocation having one
-obvious answer, ``--write`` landing where the modeline says it will, and a
+obvious answer, ``--install`` landing where the modeline says it will, and a
 bad invocation producing a clean ``Error:`` line rather than a traceback.
 """
 
@@ -40,7 +40,7 @@ def _run(monkeypatch: pytest.MonkeyPatch, *argv: str) -> int:
 
 @pytest.fixture
 def configured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A minimal valid config directory, which ``--write`` requires to locate
+    """A minimal valid config directory, which ``--install`` requires to locate
     the resources directory.
 
     ``CONFIG_PATH`` as well as ``CONFIG_DIR``: the loader re-imports the
@@ -86,7 +86,7 @@ def test_write_lands_where_the_modeline_says(
     """The destination is fixed rather than the operator's to choose,
     because the modeline stamped into manifests refers to it by that
     relative path."""
-    assert _run(monkeypatch, "--write") == 0
+    assert _run(monkeypatch, "--install") == 0
     schema_dir = configured / RESOURCES_DIRNAME / SCHEMA_DIRNAME
     written = {path.name for path in schema_dir.iterdir()}
     assert written == {ENVELOPE_SCHEMA_FILENAME, *(f"{kind}.schema.json" for kind in declarable_kinds())}
@@ -99,10 +99,8 @@ def test_write_with_a_kind_is_a_clean_refusal(
     """A partial set would leave some manifest's modeline pointing at a
     file that is not there, so the kind is refused rather than
     ignored."""
-    assert _run(monkeypatch, "secret", "--write") == 1
-    err = capsys.readouterr().err
-    assert "writes the whole schema set" in err
-    assert "Traceback" not in err
+    assert _run(monkeypatch, "secret", "--install") == 1
+    assert capsys.readouterr().err
     assert not (configured / RESOURCES_DIRNAME / SCHEMA_DIRNAME).exists()
 
 

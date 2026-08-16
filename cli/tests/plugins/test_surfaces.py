@@ -1,6 +1,6 @@
 """Plugin surfaces (Phase 6, LLD c sections 6 and 7): the disabled-hides /
-not-ready-shows default rule, the ``system-plugin`` provenance annotation, the
-``describe`` disabled-row rendering, and the doctor plugin roster.
+not-ready-shows default rule, the ``system-plugin`` provenance annotation, and
+the doctor plugin roster.
 
 These drive the service layer directly against a FIXTURE plugin injected the
 same two ways Phase 5 pins (``seated_plugin`` seats the impls; a monkeypatched
@@ -23,12 +23,7 @@ from agentworks.doctor import Status, _check_plugins
 from agentworks.origin import Origin
 from agentworks.plugins import Plugin, PluginCommand, plugin_enablement_source, publish_plugins, seated_plugin
 from agentworks.resources.graph import Enablement
-from agentworks.resources.inspect import (
-    describe_resource,
-    list_resources,
-    render_resource_description,
-    render_resource_table,
-)
+from agentworks.resources.inspect import list_resources, render_resource_table
 from agentworks.resources.registry import Registry
 from agentworks.schema import CapabilityBlock
 from agentworks.vms.sites import VMSiteDecl
@@ -212,42 +207,13 @@ def test_include_disabled_render_marks_disabled_and_not_ready_distinctly(
     assert "(not ready)" not in _row("alpha-platform")
 
 
-# -- describe of a disabled row (explicit lookup, always renders) ---------------
-
-
-def test_describe_disabled_row_render_output(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """describe is an explicit lookup: it renders the named row even when
-    the row is disabled, and the Disabled line's text is derived from
-    origin plus config, exactly as the roster phrases it, NOT from a
-    per-node reason."""
-    config = _config("alpha")  # beta disabled
-    registry = _seat_and_publish(monkeypatch, config)
-
-    render_resource_description(describe_resource(registry, "vm-platform", "beta-platform"))
-    out = capsys.readouterr().out
-    assert "Disabled: not enabled in [plugins].system (plugin beta)" in out
-    assert "from plugin beta" in out
-
-
-def test_describe_enabled_row_has_no_disabled_line(monkeypatch: pytest.MonkeyPatch) -> None:
-    config = _config("alpha")
-    registry = _seat_and_publish(monkeypatch, config)
-
-    desc = describe_resource(registry, "vm-platform", "alpha-platform")
-    assert desc.disabled_reason is None
-
-
 # -- The full fixture end-to-end (descriptor -> roster) -------------------------
 
 
 def test_full_fixture_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
     """One pass over the whole path: descriptor -> index (monkeypatched) ->
     registration (seated) -> unconditional publication -> enablement overlay
-    (finalize) -> consumption + hidden-when-disabled (list) +
-    shown-when-named (describe) + roster."""
+    (finalize) -> consumption + hidden-when-disabled (list) + roster."""
     config = _config("alpha")
     registry = _seat_and_publish(monkeypatch, config)
 
@@ -260,10 +226,10 @@ def test_full_fixture_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
     # Consumption: the vm-site on alpha's ready platform is ready.
     assert registry.graph.is_ready("vm-site", "alpha-site")
 
-    # Hidden-when-disabled (list) and shown-when-named (describe).
+    # Hidden-when-disabled list behavior does not remove the registry row.
     default_names = {(r.kind, r.name) for r in list_resources(registry).rows}
     assert ("vm-platform", "beta-platform") not in default_names
-    assert describe_resource(registry, "vm-platform", "beta-platform").disabled_reason is not None
+    assert registry.lookup("vm-platform", "beta-platform").origin.plugin == "beta"
 
     # Roster: alpha enabled -> ok, beta disabled -> info.
     group = _check_plugins(config)

@@ -25,7 +25,7 @@ _agentworks_vms() {
     "sites": """\
 _agentworks_sites() {
     local -a sites
-    sites=(${(f)"$(agw --completion-probe resource list --kind vm-site --names-only 2>/dev/null | awk -F/ '{print $2}')"})
+    sites=(${(f)"$(agw resource list --kind vm-site --names-only 2>/dev/null | awk -F/ '{print $2}')"})
     _describe 'vm-site' sites
 }""",
     "workspaces": """\
@@ -37,13 +37,13 @@ _agentworks_workspaces() {
     "ws_templates": """\
 _agentworks_templates() {
     local -a templates
-    templates=(${(f)"$(agw --completion-probe resource list --kind workspace-template --names-only 2>/dev/null | awk -F/ '{print $2}')"})
+    templates=(${(f)"$(agw resource list --kind workspace-template --names-only 2>/dev/null | awk -F/ '{print $2}')"})
     _describe 'template' templates
 }""",
     "git_credentials": """\
 _agentworks_git_credentials() {
     local -a creds
-    creds=(${(f)"$(agw --completion-probe resource list --kind git-credential --names-only 2>/dev/null | awk -F/ '{print $2}')"})
+    creds=(${(f)"$(agw resource list --kind git-credential --names-only 2>/dev/null | awk -F/ '{print $2}')"})
     _describe 'git-credential' creds
 }""",
     "sessions": """\
@@ -67,25 +67,25 @@ _agentworks_consoles() {
     "session_templates": """\
 _agentworks_session_templates() {
     local -a templates
-    templates=(${(f)"$(agw --completion-probe resource list --kind session-template --names-only 2>/dev/null | awk -F/ '{print $2}')"})
+    templates=(${(f)"$(agw resource list --kind session-template --names-only 2>/dev/null | awk -F/ '{print $2}')"})
     _describe 'session-template' templates
 }""",
     "vm_templates": """\
 _agentworks_vm_templates() {
     local -a templates
-    templates=(${(f)"$(agw --completion-probe resource list --kind vm-template --names-only 2>/dev/null | awk -F/ '{print $2}')"})
+    templates=(${(f)"$(agw resource list --kind vm-template --names-only 2>/dev/null | awk -F/ '{print $2}')"})
     _describe 'vm-template' templates
 }""",
     "agent_templates": """\
 _agentworks_agent_templates() {
     local -a templates
-    templates=(${(f)"$(agw --completion-probe resource list --kind agent-template --names-only 2>/dev/null | awk -F/ '{print $2}')"})
+    templates=(${(f)"$(agw resource list --kind agent-template --names-only 2>/dev/null | awk -F/ '{print $2}')"})
     _describe 'agent-template' templates
 }""",
     "admin_templates": """\
 _agentworks_admin_templates() {
     local -a templates
-    templates=(${(f)"$(agw --completion-probe resource list --kind admin-template --names-only 2>/dev/null | awk -F/ '{print $2}')"})
+    templates=(${(f)"$(agw resource list --kind admin-template --names-only 2>/dev/null | awk -F/ '{print $2}')"})
     _describe 'admin-template' templates
 }""",
     "secrets": """\
@@ -103,7 +103,7 @@ _agentworks_resource_kinds() {
     "resource_refs": """\
 _agentworks_resource_refs() {
     local -a refs
-    refs=(${(f)"$(agw --completion-probe resource list --names-only 2>/dev/null)"})
+    refs=(${(f)"$(agw resource list --names-only 2>/dev/null)"})
     _describe 'resource' refs
 }""",
     "guide_topics": """\
@@ -250,8 +250,8 @@ def _build_arguments(params: list[ParamSpec]) -> list[str]:
             # `*` is zsh's catchall positional spec -- matches every remaining
             # arg, which is what we want for variadic list arguments.
             position_spec = "*" if param.multiple else str(positional_index)
-            if param.choices:
-                choices_str = " ".join(param.choices)
+            if param.choices or param.suggestions:
+                choices_str = " ".join(param.choices or param.suggestions or ())
                 args.append(f"'{position_spec}:{label}:({choices_str})'")
             elif param.dynamic_completer and param.dynamic_completer in COMPLETER_FUNC_NAMES:
                 completer = f":{COMPLETER_FUNC_NAMES[param.dynamic_completer]}"
@@ -269,8 +269,8 @@ def _build_arguments(params: list[ParamSpec]) -> list[str]:
             opt = param.opts[0] if param.opts else f"--{param.name}"
             multiple = "*" if param.multiple else ""
 
-            if param.choices:
-                choices_str = " ".join(param.choices)
+            if param.choices or param.suggestions:
+                choices_str = " ".join(param.choices or param.suggestions or ())
                 args.append(f"'{multiple}{opt}[{escaped_help}]:{param.name}:({choices_str})'")
             elif param.dynamic_completer and param.dynamic_completer in COMPLETER_FUNC_NAMES:
                 func = COMPLETER_FUNC_NAMES[param.dynamic_completer]

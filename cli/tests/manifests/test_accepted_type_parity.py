@@ -7,7 +7,7 @@ keeps them from being one generator pretending to be two; the price is
 that nothing structural stops them disagreeing, and a disagreement is
 always the same defect wearing a different hat: the schema says a value
 may be written two ways and the stream documents one of them, so
-``describe-kind`` (which ``docs/guides/resources.md`` calls the authority
+``explain`` (which ``docs/guides/resources.md`` calls the authority
 on what a spec accepts) tells an operator to write the long form of
 something the loader takes short.
 
@@ -40,7 +40,7 @@ second half of that was true and the first half was the defect: the
 emitted schema accepts an owner-templated field's explicit null (now, for
 example, ``token: {mode: secret, secret: null}``) as a VALUE spelling, the
 loader reads it as the instruction to use the owner template, and
-``describe-kind`` must name that spelling. The subtraction is what let the
+``explain`` must name that spelling. The subtraction is what let the
 two derivations disagree in the one place this module exists to watch, so
 it is gone and ``accepted_annotation`` states the widening instead.
 """
@@ -268,7 +268,7 @@ def test_the_field_stream_accepts_every_type_the_emitted_schema_does() -> None:
 
     The shipped failure this pins: ``EnvEntry`` accepts a bare string
     through a before-validator, emitted schema said so, and the stream
-    documented the table form alone, so ``agw resource describe-kind
+    documented the table form alone, so ``agw resource explain
     vm-template`` told operators to rewrite every plaintext env value into
     a table.
 
@@ -316,7 +316,7 @@ def _disagreements_of(model: type[BaseModel], *, reverse: bool = False) -> Itera
 def test_the_emitted_schema_accepts_every_type_the_field_stream_offers() -> None:
     """The reverse direction, same subjects, same walk.
 
-    A type the stream offers and the schema refuses is ``describe-kind``
+    A type the stream offers and the schema refuses is ``explain``
     lying PERMISSIVELY: the surface the resources guide calls the
     authority tells an operator a spelling the loader's own schema
     rejects, and they find out from a red underline or a load failure

@@ -89,7 +89,7 @@ def secret_describe(
     matching config reference); ``Used by (per current config):`` (one
     row per live session whose subgraph reaches this secret, projected
     via the secret kind's ``instances`` hook -- same shape as
-    ``agw resource describe``); ``Backend mappings:`` (per-active-source
+    the resource graph); ``Backend mappings:`` (per-active-source
     disposition with selected backend and provenance); ``Resolution preview:``
     (which active source would attempt, or "not attemptable"). Does not prompt, does
     not resolve values.

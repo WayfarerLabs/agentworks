@@ -40,7 +40,7 @@ class MachineOutputCommand(StrEnum):
 
     RESOURCE_LIST = "resource.list"
     RESOURCE_KINDS = "resource.kinds"
-    RESOURCE_DESCRIBE = "resource.describe"
+    GRAPH_SHOW = "graph.show"
     VM_LIST = "vm.list"
     VM_DESCRIBE = "vm.describe"
     WORKSPACE_LIST = "workspace.list"

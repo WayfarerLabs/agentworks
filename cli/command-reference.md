@@ -8,12 +8,11 @@ internals that affect operator behavior. Installation and configuration guidance
 
 ### Machine-readable output
 
-The operational inspection commands `agw resource list`, `agw resource kinds`,
-`agw resource describe`, `agw secret list`, `agw secret describe`, `agw vm list`, `agw vm describe`,
-`agw workspace list`, `agw workspace describe`, `agw agent list`, `agw agent describe`,
-`agw session list`, `agw session describe`, `agw console list`, `agw console describe`, and
-`agw doctor` accept `--output json`. The default `--output human` preserves the normal terminal
-presentation.
+The operational inspection commands `agw graph show`, `agw resource list`, `agw resource kinds`,
+`agw secret list`, `agw secret describe`, `agw vm list`, `agw vm describe`, `agw workspace list`,
+`agw workspace describe`, `agw agent list`, `agw agent describe`, `agw session list`,
+`agw session describe`, `agw console list`, `agw console describe`, and `agw doctor` accept
+`--output json`. The default `--output human` preserves the normal terminal presentation.
 
 Each successful JSON response is one UTF-8 document followed by one line feed, with no BOM, ANSI
 sequences, table layout, progress messages, or empty-state prose. Its top-level keys are always in
@@ -68,23 +67,29 @@ remain hidden unless `--include-disabled` is requested.
 `{kinds: [{kind, category, resource_count, description}]}`. `category` is exactly `declarable` or
 `capability`; kinds sort lexically.
 
-`agw resource describe KIND/NAME --output json` uses command `resource.describe` and data:
+#### Graph JSON schema
+
+`agw graph show KIND/NAME --output json` uses command `graph.show` and data:
 
 ```text
-{resource: {
-  kind, name, origin, description, references, used_by,
-  not_ready_reason, disabled_reason
-}}
+{
+  query: {focus: {kind, name}, direction, depth_limit},
+  nodes: [{node_type, kind, name, distance}],
+  edges: [{edge_type, source, target, relationship, usage, declared_by}]
+}
 ```
 
-`references` is an array of `reference`; `used_by` is null or an array of `instance_reference`; and
-both reason fields are nullable. Explicit lookup continues to describe a disabled resource.
+`node_type` is `resource` or `live-instance`. `edge_type` is `declared` or `live-usage`; `source`
+and `target` are `{node_type, kind, name}`. `relationship` is `uses` or `inherits`. `usage` and
+`declared_by` are nullable, with non-null provenance shaped as `{kind, name}`. `depth_limit` is null
+for `--depth all`. Nodes are ordered by distance, type, kind, and name; edges retain intrinsic
+source-to-target direction and deterministic fact order.
 
 For example:
 
 ```bash
 agw resource list --kind secret --output json
-agw resource describe secret/npm-token --output json
+agw graph show secret/npm-token --output json
 ```
 
 #### Secret JSON schemas
@@ -119,8 +124,8 @@ configured source instance and `backend` names its implementation. `provenance` 
 boolean. `identifier` is null when a source has no static lookup identifier or will not attempt the
 secret. `not_ready_reason` is null when that source is ready. Resolution `category` is
 `attemptable`, `refused-interaction`, or `unavailable`; `source` and `identifier` are nullable.
-`source_mappings` retains configured source-chain ordering. References and `used_by` have the same
-shapes and ordering rules as resource describe.
+`source_mappings` retains configured source-chain ordering. References and `used_by` retain their
+service ordering.
 
 #### VM JSON schemas
 
@@ -350,8 +355,8 @@ lacks what it needs (wsl2 is Windows-only; a local Lima site needs `limactl`; a 
 not be installed, or its plugin not enabled): a not-ready site still lists and describes, using it
 is an error naming the requirement, and `agw doctor` shows each platform's and site's state with the
 reason. Run `agw resource sample vm-site` for a commented, ready-to-edit document, and
-`agw resource describe-kind vm-platform/azure-vm` (or any other platform) for that platform's own
-fields. The former `agw vm-host` registry is gone: a remote Lima host is now just a vm-site.
+`agw resource explain vm-platform/azure-vm` (or any other platform) for that platform's own fields.
+The former `agw vm-host` registry is gone: a remote Lima host is now just a vm-site.
 
 > **Note on WSL2:** WSL2 distros share the Windows workstation's lifecycle. They idle-shut after
 > ~60s of no `wsl.exe` activity (`vmIdleTimeout` in `.wslconfig`) and do not survive workstation
@@ -798,12 +803,12 @@ spec:
     required_commands: [htop]
 ```
 
-`agw resource describe-kind harness-integration/shell` documents its config field by field. Two
-things that reference cannot tell you: command strings support `{{session_name}}` and
-`{{workspace_name}}` substitution (double-brace syntax), and the executables an integration checks
-are checked on the session's launch target (the agent, or the VM admin for admin sessions) before
-any state mutation, so launching a session whose tool is not installed fails fast with a clear error
-instead of a cryptic downstream tmux failure.
+`agw resource explain harness-integration/shell` documents its config field by field. Two things
+that reference cannot tell you: command strings support `{{session_name}}` and `{{workspace_name}}`
+substitution (double-brace syntax), and the executables an integration checks are checked on the
+session's launch target (the agent, or the VM admin for admin sessions) before any state mutation,
+so launching a session whose tool is not installed fails fast with a clear error instead of a
+cryptic downstream tmux failure.
 
 Those keys live only inside the `harness_integration` table; spelling any of them at the `spec` top
 level is a load error that points you at the nested shape.
@@ -816,10 +821,10 @@ lists ready, but creating a session on it is refused with an "enable plugin `cla
 add `claude` to `[plugins].system`. (The built-in `shell` integration stays the default and needs no
 opt-in.) Once enabled, it needs only that `claude` is installed on the launch target, and announces
 the chosen action (resume vs new session) in the pane, so the decision is never silent. Its config
-is all optional and documented by `agw resource describe-kind harness-integration/claude-code`. The
-fields that forward a value to `claude` are not validated here, because the choice sets are Claude's
-and they move between its releases; and each `extra_args` element is one argv token (shell-quoted,
-never re-split).
+is all optional and documented by `agw resource explain harness-integration/claude-code`. The fields
+that forward a value to `claude` are not validated here, because the choice sets are Claude's and
+they move between its releases; and each `extra_args` element is one argv token (shell-quoted, never
+re-split).
 
 ```yaml
 apiVersion: agentworks/v1
@@ -851,7 +856,7 @@ workspace the new session's first resume can still adopt it, announced with the 
 ships as the opt-in `codex` system plugin, disabled by default with the same gating as `claude-code`
 above. Once enabled, it needs only that `codex` is installed on the launch target, and announces
 which of those it did, both in the command output and in the pane. Its config is all optional and
-documented by `agw resource describe-kind harness-integration/codex`; the
+documented by `agw resource explain harness-integration/codex`; the
 [resources guide](../docs/guides/resources.md) covers the Codex behavior behind the fields (network
 off by default under `workspace-write`, who adjudicates an approval escalation, and why the
 integration always passes `--strict-config`):
@@ -896,7 +901,7 @@ operation points to `concept-management`, and temporal version-change questions 
 resource, relationship, schema, and sample facts belong to command surfaces rather than guide
 topics. Core concepts use names such as `concept-onboarding`, `concept-migration`,
 `concept-secrets`, and `concept-reporting-bugs`. Schema and sample inspection remains available
-through `agw resource describe-kind` and `agw resource sample`.
+through `agw resource explain` and `agw resource sample`.
 
 `concept-source-review` owns the optional canonical source-review workflow. Establish exact stable
 `VERSION` with `agw version`, then choose focused review, full repository review, or decline. It
@@ -998,10 +1003,10 @@ authored, plugin-authored, and packaged release-note topics, never loads live co
 This stable stream backs Bash, Zsh, and PowerShell topic completion.
 
 `concept-management` covers day-two operation without duplicating the command registry. It points to
-JSON v1 list/describe surfaces and the installed Typer help for the stable `config`, `resource`,
-`vm`, `workspace`, `agent`, `session`, `console`, and `secret` groups. Use `agw GROUP --help` and
-`agw GROUP COMMAND --help` for exact current syntax, then verify through the applicable command
-facts.
+JSON v1 graph/list/detail surfaces and the installed Typer help for the stable `config`, `graph`,
+`resource`, `vm`, `workspace`, `agent`, `session`, `console`, and `secret` groups. Use
+`agw GROUP --help` and `agw GROUP COMMAND --help` for exact current syntax, then verify through the
+applicable command facts.
 
 `concept-migration` is the exceptional 0.14 resource-model rewrite guide, not a general upgrade
 workflow. It keeps the sequence, checkpoints, and authorization classes in colocated package data
@@ -1016,10 +1021,8 @@ keeps operator origin and manifest paths while ignoring mutable source lines. Th
 inventory can probe host readiness, so run it only when workstation examination is inside the
 current envelope.
 
-During the unreleased 0.14 transition, `agw resource kinds`, `agw resource list`,
-`agw resource describe-kind`, and `agw resource sample` are the available command-owned fact
-surfaces. Resource explanation and graph display are owned by a separate CLI grammar change and are
-not implemented as guide fallbacks. The 0.14 release remains gated on that follow-up.
+During the unreleased 0.14 transition, `agw graph show`, `agw resource kinds`, `agw resource list`,
+`agw resource explain`, and `agw resource sample` are the available command-owned fact surfaces.
 
 | Command                                                               | Description                                                 |
 | --------------------------------------------------------------------- | ----------------------------------------------------------- |
@@ -1069,47 +1072,52 @@ authored topics, and names-only discovery do not load configuration.
 | `agw config sync-ssh-config`        | Rebuild SSH config entries for VMs + agents  |
 | `agw config sync-vscode-workspaces` | Regenerate .code-workspace files for all VMs |
 
+### Resource Graph
+
+`agw graph show KIND/NAME` traverses resource relationships from one focus. `--direction` accepts
+`dependencies`, `dependents`, or `both` (the default). `--depth` accepts a positive integer or
+`all`, and defaults to `1`. Human output groups nodes and edges by shortest distance while keeping
+every arrow in its declared source-to-target direction. Declared edges show `uses` or `inherits`,
+usage, and provenance when present; live instance edges are marked as current configuration.
+
 ### Resource Registry
 
-Cross-kind inspection of the Resource Registry. The registry is the framework that owns every
-operator-declared, auto-declared, built-in, and system-plugin resource the CLI knows about: secrets,
-VM templates, agent templates, workspace templates, apt / install-command entries, git credential
-providers, secret backends, etc. Apt and user install-command catalog rows carry the system-plugin
-origin and remain present, but disabled, until their owning plugin is enabled. The two commands
-below stop at the framework-uniform fields (`kind`, `name`, `origin`, `references`, `used_by`,
-`description`). For kind-specific detail (secret backend mappings, template inheritance chains,
-resolution previews), reach for the per-kind command (e.g. `agw secret describe`).
+Inventory, explanation, authoring, and editing for the Resource Registry. The registry is the
+framework that owns every operator-declared, auto-declared, built-in, and system-plugin resource the
+CLI knows about: secrets, VM templates, agent templates, workspace templates, apt / install-command
+entries, git credential providers, secret backends, etc. Apt and user install-command catalog rows
+carry the system-plugin origin and remain present, but disabled, until their owning plugin is
+enabled. For relationships, use `agw graph show`; for kind-specific detail, use the per-kind command
+(for example, `agw secret describe`).
 
 | Command                              | Description                                                          |
 | ------------------------------------ | -------------------------------------------------------------------- |
 | `agw resource list`                  | List every resource in the registry across all kinds                 |
 | `agw resource kinds`                 | List every kind: category (declarable/capability), counts, purpose   |
-| `agw resource describe KIND/NAME`    | Show the per-resource detail view (header + Referenced by + Used by) |
-| `agw resource describe-kind TARGET`  | Show what a KIND (or a KIND/NAME capability) accepts, field by field |
+| `agw resource explain TARGET`        | Show what a KIND (or a KIND/NAME capability) accepts, field by field |
 | `agw resource edit KIND/NAME`        | Open the declaring YAML manifest in $EDITOR                          |
 | `agw resource sample KIND [--write]` | Print (or save) a kind's commented sample manifest (--all for all)   |
-| `agw resource schema [KIND]`         | Print the manifest JSON Schema (`--write` saves the whole set)       |
+| `agw resource schema [KIND]`         | Print the manifest JSON Schema (`--install` saves the whole set)     |
 
 `resource list` accepts `--kind <csv>` (e.g. `--kind secret,vm-template`) and `--origin <variant>`
 where variant is `operator`, `auto`, `builtin`, or `plugin`. Disabled rows (a not-enabled system
 plugin's capabilities and bundled resources) are hidden by default; pass `--include-disabled` to
 reveal them (combine with `--origin plugin` to see just a not-enabled plugin's rows). `--names-only`
 emits `kind/name` per line and backs shell completion (`/` cannot appear in resource names, so the
-split is unambiguous). The `kind/name` token is the one grammar across the resource group:
-`resource describe secret/npm-token` and `resource edit vm-template/dev` take the same shape.
+split is unambiguous). `resource edit` and `graph show` accept the same `kind/name` identity shape.
 
 `resource schema` emits JSON Schema (draft 2020-12) for manifests: one document schema per kind plus
 an any-kind one, derived from the same models the loader validates against, so it cannot describe a
 shape the loader would refuse. A bare invocation prints the any-kind schema; naming a kind prints
-that kind's. `--write` saves the whole set under `resources/.schema/`, which is the path the
+that kind's. `--install` saves the whole set under `resources/.schema/`, which is the path the
 `# yaml-language-server: $schema=...` line in written manifests refers to. See
 [the resources guide](../docs/guides/resources.md) for the editor setup.
 
 Agentworks ships no migration command. A `config.toml` that still declares resources is a hard error
 naming every offending section, and the rewrite is the operator's, walked through by
-[the resources guide](../docs/guides/resources.md). `resource sample --write` and
-`resource describe-kind` are what that walkthrough leans on, and both read no config (or settings
-only), so they answer while `config.toml` is still failing.
+[the resources guide](../docs/guides/resources.md). `resource sample --write` and `resource explain`
+are what that walkthrough leans on, and both read no config (or settings only), so they answer while
+`config.toml` is still failing.
 
 `resource sample` prints a kind's fully-commented-out sample manifest (`--all` for every kind) --
 the YAML teaching surface, mirroring `agw config sample` for the settings file. `--write <file>`
@@ -1126,9 +1134,8 @@ every optional field is a commented suggestion at its own indent with its type, 
 what it means. Where a field selects a capability (a vm-site's `platform`), one implementation is
 rendered and the rest are named.
 
-`resource describe-kind` answers the same question without producing a document to edit:
-`agw resource describe-kind vm-site` lists every field of the kind,
-`agw resource describe-kind vm-platform` lists the platforms this build has, and
-`agw resource describe-kind vm-platform/aws-ec2` documents one platform's config. It reads no config
-and builds no registry, so it works on a host whose `config.toml` does not load, and it documents a
-capability whose plugin is not enabled yet.
+`resource explain` answers the same question without producing a document to edit:
+`agw resource explain vm-site` lists every field of the kind, `agw resource explain vm-platform`
+lists the platforms this build has, and `agw resource explain vm-platform/aws-ec2` documents one
+platform's config. It reads no config and builds no registry, so it works on a host whose
+`config.toml` does not load, and it documents a capability whose plugin is not enabled yet.

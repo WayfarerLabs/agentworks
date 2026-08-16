@@ -12,7 +12,7 @@ from agentworks.config import load_config
 from agentworks.errors import StateError
 from agentworks.resources.access import ensure_recipe_enabled
 from agentworks.resources.graph import Enablement
-from agentworks.resources.inspect import describe_resource, list_resources
+from agentworks.resources.inspect import list_resources
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -84,7 +84,6 @@ def test_gcp_row_is_present_but_disabled_by_default(tmp_path: Path) -> None:
     assert row.origin.plugin == "gcp"
     assert registry.graph.enablement_of("vm-platform", "gcp-gce") is Enablement.disabled
     assert ("vm-platform", "gcp-gce") not in {(row.kind, row.name) for row in list_resources(registry).rows}
-    assert "gcp" in (describe_resource(registry, "vm-platform", "gcp-gce").disabled_reason or "")
 
 
 def test_gcp_bundle_publishes_disabled_gcloud_apt_resources(tmp_path: Path) -> None:

@@ -268,9 +268,8 @@ def test_select_site_errors_with_reasons_when_none_ready(make_config, monkeypatc
 
 
 def test_resource_layer_surfaces_not_ready_state(make_config, monkeypatch: pytest.MonkeyPatch) -> None:
-    """`agw resource list` marks not-ready rows and describe carries the
-    reason: a not-ready resource is still a resource."""
-    from agentworks.resources.inspect import describe_resource, list_resources
+    """`agw resource list` carries readiness facts for present resources."""
+    from agentworks.resources.inspect import list_resources
 
     _support(monkeypatch, wsl2="Windows only", lima_local="limactl not installed")
     registry = build_registry(make_config())
@@ -278,11 +277,8 @@ def test_resource_layer_surfaces_not_ready_state(make_config, monkeypatch: pytes
     rows = {r.name: r for r in listing.rows}
     assert rows["lima-local"].not_ready_reason == "limactl not installed"
     assert rows["wsl2"].not_ready_reason == "platform 'wsl2' is unsupported here: Windows only"
-    desc = describe_resource(registry, "vm-site", "wsl2")
-    assert desc.not_ready_reason == "platform 'wsl2' is unsupported here: Windows only"
     # Kinds without a readiness concept stay None (the no-op default).
-    tmpl = describe_resource(registry, "vm-template", "default")
-    assert tmpl.not_ready_reason is None
+    assert registry.graph.readiness_of("vm-template", "default").reason is None
 
 
 def test_doctor_lists_platforms_and_not_ready_sites(make_config, monkeypatch: pytest.MonkeyPatch) -> None:

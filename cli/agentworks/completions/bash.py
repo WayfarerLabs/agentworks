@@ -11,34 +11,22 @@ if TYPE_CHECKING:
 DYNAMIC_SNIPPETS: dict[str, str] = {
     "files": '$(compgen -f -- "$cur")',
     "vms": ("$(agw --completion-probe vm list --names-only 2>/dev/null)"),
-    "sites": ("$(agw --completion-probe resource list --kind vm-site --names-only 2>/dev/null | awk -F/ '{print $2}')"),
+    "sites": ("$(agw resource list --kind vm-site --names-only 2>/dev/null | awk -F/ '{print $2}')"),
     "workspaces": ("$(agw --completion-probe workspace list --names-only 2>/dev/null)"),
-    "ws_templates": (
-        "$(agw --completion-probe resource list --kind workspace-template --names-only "
-        "2>/dev/null | awk -F/ '{print $2}')"
-    ),
-    "git_credentials": (
-        "$(agw --completion-probe resource list --kind git-credential --names-only 2>/dev/null | awk -F/ '{print $2}')"
-    ),
+    "ws_templates": ("$(agw resource list --kind workspace-template --names-only 2>/dev/null | awk -F/ '{print $2}')"),
+    "git_credentials": ("$(agw resource list --kind git-credential --names-only 2>/dev/null | awk -F/ '{print $2}')"),
     "sessions": ("$(agw --completion-probe session list --names-only 2>/dev/null)"),
     "agents": ("$(agw --completion-probe agent list --names-only 2>/dev/null)"),
     "consoles": ("$(agw --completion-probe console list --names-only 2>/dev/null)"),
     "session_templates": (
-        "$(agw --completion-probe resource list --kind session-template --names-only "
-        "2>/dev/null | awk -F/ '{print $2}')"
+        "$(agw resource list --kind session-template --names-only 2>/dev/null | awk -F/ '{print $2}')"
     ),
-    "vm_templates": (
-        "$(agw --completion-probe resource list --kind vm-template --names-only 2>/dev/null | awk -F/ '{print $2}')"
-    ),
-    "agent_templates": (
-        "$(agw --completion-probe resource list --kind agent-template --names-only 2>/dev/null | awk -F/ '{print $2}')"
-    ),
-    "admin_templates": (
-        "$(agw --completion-probe resource list --kind admin-template --names-only 2>/dev/null | awk -F/ '{print $2}')"
-    ),
+    "vm_templates": ("$(agw resource list --kind vm-template --names-only 2>/dev/null | awk -F/ '{print $2}')"),
+    "agent_templates": ("$(agw resource list --kind agent-template --names-only 2>/dev/null | awk -F/ '{print $2}')"),
+    "admin_templates": ("$(agw resource list --kind admin-template --names-only 2>/dev/null | awk -F/ '{print $2}')"),
     "secrets": ("$(agw secret list --names-only 2>/dev/null)"),
     "resource_kinds": ("$(agw resource kinds --names-only 2>/dev/null)"),
-    "resource_refs": ("$(agw --completion-probe resource list --names-only 2>/dev/null)"),
+    "resource_refs": ("$(agw resource list --names-only 2>/dev/null)"),
     "guide_topics": ("$(agw guide --names-only 2>/dev/null)"),
 }
 
@@ -146,8 +134,8 @@ def _emit_leaf_completions(lines: list[str], spec: CommandSpec, token_offset: in
         for param in options_with_values:
             opt = param.opts[0] if param.opts else f"--{param.name}"
             lines.append(f"{indent}    {opt})")
-            if param.choices:
-                choices_str = " ".join(param.choices)
+            if param.choices or param.suggestions:
+                choices_str = " ".join(param.choices or param.suggestions or ())
                 lines.append(f'{indent}        COMPREPLY=($(compgen -W "{choices_str}" -- "$cur"))')
             elif param.dynamic_completer and param.dynamic_completer in DYNAMIC_SNIPPETS:
                 snippet = DYNAMIC_SNIPPETS[param.dynamic_completer]
@@ -164,8 +152,8 @@ def _emit_leaf_completions(lines: list[str], spec: CommandSpec, token_offset: in
         pos_token = token_offset + i
         cmp_op = "-ge" if param.multiple else "-eq"
         words: str | None = None
-        if param.choices:
-            words = " ".join(param.choices)
+        if param.choices or param.suggestions:
+            words = " ".join(param.choices or param.suggestions or ())
         elif param.dynamic_completer and param.dynamic_completer in DYNAMIC_SNIPPETS:
             words = DYNAMIC_SNIPPETS[param.dynamic_completer]
         if words:

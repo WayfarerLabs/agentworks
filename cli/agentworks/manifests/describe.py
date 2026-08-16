@@ -1,4 +1,4 @@
-"""``agw resource describe-kind``: the field reference, for the terminal.
+"""``agw resource explain``: the field reference, for the terminal.
 
 The second presenter over :mod:`agentworks.manifests.reference`, beside the
 generated sample. Same facts, different question: the sample answers "give
@@ -70,7 +70,7 @@ def reference_lines(reference: SchemaReference) -> Iterator[str]:
             if alternative.summary:
                 yield from _wrapped(alternative.summary, depth=2)
         yield ""
-        yield f"Run `agw resource describe-kind {reference.kind}/<name>` for one implementation's config."
+        yield f"Run `agw resource explain {reference.kind}/<name>` for one implementation's config."
     if reference.category == "declarable":
         yield ""
         yield f"Run `agw resource sample {reference.kind}` for a document to edit."
@@ -154,7 +154,7 @@ def _alternatives(entry: FieldEntry, *, depth: int) -> Iterator[str]:
         elif alternative.recurring:
             yield f"{_INDENT * (depth + 1)}nests this same block again, so its fields are the ones above."
         elif alternative.target:
-            yield f"{_INDENT * (depth + 1)}`agw resource describe-kind {alternative.target}` for its fields."
+            yield f"{_INDENT * (depth + 1)}`agw resource explain {alternative.target}` for its fields."
 
 
 def _key(entry: FieldEntry) -> str:

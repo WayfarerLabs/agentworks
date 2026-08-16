@@ -8,6 +8,6 @@ changing it; `agw doctor` only inspects. Restore a schema-compatible snapshot be
 and refresh generated shell code with `agw completion install` after upgrading.
 
 Work from the installed model. `agw resource sample KIND` provides a declarable manifest shape, and
-`agw resource describe-kind KIND` or `agw resource describe-kind KIND/NAME` provides the current
-field reference. Keep an untouched backup and the expected resource identities until the normal
-inventory and doctor both prove the cutover.
+`agw resource explain KIND` or `agw resource explain KIND/NAME` provides the current field
+reference. Keep an untouched backup and the expected resource identities until the normal inventory
+and doctor both prove the cutover.
