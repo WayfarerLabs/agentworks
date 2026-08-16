@@ -62,10 +62,12 @@ hints (the judgment-heavy batch), then schema, manifests, capabilities and platf
 authored-artifact form policing. Batching by domain instead would put a no-judgment mechanical
 change into the same review as the sweep's riskiest deletions.
 
-**Website work is deferred** to a final wave 1 PR after #486 merges (operator ruling 8): W1, W4, W5,
-W6, W8 and the sweep's website rows. Wave 1 does not close until that PR lands. The gcp fixture
-extraction (P5) does not wait on #486, since it shares no files with the website work; it waits on
-the sweep instead, per group 4 above.
+**Website work is deferred** until #486 merges (operator ruling 8). It lands as two PRs rather than
+one (effort lead, 2026-08-16): the website items themselves (W1, W4, W5, W6), and the sweep's
+website rows, which ride the sweep so it stays batched by shape rather than splitting one mechanical
+change across two reviews. Wave 1 does not close until both land. W8 has left this scope entirely,
+for the reasons its item records. The gcp fixture extraction (P5) does not wait on #486, since it
+shares no files with the website work; it waits on the sweep instead, per group 4 above.
 
 - [x] Delete the `phase7` corpus and `validate_interaction_policy` with its 152 call sites (S1).
       Keep `test_resolution_timeout_cleanup.py` (trim its two wording pins); rename kept fixtures
@@ -125,10 +127,12 @@ the sweep instead, per group 4 above.
 - [ ] Prose/form-policing sweep across the estate (absorbed survey list plus G12, C10, D4, P6, and
       the #470 manifesto pin). **This enumeration is the exclusion list and nothing else is
       excluded**: W1's workflow test, S1's corpus and wording-pin trims, W4/W6 in the contained
-      website trims, and the guide item's files `cli/tests/guide/test_contract_catalog.py` and
+      website trims, the guide item's files `cli/tests/guide/test_contract_catalog.py` and
       `cli/tests/guide/test_assessment.py`, whose prose pins belong to that item so each file has
-      one owner. Any other overlap the inventory turns up is an ordering question for the lead, not
-      an ownership one: a general rule keyed on what another item names or edits excluded the gcp
+      one owner, and `cli/tests/test_workflow_policy.py`, which W1 wrote and owns despite sitting
+      under `cli/tests/` (added 2026-08-16, since a path-keyed inventory would otherwise claim it).
+      Any other overlap the inventory turns up is an ordering question for the lead, not an
+      ownership one: a general rule keyed on what another item names or edits excluded the gcp
       files, `test_schema_adapter.py`, and `test_view.py`, which `findings.md` names _for_ the
       sweep. The sweep records each overlap it finds, keeps the file, and raises the ordering. The
       sweep's first step commits an exact decision inventory derived from the absorbed survey, one
@@ -222,31 +226,33 @@ the sweep instead, per group 4 above.
 
 - [ ] Contained gcp test dedup (P5), after the sweep lands: a shared gcp test fixture module. Done
       when: suite green, the extended-operation fake and `_api_error` each defined once.
-- [ ] Contained website test trims (W4, W5, W6, W8), after PR #486 merges (ruling 8): shared fixture
+- [x] Contained website test trims (W4, W5, W6), after PR #486 merges (ruling 8): shared fixture
       adoption in `test_lander_404.py`, exported status constant, threshold-not-exact contrast
-      assertions, drop the Chromium duplicate. Done when: suite green without Chromium installed.
-      **Done for W4, W5, and W6. The box stays unchecked because W8 is deliberately not executed and
-      returns to the operator with the evidence below.** W5 removed the last website test file
-      carrying its own builder loader, output manifest, HTML parser, and contrast helpers. W4
-      converted the seven three-decimal ratio comparisons into WCAG inequalities (4.5 text, 3.0
-      non-text) read out of the built stylesheet, which retires the exact token pins with them,
-      because the palette is now checked where it ships rather than transcribed; the `--hot` and
-      `--status` pairs were dropped rather than converted, since both tokens are declared in
-      `site.css` and referenced by nothing while the lander paints those colors as literals in
-      `lander.css`. W6 exported `UNDERWAY_STATUS`. **The done-condition is unachievable as written
-      and is the item's error**: the suite has eleven hard Chromium launches, not one. Ten belong to
-      the Lander arcade contracts in four `test_lander_phase4*_browser.py` files, which is W10's
-      deferred lander-scope decision, not this item's. **W8's own premise did not survive execution
-      either, on three counts.** The two tests are not duplicates: the CSS test asserts declarations
-      appear in the stylesheet, the browser test asserts the computed geometry resolves, and only
-      the second can detect an override or a cascade change, so under this SDD's own
-      observational-twin rule (`hla.md`) the browser test is the keeper and the CSS pin is the
-      deletable one. The manual checklist does not cover it; that document is the Lander arcade
-      checklist and carries no long-form table-of-contents row. And the flake evidence is stale: the
-      checklist's "Chromium CI reliability correction" entry, dated 2026-08-15 and landed after the
-      finding was written, records that the timeout was a harness defect (`--dump-dom` owning both
-      readiness and shutdown), replaced by DevTools-owned readiness and termination and validated at
-      40 consecutive iterations. Deleting the browser test would therefore surrender the only
+      assertions. **W8 has left this item** and folds into W10's lander-scope decision for the
+      reassessment (effort lead, 2026-08-16, accepting the evidence below): its premise did not
+      survive execution and this item's done-condition was unreachable, so keeping it here would
+      hold three finished trims behind a deletion that should not happen. Done when: W4, W5, and W6
+      land with the suite green. **Done**: W5 removed the last website test file carrying its own
+      builder loader, output manifest, HTML parser, and contrast helpers. W4 converted the seven
+      three-decimal ratio comparisons into WCAG inequalities (4.5 text, 3.0 non-text) read out of
+      the built stylesheet, which retires the exact token pins with them, because the palette is now
+      checked where it ships rather than transcribed; the `--hot` and `--status` pairs were dropped
+      rather than converted, since both tokens are declared in `site.css` and referenced by nothing
+      while the lander paints those colors as literals in `lander.css`. W6 exported
+      `UNDERWAY_STATUS`. **The done-condition is unachievable as written and is the item's error**:
+      the suite has eleven hard Chromium launches, not one. Ten belong to the Lander arcade
+      contracts in four `test_lander_phase4*_browser.py` files, which is W10's deferred lander-scope
+      decision, not this item's. **W8's own premise did not survive execution either, on three
+      counts.** The two tests are not duplicates: the CSS test asserts declarations appear in the
+      stylesheet, the browser test asserts the computed geometry resolves, and only the second can
+      detect an override or a cascade change, so under this SDD's own observational-twin rule
+      (`hla.md`) the browser test is the keeper and the CSS pin is the deletable one. The manual
+      checklist does not cover it; that document is the Lander arcade checklist and carries no
+      long-form table-of-contents row. And the flake evidence is stale: the checklist's "Chromium CI
+      reliability correction" entry, dated 2026-08-15 and landed after the finding was written,
+      records that the timeout was a harness defect (`--dump-dom` owning both readiness and
+      shutdown), replaced by DevTools-owned readiness and termination and validated at 40
+      consecutive iterations. Deleting the browser test would therefore surrender the only
       observational guard of the responsive layout and buy nothing operationally, because the same
       suite still launches Chromium ten more times. Recommendation: fold W8 into the W10 scope
       decision rather than executing it alone.
