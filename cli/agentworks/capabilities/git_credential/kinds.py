@@ -33,7 +33,6 @@ from agentworks.capabilities.descriptor import (
     CapabilityKindDescriptor,
     ConfigContract,
     HostSurface,
-    RegistryPolicy,
 )
 from agentworks.capabilities.git_credential.base import GitCredentialProvider, TokenAcquiringConfig
 from agentworks.git_credentials.credential import GitCredentialConfig
@@ -176,14 +175,12 @@ GIT_CREDENTIAL_PROVIDER_DESCRIPTOR = CapabilityKindDescriptor(
     kind="git-credential-provider",
     contract_version=2,
     implementation_contract=GitCredentialProvider,
-    registry_policy=RegistryPolicy.CLASS_BY_NAME,
     registry=_registry,
     required_operations=frozenset({"helper_entry", "credential_lines"}),
     # Empty: GitCredentialProvider supplies every non-operation member a
     # subclass needs.
     required_attributes=frozenset(),
     entry_factory=_entry,
-    kind_strategy=KIND_REGISTRY["git-credential-provider"],
     readiness=_readiness,
     publisher_source="agentworks.capabilities.git_credential",
     config_schema=ConfigContract(base=TokenAcquiringConfig, discriminator="name"),

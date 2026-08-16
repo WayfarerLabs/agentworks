@@ -10,9 +10,6 @@ Two structural rules make the table safe to consume from anywhere:
 - **Lazy collection, for cycle safety.** :func:`capability_descriptors`
   imports contributing modules inside the function. The ``registry`` field
   is callable for the same reason.
-
-Each descriptor's ``kind_strategy`` is the same object registered in
-``KIND_REGISTRY``; the table self-test asserts that identity.
 """
 
 from __future__ import annotations
@@ -31,15 +28,7 @@ if TYPE_CHECKING:
 
     from agentworks.origin import Origin
     from agentworks.resources.graph import Readiness
-    from agentworks.resources.kind import ResourceKind
     from agentworks.schema import ResourceRef
-
-
-class RegistryPolicy(Enum):
-    """What a capability kind's code registry stores under each name."""
-
-    CLASS_BY_NAME = "class-by-name"
-    """The implementation class itself."""
 
 
 class ModelInputDomain(Enum):
@@ -135,15 +124,12 @@ class CapabilityKindDescriptor:
     implementation_contract: type
     """The nominal base class an implementation must derive from."""
 
-    registry_policy: RegistryPolicy
-    """Whether the kind's registry stores classes. Every current kind is
-    class-by-name."""
-
     registry: Callable[[], dict[str, Any]]
-    """Lazy accessor for the kind's live code registry. A callable, not the
-    dict, so this module never imports the capability packages at load. The
-    returned object is the LIVE registry: callers that mutate it (seating,
-    snapshot restore) are mutating the real thing, by design."""
+    """Lazy accessor for the kind's live code registry, which stores the
+    implementation CLASS under each name. A callable, not the dict, so this
+    module never imports the capability packages at load. The returned
+    object is the LIVE registry: callers that mutate it (seating, snapshot
+    restore) are mutating the real thing, by design."""
 
     required_operations: frozenset[str]
     """The domain operations the framework depends on being callable."""
@@ -159,10 +145,6 @@ class CapabilityKindDescriptor:
     would change row content, which is row-semantics work, not switchboard
     work."""
 
-    kind_strategy: ResourceKind
-    """The kind's ``ResourceKind`` strategy: the SAME object registered in
-    ``KIND_REGISTRY[kind]``, referenced here rather than duplicated."""
-
     readiness: Callable[[str, Any], Readiness]
     """The capability NODE's readiness from ``(name, impl)``: a
     config-independent host-support verdict. Distinct from the
@@ -172,9 +154,14 @@ class CapabilityKindDescriptor:
     publisher_source: str
     """The ``Origin.built_in`` source label the kind's built-in rows carry."""
 
-    manifest_section: HostSurface | None
-    """How the kind is selected in its host's manifest spec, or ``None``
-    when the kind has no declarable host."""
+    manifest_section: HostSurface
+    """How the kind is selected in its host's manifest spec.
+
+    Required, because every capability kind is selected from some
+    declarable kind's spec. A kind with no declarable host would be a
+    capability nothing can ask for, so the day one exists is the day this
+    field becomes optional, and the type checker names every consumer that
+    then has to decide what to do about it."""
 
     config_schema: ConfigContract
     """What a config model offered for this kind must be.

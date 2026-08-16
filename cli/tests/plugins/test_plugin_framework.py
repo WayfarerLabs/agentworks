@@ -22,7 +22,7 @@ import pytest
 
 import agentworks
 import agentworks.plugins as plugins_pkg
-from agentworks.capabilities.descriptor import RegistryPolicy, capability_descriptors
+from agentworks.capabilities.descriptor import capability_descriptors
 from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.errors import StateError
 from agentworks.origin import Origin
@@ -462,15 +462,6 @@ def test_secret_backend_registration_never_calls_the_constructor() -> None:
     )
     with seated_plugin(plugin):
         assert capability_adapters()["secret-backend"].peek("throwing-backend") is ThrowingBackend
-
-
-def test_every_registry_policy_is_class_by_name_and_the_adapter_has_no_constructor_branch() -> None:
-    assert tuple(RegistryPolicy) == (RegistryPolicy.CLASS_BY_NAME,)
-    source = (Path(agentworks.__file__).parent / "plugins" / "adapters.py").read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    adapter = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "_DescriptorAdapter")
-    prepare = next(node for node in adapter.body if isinstance(node, ast.FunctionDef) and node.name == "prepare")
-    assert not any(isinstance(node, ast.Call) for node in ast.walk(prepare))
 
 
 # -- Idempotency ------------------------------------------------------------

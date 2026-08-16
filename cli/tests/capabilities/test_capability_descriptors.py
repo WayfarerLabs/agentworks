@@ -2,9 +2,8 @@
 describes (declarative-schema SDD step 2.0).
 
 Every field is checked against the thing it claims to describe, by object
-IDENTITY wherever an object is at stake (``kind_strategy is
-KIND_REGISTRY[kind]``, ``registry() is`` the live dict), so a record cannot
-quietly drift from the wiring while looking plausible.
+IDENTITY wherever an object is at stake (``registry() is`` the live dict),
+so a record cannot quietly drift from the wiring while looking plausible.
 
 The table was introduced additively, when no switchboard site derived from
 it yet and nothing else would notice a record that lied. As each site
@@ -27,7 +26,6 @@ from agentworks.capabilities.conformance import conformance_error
 from agentworks.capabilities.descriptor import (
     CapabilityKindDescriptor,
     ModelInputDomain,
-    RegistryPolicy,
     _validate_mapping_descriptors,
     capability_descriptors,
     descriptor_for,
@@ -144,15 +142,6 @@ def test_descriptor_for_returns_the_table_record_itself() -> None:
 
 
 @pytest.mark.parametrize("descriptor", _descriptors(), ids=lambda d: d.kind)
-def test_kind_strategy_is_the_object_in_kind_registry(descriptor: CapabilityKindDescriptor) -> None:
-    """One strategy object per kind, referenced by the descriptor rather
-    than duplicated: the co-located ``KIND_REGISTRY[...] = ...`` line stays
-    where it is precisely because this identity makes divergence
-    impossible."""
-    assert descriptor.kind_strategy is KIND_REGISTRY[descriptor.kind]
-
-
-@pytest.mark.parametrize("descriptor", _descriptors(), ids=lambda d: d.kind)
 def test_registry_accessor_returns_the_live_registry_object(descriptor: CapabilityKindDescriptor) -> None:
     """Identity, not equality: seating and snapshot/restore mutate the
     returned dict in place, so a copy would silently break both."""
@@ -160,11 +149,17 @@ def test_registry_accessor_returns_the_live_registry_object(descriptor: Capabili
 
 
 @pytest.mark.parametrize("descriptor", _descriptors(), ids=lambda d: d.kind)
-def test_registry_policy_matches_what_the_registry_actually_holds(
+def test_every_registry_holds_implementation_classes_by_name(
     descriptor: CapabilityKindDescriptor,
 ) -> None:
-    """Every live registry stores implementation classes by name."""
-    assert descriptor.registry_policy is RegistryPolicy.CLASS_BY_NAME
+    """Every live registry stores the implementation CLASS under each name.
+
+    What the adapters, the graph projection, and every documentation
+    surface assume when they read a registry without constructing anything:
+    a registry that started storing instances would break all three, and
+    ``test_plugin_framework.py`` pins the non-constructing half from the
+    other side.
+    """
     seated_impls = list(descriptor.registry().items())
     assert seated_impls, f"{descriptor.kind} has an empty registry; this test would prove nothing"
     for name, seated in seated_impls:
@@ -317,26 +312,20 @@ def test_manifest_sections_match_the_decoders_host_surfaces() -> None:
     surface changes which specs are read as capability blocks, which is why
     this is a literal.
     """
-    assert {
-        host: (d.kind, d.manifest_section.naming_field)
-        for host, d in _hosting_descriptors().items()
-        if d.manifest_section is not None
-    } == {
+    assert {host: (d.kind, d.manifest_section.naming_field) for host, d in _hosting_descriptors().items()} == {
         "vm-site": ("vm-platform", "platform"),
         "git-credential": ("git-credential-provider", "provider"),
         "session-template": ("harness-integration", "harness_integration"),
         "secret-source": ("secret-backend", "backend"),
     }
 
-    hosted = [d.manifest_section for d in _descriptors() if d.manifest_section is not None]
-    host_kinds = [surface.host_kind for surface in hosted]
+    host_kinds = [d.manifest_section.host_kind for d in _descriptors()]
     assert len(host_kinds) == len(set(host_kinds)), (
         f"two capability kinds claim the same host: {host_kinds}. Decode keys its "
         f"fold dispatch by host_kind, so the second record would silently "
         f"overwrite the first and one host's fold would vanish."
     )
     source_host = descriptor_for("secret-backend").manifest_section
-    assert source_host is not None
     assert (source_host.host_kind, source_host.naming_field) == (
         "secret-source",
         "backend",

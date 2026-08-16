@@ -24,7 +24,6 @@ from agentworks.capabilities.descriptor import (
     CapabilityKindDescriptor,
     ConfigContract,
     HostSurface,
-    RegistryPolicy,
 )
 from agentworks.capabilities.harness_integration.base import HarnessIntegration
 from agentworks.resources.graph import Readiness
@@ -117,14 +116,12 @@ HARNESS_INTEGRATION_DESCRIPTOR = CapabilityKindDescriptor(
     kind="harness-integration",
     contract_version=1,
     implementation_contract=HarnessIntegration,
-    registry_policy=RegistryPolicy.CLASS_BY_NAME,
     registry=_registry,
     required_operations=frozenset({"start", "resume"}),
     # Empty: HarnessIntegration supplies every non-operation member a
     # subclass needs.
     required_attributes=frozenset(),
     entry_factory=_entry,
-    kind_strategy=KIND_REGISTRY["harness-integration"],
     readiness=_readiness,
     publisher_source="agentworks.capabilities.harness_integration",
     config_schema=ConfigContract(base=AgwModel, discriminator="name"),

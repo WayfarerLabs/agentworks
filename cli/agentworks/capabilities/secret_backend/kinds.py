@@ -11,7 +11,6 @@ from agentworks.capabilities.descriptor import (
     HostSurface,
     MappingHost,
     ModelInputDomain,
-    RegistryPolicy,
 )
 from agentworks.capabilities.secret_backend.base import SecretBackend
 from agentworks.resources.kind import KIND_REGISTRY, NoUnreferencedDefaultError
@@ -80,7 +79,6 @@ SECRET_BACKEND_DESCRIPTOR = CapabilityKindDescriptor(
     kind="secret-backend",
     contract_version=2,
     implementation_contract=SecretBackend,
-    registry_policy=RegistryPolicy.CLASS_BY_NAME,
     registry=_backend_registry,
     required_operations=frozenset(
         {
@@ -92,7 +90,6 @@ SECRET_BACKEND_DESCRIPTOR = CapabilityKindDescriptor(
     ),
     required_attributes=frozenset({"interactive", "config_model", "mapping_model"}),
     entry_factory=_backend_entry,
-    kind_strategy=KIND_REGISTRY["secret-backend"],
     readiness=_backend_readiness,
     publisher_source="agentworks.capabilities.secret_backend",
     manifest_section=HostSurface(

@@ -514,19 +514,19 @@ implementation of it:
 - **`implementation_contract`, `required_operations`, `required_attributes`**, what an
   implementation must satisfy. All four kinds declare nominal bases, and every registered
   implementation must derive from its kind's contract.
-- **`registry`, `registry_policy`, `entry_factory`, `readiness`, `publisher_source`**, how the
-  kind's implementations are stored, published as read-only rows, and asked whether this host
-  supports them.
+- **`registry`, `entry_factory`, `readiness`, `publisher_source`**, how the kind's implementations
+  are stored, published as read-only rows, and asked whether this host supports them.
 - **`manifest_section`** (a `HostSurface`), which declarable kind's spec selects this capability and
-  under which field. `secret-backend` is selected by `secret-source.backend`; its separate
+  under which field. Required, because a capability kind no declarable spec selects is a capability
+  nothing can ask for. `secret-backend` is selected by `secret-source.backend`; its separate
   per-secret `backend_mappings` surface is described by `mapping_host`.
 
-Every registry policy is `CLASS_BY_NAME`: adapters, graph nodes, and published rows preserve the
-exact registered class and registration never constructs it. The kind list is fixed by the core and
-the descriptors are frozen: a plugin contributes IMPLEMENTATIONS of existing kinds, never a kind.
-Domain operations stay domain-owned, too. Nothing here touches `VMPlatform.create` or
-`SecretBackend.create_client`; the descriptor wires a kind into the framework without absorbing what
-makes the kind itself.
+Every registry stores the implementation CLASS under each name: adapters, graph nodes, and published
+rows preserve the exact registered class and registration never constructs it. The kind list is
+fixed by the core and the descriptors are frozen: a plugin contributes IMPLEMENTATIONS of existing
+kinds, never a kind. Domain operations stay domain-owned, too. Nothing here touches
+`VMPlatform.create` or `SecretBackend.create_client`; the descriptor wires a kind into the framework
+without absorbing what makes the kind itself.
 
 #### Registration-Time Conformance
 

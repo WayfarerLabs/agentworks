@@ -135,6 +135,21 @@ def test_a_kind_nobody_registered_is_refused_rather_than_answered_empty() -> Non
         FinalizeContext().rows_of("vm-tempalte")
 
 
+def test_a_capability_kind_nobody_registered_is_refused_rather_than_answered_empty() -> None:
+    """The projection accessor takes the same posture as ``rows_of`` on the
+    same mistake, and for the same reason: a real kind with nothing
+    projected is a legitimate ``None``, so a misspelled kind answered the
+    same way would read as "no such implementation" rather than as the
+    framework bug it is.
+    """
+    from agentworks.errors import StateError
+
+    context = FinalizeContext()
+    assert context.capability_class("secret-backend", "onepassword") is None
+    with pytest.raises(StateError):
+        context.capability_class("not-a-capability-kind", "onepassword")
+
+
 def test_a_bare_context_degrades_to_the_declaration_itself_not_to_nothing() -> None:
     """``FinalizeContext()`` carries no rows, so there are no ancestors to
     merge; the row's OWN declaration still has to come through, or a

@@ -362,13 +362,25 @@ class FinalizeContext:
     rows: Mapping[str, Mapping[str, Any]] = MappingProxyType({})
 
     def capability_class(self, kind: str, name: str) -> type | None:
-        """Return a projected capability class, or ``None`` for a name miss."""
-        from agentworks.capabilities.descriptor import RegistryPolicy, descriptor_for
+        """The projected implementation class for ``kind``/``name``, or
+        ``None`` for a name miss.
+
+        An unregistered capability ``kind`` is REFUSED rather than answered
+        with ``None``, for the reason :meth:`rows_of` gives: the empty
+        answer a wrong key produces is indistinguishable from the legitimate
+        name miss, so a typo would read as "no such implementation" instead
+        of as the framework bug it is. This is not boundary validation; the
+        kinds arrive as literals from in-repo callers. It is the same
+        loud-failure posture ``descriptor_for`` takes on the same mistake.
+        """
         from agentworks.errors import StateError
 
-        descriptor = descriptor_for(kind)
-        if descriptor.registry_policy is not RegistryPolicy.CLASS_BY_NAME:
-            raise StateError(f"capability kind {kind!r} does not project implementation classes")
+        kinds = _capability_kinds()
+        if kind not in kinds:
+            raise StateError(
+                f"no capability kind {kind!r} is registered, so it projects no implementation classes "
+                f"(known capability kinds: {', '.join(sorted(kinds))})"
+            )
         return self.capability_classes.get(kind, {}).get(name)
 
     def rows_of(self, kind: str) -> Mapping[str, Any]:
@@ -422,12 +434,10 @@ def build_context(resources: Mapping[str, Mapping[str, object]]) -> FinalizeCont
     late (reserved defaults are seeded in pass 0), so the two views agree
     either way; carrying the live map means they cannot stop agreeing.
     """
-    from agentworks.capabilities.descriptor import RegistryPolicy, capability_descriptors
+    from agentworks.capabilities.descriptor import capability_descriptors
 
     projected: dict[str, Mapping[str, type]] = {}
     for descriptor in capability_descriptors():
-        if descriptor.registry_policy is not RegistryPolicy.CLASS_BY_NAME:
-            continue
         projected[descriptor.kind] = MappingProxyType(
             {name: cast("type", _impl_for(descriptor.kind, name)) for name in resources.get(descriptor.kind, {})}
         )

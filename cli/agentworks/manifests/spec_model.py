@@ -85,7 +85,7 @@ def spec_model(kind: str) -> type[BaseModel]:
     row = row_model(kind)
     projected: type[BaseModel] = row
     descriptor = hosted_capability(kind)
-    if descriptor is not None and descriptor.manifest_section is not None:
+    if descriptor is not None:
         from agentworks.capabilities.config import capability_config_union
 
         field_name = descriptor.manifest_section.naming_field
@@ -207,7 +207,7 @@ def hosted_capability(kind: str) -> CapabilityKindDescriptor | None:
     _seat_plugin_capabilities()
     for descriptor in capability_descriptors():
         section = descriptor.manifest_section
-        if section is not None and section.host_kind == kind and descriptor.config_schema.discriminator is not None:
+        if section.host_kind == kind and descriptor.config_schema.discriminator is not None:
             return descriptor
     return None
 
