@@ -59,10 +59,12 @@ resources they can access even as those workloads become more autonomous. Withou
 of what agents are doing, consistent environments, and a contained blast radius, control is lost in
 practice even if it is notionally retained.
 
-A significant and growing part of the ecosystem treats loss of control as an inevitable cost of
-agentic autonomy. Agentworks takes the opposite position.
+Agentic autonomy is sometimes framed as a dichotomy: either evaluate every action an agent takes and
+move slowly, or move quickly by letting the agent run free and hope for the best. Agentworks rejects
+that framing and offers a third path: provide agents with well-scoped, least-privilege environments,
+complete with context, tools, and guardrails, and then let them sprint.
 
-### Give Agents Real Environments
+### Agents Need Real Environments
 
 You would not seal a good developer inside a single locked-down container and expect their best
 work. A capable agent is no different. Agentworks gives workloads a full-featured Linux VM with
@@ -72,19 +74,25 @@ run containers, and genuine multi-user collaboration.
 The VM provides the hard isolation boundary. Within it, ordinary Linux users, groups, and filesystem
 permissions provide further separation and controlled collaboration between agents.
 
-### Identity and Workload Are Separate
+### Identity and Workload Are Separable
+
+Many tools in the agentic ecosystem conflate identity and workload, often into some overarching
+"agent" concept. That conflation can make it difficult to manage workloads, especially when the
+operator wants to run many workloads with the same fundamental identity, including its credentials,
+permissions, memory, and other durable state. It also cuts against decades of systems practice,
+which treats identity and workload as distinct lifecycles.
 
 Agentworks separates who performs work from the unit of work itself. Agents are identities. Sessions
 are workloads that run in a workspace as either an agent or the VM's admin user. Creating an agent
 does not start a workload, and creating a session does not require creating a new identity.
 
-That separation lets identity and workload lifecycles vary independently. A durable agent can carry
-tools, credentials, harness context, memory, and interactive authentication across many disposable
-sessions. A session can also create a new agent alongside itself, supporting a one-off identity
-lifecycle when the operator wants one.
+That separation lets identity and workload lifecycles vary independently. Sessions come and go with
+the work. An operator can reuse a durable agent across many sessions or tie an ephemeral agent to a
+single session or short series of sessions. A durable agent can carry tools, credentials, harness
+context, memory, and interactive authentication across those sessions.
 
-Reproducible identity setup belongs in a template. The valuable state that cannot be reproduced
-belongs to the identity, while the session remains the disposable unit of work.
+Reproducible identity setup belongs in a template. Valuable state that cannot be reproduced belongs
+to the identity, while the session remains the disposable unit of work.
 
 ### Set the Context, Tools, and Guardrails, Then Get Out of the Way
 
@@ -95,17 +103,17 @@ Starting around fall 2025 with Claude Opus 4.5, it became clear that the model c
 work itself if given the proper direction. Models such as Claude Fable 5 and GPT-5.6 Sol need even
 less custom orchestration. Simply tell the model how it should work. For example: "Delegate to
 subagents where possible, consider less capable models for simpler tasks, and do not stop until you
-have a merge-ready PR." As has become a theme in the agentic world, what once was necessary is now
-counterproductive.
+have a merge-ready PR." As has become a theme in the agentic world, what once was necessary may now
+get in the way.
 
-Today, built-in "auto" and goal-oriented modes for longer-running, more autonomous work have
-proliferated across harnesses. These modes can be useful, but they are still orchestration.
-Agentworks expects their specifics to matter less as models continue to improve.
+Agentworks expects harnesses to continue improving at orchestrating agentic workloads. In this
+world, the best platforms will automate the setup (context, tools, and guardrails), handle the
+mechanics of preparing and launching the harness, and then get out of the way, letting the harness
+and models operate unimpeded. Agentworks aims to be exactly that.
 
-But while custom orchestration is on its way out, setting the right context, giving the agent the
-right tools, and, critically, establishing appropriate guardrails are more important than ever.
-Agentworks is designed to make that easy while otherwise letting the harness and models operate
-unimpeded.
+Built-in "auto" modes do not change this requirement. Their authorization layer can accelerate
+routine work, but it is not a security boundary. Auto modes should operate inside a least-privilege
+environment so that a mistaken authorization remains contained.
 
 ### Consistency Beats Unbounded Choice
 
