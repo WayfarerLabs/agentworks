@@ -6,7 +6,7 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace, TracebackType
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import pytest
 
@@ -357,7 +357,7 @@ class _Transaction(AbstractContextManager[None]):
         exc_type: type[BaseException] | None,
         exc_value: BaseException | None,
         traceback: TracebackType | None,
-    ) -> bool:
+    ) -> Literal[False]:
         del exc_type, exc_value, traceback
         self.counts["transaction_exit"] += 1
         if self.exit_error is not None:
@@ -700,7 +700,7 @@ def test_transaction_entry_failure_closes_and_frames_untyped_error(
         def __enter__(self) -> None:
             raise failure
 
-        def __exit__(self, *args: object) -> bool:
+        def __exit__(self, *args: object) -> Literal[False]:
             del args
             return False
 
