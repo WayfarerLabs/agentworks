@@ -139,11 +139,37 @@ the sweep instead, per group 4 above.
       invocation rather than degrading one target, which is the loud-refusal-at-entry posture
       boundary 1 asks for, recorded here so the reassessment reads it as a decision rather than an
       accident.
-- [ ] Delete inert descriptor generality (C1, C5): `RegistryPolicy`, `kind_strategy`, unreachable
+- [x] Delete inert descriptor generality (C1, C5): `RegistryPolicy`, `kind_strategy`, unreachable
       fallbacks, their pinning tests. **`contract_version` is not in this item and is not a deletion
       target** (operator ruling 12): it is required, it is checked at registration, and PR #546
       verified the check by mutation. Done when: suite green, four descriptors construct without the
-      deleted fields, and `contract_version` still gates registration.
+      deleted fields, and `contract_version` still gates registration. **Done**: `RegistryPolicy`
+      and both its consumer branches, `kind_strategy`, `manifest_section`'s optionality with the
+      five narrowing guards it forced, and `offered_model`'s two `getattr` fallbacks are gone;
+      `contract_version` still refuses a mismatched impl, re-verified here by the same mutation PR
+      #546 used. Suite 7358 to 7354. Every deletion was controlled one at a time: the four
+      `registry_policy` and `offered_model` sites each left the suite green, so each was decoration,
+      while deleting `kind_strategy` failed exactly
+      `test_kind_strategy_is_the_object_in_kind_registry` and nothing else, which is the self-test
+      C1 describes.
+
+      **Two of the item's targets did not survive classification, and findings.md carries both
+      corrections.** `discriminator`/`input_domain` are not inert: the entry counted the four
+      `config_schema` values and missed the fifth `ConfigContract`, `secret-backend`'s
+      `mapping_schema`, where both differ and where the difference is the whole point, with live
+      production consumers branching on each. **`config_for()`'s hook is an R2.2 set-aside, not a
+      deletion**: `capabilities/README.md` carries it in the capability authoring contract that
+      `contract_version` versions, so removing it is the shipped-contract change this wave excludes,
+      and it goes to the reassessment with the contract rev it implies. Its fallbacks and its
+      speculative docstring were still this item's to take, and were taken.
+
+      One check was preserved rather than deleted, and is recorded as a decision: `capability_class`
+      was refusing an unregistered kind incidentally, through the `descriptor_for` call it made only
+      to read `registry_policy`. Deleting the field would have dropped that refusal and left two
+      sibling accessors on `FinalizeContext` taking opposite postures on the same typo, so the
+      refusal is now spelled explicitly the way `rows_of` spells it, and R2.3's regression test
+      (which `rows_of` already had and this one did not) lands with it, proven by mutation.
+
 - [x] Delete `machine_output` defensive surface (G6): assert-guards on frozen dataclasses, double
       projections, identity comprehensions; `schema_version` becomes a named constant. This item
       owns `machine_output.py` wholesale, so G8's `JsonScalar` deletion lands here. Done when: suite
