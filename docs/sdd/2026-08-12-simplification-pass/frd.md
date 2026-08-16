@@ -61,7 +61,7 @@ Settled inputs, recorded for traceability:
     since deleting wholesale drops real branch coverage while preserving it by adding a production
     discriminator is what R2.2 forbids. Discriminate structurally where the code offers a handle;
     where only wording we author discriminates, the assertion goes and the branch coverage goes with
-    it (R2.4). No case matches our own wording.
+    it (R2.4). Matching wording we author is never licensed.
 11. **2026-08-14 (caller-supplied arguments)**: an argument arriving from a caller our type checker
     does not check is a trust boundary, not interior state, ruled after PR #523 deleted an
     interior-looking enum check that four review lenses cleared and a live `interaction="refuse"`
@@ -81,13 +81,12 @@ Settled inputs, recorded for traceability:
   globs on purpose. If the probe surfaces a reason this simple shape cannot work, escalate to the
   operator rather than building a delivery mechanism.
 - R1.1: The trust-boundary doctrine (the five boundaries, interior trust, and the
-  validator-names-its-boundary convention; hla.md doctrine 1) is folded into
-  `development-principles` as a compact amendment. In the same amendment, principle 3 gains a
-  test-quality counterweight (operator direction, 2026-08-13): a test earns its place by guarding an
-  invariant that can actually regress; a test that can only fail when someone edits the thing it
-  restates is cost, not coverage; assert behavior at a boundary, not the shape of the
-  implementation, and deleting a worthless test is the same virtue as writing a worthy one. No new
-  rule file.
+  validator-names-its-boundary convention) is folded into `development-principles` as a compact
+  amendment. In the same amendment, principle 3 gains a test-quality counterweight (operator
+  direction, 2026-08-13): a test earns its place by guarding an invariant that can actually regress;
+  a test that can only fail when someone edits the thing it restates is cost, not coverage; assert
+  behavior at a boundary, not the shape of the implementation, and deleting a worthless test is the
+  same virtue as writing a worthy one. No new rule file.
 - R1.2: `no-prose-policing-tests` gains a short generalization: the rule's target is every authored
   artifact (prose, config files, workflow files, CSS tokens, the spelling of our own source), not
   prose alone; when two artifacts must agree, derive one from the other and test the derivation. No
@@ -157,7 +156,7 @@ justification for a new production contract.
   taxonomy): deferred to the R4 reassessment, proposed individually if still warranted.
 - **External-plugin trust design**: not designed or promoted in this pass. The checks kept by the
   wave 1 charter (constructibility, call-shape compatibility at registration) are the seam; findings
-  and the boundary sketch go into the reassessment as seed material for the loader effort.
+  and this pass's boundary sketch go into the reassessment as seed material for the loader effort.
 - **New rule-delivery machinery**: wave 0 resolves the delivery gap by removing the path filter
   (R1.0), never by building a delivery mechanism; anything beyond that shape escalates.
 - No new user-facing features, no harness changes, no SDD-directory cleanup beyond the directed
