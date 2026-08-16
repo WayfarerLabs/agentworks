@@ -201,6 +201,18 @@ deliberately narrow `cli-conventions.md`.
   that both readers of `manifest_section`, `decode._hosting_descriptors` and
   `spec_model.hosted_capability`, reach the table through `capability_descriptors()`, which nothing
   patches.)
+- **C13** The capability config contract carries four names for one concept: `config_model` (the
+  declaration), `Capability.config_for()` (a no-argument classmethod whose default returns it),
+  `offered_model()` (a module function wrapping that call in a cast, seven production callers), and
+  `_declared_model()` (a fourth spelling of the same lookup for `mapping_model`). `config_for`
+  promises an argument it does not take, and its docstring spends a paragraph on the facet parameter
+  it deliberately lacks. Both wrappers exist only because the registries are typed `dict[str, Any]`,
+  so `impl_class` and its four call sites are the same residue. Out of scope here under R2.2: the
+  fix is a contract change, and the operator routed it to the multi-facet harness-integration work
+  rather than to this pass, since the shape a level parameter should take is decided by the effort
+  that introduces levels. The proposal, the three constraints any redesign must preserve, and the
+  in-repo-implementations-versus-exported-callers caution are in
+  `docs/sdd/2026-08-04-next-steps/message-2026-08-16-capability-config-shape.md`.
 - **C2** Eight of eighteen classified `FieldShape` shapes have zero shipped instances; two have one.
   `_shape.py` is 1,383 lines (ceiling: 1,000), including the two-level `X`/`item_X` mirror whose
   unshipped half is speculative by its own docstring, while `reference_marker_error` already refuses
