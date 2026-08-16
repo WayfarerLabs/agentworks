@@ -98,25 +98,25 @@ shares no files with the website work; it waits on the sweep instead, per group 
       every verbatim pin; rewrite the real policy invariants (least-privilege permissions,
       credential non-persistence, main-only deploy, source-SHA/artifact binding, double-build diff)
       as focused checks over a proper YAML load. Done when: suite green, no hardcoded workflow text
-      beyond the keys each check reads. **Done**: 834 lines become 15 checks in 563, counted at the
-      final head with `wc -l` and `grep -c '^def test_'`. Two earlier revisions of this note carried
-      wrong numbers, 380 lines and then 16 checks, neither of which any counting supported; both are
-      corrected here, and the pattern is the reason the reassessment's retrospective figures get
-      re-measured rather than carried forward. Nothing pins wording, step names, action versions, or
-      formatting; where two places in a file must agree the check derives one from the other (the
-      artifact path from the build command's `--output`, deploy's `artifact_name` from the upload's
-      `name`, the verified step from the `steps.<id>.outputs` expression the job output references,
-      the required-result count from `needs`). **The item's one false premise was the location**: a
-      "proper YAML load" cannot happen in the website suite at all, because that suite runs as
-      `python3 -m unittest` on a runner with no package installation step, and PyYAML is not in the
-      standard library nor documented in the `actions/runner-images` manifest. The file therefore
-      lands at `cli/tests/test_workflow_policy.py`, where PyYAML is already a first-party dependency
-      and the required `test` job runs it, following `cli/tests/assistance/test_contract.py`, which
-      already tests repository-root artifacts from there for the same reason. The alternative,
-      adding an install step to the two workflow jobs under test, would have edited the artifacts
-      being verified and broken the website suite's no-installation property for one test. Seven
-      guards beyond the five named invariants are kept because the deleted closed-shape assertions
-      were their only home and each is a real bypass: the fail-fast shell (a
+      beyond the keys each check reads. **Done**: 834 lines become 16 checks in 594, counted at the
+      final head with `wc -l` and `grep -c '^def test_'`. Earlier revisions of this note carried 380
+      lines, then 16 checks in 532, none of which any counting supported; the pattern is the reason
+      the reassessment's retrospective figures get re-measured rather than carried forward. Nothing
+      pins wording, step names, action versions, or formatting; where two places in a file must
+      agree the check derives one from the other (the artifact path from the build command's
+      `--output`, deploy's `artifact_name` from the upload's `name`, the verified step from the
+      `steps.<id>.outputs` expression the job output references, the required-result count from
+      `needs`). **The item's one false premise was the location**: a "proper YAML load" cannot
+      happen in the website suite at all, because that suite runs as `python3 -m unittest` on a
+      runner with no package installation step, and PyYAML is not in the standard library nor
+      documented in the `actions/runner-images` manifest. The file therefore lands at
+      `cli/tests/test_workflow_policy.py`, where PyYAML is already a first-party dependency and the
+      required `test` job runs it, following `cli/tests/assistance/test_contract.py`, which already
+      tests repository-root artifacts from there for the same reason. The alternative, adding an
+      install step to the two workflow jobs under test, would have edited the artifacts being
+      verified and broken the website suite's no-installation property for one test. Seven guards
+      beyond the five named invariants are kept because the deleted closed-shape assertions were
+      their only home and each is a real bypass: the fail-fast shell (a
       `defaults.run.shell: bash {0}` drops `-e`, which alone disarms the double-build diff),
       `BASH_ENV` at any of its three levels, a `working-directory` default over the deploy path,
       unskippable deploy-path steps and jobs (`if` or `continue-on-error` on a test step publishes
@@ -135,9 +135,9 @@ shares no files with the website work; it waits on the sweep instead, per group 
       and the complexity review lane each independently walked through two such policies, and running
       the deleted file's own mutation corpus against the replacement, which should have happened
       before the deletion merged, found two more. The corpus now stands at 39 violations from the
-      deleted file, both review lanes, and one deny-by-default probe, 37 caught, and with the 30
-      author mutations it is 71 violations each labelled with the property it attacks, and every
-      stated property has at least one attacking it. Three of the four not caught are form-only edits
+      deleted file, both review lanes, one deny-by-default probe, and five environment violations, 42
+      caught, and with the 30 author mutations it is 76 violations each labelled with the property
+      it attacks, every stated property having at least one. Three of the four are form-only edits
       a real YAML load cannot see, and are declared drops on that ground: a duplicate top-level key,
       which resolves last-wins exactly as Actions resolves it, twice, and a trailing `# comment` on a
       permission value, which is not data. **The fourth is a defense that moved, not a gap.** It
@@ -169,8 +169,21 @@ shares no files with the website work; it waits on the sweep instead, per group 
       the property it attacks, so a property nothing attacks shows up as a gap the corpus itself
       reports, rather than by maintaining a written map of sentences to checks, which is a second
       copy of what the code already expresses and is one step from someone asserting it in a test.
-      And the
-      blacklist lesson above, which is the one that reaches past workflows.
+      And the blacklist lesson above, which is the one that reaches past workflows.
+
+      **The environment predicate got the same conversion** (`BASH_ENV` banned by name became an
+      allowlist of the four keys the guarded jobs actually set), because `PATH`, `GIT_CONFIG_GLOBAL`,
+      `LD_PRELOAD`, and `PYTHONPATH` each reached the same tooling and all four passed. Two
+      blacklist-shaped predicates are **left in place and filed rather than fixed**, which is a drawn
+      line and not an oversight: the shell-operator set guarding fail-fast, and the `if` and
+      `continue-on-error` step-key bans. The step keys are closed by GitHub's schema, so no invented
+      mechanism reaches them. The shell operators are not, and the merge-base probe found the one
+      place this branch is genuinely behind `main`: `set +e` carries no operator token, so the branch
+      misses it while `main` catches it through verbatim script pinning. The mitigation offered for
+      that risk does not hold on inspection, since the pre-upload verifier checks the worktree rather
+      than the artifact, and `ci.website` has no verifier after its build at all, so a swallowed diff
+      is an unreproducible build nobody notices. The allowlist form is an executable set for those
+      scripts; it is the filed item's content, and it is the last one of this class.
 
 - [ ] Prose/form-policing sweep across the estate (absorbed survey list plus G12, C10, D4, P6, and
       the #470 manifesto pin). **This enumeration is the exclusion list and nothing else is
