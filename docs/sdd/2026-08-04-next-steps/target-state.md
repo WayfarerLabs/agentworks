@@ -98,10 +98,20 @@ whose content is one command's output wearing guide clothes is removed, and the 
 command instead, signpost-style all the way down. Kept by the rubric: `concept-` topics, the
 onboarding sequence and adoption assessment, the agent contract, and action records with their
 consent boundaries and refusal alternatives. The rubric executes survey-first: a read-only inventory
-classifying every guide block with machinery consequences priced, reviewed before anything is
-removed, and blocks duplicating a command that does not exist yet (the relationship view, until
-`graph show` lands) are not removed before their new owner ships. If the survey finds the cuttable
-surface small, keeping it is an acceptable answer.
+classifying every guide block with machinery consequences priced and reviewed before anything is
+removed. If the survey finds the cuttable surface small, keeping it is an acceptable answer.
+
+**Survey disposition (operator, 2026-08-15):** a raw aggregation of several command outputs is not
+higher-level synthesis. The reviewed survey found 59 fixed blocks to keep and 141 to remove, plus a
+dormant kind fallback and every runtime resource topic. Remove the full cut set in one effort after
+corrected PR #548 rather than coordinating current-owner and future-owner phases. The onboarding
+effort owns the combined content and directly orphaned machinery deletion as a one-time exception to
+the ordinary content-versus-machinery boundary. A smaller projector with behavioral parity must
+serve the retained onboarding assessment before `_dynamic_topic` or generic `GuideView` leaves.
+Temporary loss of guide copies is accepted on unreleased `main`: `resource describe-kind` and
+`resource describe` provide partial interim ownership, while the CLI grammar child lands the settled
+`resource explain` and `graph show` destinations. This does not relax the release gate; 0.14.0 MUST
+NOT ship until the CLI grammar rewrite restores those command surfaces.
 
 **Ruling (operator, 2026-08-15):** `resource describe` is removed pre-0.14. Its relational facts
 move to the grammar child's `graph` namespace; no generic replacement card is created. This retires
@@ -261,6 +271,11 @@ wave 1 deletions land first. Wave 0 leads in turn, because establishing that alw
 actually reach the agents they bind (issue #511) has to precede adding deletion criteria to those
 rules. Wave 2, the process and rule subtraction, runs in parallel rather than on that spine; the
 pass's reassessment and lock wait for both waves (`phasing.md` carries the detail).
+
+**Sequence amendment (operator, 2026-08-15):** corrected PR #548 is the only remaining
+simplification-pass prerequisite for the grammar rewrite. The onboarding-owned one-wave guide
+deletion follows it, then the grammar rewrite proceeds. Other wave 1 deletions and wave 2 run
+independently; the simplification pass's reassessment and lock still wait for both waves.
 
 **The 0.14 breaking-truth items travel separately.** The four contract-truth fixes that are free
 only while 0.14 is unreleased (the secret mapping key that names sources, the one-arm token union,

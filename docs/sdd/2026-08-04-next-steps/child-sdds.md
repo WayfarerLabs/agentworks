@@ -93,6 +93,12 @@ locked.
       no-topic guide is a catalog-free trail sign, `concept-onboarding` owns the walkthrough,
       selected topics fail soft on environmental failure with doctor as the health authority, and
       the release-test fix (PR #539) fixed every future release PR's CI
+- [ ] One-wave guide-value deletion (operator ruling 2026-08-15; survey PR #543): after corrected PR
+      #548, remove all 141 fixed command-duplicating blocks, the dormant kind fallback, runtime
+      resource topics, and directly orphaned guide machinery in one onboarding-owned effort. Replace
+      `_dynamic_topic`/generic-view assessment use with a smaller parity-preserving projector first.
+      The temporary gap is permitted only on unreleased `main`; the CLI grammar rewrite remains a
+      hard 0.14.0 release gate
 - [ ] Remaining phases (wave 2 adoption, closeout) per the effort's per-phase PR plan. The README
       bootstrap shipped with the assistance phase (PR #480), so the bootstraps gate is satisfied;
       the generated block pins version 0.14.0 or newer and resolves when the release ships
@@ -304,8 +310,9 @@ Planned children, seeded when their prerequisites land (see `phasing.md`):
   removed** (operator ruling, 2026-08-15, retiring the earlier A-or-B): its relationships move to
   `graph`, with no replacement card. `--write` becomes path-valued with `--install` for the schema
   set's fixed destination. No longer conditional: 0.14.0 does not ship until it lands. Runs after
-  the simplification pass's deletion waves, so the rewrite is done over the smaller surface, and it
-  owns updating any guide content and docs its renames touch.
+  the simplification pass's relevant deletion work and the onboarding child's one-wave guide-value
+  deletion, so the rewrite is done over the smaller surface. It owns updating command spellings and
+  permanent docs its renames touch.
 - Security-architecture doc child: seeds after wave 3 merges; carries the per-platform
   durable-surface inventory (what each provider retains) so provider-boundary reviews check a list
   rather than rediscovering the class incident-by-incident (lesson from wave 3's three-round class
@@ -506,20 +513,21 @@ open-ended research placeholder.
 17. Gate status (2026-08-13, post-#480): PR #480 merged, so the assistance phase is done. The cut
     now has a longer runway by ruling, not by slip: **0.14.0 waits for the CLI grammar rewrite**
     (operator, 2026-08-12), and the simplification pass is adopted as a child and runs before it.
-    The serial spine is: the pass's wave 0 (rule delivery, issue #511, then the deletion criteria),
-    its wave 1 deletions, the grammar rewrite, its reassessment; wave 2 runs in parallel off the
-    spine and the reassessment waits for it too. Open 0.14 gates: that spine, the installer-plugins
-    moves (now scope-reduced to the bucketing), and the breaking-truth task. The README bootstrap
-    gate is satisfied (PR #480; see the onboarding entry).
+    The current serial spine is: completed wave 0, corrected PR #548, the onboarding child's
+    one-wave guide-value deletion, the grammar rewrite, and the pass's reassessment. Other wave 1
+    deletions and wave 2 run independently; the reassessment still waits for them. Open 0.14 gates:
+    that spine, the installer-plugins moves (now scope-reduced to the bucketing), and the
+    breaking-truth task. The README bootstrap gate is satisfied (PR #480; see the onboarding entry).
 
     Besides wave 2, four other lanes run in parallel with the spine, and these are the boundaries
-    that keep them apart: the onboarding trail-sign round (guide content, while the pass owns guide
-    machinery), the breaking-truth task (`env/entry.py` and the token union, while the pass owns the
-    inert descriptor fields), the installer-plugins bucketing (independent), and the grammar
-    rewrite's design and seeding (only its implementation waits). Wave 1's eight deletion work items
-    are unordered by design and are themselves the largest parallelism available. One coordination
-    hazard is recorded: the pass's website items touch test files the continuous-lander effort
-    (#486) is actively changing, so those sequence behind #486 or coordinate with that lead first.
+    that keep them apart: onboarding trail-sign work until the one-wave guide deletion joins the
+    spine after #548, the breaking-truth task (`env/entry.py` and the token union, while the pass
+    owns the inert descriptor fields), the installer-plugins bucketing (independent), and the
+    grammar rewrite's design and seeding (only its implementation waits). Wave 1's eight deletion
+    work items are unordered by design and are themselves the largest parallelism available. One
+    coordination hazard is recorded: the pass's website items touch test files the continuous-lander
+    effort (#486) is actively changing, so those sequence behind #486 or coordinate with that lead
+    first.
 
     Discharged in this round: the breaking-truth brief is seeded on `refactor/breaking-truth-0-14`,
     the trail-sign message to the onboarding effort rides this PR, and the supersession note for
