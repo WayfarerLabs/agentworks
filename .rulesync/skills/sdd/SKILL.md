@@ -106,10 +106,9 @@ requirements across its children and often authoring their revisions, but the co
 operator's. An amendment travels to the owner as a request, never as a direct edit, and a subagent
 no more rewrites its charter than a lead rewrites its FRD. Anyone may decline a request, since
 declining preserves the status quo and needs no authority, and the requester may escalate past a
-decline; only the operator grants a requirements change. You can only grant what you own, which is
-why no lead delegates its FRD downward. Recording a decision its owner already made is transcription
-rather than authorship: append it verbatim to the artifact's rulings section and tell the owner;
-anything past that is a request.
+decline; only the operator grants a requirements change. Recording a decision its owner already made
+is transcription rather than authorship: append it verbatim to the artifact's rulings section and
+tell the owner; anything past that is a request.
 
 Every artifact has an owner whether or not anything here names it, and the charter is how an owner
 delegates: an agent modifies or creates one only where its charter grants that authority, and a lead
