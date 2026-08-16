@@ -6,7 +6,7 @@
 - Date: 2026-08-16
 - Implements: `frd.md` FR6-FR14 and QR1-QR4
 - Architecture: `hla.md` A1-A6
-- Code basis: `aeff8b07`
+- Code basis: `origin/main` at `bcde4983`
 
 ## Scope and invariants
 
@@ -52,12 +52,12 @@ The implementation keeps these invariants structural:
 resource attributes other than passing the row unchanged into its owning hook. The renderer modules
 must not import `Registry`, `Database`, config, kind handlers, resource rows, or origins.
 
-The CLI obtains a syntax-checked `kind` and `name` from the shared access primitive specified by
-`cli-cutover-lld.md`, constructs `ResourceIdentity`, and calls `show_graph`. `show_graph` still
-performs the authoritative registry lookup. It rejects a non-finalized registry with `StateError`,
-an unknown kind with `NotFoundError(entity_kind="resource-kind", entity_name=kind)`, and a missing
-name with `NotFoundError(entity_kind=kind, entity_name=name)`. No database operation precedes these
-checks.
+The CLI obtains a syntax-checked `ResourceIdentity` from the shared access primitive specified by
+`cli-cutover-lld.md` and calls `show_graph`. `show_graph` imports that record and `resolve_resource`
+from `resources.access`; it does not define a second identity type or duplicate the lookup. The
+service rejects a non-finalized registry with `StateError`, then calls `resolve_resource` once and
+retains its exact row for eligible live-instance projection. Unknown-kind and missing-name errors
+therefore have the shared resolver's specified shape. No database operation precedes these checks.
 
 ## Frozen records and enums
 
@@ -83,11 +83,6 @@ class LiveSourceState(StrEnum):
     ABSENT = "absent"
     OPEN = "open"
     CLOSED = "closed"
-
-@dataclass(frozen=True, slots=True)
-class ResourceIdentity:
-    kind: str
-    name: str
 
 @dataclass(frozen=True, slots=True)
 class GraphIdentity:
@@ -140,8 +135,9 @@ express:
 - `live-usage` requires a live-instance source, resource target, relationship `uses`, and null
   `usage` and `declared_by`.
 
-The records do not validate registry identity spelling again. They are first-party interior values;
-the CLI parser and registry lookup are the boundaries.
+The graph-query records do not validate registry identity spelling again. `ResourceIdentity` is the
+frozen, slotted record owned by `resources.access`; the CLI parser and the service's single shared
+resolver call are the boundaries.
 
 Helpers construct identities without reflection:
 
@@ -201,8 +197,11 @@ their union equals `set(RefRelationship)`. Traversal and the induced pass both t
 Every key is a tuple of primitive scalars:
 
 ```python
-def identity_key(value: GraphIdentity) -> tuple[str, str, str]:
-    return (value.node_type.value, value.kind, value.name)
+def node_type_rank(value: GraphNodeType) -> int:
+    return 0 if value is GraphNodeType.RESOURCE else 1
+
+def identity_key(value: GraphIdentity) -> tuple[int, str, str]:
+    return (node_type_rank(value.node_type), value.kind, value.name)
 
 def nullable_text_key(value: str | None) -> tuple[int, str]:
     return (0, "") if value is None else (1, value)
@@ -225,8 +224,9 @@ def edge_fact_key(edge: GraphEdge) -> tuple[object, ...]:
 relationship, usage, or declaration provenance remain parallel edges. Nodes deduplicate only by
 `identity_key`.
 
-Final node order is `(distance, node_type.value, kind, name)`. For an edge, let `edge_distance` be
-the maximum distance of its endpoints. Final edge order is:
+Final node order is `(distance, node_type_rank(node_type), kind, name)`, so resources precede live
+instances within a distance group. For an edge, let `edge_distance` be the maximum distance of its
+endpoints. Final edge order is:
 
 ```text
 edge_distance,
@@ -262,14 +262,16 @@ does no filesystem or database work. `show_graph` owns the source context so eve
 The BFS is:
 
 ```text
-validate finalized registry and resolve focus row
-query = GraphQuery(focus, direction, depth_limit)
-focus_id = resource_graph_identity(focus)
-distance = {focus_id: 0}
-queue = deque([focus_id])
-edges_by_key = {}
-
 with live_source:
+    validate finalized registry
+    resolved_focus = resolve_resource(registry, focus)
+    query = GraphQuery(focus, direction, depth_limit)
+    focus_id = resource_graph_identity(focus)
+    distance = {focus_id: 0}
+    queue = deque([focus_id])
+    rows = {focus_id: resolved_focus.resource}
+    edges_by_key = {}
+
     while queue:
         current = queue.popleft()
         current_distance = distance[current]
@@ -277,7 +279,10 @@ with live_source:
             continue
 
         # The queue contains resources only.
-        row = registry.lookup(current.kind, current.name)
+        row = rows.get(current)
+        if row is None:
+            row = registry.lookup(current.kind, current.name)
+            rows[current] = row
         candidates = []
 
         if direction in {DEPENDENCIES, BOTH}:
@@ -495,9 +500,12 @@ edge details; it never denotes discovery ancestry. The renderer does not compute
 parent, collapse a repeated node, discover an edge, or change ordering.
 
 Tests assert `GraphDistanceGroup` membership, ordering, and one-time edge assignment structurally.
-Human tests are limited to successful invocation and renderer isolation. Exact labels, whitespace,
-and authored explanatory wording are reviewed directly and exercised in live acceptance; unit tests
-must not assert preferred prose or blacklist alternate wording.
+Human renderer tests feed unique resource identities, live identities, relationship values, usage,
+and provenance through the completed groups, then prove every fact appears exactly once and in the
+same canonical group/order. They also prove null provenance does not manufacture a value. These are
+fact-projection assertions, not prose assertions: exact labels, whitespace, and authored explanatory
+wording are reviewed directly and exercised in live acceptance rather than pinned or blacklisted by
+unit tests.
 
 ## Exact `graph.show` JSON v1 projection
 

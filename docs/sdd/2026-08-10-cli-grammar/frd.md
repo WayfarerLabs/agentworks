@@ -2,6 +2,7 @@
 
 - Status: Approved by the operator for HLA
 - Date: 2026-08-15
+- Parent saga: `docs/sdd/2026-08-04-next-steps/`
 - Depends on: `cli-surface-study.md`, `prior-art-research.md`, and `future-directions.md`
 
 ## Purpose
@@ -19,6 +20,11 @@ say what they do. The change is intentionally narrow and gates 0.14.0.
 5. `--write` is path-valued; the schema set's fixed-destination action is `--install`.
 6. The 0.14 upgrade guide carries the breaking command map. The operator explicitly waived a
    deprecation release for the `resource describe` command shipped in 0.13.
+7. No capability currently publishes multiple configuration facets, so this effort does not invent
+   that descriptor shape. The command grammar leaves one stable extension seam: when the capability
+   framework adds named facets, the implementation target explains all of its facets together by
+   default, while the capability-kind target owns their shared vocabulary. The planned first
+   consumer is harness integration.
 
 ## Functional requirements
 
@@ -31,7 +37,9 @@ say what they do. The change is intentionally narrow and gates 0.14.0.
   target: only a capability implementation name selects a distinct schema.
 - **FR3.** Explain shall render from the existing schema and field-documentation service. Its field
   coverage, capability listing behavior, ordering, errors, and human output semantics shall not be
-  broadened as part of the rename.
+  broadened as part of the rename. This preserves the current single-model contract without
+  foreclosing settled decision 7; facet descriptor and rendering work begins with the capability
+  effort that introduces the first multi-faceted implementation.
 - **FR4.** Explain shall use its current config-free schema and capability resolver. It shall build
   no resource registry, open no database, and work when config is missing or invalid and when a
   contributing plugin is installed but disabled.

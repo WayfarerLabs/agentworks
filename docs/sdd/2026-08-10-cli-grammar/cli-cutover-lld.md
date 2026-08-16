@@ -6,7 +6,7 @@
 - Date: 2026-08-16
 - Implements: `frd.md` FR1-FR5 and FR15-FR26
 - Refines: `hla.md` A2 and A7-A9
-- Code basis: `aeff8b07`
+- Code basis: `origin/main` at `bcde4983`
 
 ## Purpose and boundary
 
@@ -15,17 +15,18 @@ graph records, traversal, lazy live projection, rendering, and graph JSON facts.
 the command tree, the shared resource-identity access seam, retirement of the generic resource card,
 completion wiring, permanent collateral, and the atomic cutover commit.
 
-The existing draft PR is the only implementation vehicle. There is no alias, warning, fallback
-dispatcher, compatibility ID, new graph operation, facet label, or deprecation runway. A new
-spelling replaces an unreleased spelling silently. The 0.14 upgrade guide maps the shipped
-`resource describe` break only.
+By explicit operator direction, the existing draft artifact PR is the only implementation vehicle;
+its public final-artifact handoff supplies the active-saga coordination point without an early
+artifact merge. There is no alias, warning, fallback dispatcher, compatibility ID, new graph
+operation, facet label, or deprecation runway. A new spelling replaces an unreleased spelling
+silently. The 0.14 upgrade guide maps the shipped `resource describe` break only.
 
 ## Ownership and file plan
 
 | Path                                                                                                                                                              | Change | Responsibility                                                                                                                                                        |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cli/agentworks/resources/access.py`                                                                                                                              | Extend | Shared first-slash parser and fact-minimal validated registry resolver.                                                                                               |
-| `cli/agentworks/resources/inspect.py`                                                                                                                             | Reduce | Retain list, kind, readiness, `used_by_for`, and edit-location behavior. Delete the generic resource-card records and presentation service.                           |
+| `cli/agentworks/resources/access.py`                                                                                                                              | Extend | In the earlier additive phase, add the shared first-slash parser and fact-minimal validated registry resolver.                                                        |
+| `cli/agentworks/resources/inspect.py`                                                                                                                             | Reduce | Repoint edit in the additive phase; at cutover, delete the generic card while retaining list, kind, readiness, `used_by_for`, and edit-location behavior.             |
 | `cli/agentworks/cli/commands/resource.py`                                                                                                                         | Modify | Register `resource explain`, retain sample writer semantics, rename the schema installer option, and remove `resource describe`.                                      |
 | `cli/agentworks/cli/commands/graph.py`                                                                                                                            | Add    | Top-level graph Typer group and thin `show` orchestration only.                                                                                                       |
 | `cli/agentworks/cli/commands/__init__.py`                                                                                                                         | Modify | Import the graph command module with the command-group registration imports.                                                                                          |
@@ -59,10 +60,10 @@ parse_resource_identity(value: str) -> ResourceIdentity
 resolve_resource(registry: Registry, identity: ResourceIdentity) -> ResolvedResource
 ```
 
-Both records are frozen dataclasses. `ResolvedResource` deliberately exposes only identity, the
-exact registry row, and its origin. It does not grow description, readiness, enablement, references,
-instance usage, display text, or JSON fields. Graph needs the row for its kind hook and edit needs
-the origin; neither needs a replacement resource card.
+Both records are frozen, slotted dataclasses. `ResolvedResource` deliberately exposes only identity,
+the exact registry row, and its origin. It does not grow description, readiness, enablement,
+references, instance usage, display text, or JSON fields. Graph needs the row for its kind hook and
+edit needs the origin; neither needs a replacement resource card.
 
 `parse_resource_identity` partitions on the first slash. It rejects a missing slash, an empty kind,
 and an empty name with `ValidationError`, before any config, registry, or database work. The error
@@ -85,11 +86,13 @@ branches: a populated kind suggests `agw resource list --kind KIND`; an empty ki
 of that kind are published. The exception carries `entity_kind=kind` and `entity_name=name`. The
 resolver never enables, probes, resolves, or otherwise acts on a row.
 
-The graph command parses its focus before loading config and then resolves the identity through this
-resolver after finalization. `resource edit` parses its argument through the same parser before its
-existing editor/config work, then passes the identity fields to its retained `edit_location`
-service. There is no shared resolver with config-free `resource explain`: its `KIND/NAME` form is a
-capability-schema target and continues to use `reference_for`.
+The graph command parses its focus before loading config and passes that identity to the graph-query
+service. After finalization, that service performs the one authoritative lookup through this
+resolver and retains the exact row for any eligible live-instance hook. `resource edit` parses its
+argument through the same parser before its existing editor/config work, then passes the identity
+fields to its retained `edit_location` service. There is no shared resolver with config-free
+`resource explain`: its `KIND/NAME` form is a capability-schema target and continues to use
+`reference_for`.
 
 ### Edit behavior after the extraction
 
@@ -152,11 +155,12 @@ The command's execution order is fixed:
 2. `load_config(warn_issues=output_format is OutputFormat.HUMAN)`.
 3. `load_request_registry(config, warn=output_format is OutputFormat.HUMAN, probe_host_readiness=False)`.
    This runs normal finalization and reference validation but does not run host-readiness probes.
-4. Resolve the parsed identity with `resolve_resource`.
-5. Construct the unopened request-scoped live source from the configured database path and call the
-   graph query service once with its explicit registry, focus, direction, depth limit, and source
-   dependencies.
-6. Select the graph-query LLD's human renderer or explicit JSON projector. For JSON, call
+4. Construct the unopened request-scoped live source from the process's canonical
+   `agentworks.db.DB_PATH` and call the graph query service once with its explicit registry, parsed
+   focus, direction, depth limit, and source dependencies. The service calls `resolve_resource` once
+   before any database operation. This effort adds no database-path config field or secondary
+   path-resolution rule.
+5. Select the graph-query LLD's human renderer or explicit JSON projector. For JSON, call
    `write_json_envelope(MachineOutputCommand.GRAPH_SHOW, data, ...)`.
 
 The graph command never calls `get_db`. It does not resolve secrets, prompt, activate resources, run
@@ -233,9 +237,13 @@ graph edges is additive and does not migrate secret behavior.
 The retired `("resource.describe", "ref")` and `("resource.describe-kind", "target")` entries
 disappear. `resource_kinds` continues to invoke the config-free `agw resource kinds --names-only`
 path in all three shells. `resource_refs` continues to invoke the config-backed
-`agw --completion-probe resource list --names-only` path in all three shells. Thus explain
-completion remains available with absent or broken config, while graph focus completion correctly
-has no candidates when the finalized registry cannot be built.
+`agw --completion-probe resource list --names-only` path in all three shells. That names-only path
+must finalize the registry but bypass `get_db` and call `list_resources(..., db=None)`, because its
+candidate set is declared resource identities and does not need live `used_by_count` facts. Thus
+explain completion remains available with absent or broken config; graph and edit completion remain
+available with a valid registry even when the database is absent, stale, newer, malformed, busy,
+unreadable, or otherwise unusable; and all config or registry failures still yield no candidates.
+The ordinary human and JSON `resource list` paths retain their current database-backed behavior.
 
 Direction and output are Click choices emitted from the Typer tree. Depth offers static useful
 candidates `1`, `2`, `3`, and `all`; it does not pretend to enumerate all positive integers or use
@@ -265,8 +273,9 @@ path and test all of the following structurally:
 - each shell invokes config-free kinds completion for explain without the completion probe, and
   invokes resource-reference completion for graph with the completion probe and its existing stderr
   suppression;
-- explain completes during missing and invalid config; graph focus preserves the existing
-  broken-config failure behavior of config-backed resource refs;
+- explain completes during missing and invalid config; graph focus preserves the config/registry
+  failure behavior of config-backed resource refs but still completes during absent, stale, newer,
+  malformed, busy, and unreadable database states;
 - static graph choices and schema `--install` are emitted by all three shells.
 
 ## Documentation, hints, and historical records
@@ -287,8 +296,8 @@ relationship inspection becomes `graph show`, while inventory, doctor, edit, and
 commands own the remaining questions. It does not advertise `describe-kind` or schema `--write` as
 user migrations because those spellings did not ship as stable contracts.
 
-Before committing, search tracked active source, tests, docs, completion artifacts, examples, hints,
-and fixtures for:
+Before committing, perform a one-time reviewed search of tracked active source, tests, docs,
+completion artifacts, examples, hints, and fixtures for:
 
 ```text
 resource describe
@@ -299,18 +308,22 @@ resource schema --write
 
 The only allowed matches are the 0.14 resource-describe upgrade explanation, clearly historical ADR
 or completed-SDD records, and focused negative tests that prove a retired spelling now fails. Review
-every other match rather than maintaining a broad textual allowlist. The sweep must also confirm
-that no current operator-facing phrase points to the removed generic inspector.
+every other match rather than maintaining a broad textual allowlist. This search is cutover
+evidence, not a committed test that polices repository-authored prose. Persistent tests cover
+command registration, exit behavior, command IDs, hints emitted by owned code paths, and completion
+structure. The sweep must also confirm that no current operator-facing phrase points to the removed
+generic inspector.
 
 ## One collateral-complete cutover commit
 
-The graph storage, query service, records, renderers, lazy database source, and their tests may land
-in earlier additive commits. This document's changes land together in exactly one final cutover
+The graph storage, query service, records, renderers, lazy database source, shared identity access,
+edit repointing, and their tests land in the earlier additive commits named by the plan. The
+remaining command-surface changes owned by this document land together in exactly one final cutover
 commit, with no pushed partial registration or stale active teaching:
 
 1. Add graph command registration and thin orchestration against the completed graph-query service.
-2. Extract the shared identity parser/resolver and repoint edit, preserving the invalid-manifest
-   fallback.
+2. Consume the already-extracted identity parser/resolver from graph and edit, preserving the
+   invalid-manifest fallback.
 3. Rename explain and the schema installer, then remove the generic resource card and its machine
    command.
 4. Update completion mappings and generated bash, zsh, and PowerShell output.
@@ -326,8 +339,10 @@ command that is not registered.
 Run focused tests for resource access and edit fallback, graph CLI option and registry construction
 behavior, explain with absent/invalid config, schema installation parity and old-flag rejection,
 resource-card removal, secret describe parity, JSON command IDs, and bash/zsh/PowerShell completion
-generation and broken-config behavior. Graph query service, renderer, source demand, secret-safety,
-and database transaction coverage are owned by the graph-query LLD and run with this slice.
+generation and broken-config behavior. Resource-reference completion tests prove its registry-only
+names path never opens absent, stale, newer, malformed, busy, or unreadable database state. Graph
+query service, renderer, source demand, secret-safety, and database transaction coverage are owned
+by the graph-query LLD and run with this slice.
 
 Then run from `cli/`:
 

@@ -1,9 +1,9 @@
 # CLI Grammar Correction: High-Level Architecture
 
-- Status: Draft for architecture checkpoint review
+- Status: Approved by the operator for implementation design
 - Date: 2026-08-15
 - Implements: `frd.md`
-- Code basis: `origin/main` at `d87deda0`
+- Code basis: `origin/main` at `bcde4983`
 
 ## Summary
 
@@ -194,10 +194,11 @@ complete an induced edge set at the boundary.
 
 Exact duplicate edges collapse by the complete fact key: edge type, both typed endpoint identities,
 relationship, usage, and declaration provenance. Parallel edges that differ in any field remain.
-Nodes are ordered by distance, then node type, kind, and name. Edges are assigned to the greater of
-their endpoint distances and ordered by that distance, then typed source, typed target, edge type,
-relationship, usage, and declaration provenance. Neighbor consideration uses the same canonical
-identity order, so equal-length path choices never inherit registry insertion order.
+Nodes are ordered by distance, then an explicit node-type rank (`resource` before `live-instance`),
+kind, and name. Edges are assigned to the greater of their endpoint distances and ordered by that
+distance, then typed source, typed target, edge type, relationship, usage, and declaration
+provenance. Neighbor consideration uses the same canonical identity order, so equal-length path
+choices never inherit registry insertion order.
 
 All sort keys are total tuples over primitive scalars. A nullable scalar is keyed as `(0, "")` when
 absent and `(1, value)` when present; nullable declaration provenance uses `(0, "", "")` or
@@ -215,12 +216,13 @@ that:
 2. has remaining depth; and
 3. belongs to a kind with an `instances` hook,
 
-the source checks the configured database path with error-preserving filesystem operations. Only a
-definite not-found result becomes an empty live source; permission, path-component, and other
-inspection failures remain source errors. There is no persisted instance history to project when the
-path is absent. A present database is opened once through `Database(read_only=True)`, reused for the
-request, and closed in `finally` on success or failure. Merely discovering a hook-owning resource at
-the depth bound does not inspect the path or open the database.
+the source checks the process's canonical `agentworks.db.DB_PATH` with error-preserving filesystem
+operations. Only a definite not-found result becomes an empty live source; permission,
+path-component, and other inspection failures remain source errors. There is no persisted instance
+history to project when the path is absent. A present database is opened once through
+`Database(read_only=True)`, reused for the request, and closed in `finally` on success or failure.
+Merely discovering a hook-owning resource at the depth bound does not inspect the path or open the
+database.
 
 Opening a present source also enters one explicit database read-transaction boundary before the
 first instance hook. The first read establishes the SQLite snapshot, and every hook query for that
@@ -292,9 +294,12 @@ here and registry instance space under graph.
 
 The command registration, help, hints, completion mapping, documentation, and test identity change
 from `resource.describe-kind` to `resource.explain`; field coverage, output, errors, ordering, and
-availability do not. No facet abstraction is added in this implementation. The grouped all-facet
-future behavior remains placement guidance for the first capability that actually offers multiple
-configuration models.
+availability do not. No capability currently offers multiple configuration models, so this effort
+does not invent a facet descriptor or synthetic runtime path. It preserves the stable targets that
+the future extension composes beneath: the implementation target will render every offered facet in
+separate groups by default, and the capability-kind target will teach their shared vocabulary. The
+harness-integration capability effort owns introducing that descriptor shape with its first real
+multi-faceted implementation.
 
 ### A8. The remaining CLI corrections cut over atomically
 
@@ -410,14 +415,15 @@ authored human prose.
 
 ## Delivery and coordination
 
-The existing draft PR remains the single delivery vehicle. Its implementation plan uses
-responsibility-aligned, always-green commits. Internal graph storage, query primitives, database
-read-transaction support, and their tests may be introduced in earlier commits without changing the
-CLI. The command registration, old command and machine-ID removal, generated completions, active
-documentation, resource-group help, hints, and cutover tests move together in one
-collateral-complete commit. No commit exposes new grammar with stale ownership or active teaching.
-The PR remains draft until the architecture and plan checkpoints converge; it has no merge intent
-yet.
+By explicit operator direction, the existing draft artifact PR remains the single delivery vehicle
+through implementation rather than merging ahead under the active-saga default. Its public artifact
+handoff supplies the coordination surface, and its implementation plan uses responsibility-aligned,
+always-green commits. Internal graph storage, query primitives, database read-transaction support,
+and their tests may be introduced in earlier commits without changing the CLI. The command
+registration, old command and machine-ID removal, generated completions, active documentation,
+resource-group help, hints, and cutover tests move together in one collateral-complete commit. No
+commit exposes new grammar with stale ownership or active teaching. The PR remains draft with no
+merge intent until the operator says otherwise.
 
 Implementation ordering inherited from the saga is:
 

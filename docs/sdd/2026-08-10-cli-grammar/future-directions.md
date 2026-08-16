@@ -41,11 +41,12 @@ resolution preview are secret-specific synthesis.
 
 ## Capability explanation
 
-The simple implementation form remains `resource explain CAPABILITY-KIND/IMPLEMENTATION`. When an
-implementation first offers more than one configuration facet, that command should render its title,
-description, overview, and every offered facet model in separate labeled sections by default. It
-must not flatten facet models into one apparent schema. A later `--facet` filter is an optional
-convenience only, never required for complete output.
+The simple implementation form remains `resource explain CAPABILITY-KIND/IMPLEMENTATION`. No
+capability exposes multiple facet models today; the planned first consumer is harness integration.
+When that effort introduces the descriptor shape, the command renders its title, description,
+overview, and every offered facet model in separate labeled sections by default. It must not flatten
+facet models into one apparent schema. A later `--facet` filter is an optional convenience only,
+never required for complete output.
 
 The capability-kind form owns the shared vocabulary. For example,
 `resource explain harness-integration` should explain the `vm`, `user`, `workspace`, and `session`

@@ -5,14 +5,17 @@
 - Requirements: `frd.md`
 - Architecture: `hla.md`
 - Detailed designs: `graph-query-lld.md`, `cli-cutover-lld.md`
-- Code basis: `origin/main` at `d87deda0`
-- Delivery vehicle: draft PR #491, continuing through implementation on this branch
+- Code basis: `origin/main` at `bcde4983`
+- Delivery vehicle: draft PR #491, continuing through implementation on this branch by explicit
+  operator direction
 
 ## Delivery posture
 
-This remains one PR because the focused correction is one release-boundary change and its estimated
-substantive diff remains within the repository's single-reviewer ceiling. Commits provide the
-reviewable layering:
+This remains one PR because the operator explicitly directed the reviewed artifact vehicle to become
+the implementation vehicle. That direction is an exception to the active-saga default of merging
+reviewed artifacts before implementation. The public draft artifact checkpoint supplies the saga's
+coordination surface without an early artifact merge, and the PR retains no merge intent until the
+operator says otherwise. Commits provide the reviewable layering:
 
 1. additive frozen-graph, database, and resource-access primitives with tests;
 2. an unregistered graph-query service, records, renderers, and tests;
@@ -24,6 +27,12 @@ The branch is already rebased over the survey-approved guide deletion merged in 
 prerequisite is satisfied at this plan's basis. Every later implementation rebase must preserve the
 post-deletion surface and must not restore removed guide views, runtime resource topics, schema
 adapters, or generic guide fact projections.
+
+At final-artifact basis `bcde4983`, the saga records this grammar rewrite as the active final spine
+item before reassessment. Simplification items C1/C5 remain uncompleted and owned by that effort;
+this branch's overlap boundary is therefore explicit: it does not modify capability descriptors or
+introduce facet models. Implementation kickoff rechecks and records that status after its required
+rebase.
 
 No compatibility layer is part of any phase. The old command spellings and `resource.describe`
 machine ID disappear at the cutover; they do not coexist with the replacements at a handoff or
@@ -42,6 +51,10 @@ Implementation begins only after this final artifact set passes the operator-dir
       remains.
 - [ ] Stop and raise any significant issue that requires product direction, scope expansion, or a
       material redesign.
+- [ ] In this final artifact checkpoint handoff, deliver the dying-command inventory to the parent
+      saga and simplification effort. At implementation kickoff, record the rebased `main` SHA and
+      whether simplification items C1/C5 have landed; if not, preserve the explicit overlap boundary
+      that this effort does not change capability descriptors or introduce facet models.
 - [ ] Record the clean artifact disposition in the PR handoff before implementation starts.
 
 ## Dying-command and ownership inventory
@@ -136,6 +149,8 @@ renderer, config, database, resource-object reflection, or insertion-order depen
       failures as typed whole-query errors.
 - [ ] Open one `Database(read_only=True)` and one read transaction per demanded request, reuse both
       for every eligible kind hook, and close on all exits.
+- [ ] Construct that lazy source from the canonical `agentworks.db.DB_PATH`; do not add a config
+      field or a second database-path resolution rule.
 - [ ] Copy each projected instance immediately into a terminal live node and intrinsic
       `live instance -> resource` edge; count it as one hop regardless of summarized config depth.
 - [ ] Treat live-edge `relationship=uses` as the fixed convention of `live-usage`, never as an
@@ -158,8 +173,9 @@ demand end to end.
 - [ ] Add the explicit safe-scalar `graph.show` JSON projector with the fixed field set and
       `depth_limit: null` for `all`.
 - [ ] Encode the complete JSON envelope before writing stdout and retain terminal-control escaping.
-- [ ] Test service grouping and JSON records structurally; review human typography directly rather
-      than writing unit tests that pin authored prose.
+- [ ] Test service grouping and JSON records structurally. Feed the human renderer unique identity,
+      relationship, usage, and provenance facts and prove complete, ordered, once-only projection
+      without pinning authored labels, whitespace, or explanatory prose.
 - [ ] Prove neither renderer reaches registry, database, config, handlers, resource rows, origins,
       secrets, or arbitrary attributes.
 
@@ -199,13 +215,17 @@ midpoint may exist only in private uncommitted work, never at a pushed review bo
 
 - [ ] Map graph focus to the config-backed `resource_refs` source, explain to config-free
       `resource_kinds`, and direction/depth to their static candidates.
+- [ ] Make `resource list --names-only` registry-only so graph/edit completion remains available
+      when the database is absent, stale, newer, malformed, busy, or unreadable; keep config and
+      finalized-registry failures silent.
 - [ ] Remove old dynamic identities, regenerate/show bash, zsh, and PowerShell output, and test
       missing/broken-config behavior for each relevant path.
 - [ ] Update active help, errors, hints, command reference, `cli/README.md`, sample-config comments,
       surviving guide contributions, domain/capability/plugin READMEs, resource and platform guides,
       and the 0.14 upgrade guide.
-- [ ] Preserve historical records deliberately and run an allowlisted active-reference sweep for
-      `resource describe`, `describe-kind`, `resource.describe`, and schema `--write`.
+- [ ] Preserve historical records deliberately and perform a reviewed one-time active-reference
+      search for `resource describe`, `describe-kind`, `resource.describe`, and schema `--write`; do
+      not commit a test that polices repository-authored prose.
 - [ ] Do not recreate any guide topic or adapter removed by PR #556.
 
 Definition of done: every observable owner presents one coherent grammar at the commit, the three
@@ -217,7 +237,8 @@ history contains retired spellings.
 ### 4.1 Automated gates
 
 - [ ] Run focused resource graph/query, database, CLI, machine-output, completion, schema, edit,
-      secret-describe, plugin, and active-reference tests.
+      secret-describe, and plugin tests; retain the active-reference search as reviewed cutover
+      evidence rather than a prose-policing test.
 - [ ] Run `uv run ruff check .`, `uv run mypy agentworks tests`, and
       `uv run pytest tests/ -m 'not integration'` from `cli/`.
 - [ ] Run `./scripts/lint-files.sh`, `git diff --check`, `./scripts/check-locked-sdds.sh`, and

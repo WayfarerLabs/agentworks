@@ -1,6 +1,6 @@
 # CLI Grammar Migration Strategy
 
-- Status: Revised after operator disposition, pending HLA
+- Status: Final artifact checkpoint
 - Date: 2026-08-15
 - Release boundary: 0.14.0
 
