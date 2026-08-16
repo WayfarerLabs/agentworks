@@ -12,6 +12,7 @@ import {
     STEP_SECONDS,
     TURN_DIFFERENTIAL,
     TURNING_TOTAL,
+    UNDERWAY_STATUS,
     advanceMissionSequence,
     advanceSimulation,
     classifySweptContact,
@@ -374,7 +375,7 @@ test("destroy restores the pristine static DOM from active and failed controller
         elements["lander-outcome"].hidden = false;
         elements["lander-controls-rail"].hidden = false;
         elements["lander-exit"].disabled = false;
-        elements["lander-status"].textContent = terminal ? FAILURE_STATUS : "Mission underway.";
+        elements["lander-status"].textContent = terminal ? FAILURE_STATUS : UNDERWAY_STATUS;
         if (terminal) {
             elements["lander-restart"].hidden = false;
             elements["lander-restart"].disabled = false;
@@ -401,7 +402,7 @@ test("render clears stale live status on crash entry", async () => {
     const { LanderGameController } = await controllerClasses();
     const fixture = controllerFixture();
     const controller = new LanderGameController(fixture.root);
-    fixture.elements["lander-status"].textContent = "Mission underway.";
+    fixture.elements["lander-status"].textContent = UNDERWAY_STATUS;
     controller.model = { ...createPreflightModel(), state: "crashing", status: "", crash: null };
     controller.render();
     assert.equal(fixture.elements["lander-status"].textContent, "");

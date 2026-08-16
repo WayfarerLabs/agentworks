@@ -1,90 +1,8 @@
-from __future__ import annotations
+# ruff: noqa: F405
 
-import importlib.util
-import math
-import re
-import tempfile
-import unittest
 import xml.etree.ElementTree as ET
-from html.parser import HTMLParser
-from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-WEBSITE = REPO_ROOT / "website"
-BUILD_PATH = WEBSITE / "build.py"
-SPEC = importlib.util.spec_from_file_location("website_build", BUILD_PATH)
-if SPEC is None or SPEC.loader is None:
-    raise RuntimeError("could not load website builder")
-website_build = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(website_build)
-
-EXPECTED_FILES = frozenset(
-    {
-        Path("404.html"),
-        Path("index.html"),
-        Path("lander/index.html"),
-        Path("manifesto/index.html"),
-        Path("security/index.html"),
-        Path("assets/agw-favicon.svg"),
-        Path("assets/agw-rocket.svg"),
-        Path("static/lander-collision.js"),
-        Path("static/lander-game.js"),
-        Path("static/lander-model.js"),
-        Path("static/lander-world.js"),
-        Path("static/onboarding-copy.js"),
-        Path("static/lander.css"),
-        Path("static/site.css"),
-    }
-)
-
-
-class DocumentParser(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__()
-        self.tags: list[tuple[str, dict[str, str | None]]] = []
-        self.ids: list[str] = []
-        self.text_stack: list[str] = []
-        self.text_by_id: dict[str, str] = {}
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        attributes = dict(attrs)
-        self.tags.append((tag, attributes))
-        if element_id := attributes.get("id"):
-            self.ids.append(element_id)
-            self.text_stack.append(element_id)
-        else:
-            self.text_stack.append("")
-
-    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        self.handle_starttag(tag, attrs)
-        self.handle_endtag(tag)
-
-    def handle_endtag(self, tag: str) -> None:
-        if self.text_stack:
-            self.text_stack.pop()
-
-    def handle_data(self, data: str) -> None:
-        for element_id in reversed(self.text_stack):
-            if element_id:
-                self.text_by_id[element_id] = self.text_by_id.get(element_id, "") + data
-                break
-
-
-def parse_document(html: str) -> DocumentParser:
-    parser = DocumentParser()
-    parser.feed(html)
-    return parser
-
-
-def relative_luminance(color: str) -> float:
-    channels = [int(color[index : index + 2], 16) / 255 for index in (1, 3, 5)]
-    linear = [channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4 for channel in channels]
-    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
-
-
-def contrast(first: str, second: str) -> float:
-    light, dark = sorted((relative_luminance(first), relative_luminance(second)), reverse=True)
-    return (light + 0.05) / (dark + 0.05)
+from site_test_support import *  # noqa: F403
 
 
 def transformed_origin(
@@ -179,9 +97,9 @@ FORBIDDEN_RUNTIME_CANARIES = {
 
 class SiteBaseTests(unittest.TestCase):
     def test_root_and_project_bases_pass(self) -> None:
-        self.assertEqual(website_build.validate_site_base("/"), "/")
-        self.assertEqual(website_build.validate_site_base("/agentworks/"), "/agentworks/")
-        self.assertEqual(website_build.validate_site_base("/agent-works_1.0~/"), "/agent-works_1.0~/")
+        self.assertEqual(site_builder.validate_site_base("/"), "/")
+        self.assertEqual(site_builder.validate_site_base("/agentworks/"), "/agentworks/")
+        self.assertEqual(site_builder.validate_site_base("/agent-works_1.0~/"), "/agent-works_1.0~/")
 
     def test_invalid_bases_are_rejected(self) -> None:
         invalid = (
@@ -217,7 +135,7 @@ class SiteBaseTests(unittest.TestCase):
         )
         for value in invalid:
             with self.subTest(value=value), self.assertRaises(ValueError):
-                website_build.validate_site_base(value)
+                site_builder.validate_site_base(value)
 
 
 class BuildTests(unittest.TestCase):
@@ -226,7 +144,7 @@ class BuildTests(unittest.TestCase):
     def build(self, site_base: str) -> tuple[Path, tempfile.TemporaryDirectory[str]]:
         temporary = tempfile.TemporaryDirectory()
         output = Path(temporary.name) / "site"
-        website_build.build_site(REPO_ROOT, output, site_base)
+        site_builder.build_site(REPO_ROOT, output, site_base)
         return output, temporary
 
     def test_root_and_project_builds_have_the_exact_output_set(self) -> None:
@@ -236,7 +154,7 @@ class BuildTests(unittest.TestCase):
                 self.addCleanup(temporary.cleanup)
                 files = {path.relative_to(output) for path in output.rglob("*") if path.is_file()}
                 self.assertEqual(files, self.expected)
-                self.assertEqual(website_build.FULL_MANIFEST, self.expected)
+                self.assertEqual(site_builder.FULL_MANIFEST, self.expected)
                 for route in (Path("404.html"), Path("lander/index.html")):
                     html = (output / route).read_text(encoding="utf-8")
                     self.assertNotIn("{{", html)
@@ -250,11 +168,11 @@ class BuildTests(unittest.TestCase):
     def test_builder_replaces_only_an_owned_output_set(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary) / "site"
-            website_build.build_site(REPO_ROOT, output, "/")
-            website_build.build_site(REPO_ROOT, output, "/agentworks/")
+            site_builder.build_site(REPO_ROOT, output, "/")
+            site_builder.build_site(REPO_ROOT, output, "/agentworks/")
             (output / "unrelated.txt").write_text("keep", encoding="utf-8")
             with self.assertRaises(ValueError):
-                website_build.build_site(REPO_ROOT, output, "/")
+                site_builder.build_site(REPO_ROOT, output, "/")
             self.assertEqual((output / "unrelated.txt").read_text(encoding="utf-8"), "keep")
 
     def test_builder_rejects_every_repository_output_before_writing(self) -> None:
@@ -278,7 +196,7 @@ class BuildTests(unittest.TestCase):
         )
         for target in targets:
             with self.subTest(target=target), self.assertRaises(ValueError):
-                website_build.build_site(REPO_ROOT, target, "/")
+                site_builder.build_site(REPO_ROOT, target, "/")
         self.assertEqual({path: path.read_bytes() for path in protected}, before)
         self.assertEqual(set(REPO_ROOT.rglob("agentworks-404-*")), staging_before)
         self.assertFalse((WEBSITE / "templates" / "nested-output").exists())
@@ -293,10 +211,10 @@ class BuildTests(unittest.TestCase):
             {"{{SITE_BASE}}", "{{LANDER_GAME}}"},
         )
         with self.assertRaises(ValueError):
-            website_build._validate_template("404.html", template + "{{OTHER}}")
-        for required in website_build.REQUIRED_404_REFERENCES:
+            site_builder._validate_template("404.html", template + "{{OTHER}}")
+        for required in site_builder.REQUIRED_404_REFERENCES:
             with self.subTest(required=required), self.assertRaises(ValueError):
-                website_build._validate_template("404.html", template.replace(required, "missing"))
+                site_builder._validate_template("404.html", template.replace(required, "missing"))
 
 
 class StaticDocumentTests(unittest.TestCase):
@@ -305,21 +223,21 @@ class StaticDocumentTests(unittest.TestCase):
         shell = (WEBSITE / "templates" / "404.html").read_text(encoding="utf-8")
         cls.fragment = (WEBSITE / "templates" / "lander-game.html").read_text(encoding="utf-8")
         cls.template = shell.replace("{{LANDER_GAME}}", cls.fragment)
-        cls.document = parse_document(cls.template)
+        cls.document = parse(cls.template)
         cls.css = (WEBSITE / "static" / "lander.css").read_text(encoding="utf-8")
         cls.model = (WEBSITE / "static" / "lander-model.js").read_text(encoding="utf-8")
         cls.game = (WEBSITE / "static" / "lander-game.js").read_text(encoding="utf-8")
 
     def element(self, element_id: str) -> tuple[str, dict[str, str | None]]:
-        return next(item for item in self.document.tags if item[1].get("id") == element_id)
+        return next(item for item in self.document.start_tags if item[1].get("id") == element_id)
 
     def test_no_javascript_document_is_a_useful_semantic_404(self) -> None:
-        tags = [tag for tag, _ in self.document.tags]
+        tags = [tag for tag, _ in self.document.start_tags]
         self.assertEqual(tags.count("header"), 1)
         self.assertEqual(tags.count("main"), 1)
         self.assertEqual(tags.count("footer"), 1)
         self.assertEqual(tags.count("h1"), 1)
-        home_links = [attributes for tag, attributes in self.document.tags if attributes.get("href") == "{{SITE_BASE}}"]
+        home_links = [attributes for tag, attributes in self.document.start_tags if attributes.get("href") == "{{SITE_BASE}}"]
         self.assertEqual(len(home_links), 1)
         self.assertNotIn("hidden", self.element("not-found-message")[1])
 
@@ -331,7 +249,7 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertIn("hidden", self.element("lander-outcome")[1])
         self.assertIn("hidden", self.element("lander-restart")[1])
         self.assertNotIn("hidden", self.element("lander-scene")[1])
-        home = next(attributes for tag, attributes in self.document.tags if attributes.get("href") == "{{SITE_BASE}}")
+        home = next(attributes for tag, attributes in self.document.start_tags if attributes.get("href") == "{{SITE_BASE}}")
         self.assertNotIn("hidden", home)
 
     def test_accessible_names_live_region_and_initial_focus_surface_are_pinned(
@@ -354,7 +272,7 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertNotIn("role", self.element("lander-fuel-value")[1])
         self.assertNotIn("aria-live", self.element("lander-fuel-value")[1])
         self.assertNotIn("aria-labelledby", self.element("lander-fuel-value")[1])
-        self.assertNotIn("output", [tag for tag, _ in self.document.tags])
+        self.assertNotIn("output", [tag for tag, _ in self.document.start_tags])
         self.assertTrue(" ".join(self.document.text_by_id["lander-scene-description"].split()))
 
     def test_scene_geometry_and_start_target_are_fixed_and_responsive(self) -> None:
@@ -377,7 +295,7 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertIn("transform-origin: 158px 401px", self.css)
         terrain = [
             attributes
-            for _, attributes in self.document.tags
+            for _, attributes in self.document.start_tags
             if attributes.get("class") in {"terrain-fill", "terrain-surface"}
         ]
         self.assertEqual([attributes["class"] for attributes in terrain], ["terrain-fill", "terrain-surface"])
@@ -395,10 +313,10 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertIn((410, 534), surface)
         self.assertIn((488, 571.2), surface)
         self.assertIn((498, 565.2), surface)
-        deck = next(attributes for _, attributes in self.document.tags if attributes.get("class") == "landing-platform")
+        deck = next(attributes for _, attributes in self.document.start_tags if attributes.get("class") == "landing-platform")
         self.assertEqual(float(deck["y"]), 453.72)
         self.assertEqual(float(deck["y"]) + float(deck["height"]), 457.21999999999997)
-        support = next(attributes for _, attributes in self.document.tags if attributes.get("class") == "site-scaffold")
+        support = next(attributes for _, attributes in self.document.start_tags if attributes.get("class") == "site-scaffold")
         self.assertTrue(
             support["d"].startswith("M312 457.21999999999997H498M312 464.71999999999997H498")
         )
@@ -407,7 +325,7 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertEqual(support["fill"], "none")
         self.assertEqual(support["stroke-linecap"], "butt")
         self.assertEqual(support["stroke-linejoin"], "round")
-        noc = next(attributes for _, attributes in self.document.tags if attributes.get("class") == "noc-building")
+        noc = next(attributes for _, attributes in self.document.start_tags if attributes.get("class") == "noc-building")
         self.assertTrue(noc["d"].startswith("M428 457.21999999999997V"))
         self.assertIn("rotate(var(--thrust-vector-angle))", self.css)
 
@@ -520,7 +438,7 @@ class StaticDocumentTests(unittest.TestCase):
                 with self.subTest(name=name, canary=canary):
                     self.assertIsNotNone(re.search(pattern, canary))
         for tag in ("audio", "canvas", "iframe"):
-            self.assertNotIn(tag, [name for name, _ in self.document.tags])
+            self.assertNotIn(tag, [name for name, _ in self.document.start_tags])
 
 
 class RocketAssetTests(unittest.TestCase):

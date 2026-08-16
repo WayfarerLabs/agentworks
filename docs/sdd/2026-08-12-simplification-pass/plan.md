@@ -62,10 +62,12 @@ hints (the judgment-heavy batch), then schema, manifests, capabilities and platf
 authored-artifact form policing. Batching by domain instead would put a no-judgment mechanical
 change into the same review as the sweep's riskiest deletions.
 
-**Website work is deferred** to a final wave 1 PR after #486 merges (operator ruling 8): W1, W4, W5,
-W6, W8 and the sweep's website rows. Wave 1 does not close until that PR lands. The gcp fixture
-extraction (P5) does not wait on #486, since it shares no files with the website work; it waits on
-the sweep instead, per group 4 above.
+**Website work is deferred** until #486 merges (operator ruling 8). It lands as two PRs rather than
+one (effort lead, 2026-08-16): the website items themselves (W1, W4, W5, W6), and the sweep's
+website rows, which ride the sweep so it stays batched by shape rather than splitting one mechanical
+change across two reviews. Wave 1 does not close until both land. W8 has left this scope entirely,
+for the reasons its item records. The gcp fixture extraction (P5) does not wait on #486, since it
+shares no files with the website work; it waits on the sweep instead, per group 4 above.
 
 - [x] Delete the `phase7` corpus and `validate_interaction_policy` with its 152 call sites (S1).
       Keep `test_resolution_timeout_cleanup.py` (trim its two wording pins); rename kept fixtures
@@ -92,21 +94,85 @@ the sweep instead, per group 4 above.
       `2026-08-07-secret-sources` lock; `phase7` alone in `hla.md`; and
       `validate_interaction_policy` alone in that lock's `operator-surfaces-lld.md`, which the
       supersession note supersedes.
-- [ ] Replace `website/tests/test_pages_workflows.py` (W1): delete the hand-rolled YAML parser and
+- [x] Replace `website/tests/test_pages_workflows.py` (W1): delete the hand-rolled YAML parser and
       every verbatim pin; rewrite the real policy invariants (least-privilege permissions,
       credential non-persistence, main-only deploy, source-SHA/artifact binding, double-build diff)
       as focused checks over a proper YAML load. Done when: suite green, no hardcoded workflow text
-      beyond the keys each check reads.
+      beyond the keys each check reads. **Done**, after four rounds that went the wrong way and one
+      that corrected them. The final file is 4 checks in 108 lines: write permissions confined to
+      the deployment job, that job running only `actions/deploy-pages`, its dependency on the
+      artifact producer and the `github-pages` environment, and `ci-success` consuming a real result
+      for every job it requires. Each derives rather than pins.
+
+      **The threat model is accidental regression in the workflow's shape, not adversarial
+      tampering.** Stating it once is what stops the next reader rediscovering the open-ended class.
+      These tests live in the same tree as the workflows and change in the same commits, so anything
+      that can edit `pages.yml` can edit them beside it; they are not a security root against a
+      hostile contributor. What the workflows guarantee, they guarantee by running: the website
+      suites, the two-build determinism diff, and the source-state verifiers each fail the job on
+      their own, and the `github-pages` environment's restrictions are configured on GitHub.
+
+      **The item got this wrong for four rounds and the record should say so plainly.** It replaced
+      the deleted file's verbatim pins with derivations, which fixed the form while preserving the
+      fundamental mistake, then grew to 635 lines policing a 134-line workflow. Each round closed one
+      expression of "repository-authored code can affect deployment" and the next round found
+      another, because that class has no end. The integration tester's findings were **all valid
+      under the guarantee the file claimed**; the guarantee was too broad. Removed with the rest: the
+      env-key, build-command, and one-invocation allowlists, the shell and `BASH_ENV` checks, the
+      step-key bans, credential non-persistence, first-party actions, the source-SHA and artifact
+      binding, and every check that executed a script.
+
+      **The one durable correction was the location.** A proper YAML load cannot happen in the
+      website suite, which runs `python3 -m unittest` on a runner with no package installation step,
+      so the file lives at `cli/tests/test_workflow_policy.py` beside
+      `cli/tests/assistance/test_contract.py`, which reads repository-root artifacts for the same
+      reason.
+
+      Three method lessons survive, all about evidence rather than workflows. A deleted policing
+      file's mutation corpus is recoverable from history on demand by parsing the old file at the
+      merge base, and running it against the replacement before the deletion merges is what showed
+      this branch briefly behind `main`. Author-selected mutations cannot establish coverage, since
+      they only show each check bites what it was written to bite; two review lanes walked through
+      policies no check owned. And a mitigation cited to justify leaving a gap has to be executed
+      rather than asserted: the one offered here, that a drift verifier stood behind fail-fast, was
+      false on inspection.
+
+      Two further tester findings arrived after the narrowing, both deliberate-actor shaped
+      (overwriting built output, replacing the gate script) and so outside the promise this file now
+      makes. The accident-grade property behind the first was taken: the gate check claimed the
+      results were consumed when it holds only that they are wired, and it is narrowed, since two
+      claims that outran their checks were already corrected here. The second was not taken and is
+      returned to the operator, because its premise does not hold: the pre-upload source verifier
+      already sits between the determinism diff and the upload, so "nothing between them" is false at
+      HEAD, and separating an inserted post-processing step from the verifier needs that step
+      identified by its environment key, which is the machinery this round removed.
+
 - [ ] Prose/form-policing sweep across the estate (absorbed survey list plus G12, C10, D4, P6, and
       the #470 manifesto pin). **This enumeration is the exclusion list and nothing else is
       excluded**: W1's workflow test, S1's corpus and wording-pin trims, W4/W6 in the contained
-      website trims, and the guide item's files `cli/tests/guide/test_contract_catalog.py` and
+      website trims, the guide item's files `cli/tests/guide/test_contract_catalog.py` and
       `cli/tests/guide/test_assessment.py`, whose prose pins belong to that item so each file has
-      one owner. Any other overlap the inventory turns up is an ordering question for the lead, not
-      an ownership one: a general rule keyed on what another item names or edits excluded the gcp
+      one owner, and `cli/tests/test_workflow_policy.py`, which W1 wrote and owns despite sitting
+      under `cli/tests/` (added 2026-08-16, since a path-keyed inventory would otherwise claim it).
+      Any other overlap the inventory turns up is an ordering question for the lead, not an
+      ownership one: a general rule keyed on what another item names or edits excluded the gcp
       files, `test_schema_adapter.py`, and `test_view.py`, which `findings.md` names _for_ the
-      sweep. The sweep records each overlap it finds, keeps the file, and raises the ordering. The
-      sweep's first step commits an exact decision inventory derived from the absorbed survey, one
+      sweep. The sweep records each overlap it finds, keeps the file, and raises the ordering.
+
+      **Three website overlaps raised 2026-08-16 by the contained-trims work, recorded here rather
+      than in a PR body so the sweep's executor finds them.** First, W5 is not on the exclusion list
+      above, which names W4 and W6 only, yet `test_lander_404.py` is W5's file and carries sweep
+      rows of its own; the W5 change rewrote about 90 lines of it by deleting duplicated fixtures,
+      so the sweep should re-read it rather than inventory it from the pre-#486 basis. Second,
+      `website/tests/test_site_documents.py` has two owners: the W4 palette rows and the W8 browser
+      row belong to the trims item, while the CSS declaration list and the four-word
+      `fake_terminal` blacklist in `test_shared_css_pins_tokens_reflow_focus_and_terminal_cues` are
+      sweep rows and were deliberately left untouched. That blacklist is the shape
+      `no-prose-policing-tests` calls worse than useless, so it is a delete row, not a convert row.
+      Third, this plan expected the sweep's website rows in the same PR as the website work; they
+      are not in it, so they remain wholly the sweep's.
+
+      The sweep's first step commits an exact decision inventory derived from the absorbed survey, one
       row per test or assertion group (a file mixing wholly-policing tests with embedded prose
       assertions gets multiple rows), each row marked delete, convert, or keep. Keep behavioral,
       structural, and security tests; delete the rest; convert to structural form only where a real
@@ -114,6 +180,7 @@ the sweep instead, per group 4 above.
       mostly by deletion (R2.4). May land as several PRs. Done when: delete rows are gone at HEAD,
       convert rows point at the landed structural replacement, and keep rows name the invariant that
       earns the assertion.
+
 - [x] Delete guide dead surface and interior re-validation (G8's guide-module members and G2;
       `JsonScalar` lives in `machine_output.py` and belongs to the G6 item below); fix the vacuous
       monkeypatch test and add the persisted-enum parity test (G11, R2.3). This item owns
@@ -229,9 +296,37 @@ the sweep instead, per group 4 above.
 
 - [ ] Contained gcp test dedup (P5), after the sweep lands: a shared gcp test fixture module. Done
       when: suite green, the extended-operation fake and `_api_error` each defined once.
-- [ ] Contained website test trims (W4, W5, W6, W8), after PR #486 merges (ruling 8): shared fixture
+- [x] Contained website test trims (W4, W5, W6), after PR #486 merges (ruling 8): shared fixture
       adoption in `test_lander_404.py`, exported status constant, threshold-not-exact contrast
-      assertions, drop the Chromium duplicate. Done when: suite green without Chromium installed.
+      assertions. **W8 has left this item** and folds into W10's lander-scope decision for the
+      reassessment (effort lead, 2026-08-16, accepting the evidence below): its premise did not
+      survive execution and this item's done-condition was unreachable, so keeping it here would
+      hold three finished trims behind a deletion that should not happen. Done when: W4, W5, and W6
+      land with the suite green. **Done**: W5 removed the last website test file carrying its own
+      builder loader, output manifest, HTML parser, and contrast helpers. W4 converted the seven
+      three-decimal ratio comparisons into WCAG inequalities (4.5 text, 3.0 non-text) read out of
+      the built stylesheet, which retires the exact token pins with them, because the palette is now
+      checked where it ships rather than transcribed; the `--hot` and `--status` pairs were dropped
+      rather than converted, since both tokens are declared in `site.css` and referenced by nothing
+      while the lander paints those colors as literals in `lander.css`. W6 exported
+      `UNDERWAY_STATUS`. **The done-condition, which read "Done when: suite green without Chromium
+      installed", is unachievable and is the item's error**: the suite has eleven hard Chromium
+      launches, not one. Ten belong to the Lander arcade contracts in four
+      `test_lander_phase4*_browser.py` files, which is W10's deferred lander-scope decision, not
+      this item's. **W8's own premise did not survive execution either, on three counts.** The two
+      tests are not duplicates: the CSS test asserts declarations appear in the stylesheet, the
+      browser test asserts the computed geometry resolves, and only the second can detect an
+      override or a cascade change, so under this SDD's own observational-twin rule (`hla.md`) the
+      browser test is the keeper and the CSS pin is the deletable one. The manual checklist does not
+      cover it; that document is the Lander arcade checklist and carries no long-form
+      table-of-contents row. And the flake evidence is stale: the checklist's "Chromium CI
+      reliability correction" entry, dated 2026-08-15 and landed after the finding was written,
+      records that the timeout was a harness defect (`--dump-dom` owning both readiness and
+      shutdown), replaced by DevTools-owned readiness and termination and validated at 40
+      consecutive iterations. Deleting the browser test would therefore surrender the only
+      observational guard of the responsive layout and buy nothing operationally, because the same
+      suite still launches Chromium ten more times. Recommendation: fold W8 into the W10 scope
+      decision rather than executing it alone.
 
 ## Wave 2: process and rule subtraction (R3)
 
