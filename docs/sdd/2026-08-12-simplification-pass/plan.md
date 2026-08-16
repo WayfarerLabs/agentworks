@@ -98,98 +98,44 @@ shares no files with the website work; it waits on the sweep instead, per group 
       every verbatim pin; rewrite the real policy invariants (least-privilege permissions,
       credential non-persistence, main-only deploy, source-SHA/artifact binding, double-build diff)
       as focused checks over a proper YAML load. Done when: suite green, no hardcoded workflow text
-      beyond the keys each check reads. **Done**: 834 lines become 16 checks in 635, counted at the
-      final head with `wc -l` and `grep -c '^def test_'`. Earlier revisions of this note carried 380
-      lines, then 16 checks in 532, none of which any counting supported; the pattern is the reason
-      the reassessment's retrospective figures get re-measured rather than carried forward. Nothing
-      pins wording, step names, action versions, or formatting; where two places in a file must
-      agree the check derives one from the other (the artifact path from the build command's
-      `--output`, deploy's `artifact_name` from the upload's `name`, the verified step from the
-      `steps.<id>.outputs` expression the job output references, the required-result count from
-      `needs`). **The item's one false premise was the location**: a "proper YAML load" cannot
-      happen in the website suite at all, because that suite runs as `python3 -m unittest` on a
-      runner with no package installation step, and PyYAML is not in the standard library nor
-      documented in the `actions/runner-images` manifest. The file therefore lands at
-      `cli/tests/test_workflow_policy.py`, where PyYAML is already a first-party dependency and the
-      required `test` job runs it, following `cli/tests/assistance/test_contract.py`, which already
-      tests repository-root artifacts from there for the same reason. The alternative, adding an
-      install step to the two workflow jobs under test, would have edited the artifacts being
-      verified and broken the website suite's no-installation property for one test. Seven guards
-      beyond the five named invariants are kept because the deleted closed-shape assertions were
-      their only home and each is a real bypass: the fail-fast shell (a
-      `defaults.run.shell: bash {0}` drops `-e`, which alone disarms the double-build diff),
-      `BASH_ENV` at any of its three levels, a `working-directory` default over the deploy path,
-      unskippable deploy-path steps and jobs (`if` or `continue-on-error` on a test step publishes
-      an unverified artifact), first-party actions only, a deny-by-default allowlist of the
-      deployment actions permitted in the write-scoped job, and the build job's website suites
-      derived from `ci.website`'s. **R2.3 applies twice**: nothing checked that `ci-success` needs
-      every other job, which is the single property branch protection depends on and the one an
-      added job silently breaks; and nothing bound that job's `REQUIRED_RESULTS` to the
-      `join(needs.*.result)` expression, so literal `success` words would have left the required
-      check green while it stopped gating. Both checks are new.
+      beyond the keys each check reads. **Done**, after four rounds that went the wrong way and one
+      that corrected them. The final file is 4 checks in 108 lines: write permissions confined to
+      the deployment job, that job running only `actions/deploy-pages`, its dependency on the
+      artifact producer and the `github-pages` environment, and `ci-success` consuming a real result
+      for every job it requires. Each derives rather than pins.
 
-      **The evidence standard changed mid-item and that is the durable lesson.** The first head's
-      proof was 30 author-chosen mutations, each failing the check that owns it. That is the wrong
-      proof: mutations chosen by the author of the checks can only show each check bites what it was
-      written to bite, and cannot find a stated policy with no owning check. The integration tester
-      and the complexity review lane each independently walked through two such policies, and running
-      the deleted file's own mutation corpus against the replacement, which should have happened
-      before the deletion merged, found two more. The corpus now stands at 39 violations from the
-      deleted file, both review lanes, one deny-by-default probe, and eight environment and script
-      violations, 45 caught, and with the 30 author mutations it is 79 violations each labelled with
-      the property it attacks, every stated property having at least one. Three of the four are
-      a real YAML load cannot see, and are declared drops on that ground: a duplicate top-level key,
-      which resolves last-wins exactly as Actions resolves it, twice, and a trailing `# comment` on a
-      permission value, which is not data. **The fourth is a defense that moved, not a gap.** It
-      inserts a tree-mutating step into the build job, and the guarantee is still held: the
-      pre-upload source verifier rejects tracked and untracked drift at runtime, and this suite
-      executes that rejection rather than asserting about it. Holding it structurally instead would
-      mean asserting the build job's `run` steps are exactly some derived set, which re-pins step
-      shape and reintroduces the form-policing this item exists to remove.
+      **The threat model is accidental regression in the workflow's shape, not adversarial
+      tampering.** Stating it once is what stops the next reader rediscovering the open-ended class.
+      These tests live in the same tree as the workflows and change in the same commits, so anything
+      that can edit `pages.yml` can edit them beside it; they are not a security root against a
+      hostile contributor. What the workflows guarantee, they guarantee by running: the website
+      suites, the two-build determinism diff, and the source-state verifiers each fail the job on
+      their own, and the `github-pages` environment's restrictions are configured on GitHub.
 
-      **A third round found the same hole a third time, and its diagnosis is the lesson that
-      generalizes furthest.** The confinement check for the write-scoped job banned `run:` steps in
-      round two, after a `run:` step walked in during round one; then `actions/github-script`, an
-      official action that executes authored JavaScript with the job's token, walked past the ban.
-      The check was a blacklist of execution mechanisms, and it failed exactly the way
-      `no-prose-policing-tests` says a blacklist of wordings fails. **A check that enumerates what is
-      forbidden is a blacklist wherever it appears, and that rule is not a prose rule**: security
-      checks, policy checks, and validation all inherit it, and the tell is a fix round that moves
-      one item across the line. The fix is the terminal shape rather than a third ban: a positive,
-      deny-by-default allowlist of the deployment actions permitted beside the token, with the job
-      still selected by its grants. A probe of an invented action nobody had thought of demonstrates
-      the difference rather than arguing it, since the old predicate passes that probe and the
-      allowlist rejects it.
+      **The item got this wrong for four rounds and the record should say so plainly.** It replaced
+      the deleted file's verbatim pins with derivations, which fixed the form while preserving the
+      fundamental mistake, then grew to 635 lines policing a 134-line workflow. Each round closed one
+      expression of "repository-authored code can affect deployment" and the next round found
+      another, because that class has no end. The integration tester's findings were **all valid
+      under the guarantee the file claimed**; the guarantee was too broad. Removed with the rest: the
+      env-key, build-command, and one-invocation allowlists, the shell and `BASH_ENV` checks, the
+      step-key bans, credential non-persistence, first-party actions, the source-SHA and artifact
+      binding, and every check that executed a script.
 
-      Four method lessons go to the reassessment. A deleted policing file's mutation corpus is
-      recoverable from history on demand, extracted here from the merge base by parsing the old
-      file's AST rather than transcribing it, and should be run against the replacement before the
-      deletion merges. The runner that does it stays evidence rather than a committed artifact, since
-      its only consumer is that one-time proof. Coverage is shown by labelling each violation with
-      the property it attacks, so a property nothing attacks shows up as a gap the corpus itself
-      reports, rather than by maintaining a written map of sentences to checks, which is a second
-      copy of what the code already expresses and is one step from someone asserting it in a test.
-      And the blacklist lesson above, which is the one that reaches past workflows.
+      **The one durable correction was the location.** A proper YAML load cannot happen in the
+      website suite, which runs `python3 -m unittest` on a runner with no package installation step,
+      so the file lives at `cli/tests/test_workflow_policy.py` beside
+      `cli/tests/assistance/test_contract.py`, which reads repository-root artifacts for the same
+      reason.
 
-      **Two more predicates got the same conversion, and the second was found by comparing against
-      what was deleted.** `BASH_ENV` banned by name became an allowlist of the four environment keys
-      the guarded jobs actually set, after `PATH`, `GIT_CONFIG_GLOBAL`, `LD_PRELOAD`, and
-      `PYTHONPATH` each reached the same tooling and passed. Then running the three probes against
-      the deleted file at the merge base showed the branch genuinely behind `main` on one property:
-      `set +e` carries no shell operator token, so the operator blacklist missed it while `main`
-      caught it by pinning the script verbatim. That was the deciding fact for merging, and it is
-      why the comparison is worth running before a policing file is deleted rather than after. The
-      risk was first filed on the reasoning that the drift verifier stood behind fail-fast; **that
-      reasoning was wrong**, since the pre-upload verifier inspects the worktree rather than the
-      built artifact and `ci.website` has no verifier after its build at all, so a swallowed diff is
-      an unreproducible build nobody notices. So it was fixed rather than filed: each line of the two
-      build scripts invokes one command from an allowlist derived from what they run, and each line
-      must be a single invocation, which is a separate property because an allowlist alone passes
-      `python3 a || python3 b`. Lines are split at their control operators using Python's own
-      shell-punctuation classification rather than a list maintained here. That subsumes the
-      blacklist in both directions, so it is retired rather than left beside the allowlist. The `if`
-      and `continue-on-error` step-key bans stay filed and unfixed, which is a drawn line rather than
-      an oversight: GitHub's schema closes that vocabulary, so no invented mechanism reaches them.
+      Three method lessons survive, all about evidence rather than workflows. A deleted policing
+      file's mutation corpus is recoverable from history on demand by parsing the old file at the
+      merge base, and running it against the replacement before the deletion merges is what showed
+      this branch briefly behind `main`. Author-selected mutations cannot establish coverage, since
+      they only show each check bites what it was written to bite; two review lanes walked through
+      policies no check owned. And a mitigation cited to justify leaving a gap has to be executed
+      rather than asserted: the one offered here, that a drift verifier stood behind fail-fast, was
+      false on inspection.
 
 - [ ] Prose/form-policing sweep across the estate (absorbed survey list plus G12, C10, D4, P6, and
       the #470 manifesto pin). **This enumeration is the exclusion list and nothing else is
