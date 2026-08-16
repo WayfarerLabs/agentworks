@@ -244,10 +244,11 @@ complete-document readiness boundary with null-safe document-root access, closin
 navigation race observed during local full-suite runs.
 
 Before commit, the responsive geometry witness passed 40 consecutive two-viewport iterations and the
-Phase 4M witness passed 30 consecutive real-Chromium iterations without a failure. The complete
-website suite then passed 159 of 159 tests in 34.391 seconds. A structural cleanup witness rejects a
-return to `--dump-dom` and verifies DevTools closure, owned-process termination, and server-thread
-cleanup.
+Phase 4M witness passed 30 consecutive real-Chromium iterations without a failure. After the
+failure-path mutations were added, the complete website suite passed 161 of 161 tests in 36.618
+seconds. Structural cleanup witnesses reject a return to `--dump-dom` and verify DevTools closure,
+owned-process termination, bounded readiness, kill fallback, primary-error precedence, and
+server-thread cleanup.
 
 ### Historical route-proof automated execution record
 
