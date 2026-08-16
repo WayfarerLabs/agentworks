@@ -2,9 +2,11 @@
 resuming its transcript when one exists and launching fresh otherwise.
 
 Config vocabulary (all optional): ``permission_mode`` and ``model`` map to
-the ``--permission-mode`` / ``--model`` flags verbatim, and ``extra_args``
-is a list of raw argv tokens appended last (the operator escape hatch for
-any flag the harness integration does not model). See ``claude-code-lld.md``.
+the ``--permission-mode`` / ``--model`` flags verbatim; ``remote_control``
+enables Claude Code Remote Control; ``vim_mode`` and ``terminal_bell`` become
+session-local settings; and ``extra_args`` is a list of raw argv tokens
+appended last (the operator escape hatch for any flag the harness integration
+does not model). See ``claude-code-lld.md``.
 
 Addressing uses a stored per-session Claude session id (a v4 uuid) kept in
 the harness integration's state namespace under ``session_id``: minted once on the first
@@ -21,6 +23,7 @@ is possible.
 
 from __future__ import annotations
 
+import json
 import shlex
 import uuid
 from typing import TYPE_CHECKING, ClassVar, Literal
@@ -54,6 +57,21 @@ class ClaudeCodeConfig(AgwModel):
 
     model: str | None = None
     """Forwarded as ``--model``."""
+
+    remote_control: bool = False
+    """When true, enable Claude Code Remote Control and use the Agentworks
+    session name as its title. False (the default) adds no override. A child
+    template's value replaces its parent's."""
+
+    vim_mode: bool = False
+    """When true, enable Vim-style prompt editing through a session-local
+    Claude setting. False (the default) adds no override. A child template's
+    value replaces its parent's."""
+
+    terminal_bell: bool = False
+    """When true, ask Claude Code to ring the terminal bell when a task
+    finishes or needs permission. False (the default) adds no override. A
+    child template's value replaces its parent's."""
 
     extra_args: list[str] = Field(default_factory=list)
     """Appended to the command verbatim, last, so it can carry any flag
@@ -200,14 +218,27 @@ class ClaudeCodeIntegration(HarnessIntegration):
         return sid
 
     def _config_flags(self) -> list[str]:
-        """The managed flags then ``extra_args``, each an argv token.
-        ``extra_args`` is appended verbatim last so it can carry any flag
-        the harness integration does not model (FRD R4)."""
+        """The managed flags and session-local settings, then
+        ``extra_args``, each an argv token. ``extra_args`` is appended
+        verbatim last so it can carry any flag the harness integration does
+        not model (FRD R4)."""
         tokens: list[str] = []
         if self.config.permission_mode is not None:
             tokens += ["--permission-mode", self.config.permission_mode]
         if self.config.model is not None:
             tokens += ["--model", self.config.model]
+        if self.config.remote_control:
+            # The flag's value is optional. Supplying the display name keeps a
+            # later positional in extra_args from becoming the Remote Control
+            # title accidentally.
+            tokens += ["--remote-control", self._session_name]
+        settings: dict[str, str] = {}
+        if self.config.vim_mode:
+            settings["editorMode"] = "vim"
+        if self.config.terminal_bell:
+            settings["preferredNotifChannel"] = "terminal_bell"
+        if settings:
+            tokens += ["--settings", json.dumps(settings, separators=(",", ":"))]
         tokens += self.config.extra_args
         return tokens
 
