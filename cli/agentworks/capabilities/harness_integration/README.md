@@ -166,11 +166,11 @@ The capability ladder, harness-integration edition:
   `miss_policy="error"` (a `session-template` naming an unknown integration fails at finalize),
   `builtin_override="reserved"` (a plugin cannot replace `shell`).
 - A **capability** is a `HarnessIntegration` subclass registered in `HARNESS_INTEGRATION_REGISTRY`
-  (`__init__.py`), plus a read-only `HarnessIntegrationEntry` registry row so it lists and describes
-  like any resource. Core built-ins' rows come from the generic capability publisher
-  (`capabilities/publish.py`, driven by the kind's descriptor); a plugin-seated integration's row is
-  published by the plugin machinery with a `system-plugin` origin instead, and the built-in
-  publisher skips it.
+  (`__init__.py`), plus a read-only `HarnessIntegrationEntry` registry row so it appears in resource
+  inventory, kind explanation, and graph queries like any resource. Core built-ins' rows come from
+  the generic capability publisher (`capabilities/publish.py`, driven by the kind's descriptor); a
+  plugin-seated integration's row is published by the plugin machinery with a `system-plugin` origin
+  instead, and the built-in publisher skips it.
 - An **instance** is one integration bound to one session: the merged harness config blob plus the
   session's identity (`session_name`, `vm_name`, `workspace_name`, the agent-or-admin target) and
   its per-session state blob. Constructed fresh per operation by the session node factories.

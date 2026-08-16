@@ -25,11 +25,11 @@ def publish_to(registry: Registry) -> None:
     lacks what it needs), never a publish-time filter.
 
     The origin's source carries the bundled filename
-    (``agentworks.manifests.builtin/<filename>``) so ``agw resource
-    describe`` points at the actual shipped file. Bundled manifests are
-    app data: warn-level issues in them are app bugs, so the shared
-    ``publish_manifest_package`` body raises a typed error the moment a
-    bundle is dirty (a raise, not an ``assert``, so it holds under
+    (``agentworks.manifests.builtin/<filename>``) so inventory and
+    kind-specific origin views attribute the actual shipped file. Bundled
+    manifests are app data: warn-level issues in them are app bugs, so the
+    shared ``publish_manifest_package`` body raises a typed error the moment
+    a bundle is dirty (a raise, not an ``assert``, so it holds under
     ``python -O``).
     """
     from agentworks.manifests.package import publish_manifest_package

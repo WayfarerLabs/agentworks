@@ -542,7 +542,7 @@ def _contextual_message(detail: ErrorDetails, address: _Address) -> str | None:
             # pattern MEANS and this module never invents phrasing: what
             # it can do is spell the rule plainly instead of pydantic's
             # "String should match pattern '...'". The intent belongs in
-            # the field's description, which the sample and describe
+            # the field's description, which the sample and explain
             # surfaces render beside it.
             #
             # Backticks rather than the ``/.../`` a regex usually wears:

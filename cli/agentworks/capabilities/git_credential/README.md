@@ -121,11 +121,11 @@ The capability ladder (`../README.md` has the full model), credential edition:
   reference, and a typo errors at finalize with the reference source named.
 - A **capability** is a `GitCredentialProvider` subclass registered in
   `GIT_CREDENTIAL_PROVIDER_REGISTRY` (`__init__.py`), plus a read-only `GitCredentialProviderEntry`
-  registry row (`kinds.py`) so it lists and describes like any resource. Core built-ins' rows come
-  from the generic capability publisher (`capabilities/publish.py`, driven by the kind's
-  descriptor); a plugin-seated provider's row is published by the plugin machinery with a
-  `system-plugin` origin, and the built-in publisher skips it (that is exactly how `azdo`
-  publishes).
+  registry row (`kinds.py`) so it appears in resource inventory, kind explanation, and graph queries
+  like any resource. Core built-ins' rows come from the generic capability publisher
+  (`capabilities/publish.py`, driven by the kind's descriptor); a plugin-seated provider's row is
+  published by the plugin machinery with a `system-plugin` origin, and the built-in publisher skips
+  it (that is exactly how `azdo` publishes).
 - An **instance** is one provider bound to one declared credential:
   `cls(credential_name, config, description=...)`, the capability's own keys only (not the tag), and
   never a resolved token. Constructed by the composition roots (see below).

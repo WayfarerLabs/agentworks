@@ -439,9 +439,11 @@ procedure above as its brief. What matters is that it gets the constraints, not 
   per-implementation output expands EVERY arm with that arm's own fields, so nothing about the modes
   has to be reconstructed from prose or from a second surface. `agw resource sample` is the surface
   that shows one arm only; it says so in a comment naming the `explain` that prints them all.
-- `explain`, stdout `sample`, and stdout `schema` work while `config.toml` is invalid. Their
-  `--write` forms, `list`, `secret list`, and config-dependent doctor checks do not. Doctor becomes
-  the iteration loop after the one-time TOML cutover.
+- `explain`, stdout `sample`, and stdout `schema` work while `config.toml` is invalid. The
+  path-valued `resource sample --write PATH` form, `list`, `secret list`, and config-dependent
+  doctor checks do not. The fixed-destination `resource schema --install` also needs valid config so
+  it can locate the resources directory. Doctor becomes the iteration loop after the one-time TOML
+  cutover.
 - `config.toml` is all-or-nothing, so every resource section comes out in one pass at the end. That
   is not a reason to defer verification: run `agw doctor` after each manifest.
 - Settings sections stay in `config.toml`. Only resource sections move.

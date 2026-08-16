@@ -260,8 +260,9 @@ recovery prerequisites.
 - The `lima-local` and `wsl2` sites ship built in, `lima-local` on `placement: {mode: local}` and
   `wsl2` on no config at all. Like every site they register on every host and report not-ready where
   this host lacks what they need (wsl2 is Windows-only; a local Lima site needs `limactl`); a
-  not-ready site still lists and describes with its reason, and using it is an error. Their names
-  are reserved. A site named after a platform must declare that platform.
+  not-ready site still appears marked in `agw resource list`, `agw doctor` reports the reason, and
+  using it is an error. Their names are reserved. A site named after a platform must declare that
+  platform.
 - Consumers name sites: `agw vm create --site`, `defaults.site` in config.toml, and each VM row's
   `site`. Templates deliberately carry no site: placement is per-host, never template state.
 - Site config secrets ride the standard secret machinery: a platform that needs a credential names
@@ -478,9 +479,9 @@ catalog rows carry the `system-plugin` origin. Override policy is per kind:
   the source too or remove that dependency.
 - **Bundled vm-sites** (`lima-local`, `wsl2`): reserved names. Redeclaring one is an error; declare
   a sibling site instead. Like every vm-site they register on every host and report not-ready where
-  this host lacks what they need (`agw resource list` marks the row; `describe` and `agw doctor`
-  carry the reason); using a not-ready site is an error naming the requirement. A site naming an
-  UNKNOWN platform (a typo, or an uninstalled plugin) is a hard error at load, not a self-disable.
+  this host lacks what they need (`agw resource list` marks the row and `agw doctor` carries the
+  reason); using a not-ready site is an error naming the requirement. A site naming an UNKNOWN
+  platform (a typo, or an uninstalled plugin) is a hard error at load, not a self-disable.
 - **The four capability kinds** (`secret-backend`, `vm-platform`, `git-credential-provider`,
   `harness-integration`): registered code, shown as read-only rows. You cannot declare or override
   one. `agw resource explain <capability-kind>` lists the implementations this build has, and naming
@@ -489,8 +490,8 @@ catalog rows carry the `system-plugin` origin. Override policy is per kind:
   `backend_mappings`, platforms configure per site via the `spec.platform` table, and integrations
   configure per session-template via the `spec.harness_integration` table. Every installed platform
   publishes a row regardless of host support: a platform whose host requirements are not met (e.g.
-  `wsl2` off Windows) publishes a present, not-ready row (`agw resource list` and `agw doctor` show
-  it with the reason), and a site referencing it is not-ready rather than erroring.
+  `wsl2` off Windows) publishes a present, not-ready row (`agw resource list` marks it and
+  `agw doctor` shows the reason), and a site referencing it is not-ready rather than erroring.
 
 ## System plugins
 

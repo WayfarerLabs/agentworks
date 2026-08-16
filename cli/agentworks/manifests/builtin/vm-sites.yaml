@@ -9,9 +9,9 @@
 # Like every vm-site, a bundled site registers UNCONDITIONALLY (its
 # platform publishes unconditionally too, R13) and is NOT-READY where it
 # lacks what it needs (its folded readiness verdict: lima-local needs a
-# local limactl; wsl2 needs Windows with WSL). Not-ready sites list and
-# describe like any resource; using one is a typed error, and `agw doctor`
-# shows each site's state and reason. The lima site is named lima-local,
+# local limactl; wsl2 needs Windows with WSL). Not-ready sites remain marked
+# in `agw resource list`; using one is a typed error, and `agw doctor` shows
+# each site's state and reason. The lima site is named lima-local,
 # not lima: the bundled site is one CONFIGURATION of the platform (this
 # workstation), and remote-Lima sites are ordinary operator declarations.
 apiVersion: agentworks/v1

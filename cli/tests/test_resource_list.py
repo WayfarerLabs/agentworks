@@ -176,9 +176,9 @@ def test_origin_filter_code_only_shows_built_in(tmp_path: Path) -> None:
 
 def test_format_origin_line_renders_each_variant(tmp_path: Path) -> None:
     """``format_origin_line`` is the framework-shared origin renderer
-    used by both the cross-kind list and per-kind describe views; the
-    list view emits it as a single cell, so we assert variant strings
-    are present and no unknown variants slip in.
+    used by the resource list and secret describe views; the list view
+    emits it as a single cell, so we assert variant strings are present
+    and no unknown variants slip in.
     """
     cfg_file = tmp_path / "config.toml"
     _write_base(

@@ -3,9 +3,10 @@ host support (``unsupported_reason`` feeds the platform node's folded
 readiness), and every vm-site, bundled and declared alike, registers
 UNCONDITIONALLY and folds to not-ready when its platform is host-disabled or
 the bound config lacks a local requirement. The verdict is stored on the graph
-and read via ``graph.readiness_of``. Not-ready sites list and describe like any
-resource; using one is a typed error naming the chain; references degrade to
-doctor warnings instead of breaking every command.
+and read via ``graph.readiness_of``. Not-ready sites remain marked in the
+resource list, while doctor owns the diagnostic reason. Using one is a typed
+error naming the chain; references degrade to doctor warnings instead of
+breaking every command.
 """
 
 from __future__ import annotations

@@ -41,8 +41,8 @@ class InstanceRef:
     Fields:
 
     - ``instance_kind``: the DB row's kind identifier (``"vm"``, ``"agent"``,
-      ``"workspace"``, ``"session"``, ``"console"``). Used by the describe
-      view to group entries by instance type.
+      ``"workspace"``, ``"session"``, ``"console"``). It becomes the graph's
+      live-node kind, and secret describe groups its live usages by this value.
     - ``instance_name``: the DB row's name (``vm.name``, ``session.name``,
       etc.).
 
@@ -101,7 +101,7 @@ class ResourceKind(Protocol):
       ``capability`` kind does, and a test pins exactly that. It is the
       single per-kind schema authority: manifest decode validates a
       document's ``spec`` against it, schema emission derives from it,
-      and the sample and describe surfaces render from it. Declared here
+      and the sample and explain surfaces render from it. Declared here
       rather than in a table in the manifest layer, so a new kind cannot
       be added without one and no switchboard has to be hand-maintained.
     - ``builtin_override``: what happens when an operator manifest
@@ -204,9 +204,10 @@ class ResourceKind(Protocol):
     # ``graph.readiness_of`` (through
     # ``agentworks.resources.inspect.not_ready_reason_for``), the single access
     # path (R11); a kind with no readiness concept folds to ready. A not-ready
-    # resource still registers, lists, describes, and holds references; USING it
-    # is the owning domain's typed error, and existing references degrade to
-    # doctor warnings. The fold's ``not_ready`` inputs stay cheap and offline
+    # resource still registers, appears marked in the resource list, and holds
+    # references; doctor owns the diagnostic reason. USING it is the owning
+    # domain's typed error, and existing references degrade to doctor warnings.
+    # The fold's ``not_ready`` inputs stay cheap and offline
     # (never network, secrets, or prompting; deeper readiness is the capability
     # lifecycle's preflight).
     #

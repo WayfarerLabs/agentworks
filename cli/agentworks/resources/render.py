@@ -1,9 +1,9 @@
-"""Framework-layer rendering helpers shared by every kind's CLI describe
-view. ``format_origin_line`` lives here (not in any kind module) because
-the resource inventory and per-kind commands
-(``agw secret describe``, future ``agw vm describe`` ...) all render the
-same ``Origin`` shape; defining the renderer next to ``Origin`` keeps the
-layer correct.
+"""Framework-layer rendering helpers for resource inspection views.
+
+``format_origin_line`` lives here (not in any kind module) because the
+resource inventory and kind-specific commands such as ``agw secret describe``
+render the same ``Origin`` shape; defining the renderer next to ``Origin``
+keeps the layer correct.
 
 The host paths these renderers embed are spelled by
 ``agentworks.path_rendering.format_host_path``, the repo-wide rule, which
@@ -33,8 +33,8 @@ def format_reference_entry(entry: ReferenceEntry) -> str:
     entirely true and still send an operator to a file with no such env
     var in it. The tail names the template that wrote it.
 
-    Shared by ``agw resource list`` and ``agw secret describe``, which
-    render the same list and must not drift.
+    This is the secret describe view's inbound-reference formatter. Graph
+    output projects the authoritative references as typed edges instead.
     """
     line = f"{entry.source[0]}/{entry.source[1]}: {entry.usage}"
     if entry.declared_by is None or entry.declared_by == entry.source:

@@ -165,8 +165,8 @@ supplies the remediation clause a propagating consumer's hint reads.
 
 The rules on the resulting verdict are uniform:
 
-- A not-ready resource **still registers**: it lists (marked), describes (with the reason), and
-  holds references. Existence and availability are separate axes.
+- A not-ready resource **still registers**: `agw resource list` marks it, `agw doctor` reports the
+  reason, and the resource holds references. Existence and availability are separate axes.
 - **Using** a not-ready resource is a typed error naming the reason.
 - **References to** a not-ready resource are doctor warnings, never command failures: a resources
   dir shared across hosts degrades gracefully on the host that lacks a requirement.

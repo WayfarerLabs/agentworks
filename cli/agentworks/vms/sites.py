@@ -12,8 +12,9 @@ the finalize fold and stored on the graph: a site is not-ready when its
 platform is host-unsupported (wsl2 off Windows) or the bound config
 reports a missing requirement (a local-Lima site without ``limactl``).
 An unknown platform (a typo, or an uninstalled plugin) is a hard
-finalize error. A not-ready site still lists, describes, and holds references;
-using it (:func:`resolve_site`) is a typed error with the reason, and
+finalize error. A not-ready site still appears marked in the resource list and
+holds references; doctor reports the reason. Using it (:func:`resolve_site`) is
+a typed error with the reason, and
 existing references to it (VMs, ``defaults.site``) degrade to doctor
 warnings rather than breaking every command. That degradation is about
 UNREADINESS only. A name that resolves to no site at all is a hard error from the generic

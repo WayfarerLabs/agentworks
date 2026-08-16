@@ -1,6 +1,6 @@
 """The ``harness-integration`` capability kind: registration, the publisher's rows,
 the capability-kind envelope rejection, and the operator inspection
-surfaces (``resource list`` / ``kinds`` / ``describe``).
+surfaces (``resource list`` / ``kinds`` / ``explain`` / graph).
 
 Mirrors ``test_git_credential_provider_kind.py``; the harness-integration kind is
 the git-credential-provider kind's twin (``category="capability"``,

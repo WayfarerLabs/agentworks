@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 # The ``source_file`` rule, authored once: a simple filename, no directory
 # separators and no shell metacharacters, because it is interpolated into a
 # shell command on the VM. Spelled as a pattern constraint rather than a
-# validator so it reaches emitted JSON Schema and the describe surface as a
+# validator so it reaches emitted JSON Schema and the explain surface as a
 # fact rather than as behavior nobody outside this module can see.
 _SAFE_FILENAME_PATTERN = r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
 SimpleFilename = Annotated[str, Field(pattern=_SAFE_FILENAME_PATTERN)]

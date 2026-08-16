@@ -118,7 +118,7 @@ class SessionTemplate(DeclaredResource):
             # The selector edge: a declared harness_integration references the
             # capability row, so a typo is a finalize-time miss-policy
             # error naming the template that wrote the name, and the harness
-            # integration row's "Referenced by:" lists its templates (FRD R2).
+            # graph's incoming typed edge names its template (FRD R2).
             refs.append(
                 _ResourceRef(
                     name=integration,

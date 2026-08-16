@@ -148,7 +148,7 @@ def test_the_validated_instance_names_the_same_secret_as_the_edge(seated: None) 
     assert _validate({}).token == "declare-once-lab"
 
 
-# -- Surface 3: the field-reference stream (sample and describe read this) ----
+# -- Surface 3: the field-reference stream (sample and explain read this) -----
 
 
 def test_the_stream_carries_the_default_and_the_description() -> None:

@@ -823,13 +823,12 @@ class Registry:
         return iter(self._resources.get(kind, {}).values())
 
     def iter_kind_items(self, kind: str) -> Iterator[tuple[str, Any]]:
-        """Iterate ``(name, Resource)`` pairs under one ``kind``. Used by
-        the cross-kind ``agw resource list`` / ``describe`` commands which
-        need the framework's canonical name (the Registry's per-kind
-        dict key) regardless of whether the Resource type carries it on
-        a ``.name`` field (most do) or on a different field
-        (capability resources). Empty iterator if the kind has
-        no Resources.
+        """Iterate ``(name, Resource)`` pairs under one ``kind``.
+
+        The name is the framework's canonical per-kind dictionary key,
+        regardless of whether the Resource type carries it on a ``.name``
+        field (most do) or on a different field (capability resources).
+        Empty iterator if the kind has no Resources.
         """
         return iter(self._resources.get(kind, {}).items())
 

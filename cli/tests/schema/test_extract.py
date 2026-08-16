@@ -705,8 +705,8 @@ def test_an_explicit_null_diverges_from_three_shipped_validators(
 
 
 def test_the_usage_prose_is_carried_verbatim() -> None:
-    # It ends up on the target's ReferenceEntry and in describe's
-    # "Referenced by:" section, so it is operator-visible output.
+    # It ends up on the target's ReferenceEntry, graph edge detail, and the
+    # secret describe "Referenced by:" section, so it is operator-visible.
     assert _extracted(ProxmoxLike, {})[0].usage == "the Proxmox API token"
 
 

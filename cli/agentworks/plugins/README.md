@@ -311,8 +311,8 @@ A plugin contributes implementations of existing capability kinds only:
 
 Each impl subclasses the kind's nominal capability base class and exposes `name` / `description`
 class attributes. Registration checks that conformance before seating anything; see
-[Contract conformance](#contract-conformance). The published row is read-only and lists, describes,
-and is referenced like any other resource of that kind.
+[Contract conformance](#contract-conformance). The published row is read-only, appears in resource
+inventory and kind explanation, and participates in the graph like any other resource of that kind.
 
 **Bundled manifests** are ordinary YAML resource documents the plugin ships, under the `manifests/`
 subdirectory of the package `manifests` points at. Only declarable kinds whose consumption sites are
