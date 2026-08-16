@@ -2,7 +2,7 @@
 
 - Status: Selected for implementation
 - Date: 2026-08-08
-- Last revised: 2026-08-09
+- Last revised: 2026-08-11
 - Decision owner: operator
 
 ## Selected mark
@@ -39,18 +39,22 @@ The dedicated Lander page and custom 404 treat the mark as the same lunar deploy
 - Tap produces a short equal-thrust pulse; press-and-hold sustains it; horizontal drag while pressed
   biases the opposite engine and turns in the drag direction.
 - Plume length follows each engine's commanded thrust independently.
-- The landing zone sits left of a small, initially dark NOC cluster. After a safe landing, the G
+- Each elevated landing platform sits left of one initially dark NOC. After a safe landing, the G
   opening becomes a deployment bay. A small terminal-inspired agent reaches the surface, enters the
-  NOC, and powers it up. Windows, server-status lights, and a restrained antenna signal remain
-  active for the rest of the run while the lander departs. The experience concludes with
-  `Agent deployed. Mission continues.`
+  NOC, remains visibly installed, and powers it up through a vertical battery and symmetric antenna
+  signal. The exact `Agent Deployed!` payoff appears while the player chooses when to depart for the
+  next site; the expedition has no terminal deployment.
+- Activated chrome uses compact blocky local-system monospace, a stronger colored fuel gauge,
+  centered arcade outcome panels, and an in-game controls rail. Exact fuel and outcome semantics
+  remain accessible without depending on color, motion, or a downloaded font.
 
 The 404 remains a useful static error page with a normal home link in every state. `/lander/`
 provides the deliberate play surface through the small footer rocket, while both routes render one
 shared game subtree and implementation. The game deploys only with a complete, publicly accepted
 site release; the interim non-onboarding release qualifies when its shell, pipeline, and acceptance
-gates are complete. The powered NOC is session-local game state; reload or restart begins a fresh
-mission without cookies or browser storage.
+gates are complete. Powered NOCs are session-local game state. Restart restores the most recent
+powered-pad checkpoint without duplicating its award; Exit or reload begins a fresh mission. No path
+uses cookies or browser storage.
 
 ## Promotion rule
 

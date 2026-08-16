@@ -1,12 +1,15 @@
 # ruff: noqa: F405
 
-import html
 import json
+import sys
 import threading
+import time
 from functools import partial
 from html.parser import HTMLParser
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from typing import Callable
 
+from lander_chromium_phase4k import DevToolsConnection, _devtools_target
 from site_test_support import *  # noqa: F403
 
 
@@ -181,8 +184,17 @@ class QuietHandler(SimpleHTTPRequestHandler):
         pass
 
 
-def browser_geometry(output: Path, width: int) -> dict[str, object]:
-    chromium = next(
+def browser_geometry(
+    output: Path,
+    width: int,
+    *,
+    chromium_path: str | None = None,
+    connection_factory: Callable[[str], DevToolsConnection] = DevToolsConnection,
+    popen_factory: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
+    target_factory: Callable[[Path, subprocess.Popen[bytes]], str] = _devtools_target,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict[str, object]:
+    chromium = chromium_path or next(
         (candidate for name in ("google-chrome", "chromium", "chromium-browser") if (candidate := shutil.which(name))),
         None,
     )
@@ -214,38 +226,79 @@ document.querySelector("#result").textContent = JSON.stringify({
         encoding="utf-8",
     )
     server = ThreadingHTTPServer(("127.0.0.1", 0), partial(QuietHandler, directory=str(output)))
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread = threading.Thread(target=server.serve_forever, daemon=True, name="site-geometry-browser-server")
     thread.start()
     profile = tempfile.TemporaryDirectory()
+    process: subprocess.Popen[bytes] | None = None
+    connection: DevToolsConnection | None = None
     try:
         port = server.server_address[1]
-        completed = subprocess.run(
+        process = popen_factory(
             (
                 chromium,
                 "--headless",
                 "--disable-gpu",
                 "--no-sandbox",
-                "--hide-scrollbars",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--remote-allow-origins=*",
+                "--remote-debugging-port=0",
                 f"--user-data-dir={profile.name}",
-                f"--window-size={width},1000",
-                "--virtual-time-budget=1000",
-                "--dump-dom",
-                f"http://127.0.0.1:{port}/geometry.html",
+                "about:blank",
             ),
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=20,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
+        connection = connection_factory(target_factory(Path(profile.name), process))
+        for domain in ("Runtime", "Page"):
+            connection.call(f"{domain}.enable")
+        connection.call(
+            "Emulation.setDeviceMetricsOverride",
+            {"width": width, "height": 1000, "deviceScaleFactor": 1, "mobile": False},
+        )
+        loaded_url = f"http://127.0.0.1:{port}/geometry.html"
+        connection.call("Page.navigate", {"url": loaded_url})
+        readiness = (
+            f"location.href === {json.dumps(loaded_url)} && "
+            "document.readyState === 'complete' && "
+            "document.querySelector('#result')?.textContent !== 'pending'"
+        )
+        for _ in range(200):
+            if connection.evaluate(readiness):
+                break
+            sleep(0.025)
+        else:
+            raise AssertionError("Chromium did not return responsive layout geometry")
+        result = connection.evaluate("JSON.parse(document.querySelector('#result').textContent)")
+        if not isinstance(result, dict):
+            raise AssertionError("Chromium returned invalid responsive layout geometry")
+        return result
     finally:
-        profile.cleanup()
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
-    match = re.search(r'<pre id="result">([^<]+)</pre>', completed.stdout)
-    if match is None or match.group(1) == "pending":
-        raise AssertionError(f"Chromium did not return layout geometry: {completed.stderr[-1000:]}")
-    return json.loads(html.unescape(match.group(1)))
+        active_error = sys.exception()
+        cleanup_errors: list[BaseException] = []
+
+        def cleanup(action: Callable[[], object]) -> None:
+            try:
+                action()
+            except BaseException as error:
+                cleanup_errors.append(error)
+
+        if connection is not None:
+            cleanup(connection.close)
+        if process is not None and process.poll() is None:
+            cleanup(process.terminate)
+            if process.poll() is None:
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    cleanup(process.kill)
+                    cleanup(lambda: process.wait(timeout=5))
+        cleanup(server.shutdown)
+        cleanup(server.server_close)
+        cleanup(lambda: thread.join(timeout=5))
+        cleanup(profile.cleanup)
+        if active_error is None and cleanup_errors:
+            raise cleanup_errors[0]
 
 
 class GeneratedDocumentTests(RepositoryFixture):
@@ -281,11 +334,8 @@ class GeneratedDocumentTests(RepositoryFixture):
                 "https://agentworks.build/manifesto/",
             ),
             "security": ("Security | Agentworks", "https://agentworks.build/security/"),
-            "lander": (
-                "Lunar deployment | Agentworks",
-                "https://agentworks.build/lander/",
-            ),
-            "404": ("Page not found | Agentworks", "https://agentworks.build/404.html"),
+            "lander": (None, "https://agentworks.build/lander/"),
+            "404": (None, "https://agentworks.build/404.html"),
         }
         for name, document in self.documents.items():
             with self.subTest(name=name):
@@ -296,7 +346,8 @@ class GeneratedDocumentTests(RepositoryFixture):
                 self.assertEqual(len(document.tags("h1")), 1)
                 self.assertEqual(len(document.ids), len(set(document.ids)))
                 self.assertEqual([tag for tag in document.tags("title") if "id" not in tag], [{}])
-                self.assertIn(f"<title>{expected[name][0]}</title>", self.pages[name])
+                if expected[name][0] is not None:
+                    self.assertIn(f"<title>{expected[name][0]}</title>", self.pages[name])
                 canonical = [tag for tag in document.tags("link") if tag.get("rel") == "canonical"]
                 self.assertEqual(canonical[0]["href"], expected[name][1])
                 self.assertTrue(any(tag.get("name") == "description" for tag in document.tags("meta")))
@@ -370,7 +421,7 @@ class GeneratedDocumentTests(RepositoryFixture):
                     site_builder.PYPI_URL,
                     "/manifesto/",
                     "/security/",
-                    "/lander/#lander-game",
+                    "/lander/",
                 ):
                     self.assertEqual(hrefs.count(destination), 1)
                 currents = [tag for tag in document.tags("span") if tag.get("aria-current") == "page"]
@@ -393,16 +444,11 @@ class GeneratedDocumentTests(RepositoryFixture):
                 self.assertEqual(self.pages[name].count(">Agentworks Manifesto</a>"), 1)
                 self.assertEqual(self.pages[name].count(">We take security seriously</a>"), 1)
                 game_links = [tag for tag in document.tags("a") if tag.get("class") == "footer-game-link"]
-                self.assertEqual(
-                    game_links,
-                    [
-                        {
-                            "class": "footer-game-link",
-                            "href": "/lander/#lander-game",
-                            "aria-label": "Play Lunar Lander",
-                        }
-                    ],
-                )
+                self.assertEqual(len(game_links), 1)
+                game_link = game_links[0]
+                self.assertEqual(game_link.get("href"), "/lander/")
+                self.assertTrue(game_link.get("aria-label"))
+                self.assertEqual(game_link.get("title"), game_link.get("aria-label"))
                 game_marks = [image for image in document.tags("img") if image.get("class") == "footer-game-mark"]
                 self.assertEqual(len(game_marks), 1)
                 self.assertEqual(game_marks[0].get("alt"), "")
@@ -421,6 +467,7 @@ class GeneratedDocumentTests(RepositoryFixture):
                 self.assertEqual(rendered.blocks, expected_blocks)
                 self.assertEqual(rendered.links, expected_links)
                 self.assertFalse(self.documents[name].tags("script"))
+
     def test_long_form_contents_navigation_matches_source_h2_h3_structure(self) -> None:
         pages = {
             "manifesto": site_builder.MANIFESTO_CONTRACT,
@@ -452,9 +499,7 @@ class GeneratedDocumentTests(RepositoryFixture):
 
     def test_404_retains_fallback_and_has_only_its_local_module(self) -> None:
         document = self.documents["404"]
-        self.assertIn("Page not found", self.pages["404"])
         self.assertFalse([tag for tag in document.tags("a") if tag.get("id") == "home-link"])
-        self.assertNotIn("Return to agentworks.build", self.pages["404"])
         self.assertNotIn('class="error-code"', self.pages["404"])
         self.assertEqual([tag.get("href") for tag in document.tags("a")].count("/"), 1)
         scripts = document.tags("script")
@@ -472,8 +517,8 @@ class GeneratedDocumentTests(RepositoryFixture):
         for name in ("lander", "404"):
             document = self.documents[name]
             self.assertEqual(document.ids.count("lander-game"), 1)
-            actions = next(tag for tag in document.tags("div") if tag.get("id") == "lander-actions")
-            self.assertIn("hidden", actions)
+            outcome = next(tag for tag in document.tags("div") if tag.get("id") == "lander-outcome")
+            self.assertIn("hidden", outcome)
             self.assertEqual(len(document.tags("script")), 1)
         self.assertEqual(
             self.documents["home"].tags("script"),
@@ -605,6 +650,176 @@ class GeneratedDocumentTests(RepositoryFixture):
         self.assertEqual(narrow["display"], "block")
         self.assertLessEqual(narrow_title["bottom"], narrow_toc["top"])
         self.assertLessEqual(narrow_toc["bottom"], narrow_body["top"])
+
+    def test_chromium_geometry_owns_the_devtools_process_and_cleanup(self) -> None:
+        class FakeProcess:
+            def __init__(self) -> None:
+                self.terminated = False
+                self.killed = False
+
+            def poll(self) -> int | None:
+                return 0 if self.terminated or self.killed else None
+
+            def terminate(self) -> None:
+                self.terminated = True
+
+            def kill(self) -> None:
+                self.killed = True
+
+            def wait(self, timeout: float | None = None) -> int:
+                del timeout
+                return 0
+
+        class FakeConnection:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict[str, object] | None]] = []
+                self.closed = False
+
+            def call(self, method: str, params: dict[str, object] | None = None) -> dict[str, object]:
+                self.calls.append((method, params))
+                return {}
+
+            def evaluate(self, expression: str) -> object:
+                if expression.startswith("JSON.parse"):
+                    return {"display": "block", "title": {}, "toc": {}, "body": {}}
+                return True
+
+            def close(self) -> None:
+                self.closed = True
+
+        process = FakeProcess()
+        connection = FakeConnection()
+        spawn = mock.Mock(return_value=process)
+        result = browser_geometry(
+            self.output,
+            390,
+            chromium_path="chromium-test",
+            connection_factory=lambda url: connection,
+            popen_factory=spawn,
+            target_factory=lambda profile, owned: "ws://chromium.test",
+        )
+
+        command = spawn.call_args.args[0]
+        self.assertIn("--remote-debugging-port=0", command)
+        self.assertNotIn("--dump-dom", command)
+        self.assertEqual(command[-1], "about:blank")
+        self.assertEqual(result["display"], "block")
+        self.assertTrue(connection.closed)
+        self.assertTrue(process.terminated)
+        self.assertFalse(process.killed)
+        self.assertFalse(any(
+            thread.name == "site-geometry-browser-server" and thread.is_alive()
+            for thread in threading.enumerate()
+        ))
+
+    def test_chromium_geometry_bounds_readiness_and_kills_a_stuck_process(self) -> None:
+        class StuckProcess:
+            def __init__(self) -> None:
+                self.terminated = False
+                self.killed = False
+                self.waits = 0
+
+            def poll(self) -> None:
+                return None
+
+            def terminate(self) -> None:
+                self.terminated = True
+
+            def kill(self) -> None:
+                self.killed = True
+
+            def wait(self, timeout: float | None = None) -> int:
+                del timeout
+                self.waits += 1
+                if self.waits == 1:
+                    raise subprocess.TimeoutExpired("chromium-test", 5)
+                return 0
+
+        class NeverReadyConnection:
+            def __init__(self) -> None:
+                self.expressions: list[str] = []
+                self.closed = False
+
+            def call(self, method: str, params: dict[str, object] | None = None) -> dict[str, object]:
+                del method, params
+                return {}
+
+            def evaluate(self, expression: str) -> bool:
+                self.expressions.append(expression)
+                return False
+
+            def close(self) -> None:
+                self.closed = True
+
+        process = StuckProcess()
+        connection = NeverReadyConnection()
+        with self.assertRaises(AssertionError):
+            browser_geometry(
+                self.output,
+                390,
+                chromium_path="chromium-test",
+                connection_factory=lambda url: connection,
+                popen_factory=lambda *args, **kwargs: process,
+                target_factory=lambda profile, owned: "ws://chromium.test",
+                sleep=lambda seconds: None,
+            )
+
+        self.assertEqual(len(connection.expressions), 200)
+        self.assertTrue(connection.closed)
+        self.assertTrue(process.terminated)
+        self.assertTrue(process.killed)
+        self.assertEqual(process.waits, 2)
+
+    def test_chromium_geometry_preserves_primary_errors_and_surfaces_cleanup_errors(self) -> None:
+        class FakeProcess:
+            def __init__(self) -> None:
+                self.terminated = False
+
+            def poll(self) -> int | None:
+                return 0 if self.terminated else None
+
+            def terminate(self) -> None:
+                self.terminated = True
+
+            def wait(self, timeout: float | None = None) -> int:
+                del timeout
+                return 0
+
+        primary = RuntimeError()
+        cleanup_error = OSError()
+
+        def run(*, evaluation_error: BaseException | None) -> None:
+            class FailingConnection:
+                def call(self, method: str, params: dict[str, object] | None = None) -> dict[str, object]:
+                    del method, params
+                    return {}
+
+                def evaluate(self, expression: str) -> object:
+                    if evaluation_error is not None:
+                        raise evaluation_error
+                    if expression.startswith("JSON.parse"):
+                        return {"display": "block"}
+                    return True
+
+                def close(self) -> None:
+                    raise cleanup_error
+
+            process = FakeProcess()
+            browser_geometry(
+                self.output,
+                390,
+                chromium_path="chromium-test",
+                connection_factory=lambda url: FailingConnection(),
+                popen_factory=lambda *args, **kwargs: process,
+                target_factory=lambda profile, owned: "ws://chromium.test",
+            )
+
+        with self.assertRaises(RuntimeError) as caught:
+            run(evaluation_error=primary)
+        self.assertIs(caught.exception, primary)
+        with self.assertRaises(OSError) as caught:
+            run(evaluation_error=None)
+        self.assertIs(caught.exception, cleanup_error)
 
     def test_pinned_color_contrasts_meet_text_component_and_status_thresholds(
         self,

@@ -1,75 +1,159 @@
 <section id="lander-game" aria-label="Lunar deployment scene">
     <div id="lander-scene-shell" tabindex="-1">
-        <svg
-            id="lander-scene"
-            viewBox="0 0 1000 640"
-            preserveAspectRatio="xMidYMid meet"
-            role="img"
-            aria-labelledby="lander-scene-title lander-scene-description"
-        >
-            <title id="lander-scene-title">Lunar deployment scene</title>
-            <desc id="lander-scene-description">
-                An AGW lander hovers above a lunar surface, a marked landing zone, and a dark network operations
-                center.
-            </desc>
-
-            <rect id="scene-sky" width="1000" height="640" />
-            <path id="scene-stars" d="M90 98h2m122-31h2m235 63h2m198-48h2m173 91h2" />
-            <path id="scene-terrain" d="M0 548H1000V640H0Z" />
-            <line id="landing-zone" x1="180" y1="548" x2="420" y2="548" />
-            <g id="landing-zone-markers" aria-hidden="true">
-                <path d="M180 548v16m240-16v16" />
-            </g>
-
-            <g id="noc" aria-hidden="true">
-                <rect id="noc-west" x="540" y="506" width="50" height="42" />
-                <rect id="noc-server" x="600" y="480" width="60" height="68" />
-                <rect id="noc-east" x="670" y="500" width="50" height="48" />
-                <g id="noc-west-window">
-                    <rect x="550" y="517" width="22" height="12" />
-                    <path d="M557 517v12m8-12v12" />
+        <div id="lander-scene-stage">
+            <svg
+                id="lander-scene"
+                viewBox="0 0 1000 640"
+                preserveAspectRatio="xMidYMid meet"
+                role="img"
+                aria-labelledby="lander-scene-title lander-scene-description"
+            >
+                <title id="lander-scene-title">Lunar deployment scene</title>
+                <desc id="lander-scene-description">
+                    An AGW lander hovers above a varied lunar surface, an elevated helipad with a gas can, and a dark
+                    network operations center.
+                </desc>
+                <rect id="scene-sky" width="1000" height="640" />
+                <g id="lander-sky-world" aria-hidden="true">
+                    <path
+                        id="scene-stars"
+                        d="M-121.69627442024648 76.63247270975262h2M-277.1351196290925 146.69736901065335h2M-349.37196164391935 209.1409612982534h2M-190.12816733215004 104.9649418471381h2M379.62949173524976 215.0982105662115h2M401.2143934890628 172.06053119385615h2M188.75958119053394 203.73836412094533h2M355.7061790022999 132.84021331230178h2M595.5826098052785 226.3075302564539h2M690.9883040562272 199.33256399119273h2M910.7622810127214 185.1886282931082h2M877.7460487559438 156.436576328706h2M1161.798286754638 103.68815313791856h2M1390.482507366687 142.3037782101892h2M1237.5252646952868 141.06193830957636h2M1281.5382751310244 146.70098160393536h2M1885.534710297361 133.08671353617683h2M1903.7949666753411 183.38631535647437h2M1698.2593644130975 86.77797651151195h2M1677.5271775014699 71.38833067845553h2"
+                    />
+                    <path
+                        id="scene-landmarks"
+                        fill="none"
+                        stroke="#8a867c"
+                        stroke-width="3"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        d="M189.03427072800696 131.73381899530068A18 18 0 1 0 189.03427072800696 167.73381899530068A13 18 0 0 1 189.03427072800696 131.73381899530068"
+                    />
                 </g>
-                <g id="noc-server-bars">
-                    <path d="M613 495h34m-34 12h34m-34 12h34" />
-                    <circle cx="617" cy="495" r="3" />
-                    <circle cx="617" cy="507" r="3" />
-                    <circle cx="617" cy="519" r="3" />
+                <g id="lander-world" aria-hidden="true">
+                    <g id="terrain-layer">
+                        <path
+                            class="terrain-fill"
+                            fill="#d7d2c4"
+                            stroke="none"
+                            d="M0 416L160 454.4L312 478.72L320 480L322 481.2L400 528L408 532.8L410 534L428 544.8L480 576L488 571.2L498 565.2L640 480L800 448L960 390.4L1000 377.59999999999997L1000 648L0 648Z"
+                        />
+                        <path
+                            class="terrain-surface"
+                            fill="none"
+                            stroke="#4b4e55"
+                            stroke-width="2"
+                            stroke-linejoin="miter"
+                            stroke-miterlimit="2"
+                            d="M0 416L160 454.4L312 478.72L320 480L322 481.2L400 528L408 532.8L410 534L428 544.8L480 576L488 571.2L498 565.2L640 480L800 448L960 390.4L1000 377.59999999999997"
+                        />
+                        <path
+                            class="world-termini"
+                            fill="none"
+                            stroke="#4b4e55"
+                            stroke-width="2"
+                            stroke-linecap="butt"
+                            d="M-7864320 0V416M7864320 0V416"
+                        />
+                    </g>
+                    <g id="site-layer">
+                        <g
+                            class="lander-site"
+                            data-site-id="0"
+                            data-can="present"
+                            data-power="off"
+                            data-agent="absent"
+                            data-noc-stage="0"
+                        >
+                            <rect class="landing-platform" x="312" y="453.72" width="96" height="3.499999999999943" />
+                            <path class="helipad-mark" d="M351 455.42v-20m18 20v-20m-18 10h18" />
+                            <path
+                                class="site-scaffold"
+                                fill="none"
+                                stroke="#4b4e55"
+                                stroke-width="2"
+                                stroke-linecap="butt"
+                                stroke-linejoin="round"
+                                d="M312 457.21999999999997H498M312 464.71999999999997H498M312 457.21999999999997L327.5 464.71999999999997M327.5 464.71999999999997L343 457.21999999999997M343 457.21999999999997L358.5 464.71999999999997M358.5 464.71999999999997L374 457.21999999999997M374 457.21999999999997L389.5 464.71999999999997M389.5 464.71999999999997L405 457.21999999999997M405 457.21999999999997L420.5 464.71999999999997M420.5 464.71999999999997L436 457.21999999999997M436 457.21999999999997L451.5 464.71999999999997M451.5 464.71999999999997L467 457.21999999999997M467 457.21999999999997L482.5 464.71999999999997M482.5 464.71999999999997L498 457.21999999999997M312 457.21999999999997L312 478.72M322 457.21999999999997L322 481.2M312 457.21999999999997L322 457.21999999999997M312 465.22L322 465.22M312 473.21999999999997L322 473.21999999999997M312 478.72L322 478.72M312 457.21999999999997L322 465.22M322 465.22L312 473.21999999999997M312 473.21999999999997L322 478.72M400 457.21999999999997L400 528M410 457.21999999999997L410 534M400 457.21999999999997L410 457.21999999999997M400 465.22L410 465.22M400 473.21999999999997L410 473.21999999999997M400 481.22L410 481.22M400 489.21999999999997L410 489.21999999999997M400 497.21999999999997L410 497.21999999999997M400 505.22L410 505.22M400 513.22L410 513.22M400 521.22L410 521.22M400 528L410 528M400 457.21999999999997L410 465.22M410 465.22L400 473.21999999999997M400 473.21999999999997L410 481.22M410 481.22L400 489.21999999999997M400 489.21999999999997L410 497.21999999999997M410 497.21999999999997L400 505.22M400 505.22L410 513.22M410 513.22L400 521.22M400 521.22L410 528M488 457.21999999999997L488 571.2M498 457.21999999999997L498 565.2M488 457.21999999999997L498 457.21999999999997M488 465.22L498 465.22M488 473.21999999999997L498 473.21999999999997M488 481.22L498 481.22M488 489.21999999999997L498 489.21999999999997M488 497.21999999999997L498 497.21999999999997M488 505.22L498 505.22M488 513.22L498 513.22M488 521.22L498 521.22M488 529.22L498 529.22M488 537.22L498 537.22M488 545.22L498 545.22M488 553.22L498 553.22M488 561.22L498 561.22M488 565.2L498 565.2M488 457.21999999999997L498 465.22M498 465.22L488 473.21999999999997M488 473.21999999999997L498 481.22M498 481.22L488 489.21999999999997M488 489.21999999999997L498 497.21999999999997M498 497.21999999999997L488 505.22M488 505.22L498 513.22M498 513.22L488 521.22M488 521.22L498 529.22M498 529.22L488 537.22M488 537.22L498 545.22M498 545.22L488 553.22M488 553.22L498 561.22M498 561.22L488 565.2"
+                            />
+                            <path
+                                class="gas-can"
+                                transform="translate(390 438.72)"
+                                d="M-7 0h14v15H-7Zm4-5h7v5h-7Zm10 7h4v8H7"
+                            />
+                            <path class="noc-building" d="M428 457.21999999999997V381.72h70V457.21999999999997Z" />
+                            <path class="noc-building noc-entry" d="M 428 435.72 H 441 V 453.72 H 428 Z" />
+                            <g class="noc-battery">
+                                <rect x="452" y="397.72" width="22" height="40" />
+                                <path class="battery-bar battery-bar-1" d="M457 427.72h12v5h-12Z" />
+                                <path class="battery-bar battery-bar-2" d="M457 419.72h12v5h-12Z" />
+                                <path class="battery-bar battery-bar-3" d="M457 411.72h12v5h-12Z" />
+                                <path class="battery-bar battery-bar-4" d="M457 403.72h12v5h-12Z" />
+                            </g>
+                            <path class="noc-antenna antenna-mast" d="M463 381.72v-32" />
+                            <circle class="noc-antenna antenna-head" cx="463" cy="347.72" r="4" />
+                            <path
+                                class="noc-antenna antenna-signal antenna-signal-1"
+                                d="M455 343.72Q463 335.72 471 343.72"
+                            />
+                            <path
+                                class="noc-antenna antenna-signal antenna-signal-2"
+                                d="M448 342.72Q463 327.72 478 342.72"
+                            />
+                            <path
+                                class="noc-antenna antenna-signal antenna-signal-3"
+                                d="M440 341.72Q463 318.72 486 341.72"
+                            />
+                        </g>
+                    </g>
+                    <g id="debris-layer"></g>
+                    <g id="mission-lander">
+                        <use id="mission-left-engine" href="{{SITE_BASE}}assets/agw-rocket.svg#agw-engine-left" />
+                        <use id="mission-right-engine" href="{{SITE_BASE}}assets/agw-rocket.svg#agw-engine-right" />
+                        <use id="mission-mark" href="{{SITE_BASE}}assets/agw-rocket.svg#agw-mark" />
+                        <path id="mission-bay-lip" d="M126 248h52v12h-52" />
+                    </g>
+                    <g id="mission-agent">
+                        <rect x="-5" y="-9" width="10" height="11" rx="1" />
+                        <path d="M-3 2v7m6-7v7M-2-5l2 2-2 2m3 0h2" />
+                    </g>
                 </g>
-                <g id="noc-east-window">
-                    <rect x="682" y="511" width="25" height="14" />
-                    <path d="M690 511v14m9-14v14" />
+                <g id="crash-flash" aria-hidden="true"><ellipse cx="0" cy="0" rx="16" ry="9" /></g>
+                <g id="next-site-cue" aria-hidden="true" transform="translate(932 280)">
+                    <path d="M0 14h24V4l20 18-20 18V30H0Z" />
                 </g>
-                <g id="noc-antenna">
-                    <path d="M695 500v-32" />
-                    <circle cx="695" cy="468" r="4" />
-                </g>
-                <g id="noc-signals">
-                    <path d="M704 464a15 15 0 0 1 0 16" />
-                    <path d="M712 456a26 26 0 0 1 0 32" />
-                </g>
-                <path id="noc-entry" d="M540 537h9v11h-9Z" />
-            </g>
-
-            <g id="mission-lander" aria-hidden="true">
-                <use id="mission-left-engine" href="{{SITE_BASE}}assets/agw-rocket.svg#agw-engine-left" />
-                <use id="mission-right-engine" href="{{SITE_BASE}}assets/agw-rocket.svg#agw-engine-right" />
-                <use id="mission-mark" href="{{SITE_BASE}}assets/agw-rocket.svg#agw-mark" />
-                <path id="mission-bay-lip" d="M126 248h52v12h-52" />
-            </g>
-
-            <g id="mission-agent" aria-hidden="true">
-                <rect x="-5" y="-9" width="10" height="11" rx="1" />
-                <path d="M-3 2v7m6-7v7M-2-5l2 2-2 2m3 0h2" />
-            </g>
-        </svg>
-        <button id="lander-start" type="button" hidden aria-label="Start lunar deployment mission"></button>
+            </svg>
+            <button
+                id="lander-start"
+                type="button"
+                hidden
+                disabled
+                aria-label="Start lunar deployment mission"
+            ></button>
+            <p id="lander-fuel" hidden>
+                <span id="lander-fuel-gauge" aria-hidden="true"><span id="lander-fuel-gauge-fill"></span></span>
+                <span id="lander-fuel-label" class="visually-hidden">Fuel reserve:</span>
+                <span id="lander-fuel-value" class="visually-hidden">0.0</span>
+            </p>
+            <span id="lander-target-direction" class="visually-hidden" hidden>Next site is to the right.</span>
+            <div id="lander-outcome" hidden>
+                <p id="lander-status" role="status" aria-live="polite" aria-atomic="true"></p>
+                <button id="lander-restart" type="button" hidden disabled aria-keyshortcuts="r">
+                    <span class="lander-action-label">Retry</span>
+                    <span class="lander-key-hint" aria-hidden="true">r</span>
+                </button>
+            </div>
+        </div>
+        <div id="lander-controls-rail" hidden>
+            <p id="lander-controls">
+                <span class="lander-controls-line lander-controls-keyboard"
+                    >Space/Up thrust; Left/H or Right/L turn.</span
+                >
+                <span class="lander-controls-line lander-controls-touch">Touch: tap/hold to thrust; drag to turn.</span>
+            </p>
+            <button id="lander-exit" type="button" disabled aria-keyshortcuts="Escape">
+                <span class="lander-action-label">Exit mission</span>
+                <span class="lander-key-hint" aria-hidden="true">&lt;esc&gt;</span>
+            </button>
+        </div>
     </div>
-    <p id="lander-controls" hidden>
-        Thrust: Space or Up. Turn: Left/H or Right/L. Escape exits. R restarts after success or failure.
-    </p>
-    <div id="lander-actions" hidden>
-        <button id="lander-exit" type="button">Exit mission</button>
-        <button id="lander-restart" type="button" hidden>Restart mission</button>
-    </div>
-    <p id="lander-status" role="status" aria-live="polite" aria-atomic="true"></p>
 </section>

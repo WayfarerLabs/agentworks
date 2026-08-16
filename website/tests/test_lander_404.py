@@ -27,8 +27,10 @@ EXPECTED_FILES = frozenset(
         Path("security/index.html"),
         Path("assets/agw-favicon.svg"),
         Path("assets/agw-rocket.svg"),
+        Path("static/lander-collision.js"),
         Path("static/lander-game.js"),
         Path("static/lander-model.js"),
+        Path("static/lander-world.js"),
         Path("static/onboarding-copy.js"),
         Path("static/lander.css"),
         Path("static/site.css"),
@@ -83,6 +85,35 @@ def relative_luminance(color: str) -> float:
 def contrast(first: str, second: str) -> float:
     light, dark = sorted((relative_luminance(first), relative_luminance(second)), reverse=True)
     return (light + 0.05) / (dark + 0.05)
+
+
+def transformed_origin(
+    transform: str,
+    origin: tuple[float, float],
+    replacements: dict[str, str],
+) -> tuple[float, float]:
+    """Execute the SVG transform list against its CSS transform origin."""
+    for variable, value in replacements.items():
+        transform = transform.replace(f"var({variable})", value)
+    point = [0.0, 0.0]
+    functions = re.findall(r"([a-z]+)\(([^)]*)\)", transform)
+    for name, source in reversed(functions):
+        values = [float(value.removesuffix("px").removesuffix("deg")) for value in re.split(r"[,\s]+", source.strip())]
+        if name == "translate":
+            point[0] += values[0]
+            point[1] += values[1] if len(values) > 1 else 0
+        elif name == "scale":
+            point[0] *= values[0]
+            point[1] *= values[1] if len(values) > 1 else values[0]
+        elif name == "rotate":
+            radians = math.radians(values[0])
+            point = [
+                point[0] * math.cos(radians) - point[1] * math.sin(radians),
+                point[0] * math.sin(radians) + point[1] * math.cos(radians),
+            ]
+        else:
+            raise AssertionError(f"unsupported transform function: {name}")
+    return origin[0] + point[0], origin[1] + point[1]
 
 
 GLOBAL_OBJECT = r"(?:\bwindow\b|\bglobalThis\b)"
@@ -288,39 +319,27 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertEqual(tags.count("main"), 1)
         self.assertEqual(tags.count("footer"), 1)
         self.assertEqual(tags.count("h1"), 1)
-        self.assertIn("Page not found", self.template)
-        self.assertNotIn("Return to agentworks.build", self.template)
         home_links = [attributes for tag, attributes in self.document.tags if attributes.get("href") == "{{SITE_BASE}}"]
         self.assertEqual(len(home_links), 1)
         self.assertNotIn("hidden", self.element("not-found-message")[1])
-        self.assertIn("Product of Wayfarer Labs, LLC", self.template)
-        self.assertNotIn("Build systems that let agents do the work.", self.template)
 
     def test_preflight_controls_are_hidden_but_scene_and_breadcrumb_are_not(
         self,
     ) -> None:
         self.assertIn("hidden", self.element("lander-start")[1])
-        self.assertIn("hidden", self.element("lander-controls")[1])
-        self.assertIn("hidden", self.element("lander-actions")[1])
+        self.assertIn("hidden", self.element("lander-controls-rail")[1])
+        self.assertIn("hidden", self.element("lander-outcome")[1])
         self.assertIn("hidden", self.element("lander-restart")[1])
         self.assertNotIn("hidden", self.element("lander-scene")[1])
         home = next(attributes for tag, attributes in self.document.tags if attributes.get("href") == "{{SITE_BASE}}")
         self.assertNotIn("hidden", home)
-        controls = " ".join(self.document.text_by_id["lander-controls"].split())
-        self.assertEqual(
-            controls,
-            "Thrust: Space or Up. Turn: Left/H or Right/L. Escape exits. R restarts after success or failure.",
-        )
 
     def test_accessible_names_live_region_and_initial_focus_surface_are_pinned(
         self,
     ) -> None:
         self.assertEqual(len(self.document.ids), len(set(self.document.ids)))
-        self.assertEqual(self.element("lander-game")[1]["aria-label"], "Lunar deployment scene")
-        self.assertEqual(
-            self.element("lander-start")[1]["aria-label"],
-            "Start lunar deployment mission",
-        )
+        self.assertTrue(" ".join((self.element("lander-game")[1]["aria-label"] or "").split()))
+        self.assertTrue(self.element("lander-start")[1]["aria-label"])
         self.assertEqual(self.element("lander-scene-shell")[1]["tabindex"], "-1")
         status = self.element("lander-status")[1]
         self.assertEqual(status["role"], "status")
@@ -328,11 +347,15 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertEqual(status["aria-atomic"], "true")
         self.assertEqual(self.element("lander-exit")[0], "button")
         self.assertEqual(self.element("lander-restart")[0], "button")
-        description = " ".join(self.document.text_by_id["lander-scene-description"].split()).lower()
-        for word in ("lander", "surface", "zone", "dark", "network operations center"):
-            self.assertIn(word, description)
-        self.assertNotIn("space", description)
-        self.assertNotIn("control", description)
+        self.assertEqual(self.element("lander-fuel-gauge")[1]["aria-hidden"], "true")
+        self.assertEqual(self.element("lander-fuel-value")[0], "span")
+        self.assertEqual(self.element("lander-fuel-label")[1]["class"], "visually-hidden")
+        self.assertEqual(self.element("lander-fuel-value")[1]["class"], "visually-hidden")
+        self.assertNotIn("role", self.element("lander-fuel-value")[1])
+        self.assertNotIn("aria-live", self.element("lander-fuel-value")[1])
+        self.assertNotIn("aria-labelledby", self.element("lander-fuel-value")[1])
+        self.assertNotIn("output", [tag for tag, _ in self.document.tags])
+        self.assertTrue(" ".join(self.document.text_by_id["lander-scene-description"].split()))
 
     def test_scene_geometry_and_start_target_are_fixed_and_responsive(self) -> None:
         scene = self.element("lander-scene")[1]
@@ -341,7 +364,10 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertIn("aspect-ratio: 25 / 16", self.css)
         self.assertIn("width: min(100%, 60rem)", self.css)
         shell_rule = self.css.split("#lander-scene-shell {", 1)[1].split("}", 1)[0]
+        stage_rule = self.css.split("#lander-scene-stage {", 1)[1].split("}", 1)[0]
         self.assertNotRegex(shell_rule, r"min-width\s*:")
+        self.assertNotIn("aspect-ratio", shell_rule)
+        self.assertIn("aspect-ratio: 25 / 16", stage_rule)
         self.assertIn("top: 31.7625%", self.css)
         self.assertIn("left: 30%", self.css)
         self.assertIn("width: max(44px, 2.816%)", self.css)
@@ -349,15 +375,52 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertIn("#lander-start:focus-visible", self.css)
         self.assertIn("transform-origin: 82px 401px", self.css)
         self.assertIn("transform-origin: 158px 401px", self.css)
-        self.assertEqual(self.element("scene-terrain")[1]["d"], "M0 548H1000V640H0Z")
+        terrain = [
+            attributes
+            for _, attributes in self.document.tags
+            if attributes.get("class") in {"terrain-fill", "terrain-surface"}
+        ]
+        self.assertEqual([attributes["class"] for attributes in terrain], ["terrain-fill", "terrain-surface"])
+        self.assertEqual(terrain[0]["stroke"], "none")
+        self.assertTrue(terrain[0]["d"].endswith("Z"))
+        self.assertEqual(terrain[1]["fill"], "none")
+        self.assertNotRegex(terrain[1]["d"], r"[VZ]")
+        surface = [
+            (float(x), float(y)) for x, y in re.findall(r"[ML](-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)", terrain[1]["d"])
+        ]
+        self.assertEqual((surface[0][0], surface[-1][0]), (0, 1000))
+        self.assertIn((312, 478.72), surface)
+        self.assertIn((322, 481.2), surface)
+        self.assertIn((400, 528), surface)
+        self.assertIn((410, 534), surface)
+        self.assertIn((488, 571.2), surface)
+        self.assertIn((498, 565.2), surface)
+        deck = next(attributes for _, attributes in self.document.tags if attributes.get("class") == "landing-platform")
+        self.assertEqual(float(deck["y"]), 453.72)
+        self.assertEqual(float(deck["y"]) + float(deck["height"]), 457.21999999999997)
+        support = next(attributes for _, attributes in self.document.tags if attributes.get("class") == "site-scaffold")
+        self.assertTrue(
+            support["d"].startswith("M312 457.21999999999997H498M312 464.71999999999997H498")
+        )
+        self.assertEqual(support["d"].count("M"), 75)
+        self.assertNotIn("Z", support["d"])
+        self.assertEqual(support["fill"], "none")
+        self.assertEqual(support["stroke-linecap"], "butt")
+        self.assertEqual(support["stroke-linejoin"], "round")
+        noc = next(attributes for _, attributes in self.document.tags if attributes.get("class") == "noc-building")
+        self.assertTrue(noc["d"].startswith("M428 457.21999999999997V"))
+        self.assertIn("rotate(var(--thrust-vector-angle))", self.css)
 
     def test_css_has_only_bounded_keyframes_and_reduced_motion_preserves_live_plumes(
         self,
     ) -> None:
         self.assertEqual(
             set(re.findall(r"@keyframes\s+([\w-]+)", self.css)),
-            {"agw-preflight-cue", "agw-agent-route"},
+            {"agw-preflight-cue", "agw-target-cue", "agw-fuel-empty-blink"},
         )
+        empty_gauge = self.css.split('[data-fuel-level="empty"] #lander-fuel-gauge {', 1)[1].split("}", 1)[0]
+        self.assertIn("animation: agw-fuel-empty-blink 700ms steps(1, end) infinite", empty_gauge)
+        self.assertIn("background: var(--fuel-danger-color)", empty_gauge)
         reduced = self.css.split("@media (prefers-reduced-motion: reduce)", 1)[1]
         self.assertIn("animation: none !important", reduced)
         self.assertIn("transition: none !important", reduced)
@@ -365,40 +428,81 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertNotIn("#mission-right-engine", reduced)
         self.assertNotIn("scale(1, 0.08)", reduced)
         self.assertIn('[data-paused="true"]', self.css)
-        powered_rule = self.css.split('#lander-game[data-noc-stage="4"] #noc-signals {', 1)[1].split("}", 1)[0]
+        powered_rule = self.css.split('.lander-site[data-noc-stage="7"] .antenna-signal-3 {', 1)[1].split("}", 1)[0]
         self.assertIn("opacity: 1", powered_rule)
         self.assertNotIn("animation", powered_rule)
 
+    def test_engine_transforms_keep_both_nozzle_anchors_fixed(self) -> None:
+        engines = {
+            "#mission-left-engine": ((82.0, 401.0), "--left-plume-scale"),
+            "#mission-right-engine": ((158.0, 401.0), "--right-plume-scale"),
+        }
+        for selector, (origin, scale_variable) in engines.items():
+            block = re.search(
+                rf"{re.escape(selector)}\s*\{{([^}}]+)\}}",
+                self.css,
+                re.DOTALL,
+            )
+            self.assertIsNotNone(block)
+            transform = re.search(r"transform:\s*([^;]+);", block[1], re.DOTALL)
+            declared_origin = re.search(
+                r"transform-origin:\s*([\d.]+)px\s+([\d.]+)px",
+                block[1],
+            )
+            self.assertIsNotNone(transform)
+            self.assertIsNotNone(declared_origin)
+            self.assertEqual(tuple(map(float, declared_origin.groups())), origin)
+            for angle in (-18, 18):
+                for scale in (0.08, 0.5, 1):
+                    actual = transformed_origin(
+                        transform[1],
+                        origin,
+                        {
+                            "--thrust-vector-angle": f"{angle}deg",
+                            scale_variable: str(scale),
+                        },
+                    )
+                    self.assertAlmostEqual(actual[0], origin[0])
+                    self.assertAlmostEqual(actual[1], origin[1])
+        cue = self.css.split("@keyframes agw-preflight-cue {", 1)[1].split("@keyframes agw-target-cue", 1)[0]
+        for transform in re.findall(r"transform:\s*([^;]+);", cue):
+            for origin, _ in engines.values():
+                self.assertEqual(transformed_origin(transform, origin, {}), origin)
+
     def test_input_clear_restores_zero_command_and_renders(self) -> None:
-        clear_input = self.game.split("clearAllInput(timestamp) {", 1)[1].split("\n    }", 1)[0]
+        clear_input = self.game.split("clearAllInput(timestamp, quiesce = false) {", 1)[1].split("\n    }", 1)[0]
         self.assertIn("commanded: { ...ZERO_INPUT }", clear_input)
-        self.assertIn("this.render()", clear_input)
+        self.assertIn("vectorAngle: 0", self.game)
+        self.assertIn("clearSimulationInput", clear_input)
+        frame = self.game.split("frame(timestamp) {", 1)[1].split("reconcileWorld() {", 1)[0]
+        self.assertIn('previousState === "flying" && this.model.state === "launching"', frame)
+        self.assertIn("if ( reachedLaunchReady ||", " ".join(frame.split()))
+        self.assertIn("this.clearAllInput(timestamp, reachedLaunchReady)", frame)
 
     def test_native_actions_share_keyboard_controller_operations_and_focus_lifecycle(
         self,
     ) -> None:
         listeners = self.game.split("installListeners() {", 1)[1].split("\n    }", 1)[0]
-        self.assertIn('this.exitButton.addEventListener("click", () => this.exit()', listeners)
+        self.assertIn('this.listen(this.lander_exit, "click", () => this.exit()', listeners)
         self.assertIn(
-            'this.restartButton.addEventListener("click", () => this.restart()',
+            'this.listen(this.lander_restart, "click", () => this.restart()',
             listeners,
         )
         keyboard = self.game.split("onKeyDown(event) {", 1)[1].split("onKeyUp(event) {", 1)[0]
         self.assertIn("this.exit()", keyboard)
         self.assertIn("this.restart()", keyboard)
         start = self.game.split("start(holdSpace, timestamp) {", 1)[1].split("exit() {", 1)[0]
-        self.assertIn("this.actions.hidden = false", start)
-        self.assertIn("this.exitButton.disabled = false", start)
-        self.assertIn("this.restartButton.hidden = true", start)
+        self.assertIn("this.lander_outcome.hidden = false", start)
+        self.assertIn("this.lander_exit.disabled = false", start)
         exit_method = self.game.split("exit() {", 1)[1].split("restart() {", 1)[0]
-        self.assertIn("this.actions.hidden = true", exit_method)
-        self.assertIn("this.startButton.focus({ preventScroll: true })", exit_method)
-        restart = self.game.split("restart() {", 1)[1].split("onKeyDown(event) {", 1)[0]
-        self.assertIn("this.restartButton.hidden = true", restart)
-        self.assertIn("this.shell.focus({ preventScroll: true })", restart)
+        self.assertIn("this.lander_outcome.hidden = true", exit_method)
+        self.assertIn("this.lander_start.focus({ preventScroll: true })", exit_method)
+        restart = self.game.split("restart() {", 1)[1].split("activeShellEventPath(event) {", 1)[0]
+        self.assertIn("this.lander_restart.hidden = true", restart)
+        self.assertIn("this.lander_scene_shell.focus({ preventScroll: true })", restart)
         render = self.game.split("render() {", 1)[1].split("destroy() {", 1)[0]
-        self.assertIn('["failed", "succeeded"].includes(this.model.state)', render)
-        self.assertIn("this.restartButton.disabled = !terminal", render)
+        self.assertIn('this.model.state === "failed"', render)
+        self.assertIn("this.lander_restart.disabled = !failed", render)
 
     def test_fixed_color_contrast_meets_text_and_graphic_thresholds(self) -> None:
         self.assertGreaterEqual(contrast("#292b30", "#f5f2e8"), 4.5)

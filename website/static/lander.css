@@ -1,5 +1,6 @@
 .game-main {
     gap: clamp(0.75rem, 2.5vw, 1.5rem);
+    --controls-rail-block-size: 48px;
 }
 
 #not-found-message {
@@ -9,22 +10,49 @@
 }
 
 #lander-game {
+    position: relative;
+    --fuel-gauge-level: 0;
+    --fuel-danger-color: #ff5a36;
+    --fuel-caution-color: #ffb000;
+    --fuel-ready-color: #2ed49b;
+    --fuel-level-color: var(--fuel-ready-color);
+    --refuel-progress: 0;
+    --fuel-transfer-x: 0px;
+    --fuel-transfer-y: 0px;
+    --camera-x: 0px;
+    --sky-camera-x: 0px;
     --lander-x: 300px;
     --lander-y: 228px;
     --lander-angle: 0deg;
+    --thrust-vector-angle: 0deg;
     --left-plume-scale: 0.08;
     --right-plume-scale: 0.08;
     --left-plume-opacity: 0.25;
     --right-plume-opacity: 0.25;
     --agent-x: 0px;
     --agent-y: 0px;
-    margin-block: clamp(0.5rem, 2vw, 1rem) 0;
+    --crash-x: 0px;
+    --crash-y: 0px;
+    --crash-progress: 0;
+    display: grid;
+    place-items: center;
+    margin: 0;
 }
 
 #lander-scene-shell {
-    position: relative;
+    display: grid;
+    grid-template-rows: auto var(--controls-rail-block-size);
     width: min(100%, 60rem);
+    max-height: 100%;
+    overflow: hidden;
+}
+
+#lander-scene-stage {
+    position: relative;
+    width: min(100%, calc((100cqh - var(--controls-rail-block-size)) * 25 / 16));
     aspect-ratio: 25 / 16;
+    container-type: size;
+    justify-self: center;
     overflow: hidden;
 }
 
@@ -38,6 +66,10 @@
     fill: #f5f2e8;
 }
 
+#lander-sky-world {
+    transform: translate(var(--sky-camera-x), 0);
+}
+
 #scene-stars {
     fill: none;
     stroke: #8a867c;
@@ -45,92 +77,162 @@
     stroke-width: 4;
 }
 
-#scene-terrain {
-    fill: #d7d2c4;
-    stroke: #4b4e55;
-    stroke-width: 2;
-}
-
-#landing-zone {
-    stroke: #d94a1e;
-    stroke-width: 2;
-}
-
-#landing-zone-markers {
+#scene-landmarks {
     fill: none;
-    stroke: #4b4e55;
+    stroke: #8a867c;
+    stroke-linecap: round;
+    stroke-linejoin: round;
     stroke-width: 3;
 }
 
-#noc-west,
-#noc-server,
-#noc-east,
-#noc-entry {
+#lander-world {
+    transform: translate(var(--camera-x), 0);
+}
+
+.terrain-fill {
+    fill: #d7d2c4;
+    stroke: none;
+}
+
+.terrain-surface {
+    fill: none;
+    stroke: #4b4e55;
+    stroke-linejoin: miter;
+    stroke-miterlimit: 2;
+    stroke-width: 2;
+}
+
+.world-termini {
+    fill: none;
+    stroke: #4b4e55;
+    stroke-linecap: butt;
+    stroke-width: 2;
+}
+
+.landing-platform {
+    fill: #4b4e55;
+    stroke: #292b30;
+    stroke-width: 2;
+}
+
+.helipad-mark {
+    fill: none;
+    stroke: #f5f2e8;
+    stroke-width: 3;
+}
+
+.site-scaffold {
+    fill: none;
+    stroke: #4b4e55;
+    stroke-width: 2;
+    stroke-linecap: butt;
+    stroke-linejoin: round;
+}
+
+.gas-can {
+    fill: #d94a1e;
+    stroke: #292b30;
+    stroke-width: 2;
+}
+
+.lander-site[data-can="collected"] .gas-can {
+    display: none;
+}
+
+.noc-building {
     fill: #20232a;
     stroke: #4b4e55;
     stroke-width: 2;
 }
 
-#noc-west-window rect,
-#noc-east-window rect {
+.noc-entry {
     fill: #3b3f47;
 }
 
-#noc-west-window path,
-#noc-east-window path,
-#noc-server-bars path {
-    fill: none;
-    stroke: #20232a;
+.lander-site[data-agent="absent"] .noc-entry {
+    fill: #3b3f47;
+    stroke: #4b4e55;
     stroke-width: 2;
 }
 
-#noc-server-bars path,
-#noc-server-bars circle {
-    stroke: #3b3f47;
+.lander-site[data-agent="installed"] .noc-entry {
+    fill: #2ed49b;
+    stroke: #f5f2e8;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
 }
 
-#noc-server-bars circle {
-    fill: #3b3f47;
-}
-
-#noc-antenna,
-#noc-signals {
+.noc-battery {
     fill: none;
-    stroke: #d94a1e;
+    stroke: #8a867c;
+    stroke-width: 2;
+}
+
+.battery-bar {
+    fill: #3b3f47;
+    stroke: none;
+}
+
+.lander-site:not([data-noc-stage="0"]) .battery-bar-1 {
+    fill: #d94a1e;
+}
+
+.lander-site:is(
+        [data-noc-stage="2"],
+        [data-noc-stage="3"],
+        [data-noc-stage="4"],
+        [data-noc-stage="5"],
+        [data-noc-stage="6"],
+        [data-noc-stage="7"]
+    )
+    .battery-bar-2 {
+    fill: #ff7a00;
+}
+
+.lander-site:is(
+        [data-noc-stage="3"],
+        [data-noc-stage="4"],
+        [data-noc-stage="5"],
+        [data-noc-stage="6"],
+        [data-noc-stage="7"]
+    )
+    .battery-bar-3 {
+    fill: #ffe09a;
+}
+
+.lander-site:is([data-noc-stage="4"], [data-noc-stage="5"], [data-noc-stage="6"], [data-noc-stage="7"]) .battery-bar-4 {
+    fill: #7de2c5;
+}
+
+.noc-antenna {
+    fill: none;
+    stroke: #8a867c;
     stroke-linecap: round;
     stroke-width: 3;
 }
 
-#noc-signals {
+.antenna-mast,
+.antenna-head {
+    stroke: #292b30;
+}
+
+.lander-site:is([data-noc-stage="5"], [data-noc-stage="6"], [data-noc-stage="7"]) .antenna-signal-1 {
+    stroke: #d94a1e;
+    opacity: 1;
+}
+
+.antenna-signal {
     opacity: 0;
 }
 
-#lander-game[data-noc-stage="1"] #noc-west-window rect,
-#lander-game[data-noc-stage="2"] #noc-west-window rect,
-#lander-game[data-noc-stage="3"] #noc-west-window rect,
-#lander-game[data-noc-stage="4"] #noc-west-window rect {
-    fill: #ffe09a;
+.lander-site:is([data-noc-stage="6"], [data-noc-stage="7"]) .antenna-signal-2 {
+    stroke: #ff7a00;
+    opacity: 1;
 }
 
-#lander-game[data-noc-stage="2"] #noc-server-bars path,
-#lander-game[data-noc-stage="3"] #noc-server-bars path,
-#lander-game[data-noc-stage="4"] #noc-server-bars path {
+.lander-site[data-noc-stage="7"] .antenna-signal-3 {
     stroke: #7de2c5;
-}
-
-#lander-game[data-noc-stage="2"] #noc-server-bars circle,
-#lander-game[data-noc-stage="3"] #noc-server-bars circle,
-#lander-game[data-noc-stage="4"] #noc-server-bars circle {
-    fill: #7de2c5;
-    stroke: #7de2c5;
-}
-
-#lander-game[data-noc-stage="3"] #noc-east-window rect,
-#lander-game[data-noc-stage="4"] #noc-east-window rect {
-    fill: #ffe09a;
-}
-
-#lander-game[data-noc-stage="4"] #noc-signals {
     opacity: 1;
 }
 
@@ -141,14 +243,14 @@
 
 #mission-left-engine {
     opacity: var(--left-plume-opacity);
+    transform: rotate(var(--thrust-vector-angle)) scale(1, var(--left-plume-scale));
     transform-origin: 82px 401px;
-    transform: translate(0, 401px) scale(1, var(--left-plume-scale)) translate(0, -401px);
 }
 
 #mission-right-engine {
     opacity: var(--right-plume-opacity);
+    transform: rotate(var(--thrust-vector-angle)) scale(1, var(--right-plume-scale));
     transform-origin: 158px 401px;
-    transform: translate(0, 401px) scale(1, var(--right-plume-scale)) translate(0, -401px);
 }
 
 #lander-game[data-cue="running"] #mission-left-engine,
@@ -165,21 +267,14 @@
 
 #lander-game[data-mission-state="landed"] #mission-bay-lip,
 #lander-game[data-mission-state="deploying"] #mission-bay-lip,
-#lander-game[data-mission-state="powering"] #mission-bay-lip,
-#lander-game[data-mission-state="departing"] #mission-bay-lip,
-#lander-game[data-mission-state="succeeded"] #mission-bay-lip {
+#lander-game[data-mission-state="powering"] #mission-bay-lip {
     display: block;
-}
-
-#lander-game[data-mission-state="succeeded"] #mission-lander {
-    display: none;
 }
 
 #mission-agent {
     display: none;
     fill: #292b30;
     stroke: #f5f2e8;
-    stroke-linecap: square;
     stroke-width: 1.5;
     transform: translate(var(--agent-x), var(--agent-y)) scale(1.8);
 }
@@ -190,10 +285,41 @@
 
 #lander-game[data-mission-state="deploying"] #mission-agent {
     display: block;
-    animation: agw-agent-route 2.2s linear 1;
 }
 
-#lander-game[data-mission-state="flying"] #lander-scene-shell {
+#lander-game[data-mission-state="crashing"] #mission-lander {
+    visibility: hidden;
+}
+
+#crash-flash {
+    fill: #ffe09a;
+    opacity: calc(1 - var(--crash-progress));
+    transform: translate(var(--crash-x), var(--crash-y)) scale(calc(0.2 + 1.2 * var(--crash-progress)));
+}
+
+#lander-game:not([data-mission-state="crashing"]) #crash-flash {
+    display: none;
+}
+
+#next-site-cue {
+    display: none;
+    fill: #d94a1e;
+}
+
+#lander-game[data-target-direction="right"] #next-site-cue {
+    transform: translate(932px, 280px);
+}
+
+#lander-game[data-target-direction="left"] #next-site-cue {
+    transform: translate(68px, 280px) scale(-1, 1);
+}
+
+#lander-game[data-target-offscreen="true"] #next-site-cue {
+    display: block;
+    animation: agw-target-cue 0.9s step-end infinite;
+}
+
+#lander-game:is([data-mission-state="flying"], [data-mission-state="launching"]) #lander-scene-stage {
     touch-action: none;
     user-select: none;
 }
@@ -224,28 +350,235 @@
     display: none !important;
 }
 
-#lander-controls,
-#lander-status {
-    max-width: 72ch;
-    min-height: 1.5em;
-    line-height: 1.5;
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
 }
 
-#lander-actions {
+#lander-fuel:not([hidden]),
+#lander-outcome:not([hidden]),
+#lander-controls-rail:not([hidden]) {
+    font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", "Liberation Mono", Menlo, Monaco, Consolas, monospace;
+    font-weight: 700;
+    letter-spacing: 0.025em;
+}
+
+#lander-fuel-value {
+    font-variant-numeric: tabular-nums;
+}
+
+#lander-fuel:not([hidden]) {
+    position: absolute;
+    z-index: 2;
+    top: clamp(0.5rem, 2vw, 1rem);
+    left: clamp(0.5rem, 2vw, 1rem);
+    display: block;
+    margin: 0;
+    pointer-events: none;
+}
+
+#lander-fuel-gauge {
+    display: block;
+    box-sizing: border-box;
+    width: 1rem;
+    height: min(7rem, calc(100cqh - 1rem));
+    overflow: hidden;
+    border: 3px solid #292b30;
+    background: #20232a;
+    box-shadow:
+        inset 0 0 0 3px var(--fuel-level-color),
+        3px 3px 0 #292b30;
+}
+
+#lander-fuel-gauge-fill {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background: var(--fuel-level-color);
+    transform: scaleY(var(--fuel-gauge-level));
+    transform-origin: bottom center;
+}
+
+#lander-game[data-fuel-level="empty"] #lander-fuel-gauge {
+    border-color: var(--fuel-danger-color);
+    background: var(--fuel-danger-color);
+    box-shadow:
+        inset 0 0 0 3px #20232a,
+        3px 3px 0 #292b30;
+    animation: agw-fuel-empty-blink 700ms steps(1, end) infinite;
+}
+
+#lander-game[data-refueling="true"] #lander-scene-stage::after {
+    position: absolute;
+    top: var(--fuel-transfer-y);
+    left: var(--fuel-transfer-x);
+    inline-size: 20px;
+    block-size: 22px;
+    background:
+        linear-gradient(#d94a1e 0 0) 6px 2px / 6px 2px no-repeat,
+        linear-gradient(#292b30 0 0) 4px 0 / 10px 6px no-repeat,
+        linear-gradient(#d94a1e 0 0) 16px 10px / 2px 4px no-repeat,
+        linear-gradient(#292b30 0 0) 16px 8px / 4px 8px no-repeat,
+        linear-gradient(#d94a1e 0 0) 2px 6px / 12px 14px no-repeat,
+        linear-gradient(#292b30 0 0) 0 4px / 16px 18px no-repeat;
+    background-color: transparent;
+    content: "";
+    image-rendering: pixelated;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+}
+
+#lander-outcome:not([hidden]) {
+    position: absolute;
+    z-index: 2;
+    inset-block-start: clamp(0.5rem, 2vw, 1rem);
+    inset-inline-end: clamp(0.5rem, 2vw, 1rem);
+    inset-inline-start: auto;
     display: flex;
-    flex-wrap: wrap;
-    gap: 0.75rem;
+    flex-direction: column;
+    align-items: center;
+    inline-size: auto;
+    pointer-events: none;
+    transform: none;
 }
 
-#lander-actions button {
-    min-width: 24px;
-    min-height: 24px;
+#lander-game:not([data-banner="none"]) #lander-outcome {
+    inset-inline-end: auto;
+    inset-inline-start: 50%;
+    inline-size: min(32rem, calc(100% - 6rem));
+    transform: translateX(-50%);
+}
+
+@container (max-height: 100px) {
+    #lander-game:not([data-banner="none"]) #lander-outcome {
+        inset-block-start: 0.125rem;
+        inline-size: calc(100% - 3rem);
+        font-size: 0.625rem;
+    }
+
+    #lander-restart {
+        margin-block-start: 0.125rem;
+    }
+}
+
+#lander-status {
+    margin: 0;
+    line-height: 1.25;
+    text-align: center;
+}
+
+#lander-game[data-banner="none"] #lander-status {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+#lander-game:not([data-banner="none"]) #lander-status {
+    box-sizing: border-box;
+    max-inline-size: 100%;
+    padding: 0.45rem 0.75rem;
+    border: 3px solid #292b30;
+    background: #f5f2e8;
+    color: #292b30;
+}
+
+#lander-game[data-banner="deployed"] #lander-status {
+    box-shadow:
+        inset 0 -3px 0 #2ed49b,
+        3px 3px 0 #292b30;
+}
+
+#lander-game[data-banner="crashed"] #lander-status {
+    box-shadow:
+        inset 0 -3px 0 #ff5a36,
+        3px 3px 0 #292b30;
+}
+
+#lander-game[data-banner="error"] #lander-status {
+    box-shadow: 3px 3px 0 #292b30;
+}
+
+#lander-restart,
+#lander-exit {
+    display: inline-grid;
+    min-inline-size: 44px;
+    block-size: 44px;
+    min-block-size: 44px;
+    align-content: center;
     padding: 0.5rem 0.75rem;
-    border: 1px solid #4b4e55;
-    background: #ebe7dc;
+    border: 3px solid #292b30;
+    border-radius: 0;
+    background: #f5f2e8;
+    box-shadow: 3px 3px 0 #292b30;
     color: #292b30;
     font: inherit;
     cursor: pointer;
+}
+
+#lander-restart {
+    margin-block-start: 0.5rem;
+    pointer-events: auto;
+}
+
+.lander-key-hint {
+    font-size: 0.75em;
+    line-height: 1;
+}
+
+#lander-controls-rail:not([hidden]) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: clamp(0.4rem, 1.5vw, 0.75rem);
+    box-sizing: border-box;
+    width: 100%;
+    min-block-size: 44px;
+    margin: 0;
+    padding: 0 clamp(0.6rem, 2vw, 1rem);
+    border-block-start: 4px solid #292b30;
+    background: #20232a;
+    color: #f5f2e8;
+    font-size: clamp(0.625rem, 1.8vw, 0.8125rem);
+    line-height: 1.25;
+}
+
+#lander-controls {
+    min-inline-size: 0;
+    margin: 0;
+}
+
+.lander-controls-line {
+    display: block;
+    overflow: visible;
+    white-space: nowrap;
+}
+
+#lander-exit {
+    align-self: end;
+    justify-self: end;
+}
+
+@media (max-width: 32rem) {
+    .game-main {
+        --controls-rail-block-size: 84px;
+    }
+
+    #lander-controls-rail:not([hidden]) {
+        grid-template-columns: minmax(0, 1fr);
+        row-gap: 0;
+        padding: 0 0.4rem;
+    }
 }
 
 #lander-game[data-paused="true"] * {
@@ -255,21 +588,23 @@
 @keyframes agw-preflight-cue {
     0%,
     100% {
-        transform: translate(0, 401px) scale(1, 0.08) translate(0, -401px);
+        transform: scale(1, 0.08);
     }
 
     50% {
-        transform: translate(0, 401px) scale(1, 0.28) translate(0, -401px);
+        transform: scale(1, 0.28);
     }
 }
 
-@keyframes agw-agent-route {
-    from {
-        opacity: 0.98;
+@keyframes agw-target-cue {
+    50% {
+        opacity: 0.35;
     }
+}
 
-    to {
-        opacity: 1;
+@keyframes agw-fuel-empty-blink {
+    50% {
+        opacity: 0.3;
     }
 }
 
@@ -279,5 +614,10 @@
     *::after {
         animation: none !important;
         transition: none !important;
+    }
+
+    #lander-game[data-target-offscreen="true"] #next-site-cue {
+        display: block;
+        opacity: 1;
     }
 }

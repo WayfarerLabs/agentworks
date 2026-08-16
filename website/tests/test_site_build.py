@@ -240,6 +240,57 @@ class BuildAndInstallTests(RepositoryFixture):
         with self.assertRaisesRegex(ValueError, "JavaScript module import is absent from manifest"):
             site_builder._validate_local_references(changed, EXPECTED_FILES, "/")
 
+    def test_model_ships_byte_for_byte_without_generated_proof_composition(self) -> None:
+        rendered, manifest = site_builder._render_artifact(self.root, "/")
+        model_path = Path("static/lander-model.js")
+        self.assertEqual(manifest, EXPECTED_FILES)
+        self.assertEqual(rendered[model_path], (WEBSITE / model_path).read_bytes())
+        source = (WEBSITE / model_path).read_text(encoding="utf-8")
+        self.assertNotIn("lander-route-proofs", source)
+        self.assertNotIn("REFERENCE_PROOF", source)
+
+    def test_collision_and_world_ship_separately_in_the_exact_manifest(self) -> None:
+        rendered, manifest = site_builder._render_artifact(self.root, "/")
+        collision = Path("static/lander-collision.js")
+        world = Path("static/lander-world.js")
+        self.assertEqual(manifest, EXPECTED_FILES)
+        self.assertEqual(rendered[collision], (WEBSITE / collision).read_bytes())
+        self.assertEqual(rendered[world], (WEBSITE / world).read_bytes())
+        self.assertIn(b'from "./lander-collision.js"', rendered[world])
+        self.assertNotIn(rendered[collision], rendered[world])
+        for changed in (manifest - {collision}, manifest | {Path("static/lander-extra.js")}):
+            with self.subTest(changed=changed), self.assertRaises(ValueError):
+                site_builder.validate_game_manifest(changed)
+
+    def test_retired_route_projection_sources_are_absent(self) -> None:
+        for relative in (
+            "static/lander-route-proofs.generated.js",
+            "tools/derive_lander_routes.mjs",
+            "tools/project_lander_route_proofs.mjs",
+        ):
+            self.assertFalse((self.root / "website" / relative).exists())
+
+    def test_authored_lander_modules_and_tests_stay_below_the_review_ceiling(self) -> None:
+        authored = [
+            WEBSITE / "static/lander-collision.js",
+            WEBSITE / "static/lander-game.js",
+            WEBSITE / "static/lander-model.js",
+            WEBSITE / "static/lander-world.js",
+            *sorted((WEBSITE / "tools").glob("*.mjs")),
+            *sorted((WEBSITE / "tests").glob("*.test.mjs")),
+        ]
+        for path in authored:
+            with self.subTest(path=path.relative_to(REPO_ROOT)):
+                self.assertLess(len(path.read_text(encoding="utf-8").splitlines()), 1_000)
+        rendered, _ = site_builder._render_artifact(self.root, "/")
+        for relative in (
+            Path("static/lander-model.js"),
+            Path("static/lander-world.js"),
+            Path("static/lander-collision.js"),
+        ):
+            with self.subTest(emitted=relative):
+                self.assertLess(len(rendered[relative].decode().splitlines()), 1_000)
+
     def test_output_rejects_dot_traversal(self) -> None:
         target = Path(self.temporary.name) / "parent" / ".." / "escaped"
         with self.assertRaisesRegex(ValueError, "dot traversal"):

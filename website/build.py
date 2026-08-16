@@ -17,6 +17,7 @@ if str(WEBSITE_DIR) not in sys.path:
     sys.path.insert(0, str(WEBSITE_DIR))
 
 from site_asset_validation import validate_favicon_asset  # noqa: E402
+from site_game_validation import validate_game_manifest  # noqa: E402
 from site_content import (  # noqa: E402
     ASSISTANCE_README_BEGIN,
     ASSISTANCE_README_END,
@@ -37,7 +38,6 @@ from site_content import (  # noqa: E402
     extract_content,
 )
 from site_validation import (  # noqa: E402
-    GAME_DESCRIPTIONS,
     MAIN_ATTRIBUTES,
     REQUIRED_404_REFERENCES,
     SERVICE_ICON_PATHS,
@@ -61,7 +61,6 @@ __all__ = (
     "ContractError",
     "DOCUMENT_CONTRACTS",
     "FULL_MANIFEST",
-    "GAME_DESCRIPTIONS",
     "MAIN_ATTRIBUTES",
     "MANIFESTO_CONTRACT",
     "PYPI_URL",
@@ -95,17 +94,19 @@ FULL_MANIFEST: Final = frozenset(
         Path("assets/agw-rocket.svg"),
         Path("security/index.html"),
         Path("static/lander-game.js"),
+        Path("static/lander-collision.js"),
         Path("static/lander-model.js"),
+        Path("static/lander-world.js"),
         Path("static/onboarding-copy.js"),
         Path("static/lander.css"),
         Path("static/site.css"),
     }
 )
 
-
 def _render_artifact(repo_root: Path, site_base: str) -> tuple[dict[Path, bytes], frozenset[Path]]:
     website = repo_root / "website"
     manifest = FULL_MANIFEST
+    validate_game_manifest(manifest)
     substitutions = extract_content(repo_root)
     fragment_source = _read_utf8(website / "templates" / "lander-game.html")
     lander_game = render_named_template("lander-game.html", fragment_source, site_base, {})
@@ -125,8 +126,10 @@ def _render_artifact(repo_root: Path, site_base: str) -> tuple[dict[Path, bytes]
     copies = {
         Path("assets/agw-favicon.svg"): website / "assets/agw-favicon.svg",
         Path("assets/agw-rocket.svg"): website / "assets/agw-rocket.svg",
+        Path("static/lander-collision.js"): website / "static/lander-collision.js",
         Path("static/lander-game.js"): website / "static/lander-game.js",
         Path("static/lander-model.js"): website / "static/lander-model.js",
+        Path("static/lander-world.js"): website / "static/lander-world.js",
         Path("static/onboarding-copy.js"): website / "static/onboarding-copy.js",
         Path("static/lander.css"): website / "static/lander.css",
         Path("static/site.css"): website / "static/site.css",

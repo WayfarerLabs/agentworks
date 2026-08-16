@@ -1,6 +1,6 @@
 # Agentworks Website
 
-<!-- cspell:ignore sdds -->
+<!-- cspell:ignore refuel reprojection sdds -->
 
 This directory owns the static source for `agentworks.build`. A standard-library Python builder
 combines semantic templates, local CSS and JavaScript, the AGW rocket asset, and selected passages
@@ -12,8 +12,8 @@ from `packaging/agentworks/assistance.md`. The same bootstrap is projected into 
 README; the build fails unless those two source representations are byte-identical. A generated
 Manifesto presents the complete long-form argument from `docs/manifesto.md`, while a separate
 Security page provides practical depth and a GitHub reporting route. The shared header places the
-GitHub and PyPI destinations once per page. A dedicated Lander page presents the same bounded
-lunar-deployment game used as progressive enhancement on the useful 404 fallback. The shared footer
+GitHub and PyPI destinations once per page. A dedicated Lander page presents the same continuous
+lunar-deployment expedition used as progressive enhancement on the useful 404 fallback. The shared
 places the Manifesto, Security, and icon-only Lander destinations once per page.
 
 ## Local build and test
@@ -38,8 +38,8 @@ Then open `http://localhost:8000/`, `http://localhost:8000/manifesto/`,
 
 Game work normally uses `/lander/` from this complete build; fallback acceptance also exercises the
 actual `/404.html`. Both shells receive one already-rendered `lander-game.html` fragment and load
-the same CSS, controller, and model. The builder has no partial-output mode because every breadcrumb
-and footer links to the other generated pages.
+the same CSS, controller, model, and pure world generator. The builder has no partial-output mode
+because every breadcrumb and footer links to the other generated pages.
 
 Run the automated suites and repository checks:
 
@@ -52,9 +52,10 @@ node --test website/tests/*.test.mjs
 ```
 
 The Python website suite requires `chromium`, `chromium-browser`, or `google-chrome` on `PATH`. Its
-responsive geometry test launches that browser in headless mode and fails, rather than skips, when
-none is available. PR CI and the Pages build therefore prove the wide left-rail and narrow inline
-layouts.
+responsive geometry tests launch that browser in headless mode and fail, rather than skip, when none
+is available. PR CI and the Pages build therefore prove the long-form layouts plus the Lander's
+narrow arcade HUD, stage-to-controls separation, native-action targets, pseudo-can paint, local font
+stack, touch scope, and zero cross-origin request contract.
 
 Pull requests and pushes to `main` run these website contracts in the `Website` job of
 `.github/workflows/ci.yml`; `ci-success` requires that job. The `Deploy website to Pages` workflow
@@ -70,6 +71,48 @@ The package-free browser, responsive, motion, touch, and assistive-technology ch
 [`tests/lander-browser-checklist.md`](tests/lander-browser-checklist.md). Complete its pending rows
 before a public release.
 
+The Lander uses fixed-step vacuum physics. Space or Up commands collective thrust; Left/H and
+Right/L steer. Steered thrust is deliberately vectored by up to 30 degrees and uses less total
+forward thrust than straight collective. A powered neutral collective redistributes thrust between
+the two engines to arrest rotation without adding drag or changing fuel use. Pointer and touch input
+use the same bounded mixer: press for collective, drag horizontally to steer, and a short tap
+retains a 140 ms pulse. Safe landing limits are inclusive at 2.2 m/s horizontal speed, 3.6 m/s
+descent, 18 degrees of tilt, and 26 degrees/s rotation.
+
+Terrain is deterministic per run. A seed-selected global stream chooses from eight asymmetric 512 m
+superblock profiles, each made only from 32 straight 16 m segments. Every height stays within the
+normalized 0.1-0.6 scene band, with absolute grade at most 0.6 and adjacent grade change at most
+1.2; seeded profile selection and asymmetric facets prevent a short repeating silhouette. Sites use
+the terrain-independent formula `36+192*i` for indexes 0 through 4095, then evaluate one bounded
+run-wide order of six fixed offsets and accept the first deck at or below normalized 0.5. One
+strict-X polyline is the collision, support-foot, fixture, and rendering authority; it projects as
+one closed fill without a stroke and one open miter-joined stroked surface. Each 9.6 m deck is
+derived exactly 2.5 m above the maximum native terrain over the complete closed platform-to-NOC
+footprint, without a global datum, shelf, or terrain-shaped exception. A continuous 18.6 m, 0.75
+m-deep twelve-bay Warren truss reaches from the deck's left edge through the NOC's right edge. Three
+one-metre, two-rail lattice columns extend from its underside to six independently interpolated
+native-terrain feet. Their ties and alternating braces use the truss member style. Exact closed
+colliders cover the truss and each complete column; the NOC begins at the deck underside. The NOC
+battery fills four colored bars bottom-to-top, then three symmetric signal arches power outward; its
+fixed mast and antenna head remain graphite at every stage. The parallax sky uses recognizable
+crescent moons and circular planets with one or two restrained elliptical rings. Each ring keeps its
+foreground arc while the planet hides its rear center. These shapes, fills, and outlines preserve
+their meaning without relying on color alone.
+
+Flight may pass a target and explore in either direction between the visible physical rails at
+`x=-786432` and `x=786432`. Only swept contact with terrain, a platform, a support, a NOC, or either
+rail causes failure; speed, altitude, empty fuel, and retained render-window edges never synthesize
+a crash. The camera follows both directions with a stable dead zone, and the target cue switches
+sides from live viewport geometry. Five deterministic sky chunks supply twenty stars and one or two
+crescent or ringed-planet landmarks. That fixed two-path sky moves at 24 percent of terrain motion
+and reconstructs exactly after reversal.
+
+The scene itself is always a fixed `25:16` projection with no vertical camera. Viewport width and
+height may only scale it uniformly. The stage and normal-flow controls rail fit within a bounded
+`100svh` game-page grid at `320 by 780`, the real `320 by 240` 400-percent equivalent, `667 by 320`
+touch landscape, and `1000 by 780`; gameplay, crash, Retry, and Exit cannot grow or scroll the
+document.
+
 ## Artifact contract
 
 Generated output is not maintained or edited. The complete output contains exactly:
@@ -83,7 +126,9 @@ manifesto/index.html
 lander/index.html
 security/index.html
 static/lander-game.js
+static/lander-collision.js
 static/lander-model.js
+static/lander-world.js
 static/onboarding-copy.js
 static/lander.css
 static/site.css
@@ -91,6 +136,74 @@ static/site.css
 
 This is the builder's only output shape. The manifest is explicit in `build.py`; the builder never
 recursively copies source directories or permits a generated local link outside the manifest.
+
+The game keeps its terrain/site geometry reviewable and independent from runtime generation.
+`tests/fixtures/lander-route-geometry-v10.json` contains geometry and physics constants only—no
+route keys, schedules, proofs, or fuel results. Regenerate to a temporary path and verify the
+reviewed fixture with:
+
+```bash
+node website/tools/derive_lander_geometry.mjs \
+  --output /tmp/lander-route-geometry-v10.json \
+  --verify website/tests/fixtures/lander-route-geometry-v10.json
+```
+
+The geometry generator uses Node built-ins and independently reconstructs the eight profiles,
+selector, 512 finite profile/order assignments, 250 geometry classes, candidate termination, signed
+sites, four complete positive missions, and the finite world counts. Those checks never produce
+route records. Runtime computes the next predicted allowance in constant time as
+`quantumCeil(22 + max(0, targetDeck - originDeck) / 3)`, then applies the existing ratio and adds
+the award to carryover. It performs no route-key construction, search, simulation, replay, or
+catalog lookup. The literal 22 is a conservative round-up from reviewed reference flights, not a
+universal minimum-flight guarantee.
+
+The builder copies the authored model byte-for-byte and emits the exact 14-file artifact. The
+separate shipped `static/lander-collision.js` is the leaf dependency of `static/lander-world.js`;
+neither module is concatenated or generated.
+
+During a run, the model retains at most five terrain chunk indexes while the DOM always uses exactly
+two terrain paths plus one permanent physical-terminus path, the active and target sites plus one
+previous powered site, one input queue of at most 64 records, and eight crash fragments. The
+worst-case world projection has at most 76 descendants. Fuel has no capacity cap: unused reserve
+carries forward. At one-indexed powered base `n`, each collected can adds the next predicted
+allowance multiplied by the direct constant-time ratio `1 + 0.5 ** (n - 1)`. Runtime number
+precision reaches exactly 1 at base 54 and remains 1 through base 100. Exit and reload discard the
+in-memory run; crash Retry restores the last powered pad without recollecting fuel or advancing
+progress.
+
+The left vertical gauge is visual-only. A new run starts with 15 units against an honest 30-unit
+reference, so its fill begins exactly half full. After each award, the uncapped carried reserve
+becomes the next leg's reference. Its bottom-up height and bright danger-red, caution-amber, or
+ready-green indicator independently project fuel against that reference. Visually hidden, ordinary,
+non-live label and value spans expose the fuel relationship as two ordered scene-description
+references; the label names the separate rounded value. Exact model fuel remains unrounded and
+uncapped. Normal motion projects the collected can toward the gauge and raises the fill linearly
+over the model-owned 300 ms refuel interval. Reduced motion, or enabling reduced motion mid-refuel,
+exposes the same committed fuel and checkpoint atomically without a transfer. Hiding the document
+freezes model time, while resize and the first visible frame project the same progress again from
+current stage and gauge rectangles.
+
+The sole status live region presents centered bordered `Agent Deployed!` and `Crashed!` arcade
+panels. A failure-only native Retry follows the status inside that outcome; a persistent native Exit
+follows the concise control sentence in the normal-flow rail after the complete 25:16 scene stage.
+Both controls stay at least 44 CSS pixels in each dimension. Their visible second-line keyboard
+hints are excluded from their accessible names, while `aria-keyshortcuts` exposes `r` and `Escape`.
+Retry returns focus to the scene and Exit returns it to Start. The control prose is exactly two
+block lines that do not wrap (keyboard, then touch); at narrow widths Exit reflows beneath them. The
+rail cannot cover terrain or overlays, and its instructions describe flight controls without
+duplicating departure commands. Pointer flight handlers belong only to the stage, reject interactive
+or editable composed paths before preventing or capturing, and disable touch gestures only during
+active flight or departure. Keyboard flight handling first requires the event path to contain the
+active shell, handles in-shell Exit or failed-run Retry, then rejects interactive or editable paths
+before accepting physical flight keys; outside-shell keys have no game effect.
+
+At the first NOC power stage, the existing doorway path becomes the installed-agent glyph without
+adding a site node or mutable world field. It stays installed whenever that retained site is
+powered, including later legs, crash, checkpoint restoration, and restart. After all four battery
+and three signal stages complete, `Agent Deployed!` remains visible while the lander waits on the
+pad without spending fuel. Normal deployment travel takes 0.9 seconds; the existing 0.3-second
+refuel and 1.4-second power sequence remain independent. Depart through the ordinary keyboard, vi,
+pointer, or touch flight controls.
 
 All three CLI paths are required. The output must be outside the repository. The site base is an
 ASCII, slash-bounded same-origin path such as `/` or `/agentworks/`; absolute URLs, dot segments,
@@ -171,10 +284,10 @@ footer. The header has exactly one linked `Agentworks` home crumb, a hidden visu
 non-linked current-page item, and one icon-and-text link each for GitHub and PyPI. Home omits the
 small header mark because its large hero follows; every other page has exactly one decorative small
 mark immediately before the breadcrumb. The footer has exact ownership text plus one Manifesto and
-one Security text link, followed by a selected-rocket icon link named `Play Lunar Lander`. Each
-service icon has one pinned direct path; its adjacent visible text supplies the accessible name.
-Those local and external destinations are not repeated in the body. On 404, the linked home crumb is
-the sole visible route-home action.
+one Security text link, followed by a selected-rocket icon link whose matching accessibility label
+and hover title are `Help deploy some agents!`. Each service icon has one pinned direct path; its
+adjacent visible text supplies the accessible name. Those local and external destinations are not
+repeated in the body. On 404, the linked home crumb is the sole visible route-home action.
 
 Every page head references `assets/agw-favicon.svg`, a transparent, flame-free projection of the
 neutral A/G/W mark. Its geometry is checked against `assets/agw-rocket.svg`; maintain the selected
@@ -218,7 +331,7 @@ the publishing workflow first runs from a merged `main` commit.
 5. Set `agentworks.build` as this repository's custom domain. Do not mutate DNS yet.
 6. On the same already verified implementation merge-push workflow, use GitHub's **Re-run all
    jobs**. Prove the rerun checked out the same source SHA, normalized `site_base=/`, built and
-   uploaded the exact root-base twelve-file artifact, and deployed that artifact successfully. If
+   uploaded the exact root-base fourteen-file artifact, and deployed that artifact successfully. If
    the deployment fails or cannot be verified, execute the activation rollback below.
 7. Re-inventory DNS. Only after the same-SHA root deployment is proven, obtain explicit operator
    approval for the exact cutover and then change only the identified parking records.
@@ -242,7 +355,7 @@ verified, leave all DNS records unchanged and detach the repository custom-domai
 the WayfarerLabs organization verification and its TXT record, along with every unrelated DNS
 record. On the same latest verified `main` push workflow, use **Re-run all jobs** again. Verify that
 `configure-pages` selected `/agentworks/`, that the rerun checked out the same source SHA, and that
-the exact project-base twelve-file artifact deployed successfully. Verify that same SHA at
+the exact project-base fourteen-file artifact deployed successfully. Verify that same SHA at
 `https://wayfarerlabs.github.io/agentworks/`, then stop. Retry custom-domain activation only through
 the full reviewed sequence above.
 

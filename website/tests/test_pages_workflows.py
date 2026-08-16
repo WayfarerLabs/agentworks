@@ -457,7 +457,7 @@ class WorkflowContractTests(unittest.TestCase):
         website = block(self.ci, "website:", 2)
         self.assertIn("actions/checkout@v7", website)
         self.assertIn("python3 -m unittest discover -s website/tests -p 'test_*.py'", website)
-        self.assertIn("node --test website/tests/*.test.mjs", website)
+        self.assertIn(NODE_TEST_COMMAND, website)
         self.assertEqual(website.count("python3 website/build.py"), 4)
         self.assertIn("--site-base /", website)
         self.assertIn("--site-base /agentworks/", website)
@@ -529,7 +529,7 @@ class WorkflowContractTests(unittest.TestCase):
     def test_pages_build_tests_determinism_and_exact_artifact_boundary(self) -> None:
         build = block(self.pages, "build:", 2)
         self.assertIn("python3 -m unittest discover -s website/tests -p 'test_*.py'", build)
-        self.assertIn("node --test website/tests/*.test.mjs", build)
+        self.assertIn(NODE_TEST_COMMAND, build)
         self.assertEqual(build.count("python3 website/build.py"), 2)
         self.assertIn('"${RUNNER_TEMP}/agentworks-site"', build)
         self.assertIn('"${RUNNER_TEMP}/agentworks-site-repeat"', build)

@@ -18,6 +18,7 @@ from site_content import (
     REPORTING_URL,
     REPOSITORY_URL,
 )
+from site_game_validation import validate_game_contract
 
 SITE_BASE_TOKEN: Final = "{{SITE_BASE}}"
 LANDER_GAME_TOKEN: Final = "{{LANDER_GAME}}"
@@ -54,18 +55,17 @@ APPROVED_EXTERNAL_URLS: Final = frozenset({
 })
 SHELL_DESTINATION_LABELS: Final = {REPOSITORY_URL: "GitHub", PYPI_URL: "PyPI", f"{SITE_BASE_TOKEN}manifesto/": "Agentworks Manifesto", f"{SITE_BASE_TOKEN}security/": "We take security seriously"}  # noqa: E501
 CURRENT_PAGE_LABELS: Final = {"index.html": "Home", "manifesto.html": "Manifesto", "security.html": "Security", "lander.html": "Lander", "404.html": "404"}  # noqa: E501
-TEMPLATE_METADATA: Final = {
+TEMPLATE_METADATA: Final[dict[str, tuple[str | None, str]]] = {
     "index.html": ("Agentworks", "https://agentworks.build/"),
     "manifesto.html": ("Agentworks Manifesto", "https://agentworks.build/manifesto/"),
     "security.html": ("Security | Agentworks", "https://agentworks.build/security/"),
-    "lander.html": ("Lunar deployment | Agentworks", "https://agentworks.build/lander/"),
-    "404.html": ("Page not found | Agentworks", "https://agentworks.build/404.html"),
+    "lander.html": (None, "https://agentworks.build/lander/"),
+    "404.html": (None, "https://agentworks.build/404.html"),
 }
 GAME_CSP: Final = (
     "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; "
     "connect-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
 )
-GAME_DESCRIPTIONS: Final = {"lander.html": "Fly the Agentworks lunar deployment mission and deliver an agent to the NOC.", "404.html": "The requested Agentworks page was not found."}  # noqa: E501
 TEMPLATE_DESTINATIONS: Final = {
     "index.html": Path("index.html"),
     "manifesto.html": Path("manifesto/index.html"),
@@ -80,10 +80,7 @@ MAIN_ATTRIBUTES: Final = {
     "lander.html": {"id": "main-content", "class": "detail-main game-main"},
     "404.html": {"id": "main-content", "class": "detail-main game-main"},
 }
-DETAIL_PAGE_HEADINGS: Final = {
-    "lander.html": "Lunar deployment",
-    "404.html": "Page not found",
-}
+GAME_DETAIL_TEMPLATES: Final = frozenset({"lander.html", "404.html"})
 LONG_FORM_TEMPLATES: Final = frozenset({"manifesto.html", "security.html"})
 
 REQUIRED_404_REFERENCES = {
@@ -128,9 +125,7 @@ TEMPLATE_REQUIRED_LITERALS: Final = {
         f'href="{SITE_BASE_TOKEN}assets/agw-rocket.svg#agw-mark"',
         f'href="{SITE_BASE_TOKEN}assets/agw-rocket.svg#agw-engine-left"',
         f'href="{SITE_BASE_TOKEN}assets/agw-rocket.svg#agw-engine-right"',
-        'id="lander-actions" hidden',
-        'id="lander-exit" type="button">Exit mission</button>',
-        'id="lander-restart" type="button" hidden>Restart mission</button>',
+        'id="lander-outcome" hidden',
     },
 }
 CONTENT_TOKEN_PLACEMENTS: Final = {
@@ -395,10 +390,8 @@ def _validate_shared_shell(name: str, template: str) -> None:
     parser.feed(template)
     elements = parser.elements
     expected_title, expected_canonical = TEMPLATE_METADATA[name]
-
     if any(element.tag == "style" or "style" in element.attributes for element in elements):
         raise ValueError(f"{name}: inline style cannot alter the reviewed shell visibility")
-
     html_index = _one(
         parser,
         [i for i, element in enumerate(elements) if element.tag == "html"],
@@ -414,10 +407,11 @@ def _validate_shared_shell(name: str, template: str) -> None:
         [i for i in _children(parser, html_index) if elements[i].tag == "body"],
         f"{name}: one body is required",
     )
+    body_attributes = {"class": "game-page"} if name in {"lander.html", "404.html"} else {}
     if (
         elements[html_index].attributes != {"lang": "en"}
         or elements[head_index].attributes
-        or elements[body_index].attributes
+        or elements[body_index].attributes != body_attributes
     ):
         raise ValueError(f"{name}: html, head, and body root attributes are invalid")
     title_index = _one(
@@ -425,14 +419,17 @@ def _validate_shared_shell(name: str, template: str) -> None:
         [i for i in _children(parser, head_index) if elements[i].tag == "title"],
         f"{name}: one document title is required",
     )
-    if _normalized_text(elements[title_index].text) != expected_title:
+    title = _normalized_text(elements[title_index].text)
+    if not title:
+        raise ValueError(f"{name}: document title must be nonempty")
+    if expected_title is not None and title != expected_title:
         raise ValueError(f"{name}: document title must be {expected_title!r}")
     validate_head_links(
         name,
         [(elements[i].tag, elements[i].attributes) for i in _children(parser, head_index)],
         expected_canonical,
     )
-    if name in GAME_DESCRIPTIONS:
+    if name in GAME_DETAIL_TEMPLATES:
         description_index = _one(
             parser,
             [
@@ -440,7 +437,7 @@ def _validate_shared_shell(name: str, template: str) -> None:
                 for i in _children(parser, head_index)
                 if elements[i].tag == "meta" and elements[i].attributes.get("name") == "description"
             ],
-            f"{name}: one exact description is required",
+            f"{name}: one description is required",
         )
         csp_index = _one(
             parser,
@@ -451,10 +448,12 @@ def _validate_shared_shell(name: str, template: str) -> None:
             ],
             f"{name}: one exact Content Security Policy is required",
         )
-        if elements[description_index].attributes != {
-            "name": "description",
-            "content": GAME_DESCRIPTIONS[name],
-        }:
+        description_attributes = elements[description_index].attributes
+        if (
+            set(description_attributes) != {"name", "content"}
+            or description_attributes["name"] != "description"
+            or not " ".join((description_attributes["content"] or "").split())
+        ):
             raise ValueError(f"{name}: description metadata is invalid")
         if elements[csp_index].attributes != {
             "http-equiv": "Content-Security-Policy",
@@ -494,7 +493,7 @@ def _validate_shared_shell(name: str, template: str) -> None:
         article_index = main_children[0]
         if _children(parser, article_index) or _normalized_text(elements[article_index].text) != source_token:
             raise ValueError(f"{name}: long-form article must contain only its complete source token")
-    if expected_heading := DETAIL_PAGE_HEADINGS.get(name):
+    if name in GAME_DETAIL_TEMPLATES:
         main_children = _children(parser, main_index)
         if not main_children or (
             elements[main_children[0]].tag != "div"
@@ -504,25 +503,27 @@ def _validate_shared_shell(name: str, template: str) -> None:
         heading_children = _children(parser, main_children[0])
         if [elements[index].tag for index in heading_children] != ["h1"]:
             raise ValueError(f"{name}: detail page heading must contain only its reviewed h1")
-        _validate_visible_leaf(
-            parser,
-            heading_children[0],
-            {},
-            expected_heading,
-            f"{name}: detail page heading requires its exact reviewed h1",
-        )
+        heading = elements[heading_children[0]]
+        if (
+            heading.attributes
+            or _hidden(parser, heading_children[0])
+            or _children(parser, heading_children[0])
+            or not _normalized_text(heading.text)
+        ):
+            raise ValueError(f"{name}: detail page heading requires one visible nonempty h1")
         if name == "lander.html" and main_children != [main_children[0]]:
             raise ValueError(f"{name}: heading must be the only shell element before the shared game")
         if name == "404.html":
             if [elements[index].tag for index in main_children] != ["div", "p"]:
                 raise ValueError(f"{name}: heading and not-found message must precede the shared game")
-            _validate_visible_leaf(
-                parser,
-                main_children[1],
-                {"id": "not-found-message"},
-                "This route has not been deployed. The lunar surface below is still operational.",
-                f"{name}: not-found message contract is invalid",
-            )
+            message = elements[main_children[1]]
+            if (
+                message.attributes != {"id": "not-found-message"}
+                or _hidden(parser, main_children[1])
+                or _children(parser, main_children[1])
+                or not _normalized_text(message.text)
+            ):
+                raise ValueError(f"{name}: not-found message must be visible ordinary prose")
         if name in {"lander.html", "404.html"} and any(
             marker in template for marker in ('class="error-code"', 'class="eyebrow"')
         ):
@@ -548,7 +549,6 @@ def _validate_shared_shell(name: str, template: str) -> None:
             "alt": "",
         }:
             raise ValueError(f"{name}: small header rocket contract is invalid")
-
     if elements[breadcrumb_index].attributes != {
         "class": "breadcrumbs",
         "aria-label": "Breadcrumb",
@@ -578,7 +578,6 @@ def _validate_shared_shell(name: str, template: str) -> None:
         CURRENT_PAGE_LABELS[name],
         f"{name}: breadcrumb current-page state is invalid",
     )
-
     if elements[external_index].attributes != {
         "class": "service-links",
         "aria-label": "External",
@@ -601,7 +600,6 @@ def _validate_shared_shell(name: str, template: str) -> None:
         or len([element for element in elements if element.tag == "svg"]) != 2
     ):
         raise ValueError(f"{name}: header must contain only the two reviewed service icons")
-
     images = [index for index, element in enumerate(elements) if element.tag == "img"]
     if len(images) != 2:
         raise ValueError(f"{name}: document must contain exactly its header/hero and footer rocket images")
@@ -653,11 +651,19 @@ def _validate_shared_shell(name: str, template: str) -> None:
             f"{name}: footer destination {destination} is invalid",
         )
     game_link = elements[footer_links[2]]
-    if game_link.attributes != {
-        "class": "footer-game-link",
-        "href": f"{SITE_BASE_TOKEN}lander/#lander-game",
-        "aria-label": "Play Lunar Lander",
-    } or _hidden(parser, footer_links[2]):
+    game_label = game_link.attributes.get("aria-label")
+    if (
+        game_link.attributes
+        != {
+            "class": "footer-game-link",
+            "href": f"{SITE_BASE_TOKEN}lander/",
+            "aria-label": game_label,
+            "title": game_label,
+        }
+        or not game_label
+        or not game_label.strip()
+        or _hidden(parser, footer_links[2])
+    ):
         raise ValueError(f"{name}: footer Lander link contract is invalid")
     game_children = _children(parser, footer_links[2])
     if (
@@ -762,7 +768,6 @@ def _validate_onboarding_template(name: str, parser: _TemplatePlacementParser, t
         raise ValueError("index.html: exactly one onboarding section is required")
     if parser.onboarding_headings != 1:
         raise ValueError("index.html: onboarding requires its reviewed heading")
-
     shell = _ShellParser()
     shell.feed(template)
     elements = shell.elements
@@ -858,83 +863,6 @@ def _validate_game_shell_placement(name: str, parser: _TemplatePlacementParser) 
         raise ValueError(f"{name}: shared Lander fragment must be an exact direct main placement")
 
 
-def _validate_lander_fragment(template: str) -> None:
-    parser = _ShellParser()
-    parser.feed(template)
-    elements = parser.elements
-    roots = [index for index, element in enumerate(elements) if element.parent is None]
-    section = _one(parser, roots, "lander-game.html: exactly one root section is required")
-    if elements[section].tag != "section" or elements[section].attributes != {
-        "id": "lander-game",
-        "aria-label": "Lunar deployment scene",
-    }:
-        raise ValueError("lander-game.html: root section contract is invalid")
-    section_children = _children(parser, section)
-    if [elements[index].tag for index in section_children] != ["div", "p", "div", "p"]:
-        raise ValueError("lander-game.html: scene, controls, actions, and status must occur in order")
-    shell, controls, actions, status = section_children
-    if elements[shell].attributes != {"id": "lander-scene-shell", "tabindex": "-1"}:
-        raise ValueError("lander-game.html: scene shell contract is invalid")
-    shell_children = _children(parser, shell)
-    if [elements[index].tag for index in shell_children] != ["svg", "button"]:
-        raise ValueError("lander-game.html: scene must precede its start button")
-    scene, start = shell_children
-    if elements[scene].attributes != {
-        "id": "lander-scene",
-        "viewbox": "0 0 1000 640",
-        "preserveaspectratio": "xMidYMid meet",
-        "role": "img",
-        "aria-labelledby": "lander-scene-title lander-scene-description",
-    }:
-        raise ValueError("lander-game.html: scene SVG attributes are invalid")
-    if elements[start].attributes != {
-        "id": "lander-start",
-        "type": "button",
-        "hidden": None,
-        "aria-label": "Start lunar deployment mission",
-    }:
-        raise ValueError("lander-game.html: start control contract is invalid")
-    if (
-        elements[controls].attributes != {"id": "lander-controls", "hidden": None}
-        or _children(parser, controls)
-        or _normalized_text(elements[controls].text)
-        != "Thrust: Space or Up. Turn: Left/H or Right/L. Escape exits. R restarts after success or failure."
-    ):
-        raise ValueError("lander-game.html: control text contract is invalid")
-    if elements[actions].attributes != {"id": "lander-actions", "hidden": None}:
-        raise ValueError("lander-game.html: action region contract is invalid")
-    action_children = _children(parser, actions)
-    if [elements[index].tag for index in action_children] != ["button", "button"]:
-        raise ValueError("lander-game.html: Exit and Restart actions must occur in order")
-    if (
-        elements[action_children[0]].attributes != {"id": "lander-exit", "type": "button"}
-        or _children(parser, action_children[0])
-        or _normalized_text(elements[action_children[0]].text) != "Exit mission"
-    ):
-        raise ValueError("lander-game.html: Exit action contract is invalid")
-    if (
-        elements[action_children[1]].attributes
-        != {
-            "id": "lander-restart",
-            "type": "button",
-            "hidden": None,
-        }
-        or _children(parser, action_children[1])
-        or _normalized_text(elements[action_children[1]].text) != "Restart mission"
-    ):
-        raise ValueError("lander-game.html: Restart action contract is invalid")
-    if elements[status].attributes != {
-        "id": "lander-status",
-        "role": "status",
-        "aria-live": "polite",
-        "aria-atomic": "true",
-    }:
-        raise ValueError("lander-game.html: status contract is invalid")
-    ids = [str(element.attributes["id"]) for element in elements if element.attributes.get("id")]
-    if len(ids) != len(set(ids)):
-        raise ValueError("lander-game.html: IDs must be unique")
-
-
 def _validate_template(name: str, template: str) -> None:
     allowed = TEMPLATE_TOKENS[name]
     tokens = TOKEN_PATTERN.findall(template)
@@ -961,7 +889,7 @@ def _validate_template(name: str, template: str) -> None:
     _validate_onboarding_template(name, parser, template)
     _validate_game_shell_placement(name, parser)
     if name == "lander-game.html":
-        _validate_lander_fragment(template)
+        validate_game_contract(template)
         return
     _validate_shared_shell(name, template)
 

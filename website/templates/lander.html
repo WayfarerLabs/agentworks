@@ -8,14 +8,14 @@
             http-equiv="Content-Security-Policy"
             content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
         />
-        <title>Lunar deployment | Agentworks</title>
+        <title>We need agents! | Agentworks</title>
         <link rel="canonical" href="https://agentworks.build/lander/" />
         <link rel="icon" type="image/svg+xml" href="{{SITE_BASE}}assets/agw-favicon.svg" />
         <link rel="stylesheet" href="{{SITE_BASE}}static/site.css" />
         <link rel="stylesheet" href="{{SITE_BASE}}static/lander.css" />
         <script type="module" src="{{SITE_BASE}}static/lander-game.js"></script>
     </head>
-    <body>
+    <body class="game-page">
         <a class="skip-link" href="#main-content">Skip to main content</a>
         <header class="site-header">
             <div class="header-identity">
@@ -33,7 +33,7 @@
         </header>
         <main id="main-content" class="detail-main game-main">
             <div class="page-heading">
-                <h1>Lunar deployment</h1>
+                <h1>We need agents!</h1>
             </div>
 
             {{LANDER_GAME}}
@@ -45,8 +45,9 @@
                 <a href="{{SITE_BASE}}security/">We take security seriously</a>
                 <a
                     class="footer-game-link"
-                    href="{{SITE_BASE}}lander/#lander-game"
-                    aria-label="Play Lunar Lander"
+                    href="{{SITE_BASE}}lander/"
+                    aria-label="Help deploy some agents!"
+                    title="Help deploy some agents!"
                     ><img class="footer-game-mark" src="{{SITE_BASE}}assets/agw-rocket.svg" alt=""
                 /></a>
             </nav>

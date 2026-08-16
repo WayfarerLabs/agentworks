@@ -15,7 +15,7 @@
         <link rel="stylesheet" href="{{SITE_BASE}}static/lander.css" />
         <script type="module" src="{{SITE_BASE}}static/lander-game.js"></script>
     </head>
-    <body>
+    <body class="game-page">
         <a class="skip-link" href="#main-content">Skip to main content</a>
         <header class="site-header">
             <div class="header-identity">
@@ -36,7 +36,7 @@
                 <h1>Page not found</h1>
             </div>
             <p id="not-found-message">
-                This route has not been deployed. The lunar surface below is still operational.
+                This route is broken! We need agents!
             </p>
 
             {{LANDER_GAME}}
@@ -48,8 +48,9 @@
                 <a href="{{SITE_BASE}}security/">We take security seriously</a>
                 <a
                     class="footer-game-link"
-                    href="{{SITE_BASE}}lander/#lander-game"
-                    aria-label="Play Lunar Lander"
+                    href="{{SITE_BASE}}lander/"
+                    aria-label="Help deploy some agents!"
+                    title="Help deploy some agents!"
                     ><img class="footer-game-mark" src="{{SITE_BASE}}assets/agw-rocket.svg" alt=""
                 /></a>
             </nav>

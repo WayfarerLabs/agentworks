@@ -152,15 +152,14 @@ class TemplateContractTests(RepositoryFixture):
                     site_builder._validate_template(name, changed)
 
     def test_detail_page_headings_reject_provenance_eyebrows(self) -> None:
-        headings = {
-            "lander.html": "Lunar deployment",
-            "404.html": "Page not found",
-        }
-        for name, heading in headings.items():
+        for name in ("lander.html", "404.html"):
             template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
+            heading = re.search(r"<h1>([^<]+)</h1>", template)
+            self.assertIsNotNone(heading)
+            assert heading is not None
             changed = template.replace(
-                f"<h1>{heading}</h1>",
-                f'<p class="eyebrow">Generated from the repository</p><h1>{heading}</h1>',
+                heading.group(0),
+                f'<p class="eyebrow">Context</p>{heading.group(0)}',
                 1,
             )
             with (
@@ -214,7 +213,7 @@ class TemplateContractTests(RepositoryFixture):
                     '<header class="site-header" hidden>',
                     1,
                 ),
-                template.replace("<body>", "<body hidden>", 1),
+                template.replace("<body", "<body hidden", 1),
                 template.replace(
                     '<nav class="service-links" aria-label="External">',
                     '<nav class="service-links" aria-label="External" aria-hidden="true">',
@@ -359,12 +358,48 @@ class TemplateContractTests(RepositoryFixture):
 
     def test_fragment_scene_svg_cannot_move_outside_its_reviewed_section(self) -> None:
         template = (self.root / "website/templates/lander-game.html").read_text(encoding="utf-8")
-        scene = re.search(r"\n        <svg\n.*?\n        </svg>", template, re.DOTALL)
+        scene = re.search(r"\n            <svg\n.*?\n            </svg>", template, re.DOTALL)
         self.assertIsNotNone(scene)
         assert scene is not None
         changed = template.replace(scene.group(0), "", 1) + scene.group(0)
-        with self.assertRaisesRegex(ValueError, "root section|scene"):
+        with self.assertRaises(ValueError):
             site_builder._validate_template("lander-game.html", changed)
+
+    def test_fragment_accessible_name_sources_must_be_structural_and_nonempty(self) -> None:
+        template = (self.root / "website/templates/lander-game.html").read_text(encoding="utf-8")
+        root_label = re.search(r'(<section id="lander-game" aria-label=")([^"]+)(")', template)
+        start_label = re.search(r'(<button\s+id="lander-start"[^>]*aria-label=")([^"]+)(")', template, re.DOTALL)
+        scene_title = re.search(r'(<title id="lander-scene-title">)([^<]+)(</title>)', template)
+        self.assertTrue(all(match is not None for match in (root_label, start_label, scene_title)))
+        assert root_label is not None and start_label is not None and scene_title is not None
+        for match in (root_label, start_label, scene_title):
+            changed = template.replace(match.group(0), f"{match.group(1)}   {match.group(3)}", 1)
+            with self.subTest(element=match.group(1)), self.assertRaises(ValueError):
+                site_builder._validate_template("lander-game.html", changed)
+
+    def test_fragment_support_and_battery_geometry_fail_closed(self) -> None:
+        template = (self.root / "website/templates/lander-game.html").read_text(encoding="utf-8")
+        bar_one = '<path class="battery-bar battery-bar-1" d="M457 427.72h12v5h-12Z" />'
+        bar_four = '<path class="battery-bar battery-bar-4" d="M457 403.72h12v5h-12Z" />'
+        mutations = (
+            template.replace('class="site-scaffold"', 'class="missing-support"', 1),
+            template.replace("M312 457.21999999999997H498", "M313 457.21999999999997H498", 1),
+            template.replace(
+                "M498 561.22L488 565.2",
+                "M498 561.22L488 565.21",
+                1,
+            ),
+            template.replace(bar_one, "BATTERY_SWAP", 1)
+            .replace(bar_four, bar_one, 1)
+            .replace(
+                "BATTERY_SWAP",
+                bar_four,
+                1,
+            ),
+        )
+        for changed in mutations:
+            with self.subTest(change=changed[:100]), self.assertRaises(ValueError):
+                site_builder._validate_template("lander-game.html", changed)
 
     def test_fragment_variants_cannot_duplicate_local_route_destinations(self) -> None:
         for name in SHELL_TEMPLATES:
@@ -427,15 +462,21 @@ class TemplateContractTests(RepositoryFixture):
     def test_footer_game_link_is_final_icon_only_and_accessibly_named(self) -> None:
         for name in SHELL_TEMPLATES:
             template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
+            footer_tag = re.search(r'<a\s+class="footer-game-link"[\s\S]*?>', template)
+            self.assertIsNotNone(footer_tag)
+            assert footer_tag is not None
+            label = re.search(r'aria-label="([^"]+)"', footer_tag.group(0))
+            self.assertIsNotNone(label)
+            assert label is not None
             variants = (
-                template.replace('aria-label="Play Lunar Lander"', 'aria-label="Game"', 1),
+                template.replace(label.group(0), 'aria-label=""', 1),
                 template.replace(
                     'alt=""\n                /></a>',
                     'alt="Rocket"\n                /></a>',
                     1,
                 ),
                 template.replace('class="footer-game-link"', 'class="footer-rocket"', 1),
-                template.replace("lander/#lander-game", "lander/", 1),
+                template.replace('href="{{SITE_BASE}}lander/"', 'href="{{SITE_BASE}}lander/#lander-game"', 1),
                 template.replace("/></a>", "/>Lander</a>", 1),
             )
             for changed in variants:
@@ -446,15 +487,16 @@ class TemplateContractTests(RepositoryFixture):
                     site_builder._validate_template(name, changed)
 
     def test_shell_title_and_canonical_metadata_fail_closed(self) -> None:
-        for name, (title, canonical) in site_builder.TEMPLATE_METADATA.items():
+        for name, (_title, canonical) in site_builder.TEMPLATE_METADATA.items():
             template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
             drifted_canonical = (
                 "https://agentworks.build/security/"
                 if canonical != "https://agentworks.build/security/"
                 else "https://agentworks.build/"
             )
+            title_mutation = re.sub(r"<title>[^<]+</title>", "<title></title>", template, count=1)
             for changed in (
-                template.replace(f"<title>{title}</title>", "<title>Drifted</title>", 1),
+                title_mutation,
                 template.replace(f'href="{canonical}"', f'href="{drifted_canonical}"', 1),
                 template.replace(
                     f'<link rel="canonical" href="{canonical}" />',
@@ -492,16 +534,25 @@ class TemplateContractTests(RepositoryFixture):
                 ):
                     site_builder._validate_template(name, changed)
 
-    def test_game_shell_description_and_csp_are_exact_and_shared(self) -> None:
+    def test_game_shell_description_structure_and_csp_are_shared(self) -> None:
         policies = []
         for name in ("lander.html", "404.html"):
             template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
             document = parse(template)
             csp = next(meta["content"] for meta in document.tags("meta") if meta.get("http-equiv"))
+            description = next(meta for meta in document.tags("meta") if meta.get("name") == "description")
             policies.append(csp)
             for changed in (
                 template.replace(csp, "default-src 'self'", 1),
-                template.replace(site_builder.GAME_DESCRIPTIONS[name], "Drifted", 1),
+                template.replace(description["content"], "", 1),
+                template.replace(description["content"], "   ", 1),
+                template.replace('name="description"', 'name="description" data-copy="duplicate"', 1),
+                template.replace(
+                    f'<meta name="description" content="{description["content"]}" />',
+                    f'<meta name="description" content="{description["content"]}" />\n'
+                    f'        <meta name="description" content="{description["content"]}" />',
+                    1,
+                ),
             ):
                 with (
                     self.subTest(name=name),
