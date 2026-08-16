@@ -21,42 +21,33 @@ so a principle can be cited by number alone.
 
 ### 1. Don't accept bad complexity
 
-Complexity is the number one cost of software over time. It is what makes things hard to understand,
-hard to change, and hard to maintain. Any increase in complexity should be viewed with suspicion. Is
-it really necessary? Is there a simpler way to achieve the same goal? Can we adjust the requirements
-or the design to avoid or reduce it?
+Complexity is the number one cost of software over time, so view any increase in it with suspicion.
+Is it really necessary? Is there a simpler way to achieve the same goal? Can we adjust the
+requirements or the design to avoid or reduce it?
 
-But of course, some complexity is unavoidable. Complexity is what makes software useful. The key is
-to differentiate between good, necessary complexity and bad, unnecessary complexity. Like most
-things that matter, the difference is in the details.
+Complexity is also what makes software useful, so some of it is unavoidable and telling that kind
+from the rest is the work. Good complexity is what the system's requirements genuinely demand, and
+it has three characteristics:
 
-Good complexity is complexity that is fundamentally necessary to meet the requirements of the
-system. It has a number of characteristics:
-
-1. It represents reality. The first principle of good software design is that the software should
-   model the real world as closely as possible. Not only does this get you the best system now, it
-   is also the best possible hedge against future changes.
+1. It represents reality. The software models the real world as closely as it can, which gets you
+   the best system now and the best available hedge against future changes.
 2. It is as general as possible while still meeting the requirements. Don't solve a more specific
    problem when a more general solution is possible. This is about the shape of the design, not
    about building ahead of need: the right general shape is usually simpler than the special case it
    replaces, while mechanism nothing consumes yet is speculative generality and principle 4's
    territory.
-3. It is still simple on the micro scale. The individual components are fundamentally simple, with
-   good data models, clear responsibilities, well-defined APIs that match their responsibilities,
-   and a clearly-defined lifecycle. The complexity (and usefulness) emerges from the way these
-   simple components are composed together.
+3. It is still simple on the micro scale. The individual components have good data models, clear
+   responsibilities, APIs that match those responsibilities, and a defined lifecycle; the complexity
+   and the usefulness emerge from how they compose.
 
-Bad complexity, on the other hand, is complexity that is either unnecessary or ill-suited to the
-problem at hand. In addition to being the opposite of the characteristics above, there are specific
-things to watch out for:
+Bad complexity is unnecessary or ill-suited to the problem. Beyond being the opposite of the above,
+two markers give it away:
 
-1. There are a lot of exceptions. A properly-designed system rarely needs them. If you find yourself
-   writing a lot of special-case code, it's a sign that the design is wrong. More than likely,
-   you're not modeling the underlying reality correctly, and you should take a step back and
-   re-evaluate your design.
-2. It is brittle. If a small change in one part of the system causes a cascade of changes in other
-   parts, it's a sign that the design is wrong. The components should be as independent as possible,
-   and changes should be localized to the smallest possible area.
+1. It needs a lot of exceptions. A properly-designed system rarely does, so a pile of special-case
+   code usually means the design is not modeling the underlying reality; step back and re-evaluate
+   rather than writing the next case.
+2. It is brittle. When a small change in one part cascades into others, the components are not
+   independent enough; changes should stay localized to the smallest possible area.
 
 We simply don't accept bad complexity into our codebase. If you find it, fix it. If you can't fix
 it, escalate it to whoever is driving your work rather than living with it silently.
