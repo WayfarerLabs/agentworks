@@ -92,11 +92,36 @@ the sweep instead, per group 4 above.
       `2026-08-07-secret-sources` lock; `phase7` alone in `hla.md`; and
       `validate_interaction_policy` alone in that lock's `operator-surfaces-lld.md`, which the
       supersession note supersedes.
-- [ ] Replace `website/tests/test_pages_workflows.py` (W1): delete the hand-rolled YAML parser and
+- [x] Replace `website/tests/test_pages_workflows.py` (W1): delete the hand-rolled YAML parser and
       every verbatim pin; rewrite the real policy invariants (least-privilege permissions,
       credential non-persistence, main-only deploy, source-SHA/artifact binding, double-build diff)
       as focused checks over a proper YAML load. Done when: suite green, no hardcoded workflow text
-      beyond the keys each check reads.
+      beyond the keys each check reads. **Done**: 834 lines become 12 checks in 380, and every one
+      of them was proven by mutation rather than by inspection: 30 violations applied to the real
+      workflows, each failing the check that owns it and none passing. Nothing pins wording, step
+      names, action versions, or formatting; where two places in a file must agree the check derives
+      one from the other (the artifact path from the build command's `--output`, deploy's
+      `artifact_name` from the upload's `name`, the verified step from the `steps.<id>.outputs`
+      expression the job output references, the required-result count from `needs`). **The item's
+      one false premise was the location**: a "proper YAML load" cannot happen in the website suite
+      at all, because that suite runs as `python3 -m unittest` on a runner with no package
+      installation step, and PyYAML is not in the standard library nor documented in the
+      `actions/runner-images` manifest. The file therefore lands at
+      `cli/tests/test_workflow_policy.py`, where PyYAML is already a first-party dependency and the
+      required `test` job runs it, following `cli/tests/assistance/test_contract.py`, which already
+      tests repository-root artifacts from there for the same reason. The alternative, adding an
+      install step to the two workflow jobs under test, would have edited the artifacts being
+      verified and broken the website suite's no-installation property for one test. Three guards
+      beyond the five named invariants were kept because the deleted closed-shape assertions were
+      their only home and each is a real bypass: the fail-fast shell (a
+      `defaults.run.shell: bash {0}` drops `-e`, which alone disarms the double-build diff),
+      unskippable deploy-path steps (`if` or `continue-on-error` on a test step publishes an
+      unverified artifact), and first-party actions only in the workflow holding the Pages token.
+      Three were dropped deliberately: pinned action versions, the exact step-key sets and step
+      order, and duplicate-key detection, which a real YAML load cannot see and which protects
+      against a malformed file rather than a regression. **R2.3 applies once**: nothing checked that
+      `ci-success` needs every other job, which is the single property branch protection depends on
+      and the one an added job silently breaks; that check is new and fails on a synthetic job.
 - [ ] Prose/form-policing sweep across the estate (absorbed survey list plus G12, C10, D4, P6, and
       the #470 manifesto pin). **This enumeration is the exclusion list and nothing else is
       excluded**: W1's workflow test, S1's corpus and wording-pin trims, W4/W6 in the contained
@@ -200,6 +225,31 @@ the sweep instead, per group 4 above.
 - [ ] Contained website test trims (W4, W5, W6, W8), after PR #486 merges (ruling 8): shared fixture
       adoption in `test_lander_404.py`, exported status constant, threshold-not-exact contrast
       assertions, drop the Chromium duplicate. Done when: suite green without Chromium installed.
+      **Done for W4, W5, and W6. The box stays unchecked because W8 is deliberately not executed and
+      returns to the operator with the evidence below.** W5 removed the last website test file
+      carrying its own builder loader, output manifest, HTML parser, and contrast helpers. W4
+      converted the seven three-decimal ratio comparisons into WCAG inequalities (4.5 text, 3.0
+      non-text) read out of the built stylesheet, which retires the exact token pins with them,
+      because the palette is now checked where it ships rather than transcribed; the `--hot` and
+      `--status` pairs were dropped rather than converted, since both tokens are declared in
+      `site.css` and referenced by nothing while the lander paints those colors as literals in
+      `lander.css`. W6 exported `UNDERWAY_STATUS`. **The done-condition is unachievable as written
+      and is the item's error**: the suite has eleven hard Chromium launches, not one. Ten belong to
+      the Lander arcade contracts in four `test_lander_phase4*_browser.py` files, which is W10's
+      deferred lander-scope decision, not this item's. **W8's own premise did not survive execution
+      either, on three counts.** The two tests are not duplicates: the CSS test asserts declarations
+      appear in the stylesheet, the browser test asserts the computed geometry resolves, and only
+      the second can detect an override or a cascade change, so under this SDD's own
+      observational-twin rule (`hla.md`) the browser test is the keeper and the CSS pin is the
+      deletable one. The manual checklist does not cover it; that document is the Lander arcade
+      checklist and carries no long-form table-of-contents row. And the flake evidence is stale: the
+      checklist's "Chromium CI reliability correction" entry, dated 2026-08-15 and landed after the
+      finding was written, records that the timeout was a harness defect (`--dump-dom` owning both
+      readiness and shutdown), replaced by DevTools-owned readiness and termination and validated at
+      40 consecutive iterations. Deleting the browser test would therefore surrender the only
+      observational guard of the responsive layout and buy nothing operationally, because the same
+      suite still launches Chromium ten more times. Recommendation: fold W8 into the W10 scope
+      decision rather than executing it alone.
 
 ## Wave 2: process and rule subtraction (R3)
 

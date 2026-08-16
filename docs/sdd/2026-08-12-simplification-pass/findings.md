@@ -271,17 +271,31 @@ deliberately narrow `cli-conventions.md`.
 
 - **W1** `tests/test_pages_workflows.py` (834 lines): a hand-rolled YAML parser pinning the CI and
   Pages workflow files verbatim against five hardcoded script constants. Config-file prose-policing;
-  GitHub Actions is the real regression guard.
+  GitHub Actions is the real regression guard. Correction (2026-08-16): the last sentence overstated
+  the disposition. GitHub Actions rejects a malformed workflow, but it never notices a well-formed
+  one that grants a write scope, persists credentials, deploys an unverified directory, or drops a
+  required job from the gate. Those are the properties the pins were incidentally holding, and they
+  moved to structural checks rather than to Actions. A separate correction: the file's replacement
+  could not stay in the website suite, which has no YAML parser available to it (see the plan item).
 - **W2** `site_validation.py` (1,072 lines) asserts exact attribute dicts, child sequences, and
   visible text for every element of five reviewed templates, exercised by a 578-line
   mutate-and-assert-raises test file. The link/asset-integrity half (~150 lines) is real and stays.
 - **W3** `site_content.py` (664 lines): a from-scratch Markdown-subset renderer for three fixed
   files, keyed by verbatim copies of README paragraphs, so every copy edit is a two-file ceremony.
 - **W4** Exact CSS token and contrast pins (`"--canvas": "#f5f2e8"`, ratios to three decimals) where
-  the invariant is an inequality.
+  the invariant is an inequality. Confirmed and resolved 2026-08-16; the conversion turned up one
+  thing the finding did not: `--hot` and `--status` are declared on `:root` in `site.css` and
+  referenced by no `var()` anywhere, while `lander.css` paints those two colors as literals. Those
+  pairs were dropped rather than converted, since an assertion keyed on the tokens would prove
+  nothing about what ships. The dead tokens and the duplicated literals are a website source defect,
+  left unfixed as out of lane, and belong to whoever takes W9 or W10.
 - **W5** `test_lander_404.py` reimplements the shared `site_test_support.py` fixtures it should
   import.
 - **W6** `lander-model.test.mjs:211` retypes an unexported status string; export the constant.
+  Resolved 2026-08-16 as `UNDERWAY_STATUS`; the string was retyped at two sites, not one, and both
+  were staging a stale-status fixture rather than asserting the wording. `lander-model.js` still
+  duplicates a second status literal ("Touchdown confirmed...") between two of its own branches,
+  which is the same defect one layer in and is left for whoever owns that source.
 - **W7** Atomic-install/rollback machinery (~90 lines plus ~10 failure-injection tests) protecting
   an output directory that is always a fresh single-writer temp dir on an ephemeral CI runner.
 - **W8** A hard-required Chromium launch inside the unit suite re-verifying a layout decision a
@@ -290,6 +304,22 @@ deliberately narrow `cli-conventions.md`.
   out after 20 s against headless Chrome in CI, failing the Website job and the `ci-success` gate on
   a docs-only PR (#518) that touched no website file. It passed on a bare re-run. A browser launch
   in the unit suite is not only redundant here, it is a flake surface every unrelated PR pays for.
+  Correction (2026-08-16), on all three claims, verified at HEAD before the deletion was declined.
+  The two tests are not duplicates:
+  `test_long_form_contents_navigation_is_inline_then_becomes_a_left_rail` asserts that declarations
+  appear in the stylesheet, while
+  `test_chromium_geometry_keeps_wide_body_beside_toc_and_narrow_toc_inline` asserts that the layout
+  actually resolves, and only the second can catch an override or a cascade change. This document's
+  own doctrine (`hla.md`, observational twins) therefore points the other way: the browser test is
+  the twin and the CSS-text test is the pin. The checklist does not cover it either;
+  `lander-browser-checklist.md` is the Lander arcade checklist and carries no long-form
+  table-of-contents row. And the flake evidence is now stale: that checklist's "Chromium CI
+  reliability correction" entry, dated 2026-08-15, records the timeout as a harness defect
+  (`--dump-dom` owning both readiness and shutdown), replaced by DevTools-owned readiness and
+  termination with a kill fallback and validated at 40 consecutive iterations. Finally, the deletion
+  buys nothing on its own: ten further hard Chromium launches remain in the four
+  `test_lander_phase4*_browser.py` files, so the suite requires a browser either way. W8 folds into
+  W10's lander-scope decision rather than standing alone.
 - **W9** Twelve parallel dictionaries forming a closed-vocabulary framework describing exactly five
   fixed, non-extensible pages. The shape to revisit if W2/W3 are tackled; documented as intentional
   house style in `website/README.md`, so this is a design-revision decision.
