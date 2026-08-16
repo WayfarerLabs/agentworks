@@ -3,10 +3,14 @@
 ``pages.yml`` is the only thing that mints a GitHub Pages deployment for
 agentworks.build, and ``ci.yml``'s ``ci-success`` job is the single required check on
 main. The properties asserted here are the ones an ordinary edit can break without
-anyone noticing: least-privilege token scopes, credentials that never reach a step
-that runs repository code, deployment tied to main and to the exact commit that was
-tested, an artifact that is exactly the directory the verified build wrote, and build
-scripts that abort on the first failure.
+anyone noticing: least-privilege token scopes, credentials that never persist past
+checkout **in the deploy path**, deployment tied to main and to the exact commit that
+was tested, an artifact that is exactly the directory the verified build wrote, and
+build scripts that abort on the first failure.
+
+The deploy path is the scope, not the repository. ``ci.yml``'s other five jobs check
+out with the default settings and are covered by nothing here; they neither build the
+site nor hold a scope that can publish one.
 
 The workflow text is an authored artifact, so nothing here pins its wording, its step
 names, its action versions, or its formatting. Every assertion reads parsed structure,
@@ -41,6 +45,12 @@ TRIGGERS = True
 RUNNER_TEMP = re.compile(r"\$\{\{\s*runner\.temp\s*\}\}|\$\{RUNNER_TEMP\}|\$RUNNER_TEMP")
 STEP_OUTPUT = re.compile(r"\$\{\{\s*steps\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z0-9_-]+)\s*\}\}")
 SHELL_OPERATORS = frozenset({"|", "||", "&", "&&", ";", ";;", ">", ">>", "<"})
+INTERPRETERS = frozenset({"python3", "node"})
+
+# The two shapes that read a result per required job: the wildcard join, which covers
+# every entry by construction, or one explicit reference each.
+NEEDS_RESULT = re.compile(r"\$\{\{\s*needs\.([A-Za-z0-9_-]+)\.result\s*\}\}")
+JOINED_RESULTS = re.compile(r"\$\{\{\s*join\(\s*needs\.\*\.result\s*,[^)]*\)\s*\}\}")
 
 
 def _workflow(name: str) -> dict[Any, Any]:
@@ -61,9 +71,28 @@ def _steps(job: dict[str, Any]) -> list[dict[str, Any]]:
     return list(job.get("steps", ()))
 
 
-def _deploy_path_jobs() -> list[dict[str, Any]]:
+def _deploy_path_jobs() -> dict[str, dict[str, Any]]:
     """Every job that runs repository code on the way to a published artifact."""
-    return [*_jobs(PAGES).values(), _jobs(CI)["website"]]
+    return {f"pages.{name}": job for name, job in _jobs(PAGES).items()} | {"ci.website": _jobs(CI)["website"]}
+
+
+def _write_scoped(job: dict[str, Any]) -> bool:
+    """Whether this job's token can change anything, read from its grants not its name."""
+    return "write" in set(job.get("permissions", {}).values())
+
+
+def _website_test_commands(job: dict[str, Any]) -> set[tuple[str, ...]]:
+    """Interpreter invocations in this job that run a suite under ``website/tests``."""
+    found = set()
+    for step in _steps(job):
+        for line in str(step.get("run", "")).splitlines():
+            try:
+                command = shlex.split(line)
+            except ValueError:
+                continue
+            if command and command[0] in INTERPRETERS and any("website/tests" in word for word in command[1:]):
+                found.add(tuple(command))
+    return found
 
 
 def _conditions(job: dict[str, Any]) -> set[str]:
@@ -162,12 +191,13 @@ def _outputs(path: Path) -> dict[str, str]:
 
 
 def test_only_the_pages_deploy_job_may_hold_write_scopes() -> None:
-    """The token that can publish a deployment reaches no step that runs our code.
+    """Write scopes sit on the deployment job and nowhere else.
 
     The build job runs the test suite and the site builder, so a write scope there
     would be reachable by anything those execute. Splitting build from deploy is the
     whole point of the two-job shape, and it survives only while deploy is the sole
-    holder of write scopes.
+    holder of write scopes. What that job may then contain is the confinement check
+    below; this one only decides where the scopes live.
     """
     assert PAGES["permissions"] == {"contents": "read"}
     for name, job in _jobs(PAGES).items():
@@ -194,7 +224,7 @@ def test_no_deploy_path_checkout_leaves_credentials_on_disk() -> None:
     """
     checkouts = [
         step
-        for job in _deploy_path_jobs()
+        for job in _deploy_path_jobs().values()
         for step in _steps(job)
         if str(step.get("uses", "")).startswith("actions/checkout@")
     ]
@@ -268,44 +298,97 @@ def test_every_site_build_is_proven_reproducible_before_it_is_used() -> None:
             assert set(outputs) in compared, f"{label}: {base} builds are not compared"
 
 
-def test_no_alternate_shell_disarms_the_deploy_path_scripts() -> None:
-    """Every script keeps the fail-fast shell its checks depend on.
+def test_nothing_reconfigures_the_shell_the_deploy_path_scripts_depend_on() -> None:
+    """The verification and build scripts run in the environment they were written for.
 
-    The ``bash`` keyword shell runs with ``-eo pipefail``. A custom template such as
-    ``bash {0}`` drops that, which turns every unchecked command in the verification
-    and build scripts into an ignored failure. ``defaults`` may still set a working
-    directory, which does not affect exit handling.
+    Three ways to disarm them without touching a line of their text. A custom shell
+    template such as ``bash {0}`` drops ``-eo pipefail``, so every unchecked command
+    becomes an ignored failure. ``BASH_ENV`` names a file bash sources before each
+    script, which can redefine ``git`` or ``diff`` and neutralize both the source
+    verifiers and the double-build diff; it is settable at workflow, job, and step
+    level, so all three are checked. A ``working-directory`` default would point the
+    same scripts at a different tree. ``ci.yml``'s other jobs legitimately set a
+    working directory, so that one is scoped to the deploy path.
     """
     for name, workflow in (("ci.yml", CI), ("pages.yml", PAGES)):
         shells = [workflow.get("defaults", {}).get("run", {}).get("shell")]
+        environments = [workflow.get("env", {})]
         for job in _jobs(workflow).values():
             shells.append(job.get("defaults", {}).get("run", {}).get("shell"))
-            shells.extend(step.get("shell") for step in _steps(job))
+            environments.append(job.get("env", {}))
+            for step in _steps(job):
+                shells.append(step.get("shell"))
+                environments.append(step.get("env", {}))
         for shell in shells:
             assert shell in (None, "bash"), f"{name}: unexpected shell {shell!r}"
+        for environment in environments:
+            assert "BASH_ENV" not in environment, f"{name}: BASH_ENV is set"
+        assert "defaults" not in workflow, f"{name}: workflow-wide defaults reach the deploy path"
+
+    for name, job in _deploy_path_jobs().items():
+        assert "defaults" not in job, f"{name}: job defaults reach scripts written for the repository root"
 
 
-def test_no_deploy_path_step_can_be_skipped_or_swallow_a_failure() -> None:
+def test_no_deploy_path_step_or_job_can_be_skipped_or_swallow_a_failure() -> None:
     """The tests and verifications that gate a deployment always run and always count.
 
-    A step-level condition or ``continue-on-error`` on any of them would let the
-    artifact reach Pages without the thing that was supposed to have checked it.
-    ``deploy`` carries the one sanctioned job condition; nothing else may.
+    A condition or ``continue-on-error`` on any of them would let the artifact reach
+    Pages without the thing that was supposed to have checked it, and a condition on a
+    whole job takes its steps with it. The write-scoped deployment job carries the one
+    sanctioned job condition, which is the main-and-matching-sha gate; nothing else may.
     """
-    for job in _deploy_path_jobs():
-        assert "continue-on-error" not in job
+    for name, job in _deploy_path_jobs().items():
+        assert "continue-on-error" not in job, name
+        if not _write_scoped(job):
+            assert "if" not in job, name
         for step in _steps(job):
-            assert "if" not in step, step.get("name")
-            assert "continue-on-error" not in step, step.get("name")
-    assert "if" not in _jobs(PAGES)["build"]
+            assert "if" not in step, f"{name}: {step.get('name')}"
+            assert "continue-on-error" not in step, f"{name}: {step.get('name')}"
+
+
+def test_the_pages_build_runs_the_same_website_suites_ci_runs() -> None:
+    """The tests that gate a deployment are the tests CI runs, and they really run.
+
+    Both jobs are supposed to run the two website suites before anything is published,
+    but nothing tied them together: deleting both test steps from the build job, or
+    wrapping either command in ``echo`` on one side, left every other check green. The
+    two sets are compared to each other rather than to any text here, and they are
+    gathered as interpreter invocations, so a command that merely prints the test line
+    no longer counts as running it.
+    """
+    building = _website_test_commands(_jobs(PAGES)["build"])
+    checking = _website_test_commands(_jobs(CI)["website"])
+    assert checking, "ci.website runs no website suite"
+    assert building == checking
 
 
 def test_the_deploy_path_runs_only_first_party_actions() -> None:
-    """No third-party action shares a workflow with the Pages deployment token."""
-    for job in _jobs(PAGES).values():
+    """No third-party action runs anywhere on the way to a published artifact."""
+    for name, job in _deploy_path_jobs().items():
         for step in _steps(job):
             if "uses" in step:
-                assert step["uses"].startswith("actions/"), step["uses"]
+                assert step["uses"].startswith("actions/"), f"{name}: {step['uses']}"
+
+
+def test_the_write_scoped_job_neither_checks_out_nor_runs_repository_code() -> None:
+    """The job holding the deployment token executes nothing of ours at all.
+
+    ``pages: write`` plus ``id-token: write`` is the whole authority to publish and to
+    mint an OIDC token, so that job is confined to first-party deploy actions. A
+    ``run:`` step there is invisible to the first-party check above, which only reads
+    steps with ``uses``, and a checkout would put repository code within its reach in
+    the first place. Identified by grant rather than by name, so a rename cannot move
+    the boundary.
+    """
+    scoped = {name: job for name, job in _jobs(PAGES).items() if _write_scoped(job)}
+    assert scoped, "no write-scoped job found; the grants moved"
+    for name, job in scoped.items():
+        for step in _steps(job):
+            assert "run" not in step, f"{name} runs a shell step"
+            assert not str(step.get("uses", "")).startswith("actions/checkout@"), f"{name} checks out"
+
+    # Nothing in CI holds a write scope, so nothing there needs the same confinement.
+    assert not [name for name, job in _jobs(CI).items() if _write_scoped(job)]
 
 
 def test_ci_success_requires_every_other_job_and_always_reports() -> None:
@@ -321,6 +404,32 @@ def test_ci_success_requires_every_other_job_and_always_reports() -> None:
     assert set(gate["needs"]) == set(jobs) - {"ci-success"}
 
 
+def test_the_gate_reads_a_real_result_for_every_job_it_requires() -> None:
+    """The gate script is fed the actual outcome of each dependency, not a constant.
+
+    Executing the script proves it rejects a bad result; it cannot prove the workflow
+    hands it real ones. Six literal ``success`` words satisfy every other check here
+    while the single required check on main silently stops gating, which is the most
+    consequential edit either of these files admits. Both accepted shapes are read
+    from the same ``needs`` list the completeness check uses, so the two cannot drift.
+    """
+    gate = _jobs(CI)["ci-success"]
+    required = list(gate["needs"])
+    assert len(required) == len(set(required))
+    supplied = str(_gate_step(gate)["env"]["REQUIRED_RESULTS"]).strip()
+
+    if not JOINED_RESULTS.fullmatch(supplied):
+        referenced = NEEDS_RESULT.findall(supplied)
+        assert sorted(referenced) == sorted(required), supplied
+        assert not NEEDS_RESULT.sub(" ", supplied).split(), f"literal text beside the results: {supplied}"
+
+
+def _gate_step(gate: dict[str, Any]) -> dict[str, Any]:
+    stepped = [step for step in _steps(gate) if "REQUIRED_RESULTS" in step.get("env", {})]
+    assert len(stepped) == 1
+    return stepped[0]
+
+
 def test_ci_success_rejects_a_short_result_list_and_every_non_success_result() -> None:
     """Executing the gate script: only a full sweep of successes passes it.
 
@@ -329,7 +438,7 @@ def test_ci_success_rejects_a_short_result_list_and_every_non_success_result() -
     wave it through.
     """
     gate = _jobs(CI)["ci-success"]
-    script = str(_steps(gate)[0]["run"])
+    script = str(_gate_step(gate)["run"])
     required = len(gate["needs"])
 
     assert _bash(script, {"REQUIRED_RESULTS": " ".join(["success"] * required)}).returncode == 0
