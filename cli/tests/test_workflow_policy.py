@@ -93,11 +93,14 @@ def test_the_deployment_job_waits_for_the_build_and_uses_the_pages_environment()
         assert job["environment"]["name"] == "github-pages", name
 
 
-def test_the_gate_consumes_every_dependency_result() -> None:
-    """The one required check reads a real result for every other job in the workflow.
+def test_the_gate_is_wired_to_every_dependency_result() -> None:
+    """Every other job is required, and the gate step is handed each of their results.
 
-    A job missing from `needs` cannot block a merge, and results that are not read
-    from `needs` leave the gate reporting success regardless of what happened.
+    This is a wiring check and holds only that much: `needs` covers every other job in
+    the workflow, so none can fail without blocking a merge, and the gate step's
+    environment carries a dependency-result expression for each required job rather
+    than constants. It does not hold that the script reads that environment or acts on
+    what it finds. Nothing in this file proves what a script does.
     """
     gate = _jobs(CI)["ci-success"]
     required = _needs(gate)
