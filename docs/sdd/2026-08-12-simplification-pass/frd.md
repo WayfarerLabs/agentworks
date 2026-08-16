@@ -148,8 +148,8 @@ justification for a new production contract.
   (operator, 2026-08-13): they run as their own dispatched task, briefed on the
   `refactor/breaking-truth-0-14` branch, in parallel with the deletion waves. That task owns
   `env/entry.py` and the token union; this pass owns the inert descriptor fields (C1, C5).
-  [migration-strategy.md](migration-strategy.md) is the task's authoritative strategy, read from
-  this directory.
+  [migration-strategy.md](migration-strategy.md) is designated as carrying that task's requirements,
+  read from this directory.
 - **Subsystem redesigns** (D1/D2 database classification and sentinels, S3/S4/S6 secrets protocol
   and resolve paths, G1/G3 guide boundary surgery, C8 `ResolvedSessionTemplate`, G5 JSON/human
   traversal, W7/W9/W10 website philosophy and lander scope, P1/P2 platform extractions, P4 error

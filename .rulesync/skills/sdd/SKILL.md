@@ -94,10 +94,11 @@ done, and unchecked boxes of the abandoned direction all strip), with exactly on
 recording the supersession, which is what the reviewer's exception keys on.
 
 Mutability follows ownership, and one rule settles it everywhere: **requirements belong to the
-operator, and the response belongs to whoever does the work.** Requirements are the FRD, together
-with any document it names as carrying requirements. The response is everything the effort produces
-in answer, from the HLA onward, so it is the effort lead's. One level down the relationship repeats:
-a lead owns the charter it hands a subagent, and the subagent owns the work done under it.
+operator, and the response belongs to whoever does the work.** Requirements are the FRD plus any
+document it designates as carrying requirements; everything else is response and the effort lead's,
+whoever produced it, so anything a requester puts elsewhere is a suggestion. One level down the
+relationship repeats: a lead owns the charter it hands a subagent, and the subagent owns the work
+done under it.
 
 A saga lead or an effort lead may draft requirements, and the operator's merge of the PR is the
 consent that makes them the operator's; until then the drafting lead applies findings directly.
