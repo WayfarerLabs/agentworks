@@ -45,8 +45,17 @@ TRIGGERS = True
 # The Actions expression form and the shell environment form name one directory.
 RUNNER_TEMP = re.compile(r"\$\{\{\s*runner\.temp\s*\}\}|\$\{RUNNER_TEMP\}|\$RUNNER_TEMP")
 STEP_OUTPUT = re.compile(r"\$\{\{\s*steps\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z0-9_-]+)\s*\}\}")
-SHELL_OPERATORS = frozenset({"|", "||", "&", "&&", ";", ";;", ">", ">>", "<"})
 INTERPRETERS = frozenset({"python3", "node"})
+
+# What the reproducibility scripts are permitted to invoke. Enumerating the shell
+# constructs that could disarm them instead would be a blacklist, and `set +e` walked
+# past exactly such a list: it carries no operator token at all.
+BUILD_COMMANDS = frozenset({"python3", "diff"})
+
+# Python's own classification of shell punctuation, rather than a list of control
+# operators maintained here. A token made only of these characters is an operator by
+# that definition, so this check does not depend on anyone having enumerated them.
+PUNCTUATION = frozenset(shlex.shlex("", punctuation_chars=True).punctuation_chars)
 
 # The closed set of actions permitted inside a job that holds write scopes. Derived
 # from what publishing actually requires rather than from what the file happens to
@@ -143,10 +152,28 @@ def _step_using(job: dict[str, Any], action: str) -> dict[str, Any]:
     return used[0]
 
 
+def _words(line: str) -> list[str]:
+    """One line of shell, tokenized with control operators kept as their own words."""
+    lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    return list(lexer)
+
+
 def _commands(script: str) -> list[list[str]]:
-    """Split a straight-line run script into shell words, one list per command."""
+    """Split a straight-line run script into shell words, one list per line."""
     joined = script.replace("\\\n", " ")
-    return [shlex.split(line) for line in joined.splitlines() if line.strip()]
+    return [_words(line) for line in joined.splitlines() if line.strip()]
+
+
+def _invocations(command: list[str]) -> list[list[str]]:
+    """One line split at its control operators; more than one means it composed."""
+    parts: list[list[str]] = [[]]
+    for word in command:
+        if word and set(word) <= PUNCTUATION:
+            parts.append([])
+        else:
+            parts[-1].append(word)
+    return [part for part in parts if part]
 
 
 def _flag(command: list[str], name: str) -> str:
@@ -303,15 +330,25 @@ def test_deploy_publishes_the_exact_artifact_the_verified_build_produced() -> No
 def test_every_site_build_is_proven_reproducible_before_it_is_used() -> None:
     """Each configured base path is built twice into separate trees and diffed.
 
-    A build that is not reproducible publishes something nobody reviewed. The check
-    is only worth having while it can fail the job, so the scripts stay straight-line
-    sequences under the default fail-fast shell: one swallowed exit code and the diff
-    becomes decoration.
+    A build that is not reproducible publishes something nobody reviewed, and the diff
+    is only worth having while it can fail the job. Two things keep it able to. Each
+    line invokes one command from an allowlist, so anything that could disarm the
+    shell is rejected without this check knowing what it does: an earlier version
+    enumerated the operators instead, and ``set +e``, which has no operator token at
+    all, walked straight past it. And each line stays a single invocation, so nothing
+    composes a fallback behind a failing command. The second half is what the
+    allowlist alone would miss, since ``python3 a || python3 b`` invokes only
+    permitted commands.
     """
+    invoked = set()
     for label, job in (("pages.build", _jobs(PAGES)["build"]), ("ci.website", _jobs(CI)["website"])):
         script = _build_script(job)
         commands = _commands(script)
-        assert not any(SHELL_OPERATORS.intersection(command) for command in commands), label
+        for command in commands:
+            parts = _invocations(command)
+            assert len(parts) == 1, f"{label}: one line composes more than one command"
+            assert parts[0][0] in BUILD_COMMANDS, f"{label}: {parts[0][0]} is not a permitted command"
+            invoked.add(parts[0][0])
 
         by_base: dict[str, list[str]] = {}
         for command in _site_builds(script):
@@ -324,6 +361,10 @@ def test_every_site_build_is_proven_reproducible_before_it_is_used() -> None:
         for base, outputs in by_base.items():
             assert len(set(outputs)) == 2, f"{label}: {base} is not built twice into separate trees"
             assert set(outputs) in compared, f"{label}: {base} builds are not compared"
+
+    # Kept minimal like the other two allowlists: a command is permitted only while a
+    # script actually invokes it.
+    assert invoked == BUILD_COMMANDS, "the allowlist permits a command no build script runs"
 
 
 def test_nothing_reconfigures_the_shell_the_deploy_path_scripts_depend_on() -> None:
