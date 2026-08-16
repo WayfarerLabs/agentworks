@@ -184,8 +184,17 @@ class QuietHandler(SimpleHTTPRequestHandler):
         pass
 
 
-def browser_geometry(output: Path, width: int) -> dict[str, object]:
-    chromium = next(
+def browser_geometry(
+    output: Path,
+    width: int,
+    *,
+    chromium_path: str | None = None,
+    connection_factory: Callable[[str], DevToolsConnection] = DevToolsConnection,
+    popen_factory: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
+    target_factory: Callable[[Path, subprocess.Popen[bytes]], str] = _devtools_target,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict[str, object]:
+    chromium = chromium_path or next(
         (candidate for name in ("google-chrome", "chromium", "chromium-browser") if (candidate := shutil.which(name))),
         None,
     )
@@ -224,7 +233,7 @@ document.querySelector("#result").textContent = JSON.stringify({
     connection: DevToolsConnection | None = None
     try:
         port = server.server_address[1]
-        process = subprocess.Popen(
+        process = popen_factory(
             (
                 chromium,
                 "--headless",
@@ -240,7 +249,7 @@ document.querySelector("#result").textContent = JSON.stringify({
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        connection = DevToolsConnection(_devtools_target(Path(profile.name), process))
+        connection = connection_factory(target_factory(Path(profile.name), process))
         for domain in ("Runtime", "Page"):
             connection.call(f"{domain}.enable")
         connection.call(
@@ -257,7 +266,7 @@ document.querySelector("#result").textContent = JSON.stringify({
         for _ in range(200):
             if connection.evaluate(readiness):
                 break
-            time.sleep(0.025)
+            sleep(0.025)
         else:
             raise AssertionError("Chromium did not return responsive layout geometry")
         result = connection.evaluate("JSON.parse(document.querySelector('#result').textContent)")
@@ -680,13 +689,15 @@ class GeneratedDocumentTests(RepositoryFixture):
 
         process = FakeProcess()
         connection = FakeConnection()
-        with (
-            mock.patch.object(shutil, "which", return_value="chromium-test"),
-            mock.patch.object(subprocess, "Popen", return_value=process) as spawn,
-            mock.patch(f"{__name__}._devtools_target", return_value="ws://chromium.test"),
-            mock.patch(f"{__name__}.DevToolsConnection", return_value=connection),
-        ):
-            result = browser_geometry(self.output, 390)
+        spawn = mock.Mock(return_value=process)
+        result = browser_geometry(
+            self.output,
+            390,
+            chromium_path="chromium-test",
+            connection_factory=lambda url: connection,
+            popen_factory=spawn,
+            target_factory=lambda profile, owned: "ws://chromium.test",
+        )
 
         command = spawn.call_args.args[0]
         self.assertIn("--remote-debugging-port=0", command)
@@ -700,6 +711,115 @@ class GeneratedDocumentTests(RepositoryFixture):
             thread.name == "site-geometry-browser-server" and thread.is_alive()
             for thread in threading.enumerate()
         ))
+
+    def test_chromium_geometry_bounds_readiness_and_kills_a_stuck_process(self) -> None:
+        class StuckProcess:
+            def __init__(self) -> None:
+                self.terminated = False
+                self.killed = False
+                self.waits = 0
+
+            def poll(self) -> None:
+                return None
+
+            def terminate(self) -> None:
+                self.terminated = True
+
+            def kill(self) -> None:
+                self.killed = True
+
+            def wait(self, timeout: float | None = None) -> int:
+                del timeout
+                self.waits += 1
+                if self.waits == 1:
+                    raise subprocess.TimeoutExpired("chromium-test", 5)
+                return 0
+
+        class NeverReadyConnection:
+            def __init__(self) -> None:
+                self.expressions: list[str] = []
+                self.closed = False
+
+            def call(self, method: str, params: dict[str, object] | None = None) -> dict[str, object]:
+                del method, params
+                return {}
+
+            def evaluate(self, expression: str) -> bool:
+                self.expressions.append(expression)
+                return False
+
+            def close(self) -> None:
+                self.closed = True
+
+        process = StuckProcess()
+        connection = NeverReadyConnection()
+        with self.assertRaises(AssertionError):
+            browser_geometry(
+                self.output,
+                390,
+                chromium_path="chromium-test",
+                connection_factory=lambda url: connection,
+                popen_factory=lambda *args, **kwargs: process,
+                target_factory=lambda profile, owned: "ws://chromium.test",
+                sleep=lambda seconds: None,
+            )
+
+        self.assertEqual(len(connection.expressions), 200)
+        self.assertTrue(connection.closed)
+        self.assertTrue(process.terminated)
+        self.assertTrue(process.killed)
+        self.assertEqual(process.waits, 2)
+
+    def test_chromium_geometry_preserves_primary_errors_and_surfaces_cleanup_errors(self) -> None:
+        class FakeProcess:
+            def __init__(self) -> None:
+                self.terminated = False
+
+            def poll(self) -> int | None:
+                return 0 if self.terminated else None
+
+            def terminate(self) -> None:
+                self.terminated = True
+
+            def wait(self, timeout: float | None = None) -> int:
+                del timeout
+                return 0
+
+        primary = RuntimeError()
+        cleanup_error = OSError()
+
+        def run(*, evaluation_error: BaseException | None) -> None:
+            class FailingConnection:
+                def call(self, method: str, params: dict[str, object] | None = None) -> dict[str, object]:
+                    del method, params
+                    return {}
+
+                def evaluate(self, expression: str) -> object:
+                    if evaluation_error is not None:
+                        raise evaluation_error
+                    if expression.startswith("JSON.parse"):
+                        return {"display": "block"}
+                    return True
+
+                def close(self) -> None:
+                    raise cleanup_error
+
+            process = FakeProcess()
+            browser_geometry(
+                self.output,
+                390,
+                chromium_path="chromium-test",
+                connection_factory=lambda url: FailingConnection(),
+                popen_factory=lambda *args, **kwargs: process,
+                target_factory=lambda profile, owned: "ws://chromium.test",
+            )
+
+        with self.assertRaises(RuntimeError) as caught:
+            run(evaluation_error=primary)
+        self.assertIs(caught.exception, primary)
+        with self.assertRaises(OSError) as caught:
+            run(evaluation_error=None)
+        self.assertIs(caught.exception, cleanup_error)
 
     def test_pinned_color_contrasts_meet_text_component_and_status_thresholds(
         self,
