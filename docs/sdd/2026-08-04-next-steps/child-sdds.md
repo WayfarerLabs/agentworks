@@ -187,15 +187,6 @@ item shrinks to a verification sweep.
       lives in `vms/manager/inspect.py`, and the two absence checks read as scoped to production and
       test surfaces, this SDD's own findings excluded. The implementing lead folds both on first
       touch; the plan is mutable until lock
-- [ ] Wave 0: establish that always-on rules reach the agents they bind (issue #511) before adding
-      criteria to them, then land the trust-boundary and authored-artifact amendments. Moved into
-      wave 0 by operator direction (2026-08-13) from a file-it-and-defer posture. The delivery
-      question is repo-wide rather than per-rule: of the 18 files in `.rulesync/rules/`, `root.md`
-      projects to `CLAUDE.md` and four `always-consider-*` carry no frontmatter, so those five
-      always load; thirteen project as Claude `paths:`, and since `cli-conventions.md` is narrowly
-      scoped by design, **twelve always-on rules are delivered path-conditionally**, among them
-      `operator-authority`, `github-input-trust`, `development-principles`, `code-style` and
-      `no-prose-policing-tests`
 - [ ] Wave 1: eight deletion work items, unordered by design, each judged locally and green on the
       full suite. How many PRs they land as is the child's call: its plan already allows the prose
       sweep to span several, and the saga lead has recommended batching by domain to about three so
