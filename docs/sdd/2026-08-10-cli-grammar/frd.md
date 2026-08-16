@@ -12,7 +12,8 @@ say what they do. The change is intentionally narrow and gates 0.14.0.
 ## Settled product decisions
 
 1. `resource describe-kind` becomes `resource explain` without new behavior.
-2. `graph show KIND/NAME` launches as a fixed one-hop, both-directions relationship view.
+2. `graph show KIND/NAME` defaults to one hop in both directions and supports explicit direction and
+   depth traversal.
 3. `resource describe` is removed with no replacement card, alias, or compatibility shim.
 4. `secret describe` keeps its contextual relationship sections and JSON fields unchanged.
 5. `--write` is path-valued; the schema set's fixed-destination action is `--install`.
@@ -25,8 +26,9 @@ say what they do. The change is intentionally narrow and gates 0.14.0.
 
 - **FR1.** `agw resource explain TARGET` shall replace `agw resource describe-kind TARGET` at the
   same resource-group level.
-- **FR2.** `TARGET` shall retain the current forms: a declarable `KIND`, a capability `KIND`, or one
-  capability implementation as `KIND/NAME`.
+- **FR2.** `TARGET` shall retain the current forms: any declarable or capability `KIND`, or one
+  capability implementation as `KIND/NAME`. A named declarable resource is not an explanation
+  target: only a capability implementation name selects a distinct schema.
 - **FR3.** Explain shall render from the existing schema and field-documentation service. Its field
   coverage, capability listing behavior, ordering, errors, and human output semantics shall not be
   broadened as part of the rename.
@@ -43,11 +45,18 @@ say what they do. The change is intentionally narrow and gates 0.14.0.
 - **FR7.** Graph show shall require exactly one focal resource identity. It shall resolve
   `KIND/NAME` through the config-backed finalized request registry, independently of explain's
   config-free resolver. Zero or multiple operands are usage errors.
-- **FR8.** The launch view shall be one hop in both directions. It shall represent outbound declared
-  references, inbound declared references, and live-instance usage. Inbound facts shall preserve
-  `source`, `usage`, and optional `declared_by`; live facts shall preserve instance kind and name.
-- **FR9.** Launch shall not include kind, direction, or depth selectors. Duplicate edges and output
-  ordering shall have deterministic, testable semantics settled in HLA.
+- **FR8.** Graph shall represent outbound declared references, inbound declared references, and
+  live-instance usage as traversable typed edges. Declared edges shall preserve their semantic
+  relationship verb, currently `uses` or `inherits`, plus `source`, `usage`, and optional
+  `declared_by`; live facts shall preserve instance kind and name. Graph shall not infer a
+  capability-facet relationship label from kinds or prose.
+- **FR9.** The default view shall be one hop in both directions. `--direction` shall accept
+  `dependencies`, `dependents`, or `both` and default to `both`. `--depth` shall accept a positive
+  integer or `all` and default to `1`; `all` means the complete reachable closure in the selected
+  direction. For `both`, every resource expansion may follow either incident direction; it is not
+  the union of separate monotonic dependency and dependent traversals. Launch shall not include a
+  kind filter or focus-optional whole-graph query. Traversal, duplicate edges, and output ordering
+  shall have deterministic, cycle-safe semantics settled in HLA.
 - **FR10.** Human output shall be terminal-readable. Machine output shall use a new command ID in
   the versioned JSON envelope and closed, typed node and edge records. Both renderers shall project
   the same safe fact service.
@@ -56,9 +65,11 @@ say what they do. The change is intentionally narrow and gates 0.14.0.
 - **FR12.** Graph shall be operationally read-only. It shall not create or migrate database state,
   repair stored process state, activate resources, make provider or remote probes, resolve secret
   values, or prompt.
-- **FR13.** Source acquisition shall be demand-driven. A focal kind without a live-instance hook
-  shall not require the database. HLA shall specify a read-only database open and source-specific
-  errors for focal kinds that do project live usage.
+- **FR13.** Source acquisition shall be demand-driven by the selected direction and traversal
+  frontier. The database shall be demanded only when expanding a resource with remaining depth, the
+  direction includes dependents, and that resource kind has a live-instance projection. A resource
+  merely discovered at the depth bound shall not demand it. Live-instance nodes shall be terminal.
+  HLA shall specify a read-only database open and source-specific errors for demanded projections.
 - **FR14.** The implementation shall reuse the frozen resource graph and existing per-kind instance
   projections without inserting database rows into `Registry`, mutating `Registry.graph`, or
   presenting an orchestration plan as complete inventory.
@@ -114,8 +125,9 @@ say what they do. The change is intentionally narrow and gates 0.14.0.
    upgrade map; the two unreleased spellings are replaced silently throughout active 0.14 guidance.
 2. `resource explain` passes the current `describe-kind` behavior suite under its new command and
    identity.
-3. `graph show KIND/NAME` renders the deterministic one-hop outbound, inbound, and live-usage facts
-   in human and JSON form without a kind, direction, or depth option.
+3. `graph show KIND/NAME` defaults to the deterministic one-hop dependencies, dependents, and live
+   usage facts in human and JSON form; direction and finite or complete-closure depth controls
+   return the corresponding deterministic traversal without a kind filter.
 4. Graph is secret-safe and read-only, and a declaration-only query does not demand live state.
 5. `resource schema --install` writes exactly the fixed schema set that the old boolean writer did,
    while every remaining `--write` requires a path.
@@ -129,10 +141,11 @@ say what they do. The change is intentionally narrow and gates 0.14.0.
 ## Out of scope
 
 - Generic concrete-object cards across declaration and live-instance kinds.
-- Kind, direction, or depth selection; whole-graph and path queries; new relation providers.
+- Kind filtering, whole-graph and path queries, new relation providers, and capability-facet edge
+  labels.
 - Field-level explain, explain JSON, DOT, Mermaid, graph watch, and graph mutation.
 - Renames or flag cleanup outside the four settled corrections.
 - Compatibility aliases, warning shims, or a staged deprecation release.
 
-HLA may settle the four architecture questions in `cli-surface-study.md` without reopening these
+HLA may settle the architecture questions in `cli-surface-study.md` without reopening these
 functional boundaries.

@@ -2,7 +2,7 @@
 
 - Status: Revised input for HLA
 - Date: 2026-08-15
-- Code basis: `origin/main` at `44448aa0`
+- Code basis: `origin/main` at `ced59c0a`
 - Scope authority: the next-steps saga plus the operator's 2026-08-15 command-ownership and
   compatibility rulings
 
@@ -44,7 +44,7 @@ The command has no remaining question of its own after responsibilities are assi
 | Live instances using a resource   | `graph show`                                                                                                                 |
 
 Outbound declared dependencies were not part of `resource describe`. `graph show` adds them from the
-existing frozen resource graph to complete the fixed both-directions neighborhood; they are a new
+existing frozen resource graph to complete the default both-directions neighborhood; they are a new
 projection, not a migrated card fact.
 
 Keeping a reduced card would recreate a generic inspector with no distinct operator job.
@@ -59,19 +59,37 @@ contract, not an exclusive ban on useful kind-specific context.
 ## Launch grammar
 
 ```text
-agw graph show KIND/NAME [--output human|json]
+agw graph show KIND/NAME
+    [--direction dependencies|dependents|both]
+    [--depth N|all]
+    [--output human|json]
 ```
 
-Launch requires exactly one focal registry resource. The view is fixed: one hop, both directions,
-with no kind, direction, or depth selector. It contains:
+Launch requires exactly one focal registry resource. The default view is one hop in both directions.
+It contains:
 
 - outbound declared-resource references from the focal resource;
 - inbound declared-resource references, preserving `source`, `usage`, and optional `declared_by`;
 - live-instance usage from the focal kind's existing `instances` hook.
 
-The fixed neighborhood answers the migration question without forcing traversal, cycle, or filter
-semantics that have no launch consumer. The `show` subcommand leaves a clean future home for a
-distinct two-node `path` query.
+`--direction dependencies` follows source-to-target references. `--direction dependents` follows
+references in reverse and resource-to-live-instance usage projections. `both` is the default.
+`--depth` counts edges from the focus: it accepts a positive integer and defaults to `1`; `all`
+returns the complete reachable closure in the selected direction. Traversal is finite and
+cycle-safe, and preserves each edge's intrinsic orientation regardless of the query direction. At
+depths greater than one, `both` permits either direction at every resource expansion; it is not the
+union of two monotonic traversals from the focus.
+
+The greater-depth use is concrete rather than speculative. Starting at `vm-platform/azure-vm`, a
+dependents query first reaches configured `vm-site` resources and then reaches the live VMs using
+those sites. The fixed one-hop view could not answer that operator question. Launch still has no
+kind filter, focus-optional whole-graph mode, or two-node path query.
+
+Declared edges preserve the model's semantic relationship verb, currently `uses` or `inherits`, in
+addition to `usage` prose and declaration provenance. Live-instance usage is a typed edge, not a
+resource-graph mutation. Launch does not add capability-facet relationship labels: a future
+structured qualifier must originate with the reference producer and graph may only project it, never
+infer it from source kinds or prose.
 
 ### Read and safety boundary
 
@@ -81,11 +99,13 @@ same.
 
 The command must not create or migrate a database, repair stored runtime state, activate a resource,
 resolve a secret value, make provider or remote probes, or prompt. Source acquisition is
-demand-driven: a focal kind without a live-instance projection does not require an unrelated
-database. When live usage is supported, the database is opened through an explicitly read-only
-boundary with source-specific failure behavior settled in HLA.
+demand-driven: the database is needed only when graph expands a resource with remaining depth and
+the selected direction includes dependents for a kind with a live-instance projection. Merely
+discovering that resource at the depth bound does not open the database. Live-instance nodes are
+terminal and are never expanded. When an expansion does need live usage, the database is opened
+through an explicitly read-only boundary with source-specific failure behavior settled in HLA.
 
-Human output is a deterministic one-hop neighborhood. JSON uses the repository's versioned envelope
+Human output is a deterministic selected neighborhood. JSON uses the repository's versioned envelope
 and typed node and edge facts.
 
 ## Explain rename boundary
@@ -94,8 +114,18 @@ and typed node and edge facts.
 implementation `KIND/NAME` forms. It reads no config, builds no registry, and opens no database, so
 it continues to work during configuration recovery and for an installed but disabled plugin.
 
+The named form is deliberately limited to capability implementations: an implementation name selects
+a distinct offered schema, while a declarable resource name does not. Accepting an arbitrary
+concrete `KIND/NAME` would either ignore the name or turn explanation into config-backed object
+inspection.
+
 Field-level selection is future work. Because implementation names may contain dots, a future field
-selector should use an option such as `--field PATH` rather than an ambiguous dotted operand.
+selector should use an option such as `--field PATH` rather than an ambiguous dotted operand. When
+the first multi-facet capability arrives, its implementation explanation should render every offered
+configuration facet in separate, labeled sections by default. The capability-kind explanation owns
+the general facet vocabulary. Facet models must never be flattened into one schema, and config
+presence must not be presented as an operational support claim. That is future capability work; this
+correction preserves today's single-model output.
 
 ## Writer semantics
 
@@ -118,9 +148,12 @@ remain historical unless they are still active operator instructions.
 
 ## Questions handed to HLA
 
-1. What typed node and edge kinds represent outbound declarations, inbound declarations, and live
-   usage without losing current provenance?
-2. What deterministic ordering and duplicate-edge rules apply to the fixed neighborhood?
-3. Which focal kinds demand the database, and how do absent, stale, malformed, and unreadable live
-   state fail without affecting declaration-only queries?
-4. What stable fields form the initial `graph.show` JSON v1 contract?
+1. What typed node and edge kinds represent declared and live usage relations without losing
+   relationship verbs or current provenance?
+2. What breadth-first traversal, cycle, repeated-node, cross-edge, and deterministic ordering rules
+   govern bounded and complete-closure queries?
+3. How do direction and depth affect source demand, especially when a deeper frontier first reaches
+   a kind with a live-instance projection?
+4. How do absent, stale, malformed, and unreadable live state fail without affecting queries that do
+   not demand it?
+5. What stable fields form the initial `graph.show` JSON v1 contract?
