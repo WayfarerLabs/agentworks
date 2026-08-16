@@ -19,6 +19,7 @@ from agentworks.completions.spec import (
     DATABASE_BACKED_DYNAMIC_COMPLETERS,
     DATABASE_BACKED_DYNAMIC_COMPLETIONS,
     DYNAMIC_COMPLETIONS,
+    RESOURCE_LIST_DYNAMIC_COMPLETIONS,
     CommandSpec,
     build_spec,
     completion_version,
@@ -74,6 +75,7 @@ class TestTopLevelGroups:
             "console",
             "database",
             "env",
+            "graph",
             "resource",
             "secret",
             "session",
@@ -187,6 +189,14 @@ class TestDynamicCompletionsMapping:
         assert frozenset(path for _completer, path in DATABASE_BACKED_DYNAMIC_COMPLETIONS) == (
             DATABASE_BACKED_COMPLETION_PATHS
         )
+        assert set(RESOURCE_LIST_DYNAMIC_COMPLETIONS).isdisjoint(DATABASE_BACKED_DYNAMIC_COMPLETERS)
+        for completer in RESOURCE_LIST_DYNAMIC_COMPLETIONS:
+            assert "--completion-probe" not in BASH_SNIPPETS[completer]
+            assert "--completion-probe" not in POWERSHELL_SNIPPETS[completer]
+            assert "--completion-probe" not in DYNAMIC_FUNCTIONS[completer]
+            assert "2>/dev/null" in BASH_SNIPPETS[completer]
+            assert "2>$null" in POWERSHELL_SNIPPETS[completer]
+            assert "2>/dev/null" in DYNAMIC_FUNCTIONS[completer]
 
     def test_generated_database_backed_invocations_all_carry_hidden_probe_marker(self) -> None:
         for shell in ("bash", "zsh", "powershell"):
@@ -364,7 +374,7 @@ class TestOptionFlagsInSpec:
         expected_paths = (
             "agentworks.resource.list",
             "agentworks.resource.kinds",
-            "agentworks.resource.describe",
+            "agentworks.graph.show",
             "agentworks.secret.list",
             "agentworks.secret.describe",
             "agentworks.vm.list",
@@ -869,7 +879,21 @@ class TestStaticChoiceCompletion:
         (kind,) = [p for p in schema.params if p.name == "kind"]
         assert not kind.choices
         assert kind.dynamic_completer == "resource_kinds"
-        assert [opt for param in schema.params for opt in param.opts] == ["--write"]
+        assert [opt for param in schema.params for opt in param.opts] == ["--install"]
+
+    def test_graph_choices_and_depth_suggestions_are_distinct(self) -> None:
+        show = build_spec(app).subcommands["graph"].subcommands["show"]
+        by_name = {param.name: param for param in show.params}
+        assert by_name["direction"].choices == ["dependencies", "dependents", "both"]
+        assert by_name["output_format"].choices == ["human", "json"]
+        assert by_name["depth"].choices is None
+        assert by_name["depth"].suggestions == ["1", "2", "3", "all"]
+
+    def test_all_shells_emit_graph_static_values(self) -> None:
+        generated = {shell: generate(shell) for shell in ("bash", "zsh", "powershell")}
+        for script in generated.values():
+            for value in ("dependencies", "dependents", "both", "1", "2", "3", "all"):
+                assert value in script
 
     def test_all_shells_emit_shell_choices(self) -> None:
         from agentworks.cli import app
@@ -904,7 +928,6 @@ def test_legacy_database_completion_recognizes_every_inventory_path(command_path
         ["session", "list", "--names-only", "--no-status", "--workspace=alpha"],
         ["agent", "list", "--vm=alpha", "--names-only"],
         ["console", "list", "--agent", "alpha", "--names-only"],
-        ["resource", "list", "--kind", "vm-site", "--include-disabled", "--names-only"],
     ],
 )
 def test_legacy_database_completion_recognizes_shipped_option_shapes(argv: list[str]) -> None:
@@ -918,6 +941,7 @@ def test_legacy_database_completion_recognizes_shipped_option_shapes(argv: list[
         ["vm", "list"],
         ["vm", "list", "--names-only", "--output", "json"],
         ["workspace", "list", "--names-only", "--agent", "alpha"],
+        ["resource", "list", "--kind", "vm-site", "--include-disabled", "--names-only"],
         ["resource", "list", "--names-only", "--unknown"],
         ["vm", "describe", "--names-only"],
     ],

@@ -179,10 +179,10 @@ Each failure is a `PluginError` naming the plugin, the kind, the impl, and what 
 
 A capability implementation DECLARES the shape of its config as a model, and the core does
 everything else with it: shape validation, reference extraction, defaulting, JSON Schema emission,
-`agw resource sample`, and `agw resource describe-kind` are all derived views of that one
-declaration. **No plugin code is invoked for any of them**, which is what keeps a misbehaving plugin
-out of the registry's finalize pass and what makes it impossible for a plugin's validator and its
-documentation to disagree.
+`agw resource sample`, and `agw resource explain` are all derived views of that one declaration.
+**No plugin code is invoked for any of them**, which is what keeps a misbehaving plugin out of the
+registry's finalize pass and what makes it impossible for a plugin's validator and its documentation
+to disagree.
 
 ```python
 from typing import Annotated, ClassVar, Literal
@@ -239,8 +239,8 @@ What the base and the markers buy you:
   error naming the fields it does, a wrong type is an error rather than a coercion, and the operator
   reads it framed as their resource with the file and line they wrote it on.
 - **The attribute docstring IS the field's operator-facing description.** It is what
-  `agw resource describe-kind`, the generated sample, and the editor's hover text render, so write
-  it for an operator. Do not restate the field list anywhere else; a second copy is free to drift.
+  `agw resource explain`, the generated sample, and the editor's hover text render, so write it for
+  an operator. Do not restate the field list anywhere else; a second copy is free to drift.
 - **`SecretRef` / `ResourceRef` mark a field that NAMES another resource**, optionally with an
   owner-templated default (`git-token-{owner_name}`). That marker is the single authored place the
   reference semantics live: extraction reads it to build the dependency graph, validation fills the
@@ -311,8 +311,8 @@ A plugin contributes implementations of existing capability kinds only:
 
 Each impl subclasses the kind's nominal capability base class and exposes `name` / `description`
 class attributes. Registration checks that conformance before seating anything; see
-[Contract conformance](#contract-conformance). The published row is read-only and lists, describes,
-and is referenced like any other resource of that kind.
+[Contract conformance](#contract-conformance). The published row is read-only, appears in resource
+inventory and kind explanation, and participates in the graph like any other resource of that kind.
 
 **Bundled manifests** are ordinary YAML resource documents the plugin ships, under the `manifests/`
 subdirectory of the package `manifests` points at. Only declarable kinds whose consumption sites are
@@ -348,8 +348,6 @@ behavior today.
 - `agw resource list` hides disabled rows by default and shows them with `--include-disabled`; a
   not-ready-but-enabled row still lists (disabled hides, not-ready shows). A plugin row is annotated
   `from plugin <name>`.
-- `agw resource describe <kind>/<name>` renders a named row even when disabled, with a `Disabled:`
-  line.
 - `agw doctor` has a **System plugins** roster: every installed plugin, its description, and its
   opt-in state. The roster is existence, description, and enable-state only; it never enumerates a
   disabled plugin's contributions.

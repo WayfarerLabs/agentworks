@@ -37,7 +37,7 @@ from agentworks.config import load_config
 from agentworks.errors import StateError
 from agentworks.resources.access import ensure_recipe_enabled
 from agentworks.resources.graph import Enablement
-from agentworks.resources.inspect import describe_resource, list_resources
+from agentworks.resources.inspect import list_resources
 from tests.conftest import ManifestDoc, write_manifests
 
 if TYPE_CHECKING:
@@ -168,7 +168,7 @@ def test_core_capabilities_stay_builtin(tmp_path: Path) -> None:
         assert registry.graph.enablement_of(kind, name) is Enablement.enabled, (kind, name)
 
 
-def test_disabled_rows_hidden_from_list_shown_by_describe(tmp_path: Path) -> None:
+def test_disabled_rows_are_present_but_hidden_from_default_list(tmp_path: Path) -> None:
     registry = build_registry(_config(tmp_path))
     default_rows = {(r.kind, r.name) for r in list_resources(registry).rows}
     for kind, name in (
@@ -177,9 +177,8 @@ def test_disabled_rows_hidden_from_list_shown_by_describe(tmp_path: Path) -> Non
         ("system-install-command", "az-cli"),
     ):
         assert (kind, name) not in default_rows, (kind, name)
-        desc = describe_resource(registry, kind, name)
-        assert desc.disabled_reason is not None, (kind, name)
-        assert "azure" in desc.disabled_reason, (kind, name)
+        assert registry.lookup(kind, name).origin.plugin == "azure", (kind, name)
+        assert registry.graph.enablement_of(kind, name) is Enablement.disabled, (kind, name)
 
 
 # -- the vm-site use-gate (R14, platform propagate) --------------------------

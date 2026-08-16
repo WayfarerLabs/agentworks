@@ -292,7 +292,7 @@ class Capability(ABC):
     """One operator-facing line: what this implementation IS.
 
     Also its SUMMARY on every schema-derived surface (the implementation
-    list under ``agw resource describe-kind <kind>``, its own field
+    list under ``agw resource explain <kind>``, its own field
     reference), which is why nothing authors a second one-liner beside
     ``prose``."""
 

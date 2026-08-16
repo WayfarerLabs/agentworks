@@ -7,7 +7,7 @@ order. They are settings, not resources, and are never published as
 pseudo-resources (ADR 0016), so the framework's own reference machinery does
 not see them: a ``ResourceReference`` is sourced from a declaring ROW, and
 inventing a ``("config", "defaults")`` row to carry one would put a fake
-resource into ``agw resource describe``'s "Referenced by:" and into the
+resource into ``agw graph show``'s declared edges and into the
 ``REFS`` / ``USED BY`` columns. What they share with a manifest reference is
 not a type, it is the OBLIGATION: a name that resolves to nothing is a hard
 error (operator ruling, 2026-08-07), with the same shape as the dangling

@@ -26,6 +26,13 @@ from agentworks.resources.graph import (
     Enablement,
     Readiness,
 )
+from agentworks.resources.graph_query import (
+    DatabaseLiveSource,
+    GraphDirection,
+    GraphResult,
+    graph_result_data,
+    show_graph,
+)
 from agentworks.resources.kind import (
     ALWAYS_MATERIALIZE_SOURCE,
     KIND_REGISTRY,
@@ -45,7 +52,10 @@ from agentworks.resources.walk import collect_secrets_for
 __all__ = [
     "ALWAYS_MATERIALIZE_SOURCE",
     "DependencyGraph",
+    "DatabaseLiveSource",
     "Enablement",
+    "GraphDirection",
+    "GraphResult",
     "KIND_REGISTRY",
     "Readiness",
     "InstanceRef",
@@ -58,4 +68,6 @@ __all__ = [
     "TemplateReference",
     "ReferenceEntry",
     "collect_secrets_for",
+    "graph_result_data",
+    "show_graph",
 ]

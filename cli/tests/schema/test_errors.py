@@ -151,7 +151,7 @@ def test_a_missing_required_UNION_also_names_the_choices_it_is_between() -> None
     """A missing ``client_id`` is a value to supply; a missing ``platform``
     is a CHOICE to make, and the choice is the only hard part.
 
-    ``platform: is required`` sends an operator to ``describe-kind`` to
+    ``platform: is required`` sends an operator to ``explain`` to
     learn something this error is holding.
 
     A missing ORDINARY field is left alone, which is the same assertion
@@ -275,10 +275,10 @@ def test_a_hint_is_carried_through() -> None:
         _fails(PrincipalLike, {"client_id": 8, "tenant_id": "t"}),
         model_cls=PrincipalLike,
         owner=OWNER,
-        hint="see `agw resource describe`",
+        hint="test-hint",
     )
 
-    assert error.hint == "see `agw resource describe`"
+    assert error.hint == "test-hint"
 
 
 # -- Framing: several errors --------------------------------------------------

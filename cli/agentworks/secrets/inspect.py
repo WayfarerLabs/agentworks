@@ -394,7 +394,7 @@ def describe_secret(
     ``db`` is optional: when provided, the ``used_by`` field is
     populated with the sessions whose subgraph reaches this secret
     (via the secret kind's ``instances`` hook, shared with
-    ``agw resource describe``). When ``None``, ``used_by`` stays
+    graph's live usage projection). When ``None``, ``used_by`` stays
     ``None`` and the renderer omits the "Used by:" section.
     """
     from agentworks.errors import NotFoundError
@@ -486,7 +486,7 @@ def render_secret_description(desc: SecretDescription) -> None:
 
     # --- Used by (dynamic, per current config) ---
     # Only rendered when describe_secret was called with a db. Same
-    # projection shape as agw resource describe's Used by section; the
+    # projection shape as the secret describe Used by section; the
     # annotation is in the section header so the projection-vs-
     # materialized signal is visible at-a-glance.
     if desc.used_by is not None:
@@ -498,7 +498,7 @@ def render_secret_description(desc: SecretDescription) -> None:
             # Group by instance_kind for readability; preserve
             # first-encounter order within a kind. Today the secret
             # kind emits only session InstanceRefs, but grouping keeps
-            # the rendering identical to agw resource describe's shape
+            # the rendering stable within the secret describe shape
             # so a future SDD that emits other instance kinds (agents,
             # VMs) slots in without renderer changes.
             grouped: dict[str, list[str]] = {}

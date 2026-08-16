@@ -198,12 +198,12 @@ def _migration_actions() -> tuple[GuideAction, ...]:
                 ),
                 ActionInput(
                     "MANIFEST_KIND",
-                    "The pre-recorded declarable kind for agw resource sample and describe-kind.",
+                    "The pre-recorded declarable kind for agw resource sample and explain.",
                     True,
                 ),
                 ActionInput(
                     "CAPABILITY_TARGET",
-                    "The optional kind/name describe-kind target when the manifest has tagged capability config.",
+                    "The optional kind/name explain target when the manifest has tagged capability config.",
                     False,
                 ),
                 ActionInput(
@@ -214,8 +214,8 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             ),
             ConsentBoundary.MUTATE_AGENTWORKS,
             None,
-            "MANIFEST_PATH contains one resource rewritten against agw resource sample and describe-kind for "
-            "MANIFEST_KIND and, when present, describe-kind for CAPABILITY_TARGET. "
+            "MANIFEST_PATH contains one resource rewritten against agw resource sample and explain for "
+            "MANIFEST_KIND and, when present, explain for CAPABILITY_TARGET. "
             "Any retired presence shape uses the documented field mapping, including the outer-null mode mapping. "
             "A git-credential token uses the canonical tagged secret arm; a version 0.13 outer token null is "
             "deleted or rewritten as token: {mode: secret}, while an existing scalar's secret name is preserved. "
@@ -223,8 +223,8 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             None,
             "Keep the last validated manifest set and do not remove any retired TOML section.",
             "Edit only MANIFEST_PATH, whether it is pre-existing or TOML-derived. Use agw resource sample "
-            "MANIFEST_KIND and agw resource describe-kind MANIFEST_KIND. When tagged capability config is "
-            "present, also use agw resource describe-kind CAPABILITY_TARGET. Replace a retired service_principal, "
+            "MANIFEST_KIND and agw resource explain MANIFEST_KIND. When tagged capability config is "
+            "present, also use agw resource explain CAPABILITY_TARGET. Replace a retired service_principal, "
             "credentials, or vm_host shape with auth service-principal, auth access-key, or placement ssh, "
             "respectively, moving the retired value's fields into the selected arm. For an outer explicit null, "
             "delete the retired line and write auth ambient, auth "
@@ -259,7 +259,7 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             "Leave the site manifests unchanged and block cutover until the intent can be established.",
             "Inspect only SITE_MANIFESTS. Classify Proxmox token_secret, Azure auth.mode and service-principal "
             "auth.secret, AWS auth.mode and access-key auth.access_key_secret, and Lima placement.mode against "
-            "agw resource describe-kind for the affected implementations. Omitted auth selects ambient; "
+            "agw resource explain for the affected implementations. Omitted auth selects ambient; "
             "omitted placement selects "
             "local. An outer explicit null means auth ambient, auth ambient, or placement local, respectively. "
             "Inside a credential arm, an omitted or null secret reference selects its well-known default name. "

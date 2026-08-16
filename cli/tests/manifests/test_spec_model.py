@@ -66,7 +66,7 @@ def test_the_splice_keeps_an_optional_capability_block_optional() -> None:
 #: EVERY ``seat_installed_plugins`` call site in the source needs an entry
 #: here. ``reference.py``'s two had none while the suite stayed green,
 #: because ``test_reference.py`` drives fixture models rather than the live
-#: registry: deleting both lazy imports left `describe-kind` quietly
+#: registry: deleting both lazy imports left `explain` quietly
 #: dropping every plugin arm with nothing failing anywhere.
 _SPEC_MODEL_CHECK = """
 import sys
@@ -94,7 +94,7 @@ mapping = set(document_schema("vm-site")["$defs"]["VmPlatformConfig"]["discrimin
 assert expected <= mapping, f"emitted schema is missing {sorted(expected - mapping)}"
 """
 
-#: `agw resource describe-kind vm-platform`: the capability-kind index,
+#: `agw resource explain vm-platform`: the capability-kind index,
 #: which reaches the descriptor table without going through spec_model.
 _DESCRIBE_KIND_INDEX_CHECK = """
 import sys
@@ -105,10 +105,10 @@ assert "agentworks.plugins" not in sys.modules, "the plugins package was already
 expected = {"azure-vm", "aws-ec2", "gcp-gce", "proxmox"}
 
 listed = {alt.name for alt in reference_for("vm-platform").alternatives}
-assert expected <= listed, f"describe-kind is missing {sorted(expected - listed)} (got {sorted(listed)})"
+assert expected <= listed, f"explain is missing {sorted(expected - listed)} (got {sorted(listed)})"
 """
 
-#: `agw resource describe-kind vm-platform/<name>`: one implementation,
+#: `agw resource explain vm-platform/<name>`: one implementation,
 #: resolved against the kind's registry. A plugin's implementation is one
 #: this host HAS, so it is describable whether or not config opted in.
 _DESCRIBE_KIND_IMPL_CHECK = """
@@ -128,7 +128,7 @@ _FRESH_SEATING_CHECKS = (
     _DESCRIBE_KIND_INDEX_CHECK,
     _DESCRIBE_KIND_IMPL_CHECK,
 )
-_FRESH_SEATING_IDS = ("spec-model", "emitted-schema", "describe-kind-index", "describe-kind-impl")
+_FRESH_SEATING_IDS = ("spec-model", "emitted-schema", "explain-index", "explain-impl")
 
 
 @pytest.mark.parametrize("script", _FRESH_SEATING_CHECKS, ids=_FRESH_SEATING_IDS)
@@ -154,7 +154,7 @@ def test_the_plugin_platforms_are_present_in_a_FRESH_interpreter(script: str) ->
     is process-wide, so the FIRST surface a script touches seats for every
     surface after it: checking them in sequence would prove the first one
     seats and prove nothing at all about the rest. Adding the
-    ``describe-kind`` checks to the end of the spec-model script passed
+    ``explain`` checks to the end of the spec-model script passed
     with both of ``reference.py``'s seating calls deleted, which is exactly
     the hole they were being added to close. A surface belongs in its own
     script, or it is not being tested.

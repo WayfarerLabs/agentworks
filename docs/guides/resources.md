@@ -21,7 +21,7 @@ registry, is identified by `kind` + `name`, and can be inspected uniformly:
 ```bash
 agw resource list                       # everything, all kinds and origins
 agw resource list --kind secret         # one kind
-agw resource describe vm-template/dev   # one resource, with references and usage
+agw graph show vm-template/dev          # declared and live relationships
 agw resource kinds                      # every kind: category, counts, purpose
 ```
 
@@ -84,22 +84,21 @@ gives you a document that loads, carrying exactly the required fields; then dele
 each optional field you actually want. Where a field selects a capability (a vm-site's `platform`),
 one implementation is written out and the rest are named beside it.
 
-`agw resource describe-kind` is the same information without a document to edit:
+`agw resource explain` is the same information without a document to edit:
 
 ```bash
-agw resource describe-kind vm-site               # every field of a kind
-agw resource describe-kind vm-platform           # the platforms this build has
-agw resource describe-kind vm-platform/aws-ec2   # one platform's own config
+agw resource explain vm-site               # every field of a kind
+agw resource explain vm-platform           # the platforms this build has
+agw resource explain vm-platform/aws-ec2   # one platform's own config
 ```
 
 It reads no config and builds no registry, so it answers on a host whose `config.toml` does not
 load, and it documents a capability whose plugin is not enabled yet.
 
 It also answers for every arm of a tagged table, which a sample cannot: where the arms are
-capabilities it names each one and gives its address
-(`agw resource describe-kind vm-platform/wsl2`), and where they are not (a lima site's
-`placement: {mode: local}` against `{mode: ssh, host: ...}`) it shows each arm's own fields under
-that arm, because no other command reaches them.
+capabilities it names each one and gives its address (`agw resource explain vm-platform/wsl2`), and
+where they are not (a lima site's `placement: {mode: local}` against `{mode: ssh, host: ...}`) it
+shows each arm's own fields under that arm, because no other command reaches them.
 
 `agw resource edit KIND/NAME` opens the manifest declaring a resource in `$EDITOR`.
 
@@ -112,7 +111,7 @@ capabilities a plugin contributed.
 ```bash
 agw resource schema                    # the any-kind schema, to stdout
 agw resource schema vm-template        # one kind's
-agw resource schema --write            # the whole set, into resources/.schema/
+agw resource schema --install            # the whole set, into resources/.schema/
 ```
 
 Files that agentworks writes for you already carry the association, as a modeline on their first
@@ -128,7 +127,7 @@ happens depends on whether one is there already:
 
 - **No modeline?** Nothing is added. A modeline has to be the first line, and inserting one would
   shift every line number you already know. To get the association on a manifest you wrote by hand,
-  add that line yourself (`agw resource schema --write` first, so the file it names exists).
+  add that line yourself (`agw resource schema --install` first, so the file it names exists).
 - **A modeline already there?** It is rewritten in place, which moves no line at all. A file created
   for one kind names that kind's schema; append a second kind to it and it is no longer a one-kind
   file, so the line is restamped to `manifest.schema.json`, the any-kind schema. Leaving it on the
@@ -136,7 +135,7 @@ happens depends on whether one is there already:
   configuration that loads, which is the failure this association exists to prevent.
 
 The schema describes THIS host: a capability from a plugin appears in it once the plugin is
-installed, so re-run `agw resource schema --write` after installing one. The schemas are generated
+installed, so re-run `agw resource schema --install` after installing one. The schemas are generated
 artifacts; `.schema/` is a dot-directory, so the manifest loader never reads what is in it.
 
 **Setting up an editor.** In VS Code (or any editor with a YAML language server), install the
@@ -160,8 +159,8 @@ hold:
   emitted schemas accept both, so `verify_ssl: no` is not underlined. The cost is that a QUOTED
   `"no"` is accepted by the schema too, and the loader refuses it: once parsed, the two are the same
   string and nothing in the schema can tell them apart. That is the under-reporting direction, so it
-  is a squiggle you do not get rather than one you get wrongly. `describe-kind` warns about the
-  quoted spelling on every boolean field.
+  is a squiggle you do not get rather than one you get wrongly. `explain` warns about the quoted
+  spelling on every boolean field.
 - **1.1 knows more integer spellings than 1.2 does.** Underscore separators (`memory: 8_192`),
   sexagesimal (`1:30`), binary (`0b1010`) and signed hex (`+0x1F`) are integers to the loader and
   plain strings under 1.2. The emitted schemas accept both, so none of them is underlined. Two edges
@@ -181,7 +180,7 @@ hold:
 
 A `git-credential`'s `spec.provider` is one tagged table: its `name` key selects the provider
 capability and the remaining keys are that provider's configuration, which
-`agw resource describe-kind git-credential-provider/<name>` documents.
+`agw resource explain git-credential-provider/<name>` documents.
 
 A provider's `token` field is a tagged acquisition choice with one supported arm:
 `token: {mode: secret, secret: my-github-token}` names the secret holding the token. Omitting
@@ -253,24 +252,25 @@ recovery prerequisites.
 
 - `spec.platform` is one table: its `name` key names a `vm-platform` capability row and the
   remaining keys are that platform's configuration, validated by it (unknown keys are errors).
-  `agw resource describe-kind vm-platform` lists the platforms this build has, including any that
-  arrive with an opt-in [system plugin](#system-plugins);
-  `agw resource describe-kind vm-platform/<name>` documents one platform's own fields. A platform
-  needing no config is just `platform: {name: wsl2}`. A lima site says where `limactl` runs:
-  `placement: {mode: local}` on this machine, or `placement: {mode: ssh, host: user@host}` over SSH.
+  `agw resource explain vm-platform` lists the platforms this build has, including any that arrive
+  with an opt-in [system plugin](#system-plugins); `agw resource explain vm-platform/<name>`
+  documents one platform's own fields. A platform needing no config is just
+  `platform: {name: wsl2}`. A lima site says where `limactl` runs: `placement: {mode: local}` on
+  this machine, or `placement: {mode: ssh, host: user@host}` over SSH.
 - The `lima-local` and `wsl2` sites ship built in, `lima-local` on `placement: {mode: local}` and
   `wsl2` on no config at all. Like every site they register on every host and report not-ready where
   this host lacks what they need (wsl2 is Windows-only; a local Lima site needs `limactl`); a
-  not-ready site still lists and describes with its reason, and using it is an error. Their names
-  are reserved. A site named after a platform must declare that platform.
+  not-ready site still appears marked in `agw resource list`, `agw doctor` reports the reason, and
+  using it is an error. Their names are reserved. A site named after a platform must declare that
+  platform.
 - Consumers name sites: `agw vm create --site`, `defaults.site` in config.toml, and each VM row's
   `site`. Templates deliberately carry no site: placement is per-host, never template state.
 - Site config secrets ride the standard secret machinery: a platform that needs a credential names
   the secret holding it in its own config, defaulting to a well-known name when you leave the field
   out (a Proxmox site's API token is the `proxmox-token` secret unless `token_secret` says
   otherwise). Those secrets are auto-declared and resolved through the configured source chain like
-  any other, and `agw resource describe-kind vm-platform/<name>` shows each platform's secret fields
-  with their default names.
+  any other, and `agw resource explain vm-platform/<name>` shows each platform's secret fields with
+  their default names.
 - **Azure, AWS, and GCP sites say how they authenticate, in a tagged `auth` table that defaults to
   ambient.** `auth: {mode: ambient}` is the declared default, so omitting the table means it: the
   host's own credential chain (for Azure, `az login` / `AZURE_*` / managed identity / browser
@@ -290,8 +290,7 @@ recovery prerequisites.
   not-ready with an "enable plugin `<name>`" hint, and refused at use, until you list that plugin in
   `[plugins] system`. The `azure-dev` example above is not-ready until you set
   `[plugins] system = ["azure"]`. `agw doctor` lists every installed plugin and whether it is
-  enabled, and `agw resource describe-kind vm-platform/<name>` says which plugin a platform arrives
-  with.
+  enabled, and `agw resource explain vm-platform/<name>` says which plugin a platform arrives with.
 
 ## Harness integrations
 
@@ -317,9 +316,9 @@ spec:
   row, and the remaining keys are the config block that integration owns and validates (unknown keys
   are errors). A template that names no integration resolves to the built-in `shell` integration (a
   plain login shell, or an operator command), which is the built-in `default` template.
-- `agw resource describe-kind harness-integration` lists the integrations this build has, and
-  `agw resource describe-kind harness-integration/<name>` documents one integration's config field
-  by field. That is the reference; what follows is what an operator wants to know beyond the fields
+- `agw resource explain harness-integration` lists the integrations this build has, and
+  `agw resource explain harness-integration/<name>` documents one integration's config field by
+  field. That is the reference; what follows is what an operator wants to know beyond the fields
   themselves.
 - Command strings support the `{{session_name}}` and `{{workspace_name}}` variables. This holds
   wherever an integration takes a command or raw arguments (`shell`'s `command` and
@@ -329,8 +328,8 @@ spec:
   integration starts fresh. `env`, `inherits`, and the description merge as usual. A few list fields
   union across the chain rather than replacing, so a child adding one entry never silently drops the
   parent's; the field reference marks which.
-- `agw resource describe harness-integration/<name>` is the other half: the integration's registry
-  row and the templates that reference it, rather than the fields it accepts.
+- `agw graph show harness-integration/<name>` is the other half: the integration's declared and live
+  relationships, rather than the fields it accepts.
 
 The `claude-code` integration runs Claude Code as the session. It ships as the opt-in `claude`
 system plugin (see "System plugins" below), so a `session-template` naming it still lists ready, but
@@ -355,11 +354,11 @@ spec:
 ```
 
 - Its config is all optional, and every field is documented by
-  `agw resource describe-kind harness-integration/claude-code`. What the reference cannot tell you:
-  the fields that forward a value verbatim to `claude` are not validated here, because the valid
-  choices are Claude's and they move between its releases. An invalid one fails at launch with the
-  tool's own error, which `session create` / `session resume` capture into their error message when
-  the workload exits immediately.
+  `agw resource explain harness-integration/claude-code`. What the reference cannot tell you: the
+  fields that forward a value verbatim to `claude` are not validated here, because the valid choices
+  are Claude's and they move between its releases. An invalid one fails at launch with the tool's
+  own error, which `session create` / `session resume` capture into their error message when the
+  workload exits immediately.
 - The only requirement checked on the launch target is that `claude` is installed. The chosen action
   (resume vs new session) is announced in the pane on start, so it is never silent.
 
@@ -389,9 +388,9 @@ one) rather than discovering it later. Overriding `notify` yourself through `ext
 recording off (yours wins, because `extra_args` is appended last), which leaves resume relying on
 that fallback.
 
-Its config is all optional, and `agw resource describe-kind harness-integration/codex` documents
-every field. Four things the field reference does not say, because they are Codex's behavior rather
-than facts about the fields:
+Its config is all optional, and `agw resource explain harness-integration/codex` documents every
+field. Four things the field reference does not say, because they are Codex's behavior rather than
+facts about the fields:
 
 - **Codex sandboxes network access OFF by default**, even under `workspace-write`. A coding session
   that needs `npm install` or `git push` has to turn it on.
@@ -480,20 +479,19 @@ catalog rows carry the `system-plugin` origin. Override policy is per kind:
   the source too or remove that dependency.
 - **Bundled vm-sites** (`lima-local`, `wsl2`): reserved names. Redeclaring one is an error; declare
   a sibling site instead. Like every vm-site they register on every host and report not-ready where
-  this host lacks what they need (`agw resource list` marks the row; `describe` and `agw doctor`
-  carry the reason); using a not-ready site is an error naming the requirement. A site naming an
-  UNKNOWN platform (a typo, or an uninstalled plugin) is a hard error at load, not a self-disable.
+  this host lacks what they need (`agw resource list` marks the row and `agw doctor` carries the
+  reason); using a not-ready site is an error naming the requirement. A site naming an UNKNOWN
+  platform (a typo, or an uninstalled plugin) is a hard error at load, not a self-disable.
 - **The four capability kinds** (`secret-backend`, `vm-platform`, `git-credential-provider`,
   `harness-integration`): registered code, shown as read-only rows. You cannot declare or override
-  one. `agw resource describe-kind <capability-kind>` lists the implementations this build has, and
-  naming one (`agw resource describe-kind vm-platform/proxmox`) says which system plugin it arrives
-  with, if any. Configuration is per consumer rather than per capability: secrets customize per
-  secret via `backend_mappings`, platforms configure per site via the `spec.platform` table, and
-  integrations configure per session-template via the `spec.harness_integration` table. Every
-  installed platform publishes a row regardless of host support: a platform whose host requirements
-  are not met (e.g. `wsl2` off Windows) publishes a present, not-ready row (`agw resource list` and
-  `agw doctor` show it with the reason), and a site referencing it is not-ready rather than
-  erroring.
+  one. `agw resource explain <capability-kind>` lists the implementations this build has, and naming
+  one (`agw resource explain vm-platform/proxmox`) says which system plugin it arrives with, if any.
+  Configuration is per consumer rather than per capability: secrets customize per secret via
+  `backend_mappings`, platforms configure per site via the `spec.platform` table, and integrations
+  configure per session-template via the `spec.harness_integration` table. Every installed platform
+  publishes a row regardless of host support: a platform whose host requirements are not met (e.g.
+  `wsl2` off Windows) publishes a present, not-ready row (`agw resource list` marks it and
+  `agw doctor` shows the reason), and a site referencing it is not-ready rather than erroring.
 
 ## System plugins
 
@@ -524,16 +522,15 @@ system = ["azure"]
 **Disabled resources are hidden by default.** `agw resource list` omits disabled rows; pass
 `--include-disabled` to reveal them. `--origin plugin` narrows the listing to plugin-contributed
 rows but still honors the disabled default, so combine it with `--include-disabled` to see a
-not-enabled plugin's rows. `agw resource describe <kind>/<name>` always renders a named resource,
-disabled or not, with a `Disabled:` line. `agw doctor` has a **System plugins** roster: each
-installed plugin, its description, and whether it is enabled. Note the axis distinction: "disabled"
-is the opt-in state and hides the row, while a **not-ready** resource (enabled but unable to run on
-this host) still lists with its reason.
+not-enabled plugin's rows. `agw doctor` has a **System plugins** roster: each installed plugin, its
+description, and whether it is enabled. Note the axis distinction: "disabled" is the opt-in state
+and hides the row, while a **not-ready** resource (enabled but unable to run on this host) still
+lists with its reason.
 
 Every plugin the build installs is disabled until you opt in. `agw doctor`'s **System plugins**
 roster is the list for this build, with each plugin's description and its opt-in state;
-`agw resource describe-kind <capability-kind>/<name>` says which plugin a given capability arrives
-with. Authoring a system plugin is documented in the plugins package README
+`agw resource explain <capability-kind>/<name>` says which plugin a given capability arrives with.
+Authoring a system plugin is documented in the plugins package README
 (`cli/agentworks/plugins/README.md`).
 
 The `apt` plugin owns five shipped apt sources and five apt package sets. The `install-command`
@@ -570,8 +567,8 @@ plugin and whether it is enabled.
 Three pieces have separate jobs:
 
 - A **secret backend** is registered code in a read-only `secret-backend` capability row.
-  `agw resource describe-kind secret-backend/onepassword` documents that implementation's source
-  config and mapping model.
+  `agw resource explain secret-backend/onepassword` documents that implementation's source config
+  and mapping model.
 - A **secret source** is a declarable `secret-source` resource. Its `spec.backend` selects and
   configures one backend implementation. Agentworks synthesizes `env-var` and `prompt`; additional
   sources are ordinary YAML resources.
@@ -656,16 +653,16 @@ prompt, biometric check, or backend authentication. That opt-in is incompatible 
 
 ```bash
 agw resource list --origin operator     # what you have declared, either source
-agw resource describe secret/npm-token  # where it's referenced, what uses it
+agw graph show secret/npm-token         # where it's referenced, what uses it
 agw doctor                              # offline secret attempt/readiness preview
 ```
 
 ### JSON for automation
 
-The read-only resource, secret, and health commands also support `--output json`: `resource list`,
-`resource kinds`, `resource describe`, `secret list`, `secret describe`, and `doctor`. Each
-successful response is one JSON document with `schema_version`, `command`, and `data` fields. The
-backend lists and reference arrays retain their operational precedence and graph order, and the
+The read-only graph, resource, secret, and health commands also support `--output json`:
+`graph show`, `resource list`, `resource kinds`, `secret list`, `secret describe`, and `doctor`.
+Each successful response is one JSON document with `schema_version`, `command`, and `data` fields.
+The backend lists and reference arrays retain their operational precedence and graph order, and the
 secret views report only lookup prediction and metadata, never a secret value.
 
 `--output human` is the default and keeps the terminal-oriented rendering. `--names-only` remains

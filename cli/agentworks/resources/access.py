@@ -1,9 +1,10 @@
-"""Typed accessors for the handful of Registry read shapes consumers use.
+"""Typed identities and accessors for Registry read shapes consumers use.
 
 The Registry's generic surface (``lookup`` / ``iter_kind`` /
 ``iter_kind_items``) is deliberately untyped (kinds are diverse types).
-Consumers overwhelmingly want a few concrete shapes; centralizing them
-here keeps kind-string literals in one place and call sites readable.
+Consumers overwhelmingly want a few concrete shapes. Centralizing them here
+keeps identity parsing, validated lookup, kind-string literals, and typed row
+access in one presentation-free layer.
 
 These accessors centralize resource reads: every read that used to
 be a ``Config`` resource attribute goes through here (or through a
@@ -14,16 +15,84 @@ live only in the Registry now.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from agentworks.errors import unknown_template_error
 
 if TYPE_CHECKING:
     from agentworks.git_credentials.credential import GitCredentialConfig
+    from agentworks.origin import Origin
     from agentworks.resources.registry import Registry
     from agentworks.secrets.base import SecretDecl
     from agentworks.sessions.template import NamedConsoleConfig
     from agentworks.vms.admin import AdminConfig
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceIdentity:
+    """A syntax-checked resource kind and name."""
+
+    kind: str
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedResource:
+    """The fact-minimal result of one validated registry lookup."""
+
+    identity: ResourceIdentity
+    resource: object
+    origin: Origin | None
+
+
+def parse_resource_identity(value: str) -> ResourceIdentity:
+    """Parse an operator-supplied ``KIND/NAME`` token at the first slash."""
+    from agentworks.errors import ValidationError
+
+    kind, slash, name = value.partition("/")
+    if not slash or not kind or not name:
+        raise ValidationError(
+            f"expected KIND/NAME, got {value!r}",
+            entity_kind="resource",
+        )
+    return ResourceIdentity(kind=kind, name=name)
+
+
+def resolve_resource(registry: Registry, identity: ResourceIdentity) -> ResolvedResource:
+    """Resolve one identity without enabling, probing, or acting on its row."""
+    from agentworks.errors import NotFoundError
+    from agentworks.resources import KIND_REGISTRY
+
+    if identity.kind not in KIND_REGISTRY:
+        raise NotFoundError(
+            f"unknown kind {identity.kind!r}",
+            entity_kind="resource-kind",
+            entity_name=identity.kind,
+            hint=f"known kinds: {', '.join(sorted(KIND_REGISTRY))}",
+        )
+
+    try:
+        resource = registry.lookup(identity.kind, identity.name)
+    except KeyError:
+        has_any = any(True for _ in registry.iter_kind_items(identity.kind))
+        hint = (
+            f"check `agw resource list --kind {identity.kind}` for available names"
+            if has_any
+            else f"no {identity.kind} resources are currently published"
+        )
+        raise NotFoundError(
+            f"no {identity.kind} named {identity.name!r} in the registry",
+            entity_kind=identity.kind,
+            entity_name=identity.name,
+            hint=hint,
+        ) from None
+
+    return ResolvedResource(
+        identity=identity,
+        resource=resource,
+        origin=getattr(resource, "origin", None),
+    )
 
 
 def kind_dict(registry: Registry, kind: str) -> dict[str, Any]:

@@ -179,7 +179,7 @@ code, or object.
 Validate the declared surface before creating anything:
 
 ```bash
-agw resource describe-kind vm-platform/gcp-gce
+agw resource explain vm-platform/gcp-gce
 agw doctor
 agw vm create build-1 --site gcp-dev
 ```

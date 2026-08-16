@@ -2,7 +2,7 @@
 
 One walker over a model's declared fields, feeding every HUMAN
 presentation of it: the generated sample manifest and ``agw resource
-describe-kind`` today, and any later prose surface that documents a
+explain`` today, and any later prose surface that documents a
 field. :class:`FieldDoc` is therefore a shared source rather than a
 CLI-layer detail, so widen its shape deliberately, not incidentally.
 
@@ -443,7 +443,7 @@ def _peeled(annotation: object) -> object:
     ``Annotated[Literal[...], Field(...)] | None`` hides the wrapper inside
     the union. Peeling only one of the two reports an OPEN field for a
     closed one, which reaches an operator as a sample with no values in it
-    and a describe line that lists none: a wrong answer with nothing to
+    and an explain line that lists none: a wrong answer with nothing to
     signal it.
 
     Terminates because each peel strictly reduces nesting, and both
@@ -470,7 +470,7 @@ def _constraints_of(field: FieldInfo) -> Mapping[str, object]:
     One carrier, never both merged. A list's ``min_length`` bounds how many
     entries it holds and a string element's bounds how long one entry is;
     flattened into a single mapping, the two arrive at
-    ``describe``/``sample`` spelled identically and an operator reads a
+    ``explain``/``sample`` spelled identically and an operator reads a
     limit on the wrong thing. Reporting one carrier's facts can omit
     something; merging them states something false.
     """

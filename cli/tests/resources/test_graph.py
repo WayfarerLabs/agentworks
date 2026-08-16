@@ -25,7 +25,7 @@ from agentworks.resources import (
     ResourceReference,
     collect_secrets_for,
 )
-from agentworks.resources.reference import ReferenceEntry
+from agentworks.resources.reference import ReferenceEntry, RefRelationship
 from tests.conftest import ManifestDoc, write_cfg
 
 
@@ -125,6 +125,70 @@ def test_edges_of_preserves_source_emission_order_across_sources() -> None:
     ]
 
 
+def test_full_incoming_edges_preserve_authoritative_parallel_facts() -> None:
+    """The target side retains each full edge in target encounter order."""
+    from agentworks.resources.graph import build_graph
+
+    uses = ResourceReference(
+        name="target",
+        kind="node",
+        usage="runtime dependency",
+        source=("node", "child"),
+    )
+    inherited_use = ResourceReference(
+        name="target",
+        kind="node",
+        usage="inherited runtime dependency",
+        source=("node", "child"),
+        declared_by=("node", "parent"),
+    )
+    inherits = ResourceReference(
+        name="target",
+        kind="node",
+        usage="a parent declaration",
+        source=("node", "child"),
+        relationship=RefRelationship.INHERITS,
+    )
+    incoming = [uses, inherited_use, inherits]
+    graph = build_graph(
+        {"node": {"child": object(), "parent": object(), "target": object()}},
+        {("node", "target"): incoming},
+        {("node", "child"): incoming},
+    )
+
+    retained = graph.incoming_edges_of("node", "target")
+    assert retained == tuple(incoming)
+    assert retained[0] is graph.edges_of("node", "child")[0]
+    assert [(edge.kind, edge.name) for edge in retained] == [
+        ("node", "target"),
+        ("node", "target"),
+        ("node", "target"),
+    ]
+    assert [edge.source for edge in retained] == [
+        ("node", "child"),
+        ("node", "child"),
+        ("node", "child"),
+    ]
+    assert [edge.relationship for edge in retained] == [
+        RefRelationship.USES,
+        RefRelationship.USES,
+        RefRelationship.INHERITS,
+    ]
+    assert [edge.usage for edge in retained] == [
+        "runtime dependency",
+        "inherited runtime dependency",
+        "a parent declaration",
+    ]
+    assert [edge.declared_by for edge in retained] == [
+        None,
+        ("node", "parent"),
+        None,
+    ]
+    assert graph.dependents_of("node", "target") == tuple(
+        ReferenceEntry(source=edge.source, usage=edge.usage, declared_by=edge.declared_by) for edge in incoming
+    )
+
+
 def test_the_closure_is_cycle_safe() -> None:
     """The closure tolerates a cycle via its visited set (it may be
     called on a graph built before finalize's cycle pass in tests). The
@@ -149,10 +213,12 @@ def test_the_closure_is_cycle_safe() -> None:
 # -- query error semantics + this-phase readiness defaults -------------------
 
 
-def test_edges_and_dependents_raise_on_unknown_key() -> None:
+def test_edge_queries_raise_on_unknown_key() -> None:
     graph = _graph_from({"a": ["b"]}).graph
     with pytest.raises(KeyError):
         graph.edges_of("node", "missing")
+    with pytest.raises(KeyError):
+        graph.incoming_edges_of("node", "missing")
     with pytest.raises(KeyError):
         graph.dependents_of("node", "missing")
 
@@ -372,8 +438,9 @@ def test_graph_is_frozen_and_registry_rejects_refinalize() -> None:
     with pytest.raises(FrozenInstanceError):
         graph._nodes = {}  # type: ignore[misc]
 
-    # Outbound/inbound are tuples (immutable); no append surface.
+    # Outbound/incoming/inbound are tuples (immutable); no append surface.
     assert isinstance(graph.edges_of("node", "a"), tuple)
+    assert isinstance(graph.incoming_edges_of("node", "b"), tuple)
     assert isinstance(graph.dependents_of("node", "b"), tuple)
 
     # Re-finalize is refused.

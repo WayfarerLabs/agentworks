@@ -1,7 +1,7 @@
-"""Tests for ``agentworks.resources.render``: the framework-shared origin
-renderer that backs both ``agw resource describe`` (cross-kind) and
-``agw secret describe`` (per-kind). The renderer lives in the framework
-layer so kind-specific modules don't drift from each other.
+"""Tests for ``agentworks.resources.render`` shared origin formatting.
+
+The renderer backs resource inventory and ``agw secret describe``. It lives
+in the framework layer so kind-specific modules do not drift from each other.
 
 The host-path spelling these renderers embed is tested next to the rule
 itself, in ``test_path_rendering.py``.

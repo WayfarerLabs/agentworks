@@ -27,8 +27,8 @@ actual git credential helper on the VM; the provider never does.
 ## Available Providers
 
 Two providers ship today, one per supported host. This list can change, so
-`agw resource describe-kind git-credential-provider` is the definitive set on any given install, and
-`agw resource describe-kind git-credential-provider/<name>` the definitive config for one.
+`agw resource explain git-credential-provider` is the definitive set on any given install, and
+`agw resource explain git-credential-provider/<name>` the definitive config for one.
 
 - **`github`** (built in) sources a GitHub PAT for `github.com`. It can optionally be scoped to
   exact repositories (`repos`), every repository under one `owner`, or the union of both, so several
@@ -121,11 +121,11 @@ The capability ladder (`../README.md` has the full model), credential edition:
   reference, and a typo errors at finalize with the reference source named.
 - A **capability** is a `GitCredentialProvider` subclass registered in
   `GIT_CREDENTIAL_PROVIDER_REGISTRY` (`__init__.py`), plus a read-only `GitCredentialProviderEntry`
-  registry row (`kinds.py`) so it lists and describes like any resource. Core built-ins' rows come
-  from the generic capability publisher (`capabilities/publish.py`, driven by the kind's
-  descriptor); a plugin-seated provider's row is published by the plugin machinery with a
-  `system-plugin` origin, and the built-in publisher skips it (that is exactly how `azdo`
-  publishes).
+  registry row (`kinds.py`) so it appears in resource inventory, kind explanation, and graph queries
+  like any resource. Core built-ins' rows come from the generic capability publisher
+  (`capabilities/publish.py`, driven by the kind's descriptor); a plugin-seated provider's row is
+  published by the plugin machinery with a `system-plugin` origin, and the built-in publisher skips
+  it (that is exactly how `azdo` publishes).
 - An **instance** is one provider bound to one declared credential:
   `cls(credential_name, config, description=...)`, the capability's own keys only (not the tag), and
   never a resolved token. Constructed by the composition roots (see below).

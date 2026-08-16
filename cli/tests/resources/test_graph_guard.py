@@ -90,7 +90,7 @@ eight of them behind in one change, which is why the check exists.
   CONSTRUCTION of a capability instance to run an operation, not a graph query.
 - ``manifests/decode.py``: a decode-time shadow check (a code-registry
   membership test), before the graph exists.
-- ``resources/inspect.py`` / ``secrets/inspect.py``: the describe-VIEW
+- ``secrets/inspect.py``: the secret describe view
   projections carry a ``references`` field, populated FROM ``dependents_of`` (the
   honest reader), distinct from the retired resource-dataclass field.
 
@@ -409,7 +409,6 @@ _NOT_READY_ALLOWLIST = frozenset(
 
 _REFERENCES_FIELD_ALLOWLIST = frozenset(
     {
-        "resources/inspect.py",  # describe view, populated from dependents_of
         "secrets/inspect.py",  # describe view, populated from dependents_of
     }
 )

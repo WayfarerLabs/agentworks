@@ -84,7 +84,7 @@ class ResourceReference:
     - ``usage``: prose describing what the declaring Resource needs the
       target for. The framework propagates this verbatim to the
       ``ReferenceEntry`` it attaches to the target during finalize, so the
-      same string appears in ``agw resource describe``'s "Referenced by:"
+      same string appears on ``agw graph show``'s declared edge
       section. Example: ``"the tailscale auth key for vm-template:default"``.
     - ``source``: ``(kind, name)`` pair identifying the declaring
       Resource. ``kind`` matches the declaring Resource's kind (e.g.,
@@ -181,8 +181,10 @@ class ReferenceEntry:
       name)`` pair -- the declaring Resource that needed this target.
     - ``usage``: the same prose the outbound ``ResourceReference.usage``
       carried. Same field name on both ends is intentional: one concept,
-      surfaced in both directions. ``agw resource describe``'s
-      "Referenced by:" section renders this verbatim.
+      surfaced in both directions. The authoritative ``ResourceReference``
+      edges retain this value for graph queries, while ``agw secret describe``
+      renders this compatibility projection in the secret's ``Referenced by:``
+      section.
 
     Producers never construct ``ReferenceEntry`` directly; the framework
     builds them in ``Registry.finalize()`` after every reference has
@@ -191,10 +193,10 @@ class ReferenceEntry:
     the entry is stored on -- there is no ambiguity about which Resource an
     entry on the ``("vm-template", "default")`` node belongs to.
 
-    ``declared_by`` mirrors the outbound side's, for the same reason:
-    "Referenced by: vm-template/kid" on a secret an ANCESTOR of kid named
-    is true but unhelpful on its own, so describe renders the declarer
-    beside it.
+    ``declared_by`` mirrors the outbound side's, for the same reason: a
+    source edge from ``vm-template/kid`` whose secret name was written by
+    an ancestor is true but unhelpful on its own. The authoritative edge and
+    this secret-describe projection both retain the declarer beside it.
     """
 
     source: tuple[str, str]

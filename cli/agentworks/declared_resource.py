@@ -124,7 +124,7 @@ class EnvelopeMetadata(AgwModel):
 
     description: SkipJsonSchema[str | None] = None
     """One operator-facing line saying what this resource is for, shown by
-    `agw resource list` and `agw resource describe`."""
+    `agw resource list`."""
 
     expires: SkipJsonSchema[Expiry | None] = None
     """When this resource stops being valid: a date (`2026-01-01`) or an
@@ -219,14 +219,14 @@ class DeclaredResource(EnvelopeMetadata):
         """Where an operator can go to fix a problem with this resource,
         or ``None`` when there is no such place.
 
-        The ORIGIN answers first, because it is the provenance every other
-        operator surface renders (``describe``, ``doctor``, and the
-        finalize pass's own framing) and it is stamped at publish, by the
-        publisher that knows where the row really came from. A row built
-        outside that path (a synthesize hook, a test) falls back to its
-        own ``declared_at``, and a built-in or auto-declared row has
-        neither a file nor a line, so it frames nothing rather than
-        pointing at a place that does not exist.
+        The ORIGIN answers first, because it is the provenance rendered by
+        resource inventory and kind-specific views such as secret describe,
+        and used by the finalize pass's own framing. It is stamped at publish
+        by the publisher that knows where the row really came from. A row
+        built outside that path (a synthesize hook, a test) falls back to its
+        own ``declared_at``, and a built-in or auto-declared row has neither a
+        file nor a line, so it frames nothing rather than pointing at a place
+        that does not exist.
         """
         origin = self.origin
         if origin is not None and origin.file is not None and origin.line:

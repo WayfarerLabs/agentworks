@@ -36,13 +36,13 @@ class InstanceRef:
 
     Returned by ``ResourceKind.instances(...)``; rendered as the per-row
     contribution to ``agw resource list``'s ``USED BY`` column count and to
-    ``agw resource describe``'s ``Used by:`` section.
+    ``agw graph show``'s live-usage edges.
 
     Fields:
 
     - ``instance_kind``: the DB row's kind identifier (``"vm"``, ``"agent"``,
-      ``"workspace"``, ``"session"``, ``"console"``). Used by the describe
-      view to group entries by instance type.
+      ``"workspace"``, ``"session"``, ``"console"``). It becomes the graph's
+      live-node kind, and secret describe groups its live usages by this value.
     - ``instance_name``: the DB row's name (``vm.name``, ``session.name``,
       etc.).
 
@@ -86,7 +86,7 @@ class ResourceKind(Protocol):
       kinds.
     - ``description``: one operator-facing line for ``agw resource
       kinds``. It is also the kind's SUMMARY on every schema-derived
-      surface (``agw resource describe-kind``, the generated sample's
+      surface (``agw resource explain``, the generated sample's
       header), which is why it is not authored a second time as prose.
     - ``prose``: the authored paragraphs about the kind (``TopicProse``:
       a display title and a markdown overview), colocated with the kind
@@ -101,7 +101,7 @@ class ResourceKind(Protocol):
       ``capability`` kind does, and a test pins exactly that. It is the
       single per-kind schema authority: manifest decode validates a
       document's ``spec`` against it, schema emission derives from it,
-      and the sample and describe surfaces render from it. Declared here
+      and the sample and explain surfaces render from it. Declared here
       rather than in a table in the manifest layer, so a new kind cannot
       be added without one and no switchboard has to be hand-maintained.
     - ``builtin_override``: what happens when an operator manifest
@@ -204,9 +204,10 @@ class ResourceKind(Protocol):
     # ``graph.readiness_of`` (through
     # ``agentworks.resources.inspect.not_ready_reason_for``), the single access
     # path (R11); a kind with no readiness concept folds to ready. A not-ready
-    # resource still registers, lists, describes, and holds references; USING it
-    # is the owning domain's typed error, and existing references degrade to
-    # doctor warnings. The fold's ``not_ready`` inputs stay cheap and offline
+    # resource still registers, appears marked in the resource list, and holds
+    # references; doctor owns the diagnostic reason. USING it is the owning
+    # domain's typed error, and existing references degrade to doctor warnings.
+    # The fold's ``not_ready`` inputs stay cheap and offline
     # (never network, secrets, or prompting; deeper readiness is the capability
     # lifecycle's preflight).
     #

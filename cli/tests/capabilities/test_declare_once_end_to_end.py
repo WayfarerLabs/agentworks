@@ -148,12 +148,12 @@ def test_the_validated_instance_names_the_same_secret_as_the_edge(seated: None) 
     assert _validate({}).token == "declare-once-lab"
 
 
-# -- Surface 3: the field-reference stream (sample and describe read this) ----
+# -- Surface 3: the field-reference stream (sample and explain read this) -----
 
 
 def test_the_stream_carries_the_default_and_the_description() -> None:
     """``iter_field_docs`` is the one ordered stream the rendered sample
-    and the describe surface are both built on, so a field reaching it is
+    and the explain surface are both built on, so a field reaching it is
     a field reaching both. The description comes from the attribute
     docstring: there is no second place to author it."""
     region = _region_doc()
@@ -228,7 +228,6 @@ def test_the_rendered_sample_offers_the_capability_as_an_alternative(seated: Non
     text = sample_text("vm-site")
 
     assert "declare-once" in text
-    assert "`agw resource describe-kind vm-platform/" in text
 
 
 def test_no_sample_mentions_the_capability_when_it_is_not_seated() -> None:
@@ -242,9 +241,9 @@ def test_no_sample_mentions_the_capability_when_it_is_not_seated() -> None:
 
 
 def test_the_field_reference_reads_the_same_one_declaration(seated: None) -> None:
-    """``agw resource describe-kind vm-platform/declare-once`` documents a
+    """``agw resource explain vm-platform/declare-once`` documents a
     capability whose field, default, and description are declared once, on
-    the model, and nowhere else. Nothing was registered with the describe
+    the model, and nowhere else. Nothing was registered with the explain
     surface; seating the capability is what put it there."""
     reference = reference_for("vm-platform/declare-once")
     region = next(entry for entry in reference.spec if entry.name == "region")

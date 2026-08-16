@@ -53,9 +53,10 @@ _BUILTIN_PUBLISHER_SOURCES = {
     "git-credential-provider": "agentworks.capabilities.git_credential",
     "secret-backend": "agentworks.capabilities.secret_backend",
 }
-"""The ``Origin.built_in`` source label each kind's built-in rows carry, as
-operators see it in ``agw resource describe``. Held here as the expectation,
-not read off the descriptor."""
+"""The ``Origin.built_in`` source label each kind's built-in rows carry.
+
+Held here as the expectation, not read off the descriptor.
+"""
 
 _ROW_TYPES: dict[str, type[Any]] = {
     "vm-platform": VMPlatformEntry,

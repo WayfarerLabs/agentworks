@@ -102,12 +102,17 @@ def test_auto_declared_resource_has_no_file_to_edit(tmp_path: Path) -> None:
         edit_location(registry, "secret", "tailscale-auth-key")
 
 
-def test_unknown_kind_and_name_reuse_describe_errors(tmp_path: Path) -> None:
+def test_unknown_kind_and_name_use_shared_resource_errors(tmp_path: Path) -> None:
     registry = _registry(tmp_path)
-    with pytest.raises(NotFoundError, match="unknown kind"):
+    with pytest.raises(NotFoundError) as unknown_kind:
         edit_location(registry, "nope", "x")
-    with pytest.raises(NotFoundError, match="no secret named"):
+    assert unknown_kind.value.entity_kind == "resource-kind"
+    assert unknown_kind.value.entity_name == "nope"
+
+    with pytest.raises(NotFoundError) as unknown_name:
         edit_location(registry, "secret", "nope")
+    assert unknown_name.value.entity_kind == "secret"
+    assert unknown_name.value.entity_name == "nope"
 
 
 def test_cli_edit_launches_editor_on_manifest(tmp_path: Path, monkeypatch) -> None:
@@ -199,7 +204,8 @@ def test_cli_edit_requires_editor_env(tmp_path: Path, monkeypatch) -> None:
     assert "$EDITOR is not set" in result.output
 
 
-def test_cli_edit_rejects_token_without_slash(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("token", ["secret", "/npm-token", "secret/"])
+def test_cli_edit_rejects_invalid_identity(token: str, tmp_path: Path, monkeypatch) -> None:
     from typer.testing import CliRunner
 
     from agentworks.cli import app
@@ -207,11 +213,13 @@ def test_cli_edit_rejects_token_without_slash(tmp_path: Path, monkeypatch) -> No
     cfg = tmp_path / "config.toml"
     _write_base(cfg)
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+    monkeypatch.setattr("agentworks.config.load_config", lambda: pytest.fail("config load attempted"))
     monkeypatch.setenv("EDITOR", "test-editor")
 
-    result = CliRunner().invoke(app, ["resource", "edit", "secret"])
+    result = CliRunner().invoke(app, ["resource", "edit", token])
     assert result.exit_code != 0
-    assert "expected KIND/NAME" in str(result.exception)
+    assert isinstance(result.exception, ValidationError)
+    assert result.exception.entity_kind == "resource"
 
 
 def test_cli_edit_works_when_manifests_fail_validation(tmp_path: Path, monkeypatch) -> None:

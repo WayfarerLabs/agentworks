@@ -76,7 +76,7 @@ def test_a_source_file_with_a_path_separator_is_refused() -> None:
     a bare filename. The rule is spelled rather than paraphrased, and the
     intent ("a simple filename: no directory separators, no shell
     metacharacters") rides the field's description, which is what the
-    sample and describe surfaces show."""
+    sample and explain surfaces show."""
     assert rejection("apt-source", "example", {**_SOURCE, "source_file": "../etc/passwd"}) == (
         r"res.yaml:7: apt-source/example.source_file: must match `^[a-zA-Z0-9][a-zA-Z0-9._-]*$`"
     )

@@ -230,7 +230,7 @@ def field_tree(model: type[BaseModel], capability_kind: str | None = None) -> tu
 
     Every arm with no address of its own is expanded, because nothing else
     documents it. An arm that HAS an address (a capability implementation)
-    is expanded only when it is the first, since its own ``describe-kind``
+    is expanded only when it is the first, since its own ``explain``
     form covers it in full. :func:`_shows_fields` holds that rule and the
     reasons for both halves of it.
 
@@ -258,7 +258,7 @@ def _tree(
     itself through a union: ``iter_field_docs`` threads its own guard, but
     it is re-entered from scratch for each expanded arm, so without this
     a self-reachable arm would recur until the interpreter gave up and
-    take ``describe-kind``, ``sample``, and ``schema`` down with it. Path
+    take ``explain``, ``sample``, and ``schema`` down with it. Path
     scoped rather than accumulating, for the same reason the stream's own
     guard is: two sibling fields whose unions share an arm each render it.
 
@@ -534,7 +534,7 @@ def _shows_fields(target: str | None, *, first: bool) -> bool:
 
     **An arm with no address is expanded**, because there is nowhere else
     to read it. It is an anonymous model inside one field, so no
-    ``describe-kind`` form reaches it and no generated sample can show it
+    ``explain`` form reaches it and no generated sample can show it
     either (a document holds one arm, so the sample expands one and names
     the rest). Left unexpanded it is a word an operator cannot act on,
     which is what ``auth: {mode: service-principal}`` was: named in the

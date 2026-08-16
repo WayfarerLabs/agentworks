@@ -24,9 +24,9 @@ includes location, credentials, and other platform-specific settings.
 
 ## Available Platforms
 
-Six platforms ship today. This list can change, so `agw resource describe-kind vm-platform` is the
+Six platforms ship today. This list can change, so `agw resource explain vm-platform` is the
 definitive set on any given install (it reads no config, so it answers even on a host that cannot
-load one), and `agw resource describe-kind vm-platform/<name>` is the definitive config for one.
+load one), and `agw resource explain vm-platform/<name>` is the definitive config for one.
 
 - **`lima`** (built in) runs fast local VMs on the operator's machine (commonly macOS, but any host
   Lima supports). It can also connect to a remote Linux host over SSH and drive `limactl` there,

@@ -40,8 +40,8 @@ The `mise_*` settings are available on the admin template (for the admin user) a
 templates (for agents). Mise itself is always installed as a system package on every VM.
 
 ```bash
-agw resource describe-kind admin-template   # every field, with types and defaults
-agw resource describe-kind agent-template
+agw resource explain admin-template   # every field, with types and defaults
+agw resource explain agent-template
 ```
 
 The sections below cover what those field descriptions cannot: how the pieces combine, and what each

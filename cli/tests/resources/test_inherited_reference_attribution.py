@@ -6,8 +6,8 @@ separately: a child now publishes the runtime needs of its merged
 declaration, so ``ResourceReference.source`` on such an edge is the child
 even when the name was written by an ancestor. Every message that answers
 "who wants this?" therefore reads ``declarer`` instead: the miss-policy
-error, the auto-declared row's origin and description, and describe's
-"Referenced by:" line.
+error, the auto-declared row's origin and description, graph edge detail,
+and secret describe's "Referenced by:" line.
 
 **Every test here publishes the CHILD FIRST**, because that is the
 ordering that exposes it. With the parent first, its own edge reaches the
@@ -80,7 +80,7 @@ def test_two_descendants_of_one_declarer_do_not_read_as_two_declarations() -> No
     assert registry.lookup("secret", "base-secret").description == "(auto) the BASE env var for vm-template/base"
 
 
-def test_describe_says_an_inherited_reference_was_inherited() -> None:
+def test_reference_formatter_says_an_inherited_reference_was_inherited() -> None:
     """ "Referenced by: vm-template/kid" is true and, on its own, sends the
     operator to the wrong file."""
     from agentworks.env.entry import EnvEntry

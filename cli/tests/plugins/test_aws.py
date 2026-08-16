@@ -19,7 +19,7 @@ from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.errors import StateError
 from agentworks.resources.graph import Enablement
-from agentworks.resources.inspect import describe_resource, list_resources
+from agentworks.resources.inspect import list_resources
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -84,13 +84,12 @@ def test_aws_ec2_row_disabled_system_plugin_by_default(tmp_path: Path) -> None:
     assert registry.graph.enablement_of("vm-platform", "aws-ec2") is Enablement.disabled
 
 
-def test_disabled_aws_ec2_hidden_from_list_shown_by_describe(tmp_path: Path) -> None:
+def test_disabled_aws_ec2_is_present_but_hidden_from_default_list(tmp_path: Path) -> None:
     registry = build_registry(_config(tmp_path))
     default_rows = {(r.kind, r.name) for r in list_resources(registry).rows}
     assert ("vm-platform", "aws-ec2") not in default_rows
-    desc = describe_resource(registry, "vm-platform", "aws-ec2")
-    assert desc.disabled_reason is not None
-    assert "aws" in desc.disabled_reason
+    assert registry.lookup("vm-platform", "aws-ec2").origin.plugin == "aws"
+    assert registry.graph.enablement_of("vm-platform", "aws-ec2") is Enablement.disabled
 
 
 def test_site_on_disabled_aws_is_not_ready_with_hint(tmp_path: Path) -> None:

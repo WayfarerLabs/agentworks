@@ -166,7 +166,7 @@ def test_apt_package_references_flow_to_apt_source(tmp_path: Path) -> None:
     ``references`` collection includes the referencing apt-package --
     the dependency graph that was previously implicit in
     ``_validate_references`` is now visible via
-    ``agw resource describe apt-source/<name>``.
+    ``agw graph show apt-source/<name>``.
     """
     cfg = load_config(
         _write_cfg(

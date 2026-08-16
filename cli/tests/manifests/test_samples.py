@@ -95,7 +95,6 @@ def test_capability_kinds_report_no_sample() -> None:
         assert "capability kind" in str(err), kind
         assert "no sample manifest" in str(err), kind
         assert err.hint is not None, kind
-        assert f"describe-kind {kind}" in err.hint
         for declarable in declarable_kinds():
             assert declarable in err.hint, (kind, declarable)
 

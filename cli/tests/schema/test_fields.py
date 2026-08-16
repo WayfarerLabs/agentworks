@@ -166,7 +166,7 @@ def test_the_shipped_optional_catalog_shape_expands_its_element(platform: str) -
     nesting, before it can see a collection at all
     (``schema/_shape.py:198-199``). Miss either peel and the field reads
     as an opaque scalar: no element, so a generated sample and a
-    describe-kind listing both stop telling an operator what goes inside
+    explain listing both stop telling an operator what goes inside
     a catalog entry, with nothing raised.
 
     Asserted against the element model's OWN field set rather than a list
@@ -339,7 +339,7 @@ def test_choices_survive_every_annotated_and_optional_spelling(field_name: str, 
     record is ``Optional[Annotated[Literal[...], ...]]`` for one field and
     ``Optional[Literal[...]]`` for the next, and a reader that peeled only
     one wrapper reported an OPEN field for a closed one. That reaches an
-    operator as a describe line listing no values and a generated sample
+    operator as an explain line listing no values and a generated sample
     with a placeholder instead of a real one: wrong, and with nothing to
     signal that it is.
     """
@@ -491,7 +491,7 @@ def test_constraints_are_found_in_every_spelling(field_name: str, expected: dict
 def test_a_collection_reports_one_carriers_constraints_not_a_mixture() -> None:
     """A list's ``min_length`` bounds how many entries it holds; a string
     element's bounds how long one entry is. Merged into a single mapping
-    they arrive at ``describe`` spelled identically, so an operator reads
+    they arrive at ``explain`` spelled identically, so an operator reads
     a limit on the wrong thing and there is no way to tell.
 
     The field's own spine wins whole, matching what ``ref`` does with a
@@ -692,7 +692,7 @@ def test_the_stream_offers_every_arm_the_emitted_schema_does() -> None:
     ``discriminator.mapping`` naming every tag it will dispatch on, and it
     does so without consulting anything in this package. An arm in the
     mapping and absent from the stream is a value an editor offers, the
-    loader accepts, and ``describe-kind`` never mentions, which is how a
+    loader accepts, and ``explain`` never mentions, which is how a
     collection of tagged blocks read as an opaque list of tables for as
     long as it did.
 
@@ -791,7 +791,7 @@ def test_the_stream_and_the_emitted_schema_agree_inside_a_nested_block() -> None
 def test_a_skipped_field_is_not_in_the_stream() -> None:
     """``SkipJsonSchema`` says "framework, not operator" once, for both
     derivations. Without the skip, every rendered sample and every
-    describe view would list ``origin`` and ``declared_at`` as fields an
+    explain view would list ``origin`` and ``declared_at`` as fields an
     operator should fill in."""
     assert [doc.path for doc in iter_field_docs(FrameworkFielded)] == [("name",), ("cpus",)]
 

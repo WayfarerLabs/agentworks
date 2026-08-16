@@ -26,8 +26,8 @@ model config. This document covers the derivation layer.
 | D11 | Manifest envelope validation    | `manifests/envelope.py`                            |
 | D12 | YAML 1.1 spelling support       | `manifests/emit.py` spelling tables                |
 
-The field tree, `describe-kind`, and generated samples consume D3. Add a consumer of D3 when
-possible instead of walking models again.
+The field tree, `explain`, and generated samples consume D3. Add a consumer of D3 when possible
+instead of walking models again.
 
 ## Soundness requirements
 

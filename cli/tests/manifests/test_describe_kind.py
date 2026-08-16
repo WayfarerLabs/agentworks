@@ -1,4 +1,4 @@
-"""``agw resource describe-kind``: the field reference an operator reads.
+"""``agw resource explain``: the field reference an operator reads.
 
 What is worth pinning is what the surface PROMISES: that it answers for a
 kind and for one capability implementation, that it needs neither a config
@@ -16,7 +16,7 @@ import pytest
 from pydantic import BaseModel, Discriminator, Field
 
 from agentworks.capabilities.config import registered_implementations
-from agentworks.errors import ConfigError
+from agentworks.errors import ConfigError, ValidationError
 from agentworks.manifests.describe import reference_lines
 from agentworks.manifests.field_tree import field_tree, root_entry
 from agentworks.manifests.loader import load_manifests
@@ -70,7 +70,7 @@ def seated() -> Iterator[None]:
     shipped plugin machinery. Nothing enables its plugin, which is the
     point: registration is what publishes a capability's schema, and
     enablement is a property of the published ROW."""
-    with seated_plugin(Plugin(name="describe-kind-fixtures", capabilities={"vm-platform": (DisabledPlatform,)})):
+    with seated_plugin(Plugin(name="explain-fixtures", capabilities={"vm-platform": (DisabledPlatform,)})):
         yield
 
 
@@ -221,7 +221,6 @@ def test_a_capability_kind_is_an_index_of_implementations() -> None:
     assert "implementations:" in text
     assert "  lima" in text
     assert "Lima VMs (local, or on a remote host via SSH)" in text
-    assert "`agw resource describe-kind vm-platform/<name>`" in text
 
 
 def test_an_implementation_shows_the_config_it_declares() -> None:
@@ -375,7 +374,7 @@ def test_each_element_arm_shows_that_arms_own_fields(seated: None) -> None:
     every arm takes.
 
     Both arms, because neither is addressable: a disk is not a capability
-    and ``agw resource describe-kind vm-platform/network`` is a command
+    and ``agw resource explain vm-platform/network`` is a command
     that fails. ``volume`` was documented nowhere at all while only the
     first arm was expanded, which made a required field of a shape the
     loader accepts invisible to every surface an operator has.
@@ -436,6 +435,21 @@ def test_the_quoted_boolean_warning_describes_this_loader(tmp_path: Path) -> Non
 # --- the CLI ----------------------------------------------------------
 
 
+def test_unknown_kind_hint_enumerates_every_kind_in_sorted_order() -> None:
+    with pytest.raises(ValidationError) as exc:
+        reference_for("vm-platfrom")
+
+    hint = exc.value.hint
+    assert hint is not None
+    expected_kinds = sorted(KIND_REGISTRY)
+    kind_pattern = re.compile(
+        r"(?<![a-z0-9-])("
+        + "|".join(re.escape(kind) for kind in sorted(expected_kinds, key=len, reverse=True))
+        + r")(?![a-z0-9-])"
+    )
+    assert kind_pattern.findall(hint) == expected_kinds
+
+
 def test_describe_kind_is_a_clean_cli_error_for_an_unknown_target(
     tmp_path: object, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -443,7 +457,7 @@ def test_describe_kind_is_a_clean_cli_error_for_an_unknown_target(
     contract `resource sample` has for the same mistake."""
     from agentworks import cli as cli_mod
 
-    monkeypatch.setattr("sys.argv", ["agentworks", "resource", "describe-kind", "vm-platfrom"])
+    monkeypatch.setattr("sys.argv", ["agentworks", "resource", "explain", "vm-platfrom"])
     monkeypatch.setenv("AGW_DEBUG", "")
 
     with pytest.raises(SystemExit) as excinfo:
@@ -461,4 +475,4 @@ def test_the_command_completes_its_argument() -> None:
     reason to exist includes a host whose config does not load."""
     from agentworks.completions.spec import DYNAMIC_COMPLETIONS
 
-    assert DYNAMIC_COMPLETIONS[("resource.describe-kind", "target")] == "resource_kinds"
+    assert DYNAMIC_COMPLETIONS[("resource.explain", "target")] == "resource_kinds"

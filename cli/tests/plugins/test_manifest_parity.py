@@ -3,10 +3,11 @@
 
 A not-enabled plugin's bundled DECLARABLE rows are published (weak), disabled by
 the same overlay that disables its capability rows, hidden from the default
-``list`` but shown by ``describe``, and REFUSED AT USE with the enable hint
-(never an unknown-name error, never a silent use). Enabling the plugin makes
-them consumable. Driven by a manifest-only fixture plugin (empty capabilities,
-so no seating needed) injected via ``SYSTEM_PLUGINS``.
+``resource list`` but shown by ``resource list --include-disabled``, and
+REFUSED AT USE with the enable hint (never an unknown-name error, never a
+silent use). Enabling the plugin makes them consumable. Driven by a
+manifest-only fixture plugin (empty capabilities, so no seating needed)
+injected via ``SYSTEM_PLUGINS``.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from agentworks.origin import Origin
 from agentworks.plugins import Plugin, plugin_enablement_source, publish_plugins, seated_plugin
 from agentworks.resources.access import ensure_recipe_enabled, ensure_reference_enabled
 from agentworks.resources.graph import Enablement
-from agentworks.resources.inspect import describe_resource, list_resources
+from agentworks.resources.inspect import list_resources
 from agentworks.resources.registry import Registry
 from agentworks.schema import CapabilityBlock
 from agentworks.sessions.template import SessionTemplate
@@ -99,7 +100,7 @@ def test_manifest_rows_enabled_when_plugin_enabled(monkeypatch: pytest.MonkeyPat
     assert registry.graph.enablement_of("agent-template", "fixture-agent-tmpl") is Enablement.enabled
 
 
-# -- Disabled hides from list, shows by describe with the Disabled line ----------
+# -- Disabled hides from the default list, include-disabled shows it ------------
 
 
 def test_disabled_manifest_hidden_from_list_shown_with_include_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -111,13 +112,9 @@ def test_disabled_manifest_hidden_from_list_shown_with_include_disabled(monkeypa
     shown = list_resources(registry, include_disabled=True)
     by_key = {(r.kind, r.name): r for r in shown.rows}
     assert ("user-install-command", "fixture-user-cmd") in by_key
-
-
-def test_describe_renders_disabled_row_with_plugin_provenance(monkeypatch: pytest.MonkeyPatch) -> None:
-    registry = _build(monkeypatch)  # not enabled
-    desc = describe_resource(registry, "user-install-command", "fixture-user-cmd")
-    assert desc.disabled_reason is not None
-    assert PLUGIN in desc.disabled_reason
+    origin = by_key[("user-install-command", "fixture-user-cmd")].origin
+    assert origin is not None
+    assert origin.plugin == PLUGIN
 
 
 # -- The reference-side use-gate helpers -----------------------------------------

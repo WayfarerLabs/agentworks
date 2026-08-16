@@ -2,7 +2,7 @@
 ``(harness_integration, harness_integration_config)`` pair,
 the manifest flat-field rejection, the pair-inheritance rules (FRD R5,
 including the multi-parent divergence), and the harness-integration
-reference / describe surfaces.
+reference / graph surfaces.
 
 The flat-TOML hoist and its two conflict errors (FRD R6) were pinned here
 against the migrator's frozen TOML reader. Both are gone (operator ruling,
@@ -24,8 +24,10 @@ from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGI
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.manifests import load_manifests
+from agentworks.resources import DatabaseLiveSource, GraphDirection, show_graph
+from agentworks.resources.access import ResourceIdentity
 from agentworks.resources.graph import FinalizeContext
-from agentworks.resources.inspect import describe_resource
+from agentworks.resources.reference import RefRelationship
 from agentworks.schema import AgwModel, CapabilityBlock
 from agentworks.sessions.template import SessionTemplate
 from agentworks.sessions.templates import resolve_from_dict
@@ -306,7 +308,7 @@ def test_undeclared_default_resolves_to_shell_empty() -> None:
     assert resolved.harness_integration_config == {}
 
 
-# -- describe / reference surfaces (FRD R2, R8) ------------------------------
+# -- Graph / reference surfaces (FRD R2, R8) ---------------------------------
 
 
 def test_declared_harness_integration_emits_a_reference() -> None:
@@ -339,6 +341,18 @@ def test_harness_integration_row_lists_its_declaring_template(tmp_path: Path) ->
     )
     config = _config(tmp_path, "")
     registry = build_registry(config, load_manifests(root))
-    desc = describe_resource(registry, "harness-integration", "shell")
-    sources = {entry.source for entry in desc.references}
-    assert ("session-template", "htop") in sources
+    result = show_graph(
+        registry,
+        ResourceIdentity("harness-integration", "shell"),
+        GraphDirection.DEPENDENTS,
+        1,
+        DatabaseLiveSource(tmp_path / "absent.db"),
+    )
+    assert any(
+        edge.source.kind == "session-template"
+        and edge.source.name == "htop"
+        and edge.target.kind == "harness-integration"
+        and edge.target.name == "shell"
+        and edge.relationship is RefRelationship.USES
+        for edge in result.edges
+    )

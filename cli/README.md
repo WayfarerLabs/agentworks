@@ -31,11 +31,8 @@ needs the valid topic names; it returns only installed authored, plugin-authored
 release-note topics without loading configuration, the resource registry, or state.
 
 Raw resource, relationship, schema, and sample facts belong to commands rather than guide topics.
-During the unreleased 0.14 transition, use `agw resource kinds`, `agw resource list`,
-`agw resource describe-kind`, and `agw resource sample` for the command-owned facts that are
-available today. Resource explanation and graph display are being restored by the separate CLI
-grammar effort; they are not guide compatibility surfaces, and 0.14 remains release-gated until that
-work lands.
+Use `agw graph show`, `agw resource kinds`, `agw resource list`, `agw resource explain`, and
+`agw resource sample` for those command-owned facts.
 
 ```bash
 # Initial setup
@@ -191,7 +188,8 @@ Settings sections (`config.toml`, permanent):
   plugins (see [System Plugins](#system-plugins) below)
 
 Resources are declared as YAML manifests. `agw resource kinds` lists every kind with its category
-and purpose, and `agw resource describe-kind KIND` documents what one accepts, field by field.
+and purpose, `agw resource explain KIND` documents what one accepts field by field, and
+`agw graph show KIND/NAME` traverses its declared and current live relationships.
 
 The table below exists for one thing this repository is otherwise the only record of: which removed
 legacy TOML section used to declare each kind. Those sections no longer load; the mapping is a

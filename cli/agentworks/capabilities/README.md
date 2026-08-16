@@ -38,8 +38,8 @@ agent up on a machine and let it work: where it runs, what it runs, how it gets 
 it authenticates to git hosts. Each kind is an independent extension point with its own shipped
 options, allowing an operator to enable only those needed in a particular environment.
 
-`agw resource describe-kind <capability-kind>` lists the implementations available in an install;
-naming one documents its config. The per-kind READMEs below cover implementation details.
+`agw resource explain <capability-kind>` lists the implementations available in an install; naming
+one documents its config. The per-kind READMEs below cover implementation details.
 
 ### VM Platform
 

@@ -9,6 +9,7 @@ the summary counts reflect the post-filter view.
 
 from __future__ import annotations
 
+import sqlite3
 from textwrap import dedent
 from typing import TYPE_CHECKING
 
@@ -175,9 +176,9 @@ def test_origin_filter_code_only_shows_built_in(tmp_path: Path) -> None:
 
 def test_format_origin_line_renders_each_variant(tmp_path: Path) -> None:
     """``format_origin_line`` is the framework-shared origin renderer
-    used by both the cross-kind list and per-kind describe views; the
-    list view emits it as a single cell, so we assert variant strings
-    are present and no unknown variants slip in.
+    used by the resource list and secret describe views; the list view
+    emits it as a single cell, so we assert variant strings are present
+    and no unknown variants slip in.
     """
     cfg_file = tmp_path / "config.toml"
     _write_base(
@@ -231,11 +232,19 @@ def test_cli_names_only_emits_kind_slash_name_per_line(tmp_path: Path, monkeypat
     """
     from typer.testing import CliRunner
 
+    from agentworks import db
     from agentworks.cli import app
+    from agentworks.cli.commands import resource
 
     cfg_file = tmp_path / "config.toml"
     _write_base(cfg_file, manifests=[_VM_DEFAULT])
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
+    monkeypatch.setattr(resource, "get_db", lambda: (_ for _ in ()).throw(AssertionError("no get_db")))
+    monkeypatch.setattr(
+        db,
+        "open_completion_database",
+        lambda _path: (_ for _ in ()).throw(AssertionError("no completion database")),
+    )
 
     result = CliRunner().invoke(app, ["resource", "list", "--names-only"])
     assert result.exit_code == 0, result.stdout
@@ -247,6 +256,70 @@ def test_cli_names_only_emits_kind_slash_name_per_line(tmp_path: Path, monkeypat
     # operator-declared; tailscale-auth-key auto-declared).
     assert "vm-template/default" in lines
     assert "secret/tailscale-auth-key" in lines
+
+
+def test_names_only_candidate_order_matches_a_healthy_database(tmp_path: Path) -> None:
+    from agentworks.db import Database
+
+    cfg_file = tmp_path / "config.toml"
+    _write_base(cfg_file, manifests=[_VM_DEFAULT])
+    registry = build_registry(load_config(cfg_file))
+    database = Database(tmp_path / "agentworks.db")
+    try:
+        with_database = list_resources(registry, database)
+    finally:
+        database.close()
+    registry_only = list_resources(registry, None)
+
+    assert tuple((row.kind, row.name) for row in registry_only.rows) == tuple(
+        (row.kind, row.name) for row in with_database.rows
+    )
+
+
+@pytest.mark.parametrize("database_state", ["absent", "stale", "newer", "malformed", "busy", "unreadable"])
+def test_names_only_ignores_unusable_database_states(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    database_state: str,
+) -> None:
+    from typer.testing import CliRunner
+
+    from agentworks import db
+    from agentworks.cli import app
+    from agentworks.db import LATEST_VERSION, Database
+
+    cfg_file = tmp_path / "config.toml"
+    _write_base(cfg_file, manifests=[_VM_DEFAULT])
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
+    database_path = tmp_path / "state.db"
+    lock: sqlite3.Connection | None = None
+
+    if database_state in {"stale", "newer", "busy"}:
+        Database(database_path).close()
+    if database_state in {"stale", "newer"}:
+        connection = sqlite3.connect(database_path)
+        version = LATEST_VERSION - 1 if database_state == "stale" else LATEST_VERSION + 1
+        connection.execute("UPDATE schema_version SET version = ?", (version,))
+        connection.commit()
+        connection.close()
+    elif database_state == "malformed":
+        database_path.write_bytes(b"not sqlite")
+    elif database_state == "busy":
+        lock = sqlite3.connect(database_path)
+        lock.execute("BEGIN EXCLUSIVE")
+    elif database_state == "unreadable":
+        database_path.mkdir()
+
+    monkeypatch.setattr(db, "DB_PATH", database_path)
+    try:
+        result = CliRunner().invoke(app, ["resource", "list", "--names-only"])
+    finally:
+        if lock is not None:
+            lock.rollback()
+            lock.close()
+
+    assert result.exit_code == 0, result.output
+    assert "vm-template/default\n" in result.stdout
 
 
 def test_cli_kind_csv_filter(tmp_path: Path, monkeypatch) -> None:

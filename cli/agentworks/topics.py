@@ -6,7 +6,7 @@ the paragraphs a human wrote about what a kind or a capability is FOR.
 It is the whole authored layer, and it is deliberately tiny.
 
 The prose is written in a voice-neutral reference register for
-``agw resource describe-kind``. An overview that says "let's start by"
+``agw resource explain``. An overview that says "let's start by"
 reads wrong when someone is looking up a field.
 
 **Where the summary went.** It already exists: every resource kind

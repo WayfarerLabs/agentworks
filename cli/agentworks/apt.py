@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 # The ``source_file`` rule, authored once: a simple filename, no directory
 # separators and no shell metacharacters, because it is interpolated into a
 # shell command on the VM. Spelled as a pattern constraint rather than a
-# validator so it reaches emitted JSON Schema and the describe surface as a
+# validator so it reaches emitted JSON Schema and the explain surface as a
 # fact rather than as behavior nobody outside this module can see.
 _SAFE_FILENAME_PATTERN = r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
 SimpleFilename = Annotated[str, Field(pattern=_SAFE_FILENAME_PATTERN)]
@@ -121,7 +121,7 @@ class AptPackageEntry(DeclaredResource):
 
         The registry attaches the corresponding ``ReferenceEntry`` to
         each ``AptSourceEntry`` during finalize, so
-        ``agw resource describe apt-source/github`` shows every apt-package
+        ``agw graph show apt-source/github`` shows every apt-package
         that depends on it.
         """
         from agentworks.resources.reference import ResourceReference
@@ -199,7 +199,7 @@ def _load_apt_packages(
 # ``apt-source`` was originally not a framework kind (only operator-facing
 # config referenced by name got promoted at first). It joined the framework
 # later so the ``apt-package -> apt-source`` dependency graph becomes visible
-# on ``agw resource describe apt-source/<name>``'s ``Referenced by:`` section,
+# as declared edges in ``agw graph show apt-source/<name>``,
 # and so unknown-source errors flow through the same miss-policy pipeline as
 # everything else.
 
