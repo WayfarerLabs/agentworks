@@ -10,7 +10,6 @@ from agentworks.guide import (
     ActionList,
     BlockId,
     BrokenTopicLinkError,
-    ConceptAnchor,
     ConsentBoundary,
     DuplicateTopicError,
     GuideAction,
@@ -35,7 +34,6 @@ def _topic(slug: str, *, related: list[str] | None = None, markdown: object = "T
         "topic": slug,
         "title": "Title",
         "summary": "Summary.",
-        "anchor": {"type": "concept", "name": slug},
         "blocks": [{"type": "overview", "id": "overview", "markdown": markdown}],
         "related_topics": related or [],
     }
@@ -57,7 +55,6 @@ def _contribution(
         TopicSlug(slug),
         "Title",
         "Summary.",
-        ConceptAnchor(slug),
         (Overview(BlockId("overview"), markdown),),
         tuple(TopicSlug(item) for item in related or []),
     )
@@ -258,7 +255,6 @@ def test_typed_records_reach_the_catalog_as_validated_copies() -> None:
         TopicSlug("concept-safe"),
         "Safe",
         "Summary.",
-        ConceptAnchor("concept-safe"),
         (Overview(BlockId("overview"), "Text."),),
     )
 

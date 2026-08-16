@@ -77,9 +77,10 @@ top-level keys, so every command that loads config meets ordinary validation:
 - **`agw resource list` and `agw secret list` do refuse outright.** They print the error and exit,
   so they only answer once the last resource section is gone.
 
-The migration therefore has two phases. First draft every manifest from the live samples and field
-references while keeping the saved inventory and backups unchanged. Then remove every retired
-section from `config.toml` in one pass and use `agw doctor` as the validation loop:
+The migration therefore has two phases. First draft every manifest with `agw resource sample <kind>`
+and inspect its fields with `agw resource describe-kind <target>` while keeping the saved inventory
+and backups unchanged. Then remove every retired section from `config.toml` in one pass and use
+`agw doctor` as the validation loop:
 
 ```console
 $ agw doctor    # after the one-time config.toml cutover
@@ -618,8 +619,8 @@ whether its config is well-formed that stopped being host-dependent.
 a hard error through ordinary model validation. Put one tagged table in place of the pair: the
 string selector becomes its `name`, and every key from the sibling table moves beside `name` with
 its value unchanged. If the sibling table already carries its own `name`, decide which selector is
-correct before merging. If it is not a table, consult the live field reference and place or remove
-that value deliberately rather than discarding it during the fold.
+correct before merging. If it is not a table, run `agw resource describe-kind <target>` and place or
+remove that value deliberately rather than discarding it during the fold.
 
 ### Git credential token acquisition is tagged now
 

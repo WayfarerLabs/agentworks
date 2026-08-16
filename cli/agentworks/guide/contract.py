@@ -59,10 +59,6 @@ class InvalidTopicSlugError(GuideContributionError):
     """A contribution uses an invalid or mismatched topic slug."""
 
 
-class InvalidAnchorError(GuideContributionError):
-    """A contribution uses an invalid anchor."""
-
-
 class InvalidBlockError(GuideContributionError):
     """A contribution uses an invalid block."""
 
@@ -85,7 +81,7 @@ class UnknownGuideTopicError(NotFoundError):
 
 
 class GuideTraversalError(ValidationError):
-    """The current guide anchor does not permit a requested traversal."""
+    """The current guide projection cannot complete a requested traversal."""
 
 
 def is_valid_topic_segment(value: object) -> bool:
@@ -111,11 +107,6 @@ def is_valid_topic_slug(value: object) -> bool:
         namespace, plugin, topic = parts
         return namespace == "plugin" and is_valid_topic_segment(plugin) and is_valid_topic_segment(topic)
     return False
-
-
-@dataclass(frozen=True, slots=True)
-class ConceptAnchor:
-    name: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,7 +151,6 @@ class TopicContribution:
     topic: TopicSlug
     title: str
     summary: str
-    anchor: ConceptAnchor
     blocks: tuple[GuideBlock, ...]
     related_topics: tuple[TopicSlug, ...] = ()
 
@@ -605,14 +595,6 @@ def _action_bytes(action: GuideAction) -> int:
     return sum(len(value.encode("utf-8")) for value in values)
 
 
-def _parse_anchor(value: object, source: str, topic: str) -> ConceptAnchor:
-    data = _mapping(value, {"type", "name"}, {"type", "name"}, source=source, topic=topic, path="anchor")
-    discriminator = data["type"]
-    if discriminator != "concept":
-        raise _error(InvalidAnchorError, source, topic, "anchor.type", "has an unknown discriminator")
-    return ConceptAnchor(_string(data["name"], source=source, topic=topic, path="anchor.name"))
-
-
 def _parse_block(value: object, source: str, topic: str, index: int) -> GuideBlock:
     path = f"blocks[{index}]"
     data = _mapping(
@@ -750,11 +732,10 @@ def _decoded_contribution(value: TopicContribution) -> dict[str, object]:
     """Project a typed contribution into the decoded shape the parser reads.
 
     Contributions arrive as frozen ``TopicContribution`` records, while the
-    contract's rules (byte caps, markdown safety, anchor grammar) are defined
+    contract's rules (byte caps and markdown safety) are defined
     over the decoded shape, so the catalog converts before it validates.  The
     record's own types carry its shape; what the parser then judges is content.
     """
-    anchor_value: dict[str, object] = {"type": "concept", "name": value.anchor.name}
     block_values: list[dict[str, object]] = []
     for block in value.blocks:
         block_value: dict[str, object] = {"type": _BLOCK_DISCRIMINATORS[type(block)], "id": block.id}
@@ -767,7 +748,6 @@ def _decoded_contribution(value: TopicContribution) -> dict[str, object]:
         "topic": value.topic,
         "title": value.title,
         "summary": value.summary,
-        "anchor": anchor_value,
         "blocks": block_values,
         "related_topics": value.related_topics,
     }
@@ -779,8 +759,8 @@ def parse_topic_contribution(value: object, source: str) -> TopicContribution:
         raise _error(GuideContributionError, "<invalid-source>", None, "source", "must be a non-blank string")
     data = _mapping(
         value,
-        {"topic", "title", "summary", "anchor", "blocks", "related_topics"},
-        {"topic", "title", "summary", "anchor", "blocks"},
+        {"topic", "title", "summary", "blocks", "related_topics"},
+        {"topic", "title", "summary", "blocks"},
         source=source,
         topic=None,
         path="",
@@ -795,9 +775,8 @@ def parse_topic_contribution(value: object, source: str) -> TopicContribution:
     )
     if not is_valid_topic_slug(topic):
         raise _error(InvalidTopicSlugError, source, topic, "topic", "is not a valid topic slug")
-    anchor = _parse_anchor(data["anchor"], source, topic)
-    if topic != anchor.name or not (topic.startswith("concept-") or topic.startswith("plugin/")):
-        raise _error(InvalidTopicSlugError, source, topic, "anchor", "does not match the topic slug")
+    if not (topic.startswith("concept-") or topic.startswith("plugin/")):
+        raise _error(InvalidTopicSlugError, source, topic, "topic", "is not a guide-owned topic slug")
     raw_blocks = data["blocks"]
     if type(raw_blocks) not in {tuple, list}:
         raise _error(InvalidBlockError, source, topic, "blocks", "must be a sequence")
@@ -877,7 +856,6 @@ def parse_topic_contribution(value: object, source: str) -> TopicContribution:
         TopicSlug(topic),
         title,
         summary,
-        anchor,
         blocks,
         related,
     )

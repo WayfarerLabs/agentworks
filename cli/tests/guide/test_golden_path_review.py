@@ -3,7 +3,6 @@ from __future__ import annotations
 from agentworks.guide import (
     ActionId,
     GuideIdentity,
-    GuideOrigin,
     GuideResourceFact,
     GuideVerdict,
     OnboardingSnapshot,
@@ -16,9 +15,6 @@ def test_unavailable_readiness_assesses_as_unverifiable() -> None:
     reason = "host readiness unavailable: guide does not inspect the workstation"
     fact = GuideResourceFact(
         GuideIdentity("vm-site", "lima-local"),
-        "declarable",
-        None,
-        GuideOrigin("built-in", None),
         GuideVerdict(enabled=True, ready=False, is_available=False, reason=reason),
     )
 

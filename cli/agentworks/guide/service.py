@@ -11,7 +11,6 @@ from agentworks.errors import AgentworksError, ConfigError, StateError, Validati
 from agentworks.guide.assessment import (
     GuideIdentity,
     GuideInstanceFact,
-    GuideOrigin,
     GuideRelationship,
     GuideResourceFact,
     GuideVerdict,
@@ -21,7 +20,6 @@ from agentworks.guide.assessment import (
 from agentworks.guide.catalog import GuideCatalog, GuideCatalogIssue, _build_guide_catalog
 from agentworks.guide.contract import (
     BlockId,
-    ConceptAnchor,
     GuideContributionError,
     GuideTraversalError,
     ReleaseNotes,
@@ -44,7 +42,7 @@ if TYPE_CHECKING:
     from agentworks.guide.agent_mode import GuideMode
     from agentworks.guide.assessment import VerificationEvidence
     from agentworks.plugins.base import Plugin
-    from agentworks.resources import Origin, Registry
+    from agentworks.resources import Registry
 
 
 # These two installed manifest-only plugins own first-party teaching packaged
@@ -55,6 +53,7 @@ _FIRST_PARTY_PLUGIN_GUIDE_PACKAGES = {
     "apt": "agentworks.plugins.apt",
     "install-command": "agentworks.plugins.install_command",
 }
+_ONBOARDING_PLAN_IDENTITY = "concept-onboarding/derived-plan"
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,7 +105,6 @@ def build_authored_catalog(*, strict: bool = False) -> GuideCatalog:
                 TopicSlug(section.topic),
                 f"Agentworks release notes v{section.version}",
                 f"Packaged untrusted plain-text release evidence for exact version v{section.version}.",
-                ConceptAnchor(section.topic),
                 (ReleaseNotes(BlockId("release-notes")),),
             )
             for section in read_release_history().sections
@@ -132,19 +130,10 @@ def build_authored_catalog(*, strict: bool = False) -> GuideCatalog:
     return GuideCatalog(catalog.topics, (*catalog.issues, release_issue))
 
 
-def _origin(origin: Origin | None) -> GuideOrigin:
-    if origin is None:
-        return GuideOrigin("built-in", None)
-    return GuideOrigin(origin.variant, origin.plugin)
-
-
-def _resource_fact(registry: Registry, kind: str, name: str, resource: object) -> GuideResourceFact:
+def _resource_fact(registry: Registry, kind: str, name: str) -> GuideResourceFact:
     readiness = registry.graph.readiness_of(kind, name)
     return GuideResourceFact(
         GuideIdentity(kind, name),
-        KIND_REGISTRY[kind].category,
-        cast("str | None", getattr(resource, "description", None)),
-        _origin(getattr(resource, "origin", None)),
         GuideVerdict(
             registry.graph.enablement_of(kind, name) is Enablement.enabled,
             readiness.is_ready,
@@ -169,7 +158,7 @@ def build_onboarding_snapshot(registry: Registry, db: Database) -> OnboardingSna
                 raise GuideTraversalError(
                     f"guide resource {kind}/{name} is absent from the finalized registry"
                 ) from None
-            fact = _resource_fact(registry, kind, name, resource)
+            fact = _resource_fact(registry, kind, name)
             resources.append(fact)
             hook = getattr(handler, "instances", None)
             if hook is not None:
@@ -211,14 +200,6 @@ def _framed_error(error: AgentworksError) -> str:
 
 def _unknown(slug: str, names: tuple[str, ...]) -> UnknownGuideTopicError:
     return UnknownGuideTopicError(slug, tuple(difflib.get_close_matches(slug, names, n=3)))
-
-
-def _topic_requires_live_context(topic: TopicContribution) -> bool:
-    return topic.topic == "concept-onboarding"
-
-
-def _live_block_identities(topic: TopicContribution) -> tuple[str, ...]:
-    return ("concept-onboarding/derived-plan",) if topic.topic == "concept-onboarding" else ()
 
 
 def _context_warning(problems: dict[str, dict[str, None]]) -> str:
@@ -268,10 +249,10 @@ def render_guide(
             raise _unknown(slug, authored_names)
 
     selected_topics = tuple(topic for _slug, topic in requested_slots if topic is not None)
-    needs_live_context = any(_topic_requires_live_context(topic) for topic in selected_topics)
+    onboarding_selected = any(topic.topic == "concept-onboarding" for topic in selected_topics)
     registry: Registry | None = None
     system_error: AgentworksError | None = None
-    if needs_live_context:
+    if onboarding_selected:
         if load_config_fn is None:
             from agentworks.config import load_config
 
@@ -302,7 +283,7 @@ def render_guide(
             omitted.setdefault(identity, None)
 
     owned_db = False
-    if needs_live_context and registry is not None and system_error is None and db is None:
+    if onboarding_selected and registry is not None and system_error is None and db is None:
         from agentworks.db import DB_PATH, Database
 
         if DB_PATH.exists():
@@ -314,7 +295,7 @@ def render_guide(
         else:
             db = cast("Database", _EmptyInventory())
 
-    all_live_identities = tuple(identity for topic in selected_topics for identity in _live_block_identities(topic))
+    all_live_identities = (_ONBOARDING_PLAN_IDENTITY,) if onboarding_selected else ()
     if system_error is not None:
         record_context_problem(system_error, all_live_identities)
 
@@ -322,19 +303,18 @@ def render_guide(
     from agentworks.db.database import _is_read_only_error
 
     onboarding_snapshot = None
-    onboarding_unavailable = any(topic.topic == "concept-onboarding" for topic in selected_topics)
+    onboarding_unavailable = onboarding_selected
     try:
-        if needs_live_context and registry is not None and system_error is None:
+        if onboarding_selected and registry is not None and system_error is None:
             if db is None:
                 raise RuntimeError("guide database was not constructed")
-            if any(topic.topic == "concept-onboarding" for topic in selected_topics):
-                try:
-                    onboarding_snapshot = build_onboarding_snapshot(registry, db)
-                    onboarding_unavailable = False
-                except GuideTraversalError:
-                    raise
-                except AgentworksError as error:
-                    record_context_problem(error, ("concept-onboarding/derived-plan",))
+            try:
+                onboarding_snapshot = build_onboarding_snapshot(registry, db)
+                onboarding_unavailable = False
+            except GuideTraversalError:
+                raise
+            except AgentworksError as error:
+                record_context_problem(error, (_ONBOARDING_PLAN_IDENTITY,))
     except DatabaseDriverError as error:
         if _is_read_only_error(error):
             raise GuideTraversalError("guide projection attempted to mutate read-only state") from None
@@ -343,7 +323,7 @@ def render_guide(
             hint="Run a normal Agentworks command to inspect or repair the state database.",
         )
         onboarding_snapshot = None
-        onboarding_unavailable = any(topic.topic == "concept-onboarding" for topic in selected_topics)
+        onboarding_unavailable = onboarding_selected
         context_problems.clear()
         record_context_problem(system_error, all_live_identities)
     finally:

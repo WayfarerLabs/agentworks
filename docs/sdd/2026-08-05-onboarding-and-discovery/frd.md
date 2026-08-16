@@ -4,6 +4,13 @@
 - Start date: 2026-08-05
 - Saga: `docs/sdd/2026-08-04-next-steps`
 
+> **Phase 4 supersession (PR #556):** The operator-approved command-owned guide deletion makes the
+> live/schema topic portions of R3 and R5 and acceptance criteria 5 and 6 historical. Selected guide
+> names now come only from authored concept, plugin, and release topics; `concept-onboarding` alone
+> projects bounded registry, instance, and relationship facts for its assessment. Resource, schema,
+> graph, and runtime facts remain command-owned, and the CLI grammar child owns their final 0.14
+> destinations. The original requirements remain below as journey history.
+
 ## Summary
 
 Agentworks provides always-available assistance through a capable external agent and the installed

@@ -10,7 +10,6 @@ from agentworks.guide.contract import (
     ActionList,
     AgentContract,
     BlockId,
-    ConceptAnchor,
     ConsentBoundary,
     GuideAction,
     Overview,
@@ -64,7 +63,6 @@ def guide_contributions() -> tuple[TopicContribution, ...]:
             TopicSlug(_TOPIC),
             "Optional apt catalog",
             "Enable the shipped apt sources and package sets only when a template selects them.",
-            ConceptAnchor(_TOPIC),
             (
                 Overview(BlockId("overview"), _markdown("overview")),
                 AgentContract(BlockId("agent-contract"), _markdown("agent-contract")),

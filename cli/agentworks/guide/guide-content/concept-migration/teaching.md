@@ -93,11 +93,12 @@ wrote it.
 
 Write one manifest at a time at its pre-recorded intended path while leaving every retired TOML
 section in place. The edit must consume its existing expected identity without changing the
-baseline. Use the manifest kind's sample and field reference. When the manifest contains tagged
-capability configuration, use that implementation's separate `kind/name` field reference. A config
-that still carries retired resource sections fails ordinary top-level validation, so commands that
-load it cannot validate the manifest set during this drafting phase. Read every field from the live
-references and keep the immutable identity inventory as the loss check. Validation begins after the
+baseline. Run `agw resource sample KIND` for the manifest shape and
+`agw resource describe-kind KIND` for its fields. When the manifest contains tagged capability
+configuration, run `agw resource describe-kind KIND/NAME` for that implementation. A config that
+still carries retired resource sections fails ordinary top-level validation, so commands that load
+it cannot validate the manifest set during this drafting phase. Read every field from those command
+surfaces and keep the immutable identity inventory as the loss check. Validation begins after the
 one-time TOML cutover below.
 
 The `edit-one-manifest` mutation applies to both pre-existing manifests and manifests derived from
@@ -114,8 +115,8 @@ canonical tagged secret arm while preserving its secret name. For a version 0.13
 ## Review authentication, placement, and changed secret references
 
 Inspect every pre-existing and TOML-derived site manifest, not only the files created during this
-migration. Use each implementation's command-owned field reference because authentication and
-placement are tagged choices now:
+migration. Run `agw resource describe-kind vm-platform/NAME` for each selected implementation
+because authentication and placement are tagged choices now:
 
 - Proxmox keeps `token_secret`. Omission or explicit null selects its well-known default secret
   name; a custom string selects that named secret. Proxmox has no no-secret mode.

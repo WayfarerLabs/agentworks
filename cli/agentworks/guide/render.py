@@ -5,7 +5,7 @@ from __future__ import annotations
 import html
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, assert_never
 
 from agentworks.guide.agent_mode import GuideMode
 from agentworks.guide.contract import (
@@ -17,6 +17,7 @@ from agentworks.guide.contract import (
     ReleaseNotes,
     Teaching,
     TopicContribution,
+    TopicLinks,
 )
 from agentworks.release_notes import (
     RELEASE_TOPIC,
@@ -141,7 +142,9 @@ def _heading(block: GuideBlock, mode: GuideMode) -> str:
         return "Packaged release evidence"
     if isinstance(block, ActionList):
         return "Actions"
-    return "Related topics"
+    if isinstance(block, TopicLinks):
+        return "Related topics"
+    assert_never(block)
 
 
 def _onboarding_plan(

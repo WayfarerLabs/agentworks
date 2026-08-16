@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Literal
 
 from agentworks.errors import ValidationError
 from agentworks.guide.contract import (
@@ -28,14 +27,6 @@ class GuideIdentity:
 
 
 @dataclass(frozen=True, slots=True)
-class GuideOrigin:
-    """A path-free resource origin used by onboarding."""
-
-    variant: Literal["operator-declared", "built-in", "auto-declared", "system-plugin"]
-    plugin: str | None
-
-
-@dataclass(frozen=True, slots=True)
 class GuideVerdict:
     """Enablement and readiness facts used by onboarding."""
 
@@ -50,9 +41,6 @@ class GuideResourceFact:
     """A bounded finalized-registry resource fact used by onboarding."""
 
     identity: GuideIdentity
-    category: Literal["declarable", "capability"]
-    description: str | None
-    origin: GuideOrigin
     verdict: GuideVerdict
 
 

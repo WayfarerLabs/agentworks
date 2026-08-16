@@ -19,7 +19,6 @@ from agentworks.guide import (
     GuideIdentity,
     GuideInstanceFact,
     GuideMode,
-    GuideOrigin,
     GuideRelationship,
     GuideResourceFact,
     GuideTraversalError,
@@ -50,9 +49,6 @@ def _fact(
     reason = None if enabled and ready else f"{name} projected reason"
     return GuideResourceFact(
         GuideIdentity(kind, name),
-        "capability" if kind.endswith("backend") else "declarable",
-        None,
-        GuideOrigin("operator-declared", None),
         GuideVerdict(enabled, ready, reason, is_available=available),
     )
 
@@ -613,11 +609,6 @@ def test_direct_projection_composes_snapshot_and_renders_target_scoped_evidence(
         "source",
         "target",
     ]
-    source_fact = next(
-        fact for fact in snapshot.resources if fact.identity == GuideIdentity("assessment-test", "source")
-    )
-    assert source_fact.description == "Source resource."
-    assert source_fact.origin == GuideOrigin("built-in", None)
     assert tuple(item for item in snapshot.instances if item.kind in {"secret", "session", "vm"}) == (
         GuideInstanceFact("secret", "token"),
         GuideInstanceFact("session", "existing"),

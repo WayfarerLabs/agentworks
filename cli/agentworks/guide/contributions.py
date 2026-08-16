@@ -10,7 +10,6 @@ from agentworks.guide.contract import (
     ActionList,
     AgentContract,
     BlockId,
-    ConceptAnchor,
     ConsentBoundary,
     GuideAction,
     GuideBlock,
@@ -69,7 +68,6 @@ def _concept(
         TopicSlug(slug),
         title,
         summary,
-        ConceptAnchor(slug),
         blocks,
         tuple(TopicSlug(topic) for topic in related_topics),
     )

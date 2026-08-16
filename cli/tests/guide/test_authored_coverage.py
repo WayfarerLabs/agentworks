@@ -31,6 +31,16 @@ def test_manifesto_topic_is_structurally_linked_to_onboarding() -> None:
     assert tuple(map(str, topic.related_topics)) == ("concept-onboarding",)
     assert "concept-manifesto" in tuple(map(str, _topic("concept-onboarding").related_topics))
     assert {type(block) for block in topic.blocks} == {Overview, AgentContract, Teaching, TopicLinks}
+    assert sum(isinstance(block, AgentContract) for block in topic.blocks) == 1
+    assert not any(isinstance(block, ActionList) for block in topic.blocks)
+
+
+def test_reporting_bugs_has_an_agent_contract_without_an_external_action() -> None:
+    topic = _topic("concept-reporting-bugs")
+
+    assert {type(block) for block in topic.blocks} == {Overview, AgentContract, Teaching}
+    assert sum(isinstance(block, AgentContract) for block in topic.blocks) == 1
+    assert not any(isinstance(block, ActionList) for block in topic.blocks)
 
 
 def test_action_contract_pins_boundaries_commands_and_verification() -> None:

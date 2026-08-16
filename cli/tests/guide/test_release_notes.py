@@ -267,14 +267,12 @@ def test_release_notes_block_rejects_fields_and_non_core_namespace() -> None:
         "topic": "concept-release-notes",
         "title": "Release notes",
         "summary": "Summary.",
-        "anchor": {"type": "concept", "name": "concept-release-notes"},
         "blocks": [{"type": "release-notes", "id": "release-notes", "path": "/tmp/evil"}],
     }
     with pytest.raises(GuideContributionError):
         parse_topic_contribution(base, "core")
 
     base["topic"] = "plugin/evil/releases"
-    base["anchor"] = {"type": "concept", "name": "plugin/evil/releases"}
     base["blocks"] = [{"type": "release-notes", "id": "release-notes"}]
     with pytest.raises(InvalidBlockError):
         parse_topic_contribution(base, "system-plugin:evil")

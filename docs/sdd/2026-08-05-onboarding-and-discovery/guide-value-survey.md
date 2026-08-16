@@ -2,6 +2,11 @@
 
 Status: reviewed survey with operator disposition, 2026-08-15. Implementation remains separate.
 
+> **Phase 4 implementation note (PR #556):** The approved one-wave deletion is now implemented. The
+> counts and evidence anchors below describe surveyed commit `b3330b1f`; paths and line ranges for
+> machinery selected for deletion are intentionally historical. The retained surface is authored
+> concept, plugin, and release topics plus the direct onboarding assessment projector.
+
 ## Result
 
 At commit `b3330b1f`, the guide has 200 fixed block instances plus four blocks repeated for every
