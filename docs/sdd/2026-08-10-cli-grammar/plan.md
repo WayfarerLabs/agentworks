@@ -261,7 +261,7 @@ history contains retired spellings.
 - [x] Run focused resource graph/query, database, CLI, machine-output, completion, schema, edit,
       secret-describe, and plugin tests; retain the active-reference search as reviewed cutover
       evidence rather than a prose-policing test.
-- [x] Run `uv run ruff check .`, `uv run mypy agentworks tests`, and
+- [x] Run `uv run ruff check .`, `uv run mypy agentworks/ tests/`, and
       `uv run pytest tests/ -m 'not integration'` from `cli/`.
 - [x] Run `./scripts/lint-files.sh`, `git diff --check`, `./scripts/check-locked-sdds.sh`, and
       `./scripts/rulesync-upgen.sh --check`.
@@ -274,11 +274,11 @@ history contains retired spellings.
       cutover; resolve every material finding and obtain clean re-review.
 - [x] Run the required fresh-eyes code review for the code-heavy implementation and triage it
       independently of the project-values review.
-- [ ] Invoke the Agentworks integration tester under the repository's integration-testing and test
+- [x] Invoke the Agentworks integration tester under the repository's integration-testing and test
       environment protocols with a bounded, residue-free charter.
-- [ ] Exercise real human and JSON graph output for one-hop defaults, two-hop platform/site/live-VM
+- [x] Exercise real human and JSON graph output for one-hop defaults, two-hop platform/site/live-VM
       dependents, dependencies-only, mixed-direction depth, and `all` on a bounded fixture registry.
-- [ ] Prove explain with absent/invalid config, schema installation parity, old-spelling failure,
+- [x] Prove explain with absent/invalid config, schema installation parity, old-spelling failure,
       secret-describe parity, missing-database success, and demanded bad-database failure.
 - [ ] Require clean saga-lead, Muntz, tester, and CI dispositions before making merge intent.
 
@@ -286,9 +286,9 @@ history contains retired spellings.
 
 - [ ] Update plan boxes only as their work is actually complete; never pre-check implementation or
       merge claims.
-- [ ] Reconcile FRD, HLA, LLDs, migration strategy, and implementation where contact with code
+- [x] Reconcile FRD, HLA, LLDs, migration strategy, and implementation where contact with code
       required a design refinement.
-- [ ] Promote every load-bearing operational contract into code, permanent docs, or tests so no
+- [x] Promote every load-bearing operational contract into code, permanent docs, or tests so no
       shipped behavior depends on reading `docs/sdd/`.
 - [ ] Add `locked.md` only when implementation, permanent collateral, review, and live acceptance
       are complete; record the final state and any consciously retained risk.

@@ -521,6 +521,12 @@ fact-projection assertions, not prose assertions: exact labels, whitespace, and 
 wording are reviewed directly and exercised in live acceptance rather than pinned or blacklisted by
 unit tests.
 
+Every dynamic human-rendered scalar passes through `sanitize_terminal_output` at the renderer
+boundary. Because that shared sanitizer deliberately preserves line feed and tab for ordinary
+multiline prose, the graph renderer additionally removes both from these single-line fact scalars.
+Resource and live-instance identities, relationship values, usage, and provenance therefore cannot
+inject terminal controls, lines, or indentation into the fixed record structure.
+
 ## Exact `graph.show` JSON v1 projection
 
 The cutover adds `MachineOutputCommand.GRAPH_SHOW = "graph.show"`. The projector is

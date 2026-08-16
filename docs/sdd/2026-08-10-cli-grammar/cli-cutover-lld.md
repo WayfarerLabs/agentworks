@@ -368,7 +368,7 @@ Then run from `cli/`:
 
 ```text
 uv run ruff check .
-uv run mypy agentworks tests
+uv run mypy agentworks/ tests/
 uv run pytest tests/ -m 'not integration'
 ```
 
