@@ -312,9 +312,9 @@ coordinates with the pending resource-CLI grammar decision.
       2026-08-12; `resource describe` removal ruled with 0.14 waiver, 2026-08-15)
 - [x] FRD converged through operator review rounds (depth/direction selectors, typed edges from the
       declared data, explain's schema-space rule, the verb glossary; the operator's five review
-      lines plus the Muntz pre-HLA pass absorbed at `f200f9a3`)
+      lines plus the complexity-critic pre-HLA pass absorbed at `f200f9a3`)
 - [x] HLA checkpoint approved (mixed-direction `both` ruled deliberate product scope by the
-      operator; saga-lead and Muntz lanes clean at `92422b6a`)
+      operator; saga-lead and complexity-critic lanes clean at `92422b6a`)
 - [x] Final artifact gate discharged at `fb899586` after two operator rulings (registry-only
       `--names-only` completion authorized with the byte-identical acceptance; the 39 assertion
       migrations moved ahead of the atomic commit)
