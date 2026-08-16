@@ -344,33 +344,21 @@ class Capability(ABC):
         the capability to do anything with it. This hook is the override
         point for a capability whose answer is not simply ``config_model``,
         and reading the config THROUGH it is what makes such a capability
-        an ordinary registration rather than a framework change.
+        an ordinary registration rather than a framework change. Nothing
+        overrides it today.
 
         Config is offered per FACET by contract, a facet being the LEVEL a
-        capability is driven at (vm, user, workspace, session): the pairing
-        of that level's API methods with that level's config. CONSUMERS
+        capability is driven at (vm, user, workspace, session). CONSUMERS
         choose the facet they drive, so a producer never has to know who is
-        asking. Facets are deliberately NOT scopes and core owns the
-        mapping between them: admin and agent both drive the user level,
-        and session start and resume share the session level, so two
-        surfaces that mean the same level get the same answer by
-        construction rather than by each capability encoding the
-        equivalence. Nothing under ``capabilities/`` spells a scope.
+        asking, and facets are deliberately NOT scopes: core owns the
+        mapping, so two surfaces meaning the same level get the same answer
+        by construction. Nothing under ``capabilities/`` spells a scope. The
+        signature takes no facet argument because no capability offers more
+        than one config yet.
 
-        **The parameter selecting a facet is not on this signature, because
-        nothing yet offers more than one config.** Every capability shipped
-        today shares a single config across all of its operations, so a
-        facet parameter would be a signature every reader has to decode and
-        no caller can use. It arrives, additively, with the first
-        capability whose methods run at several levels (a harness
-        integration is the expected one), which is the same change that
-        brings the consumers that would pass it.
-
-        Note what offering a config does NOT say: it is not a claim to
-        support a level, and offering none is not a claim to lack one.
-        Support is carried by the implementation. Reading a config offering
-        as a support signal would rebuild the declaration-contract
-        mechanism that was rescinded on 2026-08-05, under a new name.
+        Offering a config is not a claim to support a level, and offering
+        none is not a claim to lack one; support is carried by the
+        implementation. ``capabilities/README.md`` has the full contract.
         """
         return cls.config_model
 

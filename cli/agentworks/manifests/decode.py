@@ -106,11 +106,7 @@ def _hosting_descriptors() -> Mapping[str, CapabilityKindDescriptor]:
     from agentworks.capabilities.descriptor import capability_descriptors
 
     return MappingProxyType(
-        {
-            descriptor.manifest_section.host_kind: descriptor
-            for descriptor in capability_descriptors()
-            if descriptor.manifest_section is not None
-        }
+        {descriptor.manifest_section.host_kind: descriptor for descriptor in capability_descriptors()}
     )
 
 
@@ -340,7 +336,7 @@ def _hosted_capability_references(
     and the bundled manifests a plugin ships are published later.
     """
     descriptor = _hosting_descriptors().get(doc.kind)
-    if descriptor is None or descriptor.manifest_section is None:
+    if descriptor is None:
         return ()
     import agentworks.plugins  # noqa: F401  (imported for the seating side effect)
     from agentworks.capabilities.config import capability_config_references

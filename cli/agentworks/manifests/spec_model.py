@@ -85,7 +85,7 @@ def spec_model(kind: str) -> type[BaseModel]:
     row = row_model(kind)
     projected: type[BaseModel] = row
     descriptor = hosted_capability(kind)
-    if descriptor is not None and descriptor.manifest_section is not None:
+    if descriptor is not None:
         from agentworks.capabilities.config import capability_config_union
 
         field_name = descriptor.manifest_section.naming_field
@@ -196,18 +196,16 @@ def hosted_capability(kind: str) -> CapabilityKindDescriptor | None:
     """The descriptor of the capability kind ``kind``'s spec selects by a
     TAGGED table, or ``None``.
 
-    Classified on DISCRIMINATOR PRESENCE, never on whether the resulting
-    annotation is still a union: ``Union[(X,)]`` collapses to ``X``, and a
-    capability kind may have one registered implementation. Map-keyed
-    consuming surfaces are projected separately from ``mapping_host`` by
-    :func:`spec_model`.
+    Every capability config contract is tagged, so hosting is the whole
+    question: the kind named by some descriptor's ``manifest_section`` is
+    the one whose spec carries a tagged table. Map-keyed consuming surfaces
+    are projected separately from ``mapping_host`` by :func:`spec_model`.
     """
     from agentworks.capabilities.descriptor import capability_descriptors
 
     _seat_plugin_capabilities()
     for descriptor in capability_descriptors():
-        section = descriptor.manifest_section
-        if section is not None and section.host_kind == kind and descriptor.config_schema.discriminator is not None:
+        if descriptor.manifest_section.host_kind == kind:
             return descriptor
     return None
 

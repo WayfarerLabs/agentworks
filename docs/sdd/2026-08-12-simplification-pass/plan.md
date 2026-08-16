@@ -139,9 +139,41 @@ the sweep instead, per group 4 above.
       invocation rather than degrading one target, which is the loud-refusal-at-entry posture
       boundary 1 asks for, recorded here so the reassessment reads it as a decision rather than an
       accident.
-- [ ] Delete inert descriptor generality (C1, C5): `RegistryPolicy`, `kind_strategy`,
-      `contract_version` plumbing, unreachable fallbacks, their pinning tests. Done when: suite
-      green, four descriptors construct without the deleted fields.
+- [x] Delete inert descriptor generality (C1, C5): `RegistryPolicy`, `kind_strategy`, unreachable
+      fallbacks, their pinning tests. **`contract_version` is not in this item and is not a deletion
+      target** (operator ruling 12): it is required, it is checked at registration, and PR #546
+      verified the check by mutation. Done when: suite green, four descriptors construct without the
+      deleted fields, and `contract_version` still gates registration. **Done**: `RegistryPolicy`
+      and both its consumer branches, `kind_strategy`, `manifest_section`'s optionality with the
+      five narrowing guards it forced, `offered_model`'s two `getattr` fallbacks, and five more
+      sites in the same family the inventory never named (`_declared_model`'s fallback, two
+      conformance re-checks, and two of the four dead `config_schema.discriminator` branches), plus
+      a reserved-field comment and two documentation claims that had outlived what they described.
+      `contract_version` still refuses a mismatched impl, re-verified by the mutation PR #546 used.
+      Collected tests 7361 to 7358 (`pytest --collect-only`; an earlier note in this item quoted the
+      selected count, so the reassessment should cite the collected one). Every site was controlled
+      individually before deletion, by removal or by an assertion proving the branch never entered.
+
+      **C1 and C5 carry the corrections this item's classification produced**: on
+      `discriminator`/`input_domain`, on `manifest_section`, and on the `config_for()` hook that is
+      an R2.2 set-aside rather than a deletion. findings.md is their home and this item does not
+      restate them.
+
+      Three things are recorded here because they are decisions rather than corrections.
+      `capability_class` keeps the unregistered-kind refusal it had been performing incidentally
+      through `descriptor_for`, for sibling consistency with `rows_of` and explicitly **not** as an
+      R2.3 replacement: removing it fails only the test this item added. Two of the four dead
+      discriminator branches stay, because `capability_config_union`'s raise is the one deletion
+      mypy rejects (`ConfigContract.discriminator` genuinely admits `None`, and `mapping_schema` is
+      a live instance of it, so the raise enforces an invariant the type does not) and
+      `selected_name`'s orphans a parameter in four signatures. And **deleting `offered_model`'s
+      fallback was a reachable regression, found by the integration tester**: `register_plugin` is
+      exported, it admitted a class whose `config_for` was not callable, and `agw resource sample
+      vm-site` then died on a raw `TypeError`. Fixed at the registration seam, where the wave's
+      charter puts call-shape checks, with the tester's reproduction as its test. The enumeration
+      that missed it had walked the descriptor table exhaustively and never asked who supplies an
+      impl class.
+
 - [x] Delete `machine_output` defensive surface (G6): assert-guards on frozen dataclasses, double
       projections, identity comprehensions; `schema_version` becomes a named constant. This item
       owns `machine_output.py` wholesale, so G8's `JsonScalar` deletion lands here. Done when: suite
@@ -236,5 +268,19 @@ ledger.)
       retrospective numbers (lines, test counts, suite wall time, always-on bytes); the surviving
       findings; and a per-subsystem proposal or an explicit drop for each. Done when: delivered to
       the operator, after waves 1 and 2 are complete and the grammar rewrite has landed.
+
+      **Descriptor-generality residue**, surfaced by the C1/C5 item and left for this pass because
+      each needs a decision rather than a deletion. `impl_class` (`config.py:582`) is an identity
+      cast standing in for a type the registries do not declare; typing them `dict[str, type]` would
+      delete it and its four call sites together, which is a signature change across the capability
+      registries rather than a local subtraction. The `prepare`/`seat` split in
+      `plugins/registration.py` was shaped around a fallible `prepare` that no longer exists, so
+      what remains is a two-phase protocol whose two phases are a pass-through and a dict write.
+      `config_for()`'s hook is the third, recorded above with the contract rev it implies. The
+      fourth is the untagged config contract: every capability `config_schema` is tagged and only a
+      `mapping_schema` may be untagged, but nothing enforces that, so two unreachable branches
+      survive to carry it. Expressing it in the type (a tagged contract and an untagged one being
+      different things) is the subtraction, and it needs a type this wave may not add.
+
 - [ ] Write `locked.md` once the reassessment is delivered. Remaining candidates live in the
       reassessment, not in this plan.

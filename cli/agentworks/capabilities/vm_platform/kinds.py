@@ -27,7 +27,6 @@ from agentworks.capabilities.descriptor import (
     CapabilityKindDescriptor,
     ConfigContract,
     HostSurface,
-    RegistryPolicy,
 )
 from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.resources.graph import Readiness
@@ -127,7 +126,6 @@ VM_PLATFORM_DESCRIPTOR = CapabilityKindDescriptor(
     kind="vm-platform",
     contract_version=2,
     implementation_contract=VMPlatform,
-    registry_policy=RegistryPolicy.CLASS_BY_NAME,
     registry=_registry,
     required_operations=frozenset(
         {"create", "start", "stop", "delete", "status", "display_backend_name"},
@@ -135,7 +133,6 @@ VM_PLATFORM_DESCRIPTOR = CapabilityKindDescriptor(
     # Empty: VMPlatform supplies every non-operation member a subclass needs.
     required_attributes=frozenset(),
     entry_factory=_entry,
-    kind_strategy=KIND_REGISTRY["vm-platform"],
     readiness=_readiness,
     publisher_source="agentworks.capabilities.vm_platform",
     # A vm-site writes one tagged table (``platform: {name: lima, ...}``),

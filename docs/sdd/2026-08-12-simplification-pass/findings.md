@@ -178,7 +178,29 @@ deliberately narrow `cli-conventions.md`.
 - **C1** Descriptor fields that do not vary: `RegistryPolicy` single-member enum with two dead
   consumer branches; `kind_strategy` with zero production readers (self-tested against its own
   duplicate); inert `contract_version`; `manifest_section` guarded for a `None` it never takes;
-  `discriminator`/`input_domain` identical across all four kinds.
+  `discriminator`/`input_domain` identical across all four kinds. (Corrected 2026-08-15, by operator
+  ruling 12: `contract_version` is not inert. It is required and it gates registration, verified by
+  mutation in PR #546, where setting `EnvVarBackend.contract_version = 1` fails
+  `test_every_registered_builtin_impl_conforms`. It is not a deletion target; the rest of the entry
+  stands.) (Corrected 2026-08-16, by executing the item: `discriminator`/`input_domain` are not
+  deletable and the observation behind the claim is the wrong scope. Both fields live on
+  `ConfigContract`, which has a fifth instance the entry did not count, `secret-backend`'s
+  `mapping_schema`, where `discriminator=None` and `input_domain=JSON_NATIVE`
+  (`secret_backend/kinds.py:106-107`) are exactly what distinguishes a map-key-selected surface from
+  a tagged one. Both are read in production: `conformance.py:168` branches on the JSON-native
+  domain, and the discriminator is read at `conformance.py:187` and at `config.py:103`, `:231`, and
+  `:376`. Uniform across the four `config_schema` values is true and says nothing, because the arm
+  that varies is the one the field exists for. (Line numbers are this branch's head. Two further
+  discriminator reads were deleted as unreachable, and two of that family survive, for which see the
+  plan's descriptor-generality residue.) `RegistryPolicy` and `kind_strategy` were correct and are
+  deleted. `manifest_section` was correct as originally written and is NOT deleted: the field stays
+  required at `descriptor.py:157`, and what went is the optionality plus the five narrowing guards
+  the `| None` forced on `decode` and `spec_model`. The premise carrying that narrowing is not "no
+  registration API accepts a caller's descriptor", which is true but beside the point, since
+  `tests/secrets/test_sources.py` monkeypatches `descriptor_for` with a `replace()`d record. It is
+  that both readers of `manifest_section`, `decode._hosting_descriptors` and
+  `spec_model.hosted_capability`, reach the table through `capability_descriptors()`, which nothing
+  patches.)
 - **C2** Eight of eighteen classified `FieldShape` shapes have zero shipped instances; two have one.
   `_shape.py` is 1,383 lines (ceiling: 1,000), including the two-level `X`/`item_X` mirror whose
   unshipped half is speculative by its own docstring, while `reference_marker_error` already refuses
@@ -193,7 +215,22 @@ deliberately narrow `cli-conventions.md`.
   just broke.
 - **C5** `config_for()`: an override hook with zero overrides, a 30-line docstring about a parameter
   it does not have, and two unreachable `getattr` fallbacks behind registration conformance that
-  already guarantees the attributes.
+  already guarantees the attributes. (Amended 2026-08-16, by executing the item: the three
+  observations hold, but only two of them are wave 1's to act on. The fallbacks are gone and the
+  docstring is trimmed. The hook stays, because `capabilities/README.md` carries `config_for()` in
+  the capability authoring contract that `contract_version` exists to version, so deleting it is a
+  shipped-contract change of exactly the kind R2.2 excludes from this wave. It is set aside for the
+  reassessment, where the contract rev it implies can be decided on its own terms. The sharper
+  reason is that it is an override point on a PUBLIC base class, so "zero overrides" is a claim
+  about this repository and nothing else; `plugins/__init__.py` records the intent that external
+  loading become another way to obtain a `module.PLUGIN` rather than a new authoring contract, so
+  deleting the hook now means the loader effort re-adds it. Two cautions for the reassessment: the
+  in-repo override in the hook's own test is not a consumer, and zero production overrides remains
+  the honest count.) (Amended again 2026-08-16: deleting the `getattr` fallbacks was a REACHABLE
+  regression, not a safe subtraction. `register_plugin` is exported and admitted a class whose
+  `config_for` was not callable, which then crashed `agw resource sample vm-site` on a raw
+  `TypeError`. The fallback is not restored; `conformance.py` now refuses the shape at the
+  registration seam, where the wave's charter puts call-shape checks.)
 - **C6** Prose density: `schema/` 45% comment/docstring, `manifests/` 47%, with design-journey
   narration in permanent docstrings ("an earlier revision threaded..."). Files over the size
   ceiling: `_shape.py` 1,383, `errors.py` 1,033 (the latter mostly inherent; split, do not rewrite).

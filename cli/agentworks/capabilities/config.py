@@ -67,6 +67,7 @@ from agentworks.schema import (
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
+    from agentworks.capabilities.base import Capability
     from agentworks.capabilities.descriptor import CapabilityKindDescriptor
     from agentworks.declared_resource import DeclaredResource
     from agentworks.resources.reference import ConfigReference, ResourceReference
@@ -171,9 +172,6 @@ def validate_capability_config(
     if impl is None:
         return None
     hint = reference_hint(kind, selected)
-    if descriptor.config_schema.discriminator is None:
-        model = offered_model(impl)
-        return _validated(model, config, owner=owner, location=location, hint=hint, provenance=provenance)
     union = capability_config_union(kind)
     validated = _validated(union, config, owner=owner, location=location, hint=hint, provenance=provenance)
     # The union is a root model, so the thing the capability was written
@@ -378,8 +376,8 @@ def capability_config_union(kind: str) -> type[BaseModel]:
     discriminator = descriptor.config_schema.discriminator
     if discriminator is None:
         raise StateError(
-            f"the {kind} capability kind dispatches its config by map key, not by a tagged union, "
-            f"so there is no union to assemble"
+            f"the {kind} capability kind declares an untagged config_schema, so there is no union to "
+            f"assemble; only a mapping contract may be untagged"
         )
     arms = _arms(descriptor)
     key = (kind, frozenset(arms.items()))
@@ -497,26 +495,25 @@ def registered_implementation(kind: str, name: str) -> type | None:
 def offered_model(impl: type) -> type[BaseModel]:
     """The config model ``impl`` offers.
 
-    Read through ``config_for`` when the implementation has it, never off
-    ``config_model`` directly, so a capability that overrides the hook is
-    honored everywhere the framework asks. That is what lets a capability
-    whose methods run at several levels arrive as an ordinary
-    registration.
+    Read through ``Capability.config_for``, never off ``config_model``
+    directly, so a capability that overrides the hook is honored everywhere
+    the framework asks. That is what lets a capability whose methods run at
+    several levels arrive as an ordinary registration.
 
-    Every capability implementation is nominal and inherits
-    ``Capability.config_for``. The fallback remains a defensive boundary
-    for a malformed internal caller, not an alternate implementation
-    contract.
+    ``impl`` is a ``Capability`` subclass, which is what the cast says. It
+    is NOT necessarily a seated one: most callers read it out of a kind's
+    live registry, but ``Capability.__init__`` passes its own
+    ``type(self)``, so a bare subclass that never registers reaches here
+    too, which is the case ``descriptor_for_impl`` documents when it
+    answers ``None`` rather than raising.
+
+    That the hook is CALLABLE is a separate guarantee with a separate
+    owner: ``conformance.py``'s ``_config_hook_error``, at the registration
+    seam, refuses any class whose ``config_for`` is not callable. The call
+    below is unconditional because that seam holds, not because the type
+    annotation does.
     """
-    resolve = getattr(impl, "config_for", None)
-    if callable(resolve):
-        return cast("type[BaseModel]", resolve())
-    model = getattr(impl, "config_model", None)
-    if model is None:
-        raise StateError(
-            f"{impl.__name__} declares no config_model, so the framework has no schema to validate its config against"
-        )
-    return cast("type[BaseModel]", model)
+    return cast("type[Capability]", impl).config_for()
 
 
 def _seated_impl(descriptor: CapabilityKindDescriptor, name: str) -> type | None:
@@ -550,10 +547,14 @@ def _mapping_descriptor(kind: str) -> CapabilityKindDescriptor:
 
 
 def _declared_model(impl: type, attribute_name: str) -> type[BaseModel]:
-    model = getattr(impl, attribute_name, None)
-    if not isinstance(model, type):
-        raise StateError(f"{impl.__name__} declares no {attribute_name}")
-    return cast("type[BaseModel]", model)
+    """The model class ``impl`` declares under ``attribute_name``.
+
+    Both callers read ``impl`` out of a kind's live registry, and the
+    attribute is in that kind's ``required_attributes``, so registration
+    has already checked that it is present, is a class, and derives from
+    the kind's contract base (``conformance.py``'s ``_model_error``).
+    """
+    return cast("type[BaseModel]", getattr(impl, attribute_name))
 
 
 def _build_union(

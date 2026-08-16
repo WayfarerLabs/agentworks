@@ -24,7 +24,6 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, Union, get_args, get_
 from pydantic import BaseModel
 
 from agentworks.capabilities.descriptor import ConfigContract, ModelInputDomain
-from agentworks.errors import StateError
 from agentworks.schema import (
     RefMarker,
     model_is_complete,
@@ -45,6 +44,7 @@ def conformance_error(descriptor: CapabilityKindDescriptor, impl: type) -> str |
         _contract_error(descriptor, impl)
         or _metadata_error(impl)
         or _constructibility_error(impl)
+        or _config_hook_error(impl)
         or _attributes_error(descriptor, impl)
         or _operations_error(descriptor, impl)
         or _focused_operation_error(descriptor, impl)
@@ -61,10 +61,6 @@ def conformance_error(descriptor: CapabilityKindDescriptor, impl: type) -> str |
 
 def _contract_error(descriptor: CapabilityKindDescriptor, impl: type) -> str | None:
     contract = descriptor.implementation_contract
-    if not isinstance(contract, type):
-        raise StateError(
-            f"the {descriptor.kind} descriptor's implementation_contract is {contract!r}, which is not a class"
-        )
     if not issubclass(impl, contract):
         return f"it does not derive from {contract.__name__}, the {descriptor.kind} implementation contract"
     return None
@@ -91,6 +87,24 @@ def _constructibility_error(impl: type) -> str | None:
     if inspect.isabstract(impl):
         unimplemented = ", ".join(sorted(getattr(impl, "__abstractmethods__", ())))
         return f"it is abstract (unimplemented operations: {unimplemented})"
+    return None
+
+
+def _config_hook_error(impl: type) -> str | None:
+    """The impl's ``config_for`` is callable.
+
+    The other half of the call-shape seam, and the framework calls this hook
+    on every path that reads a capability's config: sample rendering, schema
+    emission, the field reference, union assembly, and construct-time
+    validation. ``Capability`` supplies a working default, so an impl only
+    fails here by shadowing it with something that is not callable, which a
+    class arriving through ``register_plugin`` can do and our type checker
+    never sees. Refused here, at the seam, rather than defended against by
+    every interior caller: without this the class seats cleanly and the
+    first resource command to render its config dies on a raw ``TypeError``.
+    """
+    if not callable(getattr(impl, "config_for", None)):
+        return "its 'config_for' is not callable, so the framework cannot ask which config it offers"
     return None
 
 
@@ -121,10 +135,8 @@ def _model_error(
     descriptor: CapabilityKindDescriptor,
     impl: type,
     attribute_name: str,
-    contract: ConfigContract | None,
+    contract: ConfigContract,
 ) -> str | None:
-    if contract is None:
-        raise StateError(f"the {descriptor.kind} descriptor has no contract for {attribute_name}")
     model = getattr(impl, attribute_name, None)
     if model is None:
         return (

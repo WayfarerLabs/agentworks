@@ -22,7 +22,7 @@ import pytest
 
 import agentworks
 import agentworks.plugins as plugins_pkg
-from agentworks.capabilities.descriptor import RegistryPolicy, capability_descriptors
+from agentworks.capabilities.descriptor import capability_descriptors
 from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.errors import StateError
 from agentworks.origin import Origin
@@ -308,6 +308,21 @@ class _PlatformWithAMistaggedModel(ConformingVMPlatform):
     config_model = _MistaggedConfig
 
 
+class _PlatformWithAnUncallableConfigHook(ConformingVMPlatform):
+    """Shadows the base's ``config_for`` with something uncallable.
+
+    Conforming in every other way, so registration is the only thing
+    standing between it and a shipped resource command calling the hook.
+    """
+
+    name = "uncallable-hook-platform"
+    description = "shadows the config hook with a non-callable"
+    # The ignore is the point: mypy rejects this shape, and a class arriving
+    # through the exported ``register_plugin`` never went through mypy, which
+    # is why the seam has to check it at runtime.
+    config_for = None  # type: ignore[assignment]
+
+
 @pytest.mark.parametrize(
     ("kind", "impl", "expected"),
     [
@@ -320,6 +335,7 @@ class _PlatformWithAMistaggedModel(ConformingVMPlatform):
         ("vm-platform", _PlatformWithoutAModel, "not a AgwModel subclass"),
         ("vm-platform", _PlatformWithAnUntaggedModel, "does not tag itself"),
         ("vm-platform", _PlatformWithAMistaggedModel, "does not tag itself"),
+        ("vm-platform", _PlatformWithAnUncallableConfigHook, "config_for"),
     ],
     ids=[
         "wrong-base",
@@ -331,6 +347,7 @@ class _PlatformWithAMistaggedModel(ConformingVMPlatform):
         "config-model-is-not-a-model",
         "config-model-carries-no-tag",
         "config-model-tagged-as-another-capability",
+        "config-hook-not-callable",
     ],
 )
 def test_rejects_a_non_conforming_impl_naming_the_plugin(kind: str, impl: type, expected: str) -> None:
@@ -462,15 +479,6 @@ def test_secret_backend_registration_never_calls_the_constructor() -> None:
     )
     with seated_plugin(plugin):
         assert capability_adapters()["secret-backend"].peek("throwing-backend") is ThrowingBackend
-
-
-def test_every_registry_policy_is_class_by_name_and_the_adapter_has_no_constructor_branch() -> None:
-    assert tuple(RegistryPolicy) == (RegistryPolicy.CLASS_BY_NAME,)
-    source = (Path(agentworks.__file__).parent / "plugins" / "adapters.py").read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    adapter = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "_DescriptorAdapter")
-    prepare = next(node for node in adapter.body if isinstance(node, ast.FunctionDef) and node.name == "prepare")
-    assert not any(isinstance(node, ast.Call) for node in ast.walk(prepare))
 
 
 # -- Idempotency ------------------------------------------------------------
