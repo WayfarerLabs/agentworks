@@ -98,9 +98,11 @@ shares no files with the website work; it waits on the sweep instead, per group 
       every verbatim pin; rewrite the real policy invariants (least-privilege permissions,
       credential non-persistence, main-only deploy, source-SHA/artifact binding, double-build diff)
       as focused checks over a proper YAML load. Done when: suite green, no hardcoded workflow text
-      beyond the keys each check reads. **Done**: 834 lines become 16 checks in 532 (measured with
-      `wc -l` at the final head; an earlier revision of this note said 380, which no counting
-      supports and which is corrected here). Nothing pins wording, step names, action versions, or
+      beyond the keys each check reads. **Done**: 834 lines become 15 checks in 563, counted at the
+      final head with `wc -l` and `grep -c '^def test_'`. Two earlier revisions of this note carried
+      wrong numbers, 380 lines and then 16 checks, neither of which any counting supported; both are
+      corrected here, and the pattern is the reason the reassessment's retrospective figures get
+      re-measured rather than carried forward. Nothing pins wording, step names, action versions, or
       formatting; where two places in a file must agree the check derives one from the other (the
       artifact path from the build command's `--output`, deploy's `artifact_name` from the upload's
       `name`, the verified step from the `steps.<id>.outputs` expression the job output references,
@@ -118,13 +120,13 @@ shares no files with the website work; it waits on the sweep instead, per group 
       `defaults.run.shell: bash {0}` drops `-e`, which alone disarms the double-build diff),
       `BASH_ENV` at any of its three levels, a `working-directory` default over the deploy path,
       unskippable deploy-path steps and jobs (`if` or `continue-on-error` on a test step publishes
-      an unverified artifact), first-party actions only, no shell step or checkout in the
-      write-scoped job, and the build job's website suites derived from `ci.website`'s. **R2.3
-      applies twice**: nothing checked that `ci-success` needs every other job, which is the single
-      property branch protection depends on and the one an added job silently breaks; and nothing
-      bound that job's `REQUIRED_RESULTS` to the `join(needs.*.result)` expression, so literal
-      `success` words would have left the required check green while it stopped gating. Both checks
-      are new.
+      an unverified artifact), first-party actions only, a deny-by-default allowlist of the
+      deployment actions permitted in the write-scoped job, and the build job's website suites
+      derived from `ci.website`'s. **R2.3 applies twice**: nothing checked that `ci-success` needs
+      every other job, which is the single property branch protection depends on and the one an
+      added job silently breaks; and nothing bound that job's `REQUIRED_RESULTS` to the
+      `join(needs.*.result)` expression, so literal `success` words would have left the required
+      check green while it stopped gating. Both checks are new.
 
       **The evidence standard changed mid-item and that is the durable lesson.** The first head's
       proof was 30 author-chosen mutations, each failing the check that owns it. That is the wrong
@@ -133,7 +135,9 @@ shares no files with the website work; it waits on the sweep instead, per group 
       and the complexity review lane each independently walked through two such policies, and running
       the deleted file's own mutation corpus against the replacement, which should have happened
       before the deletion merged, found two more. The corpus now stands at 39 violations from the
-      deleted file and both review lanes, 35 caught. Three of the four not caught are form-only edits
+      deleted file, both review lanes, and one deny-by-default probe, 37 caught, and with the 30
+      author mutations it is 71 violations each labelled with the property it attacks, and every
+      stated property has at least one attacking it. Three of the four not caught are form-only edits
       a real YAML load cannot see, and are declared drops on that ground: a duplicate top-level key,
       which resolves last-wins exactly as Actions resolves it, twice, and a trailing `# comment` on a
       permission value, which is not data. **The fourth is a defense that moved, not a gap.** It
@@ -141,13 +145,32 @@ shares no files with the website work; it waits on the sweep instead, per group 
       pre-upload source verifier rejects tracked and untracked drift at runtime, and this suite
       executes that rejection rather than asserting about it. Holding it structurally instead would
       mean asserting the build job's `run` steps are exactly some derived set, which re-pins step
-      shape and reintroduces the form-policing this item exists to remove. Three method lessons go to
-      the reassessment: a deleted policing file's mutation corpus is recoverable from history on
-      demand, extracted here from the merge base by parsing the old file's AST rather than
-      transcribing it, and should be run against the replacement before the deletion merges; the
-      runner that does it stays evidence rather than a committed artifact, since its only consumer is
-      that one-time proof; and a replacement policy suite ships a sentence-to-check map, since a
-      policy sentence with no owning check is invisible to any author-selected corpus.
+      shape and reintroduces the form-policing this item exists to remove.
+
+      **A third round found the same hole a third time, and its diagnosis is the lesson that
+      generalizes furthest.** The confinement check for the write-scoped job banned `run:` steps in
+      round two, after a `run:` step walked in during round one; then `actions/github-script`, an
+      official action that executes authored JavaScript with the job's token, walked past the ban.
+      The check was a blacklist of execution mechanisms, and it failed exactly the way
+      `no-prose-policing-tests` says a blacklist of wordings fails. **A check that enumerates what is
+      forbidden is a blacklist wherever it appears, and that rule is not a prose rule**: security
+      checks, policy checks, and validation all inherit it, and the tell is a fix round that moves
+      one item across the line. The fix is the terminal shape rather than a third ban: a positive,
+      deny-by-default allowlist of the deployment actions permitted beside the token, with the job
+      still selected by its grants. A probe of an invented action nobody had thought of demonstrates
+      the difference rather than arguing it, since the old predicate passes that probe and the
+      allowlist rejects it.
+
+      Four method lessons go to the reassessment. A deleted policing file's mutation corpus is
+      recoverable from history on demand, extracted here from the merge base by parsing the old
+      file's AST rather than transcribing it, and should be run against the replacement before the
+      deletion merges. The runner that does it stays evidence rather than a committed artifact, since
+      its only consumer is that one-time proof. Coverage is shown by labelling each violation with
+      the property it attacks, so a property nothing attacks shows up as a gap the corpus itself
+      reports, rather than by maintaining a written map of sentences to checks, which is a second
+      copy of what the code already expresses and is one step from someone asserting it in a test.
+      And the
+      blacklist lesson above, which is the one that reaches past workflows.
 
 - [ ] Prose/form-policing sweep across the estate (absorbed survey list plus G12, C10, D4, P6, and
       the #470 manifesto pin). **This enumeration is the exclusion list and nothing else is
