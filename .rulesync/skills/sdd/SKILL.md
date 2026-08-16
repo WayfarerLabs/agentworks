@@ -69,8 +69,8 @@ models, diagrams, etc.) may be stored in the feature directory as needed.
 
 As a general rule, SDD artifacts are mutable until the lockfile is created. As issues are
 encountered during implementation, the specs and plan should be updated to reflect the new
-understanding and any changes to the requirements, architecture, or plan. The SDD artifacts are
-living documents and should evolve with the work.
+understanding and any changes to the architecture or plan. The SDD artifacts are living documents
+and should evolve with the work.
 
 The one exception to that is that **completed plan checkboxes should not be modified in any way**
 (unchecked, modified, moved, removed, ...). Once a checkbox is marked complete, it should be
@@ -93,44 +93,44 @@ applies to everything around those boxes instead (narration, correction framing,
 done, and unchecked boxes of the abandoned direction all strip), with exactly one short note
 recording the supersession, which is what the reviewer's exception keys on.
 
-Mutability also follows ownership, which one rule settles everywhere: **requirements belong to
-whoever requested the work, and the response belongs to whoever does it.** A saga lead owns the FRD
-of every child it seeds, and where no saga seeded the effort the operator requested it and owns its
-FRD; either way the FRD is an input to the effort, even when the effort's own lead drafted the text.
-The effort lead owns the response, meaning everything the effort produces in answer, from the HLA
-onward. One level down it is the same relationship: a lead owns the charter it hands a subagent, and
-the subagent owns the work done under it. Authorship is not ownership, so drafting an accepted
-document does not make it yours to revise. Amendments travel back to the owner as a request, never
-as a direct edit, and a subagent no more rewrites its charter than a lead rewrites its FRD;
-recording a decision that is already made, such as appending an operator ruling to a rulings list,
-is transcription rather than authorship, and the effort's lead does it without asking. You can only
-grant what you own, which is why no lead delegates its FRD downward.
+Mutability follows ownership, and one rule settles it everywhere: **requirements belong to the
+operator, and the response belongs to whoever does the work.** The FRD is requirements, and so is
+every document it references. The response is everything the effort produces in answer, from the HLA
+onward, so it is the effort lead's. One level down the relationship repeats: a lead owns the charter
+it hands a subagent, and the subagent owns the work done under it.
 
-Between efforts, ownership is a hard boundary: do not update another effort's artifacts (a saga
-SDD's ledger, a sibling effort's plan) unless specifically instructed to, and treat such an
-instruction as the exception, not standard process. When work surfaces an inconsistency there (a
-stale claim, a checkbox that no longer matches reality, a statement your change invalidates), flag
-it to the operator rather than editing it yourself, and flag it to the artifact's owner too wherever
-you have a working channel; until such channels exist, the operator is the reliable route.
+A saga lead or an effort lead may draft requirements, and the operator's merge of the PR is the
+consent that makes them the operator's. A saga lead assigns rather than owns: it allocates
+requirements across its children and often authors their revisions, but the content is the
+operator's. Authorship is never ownership, so drafting an accepted document does not make it yours
+to revise. An amendment travels to the owner as a request, never as a direct edit, and a subagent no
+more rewrites its charter than a lead rewrites its FRD. Anyone may decline a request, since
+declining preserves the status quo and needs no authority, and the requester may escalate past a
+decline; only the operator grants a requirements change. You can only grant what you own, which is
+why no lead delegates its FRD downward. Recording a decision its owner already made is transcription
+rather than authorship: append it verbatim to the artifact's rulings section and tell the owner;
+anything past that is a request.
 
-The charter is how an owner delegates. Every artifact in an effort's feature directory has an owner,
-whether or not anything here names it, and a delegated agent modifies or creates one only where its
-charter grants that authority for that artifact. A lead grants freely across what it owns;
-delegating an artifact is a normal lead decision, not an exception. Absent the grant, flag what you
-found in the terms you would have used to fix it, and leave the file alone. New files cut both ways:
-in your own effort's directory they need a grant, while adding one to another effort's is the
-sanctioned message channel below.
+Every artifact has an owner whether or not anything here names it, and the charter is how an owner
+delegates: an agent modifies or creates one only where its charter grants that authority, a lead
+grants freely across what it owns, and granting is normal rather than exceptional. Absent the grant,
+flag what you found in the terms you would have used to fix it and leave the file alone: to the
+owner where you have a channel, and otherwise up your own chain, which ends at the operator.
+Position decides none of it. Creating an artifact needs the same grant as editing one wherever the
+directory sits, an authorized edit to another effort's directory travels as an ordinary PR to `main`
+that the effort picks up on its next rebase, and only a file delivered into an effort whose
+artifacts are none of yours is a message, per the sanctioned channel below.
 
 One sanctioned channel does exist: new-file message passing. Adding a NEW file to another SDD's
 feature directory as a message is fine (a saga delivering seed notes into an adopted child's
-directory is the standing example); the cross-effort restriction is on modifying another effort's
-existing artifacts. Name new message files `message-<YYYY>-<MM>-<DD>-<topic>.md`. The convention
-governs new messages only: message files delivered before it keep the names they already have, so
-there is no rename sweep to do and no inference to draw from an older name. A sender never
-overwrites an existing message file, because overwriting is an edit to another effort's artifact and
-can destroy a message the recipient has not read yet; a follow-up is always a new file. A delivered
-message file belongs to the receiving effort once read: integrate it into your own artifacts, then
-keep or delete it, on the same grant terms as the effort's own artifacts.
+directory is the standing example); the restriction is on modifying existing artifacts you do not
+own. Name new message files `message-<YYYY>-<MM>-<DD>-<topic>.md`. The convention governs new
+messages only: message files delivered before it keep the names they already have, so there is no
+rename sweep to do and no inference to draw from an older name. A sender never overwrites an
+existing message file, because overwriting is an edit to another effort's artifact and can destroy a
+message the recipient has not read yet; a follow-up is always a new file. A delivered message file
+belongs to the receiving effort once read: integrate it into your own artifacts, then keep or delete
+it, on the same grant terms as the effort's own artifacts.
 
 Delivery semantics: messages deliver via `main`, never by committing to another effort's live
 branch. A branch is mutable state under its owner's control (a rebase or force-push can silently
@@ -340,9 +340,9 @@ The settled rules for the species:
   across this saga (not a forever vision) and the home of every settled design ruling; `phasing.md`,
   ordering only (dependency structure, waves, release mapping); and `child-sdds.md`, the inventory
   and checkbox tracker that plays plan.md's role, whose completed checkboxes are immutable per the
-  standard rule. A saga SDD has no frd.md, hla.md, or plan.md of its own; those belong to the
-  children. The saga locks when current state and target state agree and every child is locked.
-  These forms are still young; refine them here as they prove out.
+  standard rule. A saga SDD has no frd.md, hla.md, or plan.md of its own; those files live in the
+  child directories. The saga locks when current state and target state agree and every child is
+  locked. These forms are still young; refine them here as they prove out.
 - Every PR belonging to a saga carries a `saga:<name>` label, where the name is the saga's feature
   directory without its date prefix (`saga:next-steps`). Sagas can run concurrently, so the label is
   what lets a saga lead's watch enumerate its own surface rather than infer it. That surface is
@@ -366,16 +366,11 @@ The settled rules for the species:
 - Saga state lives on `main`: every change (a new child SDD, a status change, a design revision) is
   a PR, and child SDDs reference their saga SDD so the coordination is discoverable from any effort.
 - The saga lead seeds each child SDD with its FRD plus any constraints the saga has already settled,
-  and reviews the child's PRs. A separately launched effort lead owns everything the child produces
-  in answer, from the HLA onward, per the ordinary process. Seeding PRs are ready, not draft: their
-  content is limited by design, but they are intended to merge as-is (see PR Review). The seeded FRD
-  is what the saga asked for, so it stays the saga lead's for the life of the child: when it turns
-  out wrong, the effort lead flags it and requests the change, and the saga lead makes it or
-  declines and says why.
-- The saga's artifacts, ledger included, are the saga lead's to maintain. Child effort leads do not
-  update the saga SDD to mark their own progress; the saga lead tracks child status from merged PRs.
-  Child leads flag inconsistencies they notice to the operator instead (see Artifact Mutability's
-  ownership rule).
+  and reviews the child's PRs; a separately launched effort lead runs the child by the ordinary
+  process. Seeding PRs are ready, not draft: their content is limited by design, but they are
+  intended to merge as-is (see PR Review).
+- The saga's artifacts, ledger included, are the saga lead's to maintain, and the lead tracks child
+  status from merged PRs rather than child leads updating the ledger to mark their own progress.
 - Terminology: saga SDD, saga lead, child SDD, effort lead. Not "program".
 - The `saga-lead` skill is the operating manual for the role itself: watching child efforts, the
   multi-pass review protocol for their PRs, and the lead's after-round duties. This section defines
@@ -396,8 +391,8 @@ Work driven via SDD should be done in one or more feature branches. The general 
 5. SDD artifacts merge with the work itself, or ahead of it when other efforts need visibility (see
    [Merge artifacts early](#merge-artifacts-early-when-other-efforts-need-visibility)).
 6. If additional work remains per the specs, it should be done in additional feature branches,
-   tracking the work via the existing plan files. It is entirely permissible (encouraged) to modify
-   the artifacts if the requirements, architecture, plan, etc. has changed.
+   tracking the work via the existing plan files. Keep the artifacts the effort owns current as the
+   architecture, plan, or design changes; a requirements change is a request to the FRD's owner.
 7. Alternatively, if future work superseded unfinished work in an existing SDD feature directory,
    that future work should update the existing SDD specs to indicate that the remaining work is
    superseded.
@@ -436,18 +431,18 @@ it.
 
 A branch is private state; `main` is the coordination plane. That is why message passing delivers
 via `main`, and the same logic applies to the artifacts themselves: a sibling effort designing
-against your FRD, HLA, or plan can only see what has landed on `main`, and "read my feature branch"
-is not a coordination mechanism (branches rebase, drift, and can vanish, and nothing notifies a
-sibling when they do). So when another effort could build against your design (under an active saga,
-assume one can), merge SDD artifacts ahead of the implementation. Instances of the pattern: a saga
-child's seeding PR; the reviewed pre-implementation artifacts (once the draft review converges and
-the operator directs promotion, promote and merge rather than letting the artifacts ride the feature
-branch to the end; a converged review recommends, it does not sanction; for a saga child, the effort
-lead explicitly requests that draft review from the saga lead, whose ready-flip watch covers
-merge-intent PRs); and material in-flight DESIGN revisions, which keep flowing to `main` promptly as
-small PRs rather than accumulating. After an early artifact merge, implementation simply continues
-on the same branch (or a fresh one) and opens its own PR; the branching flow above is otherwise
-unchanged.
+against your effort's FRD, HLA, or plan can only see what has landed on `main`, and "read my feature
+branch" is not a coordination mechanism (branches rebase, drift, and can vanish, and nothing
+notifies a sibling when they do). So when another effort could build against your design (under an
+active saga, assume one can), merge SDD artifacts ahead of the implementation. Instances of the
+pattern: a saga child's seeding PR; the reviewed pre-implementation artifacts (once the draft review
+converges and the operator directs promotion, promote and merge rather than letting the artifacts
+ride the feature branch to the end; a converged review recommends, it does not sanction; for a saga
+child, the effort lead explicitly requests that draft review from the saga lead, whose ready-flip
+watch covers merge-intent PRs); and material in-flight DESIGN revisions, which keep flowing to
+`main` promptly as small PRs rather than accumulating. After an early artifact merge, implementation
+simply continues on the same branch (or a fresh one) and opens its own PR; the branching flow above
+is otherwise unchanged.
 
 Two things never merge ahead of their work. Checkbox flips are completion claims, not design: a
 checked box merges with or after the work that makes it true (an early-merged box would be an

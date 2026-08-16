@@ -80,9 +80,8 @@ so a dev who hits a plan problem raises it to the lead, who owns and revises it,
 ambiguous drafting author. You MAY delegate code _scouting_ to inform the plan (read these files,
 report the anchors, shapes, and surprises: facts, not phasing), but the phasing and the plan
 document are the lead's. The HLA is lead-authored for the same reason; the LLDs are not (section 3).
-The FRD is not the lead's at all: requirements belong to whoever requested the work, so a lead who
-finds its FRD wrong requests the change from the saga lead or operator who owns it (`sdd` skill,
-Artifact Mutability).
+The FRD is the operator's however much of it the lead drafted, so a wrong FRD is an amendment
+request (`sdd` skill, Artifact Mutability).
 
 The SDD skill runs its pre-implementation artifact review as a **draft PR** by design. That is the
 one sanctioned exception to the non-draft default in section 6.
@@ -184,7 +183,9 @@ section 7a instead):
 
 Who applies the fixes follows ownership: findings on **code** loop back to the implementing dev
 subagent (it keeps the context and the authorship, and the review-then-revise loop stays intact),
-while findings on an artifact the lead owns are the lead's to apply directly.
+findings on an artifact the lead owns (the plan, an LLD it is finalizing) are the lead's to apply
+directly, and findings on the FRD, or anything it references, go to the operator as an amendment
+request.
 
 ### Periodically review the process docs as a whole
 

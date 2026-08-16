@@ -60,9 +60,11 @@ the existing way, not to widen the surface.
 - `cli/agentworks/capabilities/README.md`: the capability model and the orchestration composition
   contracts (Readiness vs Node, declare-and-receive secrets, the context). Anchor here, with ADR
   0019, for how commands compose.
-- The active SDD under `docs/sdd/<sdd_feature_dir>/` if the change is part of an SDD effort.
+- The active SDD under `docs/sdd/<sdd_feature_dir>/`, and its saga SDD, if the change is part of an
+  SDD effort.
 - `docs/guides/idempotency.md`: the idempotency contract for reinit-able operations.
-- `.rulesync/rules/`: always-on conventions (code style, conventional commits, etc.).
+- `.rulesync/rules/`: always-on conventions (code style, conventional commits, etc.), and the `sdd`
+  skill for the artifact ownership, mutability, and lock semantics check 14 enforces.
 - Existing patterns in sibling code (other CLI commands, other manager functions, other
   provisioners, other migrations), for the implementation-discipline checks.
 
@@ -534,8 +536,9 @@ Look for:
 ### 14. SDD process execution
 
 When the change belongs to an SDD effort, the process is under review alongside the code. Read the
-effort's artifacts under `docs/sdd/<sdd_feature_dir>/` and check that this change executes that SDD
-faithfully rather than drifting from it.
+effort's artifacts under `docs/sdd/<sdd_feature_dir>/` and the saga SDD they reference, where a
+child's ownership map lives, and check that this change executes that SDD faithfully rather than
+drifting from it.
 
 Look for:
 
@@ -553,19 +556,21 @@ Look for:
   reworded, moved, or deleted is a violation in its own right (the `sdd` skill permits correcting a
   wrongly-checked box only while that box has not yet merged to `main`, so say which case you
   believe you are looking at).
-- Ownership breaches: edits to an artifact the actor does not own, including another effort's SDD
-  artifacts, an effort lead revising its own FRD rather than requesting the change, or a child
-  effort updating its saga SDD's ledger instead of flagging the inconsistency. Cross-effort messages
-  are new files only, and never into a locked feature directory.
+- Ownership breaches: edits to an artifact the actor does not own. The operator owns every FRD and
+  the documents it references, so a requirements change is an amendment only the operator grants and
+  rides its own PR; transcribing a ruling verbatim into a rulings section is not a breach. Other
+  instances: another effort's artifacts, and a child effort updating its saga SDD's ledger instead
+  of flagging the inconsistency. Cross-effort messages are new files only, and never into a locked
+  feature directory.
 - Changes under a feature directory whose `locked.md` is already on `main`, other than a `locked.md`
   update or a full wipe to the tombstone.
 - Content that belongs in a permanent home (`docs/arch/`, an ADR, a module README, a rule or skill)
   landing only inside the SDD, where it dies with the SDD.
 
-Two things are genuinely invisible in a diff: who held which role (effort lead versus delegated dev)
-and whether a PR is intended to merge as-is. Both change what is correct here. Take them from the
-invoking prompt, and when the prompt is silent, raise the point under **Questions** rather than
-asserting a violation you cannot see.
+Two things are genuinely invisible in a diff: who held which role (operator, saga lead, effort lead,
+or delegated dev) and whether a PR is intended to merge as-is. Both change what is correct here.
+Take them from the invoking prompt, and when the prompt is silent, raise the point under
+**Questions** rather than asserting a violation you cannot see.
 
 ## Consistency-review mode: the process tree as one document
 
