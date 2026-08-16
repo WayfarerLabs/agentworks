@@ -67,7 +67,13 @@ class ResolutionPreview:
         elif self.source is not None or self.identifier is not None:
             raise ValueError("unavailable preview forbids source and identifier")
         # Boundary: the same operator-authored text a resolution outcome
-        # carries, on the same rendered rows. See ``_safe_diagnostic_text``.
+        # carries. See ``_safe_diagnostic_text``. ``source`` and ``identifier``
+        # reach this row's own rendered surfaces (``secret describe``,
+        # ``doctor``). ``name`` reaches none of them, and is screened for a
+        # different reason: ``describe_secret`` builds a preview before its
+        # renderer prints that same operator-chosen name in the header
+        # (``inspect.py``), so this is where a forged one is caught. Call
+        # order is what puts the catch here.
         if not _safe_diagnostic_text(self.name):
             raise ValueError("invalid preview name")
         if self.source is not None and not _safe_diagnostic_text(self.source):
