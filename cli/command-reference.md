@@ -887,16 +887,16 @@ and rewrite any that still live in `config.toml`; the
 
 `agw guide [TOPIC]...` renders installed authored teaching. `concept-onboarding` additionally
 derives a bounded assessment from the current finalized resource registry. With no topic, agent mode
-gives the Agentworks assistant agent the current assistance contract, a complete intent map, and the
-fixed destination sign. Human mode instead gives the operator a short security note and two fixed
-starting destinations. The assistant interprets the operator's request and decides what to do next;
-the guide is not a router and grants no authorization. Current capability and adoption questions
-point to `concept-onboarding`, ongoing operation points to `concept-management`, and temporal
-version-change questions point to `concept-release-notes`. Current facts are never presented as a
-version-to-version delta. Raw kind, resource, relationship, schema, and sample facts belong to
-command surfaces rather than guide topics. Core concepts use names such as `concept-onboarding`,
-`concept-migration`, `concept-secrets`, and `concept-reporting-bugs`. Schema and sample inspection
-remains available through `agw resource describe-kind` and `agw resource sample`.
+gives the Agentworks assistant agent a fixed goal-oriented destination sign. Human mode gives the
+operator a fixed new-installation or existing-installation destination sign. The assistant
+interprets the operator's request and decides what to do next; the guide is not a router and grants
+no authorization. Current capability and adoption questions point to `concept-onboarding`, ongoing
+operation points to `concept-management`, and temporal version-change questions point to
+`concept-release-notes`. Current facts are never presented as a version-to-version delta. Raw kind,
+resource, relationship, schema, and sample facts belong to command surfaces rather than guide
+topics. Core concepts use names such as `concept-onboarding`, `concept-migration`,
+`concept-secrets`, and `concept-reporting-bugs`. Schema and sample inspection remains available
+through `agw resource describe-kind` and `agw resource sample`.
 
 `concept-source-review` owns the optional canonical source-review workflow. Establish exact stable
 `VERSION` with `agw version`, then choose focused review, full repository review, or decline. It
@@ -937,18 +937,18 @@ page, it follows no embedded links, and refusal performs no network request or c
 Multiple topics render in the requested order and are validated atomically: one unknown topic
 prevents all output. Repeated topics render once at their first position. `--agent` and `--human`
 override automatic presentation selection; explicit selection wins over the Claude Code execution
-signature and stdout TTY fallback. Agent mode carries the operating contract and intent map. Human
-mode carries a short operator-facing security note and starting command instead. Guide output is
-instructional and never grants authorization to resolve secrets, inspect the workstation, connect to
-a VM, or mutate state. At assistance startup, the Agentworks assistant agent discloses once that it
-can inspect files and run commands with the workstation account's permissions, reach configured
-Agentworks resources and SSH destinations, and act only within the proposed scope. That is not root
-access. The operator's explicit instruction establishes a durable current-session authorization
-envelope. Ask one resolving question only for material ambiguity or an uncovered material expansion;
-an explicit expansion instruction is already authorization, so disclose its new impact briefly and
-proceed. Honor narrower scope, refusal, and requested per-action confirmation. An action record's
-`consent` field is its authorization class for comparing impact with that envelope, not a
-requirement to repeat a prompt.
+signature and stdout TTY fallback. For selected topics, agent mode places the authored agent
+contract before the other blocks; human mode keeps authored order and labels that block as consent
+and safety. Guide output is instructional and never grants authorization to resolve secrets, inspect
+the workstation, connect to a VM, or mutate state. At assistance startup, the Agentworks assistant
+agent discloses once that it can inspect files and run commands with the workstation account's
+permissions, reach configured Agentworks resources and SSH destinations, and act only within the
+proposed scope. That is not root access. The operator's explicit instruction establishes a durable
+current-session authorization envelope. Ask one resolving question only for material ambiguity or an
+uncovered material expansion; an explicit expansion instruction is already authorization, so
+disclose its new impact briefly and proceed. Honor narrower scope, refusal, and requested per-action
+confirmation. An action record's `consent` field is its authorization class for comparing impact
+with that envelope, not a requirement to repeat a prompt.
 
 Guide registry construction never probes host tools or backend availability. Readiness that would
 require workstation inspection is rendered as unavailable; use a diagnostic surface when that fact
@@ -1021,17 +1021,17 @@ During the unreleased 0.14 transition, `agw resource kinds`, `agw resource list`
 surfaces. Resource explanation and graph display are owned by a separate CLI grammar change and are
 not implemented as guide fallbacks. The 0.14 release remains gated on that follow-up.
 
-| Command                                                               | Description                                                       |
-| --------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `agw guide`                                                           | Render the human new/existing-installation destination sign       |
-| `agw guide --agent`                                                   | Render the agent operating contract, intent map, and destinations |
-| `agw guide TOPIC...`                                                  | Render one or more exact topics atomically                        |
-| `agw guide TOPIC... --agent/--human`                                  | Override automatic presentation mode                              |
-| `agw guide concept-release-notes`                                     | Render the installed release's packaged notes                     |
-| `agw guide concept-release-notes/vMAJOR-MINOR-PATCH`                  | Render one exact packaged historical section                      |
-| `agw guide concept-source-review`                                     | Render optional focused and full source-review actions            |
-| `agw guide concept-onboarding --evidence ACTION_ID:KIND/NAME=OUTCOME` | Replay caller-owned proof                                         |
-| `agw guide --names-only`                                              | Emit topic names for shell completion                             |
+| Command                                                               | Description                                                 |
+| --------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `agw guide`                                                           | Render the human new/existing-installation destination sign |
+| `agw guide --agent`                                                   | Render the fixed agent goal-oriented destination sign       |
+| `agw guide TOPIC...`                                                  | Render one or more exact topics atomically                  |
+| `agw guide TOPIC... --agent/--human`                                  | Override automatic presentation mode                        |
+| `agw guide concept-release-notes`                                     | Render the installed release's packaged notes               |
+| `agw guide concept-release-notes/vMAJOR-MINOR-PATCH`                  | Render one exact packaged historical section                |
+| `agw guide concept-source-review`                                     | Render optional focused and full source-review actions      |
+| `agw guide concept-onboarding --evidence ACTION_ID:KIND/NAME=OUTCOME` | Replay caller-owned proof                                   |
+| `agw guide --names-only`                                              | Emit topic names for shell completion                       |
 
 ### Guide management coverage
 

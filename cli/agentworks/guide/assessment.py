@@ -281,8 +281,8 @@ _ACTION_RECORDS = (
         "and data is an object. Require matching session, template, VM, workspace, and Agentworks-managed agent "
         "identity, plus data.session.status exactly running.",
         ("agw", "session", "describe", "$SESSION_NAME", "--output", "json"),
-        "Create or start nothing. Keep the exact input checklist and command for later, and use the live VM "
-        "and session topics for manual preparation.",
+        "Create or start nothing. Keep the exact input checklist and command for later, and use `agw vm --help` "
+        "and `agw session --help` for manual preparation.",
     ),
 )
 
