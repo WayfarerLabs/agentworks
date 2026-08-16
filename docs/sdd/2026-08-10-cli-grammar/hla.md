@@ -3,7 +3,7 @@
 - Status: Draft for architecture checkpoint review
 - Date: 2026-08-15
 - Implements: `frd.md`
-- Code basis: `origin/main` at `d7bbd475`
+- Code basis: `origin/main` at `d87deda0`
 
 ## Summary
 
@@ -331,14 +331,13 @@ keeps the config-free kind and capability-implementation completer under its new
 Bash, zsh, and PowerShell generation consume the same introspected command tree and dynamic mapping.
 No shell receives a hand-maintained grammar variant.
 
-The survey-approved guide-value deletion must land on `main`, and this branch must rebase over it,
-before grammar implementation begins. Design and seeding may continue before that prerequisite;
-implementation may not. The rewrite updates only surviving guide teaching and actions, never
-restores runtime resource topics, schema blocks, or generic guide projection machinery removed by
-that effort. The active command reference, CLI README, sample config, surviving domain READMEs,
-upgrade guide, hints, and generated completions move with their owning behavior. Resource-group help
-is updated explicitly so its current `Cross-kind inspection` description does not survive the
-generic inspector's removal.
+The survey-approved guide-value deletion landed in PR #556, and this branch's code basis includes
+it. Every implementation rebase must preserve that post-deletion surface. The rewrite updates only
+surviving guide teaching and actions, never restores runtime resource topics, schema blocks, or
+generic guide projection machinery removed by that effort. The active command reference, CLI README,
+sample config, surviving domain READMEs, upgrade guide, hints, and generated completions move with
+their owning behavior. Resource-group help is updated explicitly so its current
+`Cross-kind inspection` description does not survive the generic inspector's removal.
 
 ## End-to-end control flow
 
@@ -422,9 +421,8 @@ yet.
 
 Implementation ordering inherited from the saga is:
 
-1. land the survey-approved guide deletion and rebase before implementation;
-2. design against that post-cut guide surface and do not recreate deleted guide machinery; and
-3. keep the complete grammar correction as a 0.14.0 release gate.
+1. preserve the landed post-cut guide surface and do not recreate deleted guide machinery; and
+2. keep the complete grammar correction as a 0.14.0 release gate.
 
 The PR review thread adds two coordination steps to reconfirm at implementation kickoff: publish the
 dying command/test list so the simplification sweep can avoid ownership collisions, and coordinate
