@@ -585,14 +585,14 @@ new run records the refined source.
       identity, and two-path onboarding chooser. It has no small header mark. Home, Manifesto,
       Security, Lander, and 404 each show one GitHub and one PyPI icon-and-text link in the header
       and exactly three footer destinations: Manifesto, Security, then the icon-only Lander link.
-      Only Home's Old school onboarding path repeats the repository destination in the body.
+      Only Home's Manual onboarding path repeats the repository destination in the body.
 - [ ] In Chrome and Edge before merge, verify at 320 CSS pixels, 400 percent zoom, touch landscape,
       and wide desktop that Home, Manifesto, Security, Lander, and 404 have no page overflow,
       clipped text or navigation, overlap, or fixed-height content loss. Record browser versions,
       viewport, date, and result when available, or record the explicit evidence limitation.
 - [ ] After launch, repeat that complete shared-shell matrix in Firefox and WebKit and record the
       browser versions, viewport, date, and result.
-- [x] With JavaScript disabled, Home exposes both Agent-assisted and Old school onboarding content,
+- [x] With JavaScript disabled, Home exposes both `via Agent` and Manual onboarding content,
       Manifesto and Security retain all content and links, Lander retains its heading and named
       scene, and 404 retains its message, named scene, and breadcrumb route-home action. No surface
       depends on terminal familiarity.

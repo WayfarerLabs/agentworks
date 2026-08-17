@@ -127,8 +127,8 @@ def validate_onboarding_template(name: str, template: str) -> None:
     for tab, (tab_id, panel_id) in zip(
         tabs,
         (
-            ("agent-assisted-tab", "agent-assisted-panel"),
-            ("old-school-tab", "old-school-panel"),
+            ("via-agent-tab", "via-agent-panel"),
+            ("manual-tab", "manual-panel"),
         ),
         strict=True,
     ):
@@ -140,14 +140,14 @@ def validate_onboarding_template(name: str, template: str) -> None:
     contracts = (
         (
             agent_panel,
-            "agent-assisted-panel",
-            "agent-assisted-heading",
+            "via-agent-panel",
+            "via-agent-heading",
             ["h3", "p", "div", "p"],
         ),
         (
             old_panel,
-            "old-school-panel",
-            "old-school-heading",
+            "manual-panel",
+            "manual-heading",
             ["h3", "p", "pre", "p", "pre"],
         ),
     )
@@ -166,9 +166,9 @@ def validate_onboarding_template(name: str, template: str) -> None:
 
     agent_heading, agent_intro, prompt_shell, status = children(parser, agent_panel)
     if not visible_leaf(
-        parser, agent_heading, {"id": "agent-assisted-heading"}
+        parser, agent_heading, {"id": "via-agent-heading"}
     ) or not visible_leaf(parser, agent_intro, {}):
-        raise ValueError("index.html: agent-assisted panel introduction is invalid")
+        raise ValueError("index.html: agent panel introduction is invalid")
     prompt, button = children(parser, prompt_shell)
     if elements[prompt_shell].attributes != {"class": "onboarding-prompt-shell"} or [
         elements[index].tag for index in children(parser, prompt_shell)
@@ -230,20 +230,20 @@ def validate_onboarding_template(name: str, template: str) -> None:
         children(parser, old_panel)
     )
     if (
-        not visible_leaf(parser, old_heading, {"id": "old-school-heading"})
+        not visible_leaf(parser, old_heading, {"id": "manual-heading"})
         or elements[repository_step].attributes
         or elements[guide_step].attributes
         or not normalized_text(parser, repository_step)
         or not normalized_text(parser, guide_step)
     ):
-        raise ValueError("index.html: old-school guidance structure is invalid")
+        raise ValueError("index.html: manual guidance structure is invalid")
     repository_children = children(parser, repository_step)
     if (
         [elements[index].tag for index in repository_children] != ["a", "code"]
         or not visible_leaf(parser, repository_children[0], {"href": REPOSITORY_URL})
         or not visible_leaf(parser, repository_children[1], {})
     ):
-        raise ValueError("index.html: old-school repository guidance is invalid")
+        raise ValueError("index.html: manual repository guidance is invalid")
     for command in (install_commands, guide_command):
         command_children = children(parser, command)
         if (
@@ -252,7 +252,7 @@ def validate_onboarding_template(name: str, template: str) -> None:
             or elements[command_children[0]].tag != "code"
             or not visible_leaf(parser, command_children[0], {})
         ):
-            raise ValueError("index.html: old-school command structure is invalid")
+            raise ValueError("index.html: manual command structure is invalid")
     scripts = [
         index for index, element in enumerate(elements) if element.tag == "script"
     ]

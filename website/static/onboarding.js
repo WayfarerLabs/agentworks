@@ -3,8 +3,8 @@ const FAILURE_MESSAGE = "Copy failed. Select the prompt and copy it manually.";
 const MANUAL_MESSAGE = "Select the prompt and copy it manually.";
 
 const TAB_ENTRIES = [
-    ["agent-assisted-tab", "agent-assisted-panel"],
-    ["old-school-tab", "old-school-panel"],
+    ["via-agent-tab", "via-agent-panel"],
+    ["manual-tab", "manual-panel"],
 ];
 
 export async function copyPrompt(prompt, status, clipboard) {

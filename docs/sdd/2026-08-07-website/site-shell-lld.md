@@ -13,7 +13,7 @@
 ## 1. Scope and release invariant
 
 The checked-in `website/` tree produces the complete static shell for Home, Manifesto, Security,
-Lander, and 404. Home presents Agent-assisted and Old school onboarding, projects the canonical thin
+Lander, and 404. Home presents `via Agent` and Manual onboarding, projects the canonical thin
 assistance prompt in the default path, and progressively enhances both tabs and its local icon copy
 control. Manifesto and Security remain script-free. Lander and 404 remain useful without JavaScript
 and progressively enhance only their one shared game subtree. The retired availability notice and
@@ -203,19 +203,19 @@ reporting paths.
 
 ### 6.1 Home onboarding chooser
 
-Home contains one onboarding section with a two-option chooser. Its source order is Agent-assisted,
-then Old school. Agent-assisted owns the sole `{{ONBOARDING_PROMPT}}` placement and remains the
-default enhanced panel. Old school is hardcoded site content containing one repository link, one
+Home contains one onboarding section with a two-option chooser. Its source order is `via Agent`,
+then Manual. `via Agent` owns the sole `{{ONBOARDING_PROMPT}}` placement and remains the default
+enhanced panel. Manual is hardcoded site content containing one repository link, one
 `uv tool install agentworks-cli` command, one alternative `pipx install agentworks-cli` command, and
 one `agw guide` handoff. It does not project or duplicate guide topic bodies.
 
 Without JavaScript, the document shows both labeled panels and keeps the tab controls hidden. The
 local `static/onboarding.js` module reveals the two-button tablist, assigns the tab and tabpanel
-ARIA relationships, selects Agent-assisted, and hides only the inactive panel. Click, Left/Right
+ARIA relationships, selects `via Agent`, and hides only the inactive panel. Click, Left/Right
 arrows, Home, and End use native button focus and the WAI-ARIA tab interaction shape; Enter and
 Space retain their native button activation.
 
-The Agent-assisted prompt sits in a positioned shell containing one `pre`/`code` projection and one
+The `via Agent` prompt sits in a positioned shell containing one `pre`/`code` projection and one
 initially hidden copy button. The button contains only an inline decorative 24-unit SVG path, has a
 nonempty accessible name and matching title, and occupies at least 40 by 40 CSS pixels. It is
 revealed only when clipboard writing is available. Copy always writes the projected code element's

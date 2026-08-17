@@ -54,17 +54,13 @@
                 <h2 id="onboarding-heading">Choose your setup path</h2>
                 <p>Hand setup to an assistant, or take the controls yourself.</p>
                 <div id="onboarding-tab-list" class="onboarding-tabs" aria-label="Setup path" hidden>
-                    <button id="agent-assisted-tab" type="button" data-panel="agent-assisted-panel">
-                        Agent-assisted
+                    <button id="via-agent-tab" type="button" data-panel="via-agent-panel">
+                        via Agent
                     </button>
-                    <button id="old-school-tab" type="button" data-panel="old-school-panel">Old school</button>
+                    <button id="manual-tab" type="button" data-panel="manual-panel">Manual</button>
                 </div>
-                <section
-                    id="agent-assisted-panel"
-                    class="onboarding-panel"
-                    aria-labelledby="agent-assisted-heading"
-                >
-                    <h3 id="agent-assisted-heading">Agent-assisted</h3>
+                <section id="via-agent-panel" class="onboarding-panel" aria-labelledby="via-agent-heading">
+                    <h3 id="via-agent-heading">via Agent</h3>
                     <p>Copy this prompt into any capable assistant.</p>
                     <div class="onboarding-prompt-shell">
                         <pre class="onboarding-prompt"><code id="onboarding-prompt">{{ONBOARDING_PROMPT}}</code></pre>
@@ -72,8 +68,8 @@
                             id="copy-onboarding-prompt"
                             class="copy-prompt-button"
                             type="button"
-                            aria-label="Copy agent-assisted setup prompt"
-                            title="Copy agent-assisted setup prompt"
+                            aria-label="Copy agent setup prompt"
+                            title="Copy agent setup prompt"
                             hidden
                         >
                             <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
@@ -85,8 +81,8 @@
                     </div>
                     <p id="copy-status" class="copy-status" role="status" aria-live="polite" aria-atomic="true"></p>
                 </section>
-                <section id="old-school-panel" class="onboarding-panel" aria-labelledby="old-school-heading">
-                    <h3 id="old-school-heading">Old school</h3>
+                <section id="manual-panel" class="onboarding-panel" aria-labelledby="manual-heading">
+                    <h3 id="manual-heading">Manual</h3>
                     <p>
                         Start by <a href="https://github.com/WayfarerLabs/agentworks">browsing the repository</a>,
                         then install the CLI with <code>uv</code> or another Python tool installer. Agentworks

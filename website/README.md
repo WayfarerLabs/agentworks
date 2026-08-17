@@ -7,14 +7,14 @@ combines semantic templates, local CSS and JavaScript, the AGW rocket asset, and
 and complete documents from permanent repository sources. Generated output stays outside the
 repository and can be published by any static host.
 
-The compact Home page renders the repository-sourced identity and offers Agent-assisted and Old
-school setup paths. Agent-assisted projects the canonical thin CLI bootstrap from
+The compact Home page renders the repository-sourced identity and offers `via Agent` and Manual
+setup paths. `via Agent` projects the canonical thin CLI bootstrap from
 `packaging/agentworks/assistance.md`; the same bootstrap is projected into the top-level README, and
-the build fails unless those two source representations are byte-identical. Old school provides a
+the build fails unless those two source representations are byte-identical. Manual provides a
 bounded repository, install, and `agw guide` path. A generated Manifesto presents the complete
 long-form argument from `docs/manifesto.md`, while a separate Security page provides practical depth
 and a GitHub reporting route. The shared header places the GitHub and PyPI destinations once per
-page; Home repeats the repository only where the Old school path needs it. A dedicated Lander page
+page; Home repeats the repository only where the Manual path needs it. A dedicated Lander page
 presents the same continuous lunar-deployment expedition used as progressive enhancement on the
 useful 404 fallback. The shared footer places the Manifesto, Security, and icon-only Lander
 destinations once per page.
@@ -278,10 +278,10 @@ fails closed.
 
 Templates own only navigation, destination labels, metadata placement, presentation-neutral
 connective text, game-page headings, the semantic container around the canonical onboarding
-projection, and the bounded Old school repository/install/guide path. `website/` does not own the
-prompt body, long-form body headings, product behavior, security claims, vulnerability contact
-details, or broader installation guidance. The selected SVG and lander implementation are permanent
-assets and must not be regenerated from design-history files.
+projection, and the bounded Manual repository/install/guide path. `website/` does not own the prompt
+body, long-form body headings, product behavior, security claims, vulnerability contact details, or
+broader installation guidance. The selected SVG and lander implementation are permanent assets and
+must not be regenerated from design-history files.
 
 Home, Manifesto, Security, Lander, and 404 use the same breadcrumb-led header and traditional
 footer. The header has exactly one linked `Agentworks` home crumb, a hidden visual separator, a
@@ -290,9 +290,9 @@ small header mark because its large hero follows; every other page has exactly o
 mark immediately before the breadcrumb. The footer has exact ownership text plus one Manifesto and
 one Security text link, followed by a selected-rocket icon link whose matching accessibility label
 and hover title are `Help deploy some agents!`. Each service icon has one pinned direct path; its
-adjacent visible text supplies the accessible name. Only Home's Old school panel repeats the
-repository destination in the body; other shell destinations are not repeated. On 404, the linked
-home crumb is the sole visible route-home action.
+adjacent visible text supplies the accessible name. Only Home's Manual panel repeats the repository
+destination in the body; other shell destinations are not repeated. On 404, the linked home crumb is
+the sole visible route-home action.
 
 Every page head references `assets/agw-favicon.svg`, a transparent, flame-free projection of the
 neutral A/G/W mark. Its geometry is checked against `assets/agw-rocket.svg`; maintain the selected
@@ -303,17 +303,17 @@ sources, not generated HTML.
 
 ## Onboarding chooser
 
-Home presents Agent-assisted and Old school in source order. Without JavaScript, both panels remain
-visible and usable. The local `static/onboarding.js` module progressively enhances them into a
-two-tab chooser, selects Agent-assisted by default, and provides standard keyboard tab navigation.
-Old school links to the repository, shows `uv` and alternate Python-tooling install commands, and
-ends with `agw guide`.
+Home presents `via Agent` and Manual in source order. Without JavaScript, both panels remain visible
+and usable. The local `static/onboarding.js` module progressively enhances them into a two-tab
+chooser, selects `via Agent` by default, and provides standard keyboard tab navigation. Manual links
+to the repository, shows `uv` and alternate Python-tooling install commands, and ends with
+`agw guide`.
 
-The Agent-assisted panel contains one semantic `pre` and `code` prompt container. The builder reads
-the canonical prompt as exact NUL-free, LF-terminated UTF-8, proves that the collision-proof
-generated README fence contains the same bytes, escapes it for HTML, and places it once. Missing,
-symlinked, malformed, normalized, or divergent inputs fail before output changes. The generated code
-element's decoded text is therefore byte-identical to the canonical source.
+The `via Agent` panel contains one semantic `pre` and `code` prompt container. The builder reads the
+canonical prompt as exact NUL-free, LF-terminated UTF-8, proves that the collision-proof generated
+README fence contains the same bytes, escapes it for HTML, and places it once. Missing, symlinked,
+malformed, normalized, or divergent inputs fail before output changes. The generated code element's
+decoded text is therefore byte-identical to the canonical source.
 
 The prompt remains visible and manually selectable without JavaScript. When clipboard writing is
 available, the onboarding module reveals a compact icon button inside the prompt, writes the code

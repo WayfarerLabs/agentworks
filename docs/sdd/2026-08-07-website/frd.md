@@ -14,10 +14,10 @@
 ## Purpose
 
 Agentworks gets a public front door at `agentworks.build` (domain purchased 2026-08-07): the place a
-curious human or their agent lands first and learns what Agentworks is. They choose an
-agent-assisted setup path, centered on the canonical copy-paste block, or a concise old-school path
-for inspecting and installing the CLI themselves. Both paths hand continuing assistance to
-`agw guide`, alongside useful product/security depth and permanent project links.
+curious human or their agent lands first and learns what Agentworks is. They choose the `via Agent`
+setup path, centered on the canonical copy-paste block, or a concise Manual path for inspecting and
+installing the CLI themselves. Both paths hand continuing assistance to `agw guide`, alongside
+useful product/security depth and permanent project links.
 
 The operator's sizing mandate is the controlling constraint: **super simple at first**. The first
 slice is a small static site, its publishing pipeline, and one optional interactive surprise shared
@@ -31,9 +31,9 @@ recorded as a growth path so nothing forecloses it, and none of it is in scope n
 ## Requirements (first slice)
 
 - R1. A static site served at `https://agentworks.build`: what Agentworks is (problem, principles),
-  an agent-assisted bootstrap, a concise old-school setup path, and links to the GitHub repository
-  and the PyPI package. Content fits on one page or very few; design is clean and minimal.
-- R2. The agent-assisted bootstrap is the default setup path, presented for its real consumer: an
+  an agent bootstrap, a concise Manual setup path, and links to the GitHub repository and the PyPI
+  package. Content fits on one page or very few; design is clean and minimal.
+- R2. The `via Agent` bootstrap is the default setup path, presented for its real consumer: an
   operator will paste it to their agent, so it must be trivially copyable and byte-identical to the
   block the repository README carries. Its copy action uses a familiar local icon inside the prompt
   region rather than a large text button beneath it.
@@ -79,11 +79,11 @@ recorded as a growth path so nothing forecloses it, and none of it is in scope n
   provide touch and assistive-technology equivalents to Escape and `r`; they remain hidden during
   hint-free preflight.
 - R10. The completed site replaces the former bounded onboarding-availability notice with one
-  onboarding chooser. Its default Agent-assisted tab projects the canonical bootstrap source; its
-  Old school tab gives a bounded human-directed path to inspect the repository, install from PyPI
-  with `uv` or another Python tool installer, and continue with `agw guide`. It retains the
-  established shell, brand, permanent links, custom 404, deployment pipeline, and domain; no second
-  site or dormant interim notice remains.
+  onboarding chooser. Its default `via Agent` tab projects the canonical bootstrap source; its
+  Manual tab gives a bounded human-directed path to inspect the repository, install from PyPI with
+  `uv` or another Python tool installer, and continue with `agw guide`. It retains the established
+  shell, brand, permanent links, custom 404, deployment pipeline, and domain; no second site or
+  dormant interim notice remains.
 - R11. The main page includes the restrained link text `We take security seriously.` as optional
   depth, not a warning gate or dominant call to action. It leads to a dedicated static security page
   that renders the complete root `SECURITY.md` as HTML. That document is the single authority for
@@ -91,8 +91,8 @@ recorded as a growth path so nothing forecloses it, and none of it is in scope n
   posture, and GitHub-only vulnerability-reporting path. The website adds no selected passages or
   separately maintained security prose. The page is candid and specific without assuming every
   visitor wants a security lecture.
-- R12. The Agent-assisted tab consumes the canonical thin bootstrap source byte-for-byte and does
-  not append a security recital, source-review offer, or operating guidance. The Old school tab is
+- R12. The `via Agent` tab consumes the canonical thin bootstrap source byte-for-byte and does not
+  append a security recital, source-review offer, or operating guidance. The Manual tab is
   deliberately site-owned and bounded to repository inspection, installation, and an `agw guide`
   handoff. The installed guide owns startup disclosure, authorization posture, environment-specific
   recommendations, and continuing assistance for both paths.
@@ -104,10 +104,10 @@ recorded as a growth path so nothing forecloses it, and none of it is in scope n
 - R14. The landing page is a deliberately compact single-page product handoff, not a rendered
   manifesto. It shows the selected rocket mark as a dominant hero element at two to three times its
   original header scale, gives only the concise product identity and two-path onboarding chooser,
-  and offers the repository, package, deeper rationale, and security deep dive. The Old school path
-  may repeat the repository destination where it is necessary to make that setup path complete;
-  other destinations must not be repeated in the landing page's header, body, and footer. Visitors
-  who want the longer problem statement or principles follow the single Manifesto link to a page
+  and offers the repository, package, deeper rationale, and security deep dive. The Manual path may
+  repeat the repository destination where it is necessary to make that setup path complete; other
+  destinations must not be repeated in the landing page's header, body, and footer. Visitors who
+  want the longer problem statement or principles follow the single Manifesto link to a page
   generated from their permanent repository source. The dedicated Manifesto, security, Lander, and
   host-required 404 pages remain separate optional/play/error surfaces rather than being folded into
   the landing page.
@@ -383,10 +383,10 @@ merged and settled on `main`. The first slice must not build toward them specula
 
 - AC1. `https://agentworks.build` serves the site over TLS.
 - AC2. A change to the site source merged to `main` is live without manual steps.
-- AC3. The Agent-assisted bootstrap block on the site and in the README are verified identical by
+- AC3. The `via Agent` bootstrap block on the site and in the README are verified identical by
   tooling, not by discipline.
 - AC4. An operator who has never heard of Agentworks can land, understand what it is, and either
-  hand their agent the block or begin the old-school setup path in under a minute.
+  hand their agent the block or begin the Manual setup path in under a minute.
 - AC5. A missing URL serves a semantic 404 with a visible home link before scripts run. Its content
   begins with `Page not found` after the compact shared inset, with no redundant error-code or other
   pre-title label; no control instructions are visually disclosed until deliberate activation starts
@@ -412,30 +412,30 @@ merged and settled on `main`. The first slice must not build toward them specula
   fixed-step physics across representative frame schedules, seeded terrain and site generation,
   route-home fallback, hidden-until-start instructions, fuel and checkpoint transitions, reduced
   motion, keyboard focus, narrow screens, bounded runtime work, and paused background behavior.
-- AC9. `https://agentworks.build` contains exactly one onboarding chooser with Agent-assisted
-  selected by default, one semantic canonical bootstrap projection, one complete Old school panel,
-  and no retired availability notice, empty onboarding container, or unexpanded template token.
+- AC9. `https://agentworks.build` contains exactly one onboarding chooser with `via Agent` selected
+  by default, one semantic canonical bootstrap projection, one complete Manual panel, and no retired
+  availability notice, empty onboarding container, or unexpanded template token.
 - AC10. Canonical bootstrap integration leaves the established information architecture, visual
   system, URLs, 404, and deployment path intact.
 - AC11. The home-page security link is visible but visually secondary, works without JavaScript, and
   resolves to a semantic security page at a stable URL. That page distinguishes claims, boundaries,
   current limitations, operator practices, and private vulnerability reporting; every
   product/security claim is sourced from or verified against permanent repository documentation.
-- AC12. Tooling proves the Agent-assisted website panel and README decode to the canonical thin
-  bootstrap bytes. The separately authored Old school panel remains bounded to repository
-  inspection, installation, and an `agw guide` handoff. Startup disclosure, authorization posture,
-  and environment-specific guidance remain in the installed guide.
+- AC12. Tooling proves the `via Agent` website panel and README decode to the canonical thin
+  bootstrap bytes. The separately authored Manual panel remains bounded to repository inspection,
+  installation, and an `agw guide` handoff. Startup disclosure, authorization posture, and
+  environment-specific guidance remain in the installed guide.
 - AC13. The landing, Manifesto, security, Lander, and 404 surfaces share a restrained
   terminal/TUI-derived visual system at desktop and narrow widths. Text remains real semantic
   content, ordinary links and controls remain recognizable, and the design meets the existing
   contrast, focus, zoom, reflow, reduced-motion, keyboard, and touch requirements without depending
   on terminal familiarity.
 - AC14. In a clean-context check, a visitor with no prior Agentworks knowledge can understand what
-  the project is, distinguish Agent-assisted from Old school setup, copy the bootstrap through the
+  the project is, distinguish `via Agent` from Manual setup, copy the bootstrap through the
   in-prompt icon, and find the repository, package, rationale, or security path without explanation.
 - AC15. The landing page contains one primary navigable anchor for each of the GitHub repository,
-  PyPI package, deeper rationale, and security destinations; the Old school panel may repeat only
-  the repository anchor. It contains no rendered problem-space or principles section. The selected
+  PyPI package, deeper rationale, and security destinations; the Manual panel may repeat only the
+  repository anchor. It contains no rendered problem-space or principles section. The selected
   rocket is a prominent hero element without displacing the page identity, onboarding chooser, or
   four destinations at 320 CSS pixels or 400 percent zoom.
 - AC16. Generated Home, Manifesto, Security, Lander, and 404 documents expose the shared responsive

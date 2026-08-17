@@ -47,7 +47,7 @@ panel.
 
 The landing page does not render the longer problem statement or principles. Those passages render
 on the generated Manifesto page from their permanent repository source. GitHub and PyPI appear in
-the shared header; Manifesto and Security appear once in the shared footer. The Old school panel may
+the shared header; Manifesto and Security appear once in the shared footer. The Manual panel may
 repeat GitHub once to make its repository-inspection step complete. The body does not repeat the
 other destinations under different labels.
 
@@ -151,7 +151,7 @@ The site has three content classes:
   to this SDD.
 - **Site-owned connective content.** The website owns presentation-neutral labels and instructions
   such as navigation, link introductions, the operator-approved security-link label, copy-status
-  feedback, and the bounded Old school path. That path may explain repository inspection, name the
+  feedback, and the bounded Manual path. That path may explain repository inspection, name the
   supported package and minimum Python version already owned by permanent CLI documentation, show
   `uv` and one alternative installer, and hand off to `agw guide`. It does not make broader claims
   about Agentworks behavior, guarantees, principles, security properties, or environment-specific
@@ -220,9 +220,9 @@ surfaces with these invariants:
 
 ### D6. Onboarding interaction is progressive enhancement
 
-Before JavaScript runs, the Agent-assisted and Old school paths are both visible as ordinary
-semantic sections, and the bootstrap text remains selectable. Enhancement presents the two paths as
-an accessible two-tab interface with Agent-assisted selected by default, ordinary click and keyboard
+Before JavaScript runs, the `via Agent` and Manual paths are both visible as ordinary semantic
+sections, and the bootstrap text remains selectable. Enhancement presents the two paths as an
+accessible two-tab interface with `via Agent` selected by default, ordinary click and keyboard
 activation, arrow/Home/End navigation, managed selection state, and one visible panel. The tab
 labels, panel content, and reading order do not depend on CSS-generated text.
 

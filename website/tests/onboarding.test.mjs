@@ -35,14 +35,14 @@ function element({ hidden = false, textContent = "" } = {}) {
 
 function fixture() {
     const elements = {
-        "agent-assisted-panel": element(),
-        "agent-assisted-tab": element({ textContent: "agent" }),
         "copy-onboarding-prompt": element({ hidden: true }),
         "copy-status": element(),
-        "old-school-panel": element(),
-        "old-school-tab": element({ textContent: "manual" }),
+        "manual-panel": element(),
+        "manual-tab": element({ textContent: "manual" }),
         "onboarding-prompt": element({ textContent: "line one\n`agw guide --agent`\n" }),
         "onboarding-tab-list": element({ hidden: true }),
+        "via-agent-panel": element(),
+        "via-agent-tab": element({ textContent: "agent" }),
     };
     const documentObject = {
         activeElement: { id: "focus-canary" },
@@ -94,12 +94,12 @@ test("copy outcomes expose distinct success, failure, and manual states", async 
     assert.equal(manual.elements["copy-onboarding-prompt"].hidden, true);
 });
 
-test("tabs progressively enhance with agent-assisted selected by default", () => {
+test("tabs progressively enhance with via Agent selected by default", () => {
     const current = fixture();
     initializeTabs(current.documentObject);
 
-    const tabs = [current.elements["agent-assisted-tab"], current.elements["old-school-tab"]];
-    const panels = [current.elements["agent-assisted-panel"], current.elements["old-school-panel"]];
+    const tabs = [current.elements["via-agent-tab"], current.elements["manual-tab"]];
+    const panels = [current.elements["via-agent-panel"], current.elements["manual-panel"]];
     assert.equal(current.elements["onboarding-tab-list"].hidden, false);
     assert.equal(current.elements["onboarding-tab-list"].getAttribute("role"), "tablist");
     assert.deepEqual(
@@ -121,16 +121,16 @@ test("tabs progressively enhance with agent-assisted selected by default", () =>
 test("click and keyboard navigation select, wrap, and focus tabs", () => {
     const current = fixture();
     initializeTabs(current.documentObject);
-    const agent = current.elements["agent-assisted-tab"];
-    const oldSchool = current.elements["old-school-tab"];
+    const agent = current.elements["via-agent-tab"];
+    const manual = current.elements["manual-tab"];
 
-    oldSchool.listeners.get("click")();
-    assert.equal(oldSchool.getAttribute("aria-selected"), "true");
-    assert.equal(current.elements["old-school-panel"].hidden, false);
-    assert.equal(current.elements["agent-assisted-panel"].hidden, true);
+    manual.listeners.get("click")();
+    assert.equal(manual.getAttribute("aria-selected"), "true");
+    assert.equal(current.elements["manual-panel"].hidden, false);
+    assert.equal(current.elements["via-agent-panel"].hidden, true);
 
     let prevented = 0;
-    oldSchool.listeners.get("keydown")({
+    manual.listeners.get("keydown")({
         key: "ArrowRight",
         preventDefault() {
             prevented += 1;
@@ -141,12 +141,12 @@ test("click and keyboard navigation select, wrap, and focus tabs", () => {
     assert.equal(agent.focusCount, 1);
 
     agent.listeners.get("keydown")({ key: "End", preventDefault() {} });
-    assert.equal(oldSchool.getAttribute("aria-selected"), "true");
-    assert.equal(oldSchool.focusCount, 1);
+    assert.equal(manual.getAttribute("aria-selected"), "true");
+    assert.equal(manual.focusCount, 1);
 
-    const selectedBefore = oldSchool.getAttribute("aria-selected");
-    oldSchool.listeners.get("keydown")({ key: "Escape", preventDefault() {} });
-    assert.equal(oldSchool.getAttribute("aria-selected"), selectedBefore);
+    const selectedBefore = manual.getAttribute("aria-selected");
+    manual.listeners.get("keydown")({ key: "Escape", preventDefault() {} });
+    assert.equal(manual.getAttribute("aria-selected"), selectedBefore);
 });
 
 test("combined and partial initialization fail safely", () => {

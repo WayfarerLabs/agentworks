@@ -1260,10 +1260,18 @@ constant-time formula with no live route calculation; and the fixed scene never 
 - [x] Update permanent website documentation, structural and behavior tests, exact artifacts, and
       responsive browser evidence; run the complete website gates and required independent reviews.
 
+The operator's 2026-08-17 naming correction supersedes the completed labels without changing the
+two-path behavior recorded above.
+
+- [x] Rename the default tab and panel to `via Agent` and the second tab and panel to Manual,
+      including their semantic IDs, active SDD contracts, permanent docs, and acceptance evidence.
+- [x] Keep `packaging/agentworks/assistance.md` as the sole authored agent-prompt body and continue
+      projecting it into the website rather than hardcoding a second copy.
+
 Definition of done: Home offers two understandable setup paths in one compact onboarding region; the
-canonical agent prompt remains byte-identical and copies through a familiar in-prompt icon; Old
-school provides a complete bounded manual path; no-JavaScript, keyboard, screen-reader, narrow
-viewport, deterministic build, and deployment contracts remain intact.
+canonical agent prompt remains byte-identical and copies through a familiar in-prompt icon; Manual
+provides a complete bounded path; no-JavaScript, keyboard, screen-reader, narrow viewport,
+deterministic build, and deployment contracts remain intact.
 
 ## Phase 5: CI and default Pages deployment
 

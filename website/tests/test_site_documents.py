@@ -405,8 +405,8 @@ class GeneratedDocumentTests(RepositoryFixture):
         self.assertEqual(
             [(tab.get("id"), tab.get("type"), tab.get("data-panel")) for tab in tabs],
             [
-                ("agent-assisted-tab", "button", "agent-assisted-panel"),
-                ("old-school-tab", "button", "old-school-panel"),
+                ("via-agent-tab", "button", "via-agent-panel"),
+                ("manual-tab", "button", "manual-panel"),
             ],
         )
         panels = [
@@ -417,8 +417,8 @@ class GeneratedDocumentTests(RepositoryFixture):
         self.assertEqual(
             [(panel.get("id"), panel.get("aria-labelledby"), panel.get("hidden")) for panel in panels],
             [
-                ("agent-assisted-panel", "agent-assisted-heading", None),
-                ("old-school-panel", "old-school-heading", None),
+                ("via-agent-panel", "via-agent-heading", None),
+                ("manual-panel", "manual-heading", None),
             ],
         )
         prompts = [tag for tag in document.tags("pre") if tag.get("class") == "onboarding-prompt"]
