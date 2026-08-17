@@ -541,7 +541,7 @@ to humans and assistant agents and removes the remaining bootstrap and content c
       handoff. Regenerate README, website, Claude Code, and Codex projections; retain byte-parity
       and version/fingerprint safeguards while deleting semantic and wording tests for the authored
       prompt.
-- [ ] Update completions and permanent docs or record them unaffected. Run focused guide,
+- [x] Update completions and permanent docs or record them unaffected. Run focused guide,
       assistance, generation, and website tests plus the full non-integration suite, Ruff,
       formatting, mypy, Rulesync drift, locked-SDD, and file lint. Complete project and fresh-eyes
       reviews, resolve material findings, and hand off one ready PR under the saga gate.
