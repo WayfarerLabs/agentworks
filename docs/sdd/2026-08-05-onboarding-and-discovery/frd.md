@@ -171,7 +171,7 @@ configuration changes only if implementation introduces a real setting, which is
 3. `agw guide list` and shell completion expose discovered concepts and exact packaged release-note
    topics without configuration or state loading. Duplicate or malformed shells fail
    deterministically when their catalog is used. The index's omitted count includes only ordinary
-   ordinary concept shells not selected for the index, never generated historical release topics.
+   concept shells not selected for the index, never generated historical release topics.
 4. Inline Markdown renders in both modes. Agent-only content renders only in agent mode, and a
    hidden fence cannot trigger an import. General assistant posture lives in
    `concept-assistant-agent`; ordinary information remains human-visible.

@@ -653,22 +653,22 @@ runtime state.
 - [ ] Before implementation merges, have the saga lead record the operator's 2026-08-17 index ruling
       in the saga-owned target state, superseding its fixed trail-sign statement. This child records
       the dependency but does not edit the saga-owned artifact.
-- [ ] Amend the active FRD, HLA, and guide LLD for one reserved `_index.md`, optional bounded
+- [x] Amend the active FRD, HLA, and guide LLD for one reserved `_index.md`, optional bounded
       `index-order` frontmatter, deterministic `(index_order, slug)` ordering, ordinary-only omitted
       counts, and `agw guide list`. Preserve every completed checkbox above unchanged.
-- [ ] Replace the hard-coded trail-sign module and tuple with the reserved index shell plus
+- [x] Replace the hard-coded trail-sign module and tuple with the reserved index shell plus
       generated catalog rows. Add the existing eight featured concepts to the index through
       frontmatter only; keep shells not selected for the index addressable and listable. Do not add
       an index directive, template engine, registration map, configuration read, or runtime-state
       load.
-- [ ] Replace the guide-specific `--names-only` option with the exact `agw guide list` positional
+- [x] Replace the guide-specific `--names-only` option with the exact `agw guide list` positional
       form while preserving `agw guide concept-*`. Repoint Bash, Zsh, and PowerShell guide-topic
       completion to the list form and remove stale trail-sign/names-only code and docs.
-- [ ] Update permanent CLI and completion documentation. Add structural coverage for index-shell
+- [x] Update permanent CLI and completion documentation. Add structural coverage for index-shell
       discovery, optional frontmatter validation, deterministic ordering, exact generated-release
       exclusion from the omitted count, full list output, completion parity, and state-free
       rendering without testing authored prose.
-- [ ] Run focused guide/completion and package tests, the full non-integration suite, Ruff,
+- [x] Run focused guide/completion and package tests, the full non-integration suite, Ruff,
       formatting, mypy, Rulesync drift, locked-SDD, and file lint. Complete project and fresh-eyes
       reviews, resolve material findings, and hand off one ready PR with the saga label.
 

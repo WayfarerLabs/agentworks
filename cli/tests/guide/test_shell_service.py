@@ -59,7 +59,6 @@ def test_no_topic_renders_index_shell_and_catalog_rows_without_release_history(
     row_slugs = [line.split("`", 2)[1] for line in lines if line.startswith("- `concept-")]
 
     assert row_slugs == ["concept-zulu", "concept-alpha", "concept-beta"]
-    assert "`agw guide list`" in lines[-1]
     assert "### Imported fixture" in response.markdown
     assert "Included marker." in response.markdown
     assert ("Agent marker." in response.markdown) is (mode is GuideMode.AGENT)
