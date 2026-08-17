@@ -218,15 +218,13 @@ runs for either. Two rules with teeth:
   including a base template that expects only its children to: every template is directly namable at
   `session create`, so every template's chain has to be complete on its own. An error on an
   inherited key names the template that declared it. No shipped integration has a required field.
-- **Do not model tool-owned choice sets.** `claude-code` forwards `permission_mode` and `model`
-  values verbatim: the valid choices are the tool's and drift between its releases, so a stale
-  integration-side enum would reject values a newer CLI accepts. An invalid value surfaces as the
-  tool's own startup error in the pane, which is the right place. That promise holds even when the
-  workload dies too fast for the pane to ever be attached: `session create` / `session resume`
-  detect the instantly-dead pane, capture its output, and fold it into their own error message. A
-  tool-owned choice that silently falls back instead is different: validate it at the config
-  boundary so an operator typo cannot quietly select different behavior. Claude's `reasoning_effort`
-  is the shipped example.
+- **Do not model tool-owned choice sets.** `claude-code` forwards `permission_mode`, `model`, and
+  `reasoning_effort` values verbatim: the valid choices are the tool's and drift between its
+  releases, so a stale integration-side enum would reject values a newer CLI accepts. The installed
+  tool owns whether an unsupported value fails, warns and falls back, or changes meaning with the
+  selected model. When it fails loudly, that error still reaches the operator even if the workload
+  dies too fast for the pane to be attached: `session create` / `session resume` detect the
+  instantly-dead pane, capture its output, and fold it into their own error message.
 
 #### Declaring References: A Marker, Not a Method
 
@@ -437,8 +435,8 @@ resumable sessions. Five rules, each earned:
   tool's whole flag surface. Session-local tool settings share one generated `--settings` JSON
   argument. Append `extra_args` after the managed flags so operators can override them or add
   unmodeled ones. Claude treats repeated `--settings` flags as last-wins, so a raw one replaces the
-  generated session settings rather than extending them. `reasoning_effort` validates Claude's
-  documented six-value CLI vocabulary because Claude otherwise warns and silently falls back.
+  generated session settings rather than extending them. Keep tool-owned choice fields open strings
+  rather than duplicating a fast-moving upstream vocabulary.
 - **Use `-c` for common Codex settings without dedicated flags.** Keep Codex-owned choice sets
   unvalidated and TOML-encode string values before forwarding them. The built-in integration models
   `reasoning_effort`, `vim_mode`, and explicit `web_search` modes this way; its legacy boolean

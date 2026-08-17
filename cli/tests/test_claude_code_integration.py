@@ -110,11 +110,6 @@ def test_validation_accepts_the_optional_fields_and_empty_config() -> None:
     _validate({})
 
 
-@pytest.mark.parametrize("value", ["low", "medium", "high", "xhigh", "max", "ultracode"])
-def test_validation_accepts_supported_reasoning_efforts(value: str) -> None:
-    _validate({"reasoning_effort": value})
-
-
 def test_validation_rejects_unknown_field() -> None:
     with pytest.raises(ConfigError, match="permision_mode: unknown field; expected one of:"):
         _validate({"permision_mode": "typo"})
@@ -124,11 +119,6 @@ def test_validation_rejects_unknown_field() -> None:
 def test_validation_rejects_non_string_flag_values(field: str) -> None:
     with pytest.raises(ConfigError):
         _validate({field: 3})
-
-
-def test_validation_rejects_unknown_reasoning_effort() -> None:
-    with pytest.raises(ConfigError):
-        _validate({"reasoning_effort": "definitely-invalid"})
 
 
 def test_validation_rejects_non_list_extra_args() -> None:
@@ -325,11 +315,11 @@ def test_base_hoist_is_a_no_op() -> None:
 def test_permission_mode_model_and_reasoning_effort_map_to_their_flags() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
     command = _harness_integration(
-        {"permission_mode": "acceptEdits", "model": "sonnet", "reasoning_effort": "high"}
+        {"permission_mode": "acceptEdits", "model": "sonnet", "reasoning_effort": "future-effort"}
     ).start(_op_ctx(target))
     assert "--permission-mode acceptEdits" in command
     assert "--model sonnet" in command
-    assert "--effort high" in command
+    assert "--effort future-effort" in command
 
 
 def _claude_argv(command: str) -> list[str]:
