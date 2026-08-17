@@ -487,11 +487,19 @@ R3.2 requires the after number to be lower.
       Codex outputs were regenerated and inspected; file and SDD gates passed; final independent
       semantic-adversarial and fresh-context consistency reviews reported no material findings.
 
-- [ ] Published-feedback correction round (operator ruling 15). Restore the nine approved contracts
+- [x] Published-feedback correction round (operator ruling 15). Restore the nine approved contracts
       in their canonical owners, update the semantic inventory, regenerate every committed Rulesync
       target, and re-run project review plus the relevant repository gates. Done when: the exact new
       head has no unresolved material finding, remains within R3.4's byte ceilings and net-deletion
       constraint, and is re-handed off with the authenticated direction recorded.
+
+      **Completed 2026-08-17.** The round restored all nine approved contracts without returning to
+      numbered process references. The final core is 4,848 source bytes, the skill-local package is
+      10,682 bytes, and tracked `.rulesync` is 179,625 bytes, still 16,839 bytes below baseline.
+      Copilot, Claude, and Codex outputs are current. File lint, Rulesync drift, locked-SDD, Ruff,
+      mypy, 7,184 Python tests, 149 Python website tests, 103 Node website tests, deterministic site
+      builds, and the independent materiality-filtered review all passed. Live-backend testing was
+      not applicable to documentation-only agent behavior.
 
 ## Reassess (R4)
 
