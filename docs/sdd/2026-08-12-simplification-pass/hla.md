@@ -117,6 +117,15 @@ exposes `path`, `unknown_field` and `alternatives` and is already imported by
 check that it DISCRIMINATES: the platform-config family carries `entity_kind` identically on all
 sixteen sites, so the handle is present and useless there.
 
+### The rubric for a borderline assertion
+
+**Keep where the assertion is the only probe for a behavior that has demonstrably regressed or
+plausibly can. Delete where the assertion's only failure mode is a rewording.** Principle 3's reason
+for deleting a restatement, that a test which can only fail when someone edits the thing it restates
+is cost rather than coverage, does not reach an assertion that also fails when a real behavior
+breaks. (Operator ruling, 2026-08-16; this is what R2.4's "case by case, mostly by deletion" means,
+not a loosening of it.)
+
 ## Guidance delivery
 
 Wave 0 first resolves rule delivery (issue #511), then amends the two existing rules
