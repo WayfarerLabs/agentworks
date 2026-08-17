@@ -136,9 +136,9 @@ expected result, and refusal alternative in reviewed prose; no new schema enforc
 The general release-notes concept becomes a shell. Bounded exact-version packaged history remains a
 direct inert rendering path, not a typed guide block or shell service, and performs no network work.
 
-`packaging/agentworks/assistance.md` remains the canonical bootstrap projected into the README,
-website, Claude Code package, and Codex package. It installs the CLI and hands off; it does not grow
-guide behavior.
+`packaging/agentworks/agent-onboarding-prompt.md` remains the canonical bootstrap projected into the
+README, website, Claude Code package, and Codex package. It installs the CLI and hands off; it does
+not grow guide behavior.
 
 ## Verification posture
 
