@@ -197,3 +197,16 @@ silently omit an ID marked Keep, Move, Merge, or Adapt.
 
 The inventory is an SDD artifact and may record the migration. Permanent process artifacts describe
 only the destination.
+
+## Migration result
+
+- Core skill: 27,677 to 4,731 source bytes (-22,946; 82.9%).
+- Skill-local package: 9,896 source bytes, 64.2% below the former single-file core.
+- Complete `.rulesync` source: 196,464 to 178,356 bytes (-18,108; 9.2%).
+- External numbered `agentic-dev-process` references: 15 sites to zero.
+- Inventory: every retained contract has a current owner and representation. DEL-15 records the
+  strongest-capability contract that the first independent review found missing from the initial
+  inventory.
+- Verification: generated Copilot, Claude, and Codex targets were current and manually inspected;
+  the file and SDD gates passed; final semantic-adversarial and fresh-context consistency reviews
+  reported no unresolved material finding.
