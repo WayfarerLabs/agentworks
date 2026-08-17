@@ -12,8 +12,8 @@ name a descriptor could spoof; and external loading later becomes "another
 way to obtain a ``module.PLUGIN``", not a new authoring contract.
 
 ``_INSTALLED_MODULES`` ships the installed system plugins (``onepassword``,
-``claude``, ``proxmox``, ``azure``, ``codex``, ``aws``, ``gcp``, ``apt``, and
-``install-command``); importing this package registers each, seating its
+``claude``, ``proxmox``, ``azure``, ``codex``, ``grok``, ``aws``, ``gcp``,
+``apt``, and ``install-command``); importing this package registers each, seating its
 capability impls into the core code registries, and indexes it into
 ``SYSTEM_PLUGINS``. A shipped plugin's rows publish present-but-disabled until
 an operator opts in via ``[plugins].system``.
@@ -29,6 +29,7 @@ from agentworks.plugins import azure as _azure
 from agentworks.plugins import claude as _claude
 from agentworks.plugins import codex as _codex
 from agentworks.plugins import gcp as _gcp
+from agentworks.plugins import grok as _grok
 from agentworks.plugins import install_command as _install_command
 from agentworks.plugins import onepassword as _onepassword
 from agentworks.plugins import proxmox as _proxmox
@@ -91,6 +92,7 @@ _INSTALLED_MODULES: tuple[_PluginModule, ...] = (
     _proxmox,
     _azure,
     _codex,
+    _grok,
     _aws,
     _gcp,
     _apt,

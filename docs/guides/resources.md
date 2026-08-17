@@ -322,7 +322,7 @@ spec:
   themselves.
 - Command strings support the `{{session_name}}` and `{{workspace_name}}` variables. This holds
   wherever an integration takes a command or raw arguments (`shell`'s `command` and
-  `resume_command`, the `extra_args` escape hatch on `claude-code` and `codex`).
+  `resume_command`, the `extra_args` escape hatch on `claude-code`, `codex`, and `grok-build`).
 - The integration-plus-config pair inherits as a unit: a child restating the same integration merges
   its config keys into the parent's (child wins per key), while a child naming a _different_
   integration starts fresh. `env`, `inherits`, and the description merge as usual. A few list fields
@@ -442,12 +442,44 @@ spec:
     web_search: cached # optional; cached | indexed | live | disabled
 ```
 
-`shell` is the built-in default integration; `claude-code` and `codex` ship as the opt-in `claude`
-and `codex` system plugins. None of them is the whole set the platform is built around. The
-`harness-integration` kind is extensible: another harness or shell runtime, whatever the provider,
-is added as its own integration with its own config vocabulary. `claude-code` above (and its
-Claude-specific `model` / `permission_mode` fields) is one worked example; the core assumes no
-particular runtime, and a session runs whatever integration its template selects.
+The `grok-build` integration runs Grok Build and ships as the opt-in `grok` system plugin. Enable it
+with `[plugins] system = ["grok"]`, then pair a session template with an agent template that
+installs the bundled `grok` user install command:
+
+```yaml
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: grok
+  description: Grok Build session
+spec:
+  harness_integration:
+    name: grok-build
+    permission_mode: auto
+    reasoning_effort: high
+    sandbox: workspace
+```
+
+Agentworks assigns the conversation a UUID. A restart resumes that UUID when Grok's local
+`summary.json` exists; when local session state is absent, it starts a new conversation with the
+same UUID rather than invoking Grok's remote-restore path. Grok stores sessions below
+`$GROK_HOME/sessions` (by default `~/.grok/sessions`), and the integration searches every encoded
+workspace directory without reproducing Grok's cwd encoding. The pane announces whether it resumed
+or started fresh.
+
+All Grok-specific settings are optional. `permission_mode`, `model`, `reasoning_effort`, and
+`sandbox` are Grok-owned open strings forwarded to the installed CLI, while `extra_args` is appended
+last for new or uncommon flags. The integration checks only that `grok` is installed. Authentication
+remains Grok's responsibility: use its browser login, `grok login --device-auth` on a remote target,
+or an `XAI_API_KEY` supplied through the session environment. The plugin's installer uses xAI's
+official stable-channel installer and adds `~/.grok/bin` to the target user's PATH.
+
+`shell` is the built-in default integration; `claude-code`, `codex`, and `grok-build` ship as the
+opt-in `claude`, `codex`, and `grok` system plugins. None of them is the whole set the platform is
+built around. The `harness-integration` kind is extensible: another harness or shell runtime,
+whatever the provider, is added as its own integration with its own config vocabulary. `claude-code`
+above (and its Claude-specific `model` / `permission_mode` fields) is one worked example; the core
+assumes no particular runtime, and a session runs whatever integration its template selects.
 
 ## Install-command reruns and optional checks
 

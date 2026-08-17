@@ -1,0 +1,31 @@
+# A posture ladder for Grok Build. Permission-mode values belong to Grok and
+# forward unvalidated.
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: example-grok-strict
+  description: "Grok Build, strict posture: prompts before actions"
+spec:
+  harness_integration:
+    name: grok-build
+    permission_mode: default
+---
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: example-grok-auto
+  description: "Grok Build, auto posture: safe actions may be approved automatically"
+spec:
+  harness_integration:
+    name: grok-build
+    permission_mode: auto
+---
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: example-grok-yolo
+  description: "Grok Build, yolo posture: skips permission prompts"
+spec:
+  harness_integration:
+    name: grok-build
+    permission_mode: bypassPermissions
