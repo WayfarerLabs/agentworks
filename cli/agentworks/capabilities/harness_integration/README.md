@@ -223,10 +223,10 @@ runs for either. Two rules with teeth:
   integration-side enum would reject values a newer CLI accepts. An invalid value surfaces as the
   tool's own startup error in the pane, which is the right place. That promise holds even when the
   workload dies too fast for the pane to ever be attached: `session create` / `session resume`
-  detect the instantly-dead pane, capture its output, and fold it into their own error message.
-  A tool-owned choice that silently falls back instead is different: validate it at the config
-  boundary so an operator typo cannot quietly select different behavior. Claude's
-  `reasoning_effort` is the shipped example.
+  detect the instantly-dead pane, capture its output, and fold it into their own error message. A
+  tool-owned choice that silently falls back instead is different: validate it at the config
+  boundary so an operator typo cannot quietly select different behavior. Claude's `reasoning_effort`
+  is the shipped example.
 
 #### Declaring References: A Marker, Not a Method
 
