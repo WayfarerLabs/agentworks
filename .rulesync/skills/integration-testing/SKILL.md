@@ -119,8 +119,9 @@ capability-scaled, multi-agent campaign instead of a single pass:
    skeptic prompted to REFUTE it, not confirm it. A finding is default-refuted unless the skeptic
    can trace a concrete, reachable failing path; this is what keeps a plausible-sounding but
    untraceable finding from reaching the operator as if it were settled.
-4. **Strong synthesis.** The survivors get consolidated into one verdict: blockers, should-fixes,
-   nits, and an explicit verified-sound section for what held under attack.
+4. **Strong synthesis.** At the strongest available capability, consolidate survivors into one
+   verdict: blockers, should-fixes, nits, and an explicit verified-sound section for what held under
+   attack.
 
 The `saga-lead` skill's **Review protocol** is the reference implementation of a campaign like this
 one, cut by dimension (what each pass checks) where the stages above are cut by capability and

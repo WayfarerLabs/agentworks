@@ -19,7 +19,7 @@ review.
 
 Branch independent work from `main`; stack only actual dependencies. In a dependent series, begin
 the next phase after the predecessor's material findings are absorbed and its re-review is clean,
-not merely after merge. Keep the unreviewed portion shallow.
+not merely after merge. Keep the whole stack shallow, especially its unreviewed portion.
 
 A portable stack is a chain whose entry bases on its predecessor's head branch. Merge bottom-up. A
 substantial upstream change returns affected downstream entries to draft until each is rebased and

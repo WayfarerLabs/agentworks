@@ -31,6 +31,10 @@ the existing way, not to widen the surface.
 
 ## How to use
 
+The invoker supplies the actor role, governing SDD (or that none governs), and whether the change is
+intended to merge as-is. These facts are not inferable from a diff and affect the process checks. If
+any are absent, report the gap as a question rather than asserting a violation.
+
 1. Identify the scope: which area is touched (CLI, service-layer manager, DB schema, a specific
    platform provisioner, completion generators, docs, tests), which PR or branch, and what the
    change is trying to do.
@@ -201,10 +205,10 @@ Look for:
   before: cheap, row- or config-based checks bail early, before any prompt or VM start.
 - Scope discipline: a node that READS the operation scope must raise loudly on a scope-less context
   rather than silently skip (today's scope consumer is the required-commands check in
-  `sessions/nodes.py`; a new scope-consuming node that skips instead is a bug); most nodes never
-  read the scope, so the loudness is the consumer's obligation, not a structural guarantee.
-  Orchestrators must attach the right scope to every context they build, and the scope level must
-  name the entity the command is about.
+  `cli/agentworks/capabilities/harness_integration/base.py:287-298`; a new scope-consuming node that
+  skips instead is a bug); most nodes never read the scope, so the loudness is the consumer's
+  obligation, not a structural guarantee. Orchestrators must attach the right scope to every context
+  they build, and the scope level must name the entity the command is about.
 - Creation discipline: `mark_realized` doing more than bookkeeping; a `teardown` whose failure does
   not name the artifact left standing; an unwind window that silently differs from the command's
   stated semantics (what is rolled back on failure, and what is deliberately kept, are decisions the
@@ -556,20 +560,19 @@ Look for:
   reworded, moved, or deleted is a violation in its own right (the `sdd` skill permits correcting a
   wrongly-checked box only while that box has not yet merged to `main`, so say which case you
   believe you are looking at).
-- Ownership breaches: edits to an artifact the actor does not own. The operator owns every merged
-  FRD, so a requirements change is an amendment only the operator grants; transcribing a ruling
-  verbatim into a rulings section is not a breach. Other instances: another effort's artifacts, and
-  a child effort updating its saga SDD's ledger instead of flagging the inconsistency. Cross-effort
-  messages are new files only, and never into a locked feature directory.
+- Ownership breaches: edits to an artifact the actor does not own. The operator owns every FRD
+  accepted through authenticated direction, so a requirements change is an amendment only the
+  operator grants; transcribing a ruling verbatim into a rulings section is not a breach. Other
+  instances: another effort's artifacts, and a child effort updating its saga SDD's ledger instead
+  of flagging the inconsistency. Cross-effort messages are new files only, and never into a locked
+  feature directory.
 - Changes under a feature directory whose `locked.md` is already on `main`, other than a `locked.md`
   update or a full wipe to the tombstone.
 - Content that belongs in a permanent home (`docs/arch/`, an ADR, a module README, a rule or skill)
   landing only inside the SDD, where it dies with the SDD.
 
-Two things are genuinely invisible in a diff: who held which role (effort lead versus delegated dev)
-and whether a PR is intended to merge as-is. Both change what is correct here. Take them from the
-invoking prompt, and when the prompt is silent, raise the point under **Questions** rather than
-asserting a violation you cannot see.
+The **How to use** invocation-context contract supplies the facts a diff cannot reveal. Apply its
+question behavior when they are absent.
 
 ## Consistency-review mode: the process tree as one document
 

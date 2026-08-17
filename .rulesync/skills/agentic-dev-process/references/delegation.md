@@ -6,9 +6,9 @@ Load this reference before launching a delegate or running concurrent work.
 
 Delegate depth, not lead responsibility. A charter names the owned task or artifact, current
 `file:line` anchors, governing contracts, definition of done, required gates, and the handoff the
-lead needs. The delegate reads HEAD rather than relying on the lead's summary. Decisions, plan
-problems, and authority boundaries return to the invoking lead, which decides or escalates through
-the authority chain.
+lead needs. The delegate reads HEAD rather than relying on the lead's summary; the lead reads the
+returned result and handoff. Decisions, plan problems, and authority boundaries return to the
+invoking lead, which decides or escalates through the authority chain.
 
 ## Isolation and recovery
 
