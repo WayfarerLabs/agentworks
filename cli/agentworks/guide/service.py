@@ -26,12 +26,6 @@ class GuideResponse:
     markdown: str
 
 
-@dataclass(frozen=True, slots=True)
-class _SelectedTopic:
-    shell: ConceptShell | None = None
-    release_version: str | None = None
-
-
 def _normalize_requested(requested: tuple[str, ...]) -> tuple[str, ...]:
     normalized: list[str] = []
     for slug in requested:
@@ -50,15 +44,15 @@ def _all_names(catalog: GuideCatalog) -> tuple[str, ...]:
     return tuple(sorted((*catalog.names(), *_release_names())))
 
 
-def _resolve(slug: str, catalog: GuideCatalog) -> _SelectedTopic:
+def _resolve(slug: str, catalog: GuideCatalog) -> ConceptShell | str:
     shell = catalog.lookup(slug)
     if shell is not None:
-        return _SelectedTopic(shell=shell)
+        return shell
     version = topic_version(slug)
     if version is not None:
         history = read_release_history()
         if version in history.versions:
-            return _SelectedTopic(release_version=version)
+            return version
     raise UnknownGuideTopicError(slug, catalog.names())
 
 
@@ -82,9 +76,9 @@ def render_guide(
 
     selected = tuple(_resolve(slug, catalog) for slug in requested)
     documents = tuple(
-        render_shell(topic.shell, mode, package_root=package_root)
-        if topic.shell is not None
-        else render_release_topic(topic.release_version or "")
+        render_shell(topic, mode, package_root=package_root)
+        if isinstance(topic, ConceptShell)
+        else render_release_topic(topic)
         for topic in selected
     )
     markdown = "\n\n---\n\n".join(document.rstrip() for document in documents) + "\n"

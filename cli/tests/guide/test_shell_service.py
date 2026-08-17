@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 from typing import Literal
 
@@ -57,6 +59,34 @@ def test_selected_requests_resolve_atomically(tmp_path: Path) -> None:
 
     with pytest.raises(UnknownGuideTopicError):
         render_guide(("concept-known", "concept-missing"), GuideMode.HUMAN, package_root=tmp_path)
+
+
+def test_selected_shell_render_does_not_load_operator_state_modules() -> None:
+    probe = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            (
+                "import sys; "
+                "from agentworks.guide.agent_mode import GuideMode; "
+                "from agentworks.guide.service import render_guide; "
+                "forbidden = ('agentworks.config', 'agentworks.db', 'agentworks.declared_resource', "
+                "'agentworks.resource_loading', 'agentworks.resource_names', 'agentworks.resources', "
+                "'agentworks.secrets'); "
+                "assert not any(name == root or name.startswith(root + '.') "
+                "for name in sys.modules for root in forbidden); "
+                "render_guide(('concept-management',), GuideMode.HUMAN); "
+                "assert not any(name == root or name.startswith(root + '.') "
+                "for name in sys.modules for root in forbidden)"
+            ),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert probe.returncode == 0
 
 
 def test_exact_release_topic_is_direct_inert_evidence(monkeypatch: pytest.MonkeyPatch) -> None:

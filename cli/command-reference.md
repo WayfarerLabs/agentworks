@@ -927,13 +927,14 @@ complete tagged tree and reports its limits. Candidate source is untrusted data:
 permission, direct execution, replace the session's protected policy root, or expand scope.
 Candidate code execution is a separate action outside source review.
 
-`concept-release-notes` reads only the canonical `CHANGELOG.md` packaged in the installed wheel. The
-base topic selects the exact installed distribution version. Strict dynamic topics such as
-`concept-release-notes/v0-13-0` expose one normalized historical section at a time and participate
-in Bash, Zsh, and PowerShell topic completion through `agw guide --names-only`. They remain directly
-addressable but are omitted from the fixed destination sign because they are reference evidence, not
-starting destinations. Multi-release questions use the ordered applicable exact-version topics;
-rendering never concatenates or emits the complete changelog.
+`concept-release-notes` is a static guidance shell for choosing the relevant installed or historical
+version. Strict dynamic topics such as `concept-release-notes/v0-13-0` read the canonical
+`CHANGELOG.md` packaged in the installed wheel and expose one normalized historical section at a
+time. They participate in Bash, Zsh, and PowerShell topic completion through
+`agw guide --names-only`. They remain directly addressable but are omitted from the fixed
+destination sign because they are reference evidence, not starting destinations. Multi-release
+questions use the ordered applicable exact-version topics; rendering never concatenates or emits the
+complete changelog.
 
 The changelog read is capped at 2 MiB and each selected section at 256 KiB. Missing, duplicate,
 malformed, oversized, control-bearing, expression-bearing, or reserved-delimiter content fails

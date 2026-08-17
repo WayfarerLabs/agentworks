@@ -57,6 +57,10 @@ def test_discovery_order_is_package_path_order(tmp_path: Path) -> None:
         ),
         (
             "guide-content/bad.md",
+            '---\ndescription: Bad.\n---\n# One\n<!-- agw:include path="./source.md" heading="Bad" -->\n',
+        ),
+        (
+            "guide-content/bad.md",
             "---\ndescription: Bad.\n---\n# One\n"
             '<!-- agw:include path="source.md" heading="Bad" heading-offset="١" -->\n',
         ),

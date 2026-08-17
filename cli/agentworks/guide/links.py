@@ -228,13 +228,15 @@ def rewrite_links(
     markdown: str,
     source: str,
     rewrite: Callable[[str, bool], str],
+    *,
+    ignored_lines: frozenset[int] = frozenset(),
 ) -> str:
     """Rewrite recognized Markdown destinations while preserving all other source bytes."""
     lines = scan_markdown(markdown, source)
     definitions: dict[str, _Definition] = {}
     definition_lines: set[int] = set()
     for index, line in enumerate(lines):
-        if not line.outside_code or not line.structural:
+        if index in ignored_lines or not line.outside_code or not line.structural:
             continue
         parsed = _definition(line.content, line.content_start, index)
         if parsed is None:
@@ -248,7 +250,7 @@ def rewrite_links(
     reference_kinds: dict[str, set[bool]] = {}
     inline_by_line: dict[int, tuple[tuple[int, int, bool], ...]] = {}
     for index, line in enumerate(lines):
-        if not line.outside_code or not line.structural or index in definition_lines:
+        if index in ignored_lines or not line.outside_code or not line.structural or index in definition_lines:
             continue
         uses, inline = _uses(line.raw.rstrip("\r\n"), set(definitions))
         for use in uses:

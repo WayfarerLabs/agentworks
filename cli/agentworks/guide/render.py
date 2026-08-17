@@ -126,15 +126,16 @@ def _extract_section(source: GuideSource, heading: str, offset: int) -> str:
     for line in selected:
         raw = line.raw.rstrip("\r\n")
         ending = line.raw[len(raw) :]
-        match = _ATX_RE.fullmatch(raw) if line.outside_code else None
+        content = line.content
+        match = _ATX_RE.fullmatch(content) if line.outside_code else None
         if match is not None:
             level = len(match.group(2)) + offset
             if not 2 <= level <= 6:
                 raise GuideContentError(
                     f"guide include {source.package_path!r} heading offset produces an invalid H{level}"
                 )
-            closing = match.group(4) or ""
-            raw = f"{match.group(1)}{'#' * level} {match.group(3).strip()}{closing}"
+            content = f"{content[: match.start(2)]}{'#' * level}{content[match.end(2) :]}"
+            raw = f"{raw[: line.content_start]}{content}"
         shifted.append(raw + ending)
     return "".join(shifted)
 
@@ -195,22 +196,29 @@ def _rewrite_destination(value: str, source: GuideSource, *, image: bool) -> str
     return f"<{rewritten}>" if wrapped else rewritten
 
 
-def rewrite_relative_destinations(markdown: str, source: GuideSource) -> str:
+def rewrite_relative_destinations(
+    markdown: str,
+    source: GuideSource,
+    *,
+    ignored_lines: frozenset[int] = frozenset(),
+) -> str:
     """Rewrite repository-relative inline and reference-style Markdown destinations."""
     return rewrite_links(
         markdown,
         source.package_path,
         lambda destination, image: _rewrite_destination(destination, source, image=image),
+        ignored_lines=ignored_lines,
     )
 
 
 @dataclass(frozen=True, slots=True)
 class _TextSegment:
-    markdown: str
+    line: int
 
 
 @dataclass(frozen=True, slots=True)
 class _IncludeNode:
+    line: int
     path: str
     heading: str
     offset: int
@@ -219,31 +227,28 @@ class _IncludeNode:
 
 def _shell_nodes(markdown: str, source: str) -> tuple[_TextSegment | _IncludeNode, ...]:
     nodes: list[_TextSegment | _IncludeNode] = []
-    text: list[str] = []
-    for line in scan_markdown(markdown, source):
+    for line_number, line in enumerate(scan_markdown(markdown, source)):
         raw = line.raw.rstrip("\r\n")
         directive = directive_body(raw) if line.outside_code else None
         if directive is None:
-            text.append(line.raw)
+            nodes.append(_TextSegment(line_number))
             continue
-        if text:
-            nodes.append(_TextSegment("".join(text)))
-            text = []
         path, heading, offset = parse_include_directive(directive, source)
-        nodes.append(_IncludeNode(path, heading, offset, line.raw[len(raw) :]))
-    if text:
-        nodes.append(_TextSegment("".join(text)))
+        nodes.append(_IncludeNode(line_number, path, heading, offset, line.raw[len(raw) :]))
     return tuple(nodes)
 
 
 def render_shell(shell: ConceptShell, mode: GuideMode, *, package_root: Traversable | None = None) -> str:
     """Render one validated shell through the closed, one-level expansion pipeline."""
     filtered = filter_agent_only(shell.source.markdown, mode)
-    rewritten = rewrite_relative_destinations(filtered, shell.source)
+    nodes = _shell_nodes(filtered, shell.source.package_path)
+    ignored_lines = frozenset(node.line for node in nodes if isinstance(node, _IncludeNode))
+    rewritten = rewrite_relative_destinations(filtered, shell.source, ignored_lines=ignored_lines)
+    rewritten_lines = rewritten.splitlines(keepends=True)
     rendered: list[str] = []
-    for node in _shell_nodes(rewritten, shell.source.package_path):
+    for node in nodes:
         if isinstance(node, _TextSegment):
-            rendered.append(node.markdown)
+            rendered.append(rewritten_lines[node.line])
             continue
         include_source = _load_include(node.path, package_root)
         section = _extract_section(include_source, node.heading, node.offset)

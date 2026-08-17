@@ -81,6 +81,56 @@ def test_include_extracts_one_section_shifts_headings_and_stays_inert(tmp_path: 
     assert '<!-- agw:include path="bad.md" heading="Bad" -->' in rendered
 
 
+def test_include_heading_link_literal_is_parsed_before_shell_links_are_rewritten(tmp_path: Path) -> None:
+    included = tmp_path / "docs" / "source.md"
+    included.parent.mkdir()
+    included.write_text("## [Selected](page.md)\n\nIncluded body.\n", encoding="utf-8")
+    topic = _topic(
+        "# Demo\n\n[Manual][manual]\n\n"
+        '<!-- agw:include path="docs/source.md" heading="[Selected](page.md)" -->\n\n'
+        "![Diagram][diagram]\n\n"
+        "[manual]: docs/manual.md\n"
+        "[diagram]: docs/diagram.png\n"
+    )
+
+    rendered = render_shell(topic, GuideMode.HUMAN, package_root=tmp_path)
+
+    assert "Included body." in rendered
+    assert "https://github.com/WayfarerLabs/agentworks/blob/main/cli/agentworks/docs/page.md" in rendered
+    assert (
+        "https://github.com/WayfarerLabs/agentworks/blob/main/cli/agentworks/unit/guide-content/docs/manual.md"
+        in rendered
+    )
+    assert (
+        "https://raw.githubusercontent.com/WayfarerLabs/agentworks/main/cli/agentworks/unit/guide-content/docs/diagram.png"
+        in rendered
+    )
+
+
+def test_heading_offsets_shift_quoted_and_listed_atx_headings(tmp_path: Path) -> None:
+    included = tmp_path / "source.md"
+    included.write_text(
+        "## Selected\n\n> ### Quoted\n\n- #### Listed\n\n## Next\n",
+        encoding="utf-8",
+    )
+    topic = _topic('# Demo\n<!-- agw:include path="source.md" heading="Selected" heading-offset="1" -->\n')
+
+    rendered = render_shell(topic, GuideMode.HUMAN, package_root=tmp_path)
+
+    assert "> #### Quoted\n" in rendered
+    assert "- ##### Listed\n" in rendered
+
+
+@pytest.mark.parametrize("container_heading", ["> ###### Quoted\n", "- ###### Listed\n"])
+def test_container_heading_offsets_remain_bounded(tmp_path: Path, container_heading: str) -> None:
+    included = tmp_path / "source.md"
+    included.write_text(f"## Selected\n\n{container_heading}", encoding="utf-8")
+    topic = _topic('# Demo\n<!-- agw:include path="source.md" heading="Selected" heading-offset="1" -->\n')
+
+    with pytest.raises(GuideContentError):
+        render_shell(topic, GuideMode.HUMAN, package_root=tmp_path)
+
+
 def test_included_text_cannot_capture_later_include_nodes(tmp_path: Path) -> None:
     first = tmp_path / "first.md"
     first.write_text(

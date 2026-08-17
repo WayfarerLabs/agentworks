@@ -94,7 +94,7 @@ class Plugin:
         are tuples. The annotations carry the element shapes: nothing
         downstream re-derives them. What stays
         deferred is semantic validation of the content each element holds, to
-        ``register_plugin`` or guide-scoped catalog build.
+        ``register_plugin``.
         """
         normalized = {kind: tuple(impls) for kind, impls in self.capabilities.items()}
         object.__setattr__(self, "capabilities", MappingProxyType(normalized))

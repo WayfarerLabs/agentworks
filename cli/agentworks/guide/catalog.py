@@ -16,6 +16,7 @@ from agentworks.guide.contract import (
     shell_slug,
 )
 from agentworks.guide.directives import AGENT_CLOSE, AGENT_OPEN, directive_body, parse_include_directive
+from agentworks.guide.markdown import contains_setext_heading, scan_markdown
 
 if TYPE_CHECKING:
     from importlib.resources.abc import Traversable
@@ -52,8 +53,6 @@ def _read_markdown(resource: Traversable, package_path: str) -> str:
 
 
 def _structural_shell(body: str, package_path: str) -> str:
-    from agentworks.guide.markdown import contains_setext_heading, scan_markdown
-
     h1_titles: list[str] = []
     agent_only = False
     lines = scan_markdown(body, package_path)

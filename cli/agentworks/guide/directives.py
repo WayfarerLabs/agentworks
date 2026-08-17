@@ -28,6 +28,7 @@ def bounded_include_path(value: str) -> tuple[str, ...]:
     if (
         not value
         or value.startswith("/")
+        or value.startswith("./")
         or not value.endswith(".md")
         or "\\" in value
         or any(part in {"", ".", ".."} for part in path.parts)

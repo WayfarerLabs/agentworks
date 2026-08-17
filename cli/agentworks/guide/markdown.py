@@ -1,4 +1,7 @@
-"""Bounded Markdown structure needed by guide-shell parsing."""
+"""Bounded Markdown structure needed by guide-shell parsing.
+
+Container facts remain explicit so imported Setext and ATX headings can be detected and shifted.
+"""
 
 from __future__ import annotations
 
