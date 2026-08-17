@@ -1,9 +1,8 @@
 # Plan: The agentworks.build Website
 
-- Status: Phase 4U implemented and independently reviewed; operator acceptance pending; canonical
-  assistance integrated
+- Status: Phase 4V implemented and independently reviewed; operator acceptance pending
 - Date: 2026-08-07
-- Last revised: 2026-08-15
+- Last revised: 2026-08-17
 - FRD: `frd.md`
 - HLA: `hla.md`
 - Research: `prior-art-research.md`
@@ -1246,6 +1245,25 @@ approximately twice as far apart without violating the local deck ceiling or fin
 translational flight responds faster under the exact `0.7` mass/force model while angular response,
 fuel consumption, collision, and controls remain unchanged; fuel awards use the simple conservative
 constant-time formula with no live route calculation; and the fixed scene never scrolls.
+
+## Phase 4V: onboarding choice and compact copy action
+
+- [x] Reconcile the FRD, HLA, and shell LLD with the operator's two-path onboarding amendment while
+      preserving the canonical assistance source as the sole Agent-assisted prompt authority.
+- [x] Replace the large text copy control with a local Material-style icon button inside the prompt
+      region, retaining progressive clipboard availability and accessible status behavior.
+- [x] Add progressively enhanced Agent-assisted and Old school tabs with Agent-assisted selected by
+      default and both paths readable without JavaScript.
+- [x] Keep Old school content bounded to repository inspection, `uv` or alternative Python-tool
+      installation, and an `agw guide` handoff; do not duplicate guide topic bodies or add a runtime
+      dependency.
+- [x] Update permanent website documentation, structural and behavior tests, exact artifacts, and
+      responsive browser evidence; run the complete website gates and required independent reviews.
+
+Definition of done: Home offers two understandable setup paths in one compact onboarding region; the
+canonical agent prompt remains byte-identical and copies through a familiar in-prompt icon; Old
+school provides a complete bounded manual path; no-JavaScript, keyboard, screen-reader, narrow
+viewport, deterministic build, and deployment contracts remain intact.
 
 ## Phase 5: CI and default Pages deployment
 

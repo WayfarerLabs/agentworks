@@ -120,7 +120,7 @@ Implementation uses these permanent names:
 | `website/static/lander-world.js`                        | Pure seed, terrain, site, collision, and window functions       |
 | `website/static/lander-model.js`                        | Authored flight/run state, physics, and direct allowance        |
 | `website/static/lander-game.js`                         | DOM, clock/input, camera, focus, lifecycle, and rendering       |
-| `website/static/onboarding-copy.js`                     | Existing canonical onboarding copy; preserved without changes   |
+| `website/static/onboarding.js`                          | Onboarding chooser and prompt-copy enhancement                  |
 | `website/tools/derive_lander_geometry.mjs`              | Independent Phase 4U geometry-fixture generation CLI            |
 | `website/tools/lander_clear_faces.mjs`                  | Independent scaffold-overlay and clear-face enumeration         |
 | `website/tests/fixtures/lander-route-geometry-v10.json` | Canonical Phase 4U terrain, site, world, collision, and physics |
@@ -2153,7 +2153,7 @@ static/lander-collision.js
 static/lander-world.js
 static/lander-model.js
 static/lander-game.js
-static/onboarding-copy.js
+static/onboarding.js
 ```
 
 Final ordinary generation and independent verification pin only newly generated v10 geometry bytes

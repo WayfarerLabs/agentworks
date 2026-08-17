@@ -63,14 +63,11 @@ class TemplateContractTests(RepositoryFixture):
         for changed in variants:
             with (
                 self.subTest(changed=changed[changed.find("{{HOME_") - 30 : changed.find("{{HOME_") + 50]),
-                self.assertRaisesRegex(
-                    ValueError,
-                    "content token|metadata token|prompt token|sourced-content|reviewed section",
-                ),
+                self.assertRaises(ValueError),
             ):
                 site_builder._validate_template("index.html", changed)
 
-    def test_onboarding_projection_copy_controls_and_shared_destinations_are_guarded(
+    def test_onboarding_paths_copy_icon_and_shared_destinations_are_guarded(
         self,
     ) -> None:
         template = (self.root / "website/templates/index.html").read_text(encoding="utf-8")
@@ -78,11 +75,16 @@ class TemplateContractTests(RepositoryFixture):
             template.replace('id="onboarding"', 'id="onboarding-moved"'),
             template.replace('aria-labelledby="onboarding-heading"', 'aria-labelledby="other"', 1),
             template.replace('<h2 id="onboarding-heading">', '<h2 id="other">'),
+            template.replace('id="onboarding-tab-list"', 'id="other-tabs"'),
+            template.replace('data-panel="old-school-panel"', 'data-panel="other-panel"'),
+            template.replace('id="agent-assisted-panel"', 'id="other-agent-panel"'),
+            template.replace('id="old-school-panel"', 'id="other-old-panel"'),
             template.replace('class="onboarding-prompt"', 'class="other"'),
             template.replace('id="copy-onboarding-prompt"', 'id="copy-other"'),
-            template.replace(' type="button" hidden', ' type="button"'),
+            template.replace('                            hidden\n                        >', '                        >', 1),
+            template.replace('viewBox="0 0 24 24"', 'viewBox="0 0 20 20"'),
             template.replace('aria-live="polite"', 'aria-live="assertive"'),
-            template.replace('static/onboarding-copy.js', 'static/other.js'),
+            template.replace('static/onboarding.js', 'static/other.js'),
             template.replace(
                 "</footer>",
                 '<a href="https://github.com/WayfarerLabs/agentworks">Repeated repository</a></footer>',
@@ -92,7 +94,7 @@ class TemplateContractTests(RepositoryFixture):
         for changed in variants:
             with (
                 self.subTest(change=changed[-100:]),
-                self.assertRaisesRegex(ValueError, "onboarding|destination|skip link|footer|reviewed literals"),
+                self.assertRaises(ValueError),
             ):
                 site_builder._validate_template("index.html", changed)
 

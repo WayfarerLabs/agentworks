@@ -19,6 +19,7 @@ from site_content import (
     REPOSITORY_URL,
 )
 from site_game_validation import validate_game_contract
+from site_onboarding_validation import validate_onboarding_template
 
 SITE_BASE_TOKEN: Final = "{{SITE_BASE}}"
 LANDER_GAME_TOKEN: Final = "{{LANDER_GAME}}"
@@ -113,9 +114,10 @@ TEMPLATE_TOKENS: Final = {
 }
 TEMPLATE_REQUIRED_LITERALS: Final = {
     "index.html": {
-        f'<script type="module" src="{SITE_BASE_TOKEN}static/onboarding-copy.js"></script>',
-        '<button id="copy-onboarding-prompt" type="button" hidden>Copy prompt</button>',
-        '<p id="copy-status" role="status" aria-live="polite" aria-atomic="true"></p>',
+        f'<script type="module" src="{SITE_BASE_TOKEN}static/onboarding.js"></script>',
+        'id="onboarding-tab-list"',
+        'id="copy-onboarding-prompt"',
+        '<p id="copy-status" class="copy-status" role="status" aria-live="polite" aria-atomic="true"></p>',
     },
     "manifesto.html": set(),
     "security.html": set(),
@@ -170,8 +172,6 @@ class _TemplatePlacementParser(HTMLParser):
         self.placements: dict[str, list[tuple[str, str, tuple[tuple[str, dict[str, str | None]], ...]]]] = {}
         self.exact_text_placements: set[str] = set()
         self.description_content_tokens: set[str] = set()
-        self.onboarding_sections: list[dict[str, str | None]] = []
-        self.onboarding_headings = 0
         self.anchors: list[tuple[str, dict[str, str | None], list[str]]] = []
         self.active_anchor_indexes: list[int] = []
 
@@ -196,14 +196,6 @@ class _TemplatePlacementParser(HTMLParser):
             self.anchors.append((str(attributes["href"]), attributes, []))
             self.active_anchor_indexes.append(len(self.anchors) - 1)
         self.stack.append((tag, attributes))
-        if tag == "section" and attributes.get("id") == "onboarding":
-            self.onboarding_sections.append(attributes)
-        if (
-            tag == "h2"
-            and attributes.get("id") == "onboarding-heading"
-            and any(ancestor == "section" and values.get("id") == "onboarding" for ancestor, values in self.stack[:-1])
-        ):
-            self.onboarding_headings += 1
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attributes = _attribute_map(tag, attrs)
@@ -597,9 +589,9 @@ def _validate_shared_shell(name: str, template: str) -> None:
         len(_descendants(parser, external_index, "svg")) != 2
         or len(_descendants(parser, header_index, "svg")) != 2
         or len(service_icons) != 2
-        or len([element for element in elements if element.tag == "svg"]) != 2
+        or len([element for element in elements if element.tag == "svg"]) != (3 if name == "index.html" else 2)
     ):
-        raise ValueError(f"{name}: header must contain only the two reviewed service icons")
+        raise ValueError(f"{name}: document icon inventory is invalid")
     images = [index for index, element in enumerate(elements) if element.tag == "img"]
     if len(images) != 2:
         raise ValueError(f"{name}: document must contain exactly its header/hero and footer rocket images")
@@ -693,6 +685,10 @@ def _validate_shared_shell(name: str, template: str) -> None:
         **SHELL_DESTINATION_LABELS,
     }.items():
         matching = [anchor for anchor in anchors if anchor.attributes.get("href") == destination]
+        if name == "index.html" and destination == REPOSITORY_URL:
+            if len(matching) != 2:
+                raise ValueError(f"{name}: repository destination must occur once in the shell and once in onboarding")
+            continue
         if len(matching) != 1 or _normalized_text(matching[0].text) != label:
             raise ValueError(f"{name}: destination {destination} must occur once with label {label!r}")
     local_routes = [
@@ -761,90 +757,6 @@ def _validate_content_token_placements(name: str, template: str) -> _TemplatePla
     return parser
 
 
-def _validate_onboarding_template(name: str, parser: _TemplatePlacementParser, template: str) -> None:
-    if name != "index.html":
-        return
-    if len(parser.onboarding_sections) != 1:
-        raise ValueError("index.html: exactly one onboarding section is required")
-    if parser.onboarding_headings != 1:
-        raise ValueError("index.html: onboarding requires its reviewed heading")
-    shell = _ShellParser()
-    shell.feed(template)
-    elements = shell.elements
-    section = _one(
-        shell,
-        [index for index, element in enumerate(elements) if element.tag == "section" and element.attributes.get("id") == "onboarding"],
-        "index.html: exactly one onboarding section is required",
-    )
-    if elements[section].attributes != {
-        "id": "onboarding",
-        "class": "status-panel",
-        "aria-labelledby": "onboarding-heading",
-    }:
-        raise ValueError("index.html: onboarding section attributes are invalid")
-    children = _children(shell, section)
-    if [elements[index].tag for index in children] != ["p", "h2", "p", "pre", "div"]:
-        raise ValueError("index.html: onboarding content structure is invalid")
-    label, heading, introduction, prompt, controls = children
-    _validate_visible_leaf(
-        shell,
-        label,
-        {"class": "status-label"},
-        "Get started / Agent",
-        "index.html: onboarding label is invalid",
-    )
-    _validate_visible_leaf(
-        shell,
-        heading,
-        {"id": "onboarding-heading"},
-        "Agentworks CLI bootstrap",
-        "index.html: onboarding heading is invalid",
-    )
-    _validate_visible_leaf(
-        shell,
-        introduction,
-        {},
-        "Copy this prompt into any capable assistant.",
-        "index.html: onboarding introduction is invalid",
-    )
-    prompt_children = _children(shell, prompt)
-    if (
-        elements[prompt].attributes != {"class": "onboarding-prompt"}
-        or len(prompt_children) != 1
-        or elements[prompt_children[0]].tag != "code"
-        or elements[prompt_children[0]].attributes != {"id": "onboarding-prompt"}
-        or _children(shell, prompt_children[0])
-        or "".join(elements[prompt_children[0]].text) != "{{ONBOARDING_PROMPT}}"
-    ):
-        raise ValueError("index.html: onboarding prompt projection is invalid")
-    control_children = _children(shell, controls)
-    if elements[controls].attributes != {"class": "copy-controls"} or [
-        elements[index].tag for index in control_children
-    ] != ["button", "p"]:
-        raise ValueError("index.html: onboarding copy controls are invalid")
-    button, status = control_children
-    if (
-        elements[button].attributes
-        != {"id": "copy-onboarding-prompt", "type": "button", "hidden": None}
-        or _children(shell, button)
-        or _normalized_text(elements[button].text) != "Copy prompt"
-    ):
-        raise ValueError("index.html: onboarding copy button is invalid")
-    if (
-        elements[status].attributes
-        != {"id": "copy-status", "role": "status", "aria-live": "polite", "aria-atomic": "true"}
-        or _children(shell, status)
-        or _normalized_text(elements[status].text)
-    ):
-        raise ValueError("index.html: onboarding copy status is invalid")
-    scripts = [index for index, element in enumerate(elements) if element.tag == "script"]
-    if len(scripts) != 1 or elements[scripts[0]].attributes != {
-        "type": "module",
-        "src": f"{SITE_BASE_TOKEN}static/onboarding-copy.js",
-    }:
-        raise ValueError("index.html: onboarding copy module is invalid")
-
-
 def _validate_game_shell_placement(name: str, parser: _TemplatePlacementParser) -> None:
     if name not in {"lander.html", "404.html"}:
         return
@@ -886,7 +798,7 @@ def _validate_template(name: str, template: str) -> None:
     if missing_literals:
         raise ValueError(f"{name}: template is missing required reviewed literals: {missing_literals}")
     parser = _validate_content_token_placements(name, template)
-    _validate_onboarding_template(name, parser, template)
+    validate_onboarding_template(name, template)
     _validate_game_shell_placement(name, parser)
     if name == "lander-game.html":
         validate_game_contract(template)
