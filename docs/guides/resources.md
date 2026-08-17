@@ -355,20 +355,19 @@ spec:
 
 - Its config is all optional, and every field is documented by
   `agw resource explain harness-integration/claude-code`. What the reference cannot tell you: the
-  `permission_mode` and `model` values are not validated here, because their choices are Claude's
-  and move between releases. An invalid one fails at launch with the tool's own error, which
-  `session create` / `session resume` capture when the workload exits immediately.
+  `permission_mode`, `model`, and `reasoning_effort` values are not validated here, because their
+  choices are Claude's and move between releases. The installed Claude version decides whether a
+  value fails, falls back, or has model-specific behavior. Agentworks captures a fail-loud launch
+  when the workload exits immediately; a Claude warning or fallback remains Claude behavior.
 - The only requirement checked on the launch target is that `claude` is installed. The chosen action
   (resume vs new session) is announced in the pane on start, so it is never silent.
 - Remote Control needs a Claude subscription login and any organization-level enablement Anthropic
   requires; API-key authentication does not support it. Vim mode and the terminal bell are passed as
   session-local settings, so they do not rewrite the launch user's shared Claude configuration. The
   terminal ultimately decides whether a bell is audible, visual, or ignored.
-- `reasoning_effort` sets Claude's effort choice for the session and accepts `low`, `medium`,
-  `high`, `xhigh`, `max`, or `ultracode`. Agentworks validates these values because Claude silently
-  falls back to its default for an unknown value. When a valid level is unavailable on the selected
-  model, Claude lowers it to the closest supported level; `ultracode` starts at `xhigh` with
-  Ultracode enabled.
+- `reasoning_effort` forwards an effort choice to Claude for the session. Consult the documentation
+  for the Claude version and model on the launch target for the current choices and fallback
+  behavior.
 
 The `codex` integration runs Codex the same way and ships as the opt-in `codex` system plugin.
 
