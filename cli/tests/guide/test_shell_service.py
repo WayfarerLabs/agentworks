@@ -10,34 +10,60 @@ from typer.testing import CliRunner
 
 from agentworks.cli._app import app
 from agentworks.guide.agent_mode import GuideMode, select_guide_mode
+from agentworks.guide.catalog import CORE_INDEX_PATH
 from agentworks.guide.contract import UnknownGuideTopicError
-from agentworks.guide.service import render_guide
-from agentworks.guide.trail_sign import TRAIL_DESTINATIONS
+from agentworks.guide.service import list_guide_topics, render_guide
 from agentworks.release_notes import ReleaseHistory, ReleaseSection
 
 
-def _shell(root: Path, name: str) -> None:
+def _index(root: Path, body: str = "# Fixture index\n\n## Topics\n") -> None:
+    path = root / CORE_INDEX_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"---\ndescription: Fixture index.\n---\n{body}", encoding="utf-8")
+
+
+def _shell(root: Path, name: str, *, index_order: int | None = None) -> None:
+    if not (root / CORE_INDEX_PATH).exists():
+        _index(root)
     path = root / "guide-content" / f"{name}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f"---\ndescription: Fixture.\n---\n# {name}\n", encoding="utf-8")
+    order = "" if index_order is None else f"index-order: {index_order}\n"
+    path.write_text(f"---\ndescription: {name} fixture.\n{order}---\n# {name}\n", encoding="utf-8")
 
 
 @pytest.mark.parametrize("mode", tuple(GuideMode))
-def test_no_topic_trail_sign_bypasses_the_catalog(mode: GuideMode, monkeypatch: pytest.MonkeyPatch) -> None:
-    def forbidden(*args: object, **kwargs: object) -> None:
-        raise AssertionError("catalog loaded")
-
-    monkeypatch.setattr("agentworks.guide.service.discover_concept_shells", forbidden)
-
-    response = render_guide((), mode)
-
-    for destination in TRAIL_DESTINATIONS:
-        assert destination.slug in response.markdown
-
-
-def test_names_only_uses_static_shells_and_packaged_release_history(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_no_topic_renders_index_shell_and_catalog_rows_without_release_history(
+    tmp_path: Path, mode: GuideMode, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    include = tmp_path / "docs" / "source.md"
+    include.parent.mkdir(parents=True)
+    include.write_text("## Imported fixture\n\nIncluded marker.\n", encoding="utf-8")
+    _index(
+        tmp_path,
+        "# Fixture index\n\nShared marker.\n\n<!-- agw:agent-only -->\nAgent marker.\n<!-- /agw:agent-only -->\n\n"
+        '<!-- agw:include path="docs/source.md" heading="Imported fixture" heading-offset="1" -->\n',
+    )
+    _shell(tmp_path, "zulu", index_order=1)
+    _shell(tmp_path, "alpha", index_order=1)
+    _shell(tmp_path, "omitted")
+
+    def forbidden() -> ReleaseHistory:
+        raise AssertionError("release history loaded")
+
+    monkeypatch.setattr("agentworks.guide.service.read_release_history", forbidden)
+
+    response = render_guide((), mode, package_root=tmp_path)
+    lines = response.markdown.splitlines()
+
+    assert lines.index("- `concept-alpha`: alpha fixture.") < lines.index("- `concept-zulu`: zulu fixture.")
+    assert lines[-1].startswith("1 ")
+    assert "`agw guide list`" in lines[-1]
+    assert "### Imported fixture" in response.markdown
+    assert "Included marker." in response.markdown
+    assert ("Agent marker." in response.markdown) is (mode is GuideMode.AGENT)
+
+
+def test_list_uses_static_shells_and_packaged_release_history(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _shell(tmp_path, "beta")
     _shell(tmp_path, "alpha")
     monkeypatch.setattr(
@@ -45,13 +71,24 @@ def test_names_only_uses_static_shells_and_packaged_release_history(
         lambda: ReleaseHistory((ReleaseSection("1.2.3", "Fixture evidence."),)),
     )
 
-    response = render_guide((), GuideMode.AGENT, names_only=True, package_root=tmp_path)
+    response = list_guide_topics(package_root=tmp_path)
 
     assert response.markdown.splitlines() == [
         "concept-alpha",
         "concept-beta",
         "concept-release-notes/v1-2-3",
     ]
+
+
+def test_list_is_an_exact_reserved_cli_positional_and_names_only_is_removed() -> None:
+    listed = CliRunner().invoke(app, ["guide", "list"])
+    old_option = CliRunner().invoke(app, ["guide", "--names-only"])
+    mixed = CliRunner().invoke(app, ["guide", "list", "concept-onboarding"])
+
+    assert listed.exit_code == 0
+    assert "concept-onboarding" in listed.stdout.splitlines()
+    assert old_option.exit_code != 0
+    assert mixed.exit_code != 0
 
 
 def test_selected_requests_resolve_atomically(tmp_path: Path) -> None:
@@ -61,7 +98,7 @@ def test_selected_requests_resolve_atomically(tmp_path: Path) -> None:
         render_guide(("concept-known", "concept-missing"), GuideMode.HUMAN, package_root=tmp_path)
 
 
-def test_selected_shell_render_does_not_load_operator_state_modules() -> None:
+def test_static_index_list_and_selected_render_do_not_load_operator_state_modules() -> None:
     probe = subprocess.run(
         [
             sys.executable,
@@ -70,12 +107,14 @@ def test_selected_shell_render_does_not_load_operator_state_modules() -> None:
             (
                 "import sys; "
                 "from agentworks.guide.agent_mode import GuideMode; "
-                "from agentworks.guide.service import render_guide; "
+                "from agentworks.guide.service import list_guide_topics, render_guide; "
                 "forbidden = ('agentworks.config', 'agentworks.db', 'agentworks.declared_resource', "
                 "'agentworks.resource_loading', 'agentworks.resource_names', 'agentworks.resources', "
                 "'agentworks.secrets'); "
                 "assert not any(name == root or name.startswith(root + '.') "
                 "for name in sys.modules for root in forbidden); "
+                "render_guide((), GuideMode.HUMAN); "
+                "list_guide_topics(); "
                 "render_guide(('concept-management',), GuideMode.HUMAN); "
                 "assert not any(name == root or name.startswith(root + '.') "
                 "for name in sys.modules for root in forbidden)"

@@ -891,21 +891,21 @@ and rewrite any that still live in `config.toml`; the
 
 ### Guide
 
-`agw guide [TOPIC]...` renders installed Markdown concept shells. With no topic, human and agent
-modes render the same fixed destinations: `concept-assistant-agent`, `concept-onboarding`,
-`concept-management`, `concept-troubleshooting`, `concept-release-notes`, `concept-migration`,
-`concept-secrets`, and `concept-reporting-bugs`. Agent mode points to `concept-assistant-agent`
-first; human mode asks the operator to choose the topic matching their goal. This no-topic path does
-not construct the catalog or load configuration, registry, or state.
+`agw guide [TOPIC]...` renders installed Markdown concept shells. With no topic, it renders the
+reserved core `_index.md` shell and appends concepts selected by their optional `index-order`
+frontmatter, ordered by that value and slug. Human and agent modes share the same selected concepts;
+ordinary agent-only fencing may vary the index framing. The static no-topic path discovers the
+packaged catalog but does not load configuration, registry, state, or release history.
 
 Concepts are auto-discovered from Markdown files directly under first-party package-local
-`guide-content/` directories. Restricted frontmatter supplies the description and the filename
-supplies the global `concept-*` identity. Shells support ordinary Markdown, agent-only fences, and
-bounded exact-section imports from packaged Markdown with static heading offsets. Fence and import
-comments execute only as standalone column-zero lines between top-level Markdown blocks; nested
-comments remain content. Relative links and images in imports are rewritten to canonical repository
-URLs. The root README is packaged as an include-only source so `concept-core-model` can reuse its
-canonical sections.
+`guide-content/` directories. Restricted frontmatter supplies the required description and optional
+bounded `index-order`; the filename supplies the global `concept-*` identity. The required core
+`_index.md` follows the ordinary shell structure, cannot set `index-order`, and is not an
+addressable concept. Shells support ordinary Markdown, agent-only fences, and bounded exact-section
+imports from packaged Markdown with static heading offsets. Fence and import comments execute only
+as standalone column-zero lines between top-level Markdown blocks; nested comments remain content.
+Relative links and images in imports are rewritten to canonical repository URLs. The root README is
+packaged as an include-only source so `concept-core-model` can reuse its canonical sections.
 
 Current capability and adoption questions point to `concept-onboarding`, ongoing operation points to
 `concept-management`, and temporal version-change questions point to `concept-release-notes`. Raw
@@ -930,9 +930,9 @@ Candidate code execution is a separate action outside source review.
 `concept-release-notes` is a static guidance shell for choosing the relevant installed or historical
 version. Strict dynamic topics such as `concept-release-notes/v0-13-0` read the canonical
 `CHANGELOG.md` packaged in the installed wheel and expose one normalized historical section at a
-time. They participate in Bash, Zsh, and PowerShell topic completion through
-`agw guide --names-only`. They remain directly addressable but are omitted from the fixed
-destination sign because they are reference evidence, not starting destinations. Multi-release
+time. They participate in Bash, Zsh, and PowerShell topic completion through `agw guide list`. They
+remain directly addressable but are excluded from both the featured index and its ordinary-concept
+omitted count because they are reference evidence, not authored concept shells. Multi-release
 questions use the ordered applicable exact-version topics; rendering never concatenates or emits the
 complete changelog.
 
@@ -963,8 +963,9 @@ points to `agw resource kinds`, `agw resource list`, operational list commands, 
 current facts. Rendering never loads configuration, the registry, database, resources, secrets,
 provider state, network, transports, or subprocesses.
 
-`--names-only` discovers installed shell filenames and packaged release-note topics without loading
-operator state. This stable stream backs Bash, Zsh, and PowerShell topic completion.
+`agw guide list` discovers installed shell filenames and packaged release-note topics without
+loading operator state. This stable one-name-per-line stream backs Bash, Zsh, and PowerShell topic
+completion.
 
 `concept-management` covers day-two operation without duplicating the command registry. It points to
 JSON v1 graph/list/detail surfaces and the installed Typer help for the stable `config`, `graph`,
@@ -980,17 +981,17 @@ or authorizes an agent to do so.
 During the unreleased 0.14 transition, `agw graph show`, `agw resource kinds`, `agw resource list`,
 `agw resource explain`, and `agw resource sample` are the available command-owned fact surfaces.
 
-| Command                                              | Description                                            |
-| ---------------------------------------------------- | ------------------------------------------------------ |
-| `agw guide`                                          | Render the shared destination sign                     |
-| `agw guide --agent`                                  | Render the shared sign with the assistant starting cue |
-| `agw guide concept-assistant-agent`                  | Render the external-assistant posture                  |
-| `agw guide TOPIC...`                                 | Render one or more exact topics atomically             |
-| `agw guide TOPIC... --agent/--human`                 | Override automatic presentation mode                   |
-| `agw guide concept-release-notes`                    | Render the release-history guidance shell              |
-| `agw guide concept-release-notes/vMAJOR-MINOR-PATCH` | Render one exact packaged historical section           |
-| `agw guide concept-source-review`                    | Render optional source-review guidance                 |
-| `agw guide --names-only`                             | Emit topic names for shell completion                  |
+| Command                                              | Description                                   |
+| ---------------------------------------------------- | --------------------------------------------- |
+| `agw guide`                                          | Render the shell-backed concise concept index |
+| `agw guide --agent`                                  | Render the index with agent-only context      |
+| `agw guide concept-assistant-agent`                  | Render the external-assistant posture         |
+| `agw guide TOPIC...`                                 | Render one or more exact topics atomically    |
+| `agw guide TOPIC... --agent/--human`                 | Override automatic presentation mode          |
+| `agw guide concept-release-notes`                    | Render the release-history guidance shell     |
+| `agw guide concept-release-notes/vMAJOR-MINOR-PATCH` | Render one exact packaged historical section  |
+| `agw guide concept-source-review`                    | Render optional source-review guidance        |
+| `agw guide list`                                     | Emit every topic name for shell completion    |
 
 ### Guide management coverage
 
@@ -1010,7 +1011,7 @@ points:
 | Troubleshoot                    | `concept-troubleshooting`                            | Run `agw doctor` inside the current envelope; expand it before an uncovered repair                                           |
 
 Guide assistance adds no configuration setting, so the sample configuration and its synchronization
-surfaces are unchanged. Shell completion still calls `agw guide --names-only`, whose stream contains
+surfaces are unchanged. Shell completion calls `agw guide list`, whose stream contains
 auto-discovered concept shells and packaged release-note topics. All guide paths remain independent
 of configuration health.
 

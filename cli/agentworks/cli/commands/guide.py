@@ -10,7 +10,7 @@ import typer
 
 from agentworks.cli._app import app
 from agentworks.guide.agent_mode import select_guide_mode
-from agentworks.guide.service import render_guide
+from agentworks.guide.service import list_guide_topics, render_guide
 
 
 @app.command("guide")
@@ -24,14 +24,13 @@ def guide(
         "--agent/--human",
         help="Render for an agent or human, overriding automatic mode selection.",
     ),
-    names_only: bool = typer.Option(
-        False,
-        "--names-only",
-        help="Emit one available topic name per line with no formatting.",
-    ),
 ) -> None:
     """Show guide destinations or render selected authored guidance."""
+    requested = tuple(topics or ())
+    if requested == ("list",):
+        typer.echo(list_guide_topics().markdown, nl=False)
+        return
     explicit: Literal["agent", "human"] | None = None if agent is None else ("agent" if agent else "human")
     mode = select_guide_mode(explicit, os.environ, sys.stdout.isatty())
-    response = render_guide(tuple(topics or ()), mode, names_only=names_only)
+    response = render_guide(requested, mode)
     typer.echo(response.markdown, nl=False)

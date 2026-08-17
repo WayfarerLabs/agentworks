@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import quote, urlsplit
 
 from agentworks.guide.agent_mode import GuideMode
-from agentworks.guide.contract import MAX_GUIDE_MARKDOWN_BYTES, ConceptShell, GuideContentError, GuideSource
+from agentworks.guide.contract import MAX_GUIDE_MARKDOWN_BYTES, ConceptShell, GuideContentError, GuideSource, IndexShell
 from agentworks.guide.directives import (
     AGENT_CLOSE,
     AGENT_OPEN,
@@ -238,7 +238,7 @@ def _shell_nodes(markdown: str, source: str) -> tuple[_TextSegment | _IncludeNod
     return tuple(nodes)
 
 
-def render_shell(shell: ConceptShell, mode: GuideMode, *, package_root: Traversable | None = None) -> str:
+def render_shell(shell: ConceptShell | IndexShell, mode: GuideMode, *, package_root: Traversable | None = None) -> str:
     """Render one validated shell through the closed, one-level expansion pipeline."""
     filtered = filter_agent_only(shell.source.markdown, mode)
     nodes = _shell_nodes(filtered, shell.source.package_path)

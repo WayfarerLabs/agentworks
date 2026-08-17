@@ -43,6 +43,16 @@ class ConceptShell:
     slug: str
     title: str
     description: str
+    index_order: int | None
+    source: GuideSource
+
+
+@dataclass(frozen=True, slots=True)
+class IndexShell:
+    """The reserved, non-addressable guide index shell."""
+
+    title: str
+    description: str
     source: GuideSource
 
 

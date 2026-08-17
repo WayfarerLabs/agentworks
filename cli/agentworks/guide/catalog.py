@@ -13,6 +13,7 @@ from agentworks.guide.contract import (
     ConceptShell,
     GuideContentError,
     GuideSource,
+    IndexShell,
     shell_slug,
 )
 from agentworks.guide.directives import AGENT_CLOSE, AGENT_OPEN, directive_body, parse_include_directive
@@ -21,14 +22,20 @@ from agentworks.guide.markdown import contains_setext_heading, scan_markdown
 if TYPE_CHECKING:
     from importlib.resources.abc import Traversable
 
-_FRONTMATTER_RE = re.compile(r"\A---\ndescription:[ \t]+([^\n]+)\n---\n(?P<body>.*)\Z", re.DOTALL)
+_FRONTMATTER_RE = re.compile(
+    r"\A---\ndescription:[ \t]+(?P<description>[^\n]+)\n"
+    r"(?:index-order:[ \t]+(?P<index_order>[0-9]{1,4})\n)?---\n(?P<body>.*)\Z",
+    re.DOTALL,
+)
 _ATX_RE = re.compile(r"^[ ]{0,3}(#{1,6})(?:[ \t]+|$)(.*?)(?:[ \t]+#+[ \t]*)?$")
+CORE_INDEX_PATH = "guide/guide-content/_index.md"
 
 
 @dataclass(frozen=True, slots=True)
 class GuideCatalog:
     """The complete first-party concept-shell catalog."""
 
+    index: IndexShell
     topics: tuple[ConceptShell, ...]
 
     def names(self) -> tuple[str, ...]:
@@ -36,6 +43,15 @@ class GuideCatalog:
 
     def lookup(self, slug: str) -> ConceptShell | None:
         return next((topic for topic in self.topics if topic.slug == slug), None)
+
+    def indexed_topics(self) -> tuple[ConceptShell, ...]:
+        """Return concise-index concepts in their deterministic display order."""
+        return tuple(
+            sorted(
+                (topic for topic in self.topics if topic.index_order is not None),
+                key=lambda topic: (topic.index_order, topic.slug),
+            )
+        )
 
 
 def _read_markdown(resource: Traversable, package_path: str) -> str:
@@ -89,25 +105,36 @@ def _structural_shell(body: str, package_path: str) -> str:
     return h1_titles[0]
 
 
-def _parse_shell(resource: Traversable, package_path: str) -> ConceptShell:
+def _parse_shell(resource: Traversable, package_path: str) -> ConceptShell | IndexShell:
     text = _read_markdown(resource, package_path)
     match = _FRONTMATTER_RE.fullmatch(text)
     if match is None:
         raise GuideContentError(
-            f"guide shell {package_path!r} must have description-only frontmatter followed by a Markdown body"
+            f"guide shell {package_path!r} must have ordered description and optional index-order frontmatter "
+            "followed by a Markdown body"
         )
-    description = match.group(1).strip()
+    description = match.group("description").strip()
     if not description:
         raise GuideContentError(f"guide shell {package_path!r} has an empty description")
+    index_order_text = match.group("index_order")
+    index_order = int(index_order_text) if index_order_text is not None else None
     body = match.group("body")
     title = _structural_shell(body, package_path)
     filename = PurePosixPath(package_path).name
+    source = GuideSource(package_path, f"cli/agentworks/{package_path}", body)
+    if package_path == CORE_INDEX_PATH:
+        if index_order is not None:
+            raise GuideContentError(f"reserved guide index {package_path!r} cannot have index-order")
+        return IndexShell(title, description, source)
+    if filename.startswith("_"):
+        raise GuideContentError(f"guide shell filename {filename!r} is reserved")
     slug = shell_slug(filename.removesuffix(".md"))
     return ConceptShell(
         slug,
         title,
         description,
-        GuideSource(package_path, f"cli/agentworks/{package_path}", body),
+        index_order,
+        source,
     )
 
 
@@ -133,7 +160,11 @@ def _shell_resources(root: Traversable) -> tuple[tuple[str, Traversable], ...]:
 def discover_concept_shells(package_root: Traversable | None = None) -> GuideCatalog:
     """Discover and validate all direct Markdown children of first-party guide-content directories."""
     root = files("agentworks") if package_root is None else package_root
-    topics = tuple(_parse_shell(resource, path) for path, resource in _shell_resources(root))
+    shells = tuple(_parse_shell(resource, path) for path, resource in _shell_resources(root))
+    indexes = tuple(shell for shell in shells if isinstance(shell, IndexShell))
+    if len(indexes) != 1:
+        raise GuideContentError(f"required reserved guide index {CORE_INDEX_PATH!r} is missing")
+    topics = tuple(shell for shell in shells if isinstance(shell, ConceptShell))
     by_slug: dict[str, list[ConceptShell]] = {}
     for topic in topics:
         by_slug.setdefault(topic.slug, []).append(topic)
@@ -142,4 +173,4 @@ def discover_concept_shells(package_root: Traversable | None = None) -> GuideCat
         slug, values = collisions[0]
         paths = ", ".join(topic.source.package_path for topic in values)
         raise GuideContentError(f"duplicate guide topic {slug!r} from {paths}")
-    return GuideCatalog(tuple(sorted(topics, key=lambda topic: topic.source.package_path)))
+    return GuideCatalog(indexes[0], tuple(sorted(topics, key=lambda topic: topic.source.package_path)))

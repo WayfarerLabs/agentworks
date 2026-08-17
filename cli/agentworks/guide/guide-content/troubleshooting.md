@@ -1,5 +1,6 @@
 ---
 description: Diagnose Agentworks failures from framed errors and narrow explicit checks.
+index-order: 40
 ---
 
 # Troubleshooting

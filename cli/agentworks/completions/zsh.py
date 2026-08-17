@@ -109,7 +109,7 @@ _agentworks_resource_refs() {
     "guide_topics": """\
 _agentworks_guide_topics() {
     local -a topics
-    topics=(${(f)"$(agw guide --names-only 2>/dev/null)"})
+    topics=(${(f)"$(agw guide list 2>/dev/null)"})
     _describe 'guide topic' topics
 }""",
 }

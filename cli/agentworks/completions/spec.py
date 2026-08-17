@@ -184,7 +184,7 @@ class CommandSpec:
 #   "resource_refs"   -> agw resource list --names-only
 #                        (kind/name per line, verbatim -- the candidate
 #                        IS a KIND/NAME token)
-#   "guide_topics"    -> agw guide --names-only
+#   "guide_topics"    -> agw guide list
 #   "files"           -> native shell filesystem completion
 #
 # The template + git_credentials completers source from the Resource

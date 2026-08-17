@@ -26,6 +26,7 @@ def test_wheel_and_source_distribution_vendor_the_same_canonical_readme(tmp_path
         packaged = set(archive.namelist())
         assert archive.read("agentworks/_guide_sources/README.md") == expected_readme
         assert "agentworks/guide/guide-content/core-model.md" in packaged
+        assert "agentworks/guide/guide-content/_index.md" in packaged
         assert "agentworks/plugins/apt/guide-content/apt.md" in packaged
         assert "agentworks/plugins/install_command/guide-content/install-commands.md" in packaged
         assert not any(name.endswith("guide-content/.markdownlint.jsonc") for name in packaged)
@@ -56,9 +57,14 @@ def test_wheel_and_source_distribution_vendor_the_same_canonical_readme(tmp_path
             "-I",
             "-c",
             (
-                "from agentworks.guide import GuideMode, render_guide; "
-                "result = render_guide(('concept-core-model',), GuideMode.HUMAN); "
-                "assert result.markdown.count('raw.githubusercontent.com') == 2"
+                "from agentworks.guide import GuideMode, discover_concept_shells, render_guide; "
+                "from agentworks.guide.service import list_guide_topics; "
+                "catalog = discover_concept_shells(); "
+                "index = render_guide((), GuideMode.HUMAN).markdown; "
+                "assert all(topic.slug in index for topic in catalog.indexed_topics()); "
+                "assert set(catalog.names()) <= set(list_guide_topics().markdown.splitlines()); "
+                "core = render_guide(('concept-core-model',), GuideMode.HUMAN); "
+                "assert core.markdown.count('raw.githubusercontent.com') == 2"
             ),
         ],
         cwd=tmp_path,

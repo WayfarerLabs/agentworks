@@ -1,5 +1,6 @@
 ---
 description: Set up Agentworks or assess an existing installation using current CLI facts.
+index-order: 20
 ---
 
 # Agentworks onboarding

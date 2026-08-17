@@ -1,5 +1,6 @@
 ---
 description: Help an external assistant work effectively and safely with the Agentworks operator.
+index-order: 10
 ---
 
 # Agentworks assistant agents

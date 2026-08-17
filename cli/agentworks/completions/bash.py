@@ -27,7 +27,7 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
     "secrets": ("$(agw secret list --names-only 2>/dev/null)"),
     "resource_kinds": ("$(agw resource kinds --names-only 2>/dev/null)"),
     "resource_refs": ("$(agw resource list --names-only 2>/dev/null)"),
-    "guide_topics": ("$(agw guide --names-only 2>/dev/null)"),
+    "guide_topics": ("$(agw guide list 2>/dev/null)"),
 }
 
 

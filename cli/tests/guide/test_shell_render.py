@@ -17,6 +17,7 @@ def _topic(markdown: str, *, package_path: str = "unit/guide-content/demo.md") -
         "concept-demo",
         "Demo",
         "Fixture.",
+        None,
         GuideSource(package_path, f"cli/agentworks/{package_path}", markdown),
     )
 

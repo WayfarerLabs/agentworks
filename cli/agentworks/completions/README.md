@@ -92,6 +92,6 @@ name per line, no header, no formatting, and no round-trips that make pressing T
 publish the same name, and every backend slices the prefix off shell-side. A registry-backed
 completer that forgets the slice emits `kind/name` candidates.
 
-Guide topic completion is intentionally package-only: `agw guide --names-only` emits auto-discovered
+Guide topic completion is intentionally package-only: `agw guide list` emits auto-discovered
 first-party concept shells and packaged release-note topics without loading operator state. Resource
 and kind completion use their command-owned list surfaces instead.

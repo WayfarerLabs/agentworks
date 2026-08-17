@@ -1,5 +1,6 @@
 ---
 description: Configure and operate Agentworks resources and managed instances deliberately.
+index-order: 30
 ---
 
 # Resource management

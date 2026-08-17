@@ -1,5 +1,6 @@
 ---
 description: Migrate retired Agentworks resource settings into current declarative manifests.
+index-order: 60
 ---
 
 # Resource model migration

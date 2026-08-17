@@ -1,5 +1,6 @@
 ---
 description: Prepare and submit a minimal, redacted Agentworks bug report.
+index-order: 80
 ---
 
 # Reporting bugs

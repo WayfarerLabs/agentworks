@@ -39,14 +39,13 @@ The bootstrap adds no authorization, security-setting, or harness-posture teachi
 approvals and restrictions apply independently of the package. The guide owns any later security or
 authorization context needed for Agentworks work.
 
-## Guide discovery and degraded context
+## Guide discovery
 
-`agw guide` without a topic is a short trail sign. Human and agent modes show the same eight
-destinations: assistant-agent guidance, onboarding, management, troubleshooting, release notes,
-migration, secrets, and bug reporting. Agent mode first points to `concept-assistant-agent`; human
-mode asks the operator to choose a goal. This request does not load the topic catalog or operator
-state. Use shell completion or `agw guide --names-only` to discover every installed concept and
-packaged release-note topic.
+`agw guide` without a topic renders the reserved package-owned `_index.md` shell and appends eight
+concepts selected by optional frontmatter ordering. Human and agent modes share the same selected
+concepts; the shell may add concise agent-only context. This request discovers static packaged
+shells but does not load operator state or release history. Use shell completion or `agw guide list`
+to discover every installed concept and packaged release-note topic.
 
 `concept-assistant-agent` contains the general posture for an external helper: follow the operator's
 instruction, use current CLI help as operational authority, ask only for material ambiguity or scope
@@ -58,17 +57,17 @@ static teaching that points to current CLI inspection commands for live facts. I
 `concept-source-review` as the optional path for inspecting canonical source before installation.
 
 Concepts are auto-discovered Markdown shells in first-party package-local `guide-content/`
-directories. Their restricted frontmatter supplies the discovery description. Shells may contain
-ordinary Markdown, agent-only fences, and bounded exact-section imports from packaged Markdown. Both
-control forms use exact standalone column-zero comment lines between top-level Markdown blocks;
-comments inside lists, block quotes, or code remain ordinary Markdown. Imports preserve relative
-links and images by rewriting them to canonical repository URLs. The guide does not execute
-operations, load configuration, inspect the registry or database, resolve secrets, or access the
-network. Invalid topic syntax, unknown topics, and structurally invalid requested content remain
-errors.
+directories. Their restricted frontmatter supplies the discovery description and may supply a
+bounded `index-order` for the concise index. Shells may contain ordinary Markdown, agent-only
+fences, and bounded exact-section imports from packaged Markdown. Both control forms use exact
+standalone column-zero comment lines between top-level Markdown blocks; comments inside lists, block
+quotes, or code remain ordinary Markdown. Imports preserve relative links and images by rewriting
+them to canonical repository URLs. The guide does not execute operations, load configuration,
+inspect the registry or database, resolve secrets, or access the network. Invalid topic syntax,
+unknown topics, and structurally invalid requested content remain errors.
 
-`agw guide --names-only` prints one valid topic name per line. It discovers packaged filenames and
-release history without loading operator state. Raw kind, resource, relationship, schema, and sample
+`agw guide list` prints one valid topic name per line. It discovers packaged filenames and release
+history without loading operator state. Raw kind, resource, relationship, schema, and sample
 discovery belongs to the corresponding command completion and inspection surfaces.
 
 ## Maintaining generated packages

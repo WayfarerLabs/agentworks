@@ -160,15 +160,15 @@ class TestDynamicCompletionsMapping:
                 f"Completer '{completer_id}' from ({command_path}, {param_name}) has no bash snippet mapping"
             )
 
-    def test_guide_topics_use_names_only_in_every_shell(self) -> None:
+    def test_guide_topics_use_the_reserved_list_form_in_every_shell(self) -> None:
         from agentworks.completions.bash import DYNAMIC_SNIPPETS as BASH_SNIPPETS
         from agentworks.completions.powershell import DYNAMIC_SNIPPETS as POWERSHELL_SNIPPETS
         from agentworks.completions.zsh import DYNAMIC_FUNCTIONS
 
         assert DYNAMIC_COMPLETIONS[("guide", "topics")] == "guide_topics"
-        assert "agw guide --names-only" in BASH_SNIPPETS["guide_topics"]
-        assert "agw guide --names-only" in POWERSHELL_SNIPPETS["guide_topics"]
-        assert "agw guide --names-only" in DYNAMIC_FUNCTIONS["guide_topics"]
+        assert "agw guide list" in BASH_SNIPPETS["guide_topics"]
+        assert "agw guide list" in POWERSHELL_SNIPPETS["guide_topics"]
+        assert "agw guide list" in DYNAMIC_FUNCTIONS["guide_topics"]
 
     def test_database_backed_snippets_share_hidden_probe_contract(self) -> None:
         from agentworks.completions.bash import DYNAMIC_SNIPPETS as BASH_SNIPPETS
@@ -315,11 +315,11 @@ printf '%s\\0' "${{COMPREPLY[@]}}"
             assert "--allow-interactive" not in block
 
     def test_guide_topic_completion_stream_uses_the_package_catalog(self) -> None:
-        from agentworks.guide import GuideMode, discover_concept_shells
-        from agentworks.guide.service import render_guide
+        from agentworks.guide import discover_concept_shells
+        from agentworks.guide.service import list_guide_topics
         from agentworks.release_notes import read_release_history
 
-        response = render_guide((), GuideMode.AGENT, names_only=True)
+        response = list_guide_topics()
         expected = sorted(
             (
                 *discover_concept_shells().names(),

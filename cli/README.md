@@ -18,10 +18,9 @@ uv tool install agentworks-cli
 The everyday command is `agw`. The longer form `agentworks` is also installed if you ever want to
 type it out; examples throughout this document use `agw`.
 
-Run `agw guide` for a fixed trail sign to the main guide destinations. Human and agent modes show
-the same eight topics without inspecting the topic catalog, configuration, or live state. Agent mode
-first points an external helper to `concept-assistant-agent`; human mode simply asks you to choose
-the topic matching your goal.
+Run `agw guide` for a concise index backed by the reserved packaged `_index.md` shell. Human and
+agent modes show the same eight frontmatter-selected concepts. The static path discovers packaged
+shells but does not read configuration, live state, or release history.
 
 Use `concept-assistant-agent` for the external assistant's operating posture, `concept-onboarding`
 for repeatable first setup and current adoption, `concept-management` for ongoing operation,
@@ -29,8 +28,8 @@ for repeatable first setup and current adoption, `concept-management` for ongoin
 `concept-source-review` for optional read-only source review. Selected concepts are Markdown files;
 small top-level fenced passages can appear only in agent mode. The fence markers and section
 includes are exact standalone column-zero comment lines; similar comments nested in Markdown
-containers remain content. Use `agw guide --names-only` when a completion or tool needs every
-installed concept and packaged release-note topic name.
+containers remain content. Use `agw guide list` when a completion or tool needs every installed
+concept and packaged release-note topic name.
 
 Raw resource, relationship, schema, and sample facts belong to commands rather than guide topics.
 Use `agw graph show`, `agw resource kinds`, `agw resource list`, `agw resource explain`, and
