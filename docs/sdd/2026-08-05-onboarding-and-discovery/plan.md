@@ -643,13 +643,47 @@ operator state cannot affect guidance; and the implementation is materially smal
 corrected typed model it replaces. Current FRD R1 through R5 and acceptance criteria 1 through 8 and
 10 hold; R6, R7, and acceptance criterion 9 remain for closeout.
 
+The operator's 2026-08-17 index ruling supersedes the fixed trail-sign tuple and guide-specific
+`--names-only` shape without changing the completed Markdown-shell record above. The index remains
+static Markdown plus discovered shell metadata; this correction does not add a third directive or
+runtime state.
+
+## Phase 4 correction: shell-backed guide index
+
+- [ ] Before implementation merges, have the saga lead record the operator's 2026-08-17 index ruling
+      in the saga-owned target state, superseding its fixed trail-sign statement. This child records
+      the dependency but does not edit the saga-owned artifact.
+- [ ] Amend the active FRD, HLA, and guide LLD for one reserved `_index.md`, optional bounded
+      `index-order` frontmatter, deterministic `(index_order, slug)` ordering, ordinary-only omitted
+      counts, and `agw guide list`. Preserve every completed checkbox above unchanged.
+- [ ] Replace the hard-coded trail-sign module and tuple with the reserved index shell plus
+      generated catalog rows. Add the existing eight featured concepts to the index through
+      frontmatter only; keep shells not selected for the index addressable and listable. Do not add
+      an index directive, template engine, registration map, configuration read, or runtime-state
+      load.
+- [ ] Replace the guide-specific `--names-only` option with the exact `agw guide list` positional
+      form while preserving `agw guide concept-*`. Repoint Bash, Zsh, and PowerShell guide-topic
+      completion to the list form and remove stale trail-sign/names-only code and docs.
+- [ ] Update permanent CLI and completion documentation. Add structural coverage for index-shell
+      discovery, optional frontmatter validation, deterministic ordering, exact generated-release
+      exclusion from the omitted count, full list output, completion parity, and state-free
+      rendering without testing authored prose.
+- [ ] Run focused guide/completion and package tests, the full non-integration suite, Ruff,
+      formatting, mypy, Rulesync drift, locked-SDD, and file lint. Complete project and fresh-eyes
+      reviews, resolve material findings, and hand off one ready PR with the saga label.
+
+Definition of done: adding or removing `index-order` changes the concise no-topic index without a
+Python edit; `_index.md` owns authored framing; `agw guide list` exposes every ordinary and exact
+release topic; historical release topics never inflate the omitted-concept count; and the old trail
+sign tuple, module, and guide-specific `--names-only` option are absent.
+
 ## Phase 5: representative acceptance and closeout
 
 - [ ] Run one provider-backed journey from an exact reviewed candidate wheel through the no-topic
-      trail sign and `concept-onboarding` to a verified VM and started session. Label the candidate
+      guide index and `concept-onboarding` to a verified VM and started session. Label the candidate
       substitution rather than claiming the not-yet-published stable bootstrap was exercised. After
       publication, run one bounded canonical-prompt smoke that installs the exact stable release,
-      verifies it, and reaches the trail sign. Use generated-package parity and focused
+      verifies it, and reaches the guide index. Use generated-package parity and focused
       clean-install probes for native wrappers rather than repeating the provider journey three
       times. Done when: evidence records the exact versions, provider resources, observed results,
       cleanup, and any operator intervention. This evidence does not replace the saga's release-PR,

@@ -1,9 +1,9 @@
 # Guide Contract Low-Level Design
 
-- Status: Current Markdown-shell destination
+- Status: Current Markdown-shell destination with shell-backed index
 - Scope: concept discovery, bounded shell expansion, mode selection, and inert release evidence
 - FRD: `frd.md` R1 through R5
-- HLA: `hla.md`, Fixed trail sign through Safety and failure behavior
+- HLA: `hla.md`, Shell-backed index through Safety and failure behavior
 
 The immutable implementation journey remains in `plan.md`. This contract replaces the retained
 typed-block, action, evidence, and onboarding-assessment machinery with auto-discovered Markdown
@@ -13,7 +13,7 @@ concept shells.
 
 The guide has three content paths:
 
-1. A fixed no-topic trail sign renders without discovering shells or loading state.
+1. A reserved no-topic index shell renders with catalog-derived topic rows and no operator state.
 2. Selected `concept-*` topics render auto-discovered Markdown shells.
 3. Exact historical release-note topics render bounded sections from the packaged changelog as inert
    generated evidence. They are not shells.
@@ -44,18 +44,25 @@ Every shell begins with this restricted frontmatter shape:
 ```markdown
 ---
 description: Help an operator get started with Agentworks.
+index-order: 20
 ---
 ```
 
 `description` is required, non-empty, single-line text used for discovery and completion metadata.
-No other frontmatter key, YAML feature, or executable value is accepted. The body contains exactly
-one authored ATX level-1 heading outside agent-only fences, which supplies the topic title. Setext
-headings are not accepted anywhere in the shell. The filename supplies identity; the heading
-supplies title; frontmatter supplies description. Python does not register those values per topic.
+`index-order` is optional and, when present, is a one-to-four-digit non-negative base-10 integer. It
+selects the concept for the concise index. Equal values sort by slug. No other frontmatter key, YAML
+feature, or executable value is accepted. The body contains exactly one authored ATX level-1 heading
+outside agent-only fences, which supplies the topic title. Setext headings are not accepted anywhere
+in the shell. The filename supplies identity; the heading supplies title; frontmatter supplies
+description. Python does not register those values per topic.
 
-`agw guide --names-only` discovers names from shell filenames plus the separately generated exact
+`agw guide list` discovers names from shell filenames plus the separately generated exact
 release-note names. It loads no operator state. Shell structural defects, including duplicate slugs,
 fail the catalog request rather than producing a partial or ambiguous catalog.
+
+Exactly one reserved `_index.md` exists in the core guide-content directory. It follows the same
+description, H1, fence, include, and rendering rules, must omit `index-order`, and is excluded from
+the ordinary concept namespace. No other underscore-prefixed Markdown filename is valid.
 
 The root `README.md` is not a shell and is not discovered. One custom Hatch build hook materializes
 it at `agentworks/_guide_sources/README.md` as an include-only resource:
@@ -177,15 +184,22 @@ when it needs current facts.
 Final output strips C0 controls except line feed and tab, plus DEL and C1 controls, from authored,
 included, and generated release-note text.
 
-## Retained independent behavior
+## Index and list behavior
 
-The no-topic human and agent trail signs keep their fixed shared destination tuple and return before
-shell discovery or include loading. The fixed tuple deliberately duplicates selected-topic slugs so
-malformed configuration or shell content cannot affect the cheap entry path.
+The no-topic human and agent paths discover the static catalog, render `_index.md` through the
+ordinary shell pipeline, then append topics with `index-order` sorted by `(index_order, slug)`. Each
+row uses the concept slug and description already owned by frontmatter. Every selected destination
+therefore resolves by construction; no duplicated Python tuple remains.
 
-The tuple is `concept-assistant-agent`, `concept-onboarding`, `concept-management`,
-`concept-troubleshooting`, `concept-release-notes`, `concept-migration`, `concept-secrets`, and
-`concept-reporting-bugs`. Every destination must resolve in the selected-topic catalog.
+The footer reports `len(ordinary concepts) - len(indexed concepts)` and points to `agw guide list`.
+Exact generated release-note topics are deliberately absent from both operands: historical versions
+are listable evidence, not omitted authored concepts. `agw guide list` emits all ordinary concept
+slugs plus exact packaged release-note topic names, one per line, for both operators and shell
+completion.
+
+`list` is one reserved exact positional form of the existing top-level `guide` command. This keeps
+`agw guide concept-onboarding` intact and avoids introducing a second group or topic router. The old
+guide-specific `--names-only` option is removed rather than retained as an alias.
 
 Mode selection retains this precedence:
 
@@ -233,8 +247,8 @@ Focused tests protect behavior and boundaries:
   and images, the actual `#named-consoles` relative fragment, and no other repository-root include
   source;
 - nonzero structural failures and proof that selected rendering does not load operator state;
-- fixed trail-sign bypass, mode precedence, names-only discovery, completion, and packaged exact
-  release evidence; and
+- reserved index discovery, deterministic index ordering, ordinary-only omitted counts, mode
+  precedence, `guide list`, completion, and packaged exact release evidence; and
 - shell and exact README package-data presence in a direct wheel, source distribution, wheel rebuilt
   from that source distribution, and verified editable-source fallback.
 

@@ -1,6 +1,6 @@
 # HLA: Agentworks Assistance, Discovery, and Management
 
-- Status: Active, Markdown-shell correction
+- Status: Active, shell-backed index correction
 - FRD: `docs/sdd/2026-08-05-onboarding-and-discovery/frd.md`
 - Guide LLD: `docs/sdd/2026-08-05-onboarding-and-discovery/guide-contract-lld.md`
 
@@ -12,7 +12,7 @@ onboarding-assessment designs are historical; this document states the current a
 The assistance surface has four layers:
 
 1. One short canonical prompt installs the CLI and hands off to `agw guide --agent`.
-2. One fixed no-topic trail sign points toward useful concepts without loading the catalog or state.
+2. One reserved index shell frames a concise catalog-derived concept index without loading state.
 3. One auto-discovered catalog renders package-owned Markdown concept shells.
 4. Operational CLI commands own execution and machine-readable facts.
 
@@ -20,7 +20,7 @@ The assistance surface has four layers:
 canonical prompt
       |
       v
-fixed no-topic trail sign
+shell-backed concept index
       |
       v
 selected concept shell
@@ -32,13 +32,17 @@ selected concept shell
 current CLI commands for any operation
 ```
 
-## Fixed trail sign
+## Shell-backed index
 
-The no-topic path preserves the approved shared tuple—`concept-assistant-agent`,
-`concept-onboarding`, `concept-management`, `concept-troubleshooting`, `concept-release-notes`,
-`concept-migration`, `concept-secrets`, and `concept-reporting-bugs`—and returns before catalog
-discovery. Human and agent wording may differ briefly, but both modes point to the same concepts and
-neither path loads configuration, registry, database, network, or managed resources.
+One reserved `_index.md` document in the core guide-content directory owns the no-topic framing and
+uses the ordinary shell renderer, including agent-only fencing. It is not an addressable concept.
+After rendering that shell, the index renderer appends every ordinary concept carrying
+`index-order`, sorted by order and then slug. Equal values are valid. The generated footer reports
+the number of ordinary concepts not selected for the index and points to `agw guide list`.
+
+Exact generated release-note topics remain available through `agw guide list` and direct selection,
+but do not enter the omitted-concept count. The no-topic path loads the static package catalog but
+no configuration, registry, database, network, or managed resources.
 
 ## Shell catalog
 
@@ -49,12 +53,12 @@ plugin concepts therefore share one convention instead of a root or topic regist
 
 Each shell has:
 
-- required frontmatter containing only `description` in the first format version;
+- required `description` frontmatter plus one optional bounded non-negative `index-order`;
 - a filename stem that maps to the global `concept-<stem>` slug;
 - exactly one H1 outside agent-only regions, used as the title; and
 - one Markdown body containing any top-level structural directives.
 
-Global slug collisions and malformed shells are catalog errors. `--names-only` and completion use
+Global slug collisions and malformed shells are catalog errors. `agw guide list` and completion use
 the same discovery path without loading configuration or operator state. Exact packaged release-note
 subtopics remain a separate direct evidence source because they are version records rather than
 authored concepts.
@@ -150,8 +154,9 @@ not grow guide behavior.
 
 Tests cover discovery, frontmatter shape, slug collisions, H1 structure, mode filtering, bounded
 unique-heading imports, inert imported directives, root-README package inclusion,
-repository-relative destination rewriting, no-topic bypass, names-only, and completion. Boundary
-tests prove rendering does not load configuration or operational state.
+repository-relative destination rewriting, reserved index-shell discovery, catalog-derived index
+ordering, `guide list`, and completion. Boundary tests prove rendering does not load configuration
+or operational state.
 
 Tests do not assert authored wording, duplicate shell prose, or recreate removed schemas in test
 fixtures. Permanent CLI documentation describes the shell model. Sample configuration is unaffected.
@@ -166,5 +171,5 @@ fixtures. Permanent CLI documentation describes the shell model. Sample configur
 - **Imported references grow a general URL resolver.** Rewriting is limited to repository-relative
   Markdown link and image destinations under two known source mappings and fixed canonical GitHub
   bases. Remote content and bytes remain outside the guide.
-- **Removed guide logic returns in frontmatter.** Frontmatter contains description only; actions and
-  assessments stay ordinary prose or command-owned behavior.
+- **Removed guide logic returns in frontmatter.** Frontmatter contains description plus optional
+  index ordering only; actions and assessments stay ordinary prose or command-owned behavior.
