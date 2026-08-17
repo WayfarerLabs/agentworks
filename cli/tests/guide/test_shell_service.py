@@ -29,7 +29,6 @@ def test_no_topic_trail_sign_bypasses_the_catalog(mode: GuideMode, monkeypatch: 
 
     response = render_guide((), mode)
 
-    assert response.exit_code == 0
     for destination in TRAIL_DESTINATIONS:
         assert destination.slug in response.markdown
 
@@ -67,7 +66,6 @@ def test_exact_release_topic_is_direct_inert_evidence(monkeypatch: pytest.Monkey
 
     response = render_guide(("concept-release-notes/v1-2-3",), GuideMode.AGENT)
 
-    assert response.exit_code == 0
     assert "\\# Heading" in response.markdown
     assert "[Run](https://example.invalid)" not in response.markdown
 

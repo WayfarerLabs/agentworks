@@ -85,6 +85,50 @@ def test_directive_looking_text_inside_code_fences_is_inert(tmp_path: Path) -> N
     assert discover_concept_shells(tmp_path).names() == ("concept-code",)
 
 
+def test_fence_info_and_suffix_lines_keep_directives_inert(tmp_path: Path) -> None:
+    _shell(
+        tmp_path,
+        "guide-content/code.md",
+        body=("# Code\n\n```markdown\n<!-- agw:unknown -->\n``` suffix\n<!-- agw:unknown -->\n````\n"),
+    )
+
+    assert discover_concept_shells(tmp_path).names() == ("concept-code",)
+
+
+def test_container_prefixed_directives_are_ordinary_markdown(tmp_path: Path) -> None:
+    _shell(
+        tmp_path,
+        "guide-content/containers.md",
+        body="# Containers\n\n> <!-- agw:unknown -->\n\n- <!-- agw:unknown -->\n",
+    )
+
+    assert discover_concept_shells(tmp_path).names() == ("concept-containers",)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "# Demo\n\n> Quoted heading\n> ---\n",
+        "# Demo\n\n- Listed heading\n  ===\n",
+    ],
+)
+def test_setext_headings_in_supported_containers_fail(tmp_path: Path, body: str) -> None:
+    _shell(tmp_path, "guide-content/setext.md", body=body)
+
+    with pytest.raises(GuideContentError):
+        discover_concept_shells(tmp_path)
+
+
+def test_setext_looking_content_inside_a_container_fence_is_inert(tmp_path: Path) -> None:
+    _shell(
+        tmp_path,
+        "guide-content/code.md",
+        body="# Demo\n\n- ```markdown\n  Heading\n  ---\n  <!-- agw:unknown -->\n  ```\n",
+    )
+
+    assert discover_concept_shells(tmp_path).names() == ("concept-code",)
+
+
 def test_repository_catalog_contains_every_fixed_destination() -> None:
     from agentworks.guide.trail_sign import TRAIL_DESTINATIONS
 

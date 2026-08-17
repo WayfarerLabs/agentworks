@@ -327,7 +327,6 @@ printf '%s\\0' "${{COMPREPLY[@]}}"
             )
         )
 
-        assert response.exit_code == 0
         assert response.markdown.splitlines() == expected
 
 

@@ -35,5 +35,3 @@ def guide(
     mode = select_guide_mode(explicit, os.environ, sys.stdout.isatty())
     response = render_guide(tuple(topics or ()), mode, names_only=names_only)
     typer.echo(response.markdown, nl=False)
-    if response.exit_code:
-        raise typer.Exit(response.exit_code)

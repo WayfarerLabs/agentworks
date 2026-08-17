@@ -21,15 +21,13 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class GuideResponse:
-    """One complete Markdown response and its process exit code."""
+    """One complete Markdown response."""
 
     markdown: str
-    exit_code: int
 
 
 @dataclass(frozen=True, slots=True)
 class _SelectedTopic:
-    slug: str
     shell: ConceptShell | None = None
     release_version: str | None = None
 
@@ -55,12 +53,12 @@ def _all_names(catalog: GuideCatalog) -> tuple[str, ...]:
 def _resolve(slug: str, catalog: GuideCatalog) -> _SelectedTopic:
     shell = catalog.lookup(slug)
     if shell is not None:
-        return _SelectedTopic(slug, shell=shell)
+        return _SelectedTopic(shell=shell)
     version = topic_version(slug)
     if version is not None:
         history = read_release_history()
         if version in history.versions:
-            return _SelectedTopic(slug, release_version=version)
+            return _SelectedTopic(release_version=version)
     raise UnknownGuideTopicError(slug, catalog.names())
 
 
@@ -74,13 +72,13 @@ def render_guide(
     """Render a catalog-free trail sign, topic names, or selected static topics."""
     requested = _normalize_requested(requested)
     if not requested and not names_only:
-        return GuideResponse(render_trail_sign(mode), 0)
+        return GuideResponse(render_trail_sign(mode))
 
     catalog = discover_concept_shells(package_root)
     if names_only:
         if requested:
             raise ValidationError("topic arguments cannot be used with --names-only")
-        return GuideResponse("".join(f"{name}\n" for name in _all_names(catalog)), 0)
+        return GuideResponse("".join(f"{name}\n" for name in _all_names(catalog)))
 
     selected = tuple(_resolve(slug, catalog) for slug in requested)
     documents = tuple(
@@ -90,4 +88,4 @@ def render_guide(
         for topic in selected
     )
     markdown = "\n\n---\n\n".join(document.rstrip() for document in documents) + "\n"
-    return GuideResponse(sanitize_terminal_output(markdown), 0)
+    return GuideResponse(sanitize_terminal_output(markdown))

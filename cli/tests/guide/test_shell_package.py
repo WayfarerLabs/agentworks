@@ -58,7 +58,6 @@ def test_wheel_and_source_distribution_vendor_the_same_canonical_readme(tmp_path
             (
                 "from agentworks.guide import GuideMode, render_guide; "
                 "result = render_guide(('concept-core-model',), GuideMode.HUMAN); "
-                "assert result.exit_code == 0; "
                 "assert result.markdown.count('raw.githubusercontent.com') == 2"
             ),
         ],

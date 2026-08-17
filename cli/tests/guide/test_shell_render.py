@@ -35,6 +35,18 @@ def test_agent_fence_is_local_and_filters_before_include_work(tmp_path: Path) ->
         render_shell(topic, GuideMode.AGENT, package_root=tmp_path)
 
 
+def test_container_prefixed_agent_markers_do_not_hide_human_content() -> None:
+    topic = _topic(
+        "# Demo\n\n> <!-- agw:agent-only -->\n> Quoted.\n> <!-- /agw:agent-only -->\n\n"
+        "- <!-- agw:agent-only -->\n  Listed.\n  <!-- /agw:agent-only -->\n"
+    )
+
+    rendered = render_shell(topic, GuideMode.HUMAN)
+
+    assert "Quoted." in rendered
+    assert "Listed." in rendered
+
+
 def test_include_extracts_one_section_shifts_headings_and_stays_inert(tmp_path: Path) -> None:
     included = tmp_path / "docs" / "source.md"
     included.parent.mkdir()
@@ -52,6 +64,26 @@ def test_include_extracts_one_section_shifts_headings_and_stays_inert(tmp_path: 
     assert '<!-- agw:include path="bad.md" heading="Bad" -->' in rendered
 
 
+def test_included_text_cannot_capture_later_include_nodes(tmp_path: Path) -> None:
+    first = tmp_path / "first.md"
+    first.write_text(
+        '## First\n\n<!-- agw:expanded-section:1 -->\n\n<!-- agw:include path="missing.md" heading="Missing" -->\n',
+        encoding="utf-8",
+    )
+    second = tmp_path / "second.md"
+    second.write_text("## Second\n\nSecond body.\n", encoding="utf-8")
+    topic = _topic(
+        '# Demo\n\n<!-- agw:include path="first.md" heading="First" -->\n\n'
+        '<!-- agw:include path="second.md" heading="Second" -->\n'
+    )
+
+    rendered = render_shell(topic, GuideMode.HUMAN, package_root=tmp_path)
+
+    assert "<!-- agw:expanded-section:1 -->" in rendered
+    assert '<!-- agw:include path="missing.md" heading="Missing" -->' in rendered
+    assert rendered.count("## Second") == 1
+
+
 @pytest.mark.parametrize(
     "included",
     [
@@ -64,6 +96,22 @@ def test_invalid_selected_sections_fail_structurally(tmp_path: Path, included: s
     path = tmp_path / "source.md"
     path.write_text(included, encoding="utf-8")
     topic = _topic('# Demo\n<!-- agw:include path="source.md" heading="Selected" heading-offset="1" -->\n')
+
+    with pytest.raises(GuideContentError):
+        render_shell(topic, GuideMode.HUMAN, package_root=tmp_path)
+
+
+@pytest.mark.parametrize(
+    "container",
+    [
+        "> Heading\n> ---\n",
+        "- Heading\n  ---\n",
+    ],
+)
+def test_included_setext_headings_in_supported_containers_fail(tmp_path: Path, container: str) -> None:
+    path = tmp_path / "source.md"
+    path.write_text(f"## Selected\n\n{container}\n## Next\n", encoding="utf-8")
+    topic = _topic('# Demo\n<!-- agw:include path="source.md" heading="Selected" -->\n')
 
     with pytest.raises(GuideContentError):
         render_shell(topic, GuideMode.HUMAN, package_root=tmp_path)
@@ -109,6 +157,31 @@ def test_inline_and_reference_destinations_use_source_aware_canonical_urls() -> 
         "https://raw.githubusercontent.com/WayfarerLabs/agentworks/main/cli/agentworks/area/guide-content/images/view.png"
         in rendered
     )
+
+
+def test_link_scanner_distinguishes_prose_escapes_and_balanced_destinations() -> None:
+    source = GuideSource("source.md", "README.md", "")
+    markdown = (
+        "Plain [brackets] and \\[escaped](docs/ignored.md).\n\n"
+        "[Balanced](docs/a(b).md#part) and [Escaped](docs/a\\(b\\).md).\n\n"
+        "[Reference \\]][label\\]].\n\n[label\\]]: docs/reference.md#part\n"
+    )
+
+    rendered = rewrite_relative_destinations(markdown, source)
+
+    assert "Plain [brackets]" in rendered
+    assert "\\[escaped](docs/ignored.md)" in rendered
+    assert rendered.count("docs/a%28b%29.md#part") == 1
+    assert rendered.count("docs/a%28b%29.md)") == 1
+    assert "docs/reference.md#part" in rendered
+
+
+def test_missing_explicit_reference_fails_but_plain_brackets_remain_prose() -> None:
+    source = GuideSource("source.md", "README.md", "")
+
+    assert rewrite_relative_destinations("Plain [brackets].\n", source) == "Plain [brackets].\n"
+    with pytest.raises(GuideContentError):
+        rewrite_relative_destinations("[Explicit][missing].\n", source)
 
 
 def test_reference_definitions_are_section_local_and_kind_specific() -> None:

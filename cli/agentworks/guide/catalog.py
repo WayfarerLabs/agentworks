@@ -22,7 +22,6 @@ if TYPE_CHECKING:
 
 _FRONTMATTER_RE = re.compile(r"\A---\ndescription:[ \t]+([^\n]+)\n---\n(?P<body>.*)\Z", re.DOTALL)
 _ATX_RE = re.compile(r"^[ ]{0,3}(#{1,6})(?:[ \t]+|$)(.*?)(?:[ \t]+#+[ \t]*)?$")
-_SETEXT_RE = re.compile(r"^[ ]{0,3}(?:=+|-+)[ \t]*$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,60 +51,37 @@ def _read_markdown(resource: Traversable, package_path: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
-def _fence(line: str) -> tuple[str, int] | None:
-    stripped = line.lstrip(" ")
-    if len(line) - len(stripped) > 3 or not stripped:
-        return None
-    marker = stripped[0]
-    if marker not in {"`", "~"}:
-        return None
-    length = len(stripped) - len(stripped.lstrip(marker))
-    return (marker, length) if length >= 3 else None
-
-
 def _structural_shell(body: str, package_path: str) -> str:
+    from agentworks.guide.markdown import contains_setext_heading, scan_markdown
+
     h1_titles: list[str] = []
     agent_only = False
-    code_fence: tuple[str, int] | None = None
-    previous_plain = False
-    for line in body.splitlines():
-        candidate = _fence(line)
-        if code_fence is not None:
-            if candidate is not None and candidate[0] == code_fence[0] and candidate[1] >= code_fence[1]:
-                code_fence = None
-            previous_plain = False
-            continue
-        if candidate is not None:
-            code_fence = candidate
-            previous_plain = False
+    lines = scan_markdown(body, package_path)
+    if contains_setext_heading(lines):
+        raise GuideContentError(f"guide shell {package_path!r} contains a Setext heading")
+    for scanned in lines:
+        line = scanned.raw.rstrip("\r\n")
+        if not scanned.outside_code or not scanned.directive_eligible:
             continue
         stripped = line.strip()
         if stripped == AGENT_OPEN:
             if agent_only:
                 raise GuideContentError(f"guide shell {package_path!r} nests an agent-only fence")
             agent_only = True
-            previous_plain = False
             continue
         if stripped == AGENT_CLOSE:
             if not agent_only:
                 raise GuideContentError(f"guide shell {package_path!r} closes an unopened agent-only fence")
             agent_only = False
-            previous_plain = False
             continue
         if (directive := directive_body(line)) is not None:
             parse_include_directive(directive, package_path)
-            previous_plain = False
             continue
-        if previous_plain and _SETEXT_RE.fullmatch(line):
-            raise GuideContentError(f"guide shell {package_path!r} contains a Setext heading")
         heading = _ATX_RE.fullmatch(line)
         if heading is not None and len(heading.group(1)) == 1 and not agent_only:
             title = heading.group(2).strip()
             if title:
                 h1_titles.append(title)
-        previous_plain = bool(stripped) and heading is None and not stripped.startswith(("<!--", "- ", "* ", ">"))
-    if code_fence is not None:
-        raise GuideContentError(f"guide shell {package_path!r} has an unclosed Markdown code fence")
     if agent_only:
         raise GuideContentError(f"guide shell {package_path!r} has an unclosed agent-only fence")
     if len(h1_titles) != 1:
