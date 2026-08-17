@@ -121,11 +121,11 @@ if TYPE_CHECKING:
 class CodexConfig(AgwModel):
     """What a session template tells the ``codex`` integration.
 
-    The flag VALUES (sandbox modes, approval policies, model names) are
-    codex-owned choice sets that drift between releases, so they forward
-    unvalidated: an invalid one surfaces as codex's own startup error in
-    the pane, which is why this integration emits ``--strict-config`` by
-    default.
+    String choices are Codex-owned sets that drift between releases, so
+    they forward unvalidated. Codex validates some values at startup, but
+    not every set is an enum there (0.147.0 accepts arbitrary reasoning
+    effort strings). The integration emits ``--strict-config`` by default
+    to catch unknown config keys and wrong value types.
     """
 
     name: Literal["codex"]
@@ -153,11 +153,18 @@ class CodexConfig(AgwModel):
 
     reasoning_effort: str | None = None
     """Forwarded to Codex's ``model_reasoning_effort`` config key,
-    TOML-encoded. Values are Codex-owned and forward unvalidated."""
+    TOML-encoded. Values are Codex-owned and forward unvalidated; Codex
+    0.147.0 does not reject an unknown effort string at config load. A
+    child template's declared value replaces its parent's. A same-key raw
+    ``-c`` in ``extra_args`` wins because it is appended last and Codex
+    0.147.0 takes the last repeated config override."""
 
     vim_mode: bool = False
     """Start Codex's composer in Vim normal mode. Omitted when false, so
-    the target's own configuration remains authoritative by default."""
+    the target's own configuration remains authoritative by default. A
+    child template's declared value replaces its parent's. A same-key raw
+    ``-c`` in ``extra_args`` wins because it is appended last and Codex
+    0.147.0 takes the last repeated config override."""
 
     writable_dirs: list[str] = Field(default_factory=list)
     """Extra directories the sandbox may write, each forwarded as
@@ -166,7 +173,11 @@ class CodexConfig(AgwModel):
     web_search: bool | str | None = None
     """A Codex-owned web-search mode forwarded via ``-c``. For backward
     compatibility, ``true`` passes ``--search`` (live search) and ``false``
-    emits no override."""
+    emits no override; ``false`` therefore inherits target config, while
+    ``disabled`` forces search off. A child template's declared value
+    replaces its parent's. For a string mode, a same-key raw ``-c`` in
+    ``extra_args`` wins because it is appended last and Codex 0.147.0 takes
+    the last repeated config override."""
 
     disable_strict_config: bool | None = None
     """Turn OFF ``--strict-config``, for a target whose own

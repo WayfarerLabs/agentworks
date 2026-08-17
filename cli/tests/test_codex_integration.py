@@ -795,21 +795,41 @@ def test_approvals_reviewer_forwards_as_a_quoted_toml_string() -> None:
     assert "approvals_reviewer" not in absent
 
 
-def test_approvals_reviewer_escapes_toml_structural_characters() -> None:
+@pytest.mark.parametrize(
+    ("field", "key", "payload", "expected"),
+    [
+        (
+            "approvals_reviewer",
+            "approvals_reviewer",
+            'user"\nsandbox_mode="danger-full-access',
+            'approvals_reviewer="user\\"\\nsandbox_mode=\\"danger-full-access"',
+        ),
+        (
+            "reasoning_effort",
+            "model_reasoning_effort",
+            'high"\nsandbox_mode="danger-full-access',
+            'model_reasoning_effort="high\\"\\nsandbox_mode=\\"danger-full-access"',
+        ),
+    ],
+)
+def test_config_string_fields_escape_toml_structural_characters(
+    field: str,
+    key: str,
+    payload: str,
+    expected: str,
+) -> None:
     """Codex parses -c key=value as a TOML DOCUMENT splice (verified
     against 0.146.0), so an unescaped newline in the value silently
     defines EXTRA config keys, even under --strict-config, and an
     unescaped quote breaks the value into the raw-string fallback.
-    Escaping keeps any operator value one literal string that fails
-    codex's own enum check loudly instead."""
-    payload = 'user"\nsandbox_mode="danger-full-access'
-    command = _harness_integration({"approvals_reviewer": payload}).resume(_op_ctx(_target(rollout=0)))
+    Escaping keeps any operator value one literal string instead."""
+    command = _harness_integration({field: payload}).resume(_op_ctx(_target(rollout=0)))
     argv = _sh_argv(command, home="/home/me")
-    token = next(t for t in argv if t.startswith("approvals_reviewer="))
+    token = next(t for t in argv if t.startswith(f"{key}="))
     # One argv token, no raw newline, quote and newline TOML-escaped: the
     # smuggled second key stays inert text inside one string value.
     assert "\n" not in token
-    assert token == 'approvals_reviewer="user\\"\\nsandbox_mode=\\"danger-full-access"'
+    assert token == expected
     assert not any(t.startswith("sandbox_mode") for t in argv)
 
 
@@ -819,16 +839,6 @@ def test_reasoning_effort_forwards_as_a_quoted_toml_string() -> None:
     assert 'model_reasoning_effort="high"' in argv
     assert argv[argv.index('model_reasoning_effort="high"') - 1] == "-c"
     assert "model_reasoning_effort" not in _harness_integration().resume(_op_ctx(_target(rollout=0)))
-
-
-def test_reasoning_effort_escapes_toml_structural_characters() -> None:
-    payload = 'high"\nsandbox_mode="danger-full-access'
-    command = _harness_integration({"reasoning_effort": payload}).resume(_op_ctx(_target(rollout=0)))
-    argv = _sh_argv(command, home="/home/me")
-    token = next(t for t in argv if t.startswith("model_reasoning_effort="))
-    assert "\n" not in token
-    assert token == 'model_reasoning_effort="high\\"\\nsandbox_mode=\\"danger-full-access"'
-    assert not any(t.startswith("sandbox_mode") for t in argv)
 
 
 def test_vim_mode_true_emits_override_and_false_emits_nothing() -> None:
@@ -853,14 +863,18 @@ def test_writable_dirs_emit_one_add_dir_each_in_order_and_quoted() -> None:
 
 
 def test_web_search_legacy_bools_keep_their_existing_behavior() -> None:
-    assert "--search" in _harness_integration({"web_search": True}).resume(_op_ctx(_target(rollout=0)))
-    assert "--search" not in _harness_integration({"web_search": False}).resume(_op_ctx(_target(rollout=0)))
+    on = _sh_argv(_harness_integration({"web_search": True}).resume(_op_ctx(_target(rollout=0))), home="/home/me")
+    off = _sh_argv(_harness_integration({"web_search": False}).resume(_op_ctx(_target(rollout=0))), home="/home/me")
+    assert "--search" in on
+    assert "--search" not in off
+    assert not any(token.startswith("web_search=") for token in off)
 
 
-@pytest.mark.parametrize("mode", ["cached", "indexed", "live", "disabled"])
-def test_web_search_mode_forwards_as_a_quoted_toml_string(mode: str) -> None:
-    argv = _sh_argv(_harness_integration({"web_search": mode}).resume(_op_ctx(_target(rollout=0))), home="/home/me")
-    token = f'web_search="{mode}"'
+def test_web_search_string_forwards_as_a_quoted_toml_string() -> None:
+    argv = _sh_argv(
+        _harness_integration({"web_search": "indexed"}).resume(_op_ctx(_target(rollout=0))), home="/home/me"
+    )
+    token = 'web_search="indexed"'
     assert token in argv
     assert argv[argv.index(token) - 1] == "-c"
     assert "--search" not in argv

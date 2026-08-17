@@ -438,7 +438,9 @@ resumable sessions. Five rules, each earned:
 - **Use `-c` for common Codex settings without dedicated flags.** Keep Codex-owned choice sets
   unvalidated and TOML-encode string values before forwarding them. The built-in integration models
   `reasoning_effort`, `vim_mode`, and explicit `web_search` modes this way; its legacy boolean
-  `web_search` values retain their original `--search` / no-override behavior.
+  `web_search` values retain their original `--search` / no-override behavior. Codex 0.147.0 takes
+  the last repeated `-c` value, so a same-key override in appended-last `extra_args` replaces a
+  managed `-c` setting.
 
 #### Integration-Owned Files on the Launch Target
 

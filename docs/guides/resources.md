@@ -406,10 +406,11 @@ facts about the fields:
   not expanded.
 - **Session preferences can override user config without editing it.** `vim_mode: true` starts the
   composer in Vim normal mode, while `reasoning_effort` forwards Codex's current effort name. Both
-  remain optional, and `/vim` can still toggle Vim behavior inside a running session.
+  remain optional.
 - **Web search has explicit modes.** Use `web_search: cached`, `indexed`, `live`, or `disabled`.
   Legacy `true` still requests live search through `--search`; legacy `false` still emits no
-  override, so existing templates keep their behavior.
+  override, so existing templates keep their behavior. Use `disabled`, not `false`, to force search
+  off regardless of the target's profile or `config.toml`.
 - **The integration always passes `--strict-config`**, so a Codex config mistake (or a Codex-renamed
   config key) fails loudly at launch instead of being silently ignored. Turning that off is for when
   strictness itself is the problem: a target whose `config.toml` Codex must tolerate (one written by
