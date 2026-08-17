@@ -158,13 +158,28 @@ task's substance, but do not walk past problems just because they are not yours.
 
 Two lines bound this. The first is size and risk: a defect big enough to want its own design pass,
 or one whose fix would change a shared contract rather than honor it, gets filed with its root cause
-and call sites instead of fixed in passing. The `agentic-dev-process` skill's section 1a gives the
-three conditions.
+and call sites instead of fixed in passing. **Scope discipline** gives the complete rule below.
 
 The second is ownership. "Nicer" covers your own effort's code and docs. Every SDD artifact has an
 owner, so unless that owner is you it is not yours to tidy no matter how obvious the fix looks; the
 `sdd` skill's ownership rule governs them. Flag what you found to whoever owns it, in the terms you
 would have used to fix it, and leave the file alone.
+
+### Scope discipline
+
+Fold an incidental fix into the work only when all three conditions hold: the main work requires it,
+it stays within existing contracts and conventions, and it is unlikely to break current behavior.
+Otherwise record the root cause, evidence, and call sites for the owner. If acceptance or safe
+operation depends on it, wait for or stack on the owning effort. A discovery that needs a new
+contract, design pass, or broad risky change is not incidental work.
+
+### Finding materiality
+
+A finding is material when leaving it would change what someone builds, concludes, or does next.
+Material findings receive disposition and remain live until resolved. Other findings are optional:
+severity can describe them, but they do not independently gate, trigger another round, or require
+re-review. This classifies findings, not their source; apply scope discipline to any correction
+outside the work under review.
 
 ### 10. Ask questions; push back; then commit
 

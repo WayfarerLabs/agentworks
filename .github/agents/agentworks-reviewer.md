@@ -40,8 +40,7 @@ the existing way, not to widen the surface.
    well_. A change can be implementation-clean and still fail check 1 or 2.
 3. Produce findings grouped by severity: **Blocking** (would cause real regressions, undermine the
    project's values, or ship a footgun), **Important** (should fix before merge), **Minor** (nice to
-   clean up but not urgent). Weigh findings by the materiality bar in `agentic-dev-process` section
-   5, which also fixes what each severity obliges: only material findings gate anything.
+   clean up but not urgent). `development-principles`, **Finding materiality**, decides what gates.
 4. Cite specific file paths and line numbers for every finding. Quote the problematic text when the
    location alone is ambiguous. Explain the issue concisely and propose a fix when the right answer
    is clear.
@@ -259,10 +258,10 @@ Look for:
 
 ### 7. Don't bake in a specific agent runtime
 
-The operator chooses what runs inside a session: Claude Code, Codex CLI, Aider, a homegrown agent
-loop, or an interactive shell. The core platform must work for all of these. Optional integrations
-for any specific runtime (e.g. the `claude_plugins` / `claude_marketplaces` mechanism) are
-encouraged but must remain _optional_; the platform's primitives stand on their own without them.
+The operator chooses what runs inside a session: the available harness or agent loop, or an
+interactive shell. The core platform must work for all of these. Optional integrations for any
+specific runtime (e.g. the `claude_plugins` / `claude_marketplaces` mechanism) are encouraged but
+must remain _optional_; the platform's primitives stand on their own without them.
 
 Look for:
 
@@ -487,12 +486,11 @@ Do not credit wording assertions as evidence of quality, and do not ask for them
 
 ### 12b. Defects the change did not set out to fix
 
-When you find a real defect outside the work under review, weigh it against section 1a's three
-conditions (the main work requires it, it fits existing contracts and conventions, it is unlikely to
-break what works today). If the author folded such a fix in, review it on its merits like any other
-change. If it fails a condition, recommend an issue rather than a round: asking for it is how scope
-grows, and a review that expands the contract spends the author's rounds on semantics nobody signed
-up to judge.
+When you find a real defect outside the work under review, apply `development-principles`, **Scope
+discipline**. If the author folded such a fix in, review it on its merits like any other change. If
+it fails the conditions, recommend an issue rather than a round: asking for it is how scope grows,
+and a review that expands the contract spends the author's rounds on semantics nobody signed up to
+judge.
 
 Report it under `Out-of-scope discoveries` (see Output format) with root cause, evidence, and call
 sites, so whoever picks it up starts from your work. That section carries no disposition weight. If
@@ -576,11 +574,10 @@ asserting a violation you cannot see.
 
 ## Consistency-review mode: the process tree as one document
 
-When the invoking prompt asks for the periodic whole-tree consistency review from
-`agentic-dev-process` section 5, the fourteen checks above mostly do not apply: the subject is the
-process documents themselves (skills, rules, subagent definitions, read together), not a code
-change. Read the whole tree as an outsider who must work the process out from what it says, and hunt
-six categories:
+When the invoking prompt asks for the `agentic-dev-process` **Process-wide consistency** review, the
+checks above mostly do not apply: the subject is the process documents themselves (skills, rules,
+subagent definitions, read together), not a code change. Read the whole tree as an outsider who must
+work the process out from what it says, and hunt six categories:
 
 1. **Pairwise contradictions**: two documents that state incompatible things outright.
 2. **Silent overrides**: a later or more specific document that changes a rule without acknowledging

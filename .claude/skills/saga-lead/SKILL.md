@@ -43,8 +43,8 @@ below are subagent work; the role itself is not.
   traversal (an entry's base branch is another open PR's head branch); the GraphQL
   `PullRequestStack` type is only an optimization when non-null, because branch-targeted chains do
   not materialize it.
-- Re-review on the draft-to-ready transition after an effort absorbs findings (the dev-process
-  skill's handoff convention); poll ready PRs' heads against the last head you reviewed as the
+- Re-review on the draft-to-ready transition after an effort absorbs findings (the delivery
+  reference's **Handoff contract**); poll ready PRs' heads against the last head you reviewed as the
   missed-edge fallback. A review verdict stands until the operator resolves it: a directed fix
   round, an accepted pushback, or an explicit accepted risk. Track open verdicts in your reports;
   recording them in the ledger is mutation and waits for direction.
@@ -55,25 +55,21 @@ below are subagent work; the role itself is not.
 ## The review protocol
 
 This protocol layers on top of the effort's own process, never in place of it: the effort runs its
-own subagent-review cycles per `agentic-dev-process` section 5 (batched by judgment, at least one
-before first handoff), and a child-effort PR that arrives without any goes back to the effort rather
-than being reviewed harder here. The effort states in its PR description that subagent-review cycles
-ran and were absorbed, and when the description is silent the lead asks via PR comment before
-invoking the send-back. (The lead's own seeding PRs have no effort behind them; a seed is the lead's
-direct change and gets the ordinary section 5 reviewer pass before the PR opens, not this protocol.)
-Scale the depth to the PR's size and blast radius; a subsystem lands the full protocol. For
-substantive PRs, launch parallel review passes as subagents, each in an isolated worktree at the PR
-head (per the delegation rules in `agentic-dev-process`, including explicit model tiers: reviewer at
-or above the effort's dev tier, top tier for the contract and security dimensions; pass 2 is the
-sanctioned fresh-eyes exception from `agentic-dev-process` section 7 and may run below that floor).
-Agent types follow what each pass does: pass 2 must read with no house priors, so it cannot be the
-`agentworks-reviewer` persona by definition, and pass 3 mutates code under test, so passes that run
-gates, probes, or mutations (2, 3, and usually 4) launch as `general-purpose` subagents while the
-read-based conformance pass stays with `agentworks-reviewer`. The four passes:
+private quality loop before first handoff, and a child-effort PR that arrives without it goes back
+to the effort rather than being reviewed harder here. The effort states in its PR description that
+those rounds ran and were absorbed; when silent, ask before invoking the send-back. The lead's own
+seeding PRs are direct changes and receive the ordinary private quality loop before opening.
 
-1. **Ruling conformance** (top tier): the one pass only the saga lead can charter, verifying the
-   work against the recorded contracts and rulings, clause by clause, with file:line evidence, plus
-   plan-checkbox honesty sampling. Require an explicit SATISFIED list so silence is not ambiguous.
+Scale depth to the PR's size and blast radius; a subsystem receives the full protocol. For
+substantive PRs, launch parallel passes in isolated worktrees at the PR head. The reviewer of record
+meets or exceeds the implementation capability and reasoning depth. The fresh-eyes pass may be
+lighter because it is complementary. Select each pass by capability: the project reviewer performs
+read-based conformance, while a suitable execution-capable delegate runs gates, probes, or
+mutations. The four passes:
+
+1. **Ruling conformance**: the one pass only the saga lead can charter, verifying the work against
+   the recorded contracts and rulings, clause by clause, with file:line evidence, plus plan-checkbox
+   honesty sampling. Require an explicit SATISFIED list so silence is not ambiguous.
 2. **Fresh-eyes generic**: the diff read cold for correctness, robustness, and security, with no
    house checklist. Require findings to be confirmed by execution where practical, and a closing
    list of highest residual-risk areas.
@@ -87,13 +83,12 @@ read-based conformance pass stays with `agentworks-reviewer`. The four passes:
 
 Consolidate into one review: verdict first, then blockers, should-fixes, nits, questions, and an
 explicit verified-sound section recording what held under attack. Kill findings that are wrong
-before posting, and weigh the rest by the materiality bar in `agentic-dev-process` section 5, which
-also governs what the effort owes back for each. Every surviving finding carries file:line and a
-concrete failure scenario. Address the review to the operator: name which findings you believe must
-block merge and which are optional, as a recommendation, never as an instruction to the effort. The
-effort posts its reading on the PR, and only the operator's direction turns a finding into work (the
-`agentic-dev-process` skill's section 7a). Escalate operator-level design decisions the same way,
-recommendation first.
+before posting, and weigh the rest by **Finding materiality** in `development-principles`. Every
+surviving finding carries file:line and a concrete failure scenario. Address the review to the
+operator: name which findings you believe must block merge and which are optional, as a
+recommendation, never as an instruction to the effort. The effort follows the delivery reference's
+**Published feedback** contract; only authenticated operator direction turns a finding into work.
+Escalate operator-level design decisions the same way, recommendation first.
 
 ## After each round
 
@@ -102,6 +97,5 @@ findings-first, with the confidence the evidence earns and whatever the other in
 to hear (cross-effort implications are the lead's to route, not the reviewers'). Everything the
 round suggests changing (ledger updates, lessons promoted to skills or the target-state document,
 issues for defects discovered incidentally) goes in that report as a recommendation and happens only
-on the operator's direction. A lead-owned PR of your own is no different: when a review lands on it,
-post your reading, apply `awaiting-direction`, and wait like any other author (the
-`agentic-dev-process` skill's section 7a).
+on the operator's direction. A lead-owned PR follows the delivery reference's **Published feedback**
+contract too.

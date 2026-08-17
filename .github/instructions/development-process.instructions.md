@@ -11,8 +11,8 @@ Which part applies depends on your role:
 
 - **If you are driving work** (you decide what happens next, own a plan, or launch subagents), load
   the `agentic-dev-process` skill before starting and follow it end to end: sizing, SDD, delegation,
-  review, PRs, and escalation. This applies to small direct changes too; the skill says which steps
-  collapse.
+  review, delivery, and escalation. This applies to small direct changes too; the skill says which
+  steps collapse.
 - **If you were delegated a bounded task**, your invoking prompt and your persona define your lane;
   process decisions that reach beyond that lane route to your invoking lead, not to this rule.
 
