@@ -333,6 +333,7 @@ def _claude_argv(command: str) -> list[str]:
 def test_session_preferences_default_off() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
     argv = _claude_argv(_harness_integration().start(_op_ctx(target)))
+    assert "--effort" not in argv
     assert "--remote-control" not in argv
     assert "--settings" not in argv
 
