@@ -1,6 +1,6 @@
 # Plan: Agentworks Assistance, Discovery, and Management
 
-- Status: Active, trail-sign revision
+- Status: Active, Markdown-shell correction
 - FRD: `docs/sdd/2026-08-05-onboarding-and-discovery/frd.md`
 - HLA: `docs/sdd/2026-08-05-onboarding-and-discovery/hla.md`
 
@@ -15,9 +15,9 @@
   waits for authenticated operator direction before changing the branch.
 - Main is authoritative. Wave 2 branch content informs coordination but is not an implementation
   dependency.
-- After the draft artifact PR, each implementation phase is an intentionally separate ready-to-merge
-  PR because it is independently usable and keeps main green. Later phases build only on merged
-  predecessors.
+- Each active correction records its delivery vehicle. The Markdown-shell correction is one stacked
+  feature PR based on the corrected-guide branch until that predecessor merges, then targets `main`.
+  Phase 5 closeout remains a later PR.
 - Completed checkboxes are immutable.
 - Requirement and acceptance-criterion references inside completed Phases 0 through 3 refer to the
   pre-trail-sign FRD implemented by PR #480. They are historical records, not references to the
@@ -557,6 +557,92 @@ general assistance posture but intentionally dropped the former repeated startup
 not delete authored-prompt semantic or wording tests, and instead made retained projection-version
 assertions derive from canonical metadata.
 
+The operator's 2026-08-17 Markdown-shell ruling supersedes the retained typed topic, action,
+evidence, and onboarding-assessment destination without altering any completed checkbox above. The
+next correction deliberately removes those mechanisms rather than translating them into another
+schema.
+
+## Phase 4 correction: Markdown concept shells
+
+- [x] Reconcile the active FRD, HLA, and guide LLD around one auto-discovered Markdown-shell model.
+      Pin required `description` frontmatter, filename-derived global `concept-<shell-name>` slugs,
+      exactly one H1 title, the three-feature shell grammar, trusted package-resource ownership, the
+      two-operation live boundary, and the removal list below. Preserve every completed checkbox
+      above unchanged.
+
+Historical correction for the completed design checkpoint above: subsequent operator direction
+removed both live projections and their degradation subsystem. The final shell grammar has only
+agent-only fences and bounded section includes. It also names `concept-core-model` as the consumer
+of selected canonical root-README sections and their repository-relative images.
+
+- [ ] Before implementation, have the saga lead record the operator's 2026-08-17 Markdown-shell
+      ruling in the saga-owned target state. This child identifies the conflict but does not edit
+      the saga ledger or target artifacts itself.
+- [ ] Implement deterministic concept-shell discovery from the installed first-party package tree.
+      Replace ordinary per-topic Python registration with one walk beneath the installed first-party
+      `agentworks` package for direct Markdown children of `guide-content` directories. Make
+      `--names-only` and shell completion consume the same static catalog without live loading, and
+      fail clearly on malformed shells or global slug collisions. Keep the fixed no-topic trail sign
+      catalog-free.
+- [ ] Implement the closed shell expander: inline Markdown; balanced, non-nested agent-only fences;
+      exact unique H2-H6 ATX-heading imports from bounded Markdown beneath the installed
+      `agentworks` package; one optional static integer heading offset applied uniformly with H2-H6
+      result bounds. Keep the shell's single ATX H1 outside agent-only fences and reject Setext
+      headings. Preserve absolute HTTPS and fragment-only Markdown destinations and rewrite
+      repository-relative inline and reference-style destinations to canonical GitHub `blob/main`
+      URLs for links and raw-GitHub `main` URLs for images. Require reference definitions inside the
+      same emitted shell or extracted section. Fetch or embed no remote content. Filter mode-hidden
+      regions before import work, insert imported text inertly without recursive directive
+      processing, and add no variables, loops, conditionals, evaluator, arbitrary path support,
+      service operation, state loading, general URL resolver, or generic registry.
+- [ ] Add one small Hatch build hook that places the exact canonical root `README.md` at the private
+      packaged guide-source path for a direct wheel and a source distribution, and uses the vendored
+      package copy for a wheel built from that source distribution. In editable source execution,
+      permit only the same root file behind a verified fixed repository-layout fallback. Add no
+      checked-in generated mirror. Map its relative links and images from repository-root paths
+      while normal package-document destinations map from `cli/agentworks/`; split and preserve
+      relative-link fragments before path normalization. Expose no other repository-root include
+      source. Add `concept-core-model` as the representative shell and import its real “Architecture
+      at a Glance” and “Core Concepts” sections rather than duplicating that prose.
+- [ ] Migrate every retained ordinary core, subsystem, and curated-plugin concept to one shell. Move
+      useful commands, expected outcomes, refusal guidance, and related links into authored
+      Markdown. Keep general assistant posture in `concept-assistant-agent`; agent-only fences in
+      other shells contain local context only. Make onboarding an ordinary static shell; do not
+      preserve a projection, special snapshot, assessment, status model, evidence transition, or
+      action selector. Retain the base release-notes concept as a shell and keep exact packaged
+      version evidence as a direct inert rendering path with no `ReleaseNotes` block or old catalog
+      union.
+- [ ] Delete the superseded guide machinery and its dedicated tests in the same wave: typed
+      `Overview`, `Teaching`, `AgentNote`, `ReleaseNotes`, `ActionList`, and `TopicLinks` assembly;
+      `GuideAction` and consent records; action parsing, validation, and rendering; `--evidence`
+      parsing and replay; onboarding projection and assessment; `Plugin.guide_topics`; subsystem and
+      plugin `_load_guide_contributions` adapters and `guide_contributions.py` modules; the
+      first-party guide-package map/loader; manual ordinary-topic constructors; and every parser,
+      serializer, renderer branch, fixture, and export whose last consumer leaves. Do not recreate
+      any removed contract in frontmatter or tests.
+- [ ] Update permanent CLI and contribution documentation, package-data expectations, and
+      completions for the shell model and removed `--evidence` option; record sample configuration
+      as unaffected unless a real setting changes. Update
+      `.rulesync/rules/keep-collateral-in-sync.md`, `.rulesync/subagents/agentworks-reviewer.md`,
+      and their generated Rulesync projections to remove the onboarding assessment exception and
+      replace the typed-action requirement with the reviewed-prose obligation from FRD R5. Add no
+      schema or prose-policing test. Verify that no separate canonical `guide-contributions` rule
+      exists at the implementation base rather than creating a replacement rule. Test discovery,
+      structure, filtering, imports, absence of state loading, package inclusion, names-only, and
+      completion without asserting authored wording.
+- [ ] Deliver this correction as one stacked feature PR based on the corrected-guide branch, then
+      target `main` or rebase onto it when the predecessor merges. Run focused guide/completion and
+      package tests, the full non-integration suite, Ruff, formatting, mypy, Rulesync drift,
+      locked-SDD, and file lint. Complete the required project and fresh-eyes reviews, resolve
+      material findings, and hand off one ready PR with the saga label.
+
+Definition of done: ordinary guide concepts are self-describing Markdown files with two bounded
+composition features; selected guidance is static; operational commands own all current facts,
+actions, and verification; the special onboarding and evidence systems are absent; malformed
+operator state cannot affect guidance; and the implementation is materially smaller than the
+corrected typed model it replaces. Current FRD R1 through R5 and acceptance criteria 1 through 8 and
+10 hold; R6, R7, and acceptance criterion 9 remain for closeout.
+
 ## Phase 5: representative acceptance and closeout
 
 - [ ] Run one provider-backed journey from an exact reviewed candidate wheel through the no-topic
@@ -575,5 +661,5 @@ assertions derive from canonical metadata.
 - [ ] Create `locked.md` with the final state and date, then hand off the always-green closeout PR
       with commit and test evidence.
 
-Definition of done: FRD R6 and acceptance criteria 7 and 8 hold, the implementation is represented
-accurately in permanent artifacts, and the effort is ready to lock.
+Definition of done: FRD R6 and R7 and acceptance criteria 9 and 10 hold, the implementation is
+represented accurately in permanent artifacts, and the effort is ready to lock.

@@ -1,236 +1,239 @@
 # Guide Contract Low-Level Design
 
-- Status: Current corrected destination
-- Scope: retained authored topics, catalog, rendering, onboarding assessment, inert actions, mode
-  selection, and verification evidence
+- Status: Current Markdown-shell destination
+- Scope: concept discovery, bounded shell expansion, mode selection, and inert release evidence
 - FRD: `frd.md` R1 through R5
-- HLA: `hla.md`, Shared trail sign through Catalog, names, and completion
+- HLA: `hla.md`, Fixed trail sign through Safety and failure behavior
 
-The immutable implementation journey is in `plan.md`. The schema, runtime-resource, generic
-`GuideView`, and required `AgentContract` designs are removed from current HEAD and from this LLD.
+The immutable implementation journey remains in `plan.md`. This contract replaces the retained
+typed-block, action, evidence, and onboarding-assessment machinery with auto-discovered Markdown
+concept shells.
 
-## Module and package-data layout
+## Contract boundary
 
-The guide is a library below Typer:
+The guide has three content paths:
 
-| Module             | Responsibility                                                                   |
-| ------------------ | -------------------------------------------------------------------------------- |
-| `contract.py`      | Frozen topics, blocks, actions, strict parsing, and validation                   |
-| `catalog.py`       | Guide-scoped contribution collection, ownership, links, and plugin isolation     |
-| `assessment.py`    | Frozen onboarding facts, verification evidence, assessment, and inert actions    |
-| `render.py`        | Pure Markdown rendering, mode shaping, release evidence, and onboarding output   |
-| `service.py`       | Atomic request validation, catalog selection, onboarding projection, and framing |
-| `trail_sign.py`    | One fixed local destination tuple                                                |
-| `agent_mode.py`    | Explicit flag, registered signature, and stdout TTY precedence                   |
-| `contributions.py` | Core authored topics and action records                                          |
+1. A fixed no-topic trail sign renders without discovering shells or loading state.
+2. Selected `concept-*` topics render auto-discovered Markdown shells.
+3. Exact historical release-note topics render bounded sections from the packaged changelog as inert
+   generated evidence. They are not shells.
 
-`cli/agentworks/cli/commands/guide.py` owns Typer parsing and output. It calls the library and
-contains no catalog, assessment, or rendering policy.
+The selected-topic path is a small Markdown expander, not a template engine. It supports authored
+Markdown and exactly two directive forms: an agent-only fence and a packaged-section include.
 
-Authored Markdown is UTF-8 package data at `<owning-package>/guide-content/<topic>/<block-id>.md`.
-Core, secrets, and the two first-party plugin loaders read it with `importlib.resources` only when a
-guide request constructs the catalog. There is no filesystem-relative fallback or import-time
-registration.
+## Concept shells and discovery
 
-## Shared trail sign
+Each concept is one UTF-8 Markdown file named `<stem>.md` directly under a directory named
+`guide-content` in the installed first-party `agentworks` package tree. Discovery starts at
+`importlib.resources.files("agentworks")` and walks only that traversable package resource. The
+guide does not scan the working tree, current directory, another installed package, or a
+filesystem-relative fallback.
 
-After argument and verification-evidence validation, a no-topic request renders one fixed tuple and
-returns before catalog or live-context construction. The exact slugs, in order, are:
+Discovery validates every file and orders package-relative directories, then filenames,
+deterministically. A filename stem uses lower kebab case and produces the global slug
+`concept-<stem>`. Slugs have one global namespace; two directories producing the same slug are a
+structural catalog error. The guide never shadows one shell with another or changes the winner based
+on discovery order.
 
-1. `concept-assistant-agent`;
-2. `concept-onboarding`;
-3. `concept-management`;
-4. `concept-troubleshooting`;
-5. `concept-release-notes`;
-6. `concept-migration`;
-7. `concept-secrets`; and
-8. `concept-reporting-bugs`.
+The first-party apt and install-command content uses filenames `apt.md` and `install-commands.md`,
+producing `concept-apt` and `concept-install-commands`. The former `plugin/<name>/<topic>` grammar
+and registration adapter are deleted; separately installed plugins are outside discovery.
 
-`TrailDestination` contains only `slug` and a shared concise intent. Human and agent modes consume
-the same tuple. Human mode asks the operator to choose a goal. Agent mode points first to
-`concept-assistant-agent`, then asks the assistant to choose the operator's goal. Both point to
-shell completion and `agw guide --names-only`.
+Every shell begins with this restricted frontmatter shape:
 
-The tuple deliberately duplicates topic identities so no-topic can remain independent of the
-catalog. Structural tests pin the slugs and resolve each in both modes through the selected-topic
-path.
-
-## Frozen contribution records
-
-Every record is a frozen, slotted dataclass. The retained authored block contract is:
-
-```python
-@dataclass(frozen=True, slots=True)
-class Overview:
-    id: BlockId
-    markdown: str
-
-@dataclass(frozen=True, slots=True)
-class Teaching:
-    id: BlockId
-    markdown: str
-
-@dataclass(frozen=True, slots=True)
-class AgentNote:
-    id: BlockId
-    markdown: str
-
-@dataclass(frozen=True, slots=True)
-class ReleaseNotes:
-    id: BlockId
-
-@dataclass(frozen=True, slots=True)
-class ActionList:
-    id: BlockId
-    actions: tuple[GuideAction, ...]
-
-@dataclass(frozen=True, slots=True)
-class TopicLinks:
-    id: BlockId
-
-GuideBlock = Overview | Teaching | AgentNote | ReleaseNotes | ActionList | TopicLinks
-
-@dataclass(frozen=True, slots=True)
-class TopicContribution:
-    topic: TopicSlug
-    title: str
-    summary: str
-    blocks: tuple[GuideBlock, ...]
-    related_topics: tuple[TopicSlug, ...] = ()
+```markdown
+---
+description: Help an operator get started with Agentworks.
+---
 ```
 
-The decoded discriminators are `overview`, `teaching`, `agent-note`, `release-notes`, `action-list`,
-and `topic-links`. `AgentNote` is optional. Most topics omit it. Onboarding loads one authored
-`agent-note.md`; the assistant topic itself is ordinary shared overview and teaching.
+`description` is required, non-empty, single-line text used for discovery and completion metadata.
+No other frontmatter key, YAML feature, or executable value is accepted. The body contains exactly
+one authored ATX level-1 heading outside agent-only fences, which supplies the topic title. Setext
+headings are not accepted anywhere in the shell. The filename supplies identity; the heading
+supplies title; frontmatter supplies description. Python does not register those values per topic.
 
-Semantic block identity is `(topic, block.id)`. Block IDs are unique within a topic. Ordinary block
-identity and source payload remain identical across modes. Human rendering omits `AgentNote`; agent
-rendering includes it in authored order. No other block type is audience-specific.
+`agw guide --names-only` discovers names from shell filenames plus the separately generated exact
+release-note names. It loads no operator state. Shell structural defects, including duplicate slugs,
+fail the catalog request rather than producing a partial or ambiguous catalog.
 
-## Strict parsing and catalog behavior
+The root `README.md` is not a shell and is not discovered. One custom Hatch build hook materializes
+it at `agentworks/_guide_sources/README.md` as an include-only resource:
 
-`parse_topic_contribution(value, source)` recursively copies and validates the closed decoded shape.
-It rejects unknown or missing fields, wrong scalar and sequence types, executable objects, unknown
-discriminators, invalid topic and block identities, duplicate blocks or actions, invalid links,
-expression markers outside the narrow inert inline-code exception, and reserved framework heading
-delimiters. Titles, summaries, Markdown, links, blocks, actions, inputs, and command tokens retain
-their established byte and count limits.
+- a direct wheel reads the repository-root file and maps it to the package path;
+- a source distribution reads the repository-root file and vendors it at that package path; and
+- a wheel built from the source distribution uses the vendored file already selected with the
+  `agentworks` package, without overwriting it.
 
-Action tokens remain a closed literal grammar with exact registered `$INPUT_NAME` substitutions.
-Sensitive inputs cannot be interpolated. Exactly one of a literal-token command or bounded manual
-steps is present. Parsing never evaluates content.
+The hook fails the build if the required source for its mode is absent. A source/editable run whose
+package resource is absent may read `<verified-repository-root>/README.md` only after confirming the
+fixed layout: `.git`, `README.md`, `cli/pyproject.toml`, and `cli/agentworks/`. It does not use the
+working directory or search parent directories. No checked-in generated README mirror, runtime
+network fetch, or other repository-root include source exists.
 
-Only `concept-*` and `plugin/<plugin>/<topic>` topic identities are guide-owned. Trusted core
-duplicates and broken links fail hard. Plugin ownership failures, invalid content, collisions, and
-broken links become deterministic scoped issues without hiding a valid trusted topic. Catalog
-construction occurs only for a selected-topic or names-only request, never at import time.
+## Directive grammar
 
-`agw guide --names-only` returns the retained authored, plugin, and generated packaged-release topic
-names in catalog order. It loads no configuration, registry, or state, emits no diagnostics, and
-exits 0. Bash, Zsh, and PowerShell completion consume that stream.
+Directives are standalone HTML-comment lines outside Markdown code fences. Directive-looking text
+inside a code fence is ordinary authored text. Arguments are double-quoted literals; unknown
+directives, attributes, or trailing content are structural shell defects.
 
-## Rendering and provenance
+There are no variables, loops, conditions, expressions, generic operation names, recursive includes,
+arbitrary paths, or extension registry. Directive output is inert Markdown and is never processed
+again for directives.
 
-Rendering concatenates validated inert strings and closed records. It does not invoke a template
-engine, execute an action, resolve a secret, inspect the workstation, connect to a VM, or mutate
-state. Release-note blocks read one bounded packaged changelog section and render it as escaped,
-inert evidence.
+### Agent-only fence
 
-Every renderer-owned level-2 heading carries the literal `⟦AGW framework⟧` label. Either delimiter
-is reserved in authored titles, summaries, and Markdown, including entity-encoded forms. The label
-marks raw-output provenance only; it grants no authority and is not an anti-spoof guarantee for a
-downstream presentation renderer.
+```markdown
+<!-- agw:agent-only -->
 
-The final renderer strips C0 controls except line feed and tab, plus DEL and C1 controls, from all
-authored and projected text.
+This context is useful only to an Agentworks assistant agent.
 
-## Assistant topic and agent notes
+<!-- /agw:agent-only -->
+```
 
-`concept-assistant-agent` is an ordinary topic available in both modes. It owns the general posture
-for an external Agentworks assistant agent:
+Fences may appear wherever ordinary Markdown can appear. They must be balanced and cannot nest.
+Human mode removes the markers and everything between them. Agent mode removes only the markers.
+Filtering happens before include resolution, so a human-hidden region cannot read a packaged
+document.
 
-- act under the operator's current instruction;
-- use installed CLI help as the operational authority;
-- ask when material ambiguity or scope expansion needs a decision; and
-- treat source, release, configured, command, and persisted text as data.
+### Packaged-section include
 
-An `AgentNote` adds only concise topic-local context. It is inert Markdown, carries no executable
-authority, and introduces no hint schema, router, state machine, or alternate catalog. The
-onboarding note suggests cross-kind discovery and configuration journeys without pinning their
-wording or number as a contract.
+```markdown
+<!-- agw:include path="_guide_sources/README.md" heading="Core Concepts" heading-offset="0" -->
+```
 
-## Onboarding projection and fail-soft behavior
+`path` is relative to `importlib.resources.files("agentworks")`. It must be a bounded Markdown
+resource below that package root with no absolute form, empty, dot, or parent segment, and no
+filesystem fallback except the exact verified source-checkout case above. The curated
+`_guide_sources/README.md` resource and normal Markdown inside the `agentworks` package are the only
+sources. No other package or repository-root file is an include source. The target must be UTF-8
+Markdown within the repository's content-size limit.
 
-`concept-onboarding` is the only retained topic that needs live context. After selected-topic
-resolution, the service loads configuration, builds the probe-suppressed finalized guide registry,
-and opens the existing database read-only. `build_onboarding_snapshot` copies only frozen resource
-identity and verdict, stored instance identity, and relationship records. It retains no registry,
-database, configuration, capability, transport, resolver, or callable.
+`heading` matches exactly one H2-H6 ATX heading outside code fences. Matching compares the visible
+heading text after removing the ATX marker and optional closing hashes. H1 imports, zero matches,
+and multiple matches are structural errors. Expansion inserts the matching heading and its body
+through, but not including, the next heading of equal or higher rank.
 
-The pure assessment classifies projected facts as `done`, `not-ready`, `disabled`, or
-`unverifiable`, then selects established inert actions. It persists no onboarding ledger. Caller
-owned verification evidence is repeatable and target-scoped:
+`heading-offset` is an optional signed base-10 integer and defaults to `0`. The expander adds it to
+the level of every ATX heading in the selected section outside code fences. The offset is static for
+the include; a shifted heading below H2 or above H6 is a structural error. A Setext heading anywhere
+in the selected section is a structural error rather than an unchanged escape from this rule.
+
+Included bytes are inert. The expander does not process directives, frontmatter, or agent-only
+markers found in an included document. Includes cannot recurse.
+
+The expander recognizes Markdown link and image destinations in inline forms and reference
+definitions. Absolute HTTPS and fragment-only destinations pass through unchanged. A relative
+destination is resolved with POSIX path semantics against the repository mapping of the Markdown
+document that contains it. A result outside that mapping, an absolute local path, a scheme-relative
+destination, a query string, or a non-HTTPS scheme is a structural error. An optional fragment is
+split before path normalization and encoding, then reattached unchanged to the canonical URL. Thus
+`cli/command-reference.md#named-consoles` retains `#named-consoles` as a fragment rather than path
+data.
+
+Valid relative destinations from normal package documents map to:
 
 ```text
-ACTION_ID:KIND/NAME=verified|failed|refused
+link:  https://github.com/WayfarerLabs/agentworks/blob/main/cli/agentworks/<path>
+image: https://raw.githubusercontent.com/WayfarerLabs/agentworks/main/cli/agentworks/<path>
 ```
 
-Evidence parsing is strict and atomic. Evidence is valid only with an onboarding request and cannot
-be combined with names-only output. Equal facts and evidence produce equal findings and actions in
-both modes.
+For the curated `_guide_sources/README.md` mirror, resolution instead starts at the repository root,
+so `docs/images/agw-topology.png` becomes
+`https://raw.githubusercontent.com/WayfarerLabs/agentworks/main/docs/images/agw-topology.png`.
+Normal package documents retain the `cli/agentworks/` prefix shown above. A relative link from the
+root mirror uses the equivalent `https://github.com/WayfarerLabs/agentworks/blob/main/<path>` form.
 
-Configuration, registry, database, or environmental projection failure preserves static onboarding
-blocks, records one sanitized response warning per root problem, adds the visible
-`concept-onboarding/derived-plan` unavailable placeholder, and exits 0. A structural assessment
-defect still raises. Invalid topic syntax, unknown topics, malformed or provably invalid evidence,
-incompatible options, and requested content defects remain nonzero.
+Guide references are current explanatory material, not immutable release evidence. Path segments are
+URL-encoded. A reference-style link or image must have its definition inside the same emitted shell
+or extracted section. A missing definition, or one shared by a link and image that need different
+canonical bases, is a structural error. The rewriter does not fetch, validate, or embed remote
+content. Included references resolve relative to the included document rather than the including
+shell.
 
-The database boundary converts non-read-only driver failures to a typed, non-echoing `StateError`. A
-read-only write rejection becomes `GuideTraversalError`, proving the projection attempted a
-forbidden mutation. Owned database connections close in `finally`.
+## Rendering and failure behavior
 
-## Inert actions and verification surfaces
+For selected shells, rendering proceeds in this order:
 
-`GuideAction` retains identifier, precondition, required inputs, authorization class, literal-token
-command or manual steps, expected state, optional verification command, and refusal alternative.
-Rendering an action never authorizes or invokes it.
+1. resolve and structurally validate every requested shell atomically;
+2. filter agent-only fences for the selected mode;
+3. resolve visible packaged includes;
+4. rewrite visible repository-relative destinations; and
+5. sanitize and emit the complete Markdown response.
 
-The retained authorization classes are `read-configured-state`, `examine-workstation`,
-`resolve-named-secret`, `connect-named-vm`, `mutate-agentworks`, `read-canonical-source`, and
-`read-canonical-release-notes`.
+Structural defects remain nonzero: invalid topic syntax, unknown topics, malformed frontmatter,
+invalid filename or heading structure, duplicate slugs, malformed or unbalanced directives,
+disallowed include targets, missing or ambiguous include headings, content-bound violations, and
+internal invariant failures. Guide success means the requested guidance rendered; it does not assert
+installation health.
 
-Onboarding continues to use the existing value-free named-secret verification and non-mutating
-named-VM connection verification commands. Secret verification performs one normal ordered
-resolution pass without returning, logging, or formatting a value; interactive sources require the
-explicit interaction option. VM connection verification performs one bounded no-op transport run
-without start, repair, rekey, reinit, or database mutation. Neither operation is reachable from
-catalog construction, rendering, or the onboarding projector.
+Rendering never loads configuration, registry, database, resources, secrets, provider state,
+network, transports, or subprocesses. A shell points to command-owned help and inspection surfaces
+when it needs current facts.
 
-## Mode selection
+Final output strips C0 controls except line feed and tab, plus DEL and C1 controls, from authored,
+included, and generated release-note text.
 
-`select_guide_mode(explicit, environ, stdout_isatty)` uses this precedence:
+## Retained independent behavior
+
+The no-topic human and agent trail signs keep their fixed shared destination tuple and return before
+shell discovery or include loading. The fixed tuple deliberately duplicates selected-topic slugs so
+malformed configuration or shell content cannot affect the cheap entry path.
+
+The tuple is `concept-assistant-agent`, `concept-onboarding`, `concept-management`,
+`concept-troubleshooting`, `concept-release-notes`, `concept-migration`, `concept-secrets`, and
+`concept-reporting-bugs`. Every destination must resolve in the selected-topic catalog.
+
+Mode selection retains this precedence:
 
 1. explicit `--agent` or `--human`;
 2. the exact registered `CLAUDECODE=1` execution signature; and
 3. human for TTY stdout, otherwise agent.
 
-Configuration and secret variables are not mode signatures. Tests retain explicit override,
-near-miss signature, unsigned Codex-like environment, TTY, redirected, and piped `--human` coverage.
+Exact `concept-release-notes/vMAJOR-MINOR-PATCH` topics are resolved and rendered directly from
+bounded packaged changelog sections. They use no `ReleaseNotes` block, generic topic contribution,
+or old catalog union. Their content is escaped inert evidence, performs no network work, and uses no
+shell directives. The base `concept-release-notes` guidance is an ordinary shell.
+
+## Removed contract and code
+
+The implementation removes, rather than adapts, the superseded guide framework:
+
+- `Overview`, `Teaching`, `AgentNote`, `ReleaseNotes`, `ActionList`, and `TopicLinks` typed blocks
+  and their parsers, serializers, renderer branches, validators, and tests;
+- `GuideAction`, `ConsentBoundary`, action-token grammar, action rendering, and action validation;
+- `--evidence`, evidence parsing and replay, and evidence-driven guide behavior;
+- the onboarding snapshot, assessment, status, derived-plan, verification, and next-action logic;
+- `Plugin.guide_topics`, every subsystem or plugin `_load_guide_contributions` adapter and
+  `guide_contributions.py` module, the first-party guide-package loader map, manual per-topic
+  constructors, related-topic graphs, broken-link resolution, and contribution-specific ownership
+  machinery; and
+- compatibility layers whose only purpose is to preserve one of those removed shapes.
+
+Useful instructions and links become ordinary reviewed Markdown in their owning shell. Onboarding is
+not special and has no projection, private state machine, or assessment protocol. When guidance
+suggests an operation that could cross the operator's current authorization, review requires scope
+and impact, expected result, and a refusal alternative in the prose; no schema or prose-policing
+test replaces that review.
 
 ## Structural verification
 
-Focused tests protect:
+Focused tests protect behavior and boundaries:
 
-- the exact shared destination tuple and selected-topic resolution in both modes;
-- the no-topic no-catalog and no-live-load boundary;
-- ordinary assistant-topic resolution;
-- closed parser and serializer coverage for every block discriminator;
-- agent-only note rendering with identical shared block identities and payloads;
-- deterministic catalog ownership, collision, and broken-link handling;
-- names-only and completion discovery without live loading;
-- onboarding assessment success, caller evidence, read-only state, and fail-soft degradation;
-- inert actions and the secret, VM, filesystem, transport, probe, and mutation boundaries;
-- packaged release-evidence bounds and sanitization; and
-- authored package-data inclusion in built wheels.
+- filename discovery, global slug uniqueness, restricted frontmatter, and the unfenced single-H1
+  invariant;
+- balanced non-nested agent fences and filtering before include work;
+- exact unique H2-H6 ATX-section extraction beneath the one `agentworks` package root, bounded
+  static heading offsets, canonical URL rewriting for repository-relative links and images,
+  section-local reference definitions, size bounds, and inert non-recursive included text;
+- exact packaging of the canonical root README, `concept-core-model` rendering its selected sections
+  and images, the actual `#named-consoles` relative fragment, and no other repository-root include
+  source;
+- nonzero structural failures and proof that selected rendering does not load operator state;
+- fixed trail-sign bypass, mode precedence, names-only discovery, completion, and packaged exact
+  release evidence; and
+- shell and exact README package-data presence in a direct wheel, source distribution, wheel rebuilt
+  from that source distribution, and verified editable-source fallback.
 
-Tests assert behavior and structure, not authored wording or journey count.
+Tests use fixture content to assert structure and behavior. They do not pin, blacklist, snapshot, or
+otherwise police the wording of repository-authored Markdown, descriptions, warnings, or prompts.
