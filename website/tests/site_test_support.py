@@ -50,7 +50,9 @@ if SPEC is None or SPEC.loader is None:
 site_builder = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(site_builder)
 
-ONBOARDING_PROMPT = (REPO_ROOT / "packaging/agentworks/assistance.md").read_text(encoding="utf-8")
+ONBOARDING_PROMPT = (
+    REPO_ROOT / "packaging/agentworks/agent-onboarding-prompt.md"
+).read_text(encoding="utf-8")
 CSP = (
     "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; "
     "connect-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
@@ -171,9 +173,12 @@ class RepositoryFixture(unittest.TestCase):
         self.root = Path(self.temporary.name) / "repo"
         self.root.mkdir()
         shutil.copy2(REPO_ROOT / "README.md", self.root / "README.md")
-        assistance_source = self.root / site_builder.ASSISTANCE_SOURCE
+        assistance_source = self.root / site_builder.AGENT_ONBOARDING_PROMPT_SOURCE
         assistance_source.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(REPO_ROOT / site_builder.ASSISTANCE_SOURCE, assistance_source)
+        shutil.copy2(
+            REPO_ROOT / site_builder.AGENT_ONBOARDING_PROMPT_SOURCE,
+            assistance_source,
+        )
         for contract in site_builder.DOCUMENT_CONTRACTS:
             destination = self.root / contract.source
             destination.parent.mkdir(parents=True, exist_ok=True)

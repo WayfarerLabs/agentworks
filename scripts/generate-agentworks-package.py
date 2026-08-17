@@ -15,7 +15,7 @@ from typing import Any
 
 README_BEGIN = b"<!-- BEGIN GENERATED AGENTWORKS ASSISTANCE -->"
 README_END = b"<!-- END GENERATED AGENTWORKS ASSISTANCE -->"
-CANONICAL_BODY = Path("packaging/agentworks/assistance.md")
+CANONICAL_BODY = Path("packaging/agentworks/agent-onboarding-prompt.md")
 METADATA_FILE = Path("packaging/agentworks/metadata.json")
 README_FILE = Path("README.md")
 

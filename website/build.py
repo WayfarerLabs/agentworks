@@ -21,7 +21,7 @@ from site_game_validation import validate_game_manifest  # noqa: E402
 from site_content import (  # noqa: E402
     ASSISTANCE_README_BEGIN,
     ASSISTANCE_README_END,
-    ASSISTANCE_SOURCE,
+    AGENT_ONBOARDING_PROMPT_SOURCE,
     CLI_SECRETS_URL,
     CONTRACTS,
     DOCUMENT_CONTRACTS,
@@ -56,7 +56,7 @@ __all__ = (
     "CLI_SECRETS_URL",
     "ASSISTANCE_README_BEGIN",
     "ASSISTANCE_README_END",
-    "ASSISTANCE_SOURCE",
+    "AGENT_ONBOARDING_PROMPT_SOURCE",
     "CONTRACTS",
     "ContractError",
     "DOCUMENT_CONTRACTS",

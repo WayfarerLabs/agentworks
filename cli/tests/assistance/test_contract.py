@@ -8,7 +8,7 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
-BODY_PATH = ROOT / "packaging/agentworks/assistance.md"
+BODY_PATH = ROOT / "packaging/agentworks/agent-onboarding-prompt.md"
 BODY = BODY_PATH.read_text()
 METADATA = json.loads((ROOT / "packaging/agentworks/metadata.json").read_text())
 

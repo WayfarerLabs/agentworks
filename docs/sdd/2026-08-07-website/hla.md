@@ -136,10 +136,10 @@ concatenates them into an oversized output.
 
 The site has three content classes:
 
-- **Canonical shared content.** The build reads `packaging/agentworks/assistance.md` directly. The
-  built code element's decoded text, the canonical source, and the README's generated fenced block
-  must be byte-identical. The build fails closed on missing, duplicate, malformed, or drifted
-  sources. The website does not own or rewrite this text.
+- **Canonical shared content.** The build reads `packaging/agentworks/agent-onboarding-prompt.md`
+  directly. The built code element's decoded text, the canonical source, and the README's generated
+  fenced block must be byte-identical. The build fails closed on missing, duplicate, malformed, or
+  drifted sources. The website does not own or rewrite this text.
 - **Repository-derived product and security content.** The Manifesto and Security pages each render
   one complete permanent Markdown document through a closed, escaping transform: `docs/manifesto.md`
   and root `SECURITY.md`, respectively. Each source has exactly one `h1` and owns all of its page's
@@ -571,7 +571,7 @@ second authored prompt.
 
 ```text
 README.md identity selectors ------------------+--> home page
-packaging/agentworks/assistance.md canonical ---+
+packaging/agentworks/agent-onboarding-prompt.md canonical ---+
 
 docs/manifesto.md complete document --> Manifesto page
 SECURITY.md complete document ------------> security page
@@ -597,8 +597,8 @@ fixed here:
   CSS/JavaScript; builder; tests; and permanent operator/developer runbook.
 - `.github/workflows/`: Pages build/deploy workflow and the existing CI integration.
 - `.gitignore`: generated site artifact exclusion.
-- repository README and `packaging/agentworks/assistance.md`: required inputs, not website-owned
-  copies.
+- repository README and `packaging/agentworks/agent-onboarding-prompt.md`: required inputs, not
+  website-owned copies.
 - `docs/manifesto.md`: complete Manifesto source, with no fallback to the retired path.
 - `SECURITY.md`: complete Security page and private vulnerability-reporting authority.
 - this feature directory: temporary design, plan, research, and acceptance evidence only.

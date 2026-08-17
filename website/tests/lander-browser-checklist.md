@@ -610,4 +610,5 @@ new run records the refined source.
       the active scene and tap, hold, and drag behavior inside it.
 - [ ] In a clean context, a visitor identifies what Agentworks is, sees and can manually select the
       canonical bootstrap, and can copy it when clipboard writing is available. Confirm the copied
-      bytes match `packaging/agentworks/assistance.md`; record timing and any intervention.
+      bytes match `packaging/agentworks/agent-onboarding-prompt.md`; record timing and any
+      intervention.

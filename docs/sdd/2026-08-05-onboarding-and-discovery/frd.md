@@ -8,6 +8,10 @@ The operator's 2026-08-17 ruling replaces the retained typed guide model with a 
 the guide is a collection of authored Markdown concept shells. The completed implementation journey
 stays visible in `plan.md`; this document states the current requirements.
 
+The operator's 2026-08-17 naming ruling renames the canonical body to
+`packaging/agentworks/agent-onboarding-prompt.md`; its content and projection contract are
+unchanged.
+
 ## Summary
 
 Agentworks provides always-available assistance through its installed CLI and, when the operator
@@ -129,9 +133,9 @@ wording of authored guidance.
 
 ### R6: Bootstrap installs and hands off
 
-`packaging/agentworks/assistance.md` remains the one authored bootstrap body. It briefly identifies
-Agentworks, points to the public repository, recommends `uv` while allowing other Python 3.12+
-installers, installs `agentworks-cli>=0.14`, and runs `agw guide --agent`.
+`packaging/agentworks/agent-onboarding-prompt.md` is the one authored bootstrap body. It briefly
+identifies Agentworks, points to the public repository, recommends `uv` while allowing other Python
+3.12+ installers, installs `agentworks-cli>=0.14`, and runs `agw guide --agent`.
 
 The README, website, Claude Code package, and Codex package project that body byte-for-byte. The
 installed guide owns continuing assistance.

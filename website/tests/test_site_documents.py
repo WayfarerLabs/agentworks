@@ -376,7 +376,7 @@ class GeneratedDocumentTests(RepositoryFixture):
         self.assertEqual(document.text_by_id["onboarding-prompt"], ONBOARDING_PROMPT)
         self.assertEqual(
             document.text_by_id["onboarding-prompt"].encode(),
-            (self.root / site_builder.ASSISTANCE_SOURCE).read_bytes(),
+            (self.root / site_builder.AGENT_ONBOARDING_PROMPT_SOURCE).read_bytes(),
         )
         onboarding = [
             attributes

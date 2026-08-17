@@ -9,15 +9,15 @@ repository and can be published by any static host.
 
 The compact Home page renders the repository-sourced identity and offers `via Agent` and Manual
 setup paths. `via Agent` projects the canonical thin CLI bootstrap from
-`packaging/agentworks/assistance.md`; the same bootstrap is projected into the top-level README, and
-the build fails unless those two source representations are byte-identical. Manual provides a
-bounded repository, install, and `agw guide` path. A generated Manifesto presents the complete
-long-form argument from `docs/manifesto.md`, while a separate Security page provides practical depth
-and a GitHub reporting route. The shared header places the GitHub and PyPI destinations once per
-page; Home repeats the repository only where the Manual path needs it. A dedicated Lander page
-presents the same continuous lunar-deployment expedition used as progressive enhancement on the
-useful 404 fallback. The shared footer places the Manifesto, Security, and icon-only Lander
-destinations once per page.
+`packaging/agentworks/agent-onboarding-prompt.md`; the same bootstrap is projected into the
+top-level README, and the build fails unless those two source representations are byte-identical.
+Manual provides a bounded repository, install, and `agw guide` path. A generated Manifesto presents
+the complete long-form argument from `docs/manifesto.md`, while a separate Security page provides
+practical depth and a GitHub reporting route. The shared header places the GitHub and PyPI
+destinations once per page; Home repeats the repository only where the Manual path needs it. A
+dedicated Lander page presents the same continuous lunar-deployment expedition used as progressive
+enhancement on the useful 404 fallback. The shared footer places the Manifesto, Security, and
+icon-only Lander destinations once per page.
 
 ## Local build and test
 
@@ -238,8 +238,8 @@ The builder reads four permanent repository inputs:
 - `README.md` owns the concise product identity rendered on the landing page. Its short design
   summary remains repository documentation, not additional landing-page content. Its generated
   assistance fence is also checked as an exact projection, not treated as an authored second body.
-- `packaging/agentworks/assistance.md` is the single authored source for the Home onboarding prompt.
-  It remains a thin install-or-update and `agw guide --agent` handoff.
+- `packaging/agentworks/agent-onboarding-prompt.md` is the single authored source for the Home
+  onboarding prompt. It remains a thin install-or-update and `agw guide --agent` handoff.
 - `docs/manifesto.md` owns every body heading and block rendered on the Manifesto page.
 - `SECURITY.md` owns every body heading and block rendered on the Security page, including the
   private vulnerability reporting channel and URL.

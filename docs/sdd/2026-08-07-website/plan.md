@@ -1268,6 +1268,14 @@ two-path behavior recorded above.
 - [x] Keep `packaging/agentworks/assistance.md` as the sole authored agent-prompt body and continue
       projecting it into the website rather than hardcoding a second copy.
 
+The operator's 2026-08-17 canonical-file naming correction supersedes only the path recorded above.
+
+- [x] Rename the sole authored body to `packaging/agentworks/agent-onboarding-prompt.md` and update
+      every live generator, projection, test, permanent document, the operator-owned onboarding FRD,
+      and the website-owned active design contracts without an alias or duplicate source.
+- [x] Deliver PR #585's message through `main` for the onboarding effort's accepted HLA/LLD path
+      follow-up while leaving those owner-controlled response artifacts unchanged here.
+
 Definition of done: Home offers two understandable setup paths in one compact onboarding region; the
 canonical agent prompt remains byte-identical and copies through a familiar in-prompt icon; Manual
 provides a complete bounded path; no-JavaScript, keyboard, screen-reader, narrow viewport,

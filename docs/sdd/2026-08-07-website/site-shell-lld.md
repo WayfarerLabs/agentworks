@@ -190,11 +190,11 @@ absolute URL fails. Tests prove all three mappings and prove no source-relative 
 ## 6. Other repository content contracts
 
 The builder reads exactly four permanent content inputs: `README.md`,
-`packaging/agentworks/assistance.md`, `docs/manifesto.md`, and `SECURITY.md`. README owns the
-concise Home identity and an exact generated projection of the assistance source. The assistance
-source owns the prompt, and the other two inputs each own one complete long-form page. Only Home
-retains a heading-keypath plus exact-block selection for identity; long-form content has no
-duplicated prose contract in Python or templates.
+`packaging/agentworks/agent-onboarding-prompt.md`, `docs/manifesto.md`, and `SECURITY.md`. README
+owns the concise Home identity and an exact generated projection of the assistance source. The
+assistance source owns the prompt, and the other two inputs each own one complete long-form page.
+Only Home retains a heading-keypath plus exact-block selection for identity; long-form content has
+no duplicated prose contract in Python or templates.
 
 Templates may not move content tokens outside their reviewed metadata or sourced containers. All
 templates use a closed token vocabulary and reject unknown, missing, duplicated, or brace-like
