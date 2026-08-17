@@ -467,6 +467,27 @@ code {
     padding: 0;
     background: transparent;
     overflow-wrap: anywhere;
+    white-space: normal;
+}
+
+.onboarding-prompt-block {
+    display: grid;
+}
+
+.onboarding-prompt-block + .onboarding-prompt-block {
+    margin-top: 1.25rem;
+}
+
+.onboarding-prompt-literal {
+    white-space: pre-wrap;
+}
+
+.onboarding-prompt-block:last-child {
+    margin-bottom: 0;
+}
+
+.onboarding-prompt-paragraph {
+    white-space: normal;
 }
 
 .copy-prompt-button {

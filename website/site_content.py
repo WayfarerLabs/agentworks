@@ -31,6 +31,9 @@ AGENT_ONBOARDING_PROMPT_SOURCE: Final = Path(
 ASSISTANCE_README_BEGIN: Final = b"<!-- BEGIN GENERATED AGENTWORKS ASSISTANCE -->"
 ASSISTANCE_README_END: Final = b"<!-- END GENERATED AGENTWORKS ASSISTANCE -->"
 ASSISTANCE_FENCE_PATTERN = re.compile(br"(`{3,})markdown\n\Z")
+ASSISTANCE_BLOCK_CLASS: Final = "onboarding-prompt-block"
+ASSISTANCE_PARAGRAPH_CLASS: Final = "onboarding-prompt-paragraph"
+ASSISTANCE_LITERAL_CLASS: Final = "onboarding-prompt-literal"
 
 REPOSITORY_URL: Final = "https://github.com/WayfarerLabs/agentworks"
 README_SOURCE_URL: Final = f"{REPOSITORY_URL}/blob/main/README.md"
@@ -640,6 +643,94 @@ def _plain_inline(
     return parser.text
 
 
+def _is_assistance_paragraph(block: str) -> bool:
+    """Return whether one blank-line-delimited Markdown block is prose."""
+    lines = block.splitlines()
+    if not lines:
+        return False
+    first = lines[0]
+    return not (
+        HEADING_PATTERN.match(first)
+        or FENCE_PATTERN.match(first)
+        or LIST_ITEM_PATTERN.match(first)
+        or EMPTY_LIST_ITEM_PATTERN.match(first)
+        or REFERENCE_PATTERN.match(first)
+        or UNSUPPORTED_BLOCK_PATTERN.match(first)
+        or (len(lines) > 1 and SETEXT_UNDERLINE_PATTERN.match(lines[1]))
+    )
+
+
+def _render_assistance_paragraph(block: str) -> str:
+    """Collapse Markdown soft wraps visually while retaining exact text nodes."""
+    rendered: list[str] = []
+    for line in block.splitlines(keepends=True):
+        if not line.endswith("\n"):
+            rendered.append(html.escape(line, quote=False))
+            continue
+        body = line[:-1]
+        rendered.append(html.escape(body, quote=False))
+        trailing_backslashes = len(body) - len(body.rstrip("\\"))
+        if body.endswith("  ") or trailing_backslashes % 2 == 1:
+            rendered.append('<br aria-hidden="true" />')
+        rendered.append("\n")
+    return "".join(rendered)
+
+
+def _assistance_blocks(source: str) -> list[str]:
+    """Partition Markdown without splitting a fenced literal at blank lines."""
+    lines = source.splitlines(keepends=True)
+    blocks: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        text = line.removesuffix("\n")
+        fence = FENCE_PATTERN.match(text)
+        if fence:
+            marker = fence.group(1)
+            closing = re.compile(rf"^[ ]{{0,3}}{re.escape(marker[0])}{{{len(marker)},}}[ \t]*$")
+            end = index + 1
+            while end < len(lines):
+                if closing.match(lines[end].removesuffix("\n")):
+                    end += 1
+                    break
+                end += 1
+            blocks.append("".join(lines[index:end]))
+            index = end
+            continue
+
+        is_separator = not text.strip(" \t")
+        end = index + 1
+        while end < len(lines):
+            candidate = lines[end].removesuffix("\n")
+            if bool(not candidate.strip(" \t")) != is_separator:
+                break
+            if not is_separator and FENCE_PATTERN.match(candidate):
+                break
+            end += 1
+        blocks.append("".join(lines[index:end]))
+        index = end
+    return blocks
+
+
+def render_assistance_prompt(source: str) -> str:
+    """Render canonical Markdown with browser-flowing prose and exact textContent."""
+    rendered: list[str] = []
+    for block in _assistance_blocks(source):
+        if not block.strip(" \t\n"):
+            rendered.append(block)
+        elif _is_assistance_paragraph(block):
+            rendered.append(
+                f'<span class="{ASSISTANCE_BLOCK_CLASS} {ASSISTANCE_PARAGRAPH_CLASS}">'
+                f"{_render_assistance_paragraph(block)}</span>"
+            )
+        else:
+            rendered.append(
+                f'<span class="{ASSISTANCE_BLOCK_CLASS} {ASSISTANCE_LITERAL_CLASS}">'
+                f"{html.escape(block, quote=False)}</span>"
+            )
+    return "".join(rendered)
+
+
 class _TextParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
@@ -660,7 +751,7 @@ def extract_content(repo_root: Path) -> dict[str, str]:
             _plain_inline(str(home_blocks[1].value), home_contract, {}),
             quote=True,
         ),
-        "ONBOARDING_PROMPT": html.escape(extract_assistance_prompt(repo_root), quote=False),
+        "ONBOARDING_PROMPT": render_assistance_prompt(extract_assistance_prompt(repo_root)),
     }
     for contract in DOCUMENT_CONTRACTS:
         source = _read_utf8(repo_root / contract.source, contract)

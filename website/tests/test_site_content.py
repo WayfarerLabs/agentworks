@@ -1,8 +1,10 @@
 # ruff: noqa: F405
 
 import html
+from html.parser import HTMLParser
 
 from site_test_support import *  # noqa: F403
+import site_content
 
 
 def write_assistance_projection(root: Path, source: bytes) -> None:
@@ -29,6 +31,20 @@ def synthetic_document(contract, body: str = "") -> str:  # noqa: ANN001
     return f"# Synthetic document\n\nOpening paragraph.{reporting}{body}{definitions}"
 
 
+class BreakParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.breaks: list[dict[str, str | None]] = []
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "br":
+            self.breaks.append(dict(attrs))
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "br":
+            self.breaks.append(dict(attrs))
+
+
 class SourceContractTests(RepositoryFixture):
     def test_permanent_sources_render_the_complete_content_vocabulary(self) -> None:
         content = site_builder.extract_content(self.root)
@@ -51,7 +67,6 @@ class SourceContractTests(RepositoryFixture):
             content["HOME_META_DESCRIPTION"],
             html.escape(str(home_contract.expected[1].value), quote=True),
         )
-        self.assertEqual(content["ONBOARDING_PROMPT"], html.escape(ONBOARDING_PROMPT, quote=False))
         for contract in site_builder.DOCUMENT_CONTRACTS:
             rendered = content[f"{contract.contract_id}_CONTENT"]
             self.assertEqual(rendered.count("<h1 "), 1)
@@ -137,16 +152,28 @@ class SourceContractTests(RepositoryFixture):
             self.assertIn(f"{contract.contract_id}_CONTENT", content)
 
     def test_assistance_projection_is_exactly_canonical_and_html_escaped(self) -> None:
-        source = b"# Bootstrap <agent> & helper\n\nRun `agw guide --agent`.\n"
+        source = (
+            b"# Bootstrap <agent> & helper\n\n"
+            b"Run this prompt across\nsoft-wrapped lines & keep going.  \n"
+            b"Keep the slash break.\\\n"
+            b"Keep the escaped backslashes soft.\\\\\n\n"
+            b"```shell\nprintf one\n\nprintf two\n```\n"
+        )
         write_assistance_projection(self.root, source)
         self.assertEqual(
             site_builder.extract_assistance_prompt(self.root),
             source.decode("utf-8"),
         )
-        self.assertEqual(
-            site_builder.extract_content(self.root)["ONBOARDING_PROMPT"],
-            "# Bootstrap &lt;agent&gt; &amp; helper\n\nRun `agw guide --agent`.\n",
-        )
+        rendered = site_builder.extract_content(self.root)["ONBOARDING_PROMPT"]
+        self.assertIn("# Bootstrap &lt;agent&gt; &amp; helper", rendered)
+        blocks = site_content._assistance_blocks(source.decode())
+        self.assertEqual("".join(blocks), source.decode())
+        self.assertTrue(site_content._is_assistance_paragraph(blocks[2]))
+        self.assertFalse(site_content._is_assistance_paragraph(blocks[-1]))
+        self.assertIn("printf one\n\nprintf two", blocks[-1])
+        parser = BreakParser()
+        parser.feed(rendered)
+        self.assertEqual(parser.breaks, [{"aria-hidden": "true"}] * 2)
         document = parse((self.build() / "index.html").read_text(encoding="utf-8"))
         self.assertEqual(document.text_by_id["onboarding-prompt"].encode(), source)
 
