@@ -101,12 +101,20 @@ locked.
       guide, locked-SDD discharge entry, structural consent tests, `assert_never`) landed at the
       merged head. The temporary gap stands on unreleased `main` only; the CLI grammar rewrite
       remains the hard 0.14.0 release gate
-- [ ] Corrected guide model (operator ruling 2026-08-16, gates 0.14.0; full text in
-      `target-state.md`): one topic catalog for everyone, modes differing in presentation and never
-      in access, one agent-assistance topic with per-topic agent notes only where genuinely
-      necessary, and the bootstrap prompt cut to a few lines pointing at `agw guide --agent`. Found
-      by the operator's hands-on testing after every review lane passed the shipped design;
-      dramatically simpler is the bar
+- [x] Corrected guide model shipped, satisfying its 0.14.0 gate (PR #579, merged 2026-08-17; ruling
+      2026-08-16, full text in `target-state.md`): one shared eight-topic catalog, presentation-only
+      mode differences, `AgentContract` replaced by one optional `AgentNote` carrying the operator's
+      dozen journey hints, the assistant topic ordinary among nine, and the bootstrap at 107 words
+      of install-and-handoff. All lanes plus the tester's exact-wheel pass converged; the round
+      restored the secrets don't-display teaching and told the truth of the startup-posture drop
+- [ ] Markdown concept shells (operator ruling 2026-08-17, recorded in `target-state.md`; design
+      checkpoint on draft PR #580): the typed guide model is replaced by auto-discovered Markdown
+      shells with a closed two-addition list (agent fences and the bounded README-consuming import;
+      the live projections were removed by same-day direction, leaving shells fully static); typed
+      blocks, actions, consent/evidence replay, the onboarding assessment, and manual registration
+      go. Saga checkpoint review posted with two review items (charter the outdated always-on rule
+      updates per keep-collateral-in-sync; state the plugin-topic story). No 0.14 gate is minted for
+      this implementation absent direction
 - [ ] Remaining phases (wave 2 adoption, closeout) per the effort's per-phase PR plan. The README
       bootstrap shipped with the assistance phase (PR #480), so the bootstraps gate is satisfied;
       the generated block pins version 0.14.0 or newer and resolves when the release ships
@@ -571,20 +579,17 @@ open-ended research placeholder.
     supersession), the one-wave guide-value deletion (PR #556), and the grammar rewrite (PR #491,
     merged and locked). The hard-gate ledger: the grammar gate closed with #491, the breaking-truth
     task and installer-plugins moves closed their lanes earlier ("This lane is closed" on each entry
-    above), and the README bootstrap gate is satisfied (PR #480). Two gates remain open. The
-    **corrected guide model gates 0.14.0** (operator ruling, 2026-08-16, recorded in
-    `target-state.md`): the operator's hands-on testing found the shipped guide over-indexed on
-    agents with a defensive 23-line bootstrap, and 0.14.0 does not ship until the onboarding child
-    lands the one-catalog model and the few-line bootstrap. The **simplification pass also gates
-    0.14.0** (operator ruling, 2026-08-16, recorded in `target-state.md`): the sweep's execution,
-    the gcp dedup, and the pass's reassessment and lock complete before the release, hardening and
-    subsuming `phasing.md`'s test-consolidation soft gate, whose vehicle the sweep already is.
-    Follow-on efforts the reassessment proposes do not inherit the gate. A 2026-08-16 operator
-    clarification is recorded here because a checked entry above says the harness-integration window
-    ran "until the grammar rewrite's breaking PRs land": the operator's actual constraint was an
-    opening edge only (the integration waits for the surfaces it sits on, all landed), command
-    grammar is not such a surface, and no closing edge ever existed. The integration may be built at
-    any time.
+    above), the README bootstrap gate is satisfied (PR #480), and the corrected-guide-model gate is
+    satisfied (PR #579, merged 2026-08-17; see the onboarding entry). One gate remains open. The
+    **simplification pass gates 0.14.0** (operator ruling, 2026-08-16, recorded in
+    `target-state.md`): the sweep's execution, the gcp dedup, and the pass's reassessment and lock
+    complete before the release, hardening and subsuming `phasing.md`'s test-consolidation soft
+    gate, whose vehicle the sweep already is. Follow-on efforts the reassessment proposes do not
+    inherit the gate. A 2026-08-16 operator clarification is recorded here because a checked entry
+    above says the harness-integration window ran "until the grammar rewrite's breaking PRs land":
+    the operator's actual constraint was an opening edge only (the integration waits for the
+    surfaces it sits on, all landed), command grammar is not such a surface, and no closing edge
+    ever existed. The integration may be built at any time.
 
     Besides wave 2, the lanes still running in parallel with the spine are the remaining wave 1
     deletion items and the grammar rewrite's design and seeding (only its implementation waits).
