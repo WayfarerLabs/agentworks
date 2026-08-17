@@ -118,6 +118,13 @@ one. The saga lead's placement note, advisory: a hint of this shape describes a 
 and so belongs to the onboarding topic's agent note rather than being sprinkled per kind, which is
 how the "only when genuinely necessary" clause and a dozen journeys coexist.
 
+**Ruling (operator, 2026-08-16, the simplification pass gates 0.14.0):** the pass's remaining
+deletion work, the assertion sweep's execution and the gcp fixture dedup behind it, plus the pass's
+reassessment and lock, complete before 0.14.0 ships. The operator's rationale: "I don't want to
+start really sharing this repo with a bunch of obviously shit code." This hardens and subsumes
+`phasing.md`'s test-consolidation soft gate, whose carrying vehicle the sweep already is. Follow-on
+efforts the reassessment proposes do not inherit the gate; the pass closing does.
+
 **Ruling (operator, 2026-08-15, the guide-value rubric):** guide content earns its place only by
 conveying concepts or higher-level synthesis not available from a single CLI command. A guide block
 whose content is one command's output wearing guide clothes is removed, and the guide points at the

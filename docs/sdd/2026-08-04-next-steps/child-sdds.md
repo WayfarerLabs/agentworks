@@ -563,15 +563,16 @@ open-ended research placeholder.
     **corrected guide model gates 0.14.0** (operator ruling, 2026-08-16, recorded in
     `target-state.md`): the operator's hands-on testing found the shipped guide over-indexed on
     agents with a defensive 23-line bootstrap, and 0.14.0 does not ship until the onboarding child
-    lands the one-catalog model and the few-line bootstrap. The **test-consolidation soft gate**
-    (`phasing.md`) also stands open, carried by the simplification pass's sweep remainder, with the
-    cut-versus-soft-gate call the operator's when the time comes. The pass's reassessment is not a
-    release gate: it waits on wave 1's remainder (the sweep and the gcp dedup) and wave 2's tail. A
-    2026-08-16 operator clarification is recorded here because a checked entry above says the
-    harness-integration window ran "until the grammar rewrite's breaking PRs land": the operator's
-    actual constraint was an opening edge only (the integration waits for the surfaces it sits on,
-    all landed), command grammar is not such a surface, and no closing edge ever existed. The
-    integration may be built at any time.
+    lands the one-catalog model and the few-line bootstrap. The **simplification pass also gates
+    0.14.0** (operator ruling, 2026-08-16, recorded in `target-state.md`): the sweep's execution,
+    the gcp dedup, and the pass's reassessment and lock complete before the release, hardening and
+    subsuming `phasing.md`'s test-consolidation soft gate, whose vehicle the sweep already is.
+    Follow-on efforts the reassessment proposes do not inherit the gate. A 2026-08-16 operator
+    clarification is recorded here because a checked entry above says the harness-integration window
+    ran "until the grammar rewrite's breaking PRs land": the operator's actual constraint was an
+    opening edge only (the integration waits for the surfaces it sits on, all landed), command
+    grammar is not such a surface, and no closing edge ever existed. The integration may be built at
+    any time.
 
     Besides wave 2, the lanes still running in parallel with the spine are the remaining wave 1
     deletion items and the grammar rewrite's design and seeding (only its implementation waits).
