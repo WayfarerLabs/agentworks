@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
 import sys
 from typing import Annotated, Literal
 
@@ -11,35 +10,7 @@ import typer
 
 from agentworks.cli._app import app
 from agentworks.guide.agent_mode import select_guide_mode
-from agentworks.guide.assessment import GuideIdentity, VerificationEvidence, VerificationOutcome
-from agentworks.guide.contract import ActionId
 from agentworks.guide.service import render_guide
-
-_EVIDENCE_RE = re.compile(
-    r"(?P<action>[a-z][a-z0-9-]*):(?P<kind>[a-z][a-z0-9-]*)/"
-    r"(?P<name>[a-z0-9](?:[a-z0-9_-]{0,251}[a-z0-9])?)="
-    r"(?P<outcome>verified|failed|refused)"
-)
-
-
-def _parse_evidence(values: list[str]) -> tuple[VerificationEvidence, ...]:
-    """Parse the replay log completely before constructing any evidence."""
-    parsed: list[VerificationEvidence] = []
-    for value in values:
-        match = _EVIDENCE_RE.fullmatch(value)
-        if match is None:
-            raise typer.BadParameter(
-                "must be ACTION_ID:KIND/NAME=verified|failed|refused",
-                param_hint="--evidence",
-            ) from None
-        parsed.append(
-            VerificationEvidence(
-                ActionId(match.group("action")),
-                GuideIdentity(match.group("kind"), match.group("name")),
-                VerificationOutcome(match.group("outcome")),
-            )
-        )
-    return tuple(parsed)
 
 
 @app.command("guide")
@@ -58,21 +29,11 @@ def guide(
         "--names-only",
         help="Emit one available topic name per line with no formatting.",
     ),
-    evidence: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--evidence",
-            help="Replay caller-owned verification evidence as ACTION_ID:KIND/NAME=OUTCOME; repeatable.",
-        ),
-    ] = None,
 ) -> None:
     """Show guide destinations or render selected authored guidance."""
     explicit: Literal["agent", "human"] | None = None if agent is None else ("agent" if agent else "human")
     mode = select_guide_mode(explicit, os.environ, sys.stdout.isatty())
-    verification_evidence = _parse_evidence(evidence or [])
-    response = render_guide(
-        tuple(topics or ()), mode, names_only=names_only, verification_evidence=verification_evidence
-    )
+    response = render_guide(tuple(topics or ()), mode, names_only=names_only)
     typer.echo(response.markdown, nl=False)
     if response.exit_code:
         raise typer.Exit(response.exit_code)

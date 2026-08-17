@@ -1,155 +1,168 @@
-"""Request-scoped guide contribution collection and isolation."""
+"""Deterministic discovery of package-owned Markdown concept shells."""
 
 from __future__ import annotations
 
-import difflib
+import re
 from dataclasses import dataclass
+from importlib.resources import files
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 from agentworks.guide.contract import (
-    BrokenTopicLinkError,
-    DuplicateTopicError,
-    GuideContributionError,
-    TopicContribution,
-    UnknownGuideTopicError,
-    _decoded_contribution,
-    parse_topic_contribution,
+    MAX_GUIDE_MARKDOWN_BYTES,
+    ConceptShell,
+    GuideContentError,
+    GuideSource,
+    shell_slug,
 )
 
 if TYPE_CHECKING:
-    from agentworks.plugins.base import Plugin
+    from importlib.resources.abc import Traversable
 
-
-@dataclass(frozen=True, slots=True)
-class _GuideContributionCandidate:
-    source: str
-    value: TopicContribution
-    trusted: bool
-    plugin: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class GuideCatalogIssue:
-    error: GuideContributionError
+_FRONTMATTER_RE = re.compile(r"\A---\ndescription:[ \t]+([^\n]+)\n---\n(?P<body>.*)\Z", re.DOTALL)
+_ATX_RE = re.compile(r"^[ ]{0,3}(#{1,6})(?:[ \t]+|$)(.*?)(?:[ \t]+#+[ \t]*)?$")
+_SETEXT_RE = re.compile(r"^[ ]{0,3}(?:=+|-+)[ \t]*$")
+_AGENT_OPEN = "<!-- agw:agent-only -->"
+_AGENT_CLOSE = "<!-- /agw:agent-only -->"
 
 
 @dataclass(frozen=True, slots=True)
 class GuideCatalog:
-    topics: tuple[TopicContribution, ...]
-    issues: tuple[GuideCatalogIssue, ...] = ()
+    """The complete first-party concept-shell catalog."""
+
+    topics: tuple[ConceptShell, ...]
 
     def names(self) -> tuple[str, ...]:
-        return tuple(str(topic.topic) for topic in self.topics)
+        return tuple(topic.slug for topic in self.topics)
 
-    def lookup(self, topic: str) -> TopicContribution:
-        for contribution in self.topics:
-            if contribution.topic == topic:
-                return contribution
-        raise UnknownGuideTopicError(topic, tuple(difflib.get_close_matches(topic, self.names(), n=3)))
+    def lookup(self, slug: str) -> ConceptShell | None:
+        return next((topic for topic in self.topics if topic.slug == slug), None)
 
 
-def _ownership_error(candidate: _GuideContributionCandidate, topic: TopicContribution) -> GuideContributionError | None:
-    if candidate.trusted:
+def _read_markdown(resource: Traversable, package_path: str) -> str:
+    try:
+        data = resource.read_bytes()
+    except OSError as error:
+        raise GuideContentError(f"cannot read packaged guide document {package_path!r}: {error}") from None
+    if len(data) > MAX_GUIDE_MARKDOWN_BYTES:
+        raise GuideContentError(f"packaged guide document {package_path!r} exceeds the 256 KiB limit")
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        raise GuideContentError(f"packaged guide document {package_path!r} is not valid UTF-8") from None
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _fence(line: str) -> tuple[str, int] | None:
+    stripped = line.lstrip(" ")
+    if len(line) - len(stripped) > 3 or not stripped:
         return None
-    plugin = candidate.plugin
-    valid_prefix = f"plugin/{plugin}/" if plugin else ""
-    slug = str(topic.topic)
-    if not plugin or not slug.startswith(valid_prefix):
-        return GuideContributionError(
-            f"invalid guide contribution from {candidate.source}: topic is not owned by plugin {plugin!r}",
-            source=candidate.source,
-            topic=slug,
-            field_path="topic",
+    marker = stripped[0]
+    if marker not in {"`", "~"}:
+        return None
+    length = len(stripped) - len(stripped.lstrip(marker))
+    return (marker, length) if length >= 3 else None
+
+
+def _structural_shell(body: str, package_path: str) -> str:
+    h1_titles: list[str] = []
+    agent_only = False
+    code_fence: tuple[str, int] | None = None
+    previous_plain = False
+    for line in body.splitlines():
+        candidate = _fence(line)
+        if code_fence is not None:
+            if candidate is not None and candidate[0] == code_fence[0] and candidate[1] >= code_fence[1]:
+                code_fence = None
+            previous_plain = False
+            continue
+        if candidate is not None:
+            code_fence = candidate
+            previous_plain = False
+            continue
+        stripped = line.strip()
+        if stripped == _AGENT_OPEN:
+            if agent_only:
+                raise GuideContentError(f"guide shell {package_path!r} nests an agent-only fence")
+            agent_only = True
+            previous_plain = False
+            continue
+        if stripped == _AGENT_CLOSE:
+            if not agent_only:
+                raise GuideContentError(f"guide shell {package_path!r} closes an unopened agent-only fence")
+            agent_only = False
+            previous_plain = False
+            continue
+        if previous_plain and _SETEXT_RE.fullmatch(line):
+            raise GuideContentError(f"guide shell {package_path!r} contains a Setext heading")
+        heading = _ATX_RE.fullmatch(line)
+        if heading is not None and len(heading.group(1)) == 1 and not agent_only:
+            title = heading.group(2).strip()
+            if title:
+                h1_titles.append(title)
+        previous_plain = bool(stripped) and heading is None and not stripped.startswith(("<!--", "- ", "* ", ">"))
+    if code_fence is not None:
+        raise GuideContentError(f"guide shell {package_path!r} has an unclosed Markdown code fence")
+    if agent_only:
+        raise GuideContentError(f"guide shell {package_path!r} has an unclosed agent-only fence")
+    if len(h1_titles) != 1:
+        raise GuideContentError(
+            f"guide shell {package_path!r} must contain exactly one level-one ATX heading outside agent-only fences"
         )
-    return None
+    return h1_titles[0]
 
 
-def _issue_key(error: GuideContributionError) -> tuple[str, str, str, str]:
-    return (error.source, error.topic or "", error.field_path, str(error))
-
-
-def _build_guide_catalog(
-    trusted: tuple[tuple[str, TopicContribution], ...],
-    system_plugins: tuple[tuple[Plugin, tuple[TopicContribution, ...]], ...] = (),
-) -> GuideCatalog:
-    """Build one authored guide catalog and isolate invalid plugin topics."""
-    candidates = tuple(_GuideContributionCandidate(source, value, True) for source, value in trusted) + tuple(
-        _GuideContributionCandidate(
-            f"system-plugin:{plugin.name}",
-            value,
-            False,
-            plugin.name,
+def _parse_shell(resource: Traversable, package_path: str) -> ConceptShell:
+    text = _read_markdown(resource, package_path)
+    match = _FRONTMATTER_RE.fullmatch(text)
+    if match is None:
+        raise GuideContentError(
+            f"guide shell {package_path!r} must have description-only frontmatter followed by a Markdown body"
         )
-        for plugin, values in system_plugins
-        for value in values
+    description = match.group(1).strip()
+    if not description:
+        raise GuideContentError(f"guide shell {package_path!r} has an empty description")
+    body = match.group("body")
+    title = _structural_shell(body, package_path)
+    filename = PurePosixPath(package_path).name
+    slug = shell_slug(filename.removesuffix(".md"))
+    return ConceptShell(
+        slug,
+        title,
+        description,
+        GuideSource(package_path, f"cli/agentworks/{package_path}", body),
     )
-    parsed: list[tuple[_GuideContributionCandidate, TopicContribution]] = []
-    issues: list[GuideContributionError] = []
-    for candidate in candidates:
+
+
+def _shell_resources(root: Traversable) -> tuple[tuple[str, Traversable], ...]:
+    found: list[tuple[str, Traversable]] = []
+
+    def walk(directory: Traversable, relative: PurePosixPath) -> None:
         try:
-            topic = parse_topic_contribution(_decoded_contribution(candidate.value), candidate.source)
-            ownership = _ownership_error(candidate, topic)
-            if ownership is not None:
-                raise ownership
-            parsed.append((candidate, topic))
-        except GuideContributionError as error:
-            if candidate.trusted:
-                raise
-            issues.append(error)
+            children = sorted(directory.iterdir(), key=lambda item: item.name)
+        except OSError as error:
+            raise GuideContentError(f"cannot inspect packaged guide directory {str(relative)!r}: {error}") from None
+        for child in children:
+            child_relative = relative / child.name
+            if child.is_dir():
+                walk(child, child_relative)
+            elif relative.name == "guide-content" and child.name.endswith(".md"):
+                found.append((child_relative.as_posix(), child))
 
-    grouped: dict[str, list[tuple[_GuideContributionCandidate, TopicContribution]]] = {}
-    for item in parsed:
-        grouped.setdefault(str(item[1].topic), []).append(item)
-    retained: dict[str, tuple[_GuideContributionCandidate, TopicContribution]] = {}
-    for slug in sorted(grouped):
-        group = grouped[slug]
-        trusted_group = [item for item in group if item[0].trusted]
-        if len(trusted_group) > 1:
-            sources = sorted(item[0].source for item in trusted_group)
-            raise DuplicateTopicError(
-                f"duplicate trusted guide topic {slug!r} from {', '.join(sources)}",
-                source=sources[0],
-                topic=slug,
-                field_path="topic",
-            )
-        if trusted_group:
-            retained[slug] = trusted_group[0]
-            rejected = [item for item in group if not item[0].trusted]
-        elif len(group) == 1:
-            retained[slug] = group[0]
-            rejected = []
-        else:
-            rejected = group
-        for candidate, _topic in rejected:
-            issues.append(
-                DuplicateTopicError(
-                    f"guide topic {slug!r} collides with another contribution",
-                    source=candidate.source,
-                    topic=slug,
-                    field_path="topic",
-                )
-            )
+    walk(root, PurePosixPath())
+    return tuple(found)
 
-    while True:
-        names = frozenset(retained)
-        invalid: list[tuple[str, _GuideContributionCandidate, str]] = []
-        for slug, (candidate, topic) in retained.items():
-            broken = sorted(str(link) for link in topic.related_topics if str(link) not in names)
-            if broken:
-                invalid.append((slug, candidate, broken[0]))
-        if not invalid:
-            break
-        for slug, candidate, target in invalid:
-            link_error = BrokenTopicLinkError(
-                f"guide topic {slug!r} links to unknown topic {target!r}",
-                source=candidate.source,
-                topic=slug,
-                field_path="related_topics",
-            )
-            if candidate.trusted:
-                raise link_error
-            issues.append(link_error)
-            del retained[slug]
 
-    topics = tuple(item[1] for _, item in sorted(retained.items()))
-    return GuideCatalog(topics, tuple(GuideCatalogIssue(error) for error in sorted(issues, key=_issue_key)))
+def discover_concept_shells(package_root: Traversable | None = None) -> GuideCatalog:
+    """Discover and validate all direct Markdown children of first-party guide-content directories."""
+    root = files("agentworks") if package_root is None else package_root
+    topics = tuple(_parse_shell(resource, path) for path, resource in _shell_resources(root))
+    by_slug: dict[str, list[ConceptShell]] = {}
+    for topic in topics:
+        by_slug.setdefault(topic.slug, []).append(topic)
+    collisions = tuple((slug, values) for slug, values in sorted(by_slug.items()) if len(values) > 1)
+    if collisions:
+        slug, values = collisions[0]
+        paths = ", ".join(topic.source.package_path for topic in values)
+        raise GuideContentError(f"duplicate guide topic {slug!r} from {paths}")
+    return GuideCatalog(tuple(sorted(topics, key=lambda topic: topic.source.package_path)))
