@@ -516,6 +516,41 @@ evidence, bounded actions, and the onboarding assessment; command-owned raw fact
 its orphaned guide machinery are absent; the assessment uses its smaller projector; and the saga's
 CLI grammar release gate is explicit and still open.
 
+The operator's 2026-08-16 corrected-guide ruling supersedes Phase 4's audience-specific destination
+sets and required per-topic agent contracts without altering that completed journey. The trail-sign
+form and command-owned deletion remain; the correction below makes the retained guide equally useful
+to humans and assistant agents and removes the remaining bootstrap and content complexity.
+
+## Phase 4 correction: one topic catalog and thin bootstrap
+
+- [ ] Reconcile the active FRD, HLA, bootstrap LLD, and permanent guide documentation around one
+      ordinary topic catalog, identical trail-sign destinations, one addressable
+      `concept-assistant-agent` topic, and optional topic-local agent notes. Integrate the delivered
+      corrected-model message and preserve every completed checkbox above unchanged.
+- [ ] Replace the audience-filtered trail-sign tuple with one eight-destination tuple shared by
+      human and agent modes. Human mode gives a short choice prompt; agent mode points first to
+      `concept-assistant-agent`; both expose the same slugs and continue to bypass catalogs and live
+      state.
+- [ ] Replace required `AgentContract` blocks with optional `AgentNote` blocks. Move general posture
+      into `concept-assistant-agent`, retain ordinary topic content for both audiences, and keep an
+      agent-only note only where genuinely useful. Add one concise onboarding note containing the
+      authored cross-kind journey hints without a hint schema, exact-count invariant, or prose
+      tests.
+- [ ] Replace the canonical bootstrap with the operator-approved few-line description, repository
+      pointer, `agentworks-cli` installation command for Python 3.12+, and `agw guide --agent`
+      handoff. Regenerate README, website, Claude Code, and Codex projections; retain byte-parity
+      and version/fingerprint safeguards while deleting semantic and wording tests for the authored
+      prompt.
+- [ ] Update completions and permanent docs or record them unaffected. Run focused guide,
+      assistance, generation, and website tests plus the full non-integration suite, Ruff,
+      formatting, mypy, Rulesync drift, locked-SDD, and file lint. Complete project and fresh-eyes
+      reviews, resolve material findings, and hand off one ready PR under the saga gate.
+
+Definition of done: humans and assistant agents can reach the same useful information;
+agent-specific guidance has one obvious home plus rare local notes; the bootstrap only installs and
+hands off; no new router, hint framework, state machine, or prose-policing tests exist; and the
+result is materially smaller than the superseded model.
+
 ## Phase 5: representative acceptance and closeout
 
 - [ ] Run one provider-backed journey from an exact reviewed candidate wheel through the no-topic

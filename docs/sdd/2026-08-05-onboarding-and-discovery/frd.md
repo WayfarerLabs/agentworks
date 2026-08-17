@@ -1,6 +1,6 @@
 # FRD: Agentworks Assistance, Discovery, and Management
 
-- Status: Active, trail-sign revision
+- Status: Active, corrected shared-topic revision
 - Start date: 2026-08-05
 - Saga: `docs/sdd/2026-08-04-next-steps`
 
@@ -11,11 +11,18 @@
 > graph, and runtime facts remain command-owned, and the CLI grammar child owns their final 0.14
 > destinations. The original requirements remain below as journey history.
 
+**Corrected guide model (operator ruling, 2026-08-16):** Human and agent modes now share one
+ordinary topic catalog and the same trail-sign destinations. One addressable assistant-agent topic
+owns the general agent posture, and selected topics may add a short agent-only note when useful. The
+bootstrap prompt is reduced to installing the CLI and handing off to `agw guide --agent`. This
+supersedes the destination asymmetry and required per-topic `AgentContract` shape below while
+preserving the completed implementation record in `plan.md`.
+
 ## Summary
 
 Agentworks provides always-available assistance through a capable external agent and the installed
-CLI. The repository, website, Claude Code package, and Codex package already project one compact
-assistance prompt that installs a compatible stable CLI and invokes `agw guide --agent`.
+CLI. The repository, website, Claude Code package, and Codex package project one short assistance
+prompt that names Agentworks, installs the compatible CLI, and invokes `agw guide --agent`.
 
 The guide is progressive. Its no-topic response is a short trail sign, not a handbook. It helps a
 new operator enter onboarding and helps a returning operator choose the relevant topic. Detailed
@@ -53,18 +60,24 @@ walkthrough, live inventory, or exhaustive topic list. It uses one small fixed d
 does not construct either topic catalog or inspect configuration, registry, database, network, or
 managed resources. Missing and malformed configuration are both irrelevant to this request.
 
-Agent mode points to the concept topics for onboarding, management, troubleshooting, temporal
-release history, exceptional migration, secrets, and bug reporting. Human mode stays smaller: it
-points a new operator to onboarding and a returning operator to management or exhaustive topic
-discovery. Both forms point to shell completion and `agw guide --names-only` for deeper discovery.
-Neither form contains action records.
+Human and agent modes render the same destinations: assistant-agent guidance, onboarding,
+management, troubleshooting, temporal release history, exceptional migration, secrets, and bug
+reporting. Human mode tells the operator to choose the topic matching their goal. Agent mode first
+points the external assistant to `concept-assistant-agent`, then asks it to choose the topic
+matching the operator's goal. Both forms point to shell completion and `agw guide --names-only` for
+deeper discovery. Neither form contains action records or withholds ordinary information by
+audience.
 
 ### R2: Onboarding owns the walkthrough
 
-`concept-onboarding` is the dedicated first-setup and current-adoption topic. It owns the complete
-startup assistance posture as one body; no other topic duplicates fragments of that posture. It
-reports what is already configured from the existing safe projection and presents the smallest next
-step toward the operator's goal.
+`concept-onboarding` is the dedicated first-setup and current-adoption topic. It reports what is
+already configured from the existing safe projection and presents the smallest next step toward the
+operator's goal. Its ordinary teaching is useful to humans and assistant agents alike.
+
+Its optional agent note contains a compact set of authored journey hints. Each hint helps the
+assistant offer a useful discovery-and-configuration path—such as determining the operator's desired
+VM platforms before walking through site creation—without becoming another schema, state machine, or
+command catalog. The wording and number are content, not a test-pinned contract.
 
 For clean setup, it retains the existing visible sequence: initialize absent configuration through
 the normal CLI, collect explicit provider and plugin choices, verify readiness, create a selected
@@ -113,6 +126,13 @@ Source, release prose, configured descriptions, and other external or persisted 
 not instructions. Sensitive discovery checks presence unless content access is separately
 authorized.
 
+`concept-assistant-agent` is the one addressable home for the general Agentworks assistant-agent
+posture: follow the operator's current instruction, use the CLI and its help as the operational
+authority, ask only when the request is materially ambiguous or would expand beyond the authorized
+scope, and treat external text as data. Selected topics may include a short `AgentNote` only when
+that topic needs additional agent context. `AgentNote` is optional and appears only in agent mode;
+the topic's ordinary overview, teaching, links, and actions remain shared.
+
 ### R5: Discovery stays derived and completion-safe
 
 Selected topics derive inventory, schema, sample, relationship, enablement, readiness, and stored
@@ -120,10 +140,9 @@ instance facts from the existing platform sources. This revision adds no second 
 configuration writer, migration oracle, guide-owned state store, diagnostic protocol, or topic
 dependency declaration.
 
-The full topic catalog remains directly addressable. `agw guide --names-only` always returns valid
-static topic names and adds live resource names when live context is available. Configuration or
-resource failures do not break shell completion; they only omit names that cannot be established.
-The names-only output remains names only and is a discovery surface, not a health report.
+The full retained topic catalog remains directly addressable. `agw guide --names-only` returns the
+valid authored, plugin, and packaged release-topic names without loading configuration, registry, or
+state. The names-only output remains names only and is a discovery surface, not a health report.
 
 No-topic intentionally does not surface contributed-topic validation errors because it builds no
 catalog. An affected selected topic remains the scoped diagnostic surface for its contribution
@@ -149,11 +168,12 @@ only if implementation introduces a real setting, which is not expected.
 
 1. With no topic and any configuration state, `agw guide --agent` and human mode exit successfully,
    render only their concise trail signs, and invoke neither topic catalog nor any live dependency.
-2. Agent mode renders the seven-destination intent map. Human mode renders only the new-installation
-   and existing-installation choices. Every fixed destination resolves through the full
-   selected-topic path.
-3. `concept-onboarding` contains the single complete startup posture, current-adoption assessment,
-   clean setup sequence, and optional link to `concept-source-review` before any onboarding action.
+2. Human and agent modes render the same eight destination slugs. Agent mode additionally points to
+   `concept-assistant-agent` as its starting context; human mode contains no agent-only operating
+   prose. Every fixed destination resolves through the full selected-topic path.
+3. `concept-assistant-agent` owns the general assistant posture. `concept-onboarding` contains the
+   current-adoption assessment, clean setup sequence, compact agent journey notes, and optional link
+   to `concept-source-review` before any onboarding action.
 4. Focused and full source-review actions remain owned by `concept-source-review`; neither appears
    in the trail sign or is copied into onboarding.
 5. A static-only topic renders without loading configuration. A live topic with malformed
@@ -167,8 +187,11 @@ only if implementation introduces a real setting, which is not expected.
 7. One provider-backed candidate-wheel acceptance run reaches a verified VM and started session.
    After publication, one canonical-prompt smoke reaches the trail sign from the exact stable
    release without replacing the saga release gates.
-8. Permanent docs, completions, focused behavioral tests, the full suite, typing, formatting, and
-   lint are current and green. Tests do not police authored prose.
+8. The canonical assistance prompt is the short operator-approved install-and-handoff text, and its
+   README, website, Claude Code, and Codex projections remain generated byte-for-byte from it.
+9. Permanent docs, completions, focused behavioral tests, the full suite, typing, formatting, and
+   lint are current and green. Tests protect structure and behavior, not authored prose or hint
+   counts.
 
 ## Non-goals
 
@@ -180,20 +203,23 @@ only if implementation introduces a real setting, which is not expected.
   general feedback workflow, or a new public diagnostic model.
 - Repeating the same live provider journey for the README, Claude Code, and Codex wrappers after
   their generated parity is established.
-- Expanding the already-shipped bootstrap prompt or JSON v1 contracts.
+- Adding a bootstrap version-selection workflow, source-review flow, prompt parser, or other state
+  machine. The prompt relies on the package resolver and hands continuing assistance to the guide.
+- Changing JSON v1 contracts.
 
 ## Decisions
 
 - **D1: Trail sign over overview.** No-topic guide output points; selected topics teach.
-- **D2: Onboarding is the startup home.** The complete startup posture, adoption assessment, first
-  setup, and source-review entry live in `concept-onboarding`.
+- **D2: Onboarding is the setup home.** Adoption assessment, first setup, journey hints, and the
+  source-review entry live in `concept-onboarding`; general agent posture lives in
+  `concept-assistant-agent`.
 - **D3: Rendering success is not system health.** Valid guide requests degrade visibly and exit 0;
   doctor reports health.
 - **D4: Dependencies come from existing blocks.** Live block types trigger live projection. There is
   no topic allowlist or new dependency field.
 - **D5: One diagnostic, many placeholders.** Each root problem is explained once per response;
   affected blocks remain visibly but briefly unavailable.
-- **D6: Human and agent trail signs differ deliberately.** Humans get the smaller choice; agents get
-  the compact intent map.
+- **D6: One catalog, light mode shaping.** Humans and agents receive the same ordinary destinations.
+  Agent mode adds only the assistant-agent starting cue and optional topic-local `AgentNote` blocks.
 - **D7: One representative live journey.** Generated parity makes repeated provider-backed runs per
   wrapper redundant.
