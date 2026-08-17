@@ -96,25 +96,29 @@ own reading is that earlier phases of that effort landed tech debt while unatten
 replaced by auto-discovered Markdown concept shells, confirmed through the saga lead's authenticated
 channel after the onboarding effort's design checkpoint (PR #580). One Markdown file per ordinary
 `concept-` topic with required description frontmatter defines the catalog; the only additions to
-ordinary Markdown are balanced agent-only fences, one bounded inert import of a uniquely named
-section from the installed first-party package tree, and the `resource-kinds` and `resource-list`
-live projections; there are no variables, loops, conditionals, or template engine. Typed guide
-blocks, actions, consent and evidence replay, the onboarding assessment, and manual contribution
-registration are removed. Three older sentences are superseded with it: the 2026-08-15 survey
-disposition's projector-parity clause served an assessment this ruling removes and is discharged
-(the projector shipped with PR #556 and dies with the shells cutover); the plugin-topic-namespacing
-sentence under the capability rulings no longer describes a shape wave 8 inherits, since plugins do
-not contribute shells in this format version and a plugin contribution API is out of scope; and the
-survey disposition's raw-aggregation principle stands with a two-item carve-out, the sanctioned
-`resource-kinds` and `resource-list` projections, which the operator accepts as the guide's only
-live composition. The consent posture survives the machinery: guide text instructs and never
-authorizes (the effort FRD's R5 restates it over the new surface), and environmental failures still
-fail soft with structural shell defects nonzero. This supersedes the typed-block and action-record
-retention in the 2026-08-05 teaching-surface rulings and the 2026-08-15 rubric's "action records"
-keep clause; the corrected-guide-model ruling below otherwise stands (one catalog, presentation-only
-modes, the few-line bootstrap). The 2026-08-16 corrected guide model shipped first (PR #579, merged
-2026-08-17), satisfying its 0.14.0 gate; no gate is minted here for the shells implementation
-without separate operator direction.
+ordinary Markdown are balanced agent-only fences and one bounded inert import of a uniquely named
+section from the installed first-party package tree (whose named consumer is the packaged canonical
+root README, carried through one Hatch build-hook lifecycle with repository-relative links and
+images mapped to fixed GitHub URLs); there are no variables, loops, conditionals, live projections,
+or template engine. Shells are static documentation: a subsequent same-day operator direction in the
+child session removed the initially sanctioned `resource-kinds` and `resource-list` projections and
+their entire state-loading and degradation subsystem, so anything live is command-owned and the
+guide points at it. Typed guide blocks, actions, consent and evidence replay, the onboarding
+assessment, and manual contribution registration are removed. Three older sentences are superseded
+with it: the 2026-08-15 survey disposition's projector-parity clause served an assessment this
+ruling removes and is discharged (the projector shipped with PR #556 and dies with the shells
+cutover); the plugin-topic-namespacing sentence under the capability rulings no longer describes a
+shape wave 8 inherits, since plugins do not contribute shells in this format version and a plugin
+contribution API is out of scope; and the survey disposition's raw-aggregation principle now stands
+without exception, the guide carrying no live composition at all. The consent posture survives the
+machinery: guide text instructs and never authorizes (the effort FRD's R5 restates it over the new
+surface), structural shell defects stay nonzero as repository defects, and with no live loading the
+environmental-degradation surface is gone rather than failing soft. This supersedes the typed-block
+and action-record retention in the 2026-08-05 teaching-surface rulings and the 2026-08-15 rubric's
+"action records" keep clause; the corrected-guide-model ruling below otherwise stands (one catalog,
+presentation-only modes, the few-line bootstrap). The 2026-08-16 corrected guide model shipped first
+(PR #579, merged 2026-08-17), satisfying its 0.14.0 gate; no gate is minted here for the shells
+implementation without separate operator direction.
 
 **Ruling (operator, 2026-08-16, the corrected guide model; gates 0.14.0):** hands-on testing in the
 operator's real environment found the shipped guide badly over-indexed on agents: the human trail
