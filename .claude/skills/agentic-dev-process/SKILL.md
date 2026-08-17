@@ -35,7 +35,10 @@ definition instead. The always-on rules govern how work is done; this skill rout
 6. **Use independent fresh eyes for code-heavy work.** In addition to project review, run a generic
    correctness, robustness, edge-case, and security pass without project-specific priors. It may use
    a lighter capability because it complements rather than replaces the reviewer of record. A
-   document-only or closeout change normally does not need it.
+   document-only or closeout change normally does not need it. An available external review service
+   may supply this lens; when its output is published on GitHub, follow
+   [Published feedback](references/delivery.md#published-feedback). A local lens remains in the
+   private loop.
 7. **Validate and hand off an exact state.** Before PR validation or merge, load
    `integration-testing`; it owns validation and live-evidence mechanics. Load
    [Delivery](references/delivery.md) before choosing a PR vehicle, publishing a handoff, consuming
