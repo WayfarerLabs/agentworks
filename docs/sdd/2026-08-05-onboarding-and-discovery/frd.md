@@ -54,6 +54,13 @@ topic addressable through `agw guide`, `--names-only`, and shell completion with
 topic registration record. Duplicate slugs or malformed shells are authored-content defects and fail
 clearly.
 
+Shells and imported sections use ATX headings only; Setext headings are structural authored-content
+defects. This keeps the single-H1 and heading-offset rules literal.
+
+The existing apt and install-command concepts remain shells because they ship inside the first-party
+`agentworks` package tree. Separately installed plugins do not contribute guide shells in this
+format version; adding a plugin contribution API is out of scope.
+
 Humans and assistant agents use one catalog. Packaged exact-version release-note topics remain a
 separate direct, inert evidence surface with no typed guide block; they do not turn the shell format
 into a generic topic plugin API.
@@ -64,12 +71,18 @@ A shell supports only these additions to ordinary Markdown:
 
 1. balanced, non-nested agent-only fences whose contents are omitted unless agent mode is active;
 2. an import of one exact, uniquely named H2-H6 Markdown section from another packaged document in
-   the installed `agentworks` package tree; and
+   the installed `agentworks` package tree, with one static heading-level offset; and
 3. the explicit `resource-kinds` and `resource-list` live projections.
 
 Imports are bounded and inert. They cannot load arbitrary filesystem paths, recurse, or execute
 directives found in imported text. Agent-only filtering happens before imports or live projections,
 so hidden content causes no work in human mode.
+
+The heading offset applies uniformly to every ATX heading in the imported section and cannot produce
+an H1 or a heading deeper than H6. Absolute HTTPS image destinations pass through unchanged.
+Package-relative image destinations in shells and imported sections are resolved against their
+source document and rewritten to canonical Agentworks raw-GitHub HTTPS URLs. The guide does not
+fetch, validate, or embed images, and it never rewrites ordinary links.
 
 There are no variables, loops, conditionals, expressions, recursive includes, arbitrary operation
 names, or general template engine.
@@ -126,8 +139,10 @@ configuration changes only if implementation introduces a real setting, which is
 4. Inline Markdown renders in both modes. Agent-only content renders only in agent mode, and a
    hidden fence cannot trigger an import or live projection.
 5. A shell can import one exact unique H2-H6 ATX-heading section from a bounded Markdown resource
-   beneath the installed `agentworks` package. Imported directives remain inert, and missing or
-   ambiguous headings fail clearly.
+   beneath the installed `agentworks` package and apply one static offset while keeping every result
+   in H2-H6. Imported directives remain inert, absolute image references remain usable,
+   package-relative image references become canonical HTTPS URLs, and missing or ambiguous headings
+   fail clearly.
 6. `resource-kinds` and `resource-list` are the only live projections. They are read-only,
    presentation-neutral, lazy, and fail soft with deduplicated warnings and local placeholders.
 7. All typed guide blocks, actions, consent, evidence, onboarding assessment, and manual

@@ -64,14 +64,23 @@ Expansion is a fixed pipeline, not a general interpreter:
 
 1. load and validate the selected shell within package-data bounds;
 2. remove agent-only regions when human mode is active;
-3. expand visible package-section imports as inert Markdown;
+3. expand visible package-section imports as inert Markdown, applying their fixed heading offset;
 4. invoke visible named live projections lazily;
 5. frame the resulting Markdown and any deduplicated diagnostics.
 
 Agent fences are balanced and non-nested. Imports name a relative Markdown resource beneath the
-installed `agentworks` package plus an exact H2-H6 ATX heading. The extractor accepts exactly one
-match outside fenced code and stops at the next heading of equal or higher rank. Imported text is
-never parsed again for directives, so composition is one level deep.
+installed `agentworks` package, an exact H2-H6 ATX heading, and an optional integer heading offset
+whose default is zero. The extractor accepts exactly one match outside fenced code and stops at the
+next heading of equal or higher rank. It shifts every ATX heading outside fenced code by the same
+amount and rejects a result outside H2-H6. Imported text is never parsed again for directives, so
+composition is one level deep. Setext headings are rejected in shells and selected sections.
+
+The expander rewrites only Markdown image destinations. Absolute HTTPS destinations pass through.
+Package-relative destinations are resolved lexically against the source Markdown resource, required
+to remain inside the installed `agentworks` package tree, and rewritten to the equivalent canonical
+raw-GitHub HTTPS URL on `main`. Inline and reference-style images share this rule; a reference-style
+image must have its definition inside the same emitted shell or extracted section. Ordinary links
+remain untouched, and the guide never fetches, validates, or embeds image content.
 
 Only two live directives exist: `resource-kinds` and `resource-list`. Their implementations call
 presentation-neutral service functions already behind the corresponding CLI surfaces. There is no
@@ -132,6 +141,9 @@ fixtures. Permanent CLI documentation describes the shell model. Sample configur
 - **Auto-discovery weakens ownership.** Discovery is restricted to explicit trusted package roots,
   and global duplicate slugs fail deterministically.
 - **Included docs become executable.** Imported text is inserted inertly and never parsed again.
+- **Image support grows a general URL resolver.** Rewriting is limited to Markdown image
+  destinations under the known package root and one fixed canonical raw-GitHub base. Ordinary links,
+  remote content, and image bytes remain outside the guide.
 - **Live guidance repeats failures.** Root diagnostics are response-scoped and deduplicated; each
   slot carries only a short placeholder.
 - **Removed guide logic returns in frontmatter.** Frontmatter contains description only; actions and

@@ -46,9 +46,9 @@ description: Help an operator get started with Agentworks.
 
 `description` is required, non-empty, single-line text used for discovery and completion metadata.
 No other frontmatter key, YAML feature, or executable value is accepted. The body contains exactly
-one authored ATX level-1 heading outside agent-only fences, which supplies the topic title. The
-filename supplies identity; the heading supplies title; frontmatter supplies description. Python
-does not register those values per topic.
+one authored ATX level-1 heading outside agent-only fences, which supplies the topic title. Setext
+headings are not accepted anywhere in the shell. The filename supplies identity; the heading
+supplies title; frontmatter supplies description. Python does not register those values per topic.
 
 `agw guide --names-only` discovers names from shell filenames plus the separately generated exact
 release-note names. It invokes no live projection. Shell structural defects, including duplicate
@@ -82,7 +82,7 @@ a packaged document or invoke a service.
 ### Packaged-section include
 
 ```markdown
-<!-- agw:include path="capabilities/README.md" heading="Kinds" -->
+<!-- agw:include path="capabilities/README.md" heading="Kinds" heading-offset="1" -->
 ```
 
 `path` is relative to `importlib.resources.files("agentworks")`. It must be a bounded Markdown
@@ -95,8 +95,32 @@ heading text after removing the ATX marker and optional closing hashes. H1 impor
 and multiple matches are structural errors. Expansion inserts the matching heading and its body
 through, but not including, the next heading of equal or higher rank.
 
+`heading-offset` is an optional signed base-10 integer and defaults to `0`. The expander adds it to
+the level of every ATX heading in the selected section outside code fences. The offset is static for
+the include; a shifted heading below H2 or above H6 is a structural error. A Setext heading anywhere
+in the selected section is a structural error rather than an unchanged escape from this rule.
+
 Included bytes are inert. The expander does not process directives, frontmatter, or agent-only
 markers found in an included document. Includes cannot recurse.
+
+The expander recognizes Markdown image destinations in both inline images and reference definitions
+used by images. Absolute HTTPS destinations pass through unchanged. A relative destination is
+resolved with POSIX path semantics against the package-relative path of the Markdown document that
+contains it. A result outside the `agentworks` package root, an absolute local path, a
+scheme-relative destination, or a non-HTTPS scheme is a structural error.
+
+Valid relative destinations are rewritten as:
+
+```text
+https://raw.githubusercontent.com/WayfarerLabs/agentworks/main/cli/agentworks/<path>
+```
+
+Guide images are current explanatory material, not immutable release evidence. Path segments are
+URL-encoded. A reference-style image must have its definition inside the same emitted shell or
+extracted section. A missing definition or one shared with an ordinary link is a structural error
+rather than an invitation to emit a broken image or change a link destination. The rewriter does not
+fetch, validate, or embed image content. It does not rewrite ordinary Markdown links, and included
+image references are resolved relative to the included document rather than the including shell.
 
 ### Live resource projections
 
@@ -193,8 +217,9 @@ Focused tests protect behavior and boundaries:
 - filename discovery, global slug uniqueness, restricted frontmatter, and the unfenced single-H1
   invariant;
 - balanced non-nested agent fences and filtering before include or service work;
-- exact unique H2-H6 ATX-section extraction beneath the one `agentworks` package root, size bounds,
-  and inert non-recursive included text;
+- exact unique H2-H6 ATX-section extraction beneath the one `agentworks` package root, bounded
+  static heading offsets, image-only canonical URL rewriting for inline and reference-style images,
+  section-local reference definitions, size bounds, and inert non-recursive included text;
 - the two-directive allowlist, lazy once-per-response projection, and no invocation for static or
   human-hidden content;
 - one response-level warning, per-slot unavailable markers, exit 0 for environmental failures, and

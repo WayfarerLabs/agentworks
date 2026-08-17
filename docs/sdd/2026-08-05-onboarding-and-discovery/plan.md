@@ -580,11 +580,16 @@ schema.
       catalog-free.
 - [ ] Implement the closed shell expander: inline Markdown; balanced, non-nested agent-only fences;
       exact unique H2-H6 ATX-heading imports from bounded Markdown beneath the installed
-      `agentworks` package; and only the literal `resource-kinds` and `resource-list` live
-      directives. Keep the shell's single H1 outside agent-only fences. Filter mode-hidden regions
+      `agentworks` package; one optional static integer heading offset applied uniformly with H2-H6
+      result bounds; and only the literal `resource-kinds` and `resource-list` live directives. Keep
+      the shell's single ATX H1 outside agent-only fences and reject Setext headings. Preserve
+      absolute HTTPS Markdown image destinations and rewrite package-relative inline and
+      reference-style image destinations to the canonical raw-GitHub `main` URL for their source
+      path. Require reference definitions inside the same emitted shell or extracted section. Fetch
+      or embed no image content and leave ordinary links untouched. Filter mode-hidden regions
       before any import or service work, insert imported text inertly without recursive directive
-      processing, and add no variables, loops, conditionals, evaluator, arbitrary path support, or
-      generic operation registry.
+      processing, and add no variables, loops, conditionals, evaluator, arbitrary path support,
+      general URL resolver, or generic operation registry.
 - [ ] Back both live directives with presentation-neutral, read-only service facts used by the
       corresponding CLI resource surfaces. Invoke them only for visible directives in selected
       shells. Deny secret resolution, subprocesses, provider probes, network, VM connections, remote
@@ -607,11 +612,12 @@ schema.
       any removed contract in frontmatter or tests.
 - [ ] Update permanent CLI and contribution documentation, package-data expectations, and
       completions for the shell model and removed `--evidence` option; record sample configuration
-      as unaffected unless a real setting changes. Update the canonical always-on guide collateral
-      rule, project reviewer definition, and generated Rulesync projections to remove the onboarding
-      assessment exception and typed-action requirement. Test discovery, structure, filtering,
-      imports, service allowlisting/laziness/degradation, safety boundaries, package inclusion,
-      names-only, and completion without asserting authored wording.
+      as unaffected unless a real setting changes. Update
+      `.rulesync/rules/keep-collateral-in-sync.md`, `.rulesync/subagents/agentworks-reviewer.md`,
+      and their generated Rulesync projections to remove the onboarding assessment exception and
+      typed-action requirement. Test discovery, structure, filtering, imports, service
+      allowlisting/laziness/degradation, safety boundaries, package inclusion, names-only, and
+      completion without asserting authored wording.
 - [ ] Deliver this correction as one stacked feature PR based on the corrected-guide branch, then
       target `main` or rebase onto it when the predecessor merges. Run focused guide/completion and
       package tests, the full non-integration suite, Ruff, formatting, mypy, Rulesync drift,
