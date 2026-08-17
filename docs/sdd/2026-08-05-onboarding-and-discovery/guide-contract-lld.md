@@ -3,7 +3,7 @@
 - Status: Current Markdown-shell destination
 - Scope: concept discovery, bounded shell expansion, mode selection, and inert release evidence
 - FRD: `frd.md` R1 through R5
-- HLA: `hla.md`, Shared trail sign through Catalog, names, and completion
+- HLA: `hla.md`, Fixed trail sign through Safety and degradation
 
 The immutable implementation journey remains in `plan.md`. This contract replaces the retained
 typed-block, action, evidence, and onboarding-assessment machinery with auto-discovered Markdown
@@ -24,15 +24,17 @@ Markdown and exactly four directive forms: an agent-only fence, a packaged-secti
 
 ## Concept shells and discovery
 
-Each concept is one UTF-8 Markdown file named `<stem>.md` directly under an explicit, trusted,
-package-owned `guide-content` root. Roots are fixed package-resource locations opened with
-`importlib.resources`. The guide does not scan the working tree, current directory, arbitrary
-installed packages, or filesystem-relative fallbacks.
+Each concept is one UTF-8 Markdown file named `<stem>.md` directly under a directory named
+`guide-content` in the installed first-party `agentworks` package tree. Discovery starts at
+`importlib.resources.files("agentworks")` and walks only that traversable package resource. The
+guide does not scan the working tree, current directory, another installed package, or a
+filesystem-relative fallback.
 
-Discovery validates every file and orders roots, then filenames, deterministically. A filename stem
-uses lower kebab case and produces the global slug `concept-<stem>`. Slugs have one global
-namespace; two roots producing the same slug are a structural catalog error. The guide never shadows
-one shell with another or changes the winner based on discovery order.
+Discovery validates every file and orders package-relative directories, then filenames,
+deterministically. A filename stem uses lower kebab case and produces the global slug
+`concept-<stem>`. Slugs have one global namespace; two directories producing the same slug are a
+structural catalog error. The guide never shadows one shell with another or changes the winner based
+on discovery order.
 
 Every shell begins with this restricted frontmatter shape:
 
@@ -44,9 +46,9 @@ description: Help an operator get started with Agentworks.
 
 `description` is required, non-empty, single-line text used for discovery and completion metadata.
 No other frontmatter key, YAML feature, or executable value is accepted. The body contains exactly
-one authored ATX level-1 heading, which supplies the topic title. The filename supplies identity;
-the heading supplies title; frontmatter supplies description. Python does not register those values
-per topic.
+one authored ATX level-1 heading outside agent-only fences, which supplies the topic title. The
+filename supplies identity; the heading supplies title; frontmatter supplies description. Python
+does not register those values per topic.
 
 `agw guide --names-only` discovers names from shell filenames plus the separately generated exact
 release-note names. It invokes no live projection. Shell structural defects, including duplicate
@@ -80,17 +82,18 @@ a packaged document or invoke a service.
 ### Packaged-section include
 
 ```markdown
-<!-- agw:include package="agentworks.capabilities" path="README.md" heading="Kinds" -->
+<!-- agw:include path="capabilities/README.md" heading="Kinds" -->
 ```
 
-`package` must name an explicitly allowed package-resource root. `path` must be a bounded relative
-resource path below that root with no absolute form, parent traversal, symlink escape, or filesystem
-fallback. The target must be packaged UTF-8 Markdown within the repository's content-size limit.
+`path` is relative to `importlib.resources.files("agentworks")`. It must be a bounded Markdown
+resource below that package root with no absolute form, empty, dot, or parent segment, and no
+filesystem fallback. No other package is an include source. The target must be packaged UTF-8
+Markdown within the repository's content-size limit.
 
-`heading` matches exactly one ATX heading outside code fences. Matching compares the visible heading
-text after removing the ATX marker and optional closing hashes. Zero or multiple matches are
-structural errors. Expansion inserts the matching heading and its body through, but not including,
-the next heading of equal or higher rank.
+`heading` matches exactly one H2-H6 ATX heading outside code fences. Matching compares the visible
+heading text after removing the ATX marker and optional closing hashes. H1 imports, zero matches,
+and multiple matches are structural errors. Expansion inserts the matching heading and its body
+through, but not including, the next heading of equal or higher rank.
 
 Included bytes are inert. The expander does not process directives, frontmatter, or agent-only
 markers found in an included document. Includes cannot recurse.
@@ -158,8 +161,9 @@ Mode selection retains this precedence:
 2. the exact registered `CLAUDECODE=1` execution signature; and
 3. human for TTY stdout, otherwise agent.
 
-Exact `concept-release-notes/vMAJOR-MINOR-PATCH` topics remain generated from bounded packaged
-changelog sections. Their content is escaped inert evidence, performs no network work, and uses
+Exact `concept-release-notes/vMAJOR-MINOR-PATCH` topics are resolved and rendered directly from
+bounded packaged changelog sections. They use no `ReleaseNotes` block, generic topic contribution,
+or old catalog union. Their content is escaped inert evidence, performs no network work, and uses
 neither shell directives nor live adapters. The base `concept-release-notes` guidance is an ordinary
 shell.
 
@@ -167,13 +171,15 @@ shell.
 
 The implementation removes, rather than adapts, the superseded guide framework:
 
-- `Overview`, `Teaching`, `AgentNote`, `ActionList`, and `TopicLinks` typed blocks and their
-  parsers, serializers, renderer branches, validators, and tests;
+- `Overview`, `Teaching`, `AgentNote`, `ReleaseNotes`, `ActionList`, and `TopicLinks` typed blocks
+  and their parsers, serializers, renderer branches, validators, and tests;
 - `GuideAction`, `ConsentBoundary`, action-token grammar, action rendering, and action validation;
 - `--evidence`, evidence parsing and replay, and evidence-driven guide behavior;
 - the onboarding snapshot, assessment, status, derived-plan, verification, and next-action logic;
-- manual per-topic contribution registration, related-topic graphs, broken-link resolution, and
-  contribution-specific ownership machinery; and
+- `Plugin.guide_topics`, every subsystem or plugin `_load_guide_contributions` adapter and
+  `guide_contributions.py` module, the first-party guide-package loader map, manual per-topic
+  constructors, related-topic graphs, broken-link resolution, and contribution-specific ownership
+  machinery; and
 - compatibility layers whose only purpose is to preserve one of those removed shapes.
 
 Useful instructions and links become ordinary reviewed Markdown in their owning shell. Onboarding is
@@ -184,10 +190,11 @@ state machine or assessment protocol.
 
 Focused tests protect behavior and boundaries:
 
-- filename discovery, global slug uniqueness, restricted frontmatter, and the single-H1 invariant;
+- filename discovery, global slug uniqueness, restricted frontmatter, and the unfenced single-H1
+  invariant;
 - balanced non-nested agent fences and filtering before include or service work;
-- exact unique ATX-section extraction, allowed package roots, size bounds, and inert non-recursive
-  included text;
+- exact unique H2-H6 ATX-section extraction beneath the one `agentworks` package root, size bounds,
+  and inert non-recursive included text;
 - the two-directive allowlist, lazy once-per-response projection, and no invocation for static or
   human-hidden content;
 - one response-level warning, per-slot unavailable markers, exit 0 for environmental failures, and

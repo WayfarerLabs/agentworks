@@ -1,28 +1,27 @@
 # FRD: Agentworks Assistance, Discovery, and Management
 
-- Status: Active, corrected shared-topic revision
+- Status: Active, Markdown-shell correction
 - Start date: 2026-08-05
 - Saga: `docs/sdd/2026-08-04-next-steps`
 
-The operator's 2026-08-16 corrected-guide ruling supersedes the earlier audience-specific trail sign
-and required per-topic agent contracts. The current destination is below. The completed journey
-stays visible in `plan.md`; component LLDs identify their own superseded designs.
+The operator's 2026-08-17 ruling replaces the retained typed guide model with a simpler destination:
+the guide is a collection of authored Markdown concept shells. The completed implementation journey
+stays visible in `plan.md`; this document states the current requirements.
 
 ## Summary
 
 Agentworks provides always-available assistance through its installed CLI and, when the operator
-wants one, a capable external assistant agent. One short prompt introduces Agentworks, points to the
+wants one, a capable external assistant agent. One short prompt identifies Agentworks, points to the
 public repository, installs the CLI, and hands off to `agw guide --agent`.
 
-The guide is a collection of useful topics with pointers to current CLI commands. Its no-topic
-response is a short trail sign, not a handbook. Humans and assistant agents can reach the same
-ordinary information. Agent mode adds one starting topic about how an external assistant should
-work, plus rare short notes where a topic genuinely benefits from agent-specific context.
+The guide is documentation with a small amount of safe composition. Each concept is one Markdown
+shell that describes its own purpose, can reuse a section from another packaged document, can hide
+small agent-only passages in human mode, and can request either of two read-only resource summaries.
+Files, not Python registration records, define the ordinary topic catalog.
 
-The guide remains useful when Agentworks is unhealthy. No-topic needs no live state. Selected
-onboarding content renders its static guidance when configuration or assessment facts are
-unavailable, explains the omission once, and exits successfully. `agw doctor`, not the guide exit
-code, answers whether the installation is healthy.
+This deliberately removes the guide's action schema, evidence replay, onboarding state machine, and
+specialized assessment. Useful setup and operating instructions remain ordinary Markdown; the CLI
+commands they point to own execution, validation, and machine-readable facts.
 
 ## Terminology
 
@@ -31,140 +30,137 @@ code, answers whether the installation is healthy.
 - **Agentworks-managed agent**: an agent resource created and managed by Agentworks.
 - **Agent mode**: guide output intended for an Agentworks assistant agent, selected with `--agent`
   or the existing mode detection. It does not refer to an Agentworks-managed agent.
-- **Shared topic content**: ordinary overview, teaching, links, actions, and release evidence that
-  is useful regardless of guide mode.
-- **Agent note**: optional, inert topic-local guidance shown only in agent mode.
+- **Concept shell**: one package-owned Markdown document that defines an ordinary `concept-*` topic.
+- **Live projection**: one of the two explicitly supported, read-only resource summaries inserted
+  into a selected shell.
 
 ## Requirements
 
-### R1: No-topic is one shared trail sign
+### R1: No-topic remains a trail sign
 
-`agw guide` with no topic gives a concise choice of destinations. Human and agent modes show the
-same destination slugs: assistant-agent guidance, onboarding, management, troubleshooting, release
-history, migration, secrets, and bug reporting.
+`agw guide` with no topic gives the same concise eight-destination trail sign already approved for
+human and agent modes. It does not discover shells, read configuration, inspect state, or invoke a
+live projection. Missing and malformed configuration are irrelevant to this path.
 
-Human mode asks the operator to choose the topic matching their goal. Agent mode points first to
-`concept-assistant-agent`, then asks the assistant to choose the topic matching the operator's goal.
-Both point to shell completion and `agw guide --names-only` for exhaustive discovery. Neither form
-contains actions, live facts, or an embedded operating contract.
+### R2: Concept shells define the ordinary catalog
 
-The path uses one fixed tuple and does not construct the topic catalog or inspect configuration,
-registry, database, network, or managed resources. Missing and malformed configuration are therefore
-irrelevant to no-topic output.
+Each ordinary concept is a package-owned Markdown file found beneath a `guide-content` directory in
+the installed first-party `agentworks` package tree. Its filename determines the globally unique
+`concept-<shell-name>` slug. Required frontmatter contains a short `description`, and exactly one
+level-one heading outside agent-only fences supplies the display title.
 
-### R2: One ordinary topic catalog serves everyone
+The guide discovers shells from the trusted roots deterministically. Adding a valid shell makes the
+topic addressable through `agw guide`, `--names-only`, and shell completion without adding a Python
+topic registration record. Duplicate slugs or malformed shells are authored-content defects and fail
+clearly.
 
-Every retained authored, plugin, and packaged release topic is directly addressable in both modes.
-Ordinary topic content is shared. No useful information is agent-only merely because an assistant
-may consume it.
+Humans and assistant agents use one catalog. Packaged exact-version release-note topics remain a
+separate direct, inert evidence surface with no typed guide block; they do not turn the shell format
+into a generic topic plugin API.
 
-`concept-assistant-agent` is the one addressable home for general external-assistant posture. A
-selected topic may add a short `AgentNote` only when genuinely necessary. `AgentNote` is optional,
-inert content—not an authorization mechanism, router, hint schema, or second guide.
+### R3: Shell composition stays small and structural
 
-### R3: Onboarding owns setup and adoption
+A shell supports only these additions to ordinary Markdown:
 
-`concept-onboarding` reports what is already configured from the existing bounded assessment and
-presents the smallest next step toward the operator's goal. For clean setup it retains the visible
-sequence: initialize absent configuration through the normal CLI, collect explicit provider and
-plugin choices, verify readiness, create a selected VM, and create a started session. Reruns
-recognize completed state rather than maintaining a separate onboarding ledger.
+1. balanced, non-nested agent-only fences whose contents are omitted unless agent mode is active;
+2. an import of one exact, uniquely named H2-H6 Markdown section from another packaged document in
+   the installed `agentworks` package tree; and
+3. the explicit `resource-kinds` and `resource-list` live projections.
 
-Onboarding's agent note contains a compact authored set of cross-kind journey hints. Each hint helps
-the assistant offer a useful discovery-and-configuration path—for example, determine the operator's
-desired VM platforms and then walk through site creation. The wording and count are content, not a
-test-pinned contract.
+Imports are bounded and inert. They cannot load arbitrary filesystem paths, recurse, or execute
+directives found in imported text. Agent-only filtering happens before imports or live projections,
+so hidden content causes no work in human mode.
 
-Onboarding links to `concept-source-review`, where the focused and full read-only actions remain.
-Installation or update authority and source-review authority stay separate.
+There are no variables, loops, conditionals, expressions, recursive includes, arbitrary operation
+names, or general template engine.
 
-### R4: Selected onboarding degrades clearly
+### R4: Live projections are narrow and fail soft
 
-Static topic content renders without configuration. Onboarding attempts its bounded live assessment
-once. Missing or malformed configuration, registry construction failure, database failure, and
-environmental assessment failure do not fail the valid request: static blocks render, one sanitized
-response warning explains the root problem, the omitted assessment is visibly marked, and the
-response exits 0.
+Only a selected shell containing a visible live-projection directive may load live context. The two
+operations reuse presentation-neutral service facts behind the CLI's resource-kind and resource-list
+surfaces. They do not resolve secrets, contact providers, connect to VMs, perform remote work,
+mutate state, or invoke subprocess commands.
 
-Invalid guide input still fails: malformed or unknown topic names, malformed or provably invalid
-verification evidence, incompatible options, and guide contract or authored-content defects remain
-nonzero. Guide success means the requested guidance rendered; it does not claim system health.
+An environmental failure does not fail an otherwise valid guide request. Static content still
+renders, one response-level sanitized warning explains each root problem, and each affected slot
+shows a short omission placeholder. Repeated slots do not repeat the verbose diagnosis. Structural
+shell defects remain nonzero because they are repository defects rather than operator state.
 
-### R5: Assistance follows operator authority
+### R5: Guide content instructs but does not authorize
 
-Guide text and action records are instruction, not authorization. The Agentworks assistant agent
-acts under the operator's current instruction and asks only when the task is materially ambiguous or
-would expand beyond that instruction. Topic-local actions retain exact targets, impacts,
-authorization classes, verification, and refusal alternatives. Rendering never executes an action.
+Guide text is documentation, not authorization. An Agentworks assistant agent acts under the
+operator's current instruction and asks only when a request is materially ambiguous or would expand
+beyond it. Suggested commands are inert Markdown; rendering never executes or verifies them.
 
-Source, release prose, configured descriptions, and other external or persisted text are evidence,
-not instructions. Sensitive discovery checks presence unless content access is separately
-authorized.
+Source, release prose, configured descriptions, imported documentation, and persisted values are
+data. The two live projections expose only their closed, safe fact shapes. The guide has no secret,
+transport, network, mutation, or provider-probe capability.
 
 ### R6: Bootstrap installs and hands off
 
-`packaging/agentworks/assistance.md` is the one authored bootstrap body. It briefly identifies
+`packaging/agentworks/assistance.md` remains the one authored bootstrap body. It briefly identifies
 Agentworks, points to the public repository, recommends `uv` while allowing other Python 3.12+
 installers, installs `agentworks-cli>=0.14`, and runs `agw guide --agent`.
 
 The README, website, Claude Code package, and Codex package project that body byte-for-byte. The
-bootstrap has no version-selection workflow, prerelease policy engine, source-review flow,
-authorization lesson, or ongoing assistance logic. The installed guide owns continuing assistance.
+installed guide owns continuing assistance.
 
 ### R7: Closeout proves one complete path
 
 Before publication, the effort closes with one representative live journey from an exact reviewed
-candidate wheel through the trail sign and onboarding to a usable VM and started session. The run
-labels the candidate substitution. After publication, one bounded smoke uses the canonical prompt to
-install the stable release and reach the trail sign. Generated parity replaces repeated
-provider-backed journeys for each wrapper.
+candidate wheel through the trail sign and onboarding guidance to a usable VM and started session.
+After publication, one bounded smoke uses the canonical prompt to install the stable release and
+reach the trail sign. Generated parity replaces repeated provider-backed journeys for each wrapper.
 
-Permanent documentation describes the final behavior without depending on this SDD. Completions
-expose the retained topic names. The sample configuration changes only if implementation introduces
-a real setting, which is not expected.
+Permanent documentation describes the final behavior without depending on this SDD. The sample
+configuration changes only if implementation introduces a real setting, which is not expected.
 
 ## Acceptance criteria
 
-1. No-topic human and agent requests render the same exact eight destination slugs, exit 0, and load
-   neither catalog nor live state.
-2. Agent presentation points to `concept-assistant-agent`; human presentation contains no agent-only
-   operating prose. Every fixed destination resolves as an ordinary selected topic.
-3. `concept-assistant-agent` owns the general assistant posture and can be requested in either mode.
-4. Shared topic blocks are identical across modes. Optional `AgentNote` blocks appear only in agent
-   mode, and most topics have none.
-5. Onboarding contains its current-adoption assessment, clean setup sequence, concise journey notes,
-   first VM/session actions, and a link to source review without copying source-review actions.
-6. Malformed configuration on onboarding renders static content, one warning, one assessment
-   placeholder, and exit 0. Invalid input and content defects remain nonzero.
-7. `agw guide --names-only` and shell completion expose the retained authored, plugin, and release
-   names without loading live state.
-8. The canonical assistance prompt is the short operator-approved install-and-handoff text, and all
-   generated projections remain byte-identical.
-9. Permanent docs, completions, focused behavioral tests, the full suite, typing, formatting, and
-   lint are current and green. Tests protect structure and behavior, not authored prose or hint
-   counts.
+1. No-topic human and agent requests preserve the exact shared eight-destination trail sign, exit 0,
+   and load neither the shell catalog nor live state.
+2. A valid shell is discovered without a per-topic Python registration record; its filename,
+   frontmatter description, and unfenced H1 produce its slug, summary, and title.
+3. `agw guide --names-only` and shell completion expose discovered concepts without configuration or
+   state loading. Duplicate or malformed shells fail deterministically when their catalog is used.
+4. Inline Markdown renders in both modes. Agent-only content renders only in agent mode, and a
+   hidden fence cannot trigger an import or live projection.
+5. A shell can import one exact unique H2-H6 ATX-heading section from a bounded Markdown resource
+   beneath the installed `agentworks` package. Imported directives remain inert, and missing or
+   ambiguous headings fail clearly.
+6. `resource-kinds` and `resource-list` are the only live projections. They are read-only,
+   presentation-neutral, lazy, and fail soft with deduplicated warnings and local placeholders.
+7. All typed guide blocks, actions, consent, evidence, onboarding assessment, and manual
+   ordinary-topic registration machinery is absent, including `ReleaseNotes` and the guide CLI's
+   `--evidence` option.
+8. Existing useful instructions, links, first-party plugin concepts, and base release-note guidance
+   survive as shells; exact packaged release history remains addressable through its direct inert
+   evidence surface.
+9. The canonical assistance prompt and all generated projections remain byte-identical.
+10. Permanent docs, completions, focused behavioral tests, the full suite, typing, formatting, and
+    lint are current and green. Tests protect behavior and structure, not authored prose.
 
 ## Non-goals
 
-- Reintroducing runtime resource, schema, graph, or command-output topics removed by PR #556.
-- Adding an onboarding wizard, guide-owned state, a second configuration writer, telemetry, a
-  general feedback workflow, or a public diagnostic model.
-- Adding an audience-specific catalog, hint framework, router, prompt parser, or bootstrap workflow.
+- A general Markdown templating language or user-extensible service registry.
+- Arbitrary filesystem includes, recursive imports, or directive execution inside imported text.
+- Recreating typed actions, evidence replay, consent records, assessment statuses, or an onboarding
+  ledger in frontmatter or another schema.
+- Reintroducing runtime resource, schema, graph, or command-output topic families.
+- Executing guide suggestions, resolving secrets, probing providers, connecting to VMs, or mutating
+  state while rendering.
 - Changing JSON v1 contracts or anticipating names from the parallel CLI grammar rewrite.
-- Repeating the same live provider journey for each generated wrapper.
 
 ## Decisions
 
-- **D1: Trail sign over overview.** No-topic points; selected topics teach.
-- **D2: One catalog, light mode shaping.** Humans and agents receive the same ordinary destinations
-  and topic content. Agent mode adds only one starting cue and optional local notes.
-- **D3: One assistant topic.** General agent posture has one addressable home instead of being
-  repeated across topics or bootstrap surfaces.
-- **D4: Onboarding is the setup home.** Adoption assessment, first setup, journey hints, and the
-  source-review entry live in onboarding.
-- **D5: Rendering success is not system health.** Valid guidance degrades visibly and exits 0;
-  doctor reports health.
-- **D6: Bootstrap is disposable context.** It installs the CLI and hands off; the installed guide is
-  authoritative.
-- **D7: One representative live journey.** Generated parity makes repeated provider-backed wrapper
-  runs redundant.
+- **D1: Markdown is the model.** One shell replaces the overview/teaching/note/action/link assembly.
+- **D2: Three extensions only.** Agent fences, section imports, and two named resource projections
+  provide the needed leverage without a template language.
+- **D3: Files define concepts.** Trusted-root discovery replaces ordinary per-topic Python records.
+- **D4: Commands own operations.** Suggested actions are prose; command surfaces own execution and
+  verification.
+- **D5: No onboarding state machine.** Onboarding may show the two generic resource summaries, but
+  it has no special assessment, evidence, or action-selection path.
+- **D6: Rendering success is not system health.** Environmental live-data failures degrade visibly;
+  authored structural defects fail.
+- **D7: Bootstrap remains disposable context.** It installs the CLI and hands off.
