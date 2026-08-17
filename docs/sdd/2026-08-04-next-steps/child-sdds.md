@@ -226,6 +226,18 @@ item shrinks to a verification sweep.
 - [ ] Wave 2 in progress: rules seventeen to ten (PR #521), process-tree fact refresh (PR #535),
       testing-trio consolidation (PR #538), artifact ownership default (PR #540, one-clause
       follow-up owed per its post-merge review, absorbed and closed by PR #549's ownership model)
+- [x] Wave 2 complete (PR #570, merged 2026-08-16, closing the skills remainder): the transcribed
+      review protocol collapsed to a pointer with the drifted blocker clause resolved on the
+      qualified side, six journey passages and seven defensive negations trimmed, principle 1
+      compacted with the consistency review restoring "complexity is what makes software useful,"
+      the Not-"program" exclusion kept in its permanent home, and R3.2 satisfied at -1,442 always-on
+      bytes against baseline. With #521/#535/#538/#549 this closes R3.1 through R3.3
+- [x] Sweep inventory settled (PR #573, merged 2026-08-16): 1,146 executable rows (564 delete, 225
+      convert, 357 keep) plus 25 deferred W2 rows; the operator's keep/delete rubric landed in the
+      HLA; 55 convert recipes verified by execution with eleven corrected before any stack PR; the
+      nine-PR topology measured with group order settled. Two riders travel to the execution stack:
+      the D-006 row correction in whichever PR owns `test_errors.py` (the row as printed deletes the
+      guard it says to keep), and the 22-site screening gating the deferred conversions
 - [ ] Wave 2: process and rule subtraction under a strict net-deletion constraint. Runs in parallel
       with wave 1 on its own session (operator, 2026-08-13), file-disjoint from it; the reassessment
       below waits for both waves
