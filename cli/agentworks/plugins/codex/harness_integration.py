@@ -7,9 +7,13 @@ and ``profile`` map to the ``-m`` / ``-s`` / ``-a`` / ``-p`` flags verbatim;
 config key via ``-c``; ``approvals_reviewer`` (str) forwards to the
 ``approvals_reviewer`` config key via ``-c`` (who adjudicates approval
 escalations: codex documents ``user``, the default, and ``auto_review``, its
-risk-based reviewer subagent); ``writable_dirs`` (list) emits one ``--add-dir``
-per entry (union-merged across template inheritance, like ``shell``'s
-``required_commands``); ``web_search`` (bool) emits ``--search``;
+risk-based reviewer subagent); ``reasoning_effort`` (str) and ``vim_mode``
+(bool) forward to ``model_reasoning_effort`` and ``tui.vim_mode_default`` via
+``-c``; ``writable_dirs`` (list) emits one ``--add-dir`` per entry
+(union-merged across template inheritance, like ``shell``'s
+``required_commands``); ``web_search`` accepts a Codex-owned mode string via
+``-c``, while legacy ``true`` keeps emitting ``--search`` and ``false`` keeps
+emitting no override;
 ``disable_strict_config`` (bool, default false) suppresses the
 ``--strict-config`` the harness integration otherwise always emits; and ``extra_args`` is
 a list of raw argv tokens appended last (the operator escape hatch for any
@@ -147,12 +151,22 @@ class CodexConfig(AgwModel):
     approvals_reviewer: str | None = None
     """Forwarded as a codex config override, TOML-encoded."""
 
+    reasoning_effort: str | None = None
+    """Forwarded to Codex's ``model_reasoning_effort`` config key,
+    TOML-encoded. Values are Codex-owned and forward unvalidated."""
+
+    vim_mode: bool = False
+    """Start Codex's composer in Vim normal mode. Omitted when false, so
+    the target's own configuration remains authoritative by default."""
+
     writable_dirs: list[str] = Field(default_factory=list)
     """Extra directories the sandbox may write, each forwarded as
     ``--add-dir``. Inheritance combines parent and child entries."""
 
-    web_search: bool | None = None
-    """Whether to pass ``--search``."""
+    web_search: bool | str | None = None
+    """A Codex-owned web-search mode forwarded via ``-c``. For backward
+    compatibility, ``true`` passes ``--search`` (live search) and ``false``
+    emits no override."""
 
     disable_strict_config: bool | None = None
     """Turn OFF ``--strict-config``, for a target whose own
@@ -221,6 +235,9 @@ def _toml_basic_string(value: str) -> str:
 # the human) and `auto_review` (codex's risk-based reviewer subagent
 # adjudicates), plus the legacy `guardian_subagent`.
 _APPROVALS_REVIEWER_KEY = "approvals_reviewer"
+_REASONING_EFFORT_KEY = "model_reasoning_effort"
+_VIM_MODE_KEY = "tui.vim_mode_default"
+_WEB_SEARCH_KEY = "web_search"
 
 
 def _as_str_list(value: object) -> list[str] | None:
@@ -771,10 +788,16 @@ class CodexIntegration(HarnessIntegration):
             # Encoded as a TOML basic string: see _toml_basic_string for
             # why raw interpolation would be a silent-injection hole.
             tokens += ["-c", f"{_APPROVALS_REVIEWER_KEY}={_toml_basic_string(self.config.approvals_reviewer)}"]
+        if self.config.reasoning_effort is not None:
+            tokens += ["-c", f"{_REASONING_EFFORT_KEY}={_toml_basic_string(self.config.reasoning_effort)}"]
+        if self.config.vim_mode:
+            tokens += ["-c", f"{_VIM_MODE_KEY}=true"]
         for item in self.config.writable_dirs:
             tokens += ["--add-dir", item]
         if self.config.web_search is True:
             tokens.append("--search")
+        elif isinstance(self.config.web_search, str):
+            tokens += ["-c", f"{_WEB_SEARCH_KEY}={_toml_basic_string(self.config.web_search)}"]
         return tokens
 
     def _extra_arg_tokens(self) -> list[str]:

@@ -404,6 +404,12 @@ facts about the fields:
   `auto_review`.
 - **Extra writable directories are passed literally**, so use absolute paths: `~` and `$HOME` are
   not expanded.
+- **Session preferences can override user config without editing it.** `vim_mode: true` starts the
+  composer in Vim normal mode, while `reasoning_effort` forwards Codex's current effort name. Both
+  remain optional, and `/vim` can still toggle Vim behavior inside a running session.
+- **Web search has explicit modes.** Use `web_search: cached`, `indexed`, `live`, or `disabled`.
+  Legacy `true` still requests live search through `--search`; legacy `false` still emits no
+  override, so existing templates keep their behavior.
 - **The integration always passes `--strict-config`**, so a Codex config mistake (or a Codex-renamed
   config key) fails loudly at launch instead of being silently ignored. Turning that off is for when
   strictness itself is the problem: a target whose `config.toml` Codex must tolerate (one written by
@@ -426,6 +432,9 @@ spec:
     approval_policy: on-request # optional; forwarded to `codex -a`
     approvals_reviewer: auto_review # optional; escalations adjudicated by Codex's reviewer subagent
     network: true # optional; sandbox network access (off by default)
+    reasoning_effort: high # optional; forwarded to Codex's model_reasoning_effort setting
+    vim_mode: true # optional; start the composer in Vim normal mode
+    web_search: cached # optional; cached | indexed | live | disabled
 ```
 
 `shell` is the built-in default integration; `claude-code` and `codex` ship as the opt-in `claude`

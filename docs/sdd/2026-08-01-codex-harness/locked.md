@@ -66,6 +66,16 @@ the verification passes that execute generated shell text against real fixtures 
 exit-code stubs structurally cannot: a quoted `*` in a `case` pattern that made every workspace look
 empty, and a greedy `sed` that took the last `thread-id` rather than the first.
 
+## Post-lock updates
+
+### 2026-08-16: Session preferences and web-search modes
+
+The integration vocabulary grew from ten to twelve fields with `reasoning_effort` and `vim_mode`.
+They forward to Codex's `model_reasoning_effort` and `tui.vim_mode_default` config keys without
+changing user-level config. `web_search` also accepts Codex's explicit mode strings (`cached`,
+`indexed`, `live`, and `disabled`) through a config override. Existing booleans remain compatible:
+`true` still emits `--search`, while `false` still emits no override.
+
 ## Known limits (shipped deliberately, tracked)
 
 - **Discovery is a heuristic and says so.** Its residual windows are enumerated in the decisions

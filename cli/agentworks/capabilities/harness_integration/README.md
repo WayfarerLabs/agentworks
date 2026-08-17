@@ -435,6 +435,10 @@ resumable sessions. Five rules, each earned:
   `extra_args` after the managed flags so operators can override them or add unmodeled ones. Claude
   treats repeated `--settings` flags as last-wins, so a raw one replaces the generated session
   settings rather than extending them.
+- **Use `-c` for common Codex settings without dedicated flags.** Keep Codex-owned choice sets
+  unvalidated and TOML-encode string values before forwarding them. The built-in integration models
+  `reasoning_effort`, `vim_mode`, and explicit `web_search` modes this way; its legacy boolean
+  `web_search` values retain their original `--search` / no-override behavior.
 
 #### Integration-Owned Files on the Launch Target
 
