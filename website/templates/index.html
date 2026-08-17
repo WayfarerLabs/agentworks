@@ -12,7 +12,7 @@
         <link rel="canonical" href="https://agentworks.build/" />
         <link rel="icon" type="image/svg+xml" href="{{SITE_BASE}}assets/agw-favicon.svg" />
         <link rel="stylesheet" href="{{SITE_BASE}}static/site.css" />
-        <script type="module" src="{{SITE_BASE}}static/onboarding-copy.js"></script>
+        <script type="module" src="{{SITE_BASE}}static/onboarding.js"></script>
     </head>
     <body>
         <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -50,14 +50,50 @@
             </section>
 
             <section id="onboarding" class="status-panel" aria-labelledby="onboarding-heading">
-                <p class="status-label">Get started / Agent</p>
-                <h2 id="onboarding-heading">Agentworks CLI bootstrap</h2>
-                <p>Copy this prompt into any capable assistant.</p>
-                <pre class="onboarding-prompt"><code id="onboarding-prompt">{{ONBOARDING_PROMPT}}</code></pre>
-                <div class="copy-controls">
-                    <button id="copy-onboarding-prompt" type="button" hidden>Copy prompt</button>
-                    <p id="copy-status" role="status" aria-live="polite" aria-atomic="true"></p>
+                <p class="status-label">Get started</p>
+                <h2 id="onboarding-heading">Choose your setup path</h2>
+                <p>Hand setup to an assistant, or take the controls yourself.</p>
+                <div id="onboarding-tab-list" class="onboarding-tabs" aria-label="Setup path" hidden>
+                    <button id="via-agent-tab" type="button" data-panel="via-agent-panel">
+                        via Agent
+                    </button>
+                    <button id="manual-tab" type="button" data-panel="manual-panel">Manual</button>
                 </div>
+                <section id="via-agent-panel" class="onboarding-panel" aria-labelledby="via-agent-heading">
+                    <h3 id="via-agent-heading">via Agent</h3>
+                    <p>Copy this prompt into any capable assistant.</p>
+                    <div class="onboarding-prompt-shell">
+                        <pre class="onboarding-prompt"><code id="onboarding-prompt">{{ONBOARDING_PROMPT}}</code></pre>
+                        <button
+                            id="copy-onboarding-prompt"
+                            class="copy-prompt-button"
+                            type="button"
+                            aria-label="Copy agent setup prompt"
+                            title="Copy agent setup prompt"
+                            hidden
+                        >
+                            <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+                                <path
+                                    d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1Zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2Zm0 16H8V7h11v14Z"
+                                />
+                            </svg>
+                        </button>
+                    </div>
+                    <p id="copy-status" class="copy-status" role="status" aria-live="polite" aria-atomic="true"></p>
+                </section>
+                <section id="manual-panel" class="onboarding-panel" aria-labelledby="manual-heading">
+                    <h3 id="manual-heading">Manual</h3>
+                    <p>
+                        Start by <a href="https://github.com/WayfarerLabs/agentworks">browsing the repository</a>,
+                        then install the CLI with <code>uv</code> or another Python tool installer. Agentworks
+                        requires Python 3.12 or newer.
+                    </p>
+                    <pre class="onboarding-commands"><code>uv tool install agentworks-cli
+# or
+pipx install agentworks-cli</code></pre>
+                    <p>Once installed, open the guide and follow the setup path it recommends.</p>
+                    <pre class="onboarding-commands"><code>agw guide</code></pre>
+                </section>
             </section>
         </main>
         <footer class="site-footer">

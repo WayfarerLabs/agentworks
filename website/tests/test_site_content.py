@@ -6,7 +6,7 @@ from site_test_support import *  # noqa: F403
 
 
 def write_assistance_projection(root: Path, source: bytes) -> None:
-    source_path = root / site_builder.ASSISTANCE_SOURCE
+    source_path = root / site_builder.AGENT_ONBOARDING_PROMPT_SOURCE
     source_path.write_bytes(source)
     readme = root / "README.md"
     content = readme.read_bytes()
@@ -181,7 +181,7 @@ class SourceContractTests(RepositoryFixture):
                 site_builder.extract_assistance_prompt(self.root)
 
     def test_assistance_source_requires_exact_regular_lf_utf8(self) -> None:
-        source_path = self.root / site_builder.ASSISTANCE_SOURCE
+        source_path = self.root / site_builder.AGENT_ONBOARDING_PROMPT_SOURCE
         original = source_path.read_bytes()
         variants = (
             b"",
@@ -197,7 +197,7 @@ class SourceContractTests(RepositoryFixture):
                 site_builder.extract_assistance_prompt(self.root)
 
     def test_missing_or_symlinked_assistance_source_fails_closed(self) -> None:
-        source_path = self.root / site_builder.ASSISTANCE_SOURCE
+        source_path = self.root / site_builder.AGENT_ONBOARDING_PROMPT_SOURCE
         source_path.unlink()
         with self.assertRaisesRegex(ValueError, "missing/unreadable"):
             site_builder.extract_assistance_prompt(self.root)

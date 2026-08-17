@@ -21,7 +21,7 @@ from site_game_validation import validate_game_manifest  # noqa: E402
 from site_content import (  # noqa: E402
     ASSISTANCE_README_BEGIN,
     ASSISTANCE_README_END,
-    ASSISTANCE_SOURCE,
+    AGENT_ONBOARDING_PROMPT_SOURCE,
     CLI_SECRETS_URL,
     CONTRACTS,
     DOCUMENT_CONTRACTS,
@@ -56,7 +56,7 @@ __all__ = (
     "CLI_SECRETS_URL",
     "ASSISTANCE_README_BEGIN",
     "ASSISTANCE_README_END",
-    "ASSISTANCE_SOURCE",
+    "AGENT_ONBOARDING_PROMPT_SOURCE",
     "CONTRACTS",
     "ContractError",
     "DOCUMENT_CONTRACTS",
@@ -97,7 +97,7 @@ FULL_MANIFEST: Final = frozenset(
         Path("static/lander-collision.js"),
         Path("static/lander-model.js"),
         Path("static/lander-world.js"),
-        Path("static/onboarding-copy.js"),
+        Path("static/onboarding.js"),
         Path("static/lander.css"),
         Path("static/site.css"),
     }
@@ -130,7 +130,7 @@ def _render_artifact(repo_root: Path, site_base: str) -> tuple[dict[Path, bytes]
         Path("static/lander-game.js"): website / "static/lander-game.js",
         Path("static/lander-model.js"): website / "static/lander-model.js",
         Path("static/lander-world.js"): website / "static/lander-world.js",
-        Path("static/onboarding-copy.js"): website / "static/onboarding-copy.js",
+        Path("static/onboarding.js"): website / "static/onboarding.js",
         Path("static/lander.css"): website / "static/lander.css",
         Path("static/site.css"): website / "static/site.css",
     }

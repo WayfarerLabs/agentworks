@@ -1,9 +1,8 @@
 # HLA: The agentworks.build Website
 
-- Status: Phase 4U implemented and independently reviewed; operator acceptance pending; canonical
-  assistance integrated
+- Status: Phase 4V implemented and independently reviewed; operator acceptance pending
 - Date: 2026-08-07
-- Last revised: 2026-08-15
+- Last revised: 2026-08-17
 - FRD: `frd.md`
 - Research: `prior-art-research.md`
 - Brand direction: `brand-direction.md`
@@ -22,10 +21,11 @@ game, pipeline, domain, and canonical assistance prompt. The former interim noti
 delivery step and has been deleted rather than retained as a runtime mode or parallel site.
 
 The content pages use HTML and CSS for their full experience. Small local scripts progressively
-enhance the canonical prompt with copy-button behavior and the shared static scene on Lander and 404
-with the same nonessential game. The prompt, static Lander scene, and all error content remain
-useful when scripts are absent. The visual system includes local SVG logo assets. There are no
-remote fonts, scripts, images, runtime APIs, analytics, cookies, accounts, forms, or backend.
+enhance the onboarding chooser with tabs and icon-copy behavior and the shared static scene on
+Lander and 404 with the same nonessential game. Both setup paths, the static Lander scene, and all
+error content remain useful when scripts are absent. The visual system includes local SVG logo
+assets. There are no remote fonts, scripts, images, runtime APIs, analytics, cookies, accounts,
+forms, or backend.
 
 GitHub Actions builds and checks the same artifact in pull requests and on `main`. A dedicated Pages
 workflow uploads that artifact and deploys it through the protected `github-pages` environment.
@@ -38,7 +38,7 @@ GitHub Pages serves `agentworks.build` over HTTPS; `www.agentworks.build` redire
 The completed home page has this information order:
 
 1. the selected AGW rocket as a prominent hero with a compact product identity;
-2. the agent-addressed bootstrap as the dominant action;
+2. the two-path onboarding chooser, with the agent-addressed bootstrap selected by default;
 3. one direct link each to GitHub, PyPI, deeper rationale, and security.
 
 The retired interim notice is absent. Home renders the real canonical bootstrap, not an empty
@@ -46,9 +46,10 @@ region, disabled control, speculative command, wait-list form, countdown, or par
 panel.
 
 The landing page does not render the longer problem statement or principles. Those passages render
-on the generated Manifesto page from their permanent repository source. GitHub and PyPI appear once
-in the shared header; Manifesto and Security appear once in the shared footer. The body does not
-repeat those destinations under different labels.
+on the generated Manifesto page from their permanent repository source. GitHub and PyPI appear in
+the shared header; Manifesto and Security appear once in the shared footer. The Manual panel may
+repeat GitHub once to make its repository-inspection step complete. The body does not repeat the
+other destinations under different labels.
 
 The home page gives the security posture one calm, visually secondary link labeled
 `We take security seriously.` That link opens a dedicated static security page rendered from the
@@ -135,10 +136,10 @@ concatenates them into an oversized output.
 
 The site has three content classes:
 
-- **Canonical shared content.** The build reads `packaging/agentworks/assistance.md` directly. The
-  built code element's decoded text, the canonical source, and the README's generated fenced block
-  must be byte-identical. The build fails closed on missing, duplicate, malformed, or drifted
-  sources. The website does not own or rewrite this text.
+- **Canonical shared content.** The build reads `packaging/agentworks/agent-onboarding-prompt.md`
+  directly. The built code element's decoded text, the canonical source, and the README's generated
+  fenced block must be byte-identical. The build fails closed on missing, duplicate, malformed, or
+  drifted sources. The website does not own or rewrite this text.
 - **Repository-derived product and security content.** The Manifesto and Security pages each render
   one complete permanent Markdown document through a closed, escaping transform: `docs/manifesto.md`
   and root `SECURITY.md`, respectively. Each source has exactly one `h1` and owns all of its page's
@@ -148,10 +149,13 @@ The site has three content classes:
   an absent or duplicate `h1`, unsupported Markdown, unsafe links or links outside the reviewed set,
   and reporting-channel violations fail the build. Links point to permanent repository docs, never
   to this SDD.
-- **Site-owned connective content.** The website owns only presentation-neutral labels and
-  instructions such as navigation, link introductions, the operator-approved security-link label,
-  "Copy", and copy-status feedback. It does not make claims about Agentworks behavior, guarantees,
-  principles, installation, security properties, or requirements.
+- **Site-owned connective content.** The website owns presentation-neutral labels and instructions
+  such as navigation, link introductions, the operator-approved security-link label, copy-status
+  feedback, and the bounded Manual path. That path may explain repository inspection, name the
+  supported package and minimum Python version already owned by permanent CLI documentation, show
+  `uv` and one alternative installer, and hand off to `agw guide`. It does not make broader claims
+  about Agentworks behavior, guarantees, principles, security properties, or environment-specific
+  requirements.
 
 The shell LLD pins the whole-document source, canonical assistance path, extraction contract, README
 fence semantics, and rendering contract. Website validation proves byte equality and rejects broad
@@ -167,7 +171,8 @@ The built pages provide:
 - semantic landmarks and one correctly nested heading outline;
 - real anchor and button elements with accessible names;
 - the complete bootstrap in a `pre`/`code` region, without image-baked or CSS-generated text, plus a
-  progressively enhanced copy control;
+  progressively enhanced in-region copy control;
+- a complete human-directed setup path that remains readable when JavaScript is unavailable;
 - useful link text that identifies GitHub, PyPI, rationale, and security destinations;
 - on complete long-form pages, one source-derived `h2`/`h3` contents navigation using ordinary
   fragment links, inline after the source `h1` by default and presented as a left rail only when the
@@ -213,13 +218,20 @@ surfaces with these invariants:
 - light and dark presentation only if both can be tested to the same bar. A single excellent theme
   is preferred to two partially verified ones.
 
-### D6. Copy is progressive enhancement
+### D6. Onboarding interaction is progressive enhancement
 
-The bootstrap text is selectable and readable before JavaScript runs. The copy button reads the code
+Before JavaScript runs, the `via Agent` and Manual paths are both visible as ordinary semantic
+sections, and the bootstrap text remains selectable. Enhancement presents the two paths as an
+accessible two-tab interface with `via Agent` selected by default, ordinary click and keyboard
+activation, arrow/Home/End navigation, managed selection state, and one visible panel. The tab
+labels, panel content, and reading order do not depend on CSS-generated text.
+
+The local copy button is positioned inside the bootstrap region and uses one inline decorative
+Material-style copy glyph with an explicit accessible name and hover title. It reads the code
 element's `textContent`, invokes the Clipboard API only from the user's activation, and reports
 success or failure in an `aria-live` status region without moving focus. If the API is unavailable,
-the button is absent or explains that manual selection remains available. No clipboard content is
-read.
+the button remains absent and manual selection remains available. No clipboard content is read, and
+no remote icon asset or library is introduced.
 
 ### D7. One continuous deployment expedition renders on Lander and 404
 
@@ -559,7 +571,7 @@ second authored prompt.
 
 ```text
 README.md identity selectors ------------------+--> home page
-packaging/agentworks/assistance.md canonical ---+
+packaging/agentworks/agent-onboarding-prompt.md canonical ---+
 
 docs/manifesto.md complete document --> Manifesto page
 SECURITY.md complete document ------------> security page
@@ -585,8 +597,8 @@ fixed here:
   CSS/JavaScript; builder; tests; and permanent operator/developer runbook.
 - `.github/workflows/`: Pages build/deploy workflow and the existing CI integration.
 - `.gitignore`: generated site artifact exclusion.
-- repository README and `packaging/agentworks/assistance.md`: required inputs, not website-owned
-  copies.
+- repository README and `packaging/agentworks/agent-onboarding-prompt.md`: required inputs, not
+  website-owned copies.
 - `docs/manifesto.md`: complete Manifesto source, with no fallback to the retired path.
 - `SECURITY.md`: complete Security page and private vulnerability-reporting authority.
 - this feature directory: temporary design, plan, research, and acceptance evidence only.

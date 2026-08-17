@@ -582,23 +582,25 @@ new run records the refined source.
 ## Shared shell acceptance
 
 - [x] Home shows the AGW rocket at the accepted historical-baseline size, repository-sourced
-      identity, and onboarding availability. It has no small header mark. Home, Manifesto, Security,
-      Lander, and 404 each show one GitHub and one PyPI icon-and-text link in the header and exactly
-      three footer destinations: Manifesto, Security, then the icon-only Lander link. No destination
-      is duplicated in the body.
+      identity, and two-path onboarding chooser. It has no small header mark. Home, Manifesto,
+      Security, Lander, and 404 each show one GitHub and one PyPI icon-and-text link in the header
+      and exactly three footer destinations: Manifesto, Security, then the icon-only Lander link.
+      Only Home's Manual onboarding path repeats the repository destination in the body.
 - [ ] In Chrome and Edge before merge, verify at 320 CSS pixels, 400 percent zoom, touch landscape,
       and wide desktop that Home, Manifesto, Security, Lander, and 404 have no page overflow,
       clipped text or navigation, overlap, or fixed-height content loss. Record browser versions,
       viewport, date, and result when available, or record the explicit evidence limitation.
 - [ ] After launch, repeat that complete shared-shell matrix in Firefox and WebKit and record the
       browser versions, viewport, date, and result.
-- [x] With JavaScript disabled, Home, Manifesto, and Security retain all content and links, Lander
-      retains its heading and named scene, and 404 retains its message, named scene, and breadcrumb
-      route-home action. No surface depends on terminal familiarity.
+- [x] With JavaScript disabled, Home exposes both `via Agent` and Manual onboarding content,
+      Manifesto and Security retain all content and links, Lander retains its heading and named
+      scene, and 404 retains its message, named scene, and breadcrumb route-home action. No surface
+      depends on terminal familiarity.
 - [ ] Keyboard-only traversal reaches each visible skip link, breadcrumb home crumb, GitHub, PyPI,
-      Home copy button, all three footer links, and both Lander/404 start controls in source order
-      with a visible focus outline. Copy success or failure does not move focus. The footer rocket
-      target is at least 24 by 24 CSS pixels and is not clipped.
+      both Home tabs, the icon-only copy button, all three footer links, and both Lander/404 start
+      controls in source order with a visible focus outline. Arrow, Home, and End keys change tabs;
+      copy success or failure does not move focus. The copy and footer rocket targets are not
+      clipped.
 - [ ] A screen reader reports each page title, header, main, footer, one `h1`, nested section
       headings, breadcrumb current state, named navigation, visible CTA labels without decorative
       icon noise, sourced links, copy status, and 404 status/focus behavior. Initial game controls
@@ -608,4 +610,5 @@ new run records the refined source.
       the active scene and tap, hold, and drag behavior inside it.
 - [ ] In a clean context, a visitor identifies what Agentworks is, sees and can manually select the
       canonical bootstrap, and can copy it when clipboard writing is available. Confirm the copied
-      bytes match `packaging/agentworks/assistance.md`; record timing and any intervention.
+      bytes match `packaging/agentworks/agent-onboarding-prompt.md`; record timing and any
+      intervention.

@@ -368,16 +368,15 @@ class GeneratedDocumentTests(RepositoryFixture):
                 skip_links = [tag for tag in document.tags("a") if tag.get("class") == "skip-link"]
                 self.assertEqual([tag.get("href") for tag in skip_links], ["#main-content"])
 
-    def test_home_onboarding_is_the_exact_canonical_thin_bootstrap(self) -> None:
+    def test_home_onboarding_preserves_both_progressively_enhanced_paths(self) -> None:
         document = self.documents["home"]
-        self.assertEqual(document.headings, ["Agentworks", "Agentworks CLI bootstrap"])
         self.assertNotIn("problem", document.ids)
         self.assertNotIn("principles", document.ids)
         self.assertFalse(document.tags("article"))
         self.assertEqual(document.text_by_id["onboarding-prompt"], ONBOARDING_PROMPT)
         self.assertEqual(
             document.text_by_id["onboarding-prompt"].encode(),
-            (self.root / site_builder.ASSISTANCE_SOURCE).read_bytes(),
+            (self.root / site_builder.AGENT_ONBOARDING_PROMPT_SOURCE).read_bytes(),
         )
         onboarding = [
             attributes
@@ -395,24 +394,82 @@ class GeneratedDocumentTests(RepositoryFixture):
             and any(parent == "section" and attrs.get("id") == "onboarding" for parent, attrs in ancestors)
         ]
         self.assertEqual(len(headings), 1)
+        tab_lists = [tag for tag in document.tags("div") if tag.get("id") == "onboarding-tab-list"]
+        self.assertEqual(len(tab_lists), 1)
+        self.assertEqual(
+            {key: value for key, value in tab_lists[0].items() if key != "aria-label"},
+            {"id": "onboarding-tab-list", "class": "onboarding-tabs", "hidden": None},
+        )
+        self.assertTrue(str(tab_lists[0].get("aria-label") or "").strip())
+        tabs = [tag for tag in document.tags("button") if tag.get("data-panel")]
+        self.assertEqual(
+            [(tab.get("id"), tab.get("type"), tab.get("data-panel")) for tab in tabs],
+            [
+                ("via-agent-tab", "button", "via-agent-panel"),
+                ("manual-tab", "button", "manual-panel"),
+            ],
+        )
+        panels = [
+            attributes
+            for tag, attributes, _ in document.elements
+            if tag == "section" and attributes.get("class") == "onboarding-panel"
+        ]
+        self.assertEqual(
+            [(panel.get("id"), panel.get("aria-labelledby"), panel.get("hidden")) for panel in panels],
+            [
+                ("via-agent-panel", "via-agent-heading", None),
+                ("manual-panel", "manual-heading", None),
+            ],
+        )
         prompts = [tag for tag in document.tags("pre") if tag.get("class") == "onboarding-prompt"]
         self.assertEqual(prompts, [{"class": "onboarding-prompt"}])
         buttons = [tag for tag in document.tags("button") if tag.get("id") == "copy-onboarding-prompt"]
         self.assertEqual(
             buttons,
-            [{"id": "copy-onboarding-prompt", "type": "button", "hidden": None}],
+            [
+                {
+                    "id": "copy-onboarding-prompt",
+                    "class": "copy-prompt-button",
+                    "type": "button",
+                    "aria-label": buttons[0]["aria-label"],
+                    "title": buttons[0]["aria-label"],
+                    "hidden": None,
+                }
+            ],
         )
+        self.assertTrue(buttons[0]["aria-label"].strip())
+        copy_icons = [
+            attributes
+            for tag, attributes, ancestors in document.elements
+            if tag == "svg"
+            and any(parent == "button" and attrs.get("id") == "copy-onboarding-prompt" for parent, attrs in ancestors)
+        ]
+        self.assertEqual(copy_icons, [{"aria-hidden": "true", "focusable": "false", "viewbox": "0 0 24 24"}])
         statuses = [tag for tag in document.tags("p") if tag.get("id") == "copy-status"]
         self.assertEqual(
             statuses,
-            [{"id": "copy-status", "role": "status", "aria-live": "polite", "aria-atomic": "true"}],
+            [
+                {
+                    "id": "copy-status",
+                    "class": "copy-status",
+                    "role": "status",
+                    "aria-live": "polite",
+                    "aria-atomic": "true",
+                }
+            ],
+        )
+        old_school_commands = [tag for tag in document.tags("pre") if tag.get("class") == "onboarding-commands"]
+        self.assertEqual(old_school_commands, [{"class": "onboarding-commands"}, {"class": "onboarding-commands"}])
+        self.assertEqual(
+            [tag.get("href") for tag in document.tags("a")].count(site_builder.REPOSITORY_URL),
+            2,
         )
         hero = [image for image in document.tags("img") if image.get("class") == "hero-mark"]
         self.assertEqual(len(hero), 1)
         self.assertEqual(hero[0].get("src"), "/assets/agw-rocket.svg")
         self.assertEqual(hero[0].get("alt"), "AGW rocket mark")
         scripts = document.tags("script")
-        self.assertEqual(scripts, [{"type": "module", "src": "/static/onboarding-copy.js"}])
+        self.assertEqual(scripts, [{"type": "module", "src": "/static/onboarding.js"}])
 
     def test_shared_header_footer_breadcrumb_icons_and_logo_exception_are_exact(
         self,
@@ -435,7 +492,8 @@ class GeneratedDocumentTests(RepositoryFixture):
                     "/security/",
                     "/lander/",
                 ):
-                    self.assertEqual(hrefs.count(destination), 1)
+                    expected_count = 2 if name == "home" and destination == site_builder.REPOSITORY_URL else 1
+                    self.assertEqual(hrefs.count(destination), expected_count)
                 currents = [tag for tag in document.tags("span") if tag.get("aria-current") == "page"]
                 self.assertEqual(len(currents), 1)
                 self.assertIn(
@@ -534,7 +592,7 @@ class GeneratedDocumentTests(RepositoryFixture):
             self.assertEqual(len(document.tags("script")), 1)
         self.assertEqual(
             self.documents["home"].tags("script"),
-            [{"type": "module", "src": "/static/onboarding-copy.js"}],
+            [{"type": "module", "src": "/static/onboarding.js"}],
         )
         for name in ("manifesto", "security"):
             self.assertFalse(self.documents[name].tags("script"))

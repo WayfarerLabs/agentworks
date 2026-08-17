@@ -2,46 +2,49 @@
 
 <!-- cspell:ignore canonicalization keypath keypaths nonblank sdds TUI -->
 
-- Status: Continuous Lander and canonical assistance integration implemented; production acceptance
+- Status: Phase 4V onboarding choice implemented and independently reviewed; operator acceptance
   remains pending
 - Date: 2026-08-12
-- FRD: `frd.md`, specifically R7-R11, R13-R26
-- HLA: `hla.md`, specifically D1-D5, D7, D8, and D10
-- Source baseline: `4b280f88`
+- Last revised: 2026-08-17
+- FRD: `frd.md`, specifically R1-R26
+- HLA: `hla.md`, specifically D1-D10
+- Source baseline: `d83383d6`
 
 ## 1. Scope and release invariant
 
 The checked-in `website/` tree produces the complete static shell for Home, Manifesto, Security,
-Lander, and 404. Home projects the canonical thin assistance prompt and progressively enhances it
-with a local copy control. Manifesto and Security remain script-free. Lander and 404 remain useful
-without JavaScript and progressively enhance only their one shared game subtree. The retired
-availability notice and its temporary message input are absent.
+Lander, and 404. Home presents `via Agent` and Manual onboarding, projects the canonical thin
+assistance prompt in the default path, and progressively enhances both tabs and its local icon copy
+control. Manifesto and Security remain script-free. Lander and 404 remain useful without JavaScript
+and progressively enhance only their one shared game subtree. The retired availability notice and
+its temporary message input are absent.
 
 ## 2. Permanent files, routes, and output
 
-| Source                               | Responsibility                                                              |
-| ------------------------------------ | --------------------------------------------------------------------------- |
-| `website/templates/index.html`       | Compact identity and semantic canonical assistance container                |
-| `website/templates/manifesto.html`   | Presentation shell for the generated long-form argument                     |
-| `website/templates/security.html`    | Repository-sourced security depth and GitHub reporting route                |
-| `website/templates/lander.html`      | Dedicated semantic shell for the shared lunar deployment game               |
-| `website/templates/404.html`         | Useful error surface and progressively enhanced lander                      |
-| `website/templates/lander-game.html` | Sole template source for the reusable game subtree                          |
-| `website/assets/agw-favicon.svg`     | Flame-free browser icon projection of the selected mark                     |
-| `website/assets/agw-rocket.svg`      | Selected self-contained brand mark                                          |
-| `website/static/site.css`            | Shared tokens, shell, document presentation, focus, and reflow              |
-| `website/static/lander.css`          | Shared Lander/404 scene and mission presentation                            |
-| `website/static/lander-model.js`     | Pure deterministic lander model                                             |
-| `website/static/lander-collision.js` | Pure exact continuous-contact arithmetic                                    |
-| `website/static/lander-world.js`     | Pure seeded terrain, site, sky, and camera projection                       |
-| `website/static/lander-game.js`      | Page-agnostic game controller                                               |
-| `website/static/onboarding-copy.js`  | Accessible progressive copy enhancement for the canonical prompt            |
-| `website/build.py`                   | Closed inputs, rendering, validation, manifest, and atomic installation     |
-| `website/site_content.py`            | Complete Markdown projection and safe HTML rendering                        |
-| `website/site_validation.py`         | Template, shell, CSS, and local-reference validation                        |
-| `website/site_asset_validation.py`   | Exact canonical and favicon head-link contracts                             |
-| `website/tests/`                     | Source, template, generated-document, builder, workflow, and game contracts |
-| `website/README.md`                  | Permanent build, content-ownership, publishing, and recovery runbook        |
+| Source                                  | Responsibility                                                              |
+| --------------------------------------- | --------------------------------------------------------------------------- |
+| `website/templates/index.html`          | Compact identity and semantic canonical assistance container                |
+| `website/templates/manifesto.html`      | Presentation shell for the generated long-form argument                     |
+| `website/templates/security.html`       | Repository-sourced security depth and GitHub reporting route                |
+| `website/templates/lander.html`         | Dedicated semantic shell for the shared lunar deployment game               |
+| `website/templates/404.html`            | Useful error surface and progressively enhanced lander                      |
+| `website/templates/lander-game.html`    | Sole template source for the reusable game subtree                          |
+| `website/assets/agw-favicon.svg`        | Flame-free browser icon projection of the selected mark                     |
+| `website/assets/agw-rocket.svg`         | Selected self-contained brand mark                                          |
+| `website/static/site.css`               | Shared tokens, shell, document presentation, focus, and reflow              |
+| `website/static/lander.css`             | Shared Lander/404 scene and mission presentation                            |
+| `website/static/lander-model.js`        | Pure deterministic lander model                                             |
+| `website/static/lander-collision.js`    | Pure exact continuous-contact arithmetic                                    |
+| `website/static/lander-world.js`        | Pure seeded terrain, site, sky, and camera projection                       |
+| `website/static/lander-game.js`         | Page-agnostic game controller                                               |
+| `website/static/onboarding.js`          | Accessible onboarding tabs and progressive prompt-copy enhancement          |
+| `website/build.py`                      | Closed inputs, rendering, validation, manifest, and atomic installation     |
+| `website/site_content.py`               | Complete Markdown projection and safe HTML rendering                        |
+| `website/site_validation.py`            | Template, shell, CSS, and local-reference validation                        |
+| `website/site_onboarding_validation.py` | Focused structural validation for the onboarding chooser                    |
+| `website/site_asset_validation.py`      | Exact canonical and favicon head-link contracts                             |
+| `website/tests/`                        | Source, template, generated-document, builder, workflow, and game contracts |
+| `website/README.md`                     | Permanent build, content-ownership, publishing, and recovery runbook        |
 
 The complete generated artifact is exactly:
 
@@ -57,7 +60,7 @@ static/lander-game.js
 static/lander-model.js
 static/lander-collision.js
 static/lander-world.js
-static/onboarding-copy.js
+static/onboarding.js
 static/lander.css
 static/site.css
 ```
@@ -187,16 +190,36 @@ absolute URL fails. Tests prove all three mappings and prove no source-relative 
 ## 6. Other repository content contracts
 
 The builder reads exactly four permanent content inputs: `README.md`,
-`packaging/agentworks/assistance.md`, `docs/manifesto.md`, and `SECURITY.md`. README owns the
-concise Home identity and an exact generated projection of the assistance source. The assistance
-source owns the prompt, and the other two inputs each own one complete long-form page. Only Home
-retains a heading-keypath plus exact-block selection for identity; long-form content has no
-duplicated prose contract in Python or templates.
+`packaging/agentworks/agent-onboarding-prompt.md`, `docs/manifesto.md`, and `SECURITY.md`. README
+owns the concise Home identity and an exact generated projection of the assistance source. The
+assistance source owns the prompt, and the other two inputs each own one complete long-form page.
+Only Home retains a heading-keypath plus exact-block selection for identity; long-form content has
+no duplicated prose contract in Python or templates.
 
 Templates may not move content tokens outside their reviewed metadata or sourced containers. All
 templates use a closed token vocabulary and reject unknown, missing, duplicated, or brace-like
 tokens. The Security output retains the GitHub-only reporting invariant and rejects address-shaped
 reporting paths.
+
+### 6.1 Home onboarding chooser
+
+Home contains one onboarding section with a two-option chooser. Its source order is `via Agent`,
+then Manual. `via Agent` owns the sole `{{ONBOARDING_PROMPT}}` placement and remains the default
+enhanced panel. Manual is hardcoded site content containing one repository link, one
+`uv tool install agentworks-cli` command, one alternative `pipx install agentworks-cli` command, and
+one `agw guide` handoff. It does not project or duplicate guide topic bodies.
+
+Without JavaScript, the document shows both labeled panels and keeps the tab controls hidden. The
+local `static/onboarding.js` module reveals the two-button tablist, assigns the tab and tabpanel
+ARIA relationships, selects `via Agent`, and hides only the inactive panel. Click, Left/Right
+arrows, Home, and End use native button focus and the WAI-ARIA tab interaction shape; Enter and
+Space retain their native button activation.
+
+The `via Agent` prompt sits in a positioned shell containing one `pre`/`code` projection and one
+initially hidden copy button. The button contains only an inline decorative 24-unit SVG path, has a
+nonempty accessible name and matching title, and occupies at least 40 by 40 CSS pixels. It is
+revealed only when clipboard writing is available. Copy always writes the projected code element's
+exact `textContent`, reports through one polite atomic status, and never moves focus.
 
 ## 7. Builder and replacement safety
 
@@ -225,10 +248,11 @@ canary for off-screen absolute positioning. No home-grown general CSS parser is 
 
 `website/build.py` remains the executable CLI and artifact orchestrator. Content projection and
 Markdown rendering move to `website/site_content.py`; template, CSS, shell, and local-reference
-validation move to `website/site_validation.py`; exact canonical and favicon head-link validation
-lives in the focused `website/site_asset_validation.py`. Each production module and each test module
-remains below 1,000 lines. The split preserves one public build command and introduces no package or
-runtime dependency.
+validation move to `website/site_validation.py`; onboarding structure validation lives in
+`website/site_onboarding_validation.py`; exact canonical and favicon head-link validation lives in
+the focused `website/site_asset_validation.py`. Each production module and each test module remains
+below 1,000 lines. The split preserves one public build command and introduces no package or runtime
+dependency.
 
 Tests own a literal expected fourteen-file manifest independent of production constants. They scan
 every static JavaScript module import, resolve same-origin relative imports against its emitted

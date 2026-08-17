@@ -9,8 +9,8 @@ workstation or Agentworks permission.
 The canonical prompt is the generated copyable block at the start of the repository
 [Getting Started](../README.md#getting-started) section. Any capable external assistant can use it;
 Claude Code and Codex are not prerequisites. The authored source is
-[`packaging/agentworks/assistance.md`](../packaging/agentworks/assistance.md), and package metadata
-lives beside it. Generated package files should not be edited directly.
+[`packaging/agentworks/agent-onboarding-prompt.md`](../packaging/agentworks/agent-onboarding-prompt.md),
+and package metadata lives beside it. Generated package files should not be edited directly.
 
 ## Native installation
 

@@ -25,7 +25,9 @@ EMAIL_ADDRESS_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-ASSISTANCE_SOURCE: Final = Path("packaging/agentworks/assistance.md")
+AGENT_ONBOARDING_PROMPT_SOURCE: Final = Path(
+    "packaging/agentworks/agent-onboarding-prompt.md"
+)
 ASSISTANCE_README_BEGIN: Final = b"<!-- BEGIN GENERATED AGENTWORKS ASSISTANCE -->"
 ASSISTANCE_README_END: Final = b"<!-- END GENERATED AGENTWORKS ASSISTANCE -->"
 ASSISTANCE_FENCE_PATTERN = re.compile(br"(`{3,})markdown\n\Z")
@@ -174,7 +176,7 @@ def _read_exact_utf8(path: Path) -> bytes:
 
 def extract_assistance_prompt(repo_root: Path) -> str:
     """Return the canonical bootstrap prompt after proving README byte parity."""
-    source_path = repo_root / ASSISTANCE_SOURCE
+    source_path = repo_root / AGENT_ONBOARDING_PROMPT_SOURCE
     source = _read_exact_utf8(source_path)
     if not source or not source.endswith(b"\n") or b"\r" in source or b"\x00" in source:
         raise ValueError(f"{source_path}: assistance source must be nonempty NUL-free LF-terminated UTF-8")
