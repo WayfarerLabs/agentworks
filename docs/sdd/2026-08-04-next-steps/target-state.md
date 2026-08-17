@@ -107,6 +107,17 @@ stands). The operator's words carry the bar: "I'd be embarrassed to ship this. I
 in 0.14. This should all end up dramatically simpler." The onboarding child owns the work, and
 0.14.0 does not ship without it.
 
+The operator supplied a worked example of the agent-hint species and directed it recorded, since the
+miss was large enough that everyone should know the intended shape (the wording may drift; the shape
+may not). For VM platforms, the onboarding journey's agent hint should run along the lines of:
+"Check out the available platforms and offer to guide the operator through a discovery and
+configuration process, first determining which platform(s) they want to use, and then walking
+through the configuration options to create actual sites." The operator expects roughly a dozen
+journey hints of this species across the guide, developed by the onboarding effort, not just this
+one. The saga lead's placement note, advisory: a hint of this shape describes a journey across kinds
+and so belongs to the onboarding topic's agent note rather than being sprinkled per kind, which is
+how the "only when genuinely necessary" clause and a dozen journeys coexist.
+
 **Ruling (operator, 2026-08-15, the guide-value rubric):** guide content earns its place only by
 conveying concepts or higher-level synthesis not available from a single CLI command. A guide block
 whose content is one command's output wearing guide clothes is removed, and the guide points at the
