@@ -575,7 +575,7 @@ removed both live projections and their degradation subsystem. The final shell g
 agent-only fences and bounded section includes. It also names `concept-core-model` as the consumer
 of selected canonical root-README sections and their repository-relative images.
 
-- [ ] Before implementation, have the saga lead record the operator's 2026-08-17 Markdown-shell
+- [x] Before implementation, have the saga lead record the operator's 2026-08-17 Markdown-shell
       ruling in the saga-owned target state. This child identifies the conflict but does not edit
       the saga ledger or target artifacts itself.
 - [ ] Implement deterministic concept-shell discovery from the installed first-party package tree.

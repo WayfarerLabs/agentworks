@@ -45,11 +45,6 @@ Fields:
 - **`manifests`** (optional): an importlib-resources package anchor whose `manifests/` subdirectory
   holds the plugin's bundled YAML resource manifests (the same envelope operators write; see
   `docs/guides/resources.md`). `None` when the plugin ships no manifests.
-- **`guide_topics`**: an inert tuple of already-materialized `TopicContribution` records consumed
-  only while building an `agw guide` catalog. It does not execute during plugin registration or
-  ordinary commands. File-backed first-party teaching stays behind a fixed guide-service mapping and
-  a package-local lazy adapter, so descriptor construction and ordinary plugin imports never read
-  guide content.
 - **`required_scopes`** and **`commands`**: reserved, inert placeholders (see below).
 
 The descriptor depends on nothing in the capability or registry machinery, so it is constructible in
@@ -64,56 +59,21 @@ keeps its own existing capability contract, model, and service-specific name, th
 existing vendor plugin. Do not introduce a provider-wide base class or reserve an unconsumed
 abstraction merely because a vendor bundle gains a second contribution.
 
-### Guide contribution boundaries
+### Guide content ownership
 
-A plugin may contribute a `plugin/<plugin>/<topic>` authored concept. It cannot claim core
-`concept-*` topics, resource or schema topics, or another plugin's namespace. The guide catalog
-isolates an invalid plugin topic while retaining valid core and plugin topics. An explicitly
-requested rejected topic reports its scoped issue and exits 1, while an unrelated valid topic
-remains a clean response. Names-only discovery returns retained authored topics without issue prose.
+The guide has no plugin registration API. First-party packages inside `agentworks` may own a concept
+by placing one Markdown shell directly in a package-local `guide-content/` directory. The guide
+discovers those files only when requested; plugin registration and ordinary commands do not read
+them. A shell named `apt.md` becomes the global topic `concept-apt`, so filenames must be unique
+across the installed first-party package tree. Separately installed plugins are outside this
+discovery boundary.
 
-Keep authored Markdown beside the owning package under `guide-content/`. A package-local adapter may
-load it only during a guide request and returns inert contributions. Do not turn `guide_topics` into
-a loader callback or add a generic plugin discovery mechanism for first-party package content.
-
-Every renderer-owned level-2 heading in raw CLI Markdown carries the exact literal `⟦AGW framework⟧`
-marker. After bounded input validation, HTML entity decoding, and Unicode normalization, the
-contribution contract rejects either delimiter, whether literal or HTML-entity encoded, in authored
-topic titles, summaries, and Markdown. An authored contribution therefore cannot emit that exact
-literal marker in raw CLI Markdown. Other authored Markdown and HTML, including ordinary headings,
-remain authored content and are not relabeled.
-
-The marker is a source-provenance convention, not an anti-spoof guarantee for arbitrary downstream
-Markdown, HTML, or CSS renderers, images, or styling. It grants no authority or trust to the content
-that follows.
-
-Guide contributions are data, not callbacks. Expression markers in authored titles, summaries, and
-Markdown are accepted only inside a closed, same-line literal delimited by one unescaped backtick on
-each side. The backticks cannot touch another backtick. Multi-backtick spans, fenced blocks,
-multiline spans, escaped backticks, unmatched spans, headings, HTML, and prose do not exempt a
-marker. Guide rendering never evaluates the accepted literal. Terminal control bytes are removed
-from rendered output. Action records accept three exact token forms: a literal that starts with an
-ASCII letter or digit and then contains only ASCII letters, digits, `.`, `_`, `:`, `/`, or `-`; a
-flag that starts with `-` or `--`, then a lowercase ASCII letter or digit, and continues with
-lowercase ASCII letters, digits, or `-`; or an exact registered input placeholder such as
-`$SECRET_NAME`. Valid examples include `agw`, `vm-template/demo`, `secret_name`, `v1.2`, `-v`, and
-`--non-interactive`. Invalid examples include the absolute path `/tmp/file`, the tilde path
-`~/file`, `--flag=value`, `*.yaml`, and `#comment`. Each title is limited to 256 UTF-8 bytes, each
-summary to 2 KiB, each authored block to 64 KiB, and one topic to 64 blocks, 64 related links, and
-256 KiB of authored markdown. Every related link must be a canonical topic slug no larger than 317
-UTF-8 bytes. Keep authored files under the owning package's `guide-content/` directory so the wheel
-package-data assertion exercises them.
-
-An `ActionList` contains inert `GuideAction` records, never an executor. Each action provides at
-most 32 inputs and exactly one of a literal-token command or bounded platform-neutral manual steps.
-Command and verification sequences contain at most 64 tokens, each at most 1 KiB. Input names are at
-most 64 bytes, input descriptions are at most 2 KiB, and preconditions, expected states, refusal
-alternatives, and manual instructions are each at most 8 KiB. One action list contains at most 32
-actions and 128 KiB of action data. Action IDs are unique across all action lists in a topic, and
-action data also counts toward the topic's 256 KiB bound. Rendered actions state their inputs,
-consent boundary, expected result, optional verification, and useful refusal alternative without
-executing any operation. The same expression-marker scanner covers every rendered action prose field
-and input description. Command and verification tokens remain under the closed literal grammar.
+Each shell has restricted frontmatter containing only a single-line `description`, followed by one
+unfenced level-1 heading and ordinary reviewed Markdown. Agent-only fences and bounded exact-section
+includes are the only directives. Shells do not call Python or inspect configuration, resources,
+secrets, provider state, or the workstation. Signpost command-owned facts instead of copying them
+into teaching. The guide contract and structural tests own the exact grammar and package-data
+boundary.
 
 ## Shipping a plugin
 
