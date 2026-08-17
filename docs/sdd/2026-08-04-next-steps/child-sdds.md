@@ -223,12 +223,24 @@ item shrinks to a verification sweep.
       loop restored as real short-write protection and struck from the finding that had
       misclassified it. The onboarding effort's guide-contract LLD supersession landed as its own PR
       #551 through that artifact's owner. The website batch unblocked when PR #486 merged
-- [ ] Wave 2 in progress: rules seventeen to ten (PR #521), process-tree fact refresh (PR #535),
-      testing-trio consolidation (PR #538), artifact ownership default (PR #540, one-clause
-      follow-up owed per its post-merge review, absorbed and closed by PR #549's ownership model)
-- [ ] Wave 2: process and rule subtraction under a strict net-deletion constraint. Runs in parallel
-      with wave 1 on its own session (operator, 2026-08-13), file-disjoint from it; the reassessment
-      below waits for both waves
+- [x] Wave 2 complete (PR #570, merged 2026-08-16, closing the skills remainder after
+      #521/#535/#538/#540, with #540's follow-up absorbed by #549): the transcribed review protocol
+      collapsed to a pointer with the drifted blocker clause resolved on the qualified side, six
+      journey passages and seven defensive negations trimmed, principle 1 compacted with the
+      consistency review restoring "complexity is what makes software useful," the Not-"program"
+      exclusion kept in its permanent home, and R3.2 satisfied at -1,442 always-on bytes against
+      baseline. With #521/#535/#538/#549 this closes R3.1 through R3.3
+- [x] Sweep inventory merged with known defects (PR #573, 2026-08-16): the map's judgment layer is
+      strong (the operator's keep/delete rubric in the HLA; 55 convert recipes verified by execution
+      with eleven corrected; the nine-PR topology measured), but it merged incomplete, and a
+      corrective PR gates the first execution PR. The corrective's charter, from the tester's
+      post-merge audit: row the omitted `test_claude_code_orchestrated.py` and
+      `test_codex_orchestrated.py` (ten authored launch-note assertions between them); reconcile the
+      map, plan, and PR-body counts to one source (inventory says 1,146 executable plus 25 deferred
+      and nine PRs; the plan says 1,160 and six); close the three convert rows still permitting "or
+      delete"; tag the three untagged unverified rows; correct the 31-versus-30 migration-phrase
+      count; fix the D-006 row (as printed it deletes the guard it says to keep); and carry the
+      22-site screening as a gating condition on the deferred conversions
 - [ ] Reassessment delivered; surviving findings proposed individually or dropped
 - [ ] Locked
 
