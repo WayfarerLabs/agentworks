@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 
 from agentworks.db import SessionRow, SessionStatus
+from agentworks.errors import StateError
 from agentworks.sessions.manager import (
     batch_check_status,
     check_session_status,
@@ -393,5 +394,5 @@ def test_ensure_pid_raises_on_unresolvable() -> None:
         def get_session(self, name):
             return session
 
-    with pytest.raises(Exception, match="alive but PID/boot ID recovery failed"):
+    with pytest.raises(StateError):
         _ensure_pid(session, target=_FailTarget(), db=_FakeDb())

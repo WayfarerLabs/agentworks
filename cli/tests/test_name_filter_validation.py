@@ -196,10 +196,14 @@ def test_console_list_rejects_unknown_vm(db: Database) -> None:
 
 def test_console_list_rejects_unknown_workspace_and_agent(db: Database) -> None:
     _seed(db)
-    with pytest.raises(NotFoundError, match="unknown workspace 'nope'"):
+    with pytest.raises(NotFoundError) as exc:
         list_consoles(db, workspace_name="nope")
-    with pytest.raises(NotFoundError, match="unknown agent 'nope'"):
+    assert exc.value.entity_kind == "workspace"
+    assert exc.value.entity_name == "nope"
+    with pytest.raises(NotFoundError) as exc:
         list_consoles(db, agent_name="nope")
+    assert exc.value.entity_kind == "agent"
+    assert exc.value.entity_name == "nope"
 
 
 def test_list_commands_valid_filter_empty_result_succeeds(
