@@ -44,11 +44,12 @@ below are subagent work; the role itself is not.
   traversal (an entry's base branch is another open PR's head branch); the GraphQL
   `PullRequestStack` type is only an optimization when non-null, because branch-targeted chains do
   not materialize it.
-- Re-review on the draft-to-ready transition after an effort absorbs findings (the delivery
-  reference's **Handoff contract**); poll ready PRs' heads against the last head you reviewed as the
-  missed-edge fallback. A review verdict stands until the operator resolves it: a directed fix
-  round, an accepted pushback, or an explicit accepted risk. Track open verdicts in your reports;
-  recording them in the ledger is mutation and waits for direction.
+- Re-review on the draft-to-ready transition after an effort absorbs findings
+  ([Handoff contract](../agentic-dev-process/references/delivery.md#handoff-contract)); poll ready
+  PRs' heads against the last head you reviewed as the missed-edge fallback. A review verdict stands
+  until the operator resolves it: a directed fix round, an accepted pushback, or an explicit
+  accepted risk. Track open verdicts in your reports; recording them in the ledger is mutation and
+  waits for direction.
 - The lead reviews; the operator merges. Never merge a child PR. When GitHub refuses a formal review
   verdict (a PR owned by the same account), post the review as a comment with the verdict stated in
   the first line.
@@ -87,9 +88,10 @@ explicit verified-sound section recording what held under attack. Kill findings 
 before posting, and weigh the rest by **Finding materiality** in `development-principles`. Every
 surviving finding carries file:line and a concrete failure scenario. Address the review to the
 operator: name which findings you believe must block merge and which are optional, as a
-recommendation, never as an instruction to the effort. The effort follows the delivery reference's
-**Published feedback** contract; only authenticated operator direction turns a finding into work.
-Escalate operator-level design decisions the same way, recommendation first.
+recommendation, never as an instruction to the effort. The effort follows
+[Published feedback](../agentic-dev-process/references/delivery.md#published-feedback); only
+authenticated operator direction turns a finding into work. Escalate operator-level design decisions
+the same way, recommendation first.
 
 ## After each round
 
@@ -98,5 +100,5 @@ findings-first, with the confidence the evidence earns and whatever the other in
 to hear (cross-effort implications are the lead's to route, not the reviewers'). Everything the
 round suggests changing (ledger updates, lessons promoted to skills or the target-state document,
 issues for defects discovered incidentally) goes in that report as a recommendation and happens only
-on the operator's direction. A lead-owned PR follows the delivery reference's **Published feedback**
-contract too.
+on the operator's direction. A lead-owned PR follows
+[Published feedback](../agentic-dev-process/references/delivery.md#published-feedback) too.

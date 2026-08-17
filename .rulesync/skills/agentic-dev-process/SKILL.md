@@ -60,6 +60,7 @@ direction before a new mutation prompted by it.
 
 After a burst of process changes, before locking a saga-level effort, or when requested, run a
 fresh-context consistency review of rules, skills, and roles together. Use the project reviewer in
-its consistency-review mode. It checks contradictions, silent overrides, composition failures, stale
-references, gaps, and claims the tree disproves. Triage the resulting findings through the same
-ownership, materiality, and authority boundaries.
+its consistency-review mode at the strongest available capability and appropriate reasoning depth.
+It checks contradictions, silent overrides, composition failures, stale references, gaps, and claims
+the tree disproves. Triage the resulting findings through the same ownership, materiality, and
+authority boundaries.

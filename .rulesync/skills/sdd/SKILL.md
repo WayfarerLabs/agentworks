@@ -388,13 +388,14 @@ Work driven via SDD should be done in one or more feature branches. The general 
 
 ## Choosing the PR vehicle
 
-An SDD effort picks its delivery vehicle deliberately (the delivery reference's **Choose the
-vehicle** contract defines the layering): a **single PR** remains the default for small and medium
-efforts; a **PR stack** fits multi-phase efforts whose phases are honest working increments, and the
-phased artifact review can be the stack's base entry (FRD/HLA/plan at the bottom, implementation
-entries stacked on top, one visible sequence instead of two review streams); **coordinated
-non-stacked PRs** fit genuinely independent slices, and are the only form available across
-repositories in a poly-repo environment. Record the choice in the plan.
+An SDD effort picks its delivery vehicle deliberately
+([Choose the vehicle](../agentic-dev-process/references/delivery.md#choose-the-vehicle) defines the
+layering): a **single PR** remains the default for small and medium efforts; a **PR stack** fits
+multi-phase efforts whose phases are honest working increments, and the phased artifact review can
+be the stack's base entry (FRD/HLA/plan at the bottom, implementation entries stacked on top, one
+visible sequence instead of two review streams); **coordinated non-stacked PRs** fit genuinely
+independent slices, and are the only form available across repositories in a poly-repo environment.
+Record the choice in the plan.
 
 ## PR Review
 

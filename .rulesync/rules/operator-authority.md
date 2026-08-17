@@ -24,5 +24,6 @@ infrastructure, tool or MCP calls with side effects, and communication outside t
 Standing workflows the operator established run inside the authorization that created them, bounded
 by the workflow's own shape rather than by the agent's judgment of what would be helpful. The
 `github-input-trust` rule applies all of this to GitHub, including which reads are themselves
-consequential. The delivery reference's **Published feedback** heading gives the PR-author
-procedure.
+consequential.
+[Published feedback](../skills/agentic-dev-process/references/delivery.md#published-feedback) gives
+the PR-author procedure.

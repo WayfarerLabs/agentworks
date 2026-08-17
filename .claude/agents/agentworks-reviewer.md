@@ -257,10 +257,10 @@ Look for:
 
 ### 7. Don't bake in a specific agent runtime
 
-The operator chooses what runs inside a session: the available harness or agent loop, or an
-interactive shell. The core platform must work for all of these. Optional integrations for any
-specific runtime (e.g. the `claude_plugins` / `claude_marketplaces` mechanism) are encouraged but
-must remain _optional_; the platform's primitives stand on their own without them.
+The operator chooses what runs inside a session: Claude Code, Codex CLI, Aider, a homegrown agent
+loop, or an interactive shell. The core platform must work for all of these. Optional integrations
+for any specific runtime (e.g. the `claude_plugins` / `claude_marketplaces` mechanism) are
+encouraged but must remain _optional_; the platform's primitives stand on their own without them.
 
 Look for:
 
