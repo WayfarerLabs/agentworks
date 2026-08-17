@@ -6,6 +6,7 @@ import pytest
 
 from agentworks.guide.catalog import discover_concept_shells
 from agentworks.guide.contract import GuideContentError
+from agentworks.guide.directives import bounded_include_path
 
 
 def _shell(root: Path, relative: str, *, description: str = "Fixture topic.", body: str = "# Fixture\n") -> Path:
@@ -40,6 +41,13 @@ def test_discovery_order_is_package_path_order(tmp_path: Path) -> None:
     _shell(tmp_path, "a/guide-content/second.md")
 
     assert discover_concept_shells(tmp_path).names() == ("concept-second", "concept-first")
+
+
+def test_include_path_preserves_only_bounded_raw_segments() -> None:
+    assert bounded_include_path("docs/source.md") == ("docs", "source.md")
+    for malformed in ("docs/./source.md", "docs//source.md"):
+        with pytest.raises(GuideContentError):
+            bounded_include_path(malformed)
 
 
 @pytest.mark.parametrize(

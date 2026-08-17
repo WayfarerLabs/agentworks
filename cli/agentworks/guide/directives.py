@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from pathlib import PurePosixPath
 
 from agentworks.guide.contract import GuideContentError
 
@@ -24,17 +23,16 @@ def directive_body(line: str) -> str | None:
 
 def bounded_include_path(value: str) -> tuple[str, ...]:
     """Validate and split one package-relative Markdown include path."""
-    path = PurePosixPath(value)
+    parts = tuple(value.split("/"))
     if (
         not value
         or value.startswith("/")
-        or value.startswith("./")
         or not value.endswith(".md")
         or "\\" in value
-        or any(part in {"", ".", ".."} for part in path.parts)
+        or any(part in {"", ".", ".."} for part in parts)
     ):
         raise GuideContentError(f"guide include path {value!r} is not a bounded package Markdown path")
-    return path.parts
+    return parts
 
 
 def parse_include_directive(body: str, source: str) -> tuple[str, str, int]:
