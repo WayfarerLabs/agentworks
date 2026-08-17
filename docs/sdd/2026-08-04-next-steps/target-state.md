@@ -100,7 +100,14 @@ ordinary Markdown are balanced agent-only fences, one bounded inert import of a 
 section from the installed first-party package tree, and the `resource-kinds` and `resource-list`
 live projections; there are no variables, loops, conditionals, or template engine. Typed guide
 blocks, actions, consent and evidence replay, the onboarding assessment, and manual contribution
-registration are removed. The consent posture survives the machinery: guide text instructs and never
+registration are removed. Three older sentences are superseded with it: the 2026-08-15 survey
+disposition's projector-parity clause served an assessment this ruling removes and is discharged
+(the projector shipped with PR #556 and dies with the shells cutover); the plugin-topic-namespacing
+sentence under the capability rulings no longer describes a shape wave 8 inherits, since plugins do
+not contribute shells in this format version and a plugin contribution API is out of scope; and the
+survey disposition's raw-aggregation principle stands with a two-item carve-out, the sanctioned
+`resource-kinds` and `resource-list` projections, which the operator accepts as the guide's only
+live composition. The consent posture survives the machinery: guide text instructs and never
 authorizes (the effort FRD's R5 restates it over the new surface), and environmental failures still
 fail soft with structural shell defects nonzero. This supersedes the typed-block and action-record
 retention in the 2026-08-05 teaching-surface rulings and the 2026-08-15 rubric's "action records"
