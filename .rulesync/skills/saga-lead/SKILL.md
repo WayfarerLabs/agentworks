@@ -58,20 +58,19 @@ below are subagent work; the role itself is not.
 This protocol layers on top of the effort's own process, never in place of it: the effort runs its
 own subagent-review cycles per `agentic-dev-process` section 5 (batched by judgment, at least one
 before first handoff), and a child-effort PR that arrives without any goes back to the effort rather
-than being reviewed harder here. That fact must be observable to be actionable: the effort states in
-its PR description that subagent-review cycles ran and were absorbed, and when the description is
-silent the lead asks via PR comment before invoking the send-back. (The lead's own seeding PRs have
-no effort behind them; a seed is the lead's direct change and gets the ordinary section 5 reviewer
-pass before the PR opens, not this protocol.) Scale the depth to the PR's size and blast radius; a
-subsystem lands the full protocol. For substantive PRs, launch parallel review passes as subagents,
-each in an isolated worktree at the PR head (per the delegation rules in `agentic-dev-process`,
-including explicit model tiers: reviewer at or above the effort's dev tier, top tier for the
-contract and security dimensions; pass 2 is the sanctioned fresh-eyes exception from
-`agentic-dev-process` section 7 and may run below that floor). Agent types follow what each pass
-does: pass 2 must read with no house priors, so it cannot be the `agentworks-reviewer` persona by
-definition, and pass 3 mutates code under test, so passes that run gates, probes, or mutations (2,
-3, and usually 4) launch as `general-purpose` subagents while the read-based conformance pass stays
-with `agentworks-reviewer`. That split is also why the worktree isolation above is load-bearing:
+than being reviewed harder here. The effort states in its PR description that subagent-review cycles
+ran and were absorbed, and when the description is silent the lead asks via PR comment before
+invoking the send-back. (The lead's own seeding PRs have no effort behind them; a seed is the lead's
+direct change and gets the ordinary section 5 reviewer pass before the PR opens, not this protocol.)
+Scale the depth to the PR's size and blast radius; a subsystem lands the full protocol. For
+substantive PRs, launch parallel review passes as subagents, each in an isolated worktree at the PR
+head (per the delegation rules in `agentic-dev-process`, including explicit model tiers: reviewer at
+or above the effort's dev tier, top tier for the contract and security dimensions; pass 2 is the
+sanctioned fresh-eyes exception from `agentic-dev-process` section 7 and may run below that floor).
+Agent types follow what each pass does: pass 2 must read with no house priors, so it cannot be the
+`agentworks-reviewer` persona by definition, and pass 3 mutates code under test, so passes that run
+gates, probes, or mutations (2, 3, and usually 4) launch as `general-purpose` subagents while the
+read-based conformance pass stays with `agentworks-reviewer`. The four passes:
 
 1. **Ruling conformance** (top tier): the one pass only the saga lead can charter, verifying the
    work against the recorded contracts and rulings, clause by clause, with file:line evidence, plus

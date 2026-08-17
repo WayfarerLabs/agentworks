@@ -73,7 +73,9 @@ A PR validation run is a fixed sequence, not a menu to pick from; scale its dept
 6. **An operator-gated disposition.** Decide the disposition before touching anything further (see
    "Disposition discipline" below).
 7. **Comment on the PR, in every case.** A clean run gets a comment saying so; a blocked run gets
-   every finding; there is no outcome that ends in silence.
+   every finding; there is no outcome that ends in silence. Say in that comment whether you are
+   willing to apply the fixes should the operator direct them, or that a finding belongs with the
+   effort's own dev instead: the owner weighing disposition needs to know who would do the work.
 8. **Return to a clean main.** Leave your own working state, and the operator's, exactly as you
    found it: no stray branches, no leftover snapshots you did not need, no live resources.
 
@@ -120,17 +122,12 @@ tiered, multi-agent campaign instead of a single pass. The tiers are `agentic-de
 4. **Synthesis at the top tier.** The survivors get consolidated into one verdict: blockers,
    should-fixes, nits, and an explicit verified-sound section for what held under attack.
 
-This is the same discipline the saga-lead's multi-pass protocol runs for child-effort PRs, and that
-protocol is the reference implementation to follow when a PR warrants it: ruling and
-contract-conformance (checked clause by clause against the recorded decisions, not against vibes),
-fresh-eyes (a genuinely cold read with no house priors, which is why it cannot be the
-`agentworks-reviewer` persona by definition and instead wants a general-purpose reader), test
-quality plus mutation testing (neuter each safety-enforcement point in turn and confirm the suite
-actually fails; a safety claim whose mutation survives the suite is a finding at blocker severity
-regardless of how the test names read), and domain passes scoped to whatever the PR's blast radius
-actually is (an operator-upgrade path, a performance-sensitive traversal, a security boundary).
-Scale the number of passes and their depth to the PR's size and blast radius; a small PR does not
-need four passes, and a foundational one should not get fewer.
+The `saga-lead` skill's multi-pass protocol is the reference implementation of a campaign like this
+one, cut by dimension (what each pass checks) where the stages above are cut by tier (where the
+model budget goes). Take its four passes and its rule for scaling depth to a PR's blast radius from
+that skill rather than from a copy here, at the tiers it names for the passes it names them for.
+Only a saga lead can charter its conformance pass as written; outside a saga, that pass generalizes
+to the same clause-by-clause check against whatever contracts govern the PR.
 
 ## Live-testing discipline
 
@@ -163,13 +160,9 @@ Durable lessons about what makes a review actually catch what matters:
 A published test report informs; only the operator's authenticated direction decides. What you post
 is answered by the PR's owner, who responds per `agentic-dev-process` section 7a: a reading of every
 finding, the `awaiting-direction` label, and disposition against the section 5 materiality bar that
-decides what blocks. Know that mechanism, because it is what happens to your report. Two things
-follow for the testing session itself. It is not the PR's author, so its own route to any fix is the
-operator's direction, never its own initiative, not even for a one-line fix. And its run ends in a
-PR comment in every case, clean or blocked, because a live run that ends in silence leaves no record
-that it happened. Say in that comment whether the session is willing to apply the fixes should the
-operator direct them, or that a finding belongs with the effort's own dev instead; the owner
-weighing disposition needs to know who would do the work.
+decides what blocks. Know that mechanism, because it is what happens to your report. What follows
+for the testing session itself is that it is not the PR's author, so its own route to any fix is the
+operator's direction, never its own initiative, not even for a one-line fix.
 
 Report honestly: failures get their actual output attached, not a paraphrase, and any step you
 skipped gets named as skipped, not omitted.

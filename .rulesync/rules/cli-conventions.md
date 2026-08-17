@@ -95,8 +95,8 @@ selection elsewhere on the surface.
 Every `<resource> list` command exposes a `--names-only` flag that emits one resource name per line
 with no header and no formatting. Shell completion (`completions/{bash,zsh,powershell}.py`) shells
 out to the CLI via this flag rather than parsing the human-readable table. The output order matches
-the table's row order, and filters compose as usual -- `--names-only` is a presentation switch, not
-a filter (`agw session list --vm my-vm --names-only` is the intersection of the VM filter and the
+the table's row order, and filters compose as usual; `--names-only` is a presentation switch, not a
+filter (`agw session list --vm my-vm --names-only` is the intersection of the VM filter and the
 names-only render).
 
 The convention exists because table layout is a UX concern that should be free to change without
@@ -104,8 +104,8 @@ silently breaking completion. New list commands should ship `--names-only` from 
 service-layer `list_*` function takes a `names_only: bool = False` kwarg and short-circuits the
 table render in favor of one `output.info(row.name)` per row when set.
 
-**Render-only work is skipped under `--names-only`.** Anything computed purely for display -- status
-columns that probe live state, formatted timestamps, derived counts -- belongs after the
+**Render-only work is skipped under `--names-only`.** Anything computed purely for display (status
+columns that probe live state, formatted timestamps, derived counts) belongs after the
 short-circuit, not before. The `session list` SSH status batch is the precedent: it computes the
 STATUS column and is gated by the names-only check so completion doesn't pay SSH round-trips on
 every TAB press. Filter logic, on the other hand, runs the same way in both modes so the result set

@@ -78,25 +78,22 @@ plan. This preserves the historical record of what was actually done, even if th
 solution evolves.
 
 Immutability protects _truthful_ records, which leaves one carve-out. A box checked prematurely or
-in error may be corrected while it is still unmerged: fixing a bad entry is not rewriting a good
-one, and an inaccurate checkbox is not a historical record of anything. The rule binds fully once
-the checked box has merged to `main`, in step with the lock-at-merge paragraph under
-[Lockfile](#lockfile). Key that to the box, not to the plan file: plans routinely merge mid-effort,
-so the plan being on `main` says nothing about whether any particular box has landed there yet.
+in error may be corrected while it is still unmerged. The rule binds fully once the checked box has
+merged to `main`, in step with the lock-at-merge paragraph under [Lockfile](#lockfile). Key that to
+the box, not to the plan file: plans routinely merge mid-effort, so the plan being on `main` says
+nothing about whether any particular box has landed there yet.
 
 Supersession is not error (operator ruling, 2026-08-10). When a scope correction expunges work
-before it ever merges, the truthful checked boxes recording that work remain in the plan: the work
-happened, and "it never shipped" does not make a done-work record false. The clean-slate standard
-applies to everything around those boxes instead (narration, correction framing, definitions of
-done, and unchecked boxes of the abandoned direction all strip), with exactly one short note
-recording the supersession, which is what the reviewer's exception keys on.
+before it ever merges, the truthful checked boxes recording that work remain in the plan, because
+the work happened. The clean-slate standard applies to everything around those boxes instead
+(narration, correction framing, definitions of done, and unchecked boxes of the abandoned direction
+all strip), with exactly one short note recording the supersession, which is what the reviewer's
+exception keys on.
 
 Mutability follows ownership, and one rule settles it everywhere: **requirements belong to the
 operator, and the response belongs to whoever does the work.** Requirements are the FRD plus any
 document it designates as carrying requirements; everything else is response and the effort lead's,
-whoever produced it, so anything a requester puts elsewhere is a suggestion. One level down the
-relationship repeats: a lead owns the charter it hands a subagent, and the subagent owns the work
-done under it.
+whoever produced it, so anything a requester puts elsewhere is a suggestion.
 
 A saga lead or an effort lead may draft requirements, and the operator's merge of the PR is the
 consent that makes them the operator's; until then the drafting lead applies findings directly.
@@ -114,18 +111,15 @@ delegates: an agent modifies or creates one only where its charter grants that a
 grants freely across what it owns. A grant covers one task; authority returns to the granter when
 that task ends. Absent the grant, flag what you found in the terms you would have used to fix it and
 leave the file alone: to the owner where you have a channel, and otherwise up your own chain, which
-ends at the operator. Position decides none of it. Creating an artifact needs the same grant as
-editing one wherever the directory sits, an owner-authorized edit to another effort's directory
-travels as an ordinary PR to `main` that the effort picks up on its next rebase, and only a file
-delivered into an effort whose artifacts are none of yours is a message, per the sanctioned channel
-below.
+ends at the operator. Creating an artifact needs the same grant as editing one wherever the
+directory sits, an owner-authorized edit to another effort's directory travels as an ordinary PR to
+`main` that the effort picks up on its next rebase, and only a file delivered into an effort whose
+artifacts are none of yours is a message, per the sanctioned channel below.
 
 One sanctioned channel does exist: new-file message passing. Adding a NEW file to another SDD's
 feature directory as a message is fine (a saga delivering seed notes into an adopted child's
 directory is the standing example); the restriction is on modifying existing artifacts you do not
-own. Name new message files `message-<YYYY>-<MM>-<DD>-<topic>.md`. The convention governs new
-messages only: message files delivered before it keep the names they already have, so there is no
-rename sweep to do and no inference to draw from an older name. A sender never overwrites an
+own. Name new message files `message-<YYYY>-<MM>-<DD>-<topic>.md`. A sender never overwrites an
 existing message file, because overwriting is an edit to another effort's artifact and can destroy a
 message the recipient has not read yet; a follow-up is always a new file. A delivered message file
 belongs to the receiving effort once read: integrate it into your own artifacts, then keep or delete
@@ -144,27 +138,23 @@ Task briefs outside any SDD: some ruled work is too small for an SDD and belongs
 (a follow-on the operator ruled, a cross-cutting fix with a named owner). These are dispatched, not
 messaged, and the difference matters: a message goes to a live effort and must survive its branch
 churn, so it delivers via `main`; a brief CREATES the work vehicle, and the assignee owns it from
-pickup, so it never needs to touch `main` at all. The current mechanism: the requester seeds a
-branch, naming it with the repo's conventional branch prefix for the eventual change (`feat/<slug>`,
-`fix/<slug>`, `chore/<slug>`, ...) since the seeded branch is the working branch the PR ships from,
-whose first commit adds a single brief file (`brief-<YYYY>-<MM>-<DD>-<topic>.md`; the distinct
-prefix keeps it from reading as the message channel above, whose semantics it does not share). It
-sits at the repo root for pickup discoverability, which stays clean because briefs never reach
-`main`. The brief carries the charter (what, why, the definition of done, where the authoritative
-spec lives, who reviews) and its own disposition, usually "delete this file before the PR goes
-ready" (keep-and-promote is the exception, and the brief says where the content goes). The assignee
-takes over the branch, does the work there, and disposes of the brief per its own instructions. The
-contract is mechanism-independent on purpose: a brief names its work, its reviewer, and its own
-disposition, and delivery may later move to other channels (including Agentworks-native messaging)
-without changing what a brief is.
+pickup, so it never needs to touch `main` at all. The requester seeds a branch, naming it with the
+repo's conventional branch prefix for the eventual change (`feat/<slug>`, `fix/<slug>`,
+`chore/<slug>`, ...) since the seeded branch is the working branch the PR ships from, whose first
+commit adds a single brief file (`brief-<YYYY>-<MM>-<DD>-<topic>.md`; the distinct prefix keeps it
+from reading as the message channel above, whose semantics it does not share). It sits at the repo
+root for pickup discoverability, which stays clean because briefs never reach `main`. The brief
+carries the charter (what, why, the definition of done, where the authoritative spec lives, who
+reviews) and its own disposition, usually "delete this file before the PR goes ready"
+(keep-and-promote is the exception, and the brief says where the content goes). The assignee takes
+over the branch, does the work there, and disposes of the brief per its own instructions.
 
 A running effort only sees messages that existed at its branch point, so a message that lands after
 the recipient's branch was cut needs two independent mechanisms. Neither side may assume the other
 covers it:
 
 - **Primary: the sender notifies the operator.** A sender whose message lands late tells the
-  operator, carrying the message commit's sha, so the recipient gets nudged. This is the mechanism
-  delivery actually relies on; the backstop below is not a substitute for it.
+  operator, carrying the message commit's sha, so the recipient gets nudged.
 - **Backstop: the recipient looks.** Recipients on long-running branches glance at their feature
   directory on `origin/main` at natural checkpoints, so a mid-flight message still lands when the
   notification never arrives.
@@ -203,10 +193,10 @@ that was _already_ on `main` freezes the directory.
 
 Abandoned and superseded efforts lock like any other. The trigger for `locked.md` is that work on
 the effort has _stopped_, not that it succeeded: write the lockfile, dated as usual, and record
-honestly what shipped (possibly nothing, possibly one phase of four) and why the rest did not. This
-is not bookkeeping for its own sake. [Deleting Stale SDDs](#deleting-stale-sdds) excludes anything
-without a lockfile, so an abandoned SDD left unlocked is permanently ineligible for cleanup and sits
-in the live tree misleading readers with a design nobody is building.
+honestly what shipped (possibly nothing, possibly one phase of four) and why the rest did not.
+[Deleting Stale SDDs](#deleting-stale-sdds) excludes anything without a lockfile, so an abandoned
+SDD left unlocked is permanently ineligible for cleanup and sits in the live tree misleading readers
+with a design nobody is building.
 
 ## SDDs Are Not Permanent
 
@@ -236,12 +226,12 @@ This has three implications:
 3. **Ship permanent doc changes alongside the code that backs them.** Permanent docs (architecture
    docs in `docs/arch/`, ADRs, operator guides, module READMEs, skills, rules) must reflect
    observable system reality at HEAD on `main`. The tiebreaker test runs in both directions:
-   - A doc that claims a behavior not yet true at HEAD is **premature** -- don't merge it ahead of
-     the code.
-   - A doc that omits a behavior already true at HEAD is **stale** -- don't defer the update.
+   - A doc that claims a behavior not yet true at HEAD is **premature**; don't merge it ahead of the
+     code.
+   - A doc that omits a behavior already true at HEAD is **stale**; don't defer the update.
 
    So when a code change alters reality, the matching doc change rides in the same PR. In multi-PR
-   efforts the doc update lands in the PR that _makes the doc claim true_ -- not the first PR in the
+   efforts the doc update lands in the PR that _makes the doc claim true_, not the first PR in the
    sequence and not a "polish" PR at the end of the SDD. Edge cases will be fuzzy (upstream pin
    advances, multi-deployment rollouts, doc changes that need to wait for a tag to be cut in another
    repo); the principle is lockstep with the change that makes the doc factual, not deferred to the
@@ -301,7 +291,7 @@ When deleting:
   hitting the leftover `locked.md` should land on useful pointer information, not a bare tombstone.
 - Do the deletion as its own deliberate change (PR or commit), not as a side effect of other work.
   The deletion is the change.
-- Active SDDs (no `locked.md` yet) are not candidates -- they're still load-bearing for in-progress
+- Active SDDs (no `locked.md` yet) are not candidates; they're still load-bearing for in-progress
   work.
 
 The balance to hold: lean toward deletion when reading the SDD might actively mislead, and lean
@@ -315,11 +305,9 @@ Most SDDs cover one development effort. A saga SDD is the meta case: an SDD that
 family of related efforts, generating and tracking ordinary child SDDs rather than shipping an
 implementation of its own. Use one when several efforts overlap enough that their ordering and
 shared contracts need a single owner. The name is borrowed deliberately from the distributed-systems
-saga (operator ruling, 2026-08-08, replacing the earlier "roadmap" term, which collided with
-date-anchored planning vocabulary and over-promised timeline semantics): child efforts commit
-independently and completely, intermediate states are visible on `main` rather than isolated, a lead
-orchestrates instead of locking, and the whole either runs to its lock or is deliberately
-compensated by unwinding.
+saga (operator ruling, 2026-08-08): child efforts commit independently and completely, intermediate
+states are visible on `main` rather than isolated, a lead orchestrates instead of locking, and the
+whole either runs to its lock or is deliberately compensated by unwinding.
 
 Compensation is deliberately minimal, not a hidden lifecycle. Only the operator can abandon a saga
 (in whole or in part), and the decision is a dated ruling recorded in target-state like any other.
@@ -331,17 +319,16 @@ real abandonment ever needs more protocol, it is designed then, as saga work.
 
 The settled rules for the species:
 
-- Its artifacts are not the standard set. The working set, established by the first saga SDD: an
-  `inputs/` folder holding perspectives and other source material; `starting-state.md`, an immutable
-  snapshot of where the system stood at saga start, frozen once underway so the full journey stays
-  visible; `current-state.md`, a dated snapshot of where the system is, updated in place at wave
-  boundaries (git history is the append-only record); `target-state.md`, where the system is going
-  across this saga (not a forever vision) and the home of every settled design ruling; `phasing.md`,
-  ordering only (dependency structure, waves, release mapping); and `child-sdds.md`, the inventory
-  and checkbox tracker that plays plan.md's role, whose completed checkboxes are immutable per the
-  standard rule. A saga SDD has no frd.md, hla.md, or plan.md of its own; those files live in the
-  child directories. The saga locks when current state and target state agree and every child is
-  locked. These forms are still young; refine them here as they prove out.
+- Its artifacts are not the standard set. The working set: an `inputs/` folder holding perspectives
+  and other source material; `starting-state.md`, an immutable snapshot of where the system stood at
+  saga start, frozen once underway so the full journey stays visible; `current-state.md`, a dated
+  snapshot of where the system is, updated in place at wave boundaries (git history is the
+  append-only record); `target-state.md`, where the system is going across this saga (not a forever
+  vision) and the home of every settled design ruling; `phasing.md`, ordering only (dependency
+  structure, waves, release mapping); and `child-sdds.md`, the inventory and checkbox tracker that
+  plays plan.md's role, whose completed checkboxes are immutable per the standard rule. A saga SDD
+  has no frd.md, hla.md, or plan.md of its own; those files live in the child directories. The saga
+  locks when current state and target state agree and every child is locked.
 - Every PR belonging to a saga carries a `saga:<name>` label, where the name is the saga's feature
   directory without its date prefix (`saga:next-steps`). Sagas can run concurrently, so the label is
   what lets a saga lead's watch enumerate its own surface rather than infer it. That surface is
@@ -357,8 +344,8 @@ The settled rules for the species:
 - `target-state.md` stays mutable while children are still running, but revising it late reopens the
   current-equals-target gap by definition: whatever the revision adds is by construction not yet
   true of the current system, so the saga cannot lock until current state catches up to the revised
-  target. That is a real cost, not a formality. Revise the target deliberately, and prefer a
-  follow-on saga to a late expansion of this one.
+  target. Revise the target deliberately, and prefer a follow-on saga to a late expansion of this
+  one.
 - The settled design rulings `target-state.md` accumulates are exactly the load-bearing content
   [SDDs Are Not Permanent](#sdds-are-not-permanent) requires promoting into permanent homes
   (`docs/arch/`, ADRs) before the saga locks and is eventually deleted. As the artifact's owner, the
@@ -385,8 +372,8 @@ Work driven via SDD should be done in one or more feature branches. The general 
 2. Create the SDD feature directory and artifacts in this branch.
 3. If pre-implementation review is needed, publish a draft PR to allow others to review and provide
    feedback on the SDD artifacts. Draft is the right state here because there is no merge intent
-   yet: the PR is a pure review vehicle while the artifacts churn. It is not draft because the
-   content is partial. See [PR Review](#pr-review) for the merge-intent rule this follows from.
+   yet: the PR is a pure review vehicle while the artifacts churn. See [PR Review](#pr-review) for
+   the merge-intent rule this follows from.
 4. The first push of work should use that existing branch.
 5. SDD artifacts merge with the work itself, or ahead of it when other efforts need visibility (see
    [Merge artifacts early](#merge-artifacts-early-when-other-efforts-need-visibility)).
@@ -409,8 +396,8 @@ choice in the plan.
 
 ## PR Review
 
-Significant changes to SDD artifacts -- whether net-new specs or material revisions to existing ones
--- should go through a draft PR for review before the work is merged. The aim is to surface concerns
+Significant changes to SDD artifacts (whether net-new specs or material revisions to existing ones)
+should go through a draft PR for review before the work is merged. The aim is to surface concerns
 about requirements, architecture, or plan early, while changes are still cheap.
 
 Ready versus draft is purely a merge-intent signal, and it should be set accordingly. The

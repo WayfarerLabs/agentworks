@@ -409,7 +409,16 @@ deliberately narrow `cli-conventions.md`.
   restatements that miss the `awaiting-direction` convention. Operator caution (2026-08-12 review):
   the three files serve different perspectives and some repetition is deliberate reinforcement. The
   target is therefore divergence, not repetition: contradictory and stale copies get one
-  authoritative home, while intentional cross-perspective restatement stays.
+  authoritative home, while intentional cross-perspective restatement stays. **Resolved** by PR
+  #538, which unified the tier vocabularies onto `agentic-dev-process` section 4's names and
+  refreshed the stale restatements; `agentworks-tester` was not edited, since R3.3 keeps persona
+  changes out of the wave. Addition (2026-08-16, from executing the plan item): the divergence
+  species is not confined to the trio, and the one instance with teeth was outside it.
+  `integration-testing` also transcribed `saga-lead`'s review protocol, and the two copies had come
+  apart on when a surviving mutation blocks a merge, with the copy dropping the qualifier that makes
+  the severity claim compose with the section 5 materiality bar. A file that names another as its
+  reference implementation and then transcribes it is the shape to look for; the transcription is
+  now a pointer.
 - **PR2** `agentic-dev-process` sections 6/6a: PR stacks have one throwaway probe plus one depth-2
   docs pair of real usage, and the stack section carries lab-notebook narration (see PR8). The
   draft/ready convention and handoff definition are exercised daily and stay. Correction
@@ -420,7 +429,9 @@ deliberately narrow `cli-conventions.md`.
   The label convention is exercised and stays; the method lesson (query events, not current state,
   for anything a convention cleans up after itself) is recorded here so the pass does not repeat it.
 - **PR3** "A published review is not authorization" is stated in six places across four documents,
-  cross-referencing in a cycle. Section 7a is canonical; the rest become pointers.
+  cross-referencing in a cycle. Section 7a is canonical; the rest become pointers. **Resolved**
+  across PR #521 (the rule copies) and PR #538 (the two testing-skill copies, which the wave 2
+  skills item owned).
 - **PR4** `ask-questions`, `push-back`, `permission-to-fail` (2,090 B always-on) are fully restated
   by `development-principles` sections 10 and 13. Unfinished migration; delete and fold the concrete
   phrasings in.
@@ -430,12 +441,41 @@ deliberately narrow `cli-conventions.md`.
 - **PR6** Rule delivery: see the probed facts at the top of this document. Placement, not just size,
   is the problem.
 - **PR7** `development-principles` section 1 is a 2,753 B essay whose operative content is its final
-  paragraph; the exposition belongs in the manifesto.
+  paragraph; the exposition belongs in the manifesto. Corrected 2026-08-16, by executing it: the
+  size is exact and unchanged, and the section did carry a paragraph of pure motivation plus three
+  connective restatements, all now gone. Both of the entry's other claims are wrong. The operative
+  content is not the final paragraph alone: that paragraph carries the imperative, but the
+  good-and-bad-complexity characteristics are the test a reader applies to reach it, so deleting to
+  the imperative would leave "don't accept bad complexity" with no criterion behind it, and one of
+  those characteristics is the only place the rule draws the line between the general shape it wants
+  and the speculative generality principle 4 forbids. And the exposition does not belong in the
+  manifesto: that document argues for the platform's design convictions, not for development craft,
+  so the passage has no section there to join, and the manifesto is outside this wave's file lane in
+  any case. Compacted in place instead, 2,753 to 2,061 B. The first attempt at that compaction went
+  to 1,982 B by dropping "complexity is what makes software useful", which the consistency review
+  caught: "some complexity is unavoidable" frames good complexity as regrettable where the deleted
+  clause frames it as the source of value, and without it the principle counsels suspicion and never
+  recovers a positive case. Compaction that changes what a passage claims is not compaction.
 - **PR8** Journey narration inside operating instructions (the stacked-PR lab-notebook entry, the
   proven-technique persuasion clause, migration notes for four-day-old conventions).
 - **PR9** Register: `github-input-trust` at 5.3 legalese markers per 1k words; the "X, not Y"
   antithesis tic 34 times across the testing skills; definitional negations defending phrases
-  against misreadings nobody has made.
+  against misreadings nobody has made. Corrected 2026-08-16, by executing it: only the third clause
+  survives as a finding that could be acted on. The definitional negations are real and seven of
+  them are gone, along with `github-input-trust`'s forward-looking closing paragraph, which is the
+  same shape as PR8's journey narration and belongs there rather than here. **Neither measured claim
+  is reproducible**, because the entry states two counts without the marker lists that produced
+  them. "Legalese markers" is undefined, and every remaining clause in `github-input-trust` carries
+  a distinct security rule, so any further reduction there is a rewrite of a security rule rather
+  than a removal from it. The "34 times" is low by whatever its marker list excluded: a broad regex
+  finds about 59 across the three testing files at this document's basis and 51 at HEAD, and 48, 56,
+  and 19 in `sdd`, `agentworks-reviewer`, and `saga-lead`. The tic is the house voice rather than a
+  defect concentrated in the testing skills, and roughly a third of its instances rule out a real
+  alternative a reader might otherwise pick, so a mechanical sweep would delete operative text. A
+  count offered without its counting rule cannot be acted on or checked; the lesson is the same one
+  the wave-1 deletions kept learning, one document up.
 - **PR10** `agw-test-env` parameterization apparatus: placeholder policy stated three times, an
   untooled inject ritual, procedures for backends no host can run. The placeholder scheme itself
-  guards a real requirement and stays.
+  guards a real requirement and stays. **Resolved** by PR #538: one statement of the policy with
+  `inventory.local.md.example` as the authoritative parameter list, and the charter-injection
+  restatements gone, since the `agentworks-tester` definition already carries them.
