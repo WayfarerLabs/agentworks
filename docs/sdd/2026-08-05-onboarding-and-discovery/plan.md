@@ -630,7 +630,7 @@ of selected canonical root-README sections and their repository-relative images.
       exists at the implementation base rather than creating a replacement rule. Test discovery,
       structure, filtering, imports, absence of state loading, package inclusion, names-only, and
       completion without asserting authored wording.
-- [ ] Deliver this correction as one stacked feature PR based on the corrected-guide branch, then
+- [x] Deliver this correction as one stacked feature PR based on the corrected-guide branch, then
       target `main` or rebase onto it when the predecessor merges. Run focused guide/completion and
       package tests, the full non-integration suite, Ruff, formatting, mypy, Rulesync drift,
       locked-SDD, and file lint. Complete the required project and fresh-eyes reviews, resolve
