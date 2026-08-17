@@ -155,16 +155,12 @@ class CodexConfig(AgwModel):
     """Forwarded to Codex's ``model_reasoning_effort`` config key,
     TOML-encoded. Values are Codex-owned and forward unvalidated; Codex
     0.147.0 does not reject an unknown effort string at config load. A
-    child template's declared value replaces its parent's. A same-key raw
-    ``-c`` in ``extra_args`` wins because it is appended last and Codex
-    0.147.0 takes the last repeated config override."""
+    child template's declared value replaces its parent's."""
 
     vim_mode: bool = False
     """Start Codex's composer in Vim normal mode. Omitted when false, so
     the target's own configuration remains authoritative by default. A
-    child template's declared value replaces its parent's. A same-key raw
-    ``-c`` in ``extra_args`` wins because it is appended last and Codex
-    0.147.0 takes the last repeated config override."""
+    child template's declared value replaces its parent's."""
 
     writable_dirs: list[str] = Field(default_factory=list)
     """Extra directories the sandbox may write, each forwarded as
@@ -175,17 +171,19 @@ class CodexConfig(AgwModel):
     compatibility, ``true`` passes ``--search`` (live search) and ``false``
     emits no override; ``false`` therefore inherits target config, while
     ``disabled`` forces search off. A child template's declared value
-    replaces its parent's. For a string mode, a same-key raw ``-c`` in
-    ``extra_args`` wins because it is appended last and Codex 0.147.0 takes
-    the last repeated config override."""
+    replaces its parent's."""
 
     disable_strict_config: bool | None = None
     """Turn OFF ``--strict-config``, for a target whose own
     ``config.toml`` a newer codex wrote."""
 
     extra_args: list[str] = Field(default_factory=list)
-    """Appended to the command verbatim, last, so it can carry (or
-    override) any flag this integration does not model."""
+    """Raw argv tokens appended verbatim, last, so they can add unmodeled
+    arguments or override managed ``-c`` configuration values. Codex
+    0.147.0 takes the last value for a repeated ``-c`` key. Overriding
+    ``notify`` disables deterministic id binding, leaving discovery and the
+    picker as fallbacks. A child template's declared list replaces its
+    parent's."""
 
 
 # Config field -> the codex flag it forwards to, in emission order. The
