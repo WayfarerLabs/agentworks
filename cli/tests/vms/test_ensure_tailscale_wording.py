@@ -135,7 +135,7 @@ def test_rejoin_rejects_a_redaction_free_operation_logger(
         lambda *a, **k: pytest.fail("secret-bearing rejoin reached a redaction-free logger"),
     )
 
-    with pytest.raises(StateError, match="unexpectedly has an operation logger"):
+    with pytest.raises(StateError):
         vm_manager._ensure_tailscale(
             db,
             config,

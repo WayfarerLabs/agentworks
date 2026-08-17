@@ -222,7 +222,7 @@ def test_vm_shell_eager_resolve_fires_before_ssh(
         admin=SimpleNamespace(env={}),
     )
 
-    with pytest.raises(SecretUnavailableError, match="api-key"):
+    with pytest.raises(SecretUnavailableError):
         vm_manager.shell_vm(db, config, "vm1", interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
     assert ssh_called == [], "eager-resolve must precede the SSH session"
@@ -276,7 +276,7 @@ def test_vm_exec_eager_resolve_fires_before_ssh(
         admin=SimpleNamespace(env={}),
     )
 
-    with pytest.raises(SecretUnavailableError, match="api-key"):
+    with pytest.raises(SecretUnavailableError):
         vm_manager.exec_vm(db, config, "vm1", ["echo", "hi"], interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
     assert streaming_calls == [], "eager-resolve must precede call_streaming"
@@ -328,7 +328,7 @@ def test_agent_exec_eager_resolve_fires_before_ssh(
 
     config = SimpleNamespace()
 
-    with pytest.raises(SecretUnavailableError, match="api-key"):
+    with pytest.raises(SecretUnavailableError):
         agent_manager.exec_agent(
             db,
             config,

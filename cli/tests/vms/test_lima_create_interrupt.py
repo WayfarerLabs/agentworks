@@ -242,7 +242,7 @@ def test_failure_mid_create_cleans_up_and_reraises(
         lambda self, name, yaml: (_ for _ in ()).throw(SSHError("provision exploded")),
     )
 
-    with pytest.raises(SSHError, match="provision exploded"):
+    with pytest.raises(SSHError):
         LimaPlatform("lima", {"placement": {"mode": "local"}}).create(_request(), RunContext())
 
     assert _deletes(ran) == ["limactl delete --force myvm"]

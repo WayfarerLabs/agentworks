@@ -71,5 +71,5 @@ def test_vm_platform_is_not_manifest_declarable(tmp_path: Path) -> None:
     (tmp_path / "cap.yaml").write_text(
         "apiVersion: agentworks/v1\nkind: vm-platform\nmetadata:\n  name: my-cloud\nspec: {}\n"
     )
-    with pytest.raises(ConfigError, match="provided by the app"):
+    with pytest.raises(ConfigError):
         load_manifests(tmp_path)

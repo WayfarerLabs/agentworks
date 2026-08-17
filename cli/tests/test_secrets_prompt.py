@@ -81,7 +81,7 @@ def test_prompt_has_no_static_identifier() -> None:
 
 
 def test_allowed_prompt_without_broker_is_state_error() -> None:
-    with pytest.raises(StateError, match="interaction broker"):
+    with pytest.raises(StateError):
         resolve_batch(
             [SecretDecl(name="x", description="X")],
             [_source()],

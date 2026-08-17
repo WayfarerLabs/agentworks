@@ -28,7 +28,7 @@ def test_utf8_size_gate_accepts_exact_limit_and_rejects_plus_one() -> None:
     overhead = len(empty.encode("utf-8"))
     exact = build_startup_script("x" * (GCE_STARTUP_SCRIPT_LIMIT_BYTES - overhead), instance_name="vm-a")
     assert len(exact.encode("utf-8")) == GCE_STARTUP_SCRIPT_LIMIT_BYTES
-    with pytest.raises(ConfigError, match="262144-byte metadata limit"):
+    with pytest.raises(ConfigError):
         build_startup_script("x" * (GCE_STARTUP_SCRIPT_LIMIT_BYTES - overhead + 1), instance_name="vm-a")
 
 

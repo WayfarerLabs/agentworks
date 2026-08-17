@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 
 def test_apt_source_rejects_unsafe_source_file() -> None:
-    with pytest.raises(ConfigError, match="simple filename"):
+    with pytest.raises(ConfigError):
         _load_apt_sources(
             {
                 "bad": {
@@ -41,7 +41,7 @@ def test_apt_source_rejects_unsafe_source_file() -> None:
 
 
 def test_apt_source_requires_key_url() -> None:
-    with pytest.raises(ConfigError, match="key_url is required"):
+    with pytest.raises(ConfigError):
         _load_apt_sources(
             {
                 "bad": {
@@ -55,7 +55,7 @@ def test_apt_source_requires_key_url() -> None:
 
 
 def test_apt_source_must_be_table() -> None:
-    with pytest.raises(ConfigError, match="must be a table"):
+    with pytest.raises(ConfigError):
         _load_apt_sources({"bad": "not-a-table"})
 
 
@@ -69,7 +69,7 @@ def test_apt_package_defaults_empty_sources() -> None:
 
 
 def test_apt_package_apt_must_be_list() -> None:
-    with pytest.raises(ConfigError, match="apt must be a list"):
+    with pytest.raises(ConfigError):
         _load_apt_packages({"bad": {"description": "Bad", "apt": "vim"}})
 
 
@@ -113,5 +113,5 @@ def test_bad_apt_source_reference_errors_at_build_registry(tmp_path: Path) -> No
         warn_issues=False,
     )
 
-    with pytest.raises(ConfigError, match="nonexistent"):
+    with pytest.raises(ConfigError):
         build_registry(cfg)

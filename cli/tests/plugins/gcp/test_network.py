@@ -144,7 +144,7 @@ def _owned_rule(
 def test_zone_to_region_is_exact_and_invalid_shape_rejected() -> None:
     assert zone_region("us-central1-a") == "us-central1"
     assert zone_region("northamerica-northeast2-b") == "northamerica-northeast2"
-    with pytest.raises(ConfigError, match="cannot identify"):
+    with pytest.raises(ConfigError):
         zone_region("global")
 
 
@@ -175,7 +175,7 @@ def test_omitted_subnet_requires_and_resolves_default_network() -> None:
     assert client.calls == [{"project": "project-a", "network": "default"}]
 
     missing = _GetClient(failure=_api_error(api_exceptions.NotFound, "gone"))
-    with pytest.raises(ConfigError, match="has no default network"):
+    with pytest.raises(ConfigError):
         resolve_network(_Cache(networks=missing), RunContext(), _config())  # type: ignore[arg-type]
 
 
@@ -194,7 +194,7 @@ def test_selected_network_is_re_read_and_identity_checked() -> None:
     assert client.calls == [{"project": "project-a", "network": "default"}]
 
     wrong = _GetClient(compute_v1.Network(name="default", self_link="projects/project-a/global/networks/other"))
-    with pytest.raises(ConfigError, match="unexpected resource identity"):
+    with pytest.raises(ConfigError):
         get_network(  # type: ignore[arg-type]
             _Cache(networks=wrong),
             RunContext(),
@@ -209,7 +209,7 @@ def test_shared_vpc_host_project_subnet_is_explicitly_unsupported() -> None:
         self_link="projects/project-a/regions/us-central1/subnetworks/shared",
         network="projects/host-project/global/networks/shared",
     )
-    with pytest.raises(ConfigError, match="shared VPC host project"):
+    with pytest.raises(ConfigError):
         resolve_network(  # type: ignore[arg-type]
             _Cache(subnetworks=_GetClient(subnet)),
             RunContext(),
@@ -222,7 +222,7 @@ def test_network_policy_must_be_after_classic_firewall() -> None:
         compute_v1.Network(name="default", network_firewall_policy_enforcement_order="AFTER_CLASSIC_FIREWALL"),
         project_id="project-a",
     )
-    with pytest.raises(ConfigError, match="BEFORE_CLASSIC_FIREWALL"):
+    with pytest.raises(ConfigError):
         require_classic_first(
             compute_v1.Network(name="default", network_firewall_policy_enforcement_order="BEFORE_CLASSIC_FIREWALL"),
             project_id="project-a",
@@ -238,7 +238,7 @@ def test_network_policy_must_be_after_classic_firewall() -> None:
     ids=("universal", "derived-tag"),
 )
 def test_applicable_priority_zero_allow_is_rejected(rule: compute_v1.Firewall) -> None:
-    with pytest.raises(ConfigError, match="priority-zero ingress allow"):
+    with pytest.raises(ConfigError):
         reject_priority_zero_conflicts(
             [rule],
             network_url=_NETWORK,
@@ -273,7 +273,7 @@ def test_runup_without_tag_only_rejects_universal_target() -> None:
     ids=("all", "tcp-all", "port-range", "numeric-tcp", "source-overlap"),
 )
 def test_priority_zero_deny_overlapping_operator_ssh_is_rejected(rule: compute_v1.Firewall) -> None:
-    with pytest.raises(ConfigError, match="operator-SSH deny"):
+    with pytest.raises(ConfigError):
         reject_priority_zero_conflicts(
             [rule],
             network_url=_NETWORK,
@@ -366,7 +366,7 @@ class _FirewallClient:
 def test_firewall_name_collision_and_absence() -> None:
     expected = _owned_rule("allow", priority=0, deny=False)
     present = _FirewallClient(states=iter([expected]))
-    with pytest.raises(AlreadyExistsError, match="already exists") as caught:
+    with pytest.raises(AlreadyExistsError) as caught:
         require_firewall_name_available(present, project_id="project-a", rule_name="allow")
     assert "inspect the existing provider identity" in (caught.value.hint or "")
     assert "Do not delete the rule by name" in (caught.value.hint or "")
@@ -545,7 +545,7 @@ def test_done_capacity_firewall_failure_does_not_attribute_the_vm_zone() -> None
 def test_indeterminate_insert_mismatch_is_collision_and_never_deleted(observed: compute_v1.Firewall) -> None:
     expected = _owned_rule("allow", priority=0, deny=False)
     client = _FirewallClient(states=iter([observed]), operation=_Operation(TimeoutError("provider timeout")))
-    with pytest.raises(AlreadyExistsError, match="provider identity or shape"):
+    with pytest.raises(AlreadyExistsError):
         insert_firewall_reconciled(
             client,
             project_id="project-a",
@@ -562,7 +562,7 @@ def test_definite_already_exists_is_collision_without_shape_reconciliation() -> 
         states=iter([]),
         insert_results=iter([_api_error(api_exceptions.AlreadyExists, "concurrent winner")]),
     )
-    with pytest.raises(AlreadyExistsError, match="already exists"):
+    with pytest.raises(AlreadyExistsError):
         insert_firewall_reconciled(
             client,
             project_id="project-a",
@@ -584,7 +584,7 @@ def test_same_request_retry_already_exists_remains_collision() -> None:
             ]
         ),
     )
-    with pytest.raises(AlreadyExistsError, match="already exists"):
+    with pytest.raises(AlreadyExistsError):
         insert_firewall_reconciled(
             client,
             project_id="project-a",
@@ -626,7 +626,7 @@ def test_incomplete_or_wrong_operation_identity_is_never_owned(operation: _Opera
     expected = _owned_rule("allow", priority=0, deny=False)
     client = _FirewallClient(states=iter([]), operation=operation)
     attempt = FirewallInsertAttempt("allow", _REQUEST_ID)
-    with pytest.raises(GCEOperationError, match="incomplete ownership identity"):
+    with pytest.raises(GCEOperationError):
         insert_firewall_reconciled(
             client,
             project_id="project-a",

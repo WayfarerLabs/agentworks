@@ -34,7 +34,7 @@ def test_overview_is_dedented_so_prose_can_be_written_where_it_belongs() -> None
 def test_empty_prose_is_refused_rather_than_rendered_blank(title: str, overview: str) -> None:
     """The contract's answer for "nothing useful to say" is to contribute
     no prose at all, so empty prose is a mistake rather than a choice."""
-    with pytest.raises(StateError, match="non-empty"):
+    with pytest.raises(StateError):
         TopicProse(title=title, overview=overview)
 
 

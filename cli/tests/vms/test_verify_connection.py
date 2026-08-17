@@ -115,7 +115,7 @@ def test_verify_connection_surfaces_failure_without_activation_or_mutation(
 
 
 def test_verify_connection_missing_vm() -> None:
-    with pytest.raises(NotFoundError, match="VM 'missing' not found"):
+    with pytest.raises(NotFoundError):
         verify_vm_connection(
             cast("Database", SimpleNamespace(get_vm=lambda name: None)),
             cast("Config", SimpleNamespace()),

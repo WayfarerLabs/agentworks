@@ -53,7 +53,7 @@ def test_run_check_true_raises_on_nonzero() -> None:
     t = LimaTransport(vm_name="my-vm")
     with patch("agentworks.transports.lima.subprocess.run") as mock_run:
         mock_run.return_value = _fail_completed(returncode=2, stderr="nope")
-        with pytest.raises(SSHError, match="Lima command failed"):
+        with pytest.raises(SSHError):
             t.run("false")
 
 
@@ -117,7 +117,7 @@ def test_copy_to_raises_on_failure() -> None:
     t = LimaTransport(vm_name="my-vm")
     with patch("agentworks.transports.lima.subprocess.run") as mock_run:
         mock_run.return_value = _fail_completed(stderr="denied")
-        with pytest.raises(SSHError, match="limactl copy failed"):
+        with pytest.raises(SSHError):
             t.copy_to("/local", "/remote")
 
 

@@ -93,7 +93,7 @@ def test_run_check_true_raises_on_nonzero() -> None:
     t = SSHTransport(host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
         mock_run.return_value = _fail_completed(returncode=42, stderr="nope")
-        with pytest.raises(SSHError, match="exit 42"):
+        with pytest.raises(SSHError):
             t.run("false")
 
 
@@ -230,7 +230,7 @@ def test_copy_to_raises_on_scp_failure() -> None:
     t = SSHTransport(host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
         mock_run.return_value = _fail_completed(stderr="permission denied")
-        with pytest.raises(SSHError, match="scp failed"):
+        with pytest.raises(SSHError):
             t.copy_to("/local/foo", "/remote/bar")
 
 

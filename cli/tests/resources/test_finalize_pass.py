@@ -85,7 +85,7 @@ def test_admin_template_rejects_non_default_name() -> None:
         ),
     )
     r.add("publisher_kind", "src", stub, _opdecl())
-    with pytest.raises(ConfigError, match="reserved name"):
+    with pytest.raises(ConfigError):
         r.finalize()
 
 

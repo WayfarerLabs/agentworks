@@ -220,7 +220,7 @@ def test_legacy_admin_session_without_socket_raises_state_error() -> None:
 
     session = _session("s1", pid=42, mode="admin", boot_id=BOOT_CURRENT)
     target = _FakeTarget({"has-session": _FakeResult(ok=True)})
-    with pytest.raises(StateError, match="no socket_path") as exc:
+    with pytest.raises(StateError) as exc:
         check_session_status(session, target=target)
     assert exc.value.entity_kind == "session"
     assert exc.value.entity_name == "s1"

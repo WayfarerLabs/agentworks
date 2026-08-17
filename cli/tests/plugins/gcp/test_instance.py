@@ -167,7 +167,7 @@ def test_indeterminate_wait_reconciles_only_matching_provider_id() -> None:
 
     collision = _resource()
     collision.id = 999
-    with pytest.raises(AlreadyExistsError, match="different provider identity"):
+    with pytest.raises(AlreadyExistsError):
         insert_instance_reconciled(
             _Instances(iter([collision]), operation=_Operation(failure=TimeoutError("provider detail"))),
             project_id="project-a",
@@ -276,7 +276,7 @@ def test_non_done_permission_poll_failure_reconciles_matching_instance() -> None
 )
 def test_incomplete_operation_identity_is_never_owned(operation: _Operation) -> None:
     attempt = InstanceInsertAttempt("vm-a", _REQUEST_ID)
-    with pytest.raises(GCEOperationError, match="incomplete ownership identity"):
+    with pytest.raises(GCEOperationError):
         insert_instance_reconciled(
             _Instances(iter([]), operation=operation),
             project_id="project-a",

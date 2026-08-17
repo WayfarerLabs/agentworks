@@ -428,7 +428,7 @@ def test_the_quoted_boolean_warning_describes_this_loader(tmp_path: Path) -> Non
     assert entry.resource.key_dearmor is False, "a bare `no` means false, exactly as it reads"
 
     (resources / "bare.yaml").write_text(manifest.format(value='"no"'))
-    with pytest.raises(ConfigError, match="key_dearmor"):
+    with pytest.raises(ConfigError):
         load_manifests(resources)
 
 

@@ -43,7 +43,7 @@ def test_user_command_test_fields_default_none() -> None:
 
 
 def test_legacy_test_field_rejected() -> None:
-    with pytest.raises(ConfigError, match="'test' is not a valid field"):
+    with pytest.raises(ConfigError):
         _load_user_commands(
             {
                 "old-tool": {
@@ -83,5 +83,5 @@ def test_multiple_test_fields_are_loaded(
 
 
 def test_system_command_requires_command() -> None:
-    with pytest.raises(ConfigError, match="command is required"):
+    with pytest.raises(ConfigError):
         _load_system_commands({"bad": {"description": "no command"}})

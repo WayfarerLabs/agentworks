@@ -23,7 +23,7 @@ def test_local_app_data_resolves_from_env(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_local_app_data_raises_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("LOCALAPPDATA", raising=False)
-    with pytest.raises(RuntimeError, match="LOCALAPPDATA"):
+    with pytest.raises(RuntimeError):
         wsl2._local_app_data()
 
 

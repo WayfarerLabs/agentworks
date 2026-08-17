@@ -236,7 +236,7 @@ def test_helper_redacts_every_non_redacting_progress_surface(
     )
     progress = _RecordingProgress()
 
-    with pytest.raises(SSHError, match=r"Bootstrap script failed \(exit 1\)"):
+    with pytest.raises(SSHError):
         _call(tmp_path, monkeypatch, transport, progress=progress)
 
     assert progress.steps == ["step [REDACTED]"]

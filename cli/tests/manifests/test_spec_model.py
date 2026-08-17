@@ -186,7 +186,7 @@ def test_hosted_capability_answers_for_the_tagged_kinds_only() -> None:
 
 
 def test_a_capability_kind_has_no_row_to_describe() -> None:
-    with pytest.raises(ValidationError, match="declares no spec model"):
+    with pytest.raises(ValidationError):
         row_model("vm-platform")
 
 

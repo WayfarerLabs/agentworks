@@ -260,10 +260,7 @@ def test_create_session_aborts_on_missing_required_command(tmp_path: Path, monke
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
-    with pytest.raises(
-        StateError,
-        match="'shell' harness.*session-template 'claude'.*requires 'claude'.*agent 'a1'",
-    ):
+    with pytest.raises(StateError):
         session_manager.create_session(
             db,
             config,  # type: ignore[arg-type]

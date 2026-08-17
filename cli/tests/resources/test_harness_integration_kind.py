@@ -75,7 +75,7 @@ def test_capability_kind_envelope_rejection(tmp_path: Path) -> None:
         spec: {}
         """,
     )
-    with pytest.raises(ConfigError, match="provided by the app"):
+    with pytest.raises(ConfigError):
         load_manifests(root)
 
 

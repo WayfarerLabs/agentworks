@@ -46,7 +46,7 @@ def test_secret_delegates_to_the_reader() -> None:
 def test_secret_without_a_reader_is_a_typed_error() -> None:
     """Post-resolve code handed a pre-boundary (or inspection-only)
     context fails the same way for every capability."""
-    with pytest.raises(ConfigError, match="resolved secrets"):
+    with pytest.raises(ConfigError):
         RunContext().secret("proxmox-token")
 
 

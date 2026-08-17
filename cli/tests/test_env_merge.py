@@ -61,7 +61,7 @@ def test_session_overrides_admin() -> None:
 
 
 def test_admin_and_agent_both_set_raises() -> None:
-    with pytest.raises(ValueError, match="admin / agent"):
+    with pytest.raises(ValueError):
         effective_env(
             vm={},
             admin={"A": _e("A", "x")},

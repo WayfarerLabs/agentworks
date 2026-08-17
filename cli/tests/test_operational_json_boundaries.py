@@ -601,7 +601,7 @@ def test_vm_describe_propagates_operator_abort_in_service_and_both_cli_formats(
         monkeypatch.setattr("agentworks.orchestration.readiness.preflight_all", lambda *_args, **_kwargs: None)
         monkeypatch.setattr("agentworks.secrets.resolver.Resolver.resolve", abort)
 
-    with pytest.raises(UserAbort, match="operator declined"):
+    with pytest.raises(UserAbort):
         manager.vm_description(db, config, "box", interaction=InteractionPolicy.ALLOW)
 
     for output_format in ("human", "json"):

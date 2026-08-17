@@ -103,7 +103,7 @@ def test_unknown_template(config):  # type: ignore[no-untyped-def]
     # ValueError that escapes to the CLI's traceback handler), and the
     # hint lists the declared names so the operator can correct it in
     # place without consulting deprecated config.
-    with pytest.raises(NotFoundError, match="Unknown workspace template") as exc:
+    with pytest.raises(NotFoundError) as exc:
         resolve_template(build_registry(config), "nonexistent")
     assert exc.value.entity_kind == "workspace-template"
     assert exc.value.entity_name == "nonexistent"

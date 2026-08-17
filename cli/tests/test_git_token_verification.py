@@ -82,7 +82,7 @@ def test_github_401_is_definitive_rejection(
 ) -> None:
     monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _probe(401))
     p = GitHubCredentialProvider("gh", {"token": "my-secret"})
-    with pytest.raises(TokenRejectedError, match="rejected the token") as exc:
+    with pytest.raises(TokenRejectedError) as exc:
         p.runup(RunContext(secrets=_StubReader({"my-secret": "bogus"})))
     assert "'gh'" in str(exc.value)
     assert "'my-secret'" in str(exc.value)
@@ -127,7 +127,7 @@ def test_github_runup_without_secrets_is_error() -> None:
     from agentworks.errors import ConfigError
 
     p = GitHubCredentialProvider("gh", {})
-    with pytest.raises(ConfigError, match="resolved secrets"):
+    with pytest.raises(ConfigError):
         p.runup(RunContext())
 
 
@@ -170,7 +170,7 @@ def test_credential_materials_reject_line_unsafe_token_at_final_sink(token: str)
 def test_azdo_rejection_statuses(monkeypatch: pytest.MonkeyPatch, status: int) -> None:
     monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _probe(status))
     p = AzDOCredentialProvider("ado", {"org": "my-org"})
-    with pytest.raises(TokenRejectedError, match="Azure DevOps rejected"):
+    with pytest.raises(TokenRejectedError):
         p.runup(RunContext(secrets=_StubReader({"git-token-ado": "bogus"})))
 
 

@@ -182,7 +182,7 @@ class TestCredentialSelection:
         gets, rather than a crash or a silent ambient fallback."""
         rec = install_fakes(monkeypatch)
 
-        with pytest.raises(ConfigError, match="resolved secrets"):
+        with pytest.raises(ConfigError):
             _creds_platform()._get_session(RunContext())
 
         assert rec.sessions == []

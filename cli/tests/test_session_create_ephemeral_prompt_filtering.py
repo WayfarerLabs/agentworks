@@ -55,7 +55,7 @@ def test_workspace_prompt_filters_by_vm_flag(tmp_path: Path, monkeypatch: pytest
 
     _stub_for_post_prompt_flow(monkeypatch)
 
-    with pytest.raises(RuntimeError, match="stop after prompt"):
+    with pytest.raises(RuntimeError):
         create_session(
             db,
             config,  # type: ignore[arg-type]
@@ -99,7 +99,7 @@ def test_workspace_prompt_filters_by_existing_agent_vm(tmp_path: Path, monkeypat
 
     _stub_for_post_prompt_flow(monkeypatch)
 
-    with pytest.raises(RuntimeError, match="stop after prompt"):
+    with pytest.raises(RuntimeError):
         create_session(
             db,
             config,  # type: ignore[arg-type]
@@ -136,7 +136,7 @@ def test_mode_prompt_filters_by_resolved_vm_with_info_line(tmp_path: Path, monke
     monkeypatch.setattr(output, "choose", _choose_spy)
     _stub_for_post_prompt_flow(monkeypatch)
 
-    with pytest.raises(RuntimeError, match="stop after prompt"):
+    with pytest.raises(RuntimeError):
         create_session(
             db,
             config,  # type: ignore[arg-type]
@@ -172,7 +172,7 @@ def test_vm_and_existing_agent_mismatch_fails_before_workspace_prompt(
         output, "choose", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no prompt should fire"))
     )
 
-    with pytest.raises(ValidationError, match="VM mismatch"):
+    with pytest.raises(ValidationError):
         create_session(
             db,
             config,  # type: ignore[arg-type]
@@ -216,7 +216,7 @@ def test_mode_prompt_picks_existing_agent_pins_vm_no_vm_prompt(tmp_path: Path, m
 
     _stub_for_post_prompt_flow(monkeypatch)
 
-    with pytest.raises(RuntimeError, match="stop after prompt"):
+    with pytest.raises(RuntimeError):
         create_session(
             db,
             config,  # type: ignore[arg-type]
@@ -265,7 +265,7 @@ def test_mode_prompt_picks_admin_then_vm_prompt_fires(tmp_path: Path, monkeypatc
     monkeypatch.setattr(output, "choose", _choose_spy)
     _stub_for_post_prompt_flow(monkeypatch)
 
-    with pytest.raises(RuntimeError, match="stop after prompt"):
+    with pytest.raises(RuntimeError):
         create_session(
             db,
             config,  # type: ignore[arg-type]

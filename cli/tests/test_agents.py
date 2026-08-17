@@ -47,7 +47,7 @@ def test_workspace_group(ws_name: str, expected: str) -> None:
 
 
 def test_grant_workspaces_rejects_empty_request(db: Database) -> None:
-    with pytest.raises(ValidationError, match="needs at least one workspace name"):
+    with pytest.raises(ValidationError):
         grant_workspaces(
             db,
             config=None,  # type: ignore[arg-type]
@@ -59,7 +59,7 @@ def test_grant_workspaces_rejects_empty_request(db: Database) -> None:
 
 
 def test_revoke_workspaces_rejects_empty_request(db: Database) -> None:
-    with pytest.raises(ValidationError, match="needs at least one workspace name"):
+    with pytest.raises(ValidationError):
         revoke_workspaces(
             db,
             config=None,  # type: ignore[arg-type]

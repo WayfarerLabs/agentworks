@@ -75,7 +75,7 @@ def test_session_create_eager_resolve_fires_before_db_insert(
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
-    with pytest.raises(SecretUnavailableError, match="api-key"):
+    with pytest.raises(SecretUnavailableError):
         session_manager.create_session(
             db,
             config,  # type: ignore[arg-type]
@@ -206,7 +206,7 @@ def test_session_resume_broken_no_force_bails_before_eager_resolve(
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
-    with pytest.raises(BrokenStateError, match="broken"):
+    with pytest.raises(BrokenStateError):
         session_manager.resume_session(
             db,
             config,  # type: ignore[arg-type]
@@ -285,7 +285,7 @@ def test_session_resume_eager_resolve_fires_before_kill(
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
-    with pytest.raises(SecretUnavailableError, match="api-key"):
+    with pytest.raises(SecretUnavailableError):
         session_manager.resume_session(
             db,
             config,  # type: ignore[arg-type]

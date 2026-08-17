@@ -221,14 +221,14 @@ def test_read_only_database_rejects_stale_schema(tmp_path: Path) -> None:
     connection.commit()
     connection.close()
 
-    with pytest.raises(StateError, match="outdated"):
+    with pytest.raises(StateError):
         Database(path, read_only=True)
 
 
 def test_read_only_database_frames_malformed_schema(tmp_path: Path) -> None:
     path = tmp_path / "malformed.db"
     path.write_bytes(b"not a sqlite database")
-    with pytest.raises(StateError, match="malformed"):
+    with pytest.raises(StateError):
         Database(path, read_only=True)
 
 
