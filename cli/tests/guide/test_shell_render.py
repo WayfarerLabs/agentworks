@@ -168,6 +168,36 @@ def test_container_heading_offsets_remain_bounded(tmp_path: Path, container_head
 
 
 @pytest.mark.parametrize(
+    "literal",
+    [
+        "-     - ### literal code",
+        "-     - ###### literal code",
+    ],
+)
+def test_wide_post_marker_indented_code_is_not_shifted(tmp_path: Path, literal: str) -> None:
+    included = tmp_path / "source.md"
+    included.write_text(f"## Selected\n\n{literal}\n", encoding="utf-8")
+    topic = _topic('# Demo\n<!-- agw:include path="source.md" heading="Selected" heading-offset="1" -->\n')
+
+    rendered = render_shell(topic, GuideMode.HUMAN, package_root=tmp_path)
+
+    assert f"{literal}\n" in rendered
+
+
+def test_blank_line_ends_inner_quote_but_preserves_outer_list(tmp_path: Path) -> None:
+    included = tmp_path / "source.md"
+    included.write_text(
+        "## Selected\n\n123. > Quoted paragraph\n\n     ### Continued list heading\n",
+        encoding="utf-8",
+    )
+    topic = _topic('# Demo\n<!-- agw:include path="source.md" heading="Selected" heading-offset="1" -->\n')
+
+    rendered = render_shell(topic, GuideMode.HUMAN, package_root=tmp_path)
+
+    assert "     #### Continued list heading\n" in rendered
+
+
+@pytest.mark.parametrize(
     ("fragment", "literals"),
     [
         (
@@ -265,6 +295,12 @@ def test_fence_does_not_conceal_setext_in_a_fresh_same_shaped_list_item() -> Non
     lines = scan_markdown("- ```\n- Heading\n  ===\n", "fixture")
 
     assert contains_setext_heading(lines)
+
+
+def test_sibling_list_items_do_not_form_a_setext_heading() -> None:
+    lines = scan_markdown("- Heading\n- ===\n", "fixture")
+
+    assert not contains_setext_heading(lines)
 
 
 def test_included_text_cannot_capture_later_include_nodes(tmp_path: Path) -> None:

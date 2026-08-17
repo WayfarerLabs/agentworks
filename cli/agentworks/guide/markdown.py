@@ -11,7 +11,7 @@ from typing import Literal
 
 from agentworks.guide.contract import GuideContentError
 
-_LIST_RE = re.compile(r"(?P<indent>[ ]{0,3})(?:[-+*]|[0-9]{1,9}[.)])(?P<spacing>[ ]{1,4})(?P<body>.*)")
+_LIST_RE = re.compile(r"(?P<indent>[ ]{0,3})(?:[-+*]|[0-9]{1,9}[.)])(?P<spacing>[ ]+)(?P<body>.*)")
 _SETEXT_RE = re.compile(r"[ ]{0,3}(?:=+|-+)[ \t]*")
 type _Container = Literal["quote"] | tuple[Literal["list"], int, int]
 type _ContainerStack = tuple[_Container, ...]
@@ -47,8 +47,16 @@ def _list_body(value: str) -> tuple[str, int] | None:
     match = _LIST_RE.fullmatch(value)
     if match is None:
         return None
+    spacing = match.group("spacing")
     body = match.group("body")
+    if len(spacing) > 4:
+        body = f"{spacing[1:]}{body}"
     return body, len(value) - len(body)
+
+
+def _has_leading_tab(value: str) -> bool:
+    prefix_length = len(value) - len(value.lstrip(" \t"))
+    return "\t" in value[:prefix_length]
 
 
 def _strip_containers(
@@ -63,20 +71,25 @@ def _strip_containers(
     while True:
         if following_active and active_index < len(active):
             active_container = active[active_index]
-            if isinstance(active_container, str):
+            if active_container == _QUOTE:
                 if (body := _quote_body(remaining)) is not None:
                     containers.append(_QUOTE)
                     remaining = body
                     active_index += 1
                     continue
-            elif _leading_spaces(remaining) >= active_container[1]:
-                containers.append(active_container)
-                indent = active_container[1]
-                remaining = remaining[indent:]
-                active_index += 1
-                continue
-            if not remaining.strip() and all(container != _QUOTE for container in active[active_index:]):
-                containers.extend(active[active_index:])
+            else:
+                assert isinstance(active_container, tuple)
+                if _leading_spaces(remaining) >= active_container[1]:
+                    containers.append(active_container)
+                    indent = active_container[1]
+                    remaining = remaining[indent:]
+                    active_index += 1
+                    continue
+            if not remaining.strip():
+                for container in active[active_index:]:
+                    if container == _QUOTE:
+                        break
+                    containers.append(container)
                 remaining = ""
                 break
             following_active = False
@@ -97,11 +110,13 @@ def _strip_containers(
 def _follow_containers(value: str, expected: _ContainerStack) -> str | None:
     remaining = value
     for index, container in enumerate(expected):
-        if isinstance(container, str):
+        if container == _QUOTE:
             if (body := _quote_body(remaining)) is None:
                 return None
             remaining = body
-        elif _leading_spaces(remaining) >= container[1]:
+            continue
+        assert isinstance(container, tuple)
+        if _leading_spaces(remaining) >= container[1]:
             remaining = remaining[container[1] :]
         elif not remaining.strip() and all(item != _QUOTE for item in expected[index:]):
             return ""
@@ -138,7 +153,7 @@ def _closing_fence(content: str, active: tuple[str, int]) -> bool:
 
 
 def scan_markdown(markdown: str, source: str) -> tuple[MarkdownLine, ...]:
-    """Scan the supported container and fenced-code subset without interpreting Markdown."""
+    """Scan the supported tab-free container and fenced-code subset."""
     scanned: list[MarkdownLine] = []
     active_fence: tuple[str, int, _ContainerStack] | None = None
     active_containers: _ContainerStack = ()
@@ -155,9 +170,13 @@ def scan_markdown(markdown: str, source: str) -> tuple[MarkdownLine, ...]:
                 continue
             active_fence = None
 
+        if _has_leading_tab(line):
+            raise GuideContentError(f"Markdown source {source!r} uses unsupported leading tab indentation")
         content, container, next_list_id = _strip_containers(line, active_containers, next_list_id)
+        if _has_leading_tab(content):
+            raise GuideContentError(f"Markdown source {source!r} uses unsupported leading tab indentation")
         active_containers = container
-        indented_code = not container and _leading_spaces(content) >= 4
+        indented_code = _leading_spaces(content) >= 4
         structural = not indented_code
         scanned.append(MarkdownLine(raw, content, len(line) - len(content), True, structural, container))
         if structural and (opening := _opening_fence(content)) is not None:

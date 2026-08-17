@@ -154,6 +154,20 @@ def test_setext_looking_content_inside_a_container_fence_is_inert(tmp_path: Path
     assert discover_concept_shells(tmp_path).names() == ("concept-code",)
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        "# Demo\n\n\t### Tab-indented heading\n",
+        "# Demo\n\n- Item\n  \t### Tab-indented continuation\n",
+    ],
+)
+def test_leading_tab_indentation_fails_closed(tmp_path: Path, body: str) -> None:
+    _shell(tmp_path, "guide-content/tabs.md", body=body)
+
+    with pytest.raises(GuideContentError):
+        discover_concept_shells(tmp_path)
+
+
 def test_repository_catalog_contains_every_fixed_destination() -> None:
     from agentworks.guide.trail_sign import TRAIL_DESTINATIONS
 
