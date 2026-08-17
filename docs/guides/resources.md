@@ -474,6 +474,11 @@ remains Grok's responsibility: use its browser login, `grok login --device-auth`
 or an `XAI_API_KEY` supplied through the session environment. The plugin's installer uses xAI's
 official stable-channel installer and adds `~/.grok/bin` to the target user's PATH.
 
+Grok Build 1.0.4 rejects repeated managed flags, so `extra_args` adds unmodeled flags rather than
+overriding a modeled field. It also fails startup for an unknown sandbox profile instead of silently
+falling back. That release exposes no startup title flag, so Agentworks does not assign a title in
+Grok's own session picker.
+
 `shell` is the built-in default integration; `claude-code`, `codex`, and `grok-build` ship as the
 opt-in `claude`, `codex`, and `grok` system plugins. None of them is the whole set the platform is
 built around. The `harness-integration` kind is extensible: another harness or shell runtime,

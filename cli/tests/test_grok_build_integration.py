@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shlex
 import subprocess
+import uuid
 from typing import TYPE_CHECKING
 
 import pytest
@@ -191,6 +192,14 @@ def test_first_start_mints_and_records_a_uuid() -> None:
     assert sid in command
 
 
+def test_wrong_typed_session_id_is_replaced_with_a_canonical_uuid() -> None:
+    state: dict[str, object] = {"session_id": 7}
+    _integration(state=state).start(_op_ctx(_FakeTarget({"summary.json": _FakeResult(1)})))
+    sid = state["session_id"]
+    assert isinstance(sid, str)
+    assert str(uuid.UUID(sid)) == sid
+
+
 def test_existing_session_id_is_reused_verbatim() -> None:
     state: dict[str, object] = {"session_id": _SID}
     command = _integration(state=state).resume(_op_ctx(_FakeTarget({"summary.json": _FakeResult(0)})))
@@ -198,10 +207,11 @@ def test_existing_session_id_is_reused_verbatim() -> None:
     assert state == {"session_id": _SID}
 
 
-def test_invalid_persisted_session_id_is_rejected_before_probe() -> None:
+@pytest.mark.parametrize("sid", ["not-a-uuid", _SID.replace("-", ""), f"{{{_SID}}}"])
+def test_invalid_persisted_session_id_is_rejected_before_probe(sid: str) -> None:
     target = _FakeTarget({"summary.json": _FakeResult(0)})
     with pytest.raises(StateError) as exc:
-        _integration(state={"session_id": "not-a-uuid"}).resume(_op_ctx(target))
+        _integration(state={"session_id": sid}).resume(_op_ctx(target))
     assert exc.value.entity_name == "s1"
     assert target.commands == []
 
@@ -263,14 +273,19 @@ def test_managed_fields_map_to_canonical_flags() -> None:
     ]
 
 
+def test_empty_config_emits_only_the_fresh_session_identity() -> None:
+    command = _integration().start(_op_ctx(_FakeTarget({"summary.json": _FakeResult(1)})))
+    assert _grok_argv(command) == ["--session-id", _SID]
+
+
 def test_extra_args_are_quoted_and_appended_last() -> None:
     payload = "a'; touch /tmp/pwned #"
-    command = _integration({"model": "managed", "extra_args": ["--model", "operator", "--rules", payload]}).start(
+    command = _integration({"model": "managed", "extra_args": ["--rules", payload]}).start(
         _op_ctx(_FakeTarget({"summary.json": _FakeResult(1)}))
     )
     argv = _grok_argv(command)
-    assert argv[-4:] == ["--model", "operator", "--rules", payload]
-    assert argv.index("managed") < argv.index("operator")
+    assert argv[-2:] == ["--rules", payload]
+    assert argv.index("managed") < argv.index("--rules")
     assert "touch" not in shlex.split(shlex.split(command)[2])
 
 

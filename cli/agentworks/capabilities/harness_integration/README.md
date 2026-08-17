@@ -341,12 +341,12 @@ namespace as `self._state` (the same object, so in-place mutation keeps the full
 integration never sees another integration's keys, so if a session's template is re-pointed from one
 integration to another, cross-integration key collisions are structurally impossible and the old
 integration's namespace survives a switch away and back. Author an integration against `self._state`
-alone. Treat wrong-typed values according to the integration's compatibility contract, and validate
-well-typed content before use when its format is Agentworks-owned, since the blob is only as
-trustworthy as the DB it came from. Pre-namespacing rows carried `claude-code`'s `session_id` at the
-blob's top level; a legacy hoist (`HarnessIntegration.hoist_legacy_state`, overridden by
-`claude-code`) adopts those at the seam and is compatibility code slated for DELETION on the next
-major release.
+alone. Treat wrong-typed values as absent (as `claude-code` and `grok-build` do), since the blob
+content is only as trustworthy as the DB it came from. If a well-typed value has Agentworks-owned
+syntax, validate it before use; `grok-build`, for example, rejects a non-canonical UUID string.
+Pre-namespacing rows carried `claude-code`'s `session_id` at the blob's top level; a legacy hoist
+(`HarnessIntegration.hoist_legacy_state`, overridden by `claude-code`) adopts those at the seam and
+is compatibility code slated for DELETION on the next major release.
 
 ### How the Session Machinery Consumes a Harness Integration
 
@@ -442,10 +442,12 @@ sessions. Five rules, each earned:
   (`permission_mode`, `model`, `reasoning_effort`, `remote_control`, `vim_mode`, `terminal_bell`)
   plus a verbatim, appended-last `extra_args` list keeps the integration useful without chasing the
   tool's whole flag surface. Session-local tool settings share one generated `--settings` JSON
-  argument. Append `extra_args` after the managed flags so operators can override them or add
-  unmodeled ones. Claude treats repeated `--settings` flags as last-wins, so a raw one replaces the
-  generated session settings rather than extending them. Keep tool-owned choice fields open strings
-  rather than duplicating a fast-moving upstream vocabulary.
+  argument. Append `extra_args` after the managed flags for deterministic ordering, but let the
+  upstream tool define repeated-flag behavior. Claude treats repeated `--settings` flags as
+  last-wins, so a raw one replaces the generated session settings rather than extending them; Grok
+  Build 1.0.4 rejects a repeated managed flag, so its escape hatch adds unmodeled flags instead.
+  Keep tool-owned choice fields open strings rather than duplicating a fast-moving upstream
+  vocabulary.
 - **Use Grok's explicit conversation UUID on both branches.** Mint it once into the integration's
   state namespace, launch fresh with `--session-id`, and resume with `--resume` only when Grok's
   persisted `summary.json` exists. The summary file is Grok's own resume boundary; a bare UUID

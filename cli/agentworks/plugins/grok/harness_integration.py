@@ -43,21 +43,32 @@ class GrokBuildConfig(AgwModel):
     """The harness integration this config is for."""
 
     permission_mode: str | None = None
-    """Forwarded as ``--permission-mode``."""
+    """Forwarded as ``--permission-mode``. A child template's declared
+    value replaces its parent's."""
 
     model: str | None = None
-    """Forwarded as ``--model``."""
+    """Forwarded as ``--model``. A child template's declared value replaces
+    its parent's."""
 
     reasoning_effort: str | None = None
-    """Forwarded as ``--reasoning-effort``."""
+    """Forwarded as ``--reasoning-effort``. A child template's declared
+    value replaces its parent's."""
 
     sandbox: str | None = None
-    """Forwarded as ``--sandbox``."""
+    """Forwarded as ``--sandbox``. Grok Build 1.0.4 fails startup for an
+    unknown profile rather than falling back. A child template's declared
+    value replaces its parent's."""
 
     extra_args: list[str] = Field(default_factory=list)
-    """Raw argv tokens appended verbatim after every managed flag."""
+    """Raw argv tokens appended verbatim after every managed flag. Grok
+    Build 1.0.4 rejects repeated managed flags, so use this for unmodeled flags
+    rather than overriding a modeled field. A child template's declared list
+    replaces its parent's instead of accumulating."""
 
 
+# Grok Build 1.0.4 resolves its user-state root through the official
+# ``xai-grok-home`` crate: a non-empty ``GROK_HOME`` verbatim, otherwise
+# ``$HOME/.grok``. Sessions are stored below that same root.
 _SESSIONS_DIR = "${GROK_HOME:-$HOME/.grok}/sessions"
 
 
@@ -135,10 +146,12 @@ class GrokBuildIntegration(HarnessIntegration):
             self._state["session_id"] = sid
             return sid
         try:
-            uuid.UUID(sid)
+            canonical_sid = str(uuid.UUID(sid))
         except ValueError:
+            canonical_sid = None
+        if canonical_sid != sid:
             raise StateError(
-                f"session '{self._session_name}': stored Grok Build session id is not a valid UUID.",
+                f"session '{self._session_name}': stored Grok Build session id is not a canonical UUID.",
                 entity_kind="session",
                 entity_name=self._session_name,
                 hint="Repair or recreate the session before starting Grok Build again.",
