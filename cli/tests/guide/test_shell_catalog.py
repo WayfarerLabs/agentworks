@@ -50,6 +50,16 @@ def test_discovery_order_is_package_path_order(tmp_path: Path) -> None:
         ("guide-content/bad.md", "---\ndescription: Bad.\n---\nTitle\n=====\n"),
         ("guide-content/bad.md", "---\ndescription: Bad.\n---\n# One\n# Two\n"),
         ("guide-content/bad.md", "---\ndescription: Bad.\n---\n# One\n<!-- agw:agent-only -->\n"),
+        ("guide-content/bad.md", "---\ndescription: Bad.\n---\n# One\n<!-- agw:unknown -->\n"),
+        (
+            "guide-content/bad.md",
+            '---\ndescription: Bad.\n---\n# One\n<!-- agw:include path="../bad.md" heading="Bad" -->\n',
+        ),
+        (
+            "guide-content/bad.md",
+            "---\ndescription: Bad.\n---\n# One\n"
+            '<!-- agw:include path="source.md" heading="Bad" heading-offset="١" -->\n',
+        ),
     ],
 )
 def test_malformed_shells_fail_the_catalog(tmp_path: Path, relative: str, text: str) -> None:
@@ -67,6 +77,12 @@ def test_duplicate_global_slug_fails_instead_of_shadowing(tmp_path: Path) -> Non
 
     with pytest.raises(GuideContentError):
         discover_concept_shells(tmp_path)
+
+
+def test_directive_looking_text_inside_code_fences_is_inert(tmp_path: Path) -> None:
+    _shell(tmp_path, "guide-content/code.md", body="# Code\n\n```markdown\n<!-- agw:unknown -->\n```\n")
+
+    assert discover_concept_shells(tmp_path).names() == ("concept-code",)
 
 
 def test_repository_catalog_contains_every_fixed_destination() -> None:

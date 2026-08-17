@@ -15,6 +15,7 @@ from agentworks.guide.contract import (
     GuideSource,
     shell_slug,
 )
+from agentworks.guide.directives import AGENT_CLOSE, AGENT_OPEN, directive_body, parse_include_directive
 
 if TYPE_CHECKING:
     from importlib.resources.abc import Traversable
@@ -22,8 +23,6 @@ if TYPE_CHECKING:
 _FRONTMATTER_RE = re.compile(r"\A---\ndescription:[ \t]+([^\n]+)\n---\n(?P<body>.*)\Z", re.DOTALL)
 _ATX_RE = re.compile(r"^[ ]{0,3}(#{1,6})(?:[ \t]+|$)(.*?)(?:[ \t]+#+[ \t]*)?$")
 _SETEXT_RE = re.compile(r"^[ ]{0,3}(?:=+|-+)[ \t]*$")
-_AGENT_OPEN = "<!-- agw:agent-only -->"
-_AGENT_CLOSE = "<!-- /agw:agent-only -->"
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,16 +80,20 @@ def _structural_shell(body: str, package_path: str) -> str:
             previous_plain = False
             continue
         stripped = line.strip()
-        if stripped == _AGENT_OPEN:
+        if stripped == AGENT_OPEN:
             if agent_only:
                 raise GuideContentError(f"guide shell {package_path!r} nests an agent-only fence")
             agent_only = True
             previous_plain = False
             continue
-        if stripped == _AGENT_CLOSE:
+        if stripped == AGENT_CLOSE:
             if not agent_only:
                 raise GuideContentError(f"guide shell {package_path!r} closes an unopened agent-only fence")
             agent_only = False
+            previous_plain = False
+            continue
+        if (directive := directive_body(line)) is not None:
+            parse_include_directive(directive, package_path)
             previous_plain = False
             continue
         if previous_plain and _SETEXT_RE.fullmatch(line):

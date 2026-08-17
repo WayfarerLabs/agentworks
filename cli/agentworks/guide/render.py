@@ -10,6 +10,13 @@ from urllib.parse import quote, urlsplit
 
 from agentworks.guide.agent_mode import GuideMode
 from agentworks.guide.contract import MAX_GUIDE_MARKDOWN_BYTES, ConceptShell, GuideContentError, GuideSource
+from agentworks.guide.directives import (
+    AGENT_CLOSE,
+    AGENT_OPEN,
+    bounded_include_path,
+    directive_body,
+    parse_include_directive,
+)
 from agentworks.release_notes import ReleaseNotesError, escape_release_evidence, read_release_history
 from agentworks.terminal import sanitize_terminal_output
 
@@ -17,10 +24,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from importlib.resources.abc import Traversable
 
-_AGENT_OPEN = "<!-- agw:agent-only -->"
-_AGENT_CLOSE = "<!-- /agw:agent-only -->"
-_DIRECTIVE_RE = re.compile(r"^[ \t]*<!--\s*(?P<body>/?agw:[\s\S]*?)\s*-->[ \t]*$")
-_ATTRIBUTE_RE = re.compile(r'(?:^|[ \t]+)([a-z][a-z-]*)="([^"\n]*)"')
 _ATX_RE = re.compile(r"^([ ]{0,3})(#{1,6})(?:[ \t]+|$)(.*?)([ \t]+#+[ \t]*)?$")
 _SETEXT_RE = re.compile(r"^[ ]{0,3}(?:=+|-+)[ \t]*$")
 _REFERENCE_DEF_RE = re.compile(
@@ -35,7 +38,6 @@ _INLINE_LINK_RE = re.compile(
 )
 _REFERENCE_USE_RE = re.compile(r"(?P<image>!)?\[(?P<text>[^\]\n]+)\](?:\[(?P<label>[^\]\n]*)\])?")
 _SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
-_INCLUDE_NAME = "agw:include"
 _README_RESOURCE = "_guide_sources/README.md"
 _GITHUB_BLOB = "https://github.com/WayfarerLabs/agentworks/blob/main/"
 _GITHUB_RAW = "https://raw.githubusercontent.com/WayfarerLabs/agentworks/main/"
@@ -76,57 +78,15 @@ def filter_agent_only(markdown: str, mode: GuideMode) -> str:
     rendered: list[str] = []
     for line, is_outside in zip(lines, outside, strict=True):
         stripped = line.strip()
-        if is_outside and stripped == _AGENT_OPEN:
+        if is_outside and stripped == AGENT_OPEN:
             hidden = True
             continue
-        if is_outside and stripped == _AGENT_CLOSE:
+        if is_outside and stripped == AGENT_CLOSE:
             hidden = False
             continue
         if mode is GuideMode.AGENT or not hidden:
             rendered.append(line)
     return "".join(rendered)
-
-
-def _parse_include(body: str, source: str) -> tuple[str, str, int]:
-    if not body.startswith(_INCLUDE_NAME):
-        raise GuideContentError(f"guide shell {source!r} contains unknown directive {body!r}")
-    attributes_text = body[len(_INCLUDE_NAME) :]
-    attributes: dict[str, str] = {}
-    cursor = 0
-    for match in _ATTRIBUTE_RE.finditer(attributes_text):
-        if attributes_text[cursor : match.start()].strip():
-            raise GuideContentError(f"guide shell {source!r} contains a malformed include directive")
-        key, value = match.groups()
-        if key in attributes:
-            raise GuideContentError(f"guide shell {source!r} repeats include attribute {key!r}")
-        attributes[key] = value
-        cursor = match.end()
-    if attributes_text[cursor:].strip():
-        raise GuideContentError(f"guide shell {source!r} contains a malformed include directive")
-    unknown = set(attributes) - {"path", "heading", "heading-offset"}
-    if unknown:
-        raise GuideContentError(f"guide shell {source!r} has unknown include attribute {sorted(unknown)[0]!r}")
-    missing = {"path", "heading"} - set(attributes)
-    if missing:
-        raise GuideContentError(f"guide shell {source!r} is missing include attribute {sorted(missing)[0]!r}")
-    try:
-        offset = int(attributes.get("heading-offset", "0"))
-    except ValueError:
-        raise GuideContentError(f"guide shell {source!r} has a non-integer heading offset") from None
-    return attributes["path"], attributes["heading"], offset
-
-
-def _bounded_include_path(value: str) -> tuple[str, ...]:
-    path = PurePosixPath(value)
-    if (
-        not value
-        or value.startswith("/")
-        or not value.endswith(".md")
-        or "\\" in value
-        or any(part in {"", ".", ".."} for part in path.parts)
-    ):
-        raise GuideContentError(f"guide include path {value!r} is not a bounded package Markdown path")
-    return path.parts
 
 
 def _verified_root_readme() -> Path | None:
@@ -157,7 +117,7 @@ def _read_bytes(resource: Traversable, path: str) -> bytes:
 
 
 def _load_include(path: str, package_root: Traversable | None) -> GuideSource:
-    parts = _bounded_include_path(path)
+    parts = bounded_include_path(path)
     root = files("agentworks") if package_root is None else package_root
     resource = root.joinpath(*parts)
     data = _read_bytes(resource, path)
@@ -170,7 +130,7 @@ def _load_include(path: str, package_root: Traversable | None) -> GuideSource:
 
 
 def _heading_text(match: re.Match[str]) -> str:
-    return match.group(3).strip().removesuffix("#").rstrip()
+    return match.group(3).strip()
 
 
 def _extract_section(source: GuideSource, heading: str, offset: int) -> str:
@@ -387,11 +347,11 @@ def render_shell(shell: ConceptShell, mode: GuideMode, *, package_root: Traversa
     includes: list[str] = []
     prepared: list[str] = []
     for line, is_outside in zip(lines, outside, strict=True):
-        directive = _DIRECTIVE_RE.fullmatch(line.rstrip("\n")) if is_outside else None
+        directive = directive_body(line.rstrip("\n")) if is_outside else None
         if directive is None:
             prepared.append(line)
             continue
-        path, heading, offset = _parse_include(directive.group("body"), shell.source.package_path)
+        path, heading, offset = parse_include_directive(directive, shell.source.package_path)
         include_source = _load_include(path, package_root)
         section = _extract_section(include_source, heading, offset)
         includes.append(rewrite_relative_destinations(section, include_source).rstrip("\n"))

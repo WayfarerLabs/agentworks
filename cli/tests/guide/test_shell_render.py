@@ -69,6 +69,17 @@ def test_invalid_selected_sections_fail_structurally(tmp_path: Path, included: s
         render_shell(topic, GuideMode.HUMAN, package_root=tmp_path)
 
 
+def test_heading_match_preserves_a_nonclosing_trailing_hash(tmp_path: Path) -> None:
+    path = tmp_path / "source.md"
+    path.write_text("## C#\n\nSelected.\n\n## Next\n", encoding="utf-8")
+    topic = _topic('# Demo\n<!-- agw:include path="source.md" heading="C#" -->\n')
+
+    rendered = render_shell(topic, GuideMode.HUMAN, package_root=tmp_path)
+
+    assert "## C#" in rendered
+    assert "## Next" not in rendered
+
+
 def test_inline_and_reference_destinations_use_source_aware_canonical_urls() -> None:
     source = GuideSource(
         "area/guide-content/demo.md",
