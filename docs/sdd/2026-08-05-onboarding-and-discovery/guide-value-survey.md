@@ -7,6 +7,11 @@ Status: reviewed survey with operator disposition, 2026-08-15. Implementation re
 > machinery selected for deletion are intentionally historical. The retained surface is authored
 > concept, plugin, and release topics plus the direct onboarding assessment projector.
 
+**Phase 4 correction note (PR #579):** The `agent-contract` Keep rows below remain the historical
+disposition at the surveyed commit. The corrected guide model later removed required per-topic
+contracts, consolidated generally useful guidance into ordinary shared topics, and retained only
+optional topic-local agent notes where useful.
+
 ## Result
 
 At commit `b3330b1f`, the guide has 200 fixed block instances plus four blocks repeated for every

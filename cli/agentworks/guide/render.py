@@ -19,6 +19,7 @@ from agentworks.guide.contract import (
     TopicContribution,
     TopicLinks,
 )
+from agentworks.guide.trail_sign import TRAIL_DESTINATIONS
 from agentworks.release_notes import (
     RELEASE_TOPIC,
     ReleaseNotesError,
@@ -64,10 +65,7 @@ def framework_heading(title: str) -> str:
 
 def render_trail_sign(mode: GuideMode) -> str:
     """Render the catalog-free no-topic destination sign."""
-    from agentworks.guide.trail_sign import trail_destinations
-
-    destinations = trail_destinations()
-    rows = "\n".join(f"- {destination.intent}: `{destination.slug}`." for destination in destinations)
+    rows = "\n".join(f"- {destination.intent}: `{destination.slug}`." for destination in TRAIL_DESTINATIONS)
     if mode is GuideMode.AGENT:
         intro = (
             "Start with `concept-assistant-agent`, then choose the destination that matches the operator's "

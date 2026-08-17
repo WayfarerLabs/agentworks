@@ -13,7 +13,7 @@ class TrailDestination:
     intent: str
 
 
-TRAIL_DESTINATIONS = (
+TRAIL_DESTINATIONS: tuple[TrailDestination, ...] = (
     TrailDestination(TopicSlug("concept-assistant-agent"), "Working with an Agentworks assistant agent"),
     TrailDestination(TopicSlug("concept-onboarding"), "First setup or current adoption"),
     TrailDestination(TopicSlug("concept-management"), "Configuration and ongoing operation"),
@@ -23,8 +23,3 @@ TRAIL_DESTINATIONS = (
     TrailDestination(TopicSlug("concept-secrets"), "Secret handling"),
     TrailDestination(TopicSlug("concept-reporting-bugs"), "Product defect reporting"),
 )
-
-
-def trail_destinations() -> tuple[TrailDestination, ...]:
-    """Return the fixed destinations shared by every presentation mode."""
-    return TRAIL_DESTINATIONS

@@ -507,9 +507,10 @@ operator ruling without changing this completed phase's record.
 - [x] Update permanent guide documentation and command signposts for the temporary unreleased state.
       Record that completions and sample configuration are either updated or unaffected. The CLI
       grammar child restores `resource explain` and `graph show`; 0.14.0 must not ship before it.
-- [ ] Run focused guide/completion tests, the full non-integration suite, Ruff, formatting, mypy,
+- [x] Run focused guide/completion tests, the full non-integration suite, Ruff, formatting, mypy,
       Rulesync drift, locked-SDD, and file lint. Complete the required project and integration
-      review on one ready deletion PR.
+      review on one ready deletion PR. PR #556 completed this gate; the saga ledger records its
+      merge and exact-wheel acceptance.
 
 Definition of done: one guide surface remains for concepts, workflow synthesis, navigation,
 evidence, bounded actions, and the onboarding assessment; command-owned raw fact presentation and
@@ -550,6 +551,11 @@ Definition of done: humans and assistant agents can reach the same useful inform
 agent-specific guidance has one obvious home plus rare local notes; the bootstrap only installs and
 hands off; no new router, hint framework, state machine, or prose-policing tests exist; and the
 result is materially smaller than the superseded model.
+
+Historical correction for the completed record above: the corrected model consolidated concise
+general assistance posture but intentionally dropped the former repeated startup disclosure; it did
+not delete authored-prompt semantic or wording tests, and instead made retained projection-version
+assertions derive from canonical metadata.
 
 ## Phase 5: representative acceptance and closeout
 

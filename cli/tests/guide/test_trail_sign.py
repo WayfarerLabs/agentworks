@@ -15,7 +15,7 @@ from agentworks.guide import (
 from agentworks.guide.assessment import VerificationOutcome
 from agentworks.guide.contract import ActionId
 from agentworks.guide.service import _EmptyInventory, render_guide
-from agentworks.guide.trail_sign import TRAIL_DESTINATIONS, trail_destinations
+from agentworks.guide.trail_sign import TRAIL_DESTINATIONS
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -55,7 +55,7 @@ def test_no_topic_trail_sign_bypasses_catalogs_and_live_context(
         "concept-reporting-bugs",
     )
     assert response.exit_code == 0
-    assert tuple(str(destination.slug) for destination in trail_destinations()) == expected
+    assert tuple(str(destination.slug) for destination in TRAIL_DESTINATIONS) == expected
     for slug in expected:
         assert f"`{slug}`" in response.markdown
 
