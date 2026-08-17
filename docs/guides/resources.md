@@ -349,7 +349,7 @@ spec:
   harness_integration:
     name: claude-code
     permission_mode: acceptEdits
-    remote_control: true
+    vim_mode: true
 ```
 
 - Its config is all optional, and every field is documented by

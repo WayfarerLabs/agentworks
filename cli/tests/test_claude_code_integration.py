@@ -379,6 +379,23 @@ def test_extra_args_appended_verbatim_last_and_quoted() -> None:
     assert command.index("--settings") < command.index("--foo")
 
 
+def test_raw_settings_in_extra_args_follow_generated_settings() -> None:
+    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
+    raw_settings = '{"editorMode":"normal"}'
+    argv = _claude_argv(
+        _harness_integration(
+            {
+                "vim_mode": True,
+                "extra_args": ["--settings", raw_settings],
+            }
+        ).start(_op_ctx(target))
+    )
+    settings_indexes = [index for index, token in enumerate(argv) if token == "--settings"]
+    assert len(settings_indexes) == 2
+    assert json.loads(argv[settings_indexes[0] + 1]) == {"editorMode": "vim"}
+    assert argv[settings_indexes[1] + 1] == raw_settings
+
+
 def test_extra_args_with_shell_metacharacters_cannot_inject() -> None:
     """``extra_args`` is operator-supplied and NOT name-validated (unlike
     ``session_name``), so an adversarial value with quotes/metacharacters

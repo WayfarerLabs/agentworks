@@ -60,22 +60,27 @@ class ClaudeCodeConfig(AgwModel):
 
     remote_control: bool = False
     """When true, enable Claude Code Remote Control and use the Agentworks
-    session name as its title. False (the default) adds no override. A child
-    template's value replaces its parent's."""
+    session name as its title. Remote Control requires a Claude subscription
+    login, does not support API-key authentication, and may require
+    organization-level enablement. False (the default) adds no override. A
+    child template's value replaces its parent's."""
 
     vim_mode: bool = False
     """When true, enable Vim-style prompt editing through a session-local
-    Claude setting. False (the default) adds no override. A child template's
-    value replaces its parent's."""
+    Claude setting. A raw ``--settings`` in ``extra_args`` comes later and
+    replaces this generated setting. False (the default) adds no override. A
+    child template's value replaces its parent's."""
 
     terminal_bell: bool = False
     """When true, ask Claude Code to ring the terminal bell when a task
-    finishes or needs permission. False (the default) adds no override. A
-    child template's value replaces its parent's."""
+    finishes or needs permission. A raw ``--settings`` in ``extra_args`` comes
+    later and replaces this generated setting. False (the default) adds no
+    override. A child template's value replaces its parent's."""
 
     extra_args: list[str] = Field(default_factory=list)
     """Appended to the command verbatim, last, so it can carry any flag
-    this integration does not model."""
+    this integration does not model. Claude uses the last ``--settings``
+    occurrence, so a raw one here replaces all generated session settings."""
 
 
 # The transcript's config root. ``CLAUDE_CONFIG_DIR`` is the CLI's own

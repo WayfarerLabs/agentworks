@@ -432,7 +432,9 @@ resumable sessions. Five rules, each earned:
   (`permission_mode`, `model`, `remote_control`, `vim_mode`, `terminal_bell`) plus a verbatim,
   appended-last `extra_args` list keeps the integration useful without chasing the tool's whole flag
   surface. Session-local tool settings share one generated `--settings` JSON argument. Append
-  `extra_args` after the managed flags so operators can override or extend.
+  `extra_args` after the managed flags so operators can override them or add unmodeled ones. Claude
+  treats repeated `--settings` flags as last-wins, so a raw one replaces the generated session
+  settings rather than extending them.
 
 #### Integration-Owned Files on the Launch Target
 
