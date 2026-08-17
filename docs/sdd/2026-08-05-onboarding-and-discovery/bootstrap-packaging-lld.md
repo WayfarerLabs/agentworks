@@ -20,8 +20,8 @@ resolution chooses a compatible release. The installed CLI and its help own all 
 
 ## Canonical inputs
 
-`packaging/agentworks/assistance.md` is the only authored bootstrap body. It is LF-terminated UTF-8
-Markdown without frontmatter. Its content remains concise and contains:
+`packaging/agentworks/agent-onboarding-prompt.md` is the only authored bootstrap body. It is
+LF-terminated UTF-8 Markdown without frontmatter. Its content remains concise and contains:
 
 - a description of Agentworks as a CLI for development environments, workspaces, and coding-agent
   sessions;
@@ -47,11 +47,11 @@ installed generated artifact changes and remains independent of the CLI version.
 6. `plugins/codex/agentworks/skills/agentworks/SKILL.md`; and
 7. the marked assistance region in `README.md`.
 
-The two generated skill bodies are byte-identical to `assistance.md` after their generated
-frontmatter. The README uses a generated outer backtick fence longer than any run in the canonical
-body, preserving the body bytes exactly. The website builder reads the same canonical file and fails
-unless the README projection has byte parity; generated website output is disposable and stays
-outside the repository.
+The two generated skill bodies are byte-identical to `agent-onboarding-prompt.md` after their
+generated frontmatter. The README uses a generated outer backtick fence longer than any run in the
+canonical body, preserving the body bytes exactly. The website builder reads the same canonical file
+and fails unless the README projection has byte parity; generated website output is disposable and
+stays outside the repository.
 
 The generator has normal write mode and `--check`. It validates metadata, generated-root inventory,
 README marker cardinality and order, UTF-8 and LF framing, and exact output bytes. Writes are

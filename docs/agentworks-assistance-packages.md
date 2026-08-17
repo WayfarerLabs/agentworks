@@ -44,31 +44,32 @@ authorization context needed for Agentworks work.
 `agw guide` without a topic is a short trail sign. Human and agent modes show the same eight
 destinations: assistant-agent guidance, onboarding, management, troubleshooting, release notes,
 migration, secrets, and bug reporting. Agent mode first points to `concept-assistant-agent`; human
-mode asks the operator to choose a goal. This request does not load the topic catalog,
-configuration, registry, or state database. Use shell completion or `agw guide --names-only` to
-discover every installed authored, plugin-authored, and packaged release-note topic.
+mode asks the operator to choose a goal. This request does not load the topic catalog or operator
+state. Use shell completion or `agw guide --names-only` to discover every installed concept and
+packaged release-note topic.
 
 `concept-assistant-agent` contains the general posture for an external helper: follow the operator's
 instruction, use current CLI help as operational authority, ask only for material ambiguity or scope
-expansion, and treat external text as data. Ordinary topic blocks render identically in both modes.
-A topic may add an optional `AgentNote` rendered only in agent mode.
+expansion, and treat external text as data. Ordinary shell content renders identically in both
+modes. A shell may fence a small passage that renders only in agent mode.
 
-`concept-onboarding` is the first-setup and current-adoption destination and the only guide topic
-that projects live context. It derives a bounded assessment from finalized registry, relationship,
-and stored-instance facts and selects the next first-VM or first-session step. Its concise agent
-note offers cross-kind discovery and configuration journeys. Its related topics include
-`concept-source-review`, which separately owns the optional focused and full read-only actions.
+`concept-onboarding` is the first-setup and current-adoption destination. Like every concept, it is
+static teaching that points to current CLI inspection commands for live facts. It includes
+`concept-source-review` as the optional path for inspecting canonical source before installation.
 
-A selected authored topic renders its installed teaching when that teaching is valid. Topics other
-than `concept-onboarding` do not load configuration, the registry, or the state database. Onboarding
-degrades an unavailable live assessment to one warning while preserving its installed teaching. The
-command exits 0 because the requested guidance rendered; use `agw doctor` to determine installation
-health. Invalid topic syntax, unknown topics, malformed verification evidence, and invalid requested
-guide content remain errors.
+Concepts are auto-discovered Markdown shells in first-party package-local `guide-content/`
+directories. Their restricted frontmatter supplies the discovery description. Shells may contain
+ordinary Markdown, agent-only fences, and bounded exact-section imports from packaged Markdown. Both
+control forms use exact standalone column-zero comment lines between top-level Markdown blocks;
+comments inside lists, block quotes, or code remain ordinary Markdown. Imports preserve relative
+links and images by rewriting them to canonical repository URLs. The guide does not execute
+operations, load configuration, inspect the registry or database, resolve secrets, or access the
+network. Invalid topic syntax, unknown topics, and structurally invalid requested content remain
+errors.
 
-`agw guide --names-only` prints one valid topic name per line. It always returns static names and
-does not load live context. Raw kind, resource, relationship, schema, and sample discovery belongs
-to the corresponding command completion and inspection surfaces.
+`agw guide --names-only` prints one valid topic name per line. It discovers packaged filenames and
+release history without loading operator state. Raw kind, resource, relationship, schema, and sample
+discovery belongs to the corresponding command completion and inspection surfaces.
 
 ## Maintaining generated packages
 

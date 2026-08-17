@@ -65,6 +65,8 @@ exclude = ["**/guide-content/.markdownlint.jsonc"]
 [tool.hatch.build.targets.wheel.force-include]
 "CHANGELOG.md" = "agentworks/CHANGELOG.md"
 
+[tool.hatch.build.hooks.custom]
+
 [tool.ruff]
 target-version = "py312"
 line-length = 120

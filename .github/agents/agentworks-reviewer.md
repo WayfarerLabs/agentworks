@@ -432,27 +432,27 @@ Look for:
   README, sample config, generator-script headers, or doctor health-check messages.
 - ADRs or SDDs that have been superseded but not marked as such.
 
-#### Guide contribution drift and safety
+#### Guide shell drift and safety
 
-Changes to a retained guide concept, workflow, plugin-owned topic, release link, or action must
-update the contribution owned by the relevant core, subsystem, or plugin package. Review the
-implementation and its retained guide teaching together rather than accepting either in isolation.
-The `keep-collateral-in-sync` rule states the standard, including the consent boundary guide content
-must never cross.
+Changes to a retained guide concept, workflow, command signpost, or release link must update the
+Markdown shell owned by the relevant first-party package. Review the implementation and its retained
+guide teaching together rather than accepting either in isolation. The `keep-collateral-in-sync`
+rule states the standard, including the authorization boundary guide content must never cross.
 
 Look for:
 
-- Retained teaching, relationships, examples, and agent contracts that describe behavior which the
-  implementation no longer has.
+- Retained teaching, examples, agent-only context, imports, links, or command signposts that
+  describe behavior which the implementation no longer has.
 - Guide content that restates command-owned resource, schema, graph, or runtime facts instead of
-  signposting their current command, or onboarding projection expanded beyond its bounded assessment
-  facts.
+  signposting their current command.
 - Content or rendering that resolves or exposes secrets, inspects the workstation, connects to a VM,
   performs remote work, mutates state, or treats rendering as operator consent.
-- Suggested operations that cross a consent boundary without an inert scoped action record, an
-  expected result, and a useful refusal alternative.
-- Guide changes without catalog, rendering, and safety-boundary coverage appropriate to the changed
-  contribution.
+- Suggested operations that may fall outside the operator's current instruction without reviewed
+  prose describing scope and impact, expected result, and a useful refusal alternative.
+- Guide rendering that evaluates content or loads configuration, registry, database, resources,
+  secrets, provider state, network, transports, or subprocesses.
+- Guide changes without structural coverage appropriate to the shell grammar, discovery, rendering,
+  packaging, or safety boundary being changed. Prose wording itself is not unit-tested.
 
 ### 12. Pattern consistency
 

@@ -314,24 +314,20 @@ printf '%s\\0' "${{COMPREPLY[@]}}"
             assert "--allow-interaction" in block
             assert "--allow-interactive" not in block
 
-    def test_guide_topic_completion_stream_is_authored_only_and_does_not_load_live_context(self) -> None:
-        from agentworks.guide import GuideMode
-        from agentworks.guide.service import build_authored_catalog, render_guide
+    def test_guide_topic_completion_stream_uses_the_package_catalog(self) -> None:
+        from agentworks.guide import GuideMode, discover_concept_shells
+        from agentworks.guide.service import render_guide
+        from agentworks.release_notes import read_release_history
 
-        def forbidden(*args: object) -> object:
-            raise AssertionError("guide topic completion loaded live context")
-
-        response = render_guide(
-            (),
-            GuideMode.AGENT,
-            names_only=True,
-            load_config_fn=forbidden,  # type: ignore[arg-type]
-            load_registry_fn=forbidden,  # type: ignore[arg-type]
+        response = render_guide((), GuideMode.AGENT, names_only=True)
+        expected = sorted(
+            (
+                *discover_concept_shells().names(),
+                *(section.topic for section in read_release_history().sections),
+            )
         )
 
-        assert response.exit_code == 0
-        assert tuple(response.markdown.splitlines()) == build_authored_catalog().names()
-        assert "vm-template" not in response.markdown.splitlines()
+        assert response.markdown.splitlines() == expected
 
 
 class TestOptionFlagsInSpec:

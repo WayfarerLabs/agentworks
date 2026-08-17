@@ -575,16 +575,16 @@ removed both live projections and their degradation subsystem. The final shell g
 agent-only fences and bounded section includes. It also names `concept-core-model` as the consumer
 of selected canonical root-README sections and their repository-relative images.
 
-- [ ] Before implementation, have the saga lead record the operator's 2026-08-17 Markdown-shell
+- [x] Before implementation, have the saga lead record the operator's 2026-08-17 Markdown-shell
       ruling in the saga-owned target state. This child identifies the conflict but does not edit
       the saga ledger or target artifacts itself.
-- [ ] Implement deterministic concept-shell discovery from the installed first-party package tree.
+- [x] Implement deterministic concept-shell discovery from the installed first-party package tree.
       Replace ordinary per-topic Python registration with one walk beneath the installed first-party
       `agentworks` package for direct Markdown children of `guide-content` directories. Make
       `--names-only` and shell completion consume the same static catalog without live loading, and
       fail clearly on malformed shells or global slug collisions. Keep the fixed no-topic trail sign
       catalog-free.
-- [ ] Implement the closed shell expander: inline Markdown; balanced, non-nested agent-only fences;
+- [x] Implement the closed shell expander: inline Markdown; balanced, non-nested agent-only fences;
       exact unique H2-H6 ATX-heading imports from bounded Markdown beneath the installed
       `agentworks` package; one optional static integer heading offset applied uniformly with H2-H6
       result bounds. Keep the shell's single ATX H1 outside agent-only fences and reject Setext
@@ -595,7 +595,7 @@ of selected canonical root-README sections and their repository-relative images.
       regions before import work, insert imported text inertly without recursive directive
       processing, and add no variables, loops, conditionals, evaluator, arbitrary path support,
       service operation, state loading, general URL resolver, or generic registry.
-- [ ] Add one small Hatch build hook that places the exact canonical root `README.md` at the private
+- [x] Add one small Hatch build hook that places the exact canonical root `README.md` at the private
       packaged guide-source path for a direct wheel and a source distribution, and uses the vendored
       package copy for a wheel built from that source distribution. In editable source execution,
       permit only the same root file behind a verified fixed repository-layout fallback. Add no
@@ -604,7 +604,7 @@ of selected canonical root-README sections and their repository-relative images.
       relative-link fragments before path normalization. Expose no other repository-root include
       source. Add `concept-core-model` as the representative shell and import its real “Architecture
       at a Glance” and “Core Concepts” sections rather than duplicating that prose.
-- [ ] Migrate every retained ordinary core, subsystem, and curated-plugin concept to one shell. Move
+- [x] Migrate every retained ordinary core, subsystem, and curated-plugin concept to one shell. Move
       useful commands, expected outcomes, refusal guidance, and related links into authored
       Markdown. Keep general assistant posture in `concept-assistant-agent`; agent-only fences in
       other shells contain local context only. Make onboarding an ordinary static shell; do not
@@ -612,7 +612,7 @@ of selected canonical root-README sections and their repository-relative images.
       action selector. Retain the base release-notes concept as a shell and keep exact packaged
       version evidence as a direct inert rendering path with no `ReleaseNotes` block or old catalog
       union.
-- [ ] Delete the superseded guide machinery and its dedicated tests in the same wave: typed
+- [x] Delete the superseded guide machinery and its dedicated tests in the same wave: typed
       `Overview`, `Teaching`, `AgentNote`, `ReleaseNotes`, `ActionList`, and `TopicLinks` assembly;
       `GuideAction` and consent records; action parsing, validation, and rendering; `--evidence`
       parsing and replay; onboarding projection and assessment; `Plugin.guide_topics`; subsystem and
@@ -620,7 +620,7 @@ of selected canonical root-README sections and their repository-relative images.
       first-party guide-package map/loader; manual ordinary-topic constructors; and every parser,
       serializer, renderer branch, fixture, and export whose last consumer leaves. Do not recreate
       any removed contract in frontmatter or tests.
-- [ ] Update permanent CLI and contribution documentation, package-data expectations, and
+- [x] Update permanent CLI and contribution documentation, package-data expectations, and
       completions for the shell model and removed `--evidence` option; record sample configuration
       as unaffected unless a real setting changes. Update
       `.rulesync/rules/keep-collateral-in-sync.md`, `.rulesync/subagents/agentworks-reviewer.md`,
@@ -630,7 +630,7 @@ of selected canonical root-README sections and their repository-relative images.
       exists at the implementation base rather than creating a replacement rule. Test discovery,
       structure, filtering, imports, absence of state loading, package inclusion, names-only, and
       completion without asserting authored wording.
-- [ ] Deliver this correction as one stacked feature PR based on the corrected-guide branch, then
+- [x] Deliver this correction as one stacked feature PR based on the corrected-guide branch, then
       target `main` or rebase onto it when the predecessor merges. Run focused guide/completion and
       package tests, the full non-integration suite, Ruff, formatting, mypy, Rulesync drift,
       locked-SDD, and file lint. Complete the required project and fresh-eyes reviews, resolve

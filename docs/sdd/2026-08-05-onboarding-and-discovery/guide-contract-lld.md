@@ -73,9 +73,12 @@ network fetch, or other repository-root include source exists.
 
 ## Directive grammar
 
-Directives are standalone HTML-comment lines outside Markdown code fences. Directive-looking text
-inside a code fence is ordinary authored text. Arguments are double-quoted literals; unknown
-directives, attributes, or trailing content are structural shell defects.
+Directives are exact standalone HTML-comment lines beginning at column zero, outside Markdown code
+fences, and with no leading or trailing whitespace. They may sit between authored top-level Markdown
+blocks or sections. Directive-looking text inside a list or blockquote container, inside a code
+fence, or with surrounding whitespace is ordinary authored text. Arguments are double-quoted
+literals; unknown top-level directives, attributes, or trailing content are structural shell
+defects.
 
 There are no variables, loops, conditions, expressions, generic operation names, recursive includes,
 arbitrary paths, or extension registry. Directive output is inert Markdown and is never processed
@@ -91,10 +94,10 @@ This context is useful only to an Agentworks assistant agent.
 <!-- /agw:agent-only -->
 ```
 
-Fences may appear wherever ordinary Markdown can appear. They must be balanced and cannot nest.
-Human mode removes the markers and everything between them. Agent mode removes only the markers.
-Filtering happens before include resolution, so a human-hidden region cannot read a packaged
-document.
+Fences may appear anywhere between authored top-level Markdown blocks or sections. This does not
+extend into list or blockquote containers. They must be balanced and cannot nest. Human mode removes
+the markers and everything between them. Agent mode removes only the markers. Filtering happens
+before include resolution, so a human-hidden region cannot read a packaged document.
 
 ### Packaged-section include
 
@@ -123,13 +126,13 @@ Included bytes are inert. The expander does not process directives, frontmatter,
 markers found in an included document. Includes cannot recurse.
 
 The expander recognizes Markdown link and image destinations in inline forms and reference
-definitions. Absolute HTTPS and fragment-only destinations pass through unchanged. A relative
-destination is resolved with POSIX path semantics against the repository mapping of the Markdown
-document that contains it. A result outside that mapping, an absolute local path, a scheme-relative
-destination, a query string, or a non-HTTPS scheme is a structural error. An optional fragment is
-split before path normalization and encoding, then reattached unchanged to the canonical URL. Thus
-`cli/command-reference.md#named-consoles` retains `#named-consoles` as a fragment rather than path
-data.
+definitions. Absolute HTTPS, fragment-only, and empty current-document destinations pass through
+unchanged. A relative destination is resolved with POSIX path semantics against the repository
+mapping of the Markdown document that contains it. A result outside that mapping, an absolute local
+path, a scheme-relative destination, a query string, or a non-HTTPS scheme is a structural error. An
+optional fragment is split before path normalization and encoding, then reattached unchanged to the
+canonical URL. Thus `cli/command-reference.md#named-consoles` retains `#named-consoles` as a
+fragment rather than path data.
 
 Valid relative destinations from normal package documents map to:
 
