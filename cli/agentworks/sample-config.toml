@@ -80,7 +80,8 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # apt sources and package sets), `install-command` (optional user install
 # commands), `claude` (the
 # Claude Code harness integration and its `claude` CLI install-command), `codex`
-# (the Codex harness integration and its `codex` CLI install-command), `proxmox`
+# (the Codex harness integration and its `codex` CLI install-command), `grok`
+# (the Grok Build harness integration and its `grok` CLI install-command), `proxmox`
 # (the Proxmox VE VM platform), `azure` (the Azure VM platform, the Azure
 # DevOps git-credential provider, and the `az-cli` install-command), `aws`
 # (the EC2 VM platform), and `gcp`
@@ -93,7 +94,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # a resource is disabled, its standard message names the plugin: add that name
 # here or replace the dependency.
 #[plugins]
-#system = ["apt", "install-command", "onepassword", "claude", "codex", "proxmox", "azure", "aws", "gcp"]   # installed plugins to enable
+#system = ["apt", "install-command", "onepassword", "claude", "codex", "grok", "proxmox", "azure", "aws", "gcp"]   # installed plugins to enable
 
 # --- Default values for CLI flags ---
 

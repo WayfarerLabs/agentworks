@@ -1,0 +1,45 @@
+# The grok system plugin's bundled example session-templates: a small posture
+# ladder using Grok Build's own permission modes. Values remain Grok-owned and
+# forward unvalidated.
+#
+# Use them as-is, inherit from one, or copy one into your own resources. The
+# paired `example-grok` agent-template installs Grok Build; compose the two:
+#   agw session create <name> --template example-grok-default \
+#       --new-agent --agent-template example-grok
+#
+# Like every plugin-bundled resource, they publish present-but-disabled until
+# an operator opts in with `[plugins] system = ["grok"]`.
+#
+# This ladder uses:
+#   default -> Grok's standard permission prompts
+#   auto    -> safe actions may be approved automatically
+#   yolo    -> bypassPermissions, which skips permission prompts
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: example-grok-default
+  description: "Grok Build, default posture: uses Grok's standard permission prompts"
+spec:
+  harness_integration:
+    name: grok-build
+    permission_mode: default
+---
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: example-grok-auto
+  description: "Grok Build, auto posture: safe actions may be approved automatically"
+spec:
+  harness_integration:
+    name: grok-build
+    permission_mode: auto
+---
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: example-grok-yolo
+  description: "Grok Build, yolo posture: skips permission prompts"
+spec:
+  harness_integration:
+    name: grok-build
+    permission_mode: bypassPermissions

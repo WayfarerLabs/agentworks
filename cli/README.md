@@ -418,15 +418,16 @@ VM platform, the `azdo` git-credential provider, and the `az-cli` install-comman
 `proxmox` VM platform), `aws` (the `aws-ec2` VM platform), `gcp` (the `gcp-gce` VM platform and
 optional guest `gcloud-cli` apt package), `onepassword` (the `onepassword` secret backend), `claude`
 (the `claude-code` harness integration and the `claude` CLI install-command), and `codex` (the
-`codex` harness integration and the `codex` CLI install-command). (This is a different sense of
-"plugin" from [Claude Code Plugins](#claude-code-plugins) below, which installs marketplace plugins
-into Claude Code itself.)
+`codex` harness integration and the `codex` CLI install-command), and `grok` (the `grok-build`
+harness integration and the Grok Build CLI install-command). (This is a different sense of "plugin"
+from [Claude Code Plugins](#claude-code-plugins) below, which installs marketplace plugins into
+Claude Code itself.)
 
 Opt in by name in `config.toml`:
 
 ```toml
 [plugins]
-system = ["apt", "install-command", "azure", "aws", "gcp", "proxmox", "onepassword", "claude", "codex"] # only those you use
+system = ["apt", "install-command", "azure", "aws", "gcp", "proxmox", "onepassword", "claude", "codex", "grok"] # only those you use
 ```
 
 A resource that references a not-enabled plugin's contribution (an `azure-vm` vm-site, a

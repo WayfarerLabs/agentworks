@@ -1,0 +1,10 @@
+# Example agent for the bundled Grok Build session templates. Enable the
+# `grok` system plugin, then compose this with one of the example-grok-*
+# session templates to install the CLI for the agent user.
+apiVersion: agentworks/v1
+kind: agent-template
+metadata:
+  name: example-grok
+  description: "Example agent for Grok Build sessions: installs the Grok Build CLI"
+spec:
+  user_install_commands: [grok]

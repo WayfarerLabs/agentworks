@@ -8,8 +8,8 @@ declarable resources bundled as YAML manifests. A plugin is an **origin** (`syst
 fourth alongside `operator-declared`, `built-in`, and `auto-declared`.
 
 The shipped index currently installs `onepassword`, `apt`, `install-command`, `claude`, `proxmox`,
-`azure`, `codex`, `aws`, and `gcp`; all are disabled until named in `[plugins].system`. The index
-remains authoritative, and `agw doctor` renders it directly.
+`azure`, `codex`, `grok`, `aws`, and `gcp`; all are disabled until named in `[plugins].system`. The
+index remains authoritative, and `agw doctor` renders it directly.
 
 This document is for authoring a system plugin. For the operator-facing model (how origins and the
 enablement axis read on the surfaces) see `docs/guides/resources.md`; for the decision record see

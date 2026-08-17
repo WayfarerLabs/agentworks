@@ -1,0 +1,13 @@
+# Grok Build's official user-scoped installer. The script installs the latest
+# stable release under ~/.grok/bin; the manifest PATH entry makes it visible to
+# Agentworks readiness probes and session login shells.
+apiVersion: agentworks/v1
+kind: user-install-command
+metadata:
+  name: grok
+  description: Grok Build CLI
+spec:
+  command: "curl -fsSL https://x.ai/cli/install.sh | bash"
+  path:
+    - ~/.grok/bin
+  test_exec: grok

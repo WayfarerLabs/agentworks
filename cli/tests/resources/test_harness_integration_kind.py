@@ -104,8 +104,8 @@ def test_shell_row_carries_the_builtin_origin(tmp_path: Path) -> None:
 
 
 def test_resource_list_surfaces_the_shell_row(tmp_path: Path) -> None:
-    """``shell`` is the only harness integration listed by default: ``claude-code`` and
-    ``codex`` ship as opt-in system plugins, so their rows are
+    """``shell`` is the only harness integration listed by default: ``claude-code``,
+    ``codex``, and ``grok-build`` ship as opt-in system plugins, so their rows are
     present-but-disabled and hidden from the default list until enabled
     (``--include-disabled`` surfaces them)."""
     cfg = load_config(_write_cfg(tmp_path / "config.toml"), warn_issues=False)
@@ -117,6 +117,7 @@ def test_resource_list_surfaces_the_shell_row(tmp_path: Path) -> None:
     assert [(r.kind, r.name) for r in with_disabled.rows] == [
         ("harness-integration", "claude-code"),
         ("harness-integration", "codex"),
+        ("harness-integration", "grok-build"),
         ("harness-integration", "shell"),
     ]
 

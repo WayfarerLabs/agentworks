@@ -356,6 +356,7 @@ def test_default_config_builds_green_with_zero_enabled_system_plugins(tmp_path: 
         ("vm-platform", "azure-vm"),  # azure plugin
         ("git-credential-provider", "azdo"),  # azure plugin
         ("harness-integration", "codex"),  # codex plugin
+        ("harness-integration", "grok-build"),  # grok plugin
         ("vm-platform", "aws-ec2"),  # aws plugin
         ("vm-platform", "gcp-gce"),  # gcp plugin
     }
@@ -376,7 +377,7 @@ def test_default_config_builds_green_with_zero_enabled_system_plugins(tmp_path: 
 
     # The roster reflects the same: all shipped plugins are present and disabled.
     roster = {c.name: c for c in _check_plugins(config).checks}
-    for plugin_name in ("onepassword", "claude", "proxmox", "azure", "codex", "aws", "gcp"):
+    for plugin_name in ("onepassword", "claude", "proxmox", "azure", "codex", "grok", "aws", "gcp"):
         assert plugin_name in SYSTEM_PLUGINS
         entry = roster[f"plugin {plugin_name}"]
         assert entry.status is Status.INFO

@@ -52,9 +52,9 @@ integration effect session-scoped.
 
 ## Available Integrations
 
-Three integrations ship today. This list can change, so `agw resource explain harness-integration`
-is the definitive set on any given install, and `agw resource explain harness-integration/<name>`
-the definitive config for one.
+Four integrations ship today. This list can change, so `agw resource explain harness-integration` is
+the definitive set on any given install, and `agw resource explain harness-integration/<name>` the
+definitive config for one.
 
 - **`shell`** (built in) is the default. By default it simply opens the configured shell for the
   session's target user (agent or admin user). It can further be configured to run a specific
@@ -72,6 +72,10 @@ the definitive config for one.
   Because Codex mints its own session ids, it learns which conversation is this session's from Codex
   itself (Codex's `notify` hook), and when it genuinely cannot tell it opens Codex's own session
   picker in the pane rather than guessing or failing.
+- **`grok-build`** (via the `grok` system plugin) drives an interactive Grok Build session.
+  Agentworks assigns each session a conversation UUID, starts a new conversation with that UUID, and
+  resumes it when Grok's persisted local session state exists. Its common CLI settings remain open
+  strings owned by Grok, with `extra_args` for the rest of Grok's evolving flag surface.
 
 ## Session Resume
 
@@ -218,20 +222,21 @@ runs for either. Two rules with teeth:
   including a base template that expects only its children to: every template is directly namable at
   `session create`, so every template's chain has to be complete on its own. An error on an
   inherited key names the template that declared it. No shipped integration has a required field.
-- **Do not model tool-owned choice sets.** `claude-code` forwards `permission_mode`, `model`, and
-  `reasoning_effort` values verbatim: the valid choices are the tool's and drift between its
-  releases, so a stale integration-side enum would reject values a newer CLI accepts. The installed
-  tool owns whether an unsupported value fails, warns and falls back, or changes meaning with the
-  selected model. When it fails loudly, that error still reaches the operator even if the workload
-  dies too fast for the pane to be attached: `session create` / `session resume` detect the
-  instantly-dead pane, capture its output, and fold it into their own error message.
+- **Do not model tool-owned choice sets.** `claude-code` and `grok-build` forward fields such as
+  `permission_mode`, `model`, and `reasoning_effort` verbatim: the valid choices are the tool's and
+  drift between its releases, so a stale integration-side enum would reject values a newer CLI
+  accepts. The installed tool owns whether an unsupported value fails, warns and falls back, or
+  changes meaning with the selected model. When it fails loudly, that error still reaches the
+  operator even if the workload dies too fast for the pane to be attached: `session create` /
+  `session resume` detect the instantly-dead pane, capture its output, and fold it into their own
+  error message.
 
 #### Declaring References: A Marker, Not a Method
 
 A field that names a secret (or any other resource) carries a `SecretRef` / `ResourceRef` marker,
 optionally with an owner-templated default. The core reads the markers off the model: total, never
 raising (a malformed field just omits its edge; validation owns the raising). No shipped integration
-marks a field, so extraction yields `()` for all three; the plumbing behind it is live and tested at
+marks a field, so extraction yields `()` for all four; the plumbing behind it is live and tested at
 the framework level: the session node exposes the integration's declared references through its
 `config_secret_refs` (what the preflight sweep predicts resolvability over, with owner/usage framing
 sourced to the session template) and derives its bare-name `secret_refs` union from them, with
@@ -281,7 +286,8 @@ out-of-scope-level skip, the SESSION-level identity guard, the single-fire guard
 target selection, the pending-target defer to runup, and the preflight-tolerated / runup-fatal
 missing-transport split. A subclass fills in exactly one slot, `_probe_target`, which should call
 the shared `require_commands` helper with the executables the launch target must have on PATH
-(`shell`: the merged `required_commands`; `claude-code`: `("claude",)`).
+(`shell`: the merged `required_commands`; `claude-code`: `("claude",)`; `codex`: `("codex",)`;
+`grok-build`: `("grok",)`).
 
 Keep readiness to tool PRESENCE. Session state (is there something to resume?) is an op-time
 concern: readiness is read-only and re-runnable by contract, and it runs at command start against a
@@ -298,21 +304,22 @@ only the op-time probe does).
   resume-vs-launch with the old process dead and its on-disk state settled.
 - **`start` runs against a brand-new session row, and that is load-bearing, not trivia.** `create`
   inserts the row after the op, so a `start` call means no prior workload of this session exists.
-  Where identity is MINTED (`claude-code`), the two ops can share one decision method and the
-  difference is purely caller-side. Where identity is DISCOVERED, they must not: every discovery
-  channel keys off something the tool wrote earlier under a name or path Agentworks did not reserve
-  (a session name, a workspace directory), so discovering at create time is precisely how a
-  brand-new session inherits a deleted namesake's history or a stranger's conversation. `codex` is
-  the shipped example: its `start` is unconditionally fresh, probes nothing, and clears the stale
-  identity file, and only `resume` ever adopts an id. Asymmetry here is the correct semantics, not a
-  wart. Ask which op could legitimately find work to resume, and let the answer shape the split.
+  Where identity is MINTED (`claude-code`, `grok-build`), the two ops can share one decision method
+  and the difference is purely caller-side. Where identity is DISCOVERED, they must not: every
+  discovery channel keys off something the tool wrote earlier under a name or path Agentworks did
+  not reserve (a session name, a workspace directory), so discovering at create time is precisely
+  how a brand-new session inherits a deleted namesake's history or a stranger's conversation.
+  `codex` is the shipped example: its `start` is unconditionally fresh, probes nothing, and clears
+  the stale identity file, and only `resume` ever adopts an id. Asymmetry here is the correct
+  semantics, not a wart. Ask which op could legitimately find work to resume, and let the answer
+  shape the split.
 
 #### The Operator-Facing Decision Line
 
-`launch_note` returns a one-line note about what the op decided (`claude-code`: resumed vs started
-fresh) and the session manager prints it in the CLI op output. Default `None` keeps `shell` silent.
-Pair it with a pane-visible echo (below) so the decision is visible in both places the operator
-looks.
+`launch_note` returns a one-line note about what the op decided (`claude-code` and `grok-build`:
+resumed vs started fresh) and the session manager prints it in the CLI op output. Default `None`
+keeps `shell` silent. Pair it with a pane-visible echo (below) so the decision is visible in both
+places the operator looks.
 
 #### Per-Session State: The Persisted Blob
 
@@ -334,8 +341,9 @@ namespace as `self._state` (the same object, so in-place mutation keeps the full
 integration never sees another integration's keys, so if a session's template is re-pointed from one
 integration to another, cross-integration key collisions are structurally impossible and the old
 integration's namespace survives a switch away and back. Author an integration against `self._state`
-alone; still treat wrong-typed values as absent (as `claude-code._session_id` does with its
-`isinstance(sid, str)` check), since the blob content is only as trustworthy as the DB it came from.
+alone. Treat wrong-typed values as absent (as `claude-code` and `grok-build` do), since the blob
+content is only as trustworthy as the DB it came from. If a well-typed value has Agentworks-owned
+syntax, validate it before use; `grok-build`, for example, rejects a non-canonical UUID string.
 Pre-namespacing rows carried `claude-code`'s `session_id` at the blob's top level; a legacy hoist
 (`HarnessIntegration.hoist_legacy_state`, overridden by `claude-code`) adopts those at the seam and
 is compatibility code slated for DELETION on the next major release.
@@ -373,8 +381,9 @@ The surrounding wiring supplies the following behavior and debugging boundaries:
 
 #### Session Resume: The Stateful-Integration Pattern
 
-The `claude-code` integration is the worked example; the pattern generalizes to any harness with
-resumable sessions. Five rules, each earned:
+The `claude-code` and `grok-build` integrations are the caller-assigned-identity examples; `codex`
+is the tool-assigned-identity example. The pattern generalizes to any harness with resumable
+sessions. Five rules, each earned:
 
 1. **Own a durable identity; never derive it.** Mint the tool-side session id once (a v4 uuid where
    the tool accepts one) on the first `start`, store it in the state blob, and read it back verbatim
@@ -433,10 +442,17 @@ resumable sessions. Five rules, each earned:
   (`permission_mode`, `model`, `reasoning_effort`, `remote_control`, `vim_mode`, `terminal_bell`)
   plus a verbatim, appended-last `extra_args` list keeps the integration useful without chasing the
   tool's whole flag surface. Session-local tool settings share one generated `--settings` JSON
-  argument. Append `extra_args` after the managed flags so operators can override them or add
-  unmodeled ones. Claude treats repeated `--settings` flags as last-wins, so a raw one replaces the
-  generated session settings rather than extending them. Keep tool-owned choice fields open strings
-  rather than duplicating a fast-moving upstream vocabulary.
+  argument. Append `extra_args` after the managed flags for deterministic ordering, but let the
+  upstream tool define repeated-flag behavior. Claude treats repeated `--settings` flags as
+  last-wins, so a raw one replaces the generated session settings rather than extending them; Grok
+  Build 1.0.4 rejects a repeated managed flag, so its escape hatch adds unmodeled flags instead.
+  Keep tool-owned choice fields open strings rather than duplicating a fast-moving upstream
+  vocabulary.
+- **Use Grok's explicit conversation UUID on both branches.** Mint it once into the integration's
+  state namespace, launch fresh with `--session-id`, and resume with `--resume` only when Grok's
+  persisted `summary.json` exists. The summary file is Grok's own resume boundary; a bare UUID
+  directory can be an incomplete stub. Scan by UUID below `$GROK_HOME/sessions` instead of copying
+  Grok's cwd encoder.
 - **Use `-c` for common Codex settings without dedicated flags.** Keep Codex-owned choice sets
   unvalidated and TOML-encode string values before forwarding them. The built-in integration models
   `reasoning_effort`, `vim_mode`, and explicit `web_search` modes this way; its legacy boolean
