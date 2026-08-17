@@ -27,7 +27,6 @@ selected concept shell
       +-- inline Markdown
       +-- optional agent-only regions
       +-- optional packaged section imports
-      +-- optional resource-kinds/resource-list projections
       |
       v
 current CLI commands for any operation
@@ -35,7 +34,9 @@ current CLI commands for any operation
 
 ## Fixed trail sign
 
-The no-topic path preserves the approved shared eight-slug tuple and returns before catalog
+The no-topic path preserves the approved shared tuple—`concept-assistant-agent`,
+`concept-onboarding`, `concept-management`, `concept-troubleshooting`, `concept-release-notes`,
+`concept-migration`, `concept-secrets`, and `concept-reporting-bugs`—and returns before catalog
 discovery. Human and agent wording may differ briefly, but both modes point to the same concepts and
 neither path loads configuration, registry, database, network, or managed resources.
 
@@ -54,9 +55,27 @@ Each shell has:
 - one Markdown body containing any structural directives.
 
 Global slug collisions and malformed shells are catalog errors. `--names-only` and completion use
-the same discovery path without loading configuration or live services. Exact packaged release-note
+the same discovery path without loading configuration or operator state. Exact packaged release-note
 subtopics remain a separate direct evidence source because they are version records rather than
 authored concepts.
+
+The former first-party plugin topics become globally unique `concept-apt` and
+`concept-install-commands` shells. Their old plugin namespace has no compatibility consumer and is
+removed. Separately installed plugins do not gain a shell contribution API in this version.
+
+`concept-assistant-agent` owns general assistant-agent posture. Other shells are shared operator
+documentation; their agent-only fences contain only local handling context, never generally useful
+content hidden from humans.
+
+The canonical repository-root `README.md` is the sole include source outside the normal package
+documents. A custom Hatch build hook vendors its exact bytes at
+`agentworks/_guide_sources/README.md` for direct wheels and source distributions; a wheel built from
+the source distribution uses that already-vendored package copy. A verified repository-layout
+fallback reads the canonical root file during editable source execution. Discovery never treats the
+mirror as a shell. `concept-core-model` imports its “Architecture at a Glance” and “Core Concepts”
+sections. No other repository-root document becomes package data or an include root in this format
+version. Shells and include sources are validated and shipped in the same artifact; later repository
+edits cannot change an installed guide.
 
 ## Shell expansion
 
@@ -65,8 +84,8 @@ Expansion is a fixed pipeline, not a general interpreter:
 1. load and validate the selected shell within package-data bounds;
 2. remove agent-only regions when human mode is active;
 3. expand visible package-section imports as inert Markdown, applying their fixed heading offset;
-4. invoke visible named live projections lazily;
-5. frame the resulting Markdown and any deduplicated diagnostics.
+4. rewrite repository-relative link and image destinations in emitted Markdown; and
+5. frame the resulting Markdown.
 
 Agent fences are balanced and non-nested. Imports name a relative Markdown resource beneath the
 installed `agentworks` package, an exact H2-H6 ATX heading, and an optional integer heading offset
@@ -75,30 +94,25 @@ next heading of equal or higher rank. It shifts every ATX heading outside fenced
 amount and rejects a result outside H2-H6. Imported text is never parsed again for directives, so
 composition is one level deep. Setext headings are rejected in shells and selected sections.
 
-The expander rewrites only Markdown image destinations. Absolute HTTPS destinations pass through.
-Package-relative destinations are resolved lexically against the source Markdown resource, required
-to remain inside the installed `agentworks` package tree, and rewritten to the equivalent canonical
-raw-GitHub HTTPS URL on `main`. Inline and reference-style images share this rule; a reference-style
-image must have its definition inside the same emitted shell or extracted section. Ordinary links
-remain untouched, and the guide never fetches, validates, or embeds image content.
+The expander rewrites only repository-relative Markdown destinations. Absolute HTTPS and
+fragment-only destinations pass through. Relative destinations are resolved lexically against the
+source Markdown resource and required to remain inside its known repository mapping. Links become
+canonical GitHub `blob/main` URLs; images become canonical raw-GitHub `main` URLs. Inline and
+reference-style forms share this rule and keep their definitions inside the same emitted shell or
+extracted section. Relative-link fragments are split before path normalization and then reattached;
+query handling is out of scope. The guide never fetches, validates, or embeds remote content.
 
-Only two live directives exist: `resource-kinds` and `resource-list`. Their implementations call
-presentation-neutral service functions already behind the corresponding CLI surfaces. There is no
-generic operation registry, parameter expression language, subprocess invocation, or extension hook.
+## Safety and failure behavior
 
-## Safety and degradation
+Shell discovery uses trusted package data only. Imports use trusted package data plus the single
+canonical root-README fallback in a verified editable checkout. Rendering loads no configuration,
+registry, database, resources, secrets, providers, transports, network state, or subprocesses. A
+malformed shell, invalid directive, duplicate slug, missing or ambiguous import heading, invalid
+topic, or incompatible CLI option remains nonzero. Missing or malformed operator state is irrelevant
+to this static path.
 
-Shell discovery and static imports use trusted package data only. Live projections are read-only and
-probe-suppressed. The guide cannot resolve a secret, contact a provider, connect to a VM, perform
-remote work, or mutate state.
-
-An environmental projection failure becomes one sanitized response-level warning per root error and
-a short placeholder at each affected directive. Static content and unrelated projections still
-render, and a valid request exits 0. A malformed shell, invalid directive, duplicate slug, missing
-or ambiguous import heading, invalid topic, or incompatible CLI option remains nonzero.
-
-Filtering precedes expansion. Therefore content hidden from human mode cannot cause an import, live
-read, warning, or error in that mode.
+Filtering precedes expansion. Therefore content hidden from human mode cannot cause an import or
+structural failure in that mode.
 
 ## Removed architecture
 
@@ -114,6 +128,8 @@ The implementation deletes rather than adapts these guide-owned surfaces:
 
 Existing useful prose—including commands, expected outcomes, refusal guidance, and related-topic
 links—moves into ordinary shells. Operational commands remain the authority for actual behavior.
+Suggestions that may cross the operator's current authorization must state scope and impact,
+expected result, and refusal alternative in reviewed prose; no new schema enforces those sentences.
 
 ## Release notes and bootstrap
 
@@ -127,24 +143,22 @@ guide behavior.
 ## Verification posture
 
 Tests cover discovery, frontmatter shape, slug collisions, H1 structure, mode filtering, bounded
-unique-heading imports, inert imported directives, the two-operation allowlist, lazy invocation,
-fail-soft framing, no-topic bypass, package inclusion, names-only, and completion. Boundary tests
-deny secrets, network, transports, probes, mutation, and subprocess execution.
+unique-heading imports, inert imported directives, root-README package inclusion,
+repository-relative destination rewriting, no-topic bypass, names-only, and completion. Boundary
+tests prove rendering does not load configuration or operational state.
 
 Tests do not assert authored wording, duplicate shell prose, or recreate removed schemas in test
 fixtures. Permanent CLI documentation describes the shell model. Sample configuration is unaffected.
 
 ## Risks
 
-- **The shell format becomes a template language.** The grammar remains closed to three structural
+- **The shell format becomes a template language.** The grammar remains closed to two structural
   features and has no generic evaluator or operation registry.
 - **Auto-discovery weakens ownership.** Discovery is restricted to explicit trusted package roots,
   and global duplicate slugs fail deterministically.
 - **Included docs become executable.** Imported text is inserted inertly and never parsed again.
-- **Image support grows a general URL resolver.** Rewriting is limited to Markdown image
-  destinations under the known package root and one fixed canonical raw-GitHub base. Ordinary links,
-  remote content, and image bytes remain outside the guide.
-- **Live guidance repeats failures.** Root diagnostics are response-scoped and deduplicated; each
-  slot carries only a short placeholder.
+- **Imported references grow a general URL resolver.** Rewriting is limited to repository-relative
+  Markdown link and image destinations under two known source mappings and fixed canonical GitHub
+  bases. Remote content and bytes remain outside the guide.
 - **Removed guide logic returns in frontmatter.** Frontmatter contains description only; actions and
   assessments stay ordinary prose or command-owned behavior.
