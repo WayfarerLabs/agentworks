@@ -92,6 +92,21 @@ whatever other simplifications the onboarding and discovery track has accumulate
 own reading is that earlier phases of that effort landed tech debt while unattended. Shipped
 2026-08-15 (PRs #519 and #537).
 
+**Ruling (operator, 2026-08-16, the corrected guide model; gates 0.14.0):** hands-on testing in the
+operator's real environment found the shipped guide badly over-indexed on agents: the human trail
+sign exposes two destinations while the agent trail sign exposes seven that are plainly useful to
+humans, eight core topics carry separate agent-contract files, and the "simple" copy/paste bootstrap
+prompt is 23 lines of defensive specification. The corrected model, proposed by the onboarding lead
+and adopted by the operator: one topic catalog for everyone; human and agent modes show essentially
+the same destinations and differ in presentation, never in access to ordinary information; one
+agent-specific assistance topic explains how an external assistant behaves; individual topics carry
+a short agent note only when genuinely necessary; and the bootstrap prompt shrinks to a few lines
+that install the CLI and point at `agw guide --agent`, which is itself the specification. This
+supersedes the 2026-08-12 trail-sign ruling's destination asymmetry (the trail-sign form itself
+stands). The operator's words carry the bar: "I'd be embarrassed to ship this. It has to be included
+in 0.14. This should all end up dramatically simpler." The onboarding child owns the work, and
+0.14.0 does not ship without it.
+
 **Ruling (operator, 2026-08-15, the guide-value rubric):** guide content earns its place only by
 conveying concepts or higher-level synthesis not available from a single CLI command. A guide block
 whose content is one command's output wearing guide clothes is removed, and the guide points at the
