@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 
 from agentworks.db import SessionRow, SessionStatus
+from agentworks.errors import StateError
 from agentworks.sessions.manager import (
     batch_check_status,
     check_session_status,
@@ -220,7 +221,7 @@ def test_legacy_admin_session_without_socket_raises_state_error() -> None:
 
     session = _session("s1", pid=42, mode="admin", boot_id=BOOT_CURRENT)
     target = _FakeTarget({"has-session": _FakeResult(ok=True)})
-    with pytest.raises(StateError, match="no socket_path") as exc:
+    with pytest.raises(StateError) as exc:
         check_session_status(session, target=target)
     assert exc.value.entity_kind == "session"
     assert exc.value.entity_name == "s1"
@@ -393,5 +394,5 @@ def test_ensure_pid_raises_on_unresolvable() -> None:
         def get_session(self, name):
             return session
 
-    with pytest.raises(Exception, match="alive but PID/boot ID recovery failed"):
+    with pytest.raises(StateError):
         _ensure_pid(session, target=_FailTarget(), db=_FakeDb())

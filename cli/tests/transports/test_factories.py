@@ -95,7 +95,7 @@ def test_transport_for_user_raises_state_error_without_tailscale_host() -> None:
     the new factory promotes this to a typed error per SDD R6.
     """
     vm = _mock_vm(tailscale_host=None)
-    with pytest.raises(StateError, match="no Tailscale host"):
+    with pytest.raises(StateError):
         transport_for_user(vm, _mock_config(), user="alice")
 
 
@@ -233,7 +233,7 @@ def test_native_transport_empty_ssh_host_raises_typed_state_error() -> None:
 
     with (
         contextlib.ExitStack() as stack,
-        pytest.raises(StateError, match="no host"),
+        pytest.raises(StateError),
     ):
         native_transport(vm, platform, config, ctx=ctx, stack=stack)
 

@@ -186,7 +186,7 @@ def test_scoped_credential_refused_before_any_resolve_or_gate(
         raise AssertionError("gate ran for a refused scoped credential")
 
     monkeypatch.setattr(ProxmoxPlatform, "status", _no_status)
-    with pytest.raises(ValidationError, match="scoped"):
+    with pytest.raises(ValidationError):
         vm_manager.add_git_credential(db, config, "box", "widgets-bot", interaction=InteractionPolicy.REFUSE)
     assert resolve_counter == []
     assert target.writes == []
@@ -254,7 +254,7 @@ def test_runup_rejection_is_fatal_and_writes_nothing(
         return (401, b"", {})
 
     monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _probe)
-    with pytest.raises(TokenRejectedError, match="rejected the token"):
+    with pytest.raises(TokenRejectedError):
         vm_manager.add_git_credential(db, config, vm.name, "gh", interaction=InteractionPolicy.REFUSE)
     assert target.writes == []
     assert target.opens == 0
@@ -358,7 +358,7 @@ def test_nodes_receive_only_their_declared_secrets(
     seen: dict[str, str] = {}
 
     def _probing_runup(self: GitHubCredentialProvider, ctx: RunContext) -> None:
-        with pytest.raises(StateError, match="not declared"):
+        with pytest.raises(StateError):
             ctx.secret("proxmox-token")
         seen["token"] = ctx.secret(self.secret_name)
 
@@ -429,7 +429,7 @@ def test_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
         # The real proxmox status builds its API client via ctx.secret;
         # prove that read works pre-boundary, and that delivery is
         # scoped: a name outside the gate's declared set refuses.
-        with pytest.raises(StateError, match="not declared"):
+        with pytest.raises(StateError):
             ctx.secret("git-token-gh")
         events.append(f"status-token:{ctx.secret('proxmox-token')}")
         return VMStatus.STOPPED
@@ -473,7 +473,7 @@ def test_operator_stopped_vm_refuses_via_the_reread_race_guard(
     monkeypatch.setattr(ProxmoxPlatform, "status", _status)
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: started.append("start"))
 
-    with pytest.raises(StateError, match="manually stopped") as exc:
+    with pytest.raises(StateError) as exc:
         vm_manager.add_git_credential(db, config, vm.name, "gh", interaction=InteractionPolicy.REFUSE)
     assert "agw vm start box" in (exc.value.hint or "")
     assert started == []

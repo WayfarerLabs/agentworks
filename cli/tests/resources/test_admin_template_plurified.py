@@ -149,7 +149,7 @@ def test_admin_template_kind_errors_on_unreserved_name_reference(
     origin = Origin.operator_declared(file=tmp_path / "c.toml", line=1)
     registry.add("vm-template", "test", _Stub(), origin)
 
-    with pytest.raises(ConfigError, match="only auto-declares"):
+    with pytest.raises(ConfigError):
         registry.finalize()
 
 

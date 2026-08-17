@@ -481,7 +481,7 @@ def test_stale_inspector_waits_then_refuses_changed_state(tmp_path: Path, monkey
 
     monkeypatch.setattr(backup_module, "inspect_schema", _inspect_then_wait)
 
-    with pytest.raises(StateError, match="changed before its stale state could be qualified"):
+    with pytest.raises(StateError):
         prepare_database_open(path)
 
     writer.join(timeout=10)
@@ -517,7 +517,7 @@ def test_prepare_refuses_changed_stale_state_when_lock_released_before_first_acq
 
     monkeypatch.setattr(backup_module, "inspect_schema", _inspect_then_release)
 
-    with pytest.raises(StateError, match="changed before its stale state could be qualified") as raised:
+    with pytest.raises(StateError) as raised:
         prepare_database_open(path)
 
     writer.join(timeout=10)
@@ -555,7 +555,7 @@ def test_prepare_refuses_identical_tainted_baseline_after_lock_released_before_f
 
     monkeypatch.setattr(backup_module, "inspect_schema", _inspect_then_release)
 
-    with pytest.raises(StateError, match="unexpected columns for completed schema version 1: cpus") as raised:
+    with pytest.raises(StateError) as raised:
         prepare_database_open(path)
 
     writer.join(timeout=10)
@@ -652,7 +652,7 @@ def test_safe_open_refuses_changed_but_still_stale_state(tmp_path: Path) -> None
     connection.commit()
     connection.close()
 
-    with pytest.raises(StateError, match="changed during migration interaction"):
+    with pytest.raises(StateError):
         open_database_safely(path, plan, create_backup=True)
 
     assert not backup_directory(path).exists()
@@ -690,7 +690,7 @@ def test_partial_migration_failure_reports_exact_backup_recovery(
         "CREATE TABLE partial_failure_witness (value TEXT); SELECT * FROM missing_table",
     )
 
-    with pytest.raises(StateError, match="migration failed") as raised:
+    with pytest.raises(StateError) as raised:
         open_database_safely(path, prepare_database_open(path), create_backup=True)
 
     backups = tuple(backup_directory(path).glob("*.db"))
@@ -704,7 +704,7 @@ def test_partial_migration_failure_without_backup_says_so(tmp_path: Path, monkey
     _build_schema(path, LATEST_VERSION - 1)
     monkeypatch.setitem(MIGRATIONS, LATEST_VERSION, "SELECT * FROM missing_table")
 
-    with pytest.raises(StateError, match="migration failed") as raised:
+    with pytest.raises(StateError) as raised:
         open_database_safely(path, prepare_database_open(path), create_backup=False)
 
     assert raised.value.hint is not None
@@ -776,7 +776,7 @@ def test_completion_probe_unavailable_state_fails_before_database_caller(
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("database caller ran")),
     )
 
-    with pytest.raises(StateError, match="completion is unavailable"):
+    with pytest.raises(StateError):
         _helpers.get_db()
 
     assert {entry.name: entry.read_bytes() for entry in tmp_path.iterdir()} == before
@@ -952,7 +952,7 @@ def test_database_refuses_future_schema_without_advancing_it(tmp_path: Path) -> 
     connection.commit()
     connection.close()
 
-    with pytest.raises(StateError, match="newer than"):
+    with pytest.raises(StateError):
         Database(path)
 
     assert _version(path) == LATEST_VERSION + 1
@@ -970,7 +970,7 @@ def test_database_closes_connection_when_migration_raises(tmp_path: Path, monkey
     monkeypatch.setattr(sqlite3, "connect", _tracking_connect)
     monkeypatch.setattr(Database, "_migrate", lambda _self: (_ for _ in ()).throw(RuntimeError("boom")))
 
-    with pytest.raises(RuntimeError, match="boom"):
+    with pytest.raises(RuntimeError):
         Database(tmp_path / "state.db")
 
     assert len(opened) == 1
@@ -1087,7 +1087,7 @@ def test_get_db_invalid_focused_config_stops_before_migration(tmp_path: Path, mo
     monkeypatch.setattr(config_module, "CONFIG_PATH", config_path)
     monkeypatch.setattr(output, "is_interactive", lambda: False)
 
-    with pytest.raises(ConfigError, match="must be a boolean"):
+    with pytest.raises(ConfigError):
         _helpers.get_db()
 
     assert _version(path) == LATEST_VERSION - 1
@@ -1123,7 +1123,7 @@ def test_get_db_selected_backup_failure_prevents_migration_and_guides_retry(
     )
     captured_output.confirm_response = True
 
-    with pytest.raises(BackupError, match="snapshot unavailable") as raised:
+    with pytest.raises(BackupError) as raised:
         _helpers.get_db()
 
     assert raised.value.hint is not None

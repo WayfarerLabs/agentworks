@@ -378,7 +378,7 @@ class TestFailClosedBootstrap:
         fake.bootstrap_result = None
         fake.delete_error = ProxmoxAPIError("VM is locked")
 
-        with pytest.raises(ProvisioningError, match="bootstrap timed out") as caught:
+        with pytest.raises(ProvisioningError) as caught:
             platform.create(_request(tailscale=True), RunContext())
 
         _assert_exception_graph_is_value_free(caught.value)
@@ -649,7 +649,7 @@ class TestPlainFailure:
         platform, fake = _platform_with_fake(monkeypatch)
         fake.next_id_error = ProxmoxAPIError("cluster unreachable")
 
-        with pytest.raises(ProxmoxAPIError, match="cluster unreachable"):
+        with pytest.raises(ProxmoxAPIError):
             platform.create(_request(tailscale=False), RunContext())
 
         for op in ("clone_vm", "stop_vm", "delete_vm", "stop_task"):

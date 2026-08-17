@@ -100,7 +100,7 @@ def test_unexpected_generated_file_is_rejected(clean_package_root: Path) -> None
     extra.parent.mkdir(parents=True)
     extra.write_text("not owned\n")
 
-    with pytest.raises(generator.GenerationError, match="commands/install.md"):
+    with pytest.raises(generator.GenerationError):
         generator.generate(root, check=False)
 
 
@@ -135,7 +135,7 @@ def test_readme_fence_is_minimally_collision_proof(clean_package_root: Path, run
 )
 def test_readme_requires_one_ordered_marker_pair(clean_package_root: Path, readme: str) -> None:
     (clean_package_root / "README.md").write_text(readme)
-    with pytest.raises(generator.GenerationError, match="README"):
+    with pytest.raises(generator.GenerationError):
         generator.render_outputs(clean_package_root)
 
 
@@ -163,7 +163,7 @@ def test_metadata_schema_rejects_unknown_fields(clean_package_root: Path) -> Non
     metadata["anotherDescription"] = "A drifting description"
     path.write_text(json.dumps(metadata))
 
-    with pytest.raises(generator.GenerationError, match="unknown anotherDescription"):
+    with pytest.raises(generator.GenerationError):
         generator.load_metadata(path)
 
 

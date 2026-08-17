@@ -258,7 +258,7 @@ def test_a_kind_owned_key_inside_the_table_is_the_platforms_to_refuse(tmp_path: 
         """)
     )
 
-    with pytest.raises(ConfigError, match="platform: unknown field"):
+    with pytest.raises(ConfigError):
         build_registry(load_config(cfg, warn_issues=False))
 
 

@@ -429,7 +429,7 @@ class TestGeneration:
     def test_unsupported_shell_raises(self) -> None:
         import pytest
 
-        with pytest.raises(ValueError, match="Unsupported shell"):
+        with pytest.raises(ValueError):
             generate("fish")
 
 

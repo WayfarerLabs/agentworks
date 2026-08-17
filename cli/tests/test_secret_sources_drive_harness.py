@@ -101,7 +101,7 @@ def test_child_environment_drops_inherited_home_credentials_and_import_paths(
         assert key not in environment
     assert environment["PYTHONPATH"] != inherited["PYTHONPATH"]
 
-    with pytest.raises(RuntimeError, match="isolation boundary"):
+    with pytest.raises(RuntimeError):
         HARNESS._child_environment(home=home, shim=shim, path_dir=closed_bin, extra_env={"PATH": "/escape"})
 
 

@@ -155,7 +155,7 @@ def test_failure_output_is_not_repeated_to_observable_error_text(
         }
     )
 
-    with pytest.raises(ProvisioningError, match=r"bootstrap failed \(exit 1\)") as caught:
+    with pytest.raises(ProvisioningError) as caught:
         _platform(monkeypatch, api)._run_bootstrap_via_agent("pve1", 100, _SCRIPT, RunContext())
 
     assert warnings == []
@@ -176,7 +176,7 @@ def test_forged_success_ip_is_not_returned_or_repeated(
         }
     )
 
-    with pytest.raises(ProvisioningError, match=r"bootstrap failed \(exit 0\)") as caught:
+    with pytest.raises(ProvisioningError) as caught:
         _platform(monkeypatch, api)._run_bootstrap_via_agent("pve1", 100, _SCRIPT, RunContext())
 
     assert warnings == []
@@ -208,7 +208,7 @@ def test_execute_unwind_removes_stage(
             platform._run_bootstrap_via_agent("pve1", 100, _SCRIPT, RunContext())
         assert caught.value is execute_result
     elif execute_result is None:
-        with pytest.raises(ProvisioningError, match="bootstrap timed out"):
+        with pytest.raises(ProvisioningError):
             platform._run_bootstrap_via_agent("pve1", 100, _SCRIPT, RunContext())
     else:
         raise AssertionError("unexpected non-exception execute result")

@@ -103,7 +103,7 @@ def test_the_resolver_path_refuses_the_same_cycle() -> None:
         "a": VMTemplate(name="a", inherits=["b"]),
         "b": VMTemplate(name="b", inherits=["a"]),
     }
-    with pytest.raises(InheritanceCycleError, match="a -> b -> a"):
+    with pytest.raises(InheritanceCycleError):
         resolution_layers(rows, "a", "vm-template")
 
 

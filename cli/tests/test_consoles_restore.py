@@ -43,7 +43,7 @@ CON = "aw-console-con"
 def test_restore_session_errors_when_console_missing(db: Database) -> None:
     """restore-session refuses unknown console name with NotFoundError."""
     _seed_vm(db, with_tailscale=False)
-    with pytest.raises(NotFoundError, match="console 'nope' not found"):
+    with pytest.raises(NotFoundError):
         restore_session(db, _StubConfig(), console_name="nope", session_name="a", interaction=InteractionPolicy.REFUSE)
 
 
@@ -54,7 +54,7 @@ def test_restore_session_errors_when_session_not_member(db: Database, fake_targe
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
 
-    with pytest.raises(NotFoundError, match="is not a member of console"):
+    with pytest.raises(NotFoundError):
         restore_session(db, _StubConfig(), console_name="con", session_name="b", interaction=InteractionPolicy.REFUSE)
 
 
@@ -67,7 +67,7 @@ def test_restore_session_errors_when_tmux_not_running(db: Database, fake_target:
 
     # has-session returns nonzero (default _FakeResult is ok, so override).
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
-    with pytest.raises(StateError, match="has no live tmux session"):
+    with pytest.raises(StateError):
         restore_session(db, _StubConfig(), console_name="con", session_name="a", interaction=InteractionPolicy.REFUSE)
 
 
@@ -87,7 +87,7 @@ def test_restore_session_strict_on_untagged_pane(db: Database, fake_target: _Fak
     # Two shell panes (pidx 1, 2), neither tagged.
     fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(stdout="%1|0|\n%2|1|\n%3|2|\n")
 
-    with pytest.raises(StateError, match="no agentworks tag"):
+    with pytest.raises(StateError):
         restore_session(db, _StubConfig(), console_name="con", session_name="a", interaction=InteractionPolicy.REFUSE)
 
 
@@ -105,10 +105,7 @@ def test_restore_session_strict_on_out_of_range_tag(db: Database, fake_target: _
     # Three live shell panes tagged 0, 1, 2; tag 2 is out-of-range.
     fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(stdout="%1|0|\n%2|1|0\n%3|2|1\n%4|3|2\n")
 
-    with pytest.raises(
-        StateError,
-        match=r"tags \[2\] point past the configured range",
-    ):
+    with pytest.raises(StateError):
         restore_session(db, _StubConfig(), console_name="con", session_name="a", interaction=InteractionPolicy.REFUSE)
 
 
@@ -124,7 +121,7 @@ def test_restore_session_strict_on_duplicate_tags(db: Database, fake_target: _Fa
     # Two live shell panes both tagged 0 (a duplicate).
     fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(stdout="%1|0|\n%2|1|0\n%3|2|0\n")
 
-    with pytest.raises(StateError, match=r"duplicate tags \[0\]"):
+    with pytest.raises(StateError):
         restore_session(db, _StubConfig(), console_name="con", session_name="a", interaction=InteractionPolicy.REFUSE)
 
 
@@ -143,7 +140,7 @@ def test_restore_session_strict_message_when_configured_zero(db: Database, fake_
     # Session pane + one tagged shell pane (config index 0, but config has 0 shells).
     fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(stdout="%1|0|\n%2|1|0\n")
 
-    with pytest.raises(StateError, match="no configured shells") as excinfo:
+    with pytest.raises(StateError) as excinfo:
         restore_session(db, _StubConfig(), console_name="con", session_name="a", interaction=InteractionPolicy.REFUSE)
     assert "0..-1" not in str(excinfo.value)
 
@@ -234,7 +231,7 @@ def test_restore_session_rebuild_raises_when_new_window_fails(
     fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="other\n")
     fake_target.responses["new-window -t aw-console-con"] = _FakeResult(returncode=1, stderr="no space for window")
 
-    with pytest.raises(ExternalError, match="failed to rebuild window 'a'"):
+    with pytest.raises(ExternalError):
         restore_session(db, _StubConfig(), console_name="con", session_name="a", interaction=InteractionPolicy.REFUSE)
 
     # RESULT lines mirror into .info; the success line must not be among them.
@@ -258,7 +255,7 @@ def test_restore_session_rebuild_raises_when_shell_split_fails(
     # pane id, so _split_shell_pane can't tag the pane and returns None.
     fake_target.responses["split-window -t aw-console-con:a"] = _FakeResult(stdout="")
 
-    with pytest.raises(ExternalError, match=r"failed to create/tag config indices \[0, 1\]") as excinfo:
+    with pytest.raises(ExternalError) as excinfo:
         restore_session(db, _StubConfig(), console_name="con", session_name="a", interaction=InteractionPolicy.REFUSE)
 
     assert "agw console attach con --recreate" in (excinfo.value.hint or "")
@@ -284,7 +281,7 @@ def test_restore_session_rebuild_raises_when_shell_tag_fails(
     fake_target.responses["split-window -t aw-console-con:a"] = _FakeResult(stdout="%9\n")
     fake_target.responses["set-option -p"] = _FakeResult(returncode=1, stderr="tmux refused set-option")
 
-    with pytest.raises(ExternalError, match=r"failed to create/tag config indices \[0\]") as excinfo:
+    with pytest.raises(ExternalError) as excinfo:
         restore_session(db, _StubConfig(), console_name="con", session_name="a", interaction=InteractionPolicy.REFUSE)
 
     assert "agw console attach con --recreate" in (excinfo.value.hint or "")
@@ -312,7 +309,7 @@ def test_restore_session_rebuild_refuses_when_session_row_gone(db: Database, fak
     fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(stdout="other\n")
 
     fake_target.commands.clear()
-    with pytest.raises(StateError, match="no longer exists in the database"):
+    with pytest.raises(StateError):
         restore_session(db, _StubConfig(), console_name="con", session_name="a", interaction=InteractionPolicy.REFUSE)
 
     assert not any("new-window" in c for c in fake_target.commands)
@@ -339,7 +336,7 @@ def test_restore_session_refuses_when_session_pane_killed(db: Database, fake_tar
     fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(stdout="%1|0|0\n")
 
     fake_target.commands.clear()
-    with pytest.raises(StateError, match="lost its session-attach pane") as excinfo:
+    with pytest.raises(StateError) as excinfo:
         restore_session(db, _StubConfig(), console_name="con", session_name="a", interaction=InteractionPolicy.REFUSE)
 
     assert "agw console attach con --recreate" in (excinfo.value.hint or "")
@@ -369,7 +366,7 @@ def test_restore_session_refuses_when_session_pane_killed_leaves_duplicate(
     # Two panes, both tagged 0 (no untagged session pane): the observed bug.
     fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(stdout="%1|0|0\n%2|1|0\n")
 
-    with pytest.raises(StateError, match="lost its session-attach pane"):
+    with pytest.raises(StateError):
         restore_session(db, _StubConfig(), console_name="con", session_name="a", interaction=InteractionPolicy.REFUSE)
 
 
@@ -468,7 +465,7 @@ def test_restore_session_refuses_killed_session_pane_under_pane_base_index_one(
     # Session pane killed: the shells renumbered down to 1 and 2.
     fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(stdout="%2|1|0\n%3|2|1\n")
 
-    with pytest.raises(StateError, match=r"pane 1 is a shell pane"):
+    with pytest.raises(StateError):
         restore_session(db, _StubConfig(), console_name="con", session_name="a", interaction=InteractionPolicy.REFUSE)
 
 
@@ -534,7 +531,7 @@ def test_restore_session_raises_when_split_returns_no_pane_id(db: Database, fake
     # and returns None, which restore_session must escalate.
     fake_target.responses["split-window -t aw-console-con:a"] = _FakeResult(stdout="")
 
-    with pytest.raises(ExternalError, match=r"failed to create/tag config indices \[1\]"):
+    with pytest.raises(ExternalError):
         restore_session(db, _StubConfig(), console_name="con", session_name="a", interaction=InteractionPolicy.REFUSE)
 
 

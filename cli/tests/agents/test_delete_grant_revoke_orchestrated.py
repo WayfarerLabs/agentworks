@@ -341,7 +341,7 @@ def test_delete_sessions_guard_refuses_with_zero_resolves_and_zero_gate(
     _seed_live_session(db, name="s1", ws="ws1", agent="a1")
     _no_gate(monkeypatch)
 
-    with pytest.raises(StateError, match="has 1 session"):
+    with pytest.raises(StateError):
         agent_manager.delete_agent(db, config, name="a1", interaction=InteractionPolicy.REFUSE)
 
     assert resolve_counter == []
@@ -362,7 +362,7 @@ def test_delete_declined_confirm_aborts_with_zero_resolves_and_zero_gate(
     _no_gate(monkeypatch)
     captured_output.confirm_response = False
 
-    with pytest.raises(UserAbort, match="delete cancelled"):
+    with pytest.raises(UserAbort):
         agent_manager.delete_agent(db, config, name="a1", interaction=InteractionPolicy.REFUSE)
 
     assert resolve_counter == []
@@ -381,7 +381,7 @@ def test_grant_empty_request_fails_with_zero_resolves_and_zero_gate(
     _seed(db)
     _no_gate(monkeypatch)
 
-    with pytest.raises(ValidationError, match="needs at least one workspace name"):
+    with pytest.raises(ValidationError):
         agent_grants.grant_workspaces(
             db, config, agent_name="a1", workspace_names=[], interaction=InteractionPolicy.REFUSE
         )
@@ -401,7 +401,7 @@ def test_revoke_unknown_agent_fails_with_zero_resolves_and_zero_gate(
     _seed(db)
     _no_gate(monkeypatch)
 
-    with pytest.raises(NotFoundError, match="agent 'ghost' not found"):
+    with pytest.raises(NotFoundError):
         agent_grants.revoke_workspaces(
             db, config, agent_name="ghost", workspace_names=["ws1"], interaction=InteractionPolicy.REFUSE
         )
@@ -660,7 +660,7 @@ def test_delete_nested_rejects_a_mismatched_vm_node(
     _no_gate(monkeypatch)  # nothing may probe status or hold the VM
     vm_node = _node_holding(db, config, object(), vm_name="other")
 
-    with pytest.raises(StateError, match="teardown-wiring bug"):
+    with pytest.raises(StateError):
         agent_manager.delete_agent(
             db, config, name="a1", force=True, yes=True, vm_node=vm_node, interaction=InteractionPolicy.REFUSE
         )

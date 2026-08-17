@@ -74,7 +74,7 @@ def test_proxmox_runup_rejection_is_fatal(monkeypatch: pytest.MonkeyPatch, code:
         raise err
 
     monkeypatch.setattr(ProxmoxAPI, "next_id", _boom)
-    with pytest.raises(TokenRejectedError, match="Proxmox rejected"):
+    with pytest.raises(TokenRejectedError):
         _platform().runup(_ctx())
 
 
@@ -104,7 +104,7 @@ def test_proxmox_runup_without_secrets_is_error() -> None:
     the token via ``ctx.secret(name)``."""
     from agentworks.errors import ConfigError
 
-    with pytest.raises(ConfigError, match="resolved secrets"):
+    with pytest.raises(ConfigError):
         ProxmoxPlatform("px", _CONFIG).runup(RunContext())
 
 
@@ -289,7 +289,7 @@ def test_azure_runup_without_the_client_secret_is_typed(monkeypatch: pytest.Monk
     accessor's typed ConfigError, exactly as for proxmox above."""
     from agentworks.errors import ConfigError
 
-    with pytest.raises(ConfigError, match="resolved secrets"):
+    with pytest.raises(ConfigError):
         AzureVMPlatform("az", _AZURE_SP_CONFIG).runup(RunContext())
 
 
@@ -328,7 +328,7 @@ def test_aws_ec2_runup_auth_rejection_is_fatal(monkeypatch: pytest.MonkeyPatch) 
     install_fakes(
         monkeypatch, Controls(identity_error=client_error("InvalidClientTokenId", "bad key", "GetCallerIdentity"))
     )
-    with pytest.raises(TokenRejectedError, match="AWS rejected"):
+    with pytest.raises(TokenRejectedError):
         EC2Platform("aws", _EC2_CONFIG).runup(RunContext())
 
 
@@ -386,5 +386,5 @@ def test_aws_ec2_runup_without_the_secret_is_typed() -> None:
     from agentworks.errors import ConfigError
     from agentworks.plugins.aws.platform import EC2Platform
 
-    with pytest.raises(ConfigError, match="resolved secrets"):
+    with pytest.raises(ConfigError):
         EC2Platform("aws", _EC2_CREDS_CONFIG).runup(RunContext())

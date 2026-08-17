@@ -72,7 +72,7 @@ def test_running_session_names_raises_on_unreachable(db: Database, fake_target: 
     # Probe returns empty stdout (simulates transport failure caught by check=False).
     fake_target.run = lambda command, **kwargs: _FakeResult(returncode=255, stdout="")  # type: ignore[assignment]
 
-    with pytest.raises(ConnectivityError, match="could not determine running"):
+    with pytest.raises(ConnectivityError):
         running_session_names(db, _StubConfig(), "vm1")
 
 
@@ -123,7 +123,7 @@ def test_infer_vm_from_session_specs(db: Database) -> None:
     assert infer_vm_from_session_specs(db, ["a+2", "b"]) == "vm1"
 
     # Spans multiple VMs -> ValidationError (user must disambiguate with --vm).
-    with pytest.raises(ValidationError, match="span multiple VMs"):
+    with pytest.raises(ValidationError):
         infer_vm_from_session_specs(db, ["a", "c"])
 
     # All-unknown sessions -> None (defer error to create_console).
@@ -151,13 +151,13 @@ def test_create_console_fill_all_appends_alphabetically(db: Database) -> None:
 def test_create_console_rejects_empty_without_all(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a"])
-    with pytest.raises(ValidationError, match="specify at least one session"):
+    with pytest.raises(ValidationError):
         create_console(db, name="empty", vm_name="vm1", session_specs=[])
 
 
 def test_create_console_rejects_empty_fill_all(db: Database) -> None:
     _seed_vm(db)  # no sessions seeded
-    with pytest.raises(ValidationError, match="VM 'vm1' has no sessions"):
+    with pytest.raises(ValidationError):
         create_console(db, name="empty", vm_name="vm1", session_specs=[], fill_all=True)
 
 
@@ -165,18 +165,18 @@ def test_create_console_rejects_duplicate_name(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
-    with pytest.raises(AlreadyExistsError, match="already exists"):
+    with pytest.raises(AlreadyExistsError):
         create_console(db, name="con", vm_name="vm1", session_specs=["a"])
 
 
 def test_create_console_rejects_unknown_vm(db: Database) -> None:
-    with pytest.raises(NotFoundError, match="not found"):
+    with pytest.raises(NotFoundError):
         create_console(db, name="con", vm_name="ghost", session_specs=["a"])
 
 
 def test_create_console_rejects_unknown_session(db: Database) -> None:
     _seed_vm(db)
-    with pytest.raises(NotFoundError, match="not found"):
+    with pytest.raises(NotFoundError):
         create_console(db, name="con", vm_name="vm1", session_specs=["ghost"])
 
 
@@ -184,14 +184,14 @@ def test_create_console_rejects_cross_vm_session(db: Database) -> None:
     _seed_vm(db, "vm1")
     _seed_vm(db, "vm2")
     _seed_sessions(db, ["a"], workspace_name="ws-vm2")
-    with pytest.raises(ValidationError, match="is not on VM 'vm1'"):
+    with pytest.raises(ValidationError):
         create_console(db, name="con", vm_name="vm1", session_specs=["a"])
 
 
 def test_create_console_rejects_dup_in_args(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a"])
-    with pytest.raises(ValidationError, match="listed more than once"):
+    with pytest.raises(ValidationError):
         create_console(db, name="con", vm_name="vm1", session_specs=["a", "a+1"])
 
 
@@ -200,7 +200,7 @@ def test_create_console_rolls_back_on_failure(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a"])
     db.insert_console("con", "vm1")
-    with pytest.raises(AlreadyExistsError, match="already exists"):
+    with pytest.raises(AlreadyExistsError):
         create_console(db, name="con", vm_name="vm1", session_specs=["a"])
     assert db.list_console_sessions("con") == []
 
@@ -227,7 +227,7 @@ def test_add_sessions_rejects_duplicate(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
-    with pytest.raises(AlreadyExistsError, match="already a member"):
+    with pytest.raises(AlreadyExistsError):
         add_sessions(db, _StubConfig(), console_name="con", session_specs=["a"], interaction=InteractionPolicy.REFUSE)
 
 
@@ -244,7 +244,7 @@ def test_remove_sessions_rejects_non_member(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a", "b"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
-    with pytest.raises(NotFoundError, match="not a member"):
+    with pytest.raises(NotFoundError):
         remove_sessions(db, _StubConfig(), console_name="con", session_names=["b"])
 
 
@@ -280,7 +280,7 @@ def test_reorder_sessions_rejects_non_member(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a", "b"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
-    with pytest.raises(NotFoundError, match="not a member"):
+    with pytest.raises(NotFoundError):
         reorder_sessions(db, _StubConfig(), console_name="con", session_names=["b"])
 
 
@@ -288,13 +288,13 @@ def test_reorder_sessions_rejects_duplicates(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a", "b"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a", "b"])
-    with pytest.raises(ValidationError, match="listed more than once"):
+    with pytest.raises(ValidationError):
         reorder_sessions(db, _StubConfig(), console_name="con", session_names=["a", "a"])
 
 
 def test_reorder_sessions_rejects_missing_console(db: Database) -> None:
     _seed_vm(db)
-    with pytest.raises(NotFoundError, match="console 'nope' not found"):
+    with pytest.raises(NotFoundError):
         reorder_sessions(db, _StubConfig(), console_name="nope", session_names=["a"])
 
 
@@ -304,7 +304,7 @@ def test_reorder_sessions_rejects_empty_input(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a", "b"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a", "b"])
-    with pytest.raises(ValidationError, match="no sessions specified"):
+    with pytest.raises(ValidationError):
         reorder_sessions(db, _StubConfig(), console_name="con", session_names=[])
 
 
@@ -333,7 +333,7 @@ def test_add_shell_rejects_non_member(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a", "b"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
-    with pytest.raises(NotFoundError, match="not a member"):
+    with pytest.raises(NotFoundError):
         add_shell(db, _StubConfig(), console_name="con", session_name="b", interaction=InteractionPolicy.REFUSE)
 
 

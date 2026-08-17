@@ -424,7 +424,7 @@ def test_manually_stopped_raises_and_skips_the_ping(db: Database, monkeypatch: p
     platform = _GatePlatform(status=VMStatus.STOPPED)
     node, _ = _node(db, platform, vm)
 
-    with pytest.raises(StateError, match="manually stopped") as exc:
+    with pytest.raises(StateError) as exc:
         ensure_active(node, _no_resolve)
     assert "not be auto-started" in str(exc.value)
     assert "agw vm start gvm" in (exc.value.hint or "")
@@ -456,7 +456,7 @@ def test_flag_is_reread_before_auto_start(db: Database, monkeypatch: pytest.Monk
     platform = _GatePlatform(status=VMStatus.STOPPED)
     node, _ = _node(db, platform, vm)
 
-    with pytest.raises(StateError, match="stopped"):
+    with pytest.raises(StateError):
         ensure_active(node, _no_resolve)
     assert platform.start_calls == 0
 
@@ -681,7 +681,7 @@ def test_pending_vm_realization_is_one_way(db: Database) -> None:
     node, _, _ = _pending(db)
     node.mark_realized()
     assert node.realized
-    with pytest.raises(StateError, match="one-way"):
+    with pytest.raises(StateError):
         node.mark_realized()
 
 

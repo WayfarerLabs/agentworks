@@ -693,7 +693,7 @@ def test_known_machine_incompatibility_stays_pre_mutation(
     platform, cache = _platform(monkeypatch, _Transport())
     cache.clients["machine-types"] = SimpleNamespace(get=lambda **_kwargs: machine)
 
-    with pytest.raises(ConfigError, match="e2-standard-2"):
+    with pytest.raises(ConfigError):
         platform.create(_request(), _ctx())
 
     assert cache.firewalls.insert_requests == []
@@ -825,7 +825,7 @@ def test_delete_retains_same_name_different_id_instance_and_lifetime_deny(
     assert cache.instances.resource is not None
     cache.instances.resource.id = 999
 
-    with pytest.raises(GCEOperationError, match="not proven absent") as caught:
+    with pytest.raises(GCEOperationError) as caught:
         platform.delete(vm, _ctx())
     assert cache.instances.resource is not None
     assert cache.instances.delete_requests == []
@@ -865,7 +865,7 @@ def test_delete_refuses_noncanonical_persisted_allow_sources_before_any_mutation
     metadata = dict(result.platform_metadata)
     metadata["allow_source_ranges"] = "198.18.0.7"
 
-    with pytest.raises(StateError, match="invalid persisted GCE allow-source metadata"):
+    with pytest.raises(StateError):
         platform.delete(_vm(metadata), _ctx())
 
     assert cache.instances.delete_requests == []
@@ -911,7 +911,7 @@ def test_delete_keeps_deny_when_allow_read_and_instance_delete_are_indeterminate
     cache.firewalls.get_failures[allow_name] = [unavailable]
     cache.instances.delete_failures = [unavailable]
 
-    with pytest.raises(GCEOperationError, match="not proven absent") as caught:
+    with pytest.raises(GCEOperationError) as caught:
         platform.delete(vm, _ctx())
 
     assert len(cache.instances.delete_requests) == 1

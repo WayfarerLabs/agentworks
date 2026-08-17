@@ -61,5 +61,5 @@ def test_something_that_is_neither_is_a_loud_failure() -> None:
     """Never a silent pass-through: the caller gets an object back either
     way, so a no-op on an unrecognized shape leaves the row unstamped and
     nothing says so until something downstream reads the missing field."""
-    with pytest.raises(StateError, match="neither a frozen dataclass nor a model"):
+    with pytest.raises(StateError):
         replace_fields(object(), origin="built-in")

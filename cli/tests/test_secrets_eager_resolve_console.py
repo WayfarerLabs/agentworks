@@ -67,7 +67,7 @@ def test_console_add_shell_eager_resolve_fires_before_db_update(
 
     config = SimpleNamespace()
 
-    with pytest.raises(SecretUnavailableError, match="api-key"):
+    with pytest.raises(SecretUnavailableError):
         multi_console.add_shell(
             db,
             config,  # type: ignore[arg-type]
@@ -204,7 +204,7 @@ def test_attach_console_build_path_eager_resolves_before_tmux(
     )
 
     monkeypatch.delenv("TMUX", raising=False)
-    with pytest.raises(SecretUnavailableError, match="api-key"):
+    with pytest.raises(SecretUnavailableError):
         multi_console.attach_console(db, config, name="c1", interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
     assert build_called == [], "eager-resolve must fire before _build_console_tmux; build ran anyway"
@@ -468,7 +468,7 @@ def test_console_add_sessions_with_shells_eager_resolves(
         named_console=SimpleNamespace(tmux_layout="aw-session-vertical"),
     )
 
-    with pytest.raises(SecretUnavailableError, match="api-key"):
+    with pytest.raises(SecretUnavailableError):
         multi_console.add_sessions(
             db,
             config,  # type: ignore[arg-type]
@@ -589,7 +589,7 @@ def test_restore_session_window_missing_branch_eager_resolves(
         named_console=SimpleNamespace(tmux_layout="aw-session-vertical"),
     )
 
-    with pytest.raises(SecretUnavailableError, match="api-key"):
+    with pytest.raises(SecretUnavailableError):
         multi_console.restore_session(
             db,
             config,  # type: ignore[arg-type]

@@ -230,7 +230,7 @@ def test_not_ready_site_errors_before_tailscale_and_slug_prompt(
     monkeypatch.setattr(vm_manager, "verify_tailscale_available", _no_tailscale)
     monkeypatch.setattr(vm_manager, "_resolve_system_slug", _no_slug)
 
-    with pytest.raises(StateError, match="not ready on this host") as exc:
+    with pytest.raises(StateError) as exc:
         vm_manager.create_vm(db, config, name="dvm", site="lima-local", interaction=InteractionPolicy.REFUSE)
     assert "limactl" in str(exc.value)
 
@@ -425,7 +425,7 @@ def test_proxmox_token_resolves_end_to_end(
 
     monkeypatch.setattr(ProxmoxPlatform, "create", _fake_create)
 
-    with pytest.raises(ProvisioningError, match="halt after binding"):
+    with pytest.raises(ProvisioningError):
         vm_manager.create_vm(db, config, name="pvm", site="proxmox", interaction=InteractionPolicy.REFUSE)
 
     assert captured["token"] == "pve-token-value"

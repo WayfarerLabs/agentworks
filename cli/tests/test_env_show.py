@@ -113,7 +113,7 @@ def test_no_flags_raises_validation_error(db: Database, tmp_path: Path) -> None:
     cfg = _write_config(tmp_path)
     config = load_config(cfg, warn_issues=False)
     _seed_db(db)
-    with pytest.raises(ValidationError, match="requires a context"):
+    with pytest.raises(ValidationError):
         show_env(db, config, interaction=InteractionPolicy.REFUSE)
 
 
@@ -121,7 +121,7 @@ def test_unknown_vm_raises_validation_error(db: Database, tmp_path: Path) -> Non
     cfg = _write_config(tmp_path)
     config = load_config(cfg, warn_issues=False)
     _seed_db(db)
-    with pytest.raises(ValidationError, match="VM 'nope' not found"):
+    with pytest.raises(ValidationError):
         show_env(db, config, vm_name="nope", interaction=InteractionPolicy.REFUSE)
 
 

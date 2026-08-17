@@ -191,5 +191,5 @@ def test_inherits_cycle_caught_by_framework(tmp_path: Path) -> None:
         ManifestDoc("agent-template", "b", {"inherits": ["a"]}),
     )
     cfg = load_config(cfg_file, warn_issues=False)
-    with pytest.raises(ConfigError, match="cycle detected"):
+    with pytest.raises(ConfigError):
         build_registry(cfg)

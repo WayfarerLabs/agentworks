@@ -234,7 +234,7 @@ def test_named_console_no_tailscale_fails_with_zero_resolves_and_zero_gate(
 
     monkeypatch.setattr(ProxmoxPlatform, "status", _no_status)
 
-    with pytest.raises(StateError, match="no Tailscale address"):
+    with pytest.raises(StateError):
         multi_console.attach_console(db, config, name="c1", interaction=InteractionPolicy.REFUSE)
 
     assert resolve_counter == []

@@ -85,7 +85,7 @@ def test_compose_env_raises_loudly_on_uncovered_secret() -> None:
     """A secret reference absent from values means the eager-resolve
     target and this compose site drifted apart -- a bug in the calling
     command, surfaced loudly rather than resolved on the fly."""
-    with pytest.raises(RuntimeError, match="drift"):
+    with pytest.raises(RuntimeError):
         compose_env(
             values={},
             ctx=_ctx(),

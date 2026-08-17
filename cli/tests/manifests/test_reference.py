@@ -682,9 +682,15 @@ def test_a_secret_backend_implementation_describes_its_source_config() -> None:
 
 
 def test_an_unknown_kind_and_an_unknown_implementation_are_typed_refusals() -> None:
-    with pytest.raises(ValidationError, match="unknown kind"):
+    with pytest.raises(ValidationError) as exc:
         reference_for("nope")
-    with pytest.raises(ValidationError, match="no vm-platform named 'nope'"):
+    assert exc.value.entity_kind == "resource"
+    assert exc.value.entity_name == "nope"
+    with pytest.raises(ValidationError) as exc:
         reference_for("vm-platform/nope")
-    with pytest.raises(ValidationError, match="has no implementations"):
+    assert exc.value.entity_kind == "vm-platform"
+    assert exc.value.entity_name == "nope"
+    with pytest.raises(ValidationError) as exc:
         reference_for("secret/npm-token")
+    assert exc.value.entity_kind == "resource"
+    assert exc.value.entity_name == "secret/npm-token"

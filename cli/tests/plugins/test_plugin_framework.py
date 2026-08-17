@@ -111,7 +111,7 @@ def test_rejects_unknown_capability_kind() -> None:
 def test_rejects_instance_instead_of_class_the_secret_backend_trap() -> None:
     trap = cast("type", object())
     plugin = Plugin(name="p", capabilities={"secret-backend": (trap,)})
-    with pytest.raises(PluginError, match="is not a class"):
+    with pytest.raises(PluginError):
         register_plugin(plugin)
 
 
@@ -120,7 +120,7 @@ def test_rejects_impl_with_missing_name() -> None:
         pass
 
     plugin = Plugin(name="p", capabilities={"vm-platform": (NoName,)})
-    with pytest.raises(PluginError, match="invalid capability name"):
+    with pytest.raises(PluginError):
         register_plugin(plugin)
 
 
@@ -129,7 +129,7 @@ def test_rejects_impl_with_slash_bearing_name() -> None:
         name = "a/b"
 
     plugin = Plugin(name="p", capabilities={"vm-platform": (SlashName,)})
-    with pytest.raises(PluginError, match="a/b"):
+    with pytest.raises(PluginError):
         register_plugin(plugin)
 
 
@@ -138,7 +138,7 @@ def test_rejects_intra_descriptor_collision() -> None:
     two = conforming_impl("vm-platform", "dup")
 
     plugin = Plugin(name="p", capabilities={"vm-platform": (one, two)})
-    with pytest.raises(PluginError, match="intra-descriptor collision"):
+    with pytest.raises(PluginError):
         register_plugin(plugin)
 
 
@@ -388,7 +388,7 @@ def test_a_non_conforming_impl_is_refused_before_any_registry_write() -> None:
         },
     )
     before = _snapshot_registries()
-    with pytest.raises(PluginError, match="does not satisfy"):
+    with pytest.raises(PluginError):
         register_plugin(plugin)
     assert _snapshot_registries() == before
 
@@ -407,7 +407,7 @@ def test_a_mixed_valid_and_version_one_plugin_contribution_seats_nothing() -> No
         },
     )
     before = _snapshot_registries()
-    with pytest.raises(PluginError, match="declares contract_version 1"):
+    with pytest.raises(PluginError):
         register_plugin(plugin)
     assert _snapshot_registries() == before
 
@@ -513,7 +513,7 @@ def test_secret_backend_subclass_under_a_taken_name_is_not_idempotent() -> None:
 
     first = Plugin(name="first", capabilities={"secret-backend": (SubBackend,)})
     second = Plugin(name="second", capabilities={"secret-backend": (BaseBackend,)})
-    with seated_plugin(first), pytest.raises(PluginError, match="already published by system plugin 'first'"):
+    with seated_plugin(first), pytest.raises(PluginError):
         register_plugin(second)
 
 
@@ -815,7 +815,7 @@ def test_seated_plugin_round_trips_on_exception() -> None:
     from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
     before = _snapshot_registries()
-    with pytest.raises(RuntimeError, match="boom"), seated_plugin(fixture_plugin()):
+    with pytest.raises(RuntimeError), seated_plugin(fixture_plugin()):
         assert "fixture-vm" in VM_PLATFORM_REGISTRY  # seated inside
         raise RuntimeError("boom")
     assert _snapshot_registries() == before

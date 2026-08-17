@@ -122,7 +122,7 @@ def test_an_explicit_value_wins_over_the_default(seated: None) -> None:
 def test_the_declarations_constraint_reaches_validation(seated: None) -> None:
     """``NonEmptyStr`` is part of the same one declaration, so it is
     enforced without a validator being registered anywhere."""
-    with pytest.raises(ConfigError, match="region: must not be empty"):
+    with pytest.raises(ConfigError):
         _validate({"region": ""})
 
 

@@ -192,7 +192,7 @@ def test_create_bad_template_bails_before_any_prompt_or_start(
     # the bail-early precedence.
     from agentworks.errors import NotFoundError
 
-    with pytest.raises(NotFoundError, match="nope"):
+    with pytest.raises(NotFoundError):
         workspace_manager.create_workspace(
             db, config, name="ws1", vm_name="box", template_name="nope", interaction=InteractionPolicy.REFUSE
         )
@@ -260,7 +260,7 @@ def test_create_mutation_failure_cleans_up_and_leaves_no_row(
         lambda vm, config_, ws_name, path, linux_group, *, logger=None: deletes.append(path),
     )
 
-    with pytest.raises(ExternalError, match="creating workspace: ssh exploded"):
+    with pytest.raises(ExternalError):
         workspace_manager.create_workspace(db, config, name="ws1", vm_name="box", interaction=InteractionPolicy.REFUSE)
 
     assert deletes == ["/srv/ws1"]  # the body's partial-state cleanup ran

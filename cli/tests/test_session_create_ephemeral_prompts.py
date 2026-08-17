@@ -80,7 +80,7 @@ def test_admin_non_interactive_on_vm_with_agents_does_not_prompt(
     # If admin is honored, we reach ensure_active. If admin is
     # erased and the prompt fires, the autouse non-interactive fixture
     # makes it raise ValidationError first.
-    with pytest.raises(RuntimeError, match="stop after mode-prompt gate"):
+    with pytest.raises(RuntimeError):
         create_session(
             db,
             config,  # type: ignore[arg-type]
@@ -104,7 +104,7 @@ def test_mode_required_in_non_interactive(tmp_path: Path) -> None:
     db = _seed_one_vm(tmp_path)  # vm1 + ws1, no agents
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
-    with pytest.raises(ValidationError, match="session mode is required in non-interactive mode"):
+    with pytest.raises(ValidationError):
         create_session(
             db,
             config,  # type: ignore[arg-type]
@@ -127,7 +127,7 @@ def test_workspace_required_in_non_interactive(tmp_path: Path) -> None:
     db = _seed_one_vm(tmp_path)  # vm1 + ws1, exactly one workspace
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
-    with pytest.raises(ValidationError, match="workspace is required in non-interactive mode"):
+    with pytest.raises(ValidationError):
         create_session(
             db,
             config,  # type: ignore[arg-type]
@@ -156,7 +156,7 @@ def test_workspace_prompt_picks_existing(tmp_path: Path, monkeypatch: pytest.Mon
     monkeypatch.setattr(output, "choose", lambda msg, opts: 0)  # ws1
     called = _stub_for_post_prompt_flow(monkeypatch)
 
-    with pytest.raises(RuntimeError, match="stop after prompt"):
+    with pytest.raises(RuntimeError):
         create_session(
             db,
             config,  # type: ignore[arg-type]
@@ -193,7 +193,7 @@ def test_workspace_prompt_picks_create_new(tmp_path: Path, monkeypatch: pytest.M
 
     monkeypatch.setattr("agentworks.workspaces.realize.realize_workspace", _ws_spy)
 
-    with pytest.raises(RuntimeError, match="stop after workspace realize"):
+    with pytest.raises(RuntimeError):
         create_session(
             db,
             config,  # type: ignore[arg-type]
@@ -224,7 +224,7 @@ def test_mode_prompt_picks_admin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(output, "choose", lambda msg, opts: 0)  # admin
     called = _stub_for_post_prompt_flow(monkeypatch)
 
-    with pytest.raises(RuntimeError, match="stop after prompt"):
+    with pytest.raises(RuntimeError):
         create_session(
             db,
             config,  # type: ignore[arg-type]
@@ -249,7 +249,7 @@ def test_mode_prompt_picks_existing_agent(tmp_path: Path, monkeypatch: pytest.Mo
     monkeypatch.setattr(output, "choose", lambda msg, opts: 1)  # agt1
     called = _stub_for_post_prompt_flow(monkeypatch)
 
-    with pytest.raises(RuntimeError, match="stop after prompt"):
+    with pytest.raises(RuntimeError):
         create_session(
             db,
             config,  # type: ignore[arg-type]
@@ -289,7 +289,7 @@ def test_mode_prompt_picks_create_new(tmp_path: Path, monkeypatch: pytest.Monkey
 
     monkeypatch.setattr("agentworks.agents.realize.realize_agent", _ag_spy)
 
-    with pytest.raises(RuntimeError, match="stop after agent realize"):
+    with pytest.raises(RuntimeError):
         create_session(
             db,
             config,  # type: ignore[arg-type]

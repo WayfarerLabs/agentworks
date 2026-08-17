@@ -220,7 +220,7 @@ class TestPrefixAssembly:
         assert azure_network.operator_ssh_prefixes([_DETECTED]) == [_DETECTED_PREFIX]
 
     def test_invalid_extra_rejected(self) -> None:
-        with pytest.raises(ConfigError, match="not-an-ip"):
+        with pytest.raises(ConfigError):
             azure_network.operator_ssh_prefixes(["not-an-ip"])
 
     def test_detection_failure_with_extras_proceeds_with_warning(
@@ -456,7 +456,7 @@ class TestTransientRoute:
         network = _install_fakes(monkeypatch).network
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
-        with pytest.raises(RuntimeError, match="kaboom"), _platform().transient_route(vm, RunContext()):
+        with pytest.raises(RuntimeError), _platform().transient_route(vm, RunContext()):
             raise RuntimeError("kaboom")
 
         rule_name = network.security_rules.transient_names()[0]

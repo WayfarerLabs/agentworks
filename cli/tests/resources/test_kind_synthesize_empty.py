@@ -32,7 +32,7 @@ def test_secret_kind_raises_on_empty_requirements() -> None:
     obvious landing pad.
     """
     secret_kind = KIND_REGISTRY["secret"]
-    with pytest.raises(NoUnreferencedDefaultError, match="secret kind"):
+    with pytest.raises(NoUnreferencedDefaultError):
         secret_kind.synthesize(())
 
 

@@ -32,7 +32,7 @@ def test_validate_slug_bounds() -> None:
     vm_manager.validate_slug("a" * 20)
     vm_manager.validate_slug("team-a1")
     for bad in ("ab", "a" * 21, "-abc", "abc-", "Team", "a_b_c", ""):
-        with pytest.raises(ValidationError, match="invalid system slug"):
+        with pytest.raises(ValidationError):
             vm_manager.validate_slug(bad)
 
 

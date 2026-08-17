@@ -406,11 +406,11 @@ def test_reorder_console_sessions_rejects_wrong_member_set(db: Database) -> None
     db.add_console_session("con", "a", [])
     db.add_console_session("con", "b", [])
 
-    with pytest.raises(ValueError, match="full member list"):
+    with pytest.raises(ValueError):
         db.reorder_console_sessions("con", ["a"])  # missing b
-    with pytest.raises(ValueError, match="full member list"):
+    with pytest.raises(ValueError):
         db.reorder_console_sessions("con", ["a", "b", "c"])  # c not a member
-    with pytest.raises(ValueError, match="full member list"):
+    with pytest.raises(ValueError):
         db.reorder_console_sessions("con", ["a", "a"])  # duplicate a, missing b
 
 

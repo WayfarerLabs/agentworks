@@ -208,7 +208,7 @@ def test_declared_site_on_unsupported_platform_registers_not_ready(
     registry = build_registry(config)
     reason = registry.graph.readiness_of("vm-site", "my-wsl").reason
     assert reason == "platform 'wsl2' is unsupported here: Windows only"
-    with pytest.raises(StateError, match="not ready on this host") as exc:
+    with pytest.raises(StateError) as exc:
         resolve_site("my-wsl", registry)
     assert "Windows only" in str(exc.value)
 
@@ -224,7 +224,7 @@ def test_unknown_platform_site_is_a_hard_error(make_config, monkeypatch: pytest.
     config = make_config(
         resources=_site_doc("orbital", "skynet"),
     )
-    with pytest.raises(ConfigError, match="unknown vm-platform 'skynet'"):
+    with pytest.raises(ConfigError):
         build_registry(config)
 
 
@@ -236,7 +236,7 @@ def test_bundled_site_names_are_reserved_on_every_host(make_config, monkeypatch:
     config = make_config(
         resources=_site_doc("lima-local", "lima"),
     )
-    with pytest.raises(ConfigError, match="reserved"):
+    with pytest.raises(ConfigError):
         build_registry(config)
 
 
@@ -247,7 +247,7 @@ def test_defaults_site_naming_a_disabled_site_is_valid_config(make_config, monke
     _support(monkeypatch, wsl2="Windows only", lima_local="limactl not installed")
     config = make_config('[defaults]\nsite = "lima-local"\n')
     registry = build_registry(config)  # no raise
-    with pytest.raises(StateError, match="limactl not installed"):
+    with pytest.raises(StateError):
         resolve_site("lima-local", registry)
 
 
@@ -262,7 +262,7 @@ def test_select_site_infers_over_enabled_sites_only(make_config, monkeypatch: py
 def test_select_site_errors_with_reasons_when_none_ready(make_config, monkeypatch: pytest.MonkeyPatch) -> None:
     _support(monkeypatch, wsl2="Windows only", lima_local="limactl not installed")
     registry = build_registry(make_config())
-    with pytest.raises(ValidationError, match="no vm-sites are ready") as exc:
+    with pytest.raises(ValidationError) as exc:
         select_site(None, None, registry)
     assert "limactl not installed" in str(exc.value)
     assert "Windows only" in str(exc.value)

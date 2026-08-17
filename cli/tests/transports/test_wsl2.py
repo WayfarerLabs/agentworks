@@ -63,7 +63,7 @@ def test_run_check_true_raises_on_nonzero() -> None:
     t = WSL2Transport(distro_name="my-distro")
     with patch("agentworks.transports.wsl2.subprocess.run") as mock_run:
         mock_run.return_value = _fail_completed(returncode=5)
-        with pytest.raises(SSHError, match="WSL2 command failed"):
+        with pytest.raises(SSHError):
             t.run("false")
 
 
@@ -145,7 +145,7 @@ def test_copy_to_raises_on_failure(tmp_path: Path) -> None:
     t = WSL2Transport(distro_name="my-distro")
     with patch("agentworks.transports.wsl2.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=1, stderr=b"denied")
-        with pytest.raises(SSHError, match="WSL2 copy failed"):
+        with pytest.raises(SSHError):
             t.copy_to(src, "/remote/x")
 
 

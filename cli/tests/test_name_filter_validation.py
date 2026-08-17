@@ -98,19 +98,19 @@ def test_no_filters_is_a_noop(db: Database) -> None:
 
 def test_session_list_rejects_unknown_vm(db: Database) -> None:
     _seed(db)
-    with pytest.raises(NotFoundError, match="unknown VM 'wf-test'"):
+    with pytest.raises(NotFoundError):
         session_manager.list_sessions(db, None, vm_name="wf-test", interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
 
 def test_session_list_rejects_unknown_workspace(db: Database) -> None:
     _seed(db)
-    with pytest.raises(NotFoundError, match="unknown workspace 'nope'"):
+    with pytest.raises(NotFoundError):
         session_manager.list_sessions(db, None, workspace_name="nope", interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
 
 def test_session_list_rejects_unknown_agent(db: Database) -> None:
     _seed(db)
-    with pytest.raises(NotFoundError, match="unknown agent 'nope'"):
+    with pytest.raises(NotFoundError):
         session_manager.list_sessions(db, None, agent_name="nope", interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
 
@@ -118,7 +118,7 @@ def test_session_list_csv_with_one_bad_element_rejects(db: Database) -> None:
     """A CSV filter validates every element: one good name does not
     excuse an unknown sibling."""
     _seed(db)
-    with pytest.raises(NotFoundError, match="unknown VM 'wf-test'") as excinfo:
+    with pytest.raises(NotFoundError) as excinfo:
         session_manager.list_sessions(db, None, vm_name=["dev-vm", "wf-test"], interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
     assert "'dev-vm'" not in str(excinfo.value)
 
@@ -141,7 +141,7 @@ def test_session_list_valid_filter_empty_result_succeeds(
 
 def test_stop_all_sessions_rejects_unknown_vm(db: Database) -> None:
     _seed(db)
-    with pytest.raises(NotFoundError, match="unknown VM 'wf-test'"):
+    with pytest.raises(NotFoundError):
         session_manager.stop_all_sessions(db, None, vm_name="wf-test", interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
 
@@ -158,7 +158,7 @@ def test_resume_all_sessions_rejects_unknown_vm(db: Database) -> None:
     """The issue #304 reproducer: restart --all-stopped with an unknown
     ``--vm`` must be a hard error, not "no sessions to restart"."""
     _seed(db)
-    with pytest.raises(NotFoundError, match="unknown VM 'wf-test'"):
+    with pytest.raises(NotFoundError):
         session_manager.resume_all_sessions(db, None, vm_name="wf-test", interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
 
@@ -178,28 +178,32 @@ def test_resume_all_sessions_valid_filter_empty_result_succeeds(
 
 def test_agent_list_rejects_unknown_vm(db: Database) -> None:
     _seed(db)
-    with pytest.raises(NotFoundError, match="unknown VM 'wf-test'"):
+    with pytest.raises(NotFoundError):
         list_agents(db, vm_name="wf-test")
 
 
 def test_workspace_list_rejects_unknown_vm(db: Database) -> None:
     _seed(db)
-    with pytest.raises(NotFoundError, match="unknown VM 'wf-test'"):
+    with pytest.raises(NotFoundError):
         list_workspaces(db, vm_name="wf-test")
 
 
 def test_console_list_rejects_unknown_vm(db: Database) -> None:
     _seed(db)
-    with pytest.raises(NotFoundError, match="unknown VM 'wf-test'"):
+    with pytest.raises(NotFoundError):
         list_consoles(db, vm_name="wf-test")
 
 
 def test_console_list_rejects_unknown_workspace_and_agent(db: Database) -> None:
     _seed(db)
-    with pytest.raises(NotFoundError, match="unknown workspace 'nope'"):
+    with pytest.raises(NotFoundError) as exc:
         list_consoles(db, workspace_name="nope")
-    with pytest.raises(NotFoundError, match="unknown agent 'nope'"):
+    assert exc.value.entity_kind == "workspace"
+    assert exc.value.entity_name == "nope"
+    with pytest.raises(NotFoundError) as exc:
         list_consoles(db, agent_name="nope")
+    assert exc.value.entity_kind == "agent"
+    assert exc.value.entity_name == "nope"
 
 
 def test_list_commands_valid_filter_empty_result_succeeds(

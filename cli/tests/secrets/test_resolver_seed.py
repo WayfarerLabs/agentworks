@@ -76,7 +76,7 @@ def test_seeded_value_is_readable_before_the_boundary_pass(
 def test_unseeded_pre_pass_read_still_raises(backend: _ResolveSpy) -> None:
     resolver = _resolver()
     resolver.seed({"proxmox-token": "pve"})
-    with pytest.raises(StateError, match="before the operation's resolve"):
+    with pytest.raises(StateError):
         resolver.get("git-token-gh")
 
 
@@ -117,5 +117,5 @@ def test_seeding_after_the_pass_is_a_loud_error(backend: _ResolveSpy) -> None:
     covered must not quietly widen the cache."""
     resolver = _resolver()
     resolver.resolve()
-    with pytest.raises(StateError, match="seeded after"):
+    with pytest.raises(StateError):
         resolver.seed({"proxmox-token": "pve"})

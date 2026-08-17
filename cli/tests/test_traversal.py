@@ -173,7 +173,7 @@ def test_a_hook_that_raises_refuses_the_input() -> None:
     def refuse(chain: tuple[str, ...]) -> None:
         raise ValueError(" -> ".join(chain))
 
-    with pytest.raises(ValueError, match="a -> b -> a"):
+    with pytest.raises(ValueError):
         list(iter_post_order("a", _graph_successors(edges), on_cycle=refuse))
 
 

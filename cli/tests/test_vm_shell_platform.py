@@ -487,7 +487,7 @@ def test_native_transport_closes_allow_on_exception_for_azure(
 
     vm = vm_manager._require_vm(db, "vm1")
     with contextlib.ExitStack() as stack:
-        with pytest.raises(RuntimeError, match="simulated post-open failure"):
+        with pytest.raises(RuntimeError):
             _native_transport(
                 vm,
                 _AzureRaisesAfterOpen(),

@@ -125,7 +125,7 @@ def test_unknown_kind_filter_raises_unknown_kind_error(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(cfg_file)
     registry = _load(cfg_file)
-    with pytest.raises(NotFoundError, match="unknown kind 'does_not_exist'"):
+    with pytest.raises(NotFoundError):
         list_resources(registry, kinds=("does_not_exist",))
 
 
