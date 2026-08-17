@@ -92,6 +92,23 @@ whatever other simplifications the onboarding and discovery track has accumulate
 own reading is that earlier phases of that effort landed tech debt while unattended. Shipped
 2026-08-15 (PRs #519 and #537).
 
+**Ruling (operator, 2026-08-17, markdown concept shells):** the guide's retained typed model is
+replaced by auto-discovered Markdown concept shells, confirmed through the saga lead's authenticated
+channel after the onboarding effort's design checkpoint (PR #580). One Markdown file per ordinary
+`concept-` topic with required description frontmatter defines the catalog; the only additions to
+ordinary Markdown are balanced agent-only fences, one bounded inert import of a uniquely named
+section from the installed first-party package tree, and the `resource-kinds` and `resource-list`
+live projections; there are no variables, loops, conditionals, or template engine. Typed guide
+blocks, actions, consent and evidence replay, the onboarding assessment, and manual contribution
+registration are removed. The consent posture survives the machinery: guide text instructs and never
+authorizes (the effort FRD's R5 restates it over the new surface), and environmental failures still
+fail soft with structural shell defects nonzero. This supersedes the typed-block and action-record
+retention in the 2026-08-05 teaching-surface rulings and the 2026-08-15 rubric's "action records"
+keep clause; the corrected-guide-model ruling below otherwise stands (one catalog, presentation-only
+modes, the few-line bootstrap). The 2026-08-16 corrected guide model shipped first (PR #579, merged
+2026-08-17), satisfying its 0.14.0 gate; no gate is minted here for the shells implementation
+without separate operator direction.
+
 **Ruling (operator, 2026-08-16, the corrected guide model; gates 0.14.0):** hands-on testing in the
 operator's real environment found the shipped guide badly over-indexed on agents: the human trail
 sign exposes two destinations while the agent trail sign exposes seven that are plainly useful to
