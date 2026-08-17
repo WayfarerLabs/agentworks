@@ -131,6 +131,10 @@ def test_container_prefixed_control_lines_are_ordinary_markdown(tmp_path: Path) 
     [
         "# Demo\n\n> Quoted heading\n> ---\n",
         "# Demo\n\n- Listed heading\n  ===\n",
+        "# Demo\n\n- > List quote heading\n  > ===\n",
+        "# Demo\n\n> - Quote list heading\n>   ===\n",
+        "# Demo\n\n- Outer\n  - Nested list heading\n    ===\n",
+        "# Demo\n\n- Outer\n  - Inner\n    > Three-deep heading\n    > ===\n",
     ],
 )
 def test_setext_headings_in_supported_containers_fail(tmp_path: Path, body: str) -> None:

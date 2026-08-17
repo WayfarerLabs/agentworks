@@ -7,11 +7,15 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Literal
 
 from agentworks.guide.contract import GuideContentError
 
 _LIST_RE = re.compile(r"(?P<indent>[ ]{0,3})(?:[-+*]|[0-9]{1,9}[.)])(?P<spacing>[ ]{1,4})(?P<body>.*)")
 _SETEXT_RE = re.compile(r"[ ]{0,3}(?:=+|-+)[ \t]*")
+type _Container = Literal["quote"] | tuple[Literal["list"], int, int]
+type _ContainerStack = tuple[_Container, ...]
+_QUOTE: _Container = "quote"
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,25 +27,87 @@ class MarkdownLine:
     content_start: int
     outside_code: bool
     structural: bool
-    container: tuple[int, int | None]
+    container: _ContainerStack
 
 
 def _leading_spaces(value: str) -> int:
     return len(value) - len(value.lstrip(" "))
 
 
-def _strip_quotes(value: str) -> tuple[str, int]:
-    depth = 0
+def _quote_body(value: str) -> str | None:
+    spaces = min(_leading_spaces(value), 3)
+    candidate = value[spaces:]
+    if not candidate.startswith(">"):
+        return None
+    remaining = candidate[1:]
+    return remaining[1:] if remaining.startswith(" ") else remaining
+
+
+def _list_body(value: str) -> tuple[str, int] | None:
+    match = _LIST_RE.fullmatch(value)
+    if match is None:
+        return None
+    body = match.group("body")
+    return body, len(value) - len(body)
+
+
+def _strip_containers(
+    value: str,
+    active: _ContainerStack,
+    next_list_id: int,
+) -> tuple[str, _ContainerStack, int]:
+    containers: list[_Container] = []
     remaining = value
+    active_index = 0
+    following_active = True
     while True:
-        spaces = min(_leading_spaces(remaining), 3)
-        candidate = remaining[spaces:]
-        if not candidate.startswith(">"):
-            return remaining, depth
-        remaining = candidate[1:]
-        if remaining.startswith(" "):
-            remaining = remaining[1:]
-        depth += 1
+        if following_active and active_index < len(active):
+            active_container = active[active_index]
+            if isinstance(active_container, str):
+                if (body := _quote_body(remaining)) is not None:
+                    containers.append(_QUOTE)
+                    remaining = body
+                    active_index += 1
+                    continue
+            elif _leading_spaces(remaining) >= active_container[1]:
+                containers.append(active_container)
+                indent = active_container[1]
+                remaining = remaining[indent:]
+                active_index += 1
+                continue
+            if not remaining.strip() and all(container != _QUOTE for container in active[active_index:]):
+                containers.extend(active[active_index:])
+                remaining = ""
+                break
+            following_active = False
+
+        if (body := _quote_body(remaining)) is not None:
+            containers.append(_QUOTE)
+            remaining = body
+            continue
+        if (listed := _list_body(remaining)) is not None:
+            remaining, indent = listed
+            containers.append(("list", indent, next_list_id))
+            next_list_id += 1
+            continue
+        break
+    return remaining, tuple(containers), next_list_id
+
+
+def _follow_containers(value: str, expected: _ContainerStack) -> str | None:
+    remaining = value
+    for index, container in enumerate(expected):
+        if isinstance(container, str):
+            if (body := _quote_body(remaining)) is None:
+                return None
+            remaining = body
+        elif _leading_spaces(remaining) >= container[1]:
+            remaining = remaining[container[1] :]
+        elif not remaining.strip() and all(item != _QUOTE for item in expected[index:]):
+            return ""
+        else:
+            return None
+    return remaining
 
 
 def _opening_fence(content: str) -> tuple[str, int] | None:
@@ -74,50 +140,28 @@ def _closing_fence(content: str, active: tuple[str, int]) -> bool:
 def scan_markdown(markdown: str, source: str) -> tuple[MarkdownLine, ...]:
     """Scan the supported container and fenced-code subset without interpreting Markdown."""
     scanned: list[MarkdownLine] = []
-    active_fence: tuple[str, int, tuple[int, int | None]] | None = None
-    list_indent: int | None = None
-    list_quote_depth = 0
+    active_fence: tuple[str, int, _ContainerStack] | None = None
+    active_containers: _ContainerStack = ()
+    next_list_id = 0
 
     for raw in markdown.splitlines(keepends=True):
         line = raw.rstrip("\r\n")
-        quoted, quote_depth = _strip_quotes(line)
-        explicit_list = _LIST_RE.fullmatch(quoted)
-        if explicit_list is not None:
-            prefix_width = len(explicit_list.group("indent")) + (
-                len(quoted) - len(explicit_list.group("body")) - len(explicit_list.group("indent"))
-            )
-            content = explicit_list.group("body")
-            list_indent = prefix_width
-            list_quote_depth = quote_depth
-            in_list = True
-        elif list_indent is not None and quote_depth == list_quote_depth:
-            spaces = _leading_spaces(quoted)
-            if not quoted.strip():
-                content = ""
-                in_list = True
-            elif spaces >= list_indent:
-                content = quoted[list_indent:]
-                in_list = True
-            else:
-                list_indent = None
-                content = quoted
-                in_list = False
-        else:
-            list_indent = None
-            content = quoted
-            in_list = False
-
-        indented_code = not in_list and quote_depth == 0 and _leading_spaces(content) >= 4
-        structural = not indented_code
-        container = (quote_depth, list_indent if in_list else None)
-        outside = active_fence is None
-        scanned.append(MarkdownLine(raw, content, len(line) - len(content), outside, structural, container))
-
-        if active_fence is None:
-            if structural and (opening := _opening_fence(content)) is not None:
-                active_fence = (*opening, container)
-        elif container == active_fence[2] and _closing_fence(content, active_fence[:2]):
+        if active_fence is not None:
+            content = _follow_containers(line, active_fence[2])
+            if content is not None:
+                scanned.append(MarkdownLine(raw, content, len(line) - len(content), False, True, active_fence[2]))
+                if _closing_fence(content, active_fence[:2]):
+                    active_fence = None
+                continue
             active_fence = None
+
+        content, container, next_list_id = _strip_containers(line, active_containers, next_list_id)
+        active_containers = container
+        indented_code = not container and _leading_spaces(content) >= 4
+        structural = not indented_code
+        scanned.append(MarkdownLine(raw, content, len(line) - len(content), True, structural, container))
+        if structural and (opening := _opening_fence(content)) is not None:
+            active_fence = (*opening, container)
 
     if active_fence is not None:
         raise GuideContentError(f"Markdown source {source!r} has an unclosed code fence")

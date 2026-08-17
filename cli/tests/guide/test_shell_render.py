@@ -8,6 +8,7 @@ import agentworks.guide.render as render_module
 from agentworks.guide.agent_mode import GuideMode
 from agentworks.guide.catalog import discover_concept_shells
 from agentworks.guide.contract import ConceptShell, GuideContentError, GuideSource
+from agentworks.guide.markdown import contains_setext_heading, scan_markdown
 from agentworks.guide.render import render_shell, rewrite_relative_destinations
 
 
@@ -107,21 +108,56 @@ def test_include_heading_link_literal_is_parsed_before_shell_links_are_rewritten
     )
 
 
-def test_heading_offsets_shift_quoted_and_listed_atx_headings(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("fragment", "shifted"),
+    [
+        ("### Top", "#### Top"),
+        ("> ### Quote", "> #### Quote"),
+        ("- ### List", "- #### List"),
+        ("- > ### List quote", "- > #### List quote"),
+        ("- - ### Nested list", "- - #### Nested list"),
+        ("> - ### Quote list", "> - #### Quote list"),
+        ("- > - ### Three deep", "- > - #### Three deep"),
+        ("  -   >  ### Spaced", "  -   >  #### Spaced"),
+        ("- > Outer\n  > ### List quote continuation", "  > #### List quote continuation"),
+        ("> - Outer\n>   ### Quote list continuation", ">   #### Quote list continuation"),
+        ("- Outer\n  - Inner\n    ### Nested list continuation", "    #### Nested list continuation"),
+        (
+            "- Outer\n  - Inner\n    > ### Three-deep continuation",
+            "    > #### Three-deep continuation",
+        ),
+    ],
+)
+def test_heading_offsets_shift_every_supported_container_prefix(
+    tmp_path: Path,
+    fragment: str,
+    shifted: str,
+) -> None:
     included = tmp_path / "source.md"
     included.write_text(
-        "## Selected\n\n> ### Quoted\n\n- #### Listed\n\n## Next\n",
+        f"## Selected\n\n{fragment}\n\n## Next\n",
         encoding="utf-8",
     )
     topic = _topic('# Demo\n<!-- agw:include path="source.md" heading="Selected" heading-offset="1" -->\n')
 
     rendered = render_shell(topic, GuideMode.HUMAN, package_root=tmp_path)
 
-    assert "> #### Quoted\n" in rendered
-    assert "- ##### Listed\n" in rendered
+    assert f"{shifted}\n" in rendered
 
 
-@pytest.mark.parametrize("container_heading", ["> ###### Quoted\n", "- ###### Listed\n"])
+@pytest.mark.parametrize(
+    "container_heading",
+    [
+        "- > ###### List quote\n",
+        "> - ###### Quote list\n",
+        "- - ###### Nested list\n",
+        "- > - ###### Three deep\n",
+        "- > Outer\n  > ###### List quote continuation\n",
+        "> - Outer\n>   ###### Quote list continuation\n",
+        "- Outer\n  - Inner\n    ###### Nested list continuation\n",
+        "- Outer\n  - Inner\n    > ###### Three-deep continuation\n",
+    ],
+)
 def test_container_heading_offsets_remain_bounded(tmp_path: Path, container_heading: str) -> None:
     included = tmp_path / "source.md"
     included.write_text(f"## Selected\n\n{container_heading}", encoding="utf-8")
@@ -129,6 +165,106 @@ def test_container_heading_offsets_remain_bounded(tmp_path: Path, container_head
 
     with pytest.raises(GuideContentError):
         render_shell(topic, GuideMode.HUMAN, package_root=tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("fragment", "literals"),
+    [
+        (
+            "```\n- ###### List-looking literal\n> ###### Quote-looking literal\n```",
+            ("- ###### List-looking literal\n", "> ###### Quote-looking literal\n"),
+        ),
+        (
+            "- ```\n  - ###### List-looking literal\n  > ###### Quote-looking literal\n  ```",
+            ("  - ###### List-looking literal\n", "  > ###### Quote-looking literal\n"),
+        ),
+        (
+            "- > ```\n  > - ###### List-looking literal\n  > > ###### Quote-looking literal\n  > ```",
+            ("  > - ###### List-looking literal\n", "  > > ###### Quote-looking literal\n"),
+        ),
+    ],
+)
+def test_fences_keep_container_looking_h6_lines_literal(
+    tmp_path: Path,
+    fragment: str,
+    literals: tuple[str, str],
+) -> None:
+    included = tmp_path / "source.md"
+    included.write_text(f"## Selected\n\n{fragment}\n", encoding="utf-8")
+    topic = _topic('# Demo\n<!-- agw:include path="source.md" heading="Selected" heading-offset="1" -->\n')
+
+    rendered = render_shell(topic, GuideMode.HUMAN, package_root=tmp_path)
+
+    assert all(literal in rendered for literal in literals)
+
+
+@pytest.mark.parametrize(
+    ("fragment", "literal"),
+    [
+        ("- > ```\n  > ###### List quote\n  > ```", "  > ###### List quote\n"),
+        ("> - ```\n>   ###### Quote list\n>   ```", ">   ###### Quote list\n"),
+        ("- - ```\n    ###### Nested list\n    ```", "    ###### Nested list\n"),
+        (
+            "- Outer\n  - > ```\n    > ###### Three deep\n    > ```",
+            "    > ###### Three deep\n",
+        ),
+    ],
+)
+def test_mixed_container_fences_match_across_continuation_lines(
+    tmp_path: Path,
+    fragment: str,
+    literal: str,
+) -> None:
+    included = tmp_path / "source.md"
+    included.write_text(f"## Selected\n\n{fragment}\n", encoding="utf-8")
+    topic = _topic('# Demo\n<!-- agw:include path="source.md" heading="Selected" heading-offset="1" -->\n')
+
+    rendered = render_shell(topic, GuideMode.HUMAN, package_root=tmp_path)
+
+    assert literal in rendered
+
+
+def test_reversed_container_order_does_not_close_a_fence() -> None:
+    with pytest.raises(GuideContentError):
+        scan_markdown("- > ```\n> - ```\n", "fixture")
+
+
+def test_container_fence_suffix_does_not_close(tmp_path: Path) -> None:
+    included = tmp_path / "source.md"
+    included.write_text(
+        "## Selected\n\n- > ```markdown\n  > ``` suffix\n  > ###### After suffix\n  > ```\n",
+        encoding="utf-8",
+    )
+    topic = _topic('# Demo\n<!-- agw:include path="source.md" heading="Selected" heading-offset="1" -->\n')
+
+    rendered = render_shell(topic, GuideMode.HUMAN, package_root=tmp_path)
+
+    assert "  > ###### After suffix\n" in rendered
+
+
+@pytest.mark.parametrize(
+    "sibling_items",
+    [
+        "- ```\n- ###### Sibling heading\n- ```\n",
+        "- > ```\n- > ###### Mixed sibling heading\n- > ```\n",
+    ],
+)
+def test_fence_does_not_conceal_heading_in_a_fresh_list_item(
+    tmp_path: Path,
+    sibling_items: str,
+) -> None:
+    included = tmp_path / "source.md"
+    included.write_text(f"## Selected\n\n{sibling_items}", encoding="utf-8")
+    topic = _topic('# Demo\n<!-- agw:include path="source.md" heading="Selected" heading-offset="1" -->\n')
+
+    with pytest.raises(GuideContentError):
+        render_shell(topic, GuideMode.HUMAN, package_root=tmp_path)
+
+
+def test_fence_does_not_conceal_setext_in_a_fresh_same_shaped_list_item() -> None:
+    lines = scan_markdown("- ```\n- Heading\n  ===\n", "fixture")
+
+    assert contains_setext_heading(lines)
 
 
 def test_included_text_cannot_capture_later_include_nodes(tmp_path: Path) -> None:
