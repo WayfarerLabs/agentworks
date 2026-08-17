@@ -92,6 +92,39 @@ whatever other simplifications the onboarding and discovery track has accumulate
 own reading is that earlier phases of that effort landed tech debt while unattended. Shipped
 2026-08-15 (PRs #519 and #537).
 
+**Ruling (operator, 2026-08-16, the corrected guide model; gates 0.14.0):** hands-on testing in the
+operator's real environment found the shipped guide badly over-indexed on agents: the human trail
+sign exposes two destinations while the agent trail sign exposes seven that are plainly useful to
+humans, eight core topics carry separate agent-contract files, and the "simple" copy/paste bootstrap
+prompt is 23 lines of defensive specification. The corrected model, proposed by the onboarding lead
+and adopted by the operator: one topic catalog for everyone; human and agent modes show essentially
+the same destinations and differ in presentation, never in access to ordinary information; one
+agent-specific assistance topic explains how an external assistant behaves; individual topics carry
+a short agent note only when genuinely necessary; and the bootstrap prompt shrinks to a few lines
+that install the CLI and point at `agw guide --agent`, which is itself the specification. This
+supersedes the 2026-08-12 trail-sign ruling's destination asymmetry (the trail-sign form itself
+stands). The operator's words carry the bar: "I'd be embarrassed to ship this. It has to be included
+in 0.14. This should all end up dramatically simpler." The onboarding child owns the work, and
+0.14.0 does not ship without it.
+
+The operator supplied a worked example of the agent-hint species and directed it recorded, since the
+miss was large enough that everyone should know the intended shape (the wording may drift; the shape
+may not). For VM platforms, the onboarding journey's agent hint should run along the lines of:
+"Check out the available platforms and offer to guide the operator through a discovery and
+configuration process, first determining which platform(s) they want to use, and then walking
+through the configuration options to create actual sites." The operator expects roughly a dozen
+journey hints of this species across the guide, developed by the onboarding effort, not just this
+one. The saga lead's placement note, advisory: a hint of this shape describes a journey across kinds
+and so belongs to the onboarding topic's agent note rather than being sprinkled per kind, which is
+how the "only when genuinely necessary" clause and a dozen journeys coexist.
+
+**Ruling (operator, 2026-08-16, the simplification pass gates 0.14.0):** the pass's remaining
+deletion work, the assertion sweep's execution and the gcp fixture dedup behind it, plus the pass's
+reassessment and lock, complete before 0.14.0 ships. The operator's rationale: "I don't want to
+start really sharing this repo with a bunch of obviously shit code." This hardens and subsumes
+`phasing.md`'s test-consolidation soft gate, whose carrying vehicle the sweep already is. Follow-on
+efforts the reassessment proposes do not inherit the gate; the pass closing does.
+
 **Ruling (operator, 2026-08-15, the guide-value rubric):** guide content earns its place only by
 conveying concepts or higher-level synthesis not available from a single CLI command. A guide block
 whose content is one command's output wearing guide clothes is removed, and the guide points at the

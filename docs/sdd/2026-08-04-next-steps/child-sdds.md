@@ -101,6 +101,12 @@ locked.
       guide, locked-SDD discharge entry, structural consent tests, `assert_never`) landed at the
       merged head. The temporary gap stands on unreleased `main` only; the CLI grammar rewrite
       remains the hard 0.14.0 release gate
+- [ ] Corrected guide model (operator ruling 2026-08-16, gates 0.14.0; full text in
+      `target-state.md`): one topic catalog for everyone, modes differing in presentation and never
+      in access, one agent-assistance topic with per-topic agent notes only where genuinely
+      necessary, and the bootstrap prompt cut to a few lines pointing at `agw guide --agent`. Found
+      by the operator's hands-on testing after every review lane passed the shipped design;
+      dramatically simpler is the bar
 - [ ] Remaining phases (wave 2 adoption, closeout) per the effort's per-phase PR plan. The README
       bootstrap shipped with the assistance phase (PR #480), so the bootstraps gate is satisfied;
       the generated block pins version 0.14.0 or newer and resolves when the release ships
@@ -306,6 +312,27 @@ coordinates with the pending resource-CLI grammar decision.
       probes, and a mutation-pinned benign-contention witness; the effort's SDD locked at merge).
       The safer-migrations release gate is satisfied
 
+### CLI grammar child (0.14 gate): 2026-08-10-cli-grammar
+
+- [x] Seeded (surface study and focused FRD on draft PR #491; ruled in and gating, operator,
+      2026-08-12; `resource describe` removal ruled with 0.14 waiver, 2026-08-15)
+- [x] FRD converged through operator review rounds (depth/direction selectors, typed edges from the
+      declared data, explain's schema-space rule, the verb glossary; the operator's five review
+      lines plus the complexity-critic pre-HLA pass absorbed at `f200f9a3`)
+- [x] HLA checkpoint approved (mixed-direction `both` ruled deliberate product scope by the
+      operator; saga-lead and complexity-critic lanes clean at `92422b6a`)
+- [x] Final artifact gate discharged at `fb899586` after two operator rulings (registry-only
+      `--names-only` completion authorized with the byte-identical acceptance; the 39 assertion
+      migrations moved ahead of the atomic commit)
+- [x] Implementation complete through the reviewed phases: additive primitives and graph service
+      (checkpoint `921eea01`), one collateral-complete cutover commit (`b22df512`, 84 files, no
+      alias), directed hint-coverage fix (`51149bf1`), all lanes clean at every checkpoint
+- [x] Live acceptance passed on the installed CLI with zero residue (graph traversal, depth demand
+      against real SQLite, retired spellings exiting 2, names-only byte-identical under missing and
+      malformed databases, secret safety)
+- [x] Merged and locked (PR #491, 2026-08-16; `locked.md` binds at merge). The 0.14.0 grammar gate
+      is satisfied
+
 ### Not yet spawned
 
 Planned children, seeded when their prerequisites land (see `phasing.md`):
@@ -320,15 +347,7 @@ Planned children, seeded when their prerequisites land (see `phasing.md`):
 - Wave 6: agentic artifacts and distillation
 - Wave 7: structured control
 - Wave 8: external plugin API
-- CLI grammar child (**ruled in and gating, operator, 2026-08-12**; active, focused FRD in
-  checkpoint review on PR #491): `describe-kind` becomes `explain`, a top-level `agw graph` gains
-  `graph show KIND/NAME` as its initial single-focus relational view, and **`resource describe` is
-  removed** (operator ruling, 2026-08-15, retiring the earlier A-or-B): its relationships move to
-  `graph`, with no replacement card. `--write` becomes path-valued with `--install` for the schema
-  set's fixed destination. No longer conditional: 0.14.0 does not ship until it lands. Runs after
-  the simplification pass's relevant deletion work and the onboarding child's one-wave guide-value
-  deletion, so the rewrite is done over the smaller surface. It owns updating command spellings and
-  permanent docs its renames touch.
+- CLI grammar child: spawned, completed, and locked; see its ledger section above.
 - Security-architecture doc child: seeds after wave 3 merges; carries the per-platform
   durable-surface inventory (what each provider retains) so provider-boundary reviews check a list
   rather than rediscovering the class incident-by-incident (lesson from wave 3's three-round class
@@ -536,15 +555,24 @@ open-ended research placeholder.
 17. Gate status (2026-08-13, post-#480): PR #480 merged, so the assistance phase is done. The cut
     now has a longer runway by ruling, not by slip: **0.14.0 waits for the CLI grammar rewrite**
     (operator, 2026-08-12), and the simplification pass is adopted as a child and runs before it.
-    The current serial spine is: completed wave 0, corrected PR #548 (merged 2026-08-16 with the
-    #551 LLD supersession), the completed one-wave guide-value deletion (PR #556, merged
-    2026-08-16), the grammar rewrite (now the active and final spine item before the reassessment;
-    its HLA checkpoint is approved and its branch rebases over the guide deletion before
-    implementation), and the pass's reassessment. Other wave 1 deletions and wave 2 run
-    independently; the reassessment still waits for them. The spine is the only open 0.14 gate: the
-    breaking-truth task and the installer-plugins moves both closed their lanes ("This lane is
-    closed" on each entry above), and the README bootstrap gate is satisfied (PR #480; see the
-    onboarding entry).
+    The serial spine completed on 2026-08-16: wave 0, corrected PR #548 (with the #551 LLD
+    supersession), the one-wave guide-value deletion (PR #556), and the grammar rewrite (PR #491,
+    merged and locked). The hard-gate ledger: the grammar gate closed with #491, the breaking-truth
+    task and installer-plugins moves closed their lanes earlier ("This lane is closed" on each entry
+    above), and the README bootstrap gate is satisfied (PR #480). Two gates remain open. The
+    **corrected guide model gates 0.14.0** (operator ruling, 2026-08-16, recorded in
+    `target-state.md`): the operator's hands-on testing found the shipped guide over-indexed on
+    agents with a defensive 23-line bootstrap, and 0.14.0 does not ship until the onboarding child
+    lands the one-catalog model and the few-line bootstrap. The **simplification pass also gates
+    0.14.0** (operator ruling, 2026-08-16, recorded in `target-state.md`): the sweep's execution,
+    the gcp dedup, and the pass's reassessment and lock complete before the release, hardening and
+    subsuming `phasing.md`'s test-consolidation soft gate, whose vehicle the sweep already is.
+    Follow-on efforts the reassessment proposes do not inherit the gate. A 2026-08-16 operator
+    clarification is recorded here because a checked entry above says the harness-integration window
+    ran "until the grammar rewrite's breaking PRs land": the operator's actual constraint was an
+    opening edge only (the integration waits for the surfaces it sits on, all landed), command
+    grammar is not such a surface, and no closing edge ever existed. The integration may be built at
+    any time.
 
     Besides wave 2, the lanes still running in parallel with the spine are the remaining wave 1
     deletion items and the grammar rewrite's design and seeding (only its implementation waits).
