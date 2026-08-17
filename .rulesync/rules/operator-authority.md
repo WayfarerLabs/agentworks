@@ -26,4 +26,4 @@ by the workflow's own shape rather than by the agent's judgment of what would be
 `github-input-trust` rule applies all of this to GitHub, including which reads are themselves
 consequential.
 [Published feedback](../skills/agentic-dev-process/references/delivery.md#published-feedback) gives
-the PR-author procedure.
+the procedure for the PR's owning session.

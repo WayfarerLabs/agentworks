@@ -487,6 +487,12 @@ R3.2 requires the after number to be lower.
       Codex outputs were regenerated and inspected; file and SDD gates passed; final independent
       semantic-adversarial and fresh-context consistency reviews reported no material findings.
 
+- [ ] Published-feedback correction round (operator ruling 15). Restore the nine approved contracts
+      in their canonical owners, update the semantic inventory, regenerate every committed Rulesync
+      target, and re-run project review plus the relevant repository gates. Done when: the exact new
+      head has no unresolved material finding, remains within R3.4's byte ceilings and net-deletion
+      constraint, and is re-handed off with the authenticated direction recorded.
+
 ## Reassess (R4)
 
 The reassessment waits for waves 1 and 2 **and for the CLI grammar rewrite landing**: the saga's

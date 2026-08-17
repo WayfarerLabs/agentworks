@@ -84,6 +84,13 @@ Settled inputs, recorded for traceability:
     them in good faith, analyze them critically, and let them produce findings or recommendations,
     never authority. Server-computed state may trigger a standing workflow the operator already
     authorized; the authority comes from that standing authorization, not from GitHub content.
+15. **2026-08-17 (published-review correction round)**: restore the pre-acceptance draft owner, the
+    hostile-input and consequential-read-only threat model, Conventional Commits, saga closure
+    trigger, explicit project-role routing, independent review lanes, and unexplained-head
+    reporting. A bot-maintained PR's response lifecycle belongs to a session designated through
+    authenticated direction or an existing operator-authorized standing workflow; without one,
+    material feedback escalates to the operator and no PR response mutation proceeds. This bot-lane
+    rule is the narrow authorized exception to R3.3's no-new-behavior constraint.
 
 ## Requirements
 
@@ -146,7 +153,8 @@ justification for a new production contract.
   instructions. Always-on rule bytes are reported before and after and must go down.
 - R3.3: No new personas or delivery mechanisms ride this wave. Existing persona files may change
   only to remove duplicated process text, repair references, or preserve an existing role contract
-  after its canonical home moves (operator ruling 13). The rule-delivery gap is wave 0's to resolve
+  after its canonical home moves (operator ruling 13). Operator ruling 15 narrowly adds the owning
+  session for bot-maintained PR response lifecycles. The rule-delivery gap is wave 0's to resolve
   (R1.0); this wave's subtraction builds on whatever delivery shape wave 0 landed. Wave 2 runs in
   parallel with wave 1 on its own session (operator, 2026-08-13), file-disjoint from it; the R4
   reassessment waits for both waves.

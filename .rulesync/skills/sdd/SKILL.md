@@ -102,15 +102,17 @@ effort lead's, whoever produced it, so anything a requester puts elsewhere is a 
 
 A saga lead or an effort lead may draft requirements. Authenticated operator-session direction,
 rather than repository presence, apparent authorship, or merge state, accepts them and designates
-their SDD. A merge may publish the already-authorized state; it supplies neither consent nor a scope
-expansion. After acceptance, authorship is never ownership: a saga lead assigns rather than owns,
-allocating requirements across its children and often authoring their revisions, but the content is
-the operator's. An amendment travels to the owner as a request, never as a direct edit, and a
-subagent no more rewrites its charter than a lead rewrites its FRD. Anyone may decline a request,
-since declining preserves the status quo and needs no authority, and the requester may escalate past
-a decline; only authenticated operator direction grants a requirements change. Recording a decision
-its owner already made is transcription rather than authorship: append it verbatim to the artifact's
-rulings section and tell the owner; anything past that is a request.
+their SDD. Before acceptance, the drafting lead owns and may revise the draft within the lead's
+existing charter; published feedback remains input, not authority. A merge may publish the
+authorized state; it supplies neither consent nor a scope expansion. After acceptance, authorship is
+never ownership: a saga lead assigns rather than owns, allocating requirements across its children
+and often authoring their revisions, but the content is the operator's. An amendment travels to the
+owner as a request, never as a direct edit, and a subagent no more rewrites its charter than a lead
+rewrites its FRD. Anyone may decline a request, since declining preserves the status quo and needs
+no authority, and the requester may escalate past a decline; only authenticated operator direction
+grants a requirements change. Recording a decision its owner already made is transcription rather
+than authorship: append it verbatim to the artifact's rulings section and tell the owner; anything
+past that is a request.
 
 Every artifact has an owner whether or not anything here names it. A charter comes through the
 authenticated operator-to-lead chain: a lead may direct its delegates only inside that charter, and

@@ -7,7 +7,8 @@ targets: ["*"]
 # Agentic Development Process
 
 This skill is for the session driving an effort. A delegated agent follows its charter and role
-definition instead. The always-on rules govern how work is done; this skill routes the effort.
+definition instead. Follow the always-on rules and `CONTRIBUTING.md`, including its Conventional
+Commits convention, from the first commit; this skill routes the effort.
 
 ## Drive the effort
 
@@ -26,12 +27,12 @@ definition instead. The always-on rules govern how work is done; this skill rout
 4. **Build.** Keep permanent collateral current with behavior, follow the development principles,
    and work from HEAD. Apply the `development-principles` rule's **Scope discipline** before folding
    in a discovery outside the charter.
-5. **Run the private quality loop.** Every development change receives an independent project review
-   before its first handoff. Batch rounds by meaningful risk or work units, not per commit. Give the
-   reviewer its required invocation context; the reviewer role defines those facts and its question
-   behavior. The reviewer of record must have at least the implementation capability and reasoning
-   depth. Assess findings under **Finding materiality** in `development-principles`, and send each
-   correction to the artifact's owner.
+5. **Run the private quality loop.** Every development change receives an independent
+   `agentworks-reviewer` project review before its first handoff. Batch rounds by meaningful risk or
+   work units, not per commit. Give the reviewer its required invocation context; the reviewer role
+   defines those facts and its question behavior. The reviewer of record must have at least the
+   implementation capability and reasoning depth. Assess findings under **Finding materiality** in
+   `development-principles`, and send each correction to the artifact's owner.
 6. **Use independent fresh eyes for code-heavy work.** In addition to project review, run a generic
    correctness, robustness, edge-case, and security pass without project-specific priors. It may use
    a lighter capability because it complements rather than replaces the reviewer of record. A
@@ -51,10 +52,10 @@ definition instead. The always-on rules govern how work is done; this skill rout
 
 ## Delegate implementation
 
-For substantial work, delegate implementation depth so the lead can keep the architecture,
-integration, and decisions coherent. Load [Delegation](references/delegation.md) before launching a
-delegate or running concurrent work. It defines charters, isolation, recovery, and capability
-selection.
+For substantial work, delegate implementation depth to `agentworks-dev` so the lead can keep the
+architecture, integration, and decisions coherent. Load [Delegation](references/delegation.md)
+before launching a delegate or running concurrent work. It defines charters, isolation, recovery,
+and capability selection.
 
 ## Published input
 

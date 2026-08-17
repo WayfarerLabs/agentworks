@@ -67,8 +67,9 @@ any are absent, report the gap as a question rather than asserting a violation.
 - The active SDD under `docs/sdd/<sdd_feature_dir>/`, and its saga SDD, if the change is part of an
   SDD effort.
 - `docs/guides/idempotency.md`: the idempotency contract for reinit-able operations.
-- `.rulesync/rules/`: always-on conventions (code style, conventional commits, etc.), and the `sdd`
-  skill for the artifact ownership, mutability, and lock semantics check 14 enforces.
+- `.rulesync/rules/` for always-on conventions, `CONTRIBUTING.md` for repository mechanics such as
+  Conventional Commits, and the `sdd` skill for the artifact ownership, mutability, and lock
+  semantics check 14 enforces.
 - Existing patterns in sibling code (other CLI commands, other manager functions, other
   provisioners, other migrations), for the implementation-discipline checks.
 
