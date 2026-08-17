@@ -92,6 +92,17 @@ whatever other simplifications the onboarding and discovery track has accumulate
 own reading is that earlier phases of that effort landed tech debt while unattended. Shipped
 2026-08-15 (PRs #519 and #537).
 
+**Ruling (operator, 2026-08-18, the derived index):** the guide's no-topic response derives from the
+shell catalog instead of a hand-maintained tuple, confirmed through the saga lead's authenticated
+channel as the final 0.14 guide work (the onboarding effort's PR #593). A reserved `_index.md` shell
+renders first, followed by ordered ordinary concept metadata (an optional bounded `index-order`
+frontmatter features concepts; generated exact release-note topics stay listable but outside the
+omitted-concept count), all still static and package-only with no config, runtime state, registry,
+or release-history loading. Guide-specific `--names-only` is replaced by `agw guide list`. This
+supersedes the 2026-08-12 trail-sign ruling's catalog-free clause and the shells ruling's "loads
+neither the shell catalog" sentence below; the trail-sign intent (point, do not teach) survives as
+`_index.md`'s content, now owned like any other shell.
+
 **Ruling (operator, 2026-08-17, markdown concept shells):** the guide's retained typed model is
 replaced by auto-discovered Markdown concept shells, confirmed through the saga lead's authenticated
 channel after the onboarding effort's design checkpoint (PR #580). One Markdown file per ordinary
