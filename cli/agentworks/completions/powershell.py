@@ -218,8 +218,25 @@ def _emit_param_completions(lines: list[str], spec: CommandSpec, token_offset: i
         values = param.choices or param.suggestions
         if param.terminal_values:
             terminal_values = tuple(value.replace("'", "''") for value in param.terminal_values)
+            flag_options = tuple(
+                opt.replace("'", "''") for option in spec.params if option.is_flag for opt in option.opts
+            )
+            flag_array = ", ".join(f"'{value}'" for value in flag_options)
+            terminal_array = ", ".join(f"'{value}'" for value in terminal_values)
             lines.append(f"{indent}# Initial and terminal positional values: {param.name}")
-            lines.append(f"{indent}if ($wordToComplete -notlike '-*' -and $tokenCount -eq {pos_token}) {{")
+            lines.append(f"{indent}$completedPositionals = @()")
+            lines.append(
+                f"{indent}for ($wordIndex = {token_offset}; $wordIndex -lt ($tokenCount - 1); $wordIndex++) {{"
+            )
+            lines.append(f"{indent}    if (@({flag_array}) -notcontains $tokens[$wordIndex]) {{")
+            lines.append(f"{indent}        $completedPositionals += $tokens[$wordIndex]")
+            lines.append(f"{indent}    }}")
+            lines.append(f"{indent}}}")
+            lines.append(
+                f"{indent}$terminalSelected = @($completedPositionals | "
+                f"Where-Object {{ @({terminal_array}) -contains $_ }}).Count -gt 0"
+            )
+            lines.append(f"{indent}if ($wordToComplete -notlike '-*' -and $completedPositionals.Count -eq {i}) {{")
             _open_result_array(lines, f"{indent}    ")
             for choice in terminal_values:
                 lines.append(
@@ -240,11 +257,7 @@ def _emit_param_completions(lines: list[str], spec: CommandSpec, token_offset: i
             lines.append(f"{indent}    return")
             lines.append(f"{indent}}}")
             lines.append("")
-            terminal_array = ", ".join(f"'{value}'" for value in terminal_values)
-            lines.append(
-                f"{indent}if ($wordToComplete -notlike '-*' -and $tokenCount -gt {pos_token} "
-                f"-and @({terminal_array}) -contains $tokens[{pos_token - 1}]) {{"
-            )
+            lines.append(f"{indent}if ($wordToComplete -notlike '-*' -and $terminalSelected) {{")
             lines.append(f"{indent}    return")
             lines.append(f"{indent}}}")
             lines.append("")
@@ -277,12 +290,12 @@ def _emit_param_completions(lines: list[str], spec: CommandSpec, token_offset: i
         lines.append(f"{indent}if ($wordToComplete -like '-*') {{")
         _open_result_array(lines, f"{indent}    ")
         for param in all_options:
-            opt = param.opts[0] if param.opts else f"--{param.name}"
             escaped = param.help.replace("'", "''")
-            lines.append(
-                f"{indent}        [System.Management.Automation.CompletionResult]::new('{opt}', '{opt}',"
-                f" 'ParameterValue', '{escaped}')"
-            )
+            for opt in param.opts or [f"--{param.name}"]:
+                lines.append(
+                    f"{indent}        [System.Management.Automation.CompletionResult]::new('{opt}', '{opt}',"
+                    f" 'ParameterValue', '{escaped}')"
+                )
         lines.append(
             f"{indent}        [System.Management.Automation.CompletionResult]::new('--help', '--help',"
             " 'ParameterValue', 'Show help')"

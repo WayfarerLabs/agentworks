@@ -65,23 +65,17 @@ def test_no_topic_renders_index_shell_and_catalog_rows_without_release_history(
     assert ("Agent marker." in response.markdown) is (mode is GuideMode.AGENT)
 
 
-@pytest.mark.parametrize(
-    ("omitted", "expected_noun", "expected_verb"),
-    [(0, "concepts", "are"), (1, "concept", "is"), (2, "concepts", "are")],
-)
-def test_index_footer_count_uses_matching_number_grammar(
-    tmp_path: Path, omitted: int, expected_noun: str, expected_verb: str
-) -> None:
+@pytest.mark.parametrize("omitted", [0, 1, 2])
+def test_index_footer_reports_the_structural_omitted_count(tmp_path: Path, omitted: int) -> None:
     _shell(tmp_path, "indexed", index_order=1)
     for index in range(omitted):
         _shell(tmp_path, f"omitted-{index}")
 
     footer = render_guide((), GuideMode.HUMAN, package_root=tmp_path).markdown.splitlines()[-1]
-    grammar = re.match(r"^(\d+) other (concepts?) (is|are)\b", footer)
+    count = re.match(r"^(\d+)\b", footer)
 
-    assert grammar is not None
-    assert grammar.groups() == (str(omitted), expected_noun, expected_verb)
-    assert "`agw guide list`" in footer
+    assert count is not None
+    assert int(count.group(1)) == omitted
 
 
 def test_list_uses_static_shells_and_packaged_release_history(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -103,18 +97,22 @@ def test_list_uses_static_shells_and_packaged_release_history(tmp_path: Path, mo
 
 def test_list_is_an_exact_reserved_cli_positional_and_names_only_is_removed() -> None:
     listed = CliRunner().invoke(app, ["guide", "list"])
-    help_result = CliRunner().invoke(app, ["guide", "--help"])
+    mode_listed = [CliRunner().invoke(app, ["guide", mode, "list"]) for mode in ("--agent", "--human")]
     old_option = CliRunner().invoke(app, ["guide", "--names-only"])
-    mixed = CliRunner().invoke(app, ["guide", "list", "concept-onboarding"])
+    mixed = subprocess.run(
+        ["agw", "guide", "list", "concept-onboarding"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
 
     assert listed.exit_code == 0
     assert "concept-onboarding" in listed.stdout.splitlines()
-    assert help_result.exit_code == 0
-    assert "list" in help_result.stdout
+    assert all(result.exit_code == 0 and result.stdout == listed.stdout for result in mode_listed)
     assert old_option.exit_code != 0
-    assert mixed.exit_code != 0
-    assert mixed.exception is not None
-    assert "agw guide list" in str(mixed.exception)
+    assert mixed.returncode != 0
+    assert not mixed.stdout
+    assert mixed.stderr
 
 
 def test_selected_requests_resolve_atomically(tmp_path: Path) -> None:

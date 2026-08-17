@@ -159,12 +159,22 @@ def _emit_leaf_completions(lines: list[str], spec: CommandSpec, token_offset: in
         if words:
             if param.terminal_values:
                 terminal_words = " ".join(param.terminal_values)
-                lines.append(f'{indent}if [[ $cword -eq {pos_token} && "$cur" != -* ]]; then')
+                flag_options = "|".join(opt for option in all_options if option.is_flag for opt in option.opts)
+                lines.append(f"{indent}local positional_count=0 terminal_selected=false word_index")
+                lines.append(f"{indent}for ((word_index={token_offset}; word_index<cword; word_index++)); do")
+                if flag_options:
+                    lines.append(f'{indent}    case "${{words[word_index]}}" in')
+                    lines.append(f"{indent}        {flag_options}) continue ;;")
+                    lines.append(f"{indent}    esac")
+                terminal_match = " || ".join(f'${{words[word_index]}} == "{value}"' for value in param.terminal_values)
+                lines.append(f"{indent}    if [[ {terminal_match} ]]; then terminal_selected=true; fi")
+                lines.append(f"{indent}    positional_count=$((positional_count + 1))")
+                lines.append(f"{indent}done")
+                lines.append(f'{indent}if [[ $positional_count -eq {i} && "$cur" != -* ]]; then')
                 lines.append(f'{indent}    COMPREPLY=($(compgen -W "{terminal_words} {words}" -- "$cur"))')
                 lines.append(f"{indent}    return")
                 lines.append(f"{indent}fi")
-                terminal_match = " || ".join(f'${{words[{pos_token}]}} == "{value}"' for value in param.terminal_values)
-                lines.append(f'{indent}if [[ $cword -gt {pos_token} && "$cur" != -* && ({terminal_match}) ]]; then')
+                lines.append(f'{indent}if [[ "$terminal_selected" == true && "$cur" != -* ]]; then')
                 lines.append(f"{indent}    COMPREPLY=()")
                 lines.append(f"{indent}    return")
                 lines.append(f"{indent}fi")
@@ -184,8 +194,7 @@ def _emit_leaf_completions(lines: list[str], spec: CommandSpec, token_offset: in
     if all_options:
         opts = []
         for param in all_options:
-            opt = param.opts[0] if param.opts else f"--{param.name}"
-            opts.append(opt)
+            opts.extend(param.opts or [f"--{param.name}"])
         opts.append("--help")
         opts_str = " ".join(opts)
         lines.append(f'{indent}if [[ "$cur" == -* ]]; then')

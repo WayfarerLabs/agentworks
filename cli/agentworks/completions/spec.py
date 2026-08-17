@@ -106,6 +106,7 @@ def is_legacy_database_completion(argv: list[str]) -> bool:
 class _ClickParameter(Protocol):
     name: str | None
     opts: list[str]
+    secondary_opts: list[str]
     multiple: bool
     nargs: int
     required: bool
@@ -412,7 +413,7 @@ def _build_param_spec(param: _ClickParameter, command_path: str) -> ParamSpec:
 
     opts: list[str] = []
     if is_option:
-        opts = list(param.opts)
+        opts = [*param.opts, *getattr(param, "secondary_opts", ())]
 
     # DYNAMIC_COMPLETIONS keys use paths without the root app name
     # (e.g. "vm.shell" not "agentworks.vm.shell")

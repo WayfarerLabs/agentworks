@@ -231,14 +231,23 @@ def _emit_leaf(lines: list[str], spec: CommandSpec, func_name: str, first_positi
             helper = f"{func_name}_{param.name}_values"
             terminal_helpers[param.name] = helper
             terminal_values = " ".join(param.terminal_values)
-            terminal_match = " || ".join(
-                f'${{words[{positional_word}]}} == "{value}"' for value in param.terminal_values
-            )
+            flag_options = "|".join(opt for option in spec.params if option.is_flag for opt in option.opts)
+            terminal_match = " || ".join(f'${{words[word_index]}} == "{value}"' for value in param.terminal_values)
             lines.append(f"{helper}() {{")
-            lines.append(f"    if [[ CURRENT -gt {positional_word} && ({terminal_match}) ]]; then")
+            lines.append("    local -i positional_count=0 word_index")
+            lines.append("    local terminal_selected=false")
+            lines.append(f"    for (( word_index = {positional_word}; word_index < CURRENT; word_index++ )); do")
+            if flag_options:
+                lines.append('        case "${words[word_index]}" in')
+                lines.append(f"            {flag_options}) continue ;;")
+                lines.append("        esac")
+            lines.append(f"        if [[ {terminal_match} ]]; then terminal_selected=true; fi")
+            lines.append("        positional_count=$(( positional_count + 1 ))")
+            lines.append("    done")
+            lines.append('    if [[ "$terminal_selected" == true ]]; then')
             lines.append("        return 0")
             lines.append("    fi")
-            lines.append(f"    if (( CURRENT == {positional_word} )); then")
+            lines.append("    if (( positional_count == 0 )); then")
             lines.append("        local -a terminal_values")
             lines.append(f"        terminal_values=({terminal_values})")
             lines.append("        _describe 'operation' terminal_values")
@@ -299,8 +308,8 @@ def _build_arguments(params: list[ParamSpec], terminal_helpers: dict[str, str]) 
                 positional_index += 1
         elif param.is_flag:
             escaped_help = param.help.replace("'", "'\\''")
-            opt = param.opts[0] if param.opts else f"--{param.name}"
-            args.append(f"'{opt}[{escaped_help}]'")
+            for opt in param.opts or [f"--{param.name}"]:
+                args.append(f"'{opt}[{escaped_help}]'")
         else:
             escaped_help = param.help.replace("'", "'\\''")
             opt = param.opts[0] if param.opts else f"--{param.name}"
