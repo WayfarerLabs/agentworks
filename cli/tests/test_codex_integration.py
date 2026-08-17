@@ -184,7 +184,7 @@ def _validate(blob: dict[str, object]) -> None:
     )
 
 
-def test_validation_accepts_the_ten_fields_and_empty_config() -> None:
+def test_validation_accepts_the_config_vocabulary_and_empty_config() -> None:
     _validate(
         {
             "model": "gpt-5",
@@ -193,8 +193,10 @@ def test_validation_accepts_the_ten_fields_and_empty_config() -> None:
             "profile": "work",
             "network": True,
             "approvals_reviewer": "auto_review",
+            "reasoning_effort": "high",
+            "vim_mode": True,
             "writable_dirs": ["/srv/cache"],
-            "web_search": False,
+            "web_search": "cached",
             "disable_strict_config": False,
             "extra_args": ["--foo"],
         }
@@ -693,8 +695,10 @@ def test_notify_lands_after_the_managed_flags_and_before_extra_args() -> None:
             "model": "gpt-5",
             "network": True,
             "approvals_reviewer": "auto_review",
+            "reasoning_effort": "high",
+            "vim_mode": True,
             "writable_dirs": ["/srv/cache"],
-            "web_search": True,
+            "web_search": "live",
             "extra_args": ["--foo"],
         },
         state={},
@@ -706,8 +710,10 @@ def test_notify_lands_after_the_managed_flags_and_before_extra_args() -> None:
         "gpt-5",
         "sandbox_workspace_write.network_access=true",
         'approvals_reviewer="auto_review"',
+        'model_reasoning_effort="high"',
+        "tui.vim_mode_default=true",
         "/srv/cache",
-        "--search",
+        'web_search="live"',
     ):
         assert argv.index(managed) < notify_at
     assert notify_at < argv.index("--foo")
@@ -789,22 +795,58 @@ def test_approvals_reviewer_forwards_as_a_quoted_toml_string() -> None:
     assert "approvals_reviewer" not in absent
 
 
-def test_approvals_reviewer_escapes_toml_structural_characters() -> None:
+@pytest.mark.parametrize(
+    ("field", "key", "payload", "expected"),
+    [
+        (
+            "approvals_reviewer",
+            "approvals_reviewer",
+            'user"\nsandbox_mode="danger-full-access',
+            'approvals_reviewer="user\\"\\nsandbox_mode=\\"danger-full-access"',
+        ),
+        (
+            "reasoning_effort",
+            "model_reasoning_effort",
+            'high"\nsandbox_mode="danger-full-access',
+            'model_reasoning_effort="high\\"\\nsandbox_mode=\\"danger-full-access"',
+        ),
+    ],
+)
+def test_config_string_fields_escape_toml_structural_characters(
+    field: str,
+    key: str,
+    payload: str,
+    expected: str,
+) -> None:
     """Codex parses -c key=value as a TOML DOCUMENT splice (verified
     against 0.146.0), so an unescaped newline in the value silently
     defines EXTRA config keys, even under --strict-config, and an
     unescaped quote breaks the value into the raw-string fallback.
-    Escaping keeps any operator value one literal string that fails
-    codex's own enum check loudly instead."""
-    payload = 'user"\nsandbox_mode="danger-full-access'
-    command = _harness_integration({"approvals_reviewer": payload}).resume(_op_ctx(_target(rollout=0)))
+    Escaping keeps any operator value one literal string instead."""
+    command = _harness_integration({field: payload}).resume(_op_ctx(_target(rollout=0)))
     argv = _sh_argv(command, home="/home/me")
-    token = next(t for t in argv if t.startswith("approvals_reviewer="))
+    token = next(t for t in argv if t.startswith(f"{key}="))
     # One argv token, no raw newline, quote and newline TOML-escaped: the
     # smuggled second key stays inert text inside one string value.
     assert "\n" not in token
-    assert token == 'approvals_reviewer="user\\"\\nsandbox_mode=\\"danger-full-access"'
+    assert token == expected
     assert not any(t.startswith("sandbox_mode") for t in argv)
+
+
+def test_reasoning_effort_forwards_as_a_quoted_toml_string() -> None:
+    command = _harness_integration({"reasoning_effort": "high"}).resume(_op_ctx(_target(rollout=0)))
+    argv = _sh_argv(command, home="/home/me")
+    assert 'model_reasoning_effort="high"' in argv
+    assert argv[argv.index('model_reasoning_effort="high"') - 1] == "-c"
+    assert "model_reasoning_effort" not in _harness_integration().resume(_op_ctx(_target(rollout=0)))
+
+
+def test_vim_mode_true_emits_override_and_false_emits_nothing() -> None:
+    on = _sh_argv(_harness_integration({"vim_mode": True}).resume(_op_ctx(_target(rollout=0))), home="/home/me")
+    assert "tui.vim_mode_default=true" in on
+    assert on[on.index("tui.vim_mode_default=true") - 1] == "-c"
+    off = _harness_integration({"vim_mode": False}).resume(_op_ctx(_target(rollout=0)))
+    assert "tui.vim_mode_default" not in off
 
 
 def test_writable_dirs_emit_one_add_dir_each_in_order_and_quoted() -> None:
@@ -820,9 +862,22 @@ def test_writable_dirs_emit_one_add_dir_each_in_order_and_quoted() -> None:
     assert first < second
 
 
-def test_web_search_true_emits_search_and_false_emits_nothing() -> None:
-    assert "--search" in _harness_integration({"web_search": True}).resume(_op_ctx(_target(rollout=0)))
-    assert "--search" not in _harness_integration({"web_search": False}).resume(_op_ctx(_target(rollout=0)))
+def test_web_search_legacy_bools_keep_their_existing_behavior() -> None:
+    on = _sh_argv(_harness_integration({"web_search": True}).resume(_op_ctx(_target(rollout=0))), home="/home/me")
+    off = _sh_argv(_harness_integration({"web_search": False}).resume(_op_ctx(_target(rollout=0))), home="/home/me")
+    assert "--search" in on
+    assert "--search" not in off
+    assert not any(token.startswith("web_search=") for token in off)
+
+
+def test_web_search_string_forwards_as_a_quoted_toml_string() -> None:
+    argv = _sh_argv(
+        _harness_integration({"web_search": "indexed"}).resume(_op_ctx(_target(rollout=0))), home="/home/me"
+    )
+    token = 'web_search="indexed"'
+    assert token in argv
+    assert argv[argv.index(token) - 1] == "-c"
+    assert "--search" not in argv
 
 
 def test_new_fields_reject_wrong_types() -> None:
@@ -831,6 +886,8 @@ def test_new_fields_reject_wrong_types() -> None:
         ("web_search", 1),
         ("disable_strict_config", "true"),
         ("approvals_reviewer", True),
+        ("reasoning_effort", True),
+        ("vim_mode", "true"),
         ("writable_dirs", "/srv/cache"),
         ("writable_dirs", [1, 2]),
     ):
@@ -843,11 +900,25 @@ def test_merge_config_unions_writable_dirs_and_child_wins_the_rest() -> None:
     required_commands): a child adding one dir must not drop the
     parent's. Scalars/bools and extra_args child-win."""
     merged = CodexIntegration.merge_config(
-        {"writable_dirs": ["/srv/a"], "network": True, "extra_args": ["--x"]},
-        {"writable_dirs": ["/srv/b", "/srv/a"], "network": False, "extra_args": ["--y"]},
+        {
+            "writable_dirs": ["/srv/a"],
+            "network": True,
+            "reasoning_effort": "medium",
+            "vim_mode": False,
+            "extra_args": ["--x"],
+        },
+        {
+            "writable_dirs": ["/srv/b", "/srv/a"],
+            "network": False,
+            "reasoning_effort": "high",
+            "vim_mode": True,
+            "extra_args": ["--y"],
+        },
     )
     assert merged["writable_dirs"] == ["/srv/a", "/srv/b"]
     assert merged["network"] is False
+    assert merged["reasoning_effort"] == "high"
+    assert merged["vim_mode"] is True
     assert merged["extra_args"] == ["--y"]
 
 

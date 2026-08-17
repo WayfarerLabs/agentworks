@@ -20,7 +20,7 @@
 #   sandbox         -> read-only | workspace-write | danger-full-access
 #   approval_policy -> untrusted | on-request | never
 #   network         -> whether the sandbox may reach the network
-#   web_search      -> whether Codex's web search tool is enabled
+#   web_search      -> cached | indexed | live | disabled
 # The ladder:
 #   strict -> read-only sandbox, no network; prompts for requests beyond it
 #   auto   -> workspace-write with network; prompts for requests beyond it
@@ -59,4 +59,4 @@ spec:
     name: codex
     sandbox: danger-full-access
     approval_policy: never
-    web_search: true
+    web_search: live
