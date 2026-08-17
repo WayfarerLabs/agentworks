@@ -10,6 +10,7 @@ stored session id (``claude-code-lld.md`` "Test double").
 
 from __future__ import annotations
 
+import json
 import shlex
 from typing import TYPE_CHECKING
 
@@ -94,8 +95,17 @@ def _validate(blob: dict[str, object]) -> None:
     )
 
 
-def test_validation_accepts_the_three_fields_and_empty_config() -> None:
-    _validate({"permission_mode": "acceptEdits", "model": "opus", "extra_args": ["--foo"]})
+def test_validation_accepts_the_optional_fields_and_empty_config() -> None:
+    _validate(
+        {
+            "permission_mode": "acceptEdits",
+            "model": "opus",
+            "remote_control": True,
+            "vim_mode": True,
+            "terminal_bell": True,
+            "extra_args": ["--foo"],
+        }
+    )
     _validate({})
 
 
@@ -112,6 +122,12 @@ def test_validation_rejects_non_string_model() -> None:
 def test_validation_rejects_non_list_extra_args() -> None:
     with pytest.raises(ConfigError, match="extra_args: must be a list"):
         _validate({"extra_args": "just-a-string"})
+
+
+@pytest.mark.parametrize("field", ["remote_control", "vim_mode", "terminal_bell"])
+def test_validation_rejects_non_boolean_preferences(field: str) -> None:
+    with pytest.raises(ConfigError):
+        _validate({field: "yes"})
 
 
 def test_construct_revalidates_config() -> None:
@@ -301,13 +317,83 @@ def test_permission_mode_and_model_map_to_their_flags() -> None:
     assert "--model sonnet" in command
 
 
+def _claude_argv(command: str) -> list[str]:
+    outer = shlex.split(command)
+    assert outer[:2] == ["sh", "-c"]
+    inner = shlex.split(outer[2])
+    claude = inner.index("claude")
+    return inner[claude + 1 :]
+
+
+def test_session_preferences_default_off() -> None:
+    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
+    argv = _claude_argv(_harness_integration().start(_op_ctx(target)))
+    assert "--remote-control" not in argv
+    assert "--settings" not in argv
+
+
+def test_remote_control_uses_the_session_name_as_its_title() -> None:
+    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
+    argv = _claude_argv(
+        _harness_integration({"remote_control": True}, session_name="my-session").start(_op_ctx(target))
+    )
+    index = argv.index("--remote-control")
+    assert argv[index + 1] == "my-session"
+
+
+@pytest.mark.parametrize(
+    ("config", "expected"),
+    [
+        pytest.param({"vim_mode": True}, {"editorMode": "vim"}, id="vim-only"),
+        pytest.param(
+            {"terminal_bell": True},
+            {"preferredNotifChannel": "terminal_bell"},
+            id="bell-only",
+        ),
+        pytest.param(
+            {"vim_mode": True, "terminal_bell": True},
+            {"editorMode": "vim", "preferredNotifChannel": "terminal_bell"},
+            id="combined",
+        ),
+    ],
+)
+def test_vim_mode_and_terminal_bell_share_session_local_settings(
+    config: dict[str, object], expected: dict[str, str]
+) -> None:
+    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
+    argv = _claude_argv(_harness_integration(config).start(_op_ctx(target)))
+    index = argv.index("--settings")
+    assert json.loads(argv[index + 1]) == expected
+    assert argv.count("--settings") == 1
+
+
 def test_extra_args_appended_verbatim_last_and_quoted() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
-    command = _harness_integration({"model": "opus", "extra_args": ["--foo", "bar baz"]}).start(_op_ctx(target))
+    command = _harness_integration({"model": "opus", "vim_mode": True, "extra_args": ["--foo", "bar baz"]}).start(
+        _op_ctx(target)
+    )
     # One argv token stays one token: "bar baz" is quoted, not re-split.
     assert shlex.quote("bar baz") in command
-    # Appended last: after the managed --model flag.
+    # Appended last: after the managed flag and settings override.
     assert command.index("--model") < command.index("--foo")
+    assert command.index("--settings") < command.index("--foo")
+
+
+def test_raw_settings_in_extra_args_follow_generated_settings() -> None:
+    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
+    raw_settings = '{"editorMode":"normal"}'
+    argv = _claude_argv(
+        _harness_integration(
+            {
+                "vim_mode": True,
+                "extra_args": ["--settings", raw_settings],
+            }
+        ).start(_op_ctx(target))
+    )
+    settings_indexes = [index for index, token in enumerate(argv) if token == "--settings"]
+    assert len(settings_indexes) == 2
+    assert json.loads(argv[settings_indexes[0] + 1]) == {"editorMode": "vim"}
+    assert argv[settings_indexes[1] + 1] == raw_settings
 
 
 def test_extra_args_with_shell_metacharacters_cannot_inject() -> None:

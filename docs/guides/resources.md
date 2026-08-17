@@ -348,9 +348,8 @@ metadata:
 spec:
   harness_integration:
     name: claude-code
-    permission_mode: acceptEdits # optional; forwarded to `claude --permission-mode`
-    model: opus # optional; forwarded to `claude --model`
-    extra_args: [--append-system-prompt, "session {{session_name}}"] # optional escape hatch
+    permission_mode: acceptEdits
+    vim_mode: true
 ```
 
 - Its config is all optional, and every field is documented by
@@ -361,6 +360,10 @@ spec:
   workload exits immediately.
 - The only requirement checked on the launch target is that `claude` is installed. The chosen action
   (resume vs new session) is announced in the pane on start, so it is never silent.
+- Remote Control needs a Claude subscription login and any organization-level enablement Anthropic
+  requires; API-key authentication does not support it. Vim mode and the terminal bell are passed as
+  session-local settings, so they do not rewrite the launch user's shared Claude configuration. The
+  terminal ultimately decides whether a bell is audible, visual, or ignored.
 
 The `codex` integration runs Codex the same way and ships as the opt-in `codex` system plugin.
 
