@@ -4,7 +4,7 @@ import importlib
 
 from agentworks.guide import (
     ActionList,
-    AgentContract,
+    AgentNote,
     ConsentBoundary,
     Overview,
     ReleaseNotes,
@@ -30,17 +30,21 @@ def test_manifesto_topic_is_structurally_linked_to_onboarding() -> None:
 
     assert tuple(map(str, topic.related_topics)) == ("concept-onboarding",)
     assert "concept-manifesto" in tuple(map(str, _topic("concept-onboarding").related_topics))
-    assert {type(block) for block in topic.blocks} == {Overview, AgentContract, Teaching, TopicLinks}
-    assert sum(isinstance(block, AgentContract) for block in topic.blocks) == 1
+    assert {type(block) for block in topic.blocks} == {Overview, Teaching, TopicLinks}
     assert not any(isinstance(block, ActionList) for block in topic.blocks)
 
 
-def test_reporting_bugs_has_an_agent_contract_without_an_external_action() -> None:
-    topic = _topic("concept-reporting-bugs")
+def test_assistant_topic_is_ordinary_shared_content() -> None:
+    topic = _topic("concept-assistant-agent")
 
-    assert {type(block) for block in topic.blocks} == {Overview, AgentContract, Teaching}
-    assert sum(isinstance(block, AgentContract) for block in topic.blocks) == 1
+    assert {type(block) for block in topic.blocks} == {Overview, Teaching, TopicLinks}
     assert not any(isinstance(block, ActionList) for block in topic.blocks)
+
+
+def test_onboarding_has_an_optional_agent_note() -> None:
+    onboarding = _topic("concept-onboarding")
+
+    assert any(isinstance(block, AgentNote) for block in onboarding.blocks)
 
 
 def test_action_contract_pins_boundaries_commands_and_verification() -> None:
@@ -98,7 +102,7 @@ def test_action_contract_pins_boundaries_commands_and_verification() -> None:
 
 def test_catalog_contains_only_retained_authored_block_shapes() -> None:
     catalog = build_authored_catalog(strict=True)
-    retained_types = {Overview, Teaching, AgentContract, ReleaseNotes, ActionList, TopicLinks}
+    retained_types = {Overview, Teaching, AgentNote, ReleaseNotes, ActionList, TopicLinks}
 
     assert {type(block) for topic in catalog.topics for block in topic.blocks} <= retained_types
     assert all(str(block.id) != "inventory" for topic in catalog.topics for block in topic.blocks)

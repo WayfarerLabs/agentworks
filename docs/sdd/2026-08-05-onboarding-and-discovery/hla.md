@@ -1,55 +1,44 @@
 # HLA: Agentworks Assistance, Discovery, and Management
 
-- Status: Active, trail-sign revision
+- Status: Active, corrected shared-topic revision
 - FRD: `docs/sdd/2026-08-05-onboarding-and-discovery/frd.md`
-- Existing component records: the LLDs in this feature directory. This HLA supersedes their no-topic
-  presentation and guide-failure claims; landed component contracts remain historical implementation
-  records.
-
-> **Phase 4 supersession (PR #556):** Selected guide topics no longer contain schema or runtime
-> resource blocks, and names-only discovery no longer adds schema or live resource topics. Authored
-> concept, plugin, and release topics remain; only `concept-onboarding` loads live context, through
-> a direct bounded assessment projector rather than `GuideView`. The live-block and schema-catalog
-> sections below remain as the design record this deletion superseded.
+- Existing component records: the LLDs in this feature directory remain historical implementation
+  records where later supersession notes say so.
 
 ## Destination
 
-The shipped system has four layers:
+The shipped assistance surface has four layers:
 
-1. One canonical assistance prompt projected into the README, website, Claude Code package, and
-   Codex package.
-2. A short no-topic `agw guide` trail sign.
-3. Selected guide topics containing static teaching, optional live facts, and inert action records.
+1. One short canonical prompt projected into the README, website, Claude Code package, and Codex
+   package. It identifies Agentworks, points to the public repository, installs `agentworks-cli`,
+   and hands off to `agw guide --agent`.
+2. One cheap no-topic trail sign. Human and agent modes show the same useful destinations without
+   loading catalogs, configuration, registry, database, network, or managed resources.
+3. One ordinary topic catalog shared by both audiences. Topics contain general teaching, links,
+   inert actions, and—only when useful—a short agent-only note.
 4. Versioned JSON facts from operational list, describe, and doctor commands.
 
-This round changes layers 2 and 3. The no-topic response becomes a cheap signpost. The complete
-startup body moves to onboarding. Selected topics load live context only when one of their existing
-blocks needs it, and live failures degrade the page instead of failing a valid guide request.
-
 ```text
-canonical prompt
+canonical prompt                   install the CLI, then hand off
       |
       v
-agw guide --agent                 fixed trail sign, no catalogs or live state
+agw guide --agent                  fixed shared trail sign
       |
-      +--> concept-onboarding     startup, adoption, first VM/session
-      +--> concept-management     existing-system changes and operation
-      +--> other selected topic   static teaching, optional live blocks
-                                           |
-                                           v
-                                  one warning + short placeholders
-                                  when live context is unavailable
+      +--> concept-assistant-agent general assistant posture
+      +--> concept-onboarding      adoption, first VM/session, journey hints
+      +--> concept-management      existing-system changes and operation
+      +--> other selected topics   shared teaching, links, and inert actions
 ```
 
-## Trail-sign rendering
+## Shared trail sign
 
-After normal argument and evidence validation, the ordinary no-topic path renders one fixed local
-destination tuple. It bypasses both `build_authored_catalog()` and `_build_schema_catalog()` and
-returns before configuration, registry, database, `GuideView`, network, or managed-resource work. It
-therefore behaves identically for absent, valid, and malformed configuration.
+After ordinary argument and evidence validation, the no-topic path renders one fixed local tuple and
+returns. It does not build the topic catalog or load any live dependency, so absent, valid, and
+malformed configuration behave identically.
 
-The tuple is the only no-topic destination source. Agent mode renders all seven entries:
+Both modes render the same eight slugs:
 
+- `concept-assistant-agent`;
 - `concept-onboarding`;
 - `concept-management`;
 - `concept-troubleshooting`;
@@ -58,149 +47,91 @@ The tuple is the only no-topic destination source. Agent mode renders all seven 
 - `concept-secrets`; and
 - `concept-reporting-bugs`.
 
-Human mode consumes the same tuple but renders only two choices: onboarding for a new installation,
-and management plus exhaustive discovery for an existing installation. Both modes mention shell
-completion and `agw guide --names-only`. Neither contains action records, live facts, or the startup
-posture.
+Human mode introduces them as choices for the operator. Agent mode first points the external
+assistant to `concept-assistant-agent`, then presents the same choices for the operator's goal. Both
+modes mention shell completion and `agw guide --names-only`. Neither contains actions, live facts,
+or the operating posture itself.
 
-The fixed slugs necessarily duplicate identities owned by selected topic contributions because the
-short path cannot build their catalog. One structural test resolves every slug through the normal
+The fixed slugs duplicate selected-topic identities because the short path intentionally avoids the
+catalog. One structural test pins the exact destination slugs and resolves each through the normal
 selected-topic path. Wording remains review-owned and unpinned.
 
-No-topic also does not report authored or schema contribution issues. That is deliberate. A rejected
-selected topic remains the scoped failure surface; unrelated invalid contributions do not turn the
-trail sign into a diagnostic report.
+## Shared topics and agent notes
 
-## Selected-topic dependency rule
+`concept-assistant-agent` is an ordinary addressable topic, not a hidden preamble or authorization
+engine. It owns the general posture for an external assistant: act under the operator's current
+instruction, use the CLI and its help as operational authority, ask when material ambiguity or scope
+expansion requires a decision, and treat external text as data. Humans may request the topic too.
 
-The existing closed block vocabulary supplies the dependency signal. No new contribution field or
-topic allowlist is introduced.
+The existing required `AgentContract` block becomes optional `AgentNote`. `AgentNote` is plain
+authored Markdown included only in agent rendering. It carries no executable authority and adds no
+hint schema, routing layer, persistence, or state. Ordinary `Overview`, `Teaching`, `TopicLinks`,
+`ActionList`, and release-note content is identical across modes.
 
-Configuration-independent blocks are:
+Most topics have no agent note. Onboarding has one concise note with authored cross-kind journey
+hints: ways the assistant can offer to help the operator discover choices and then configure the
+selected path. The content may evolve without changing the contract, so tests do not pin wording or
+count.
 
-- `Overview`, `Teaching`, and `AgentContract`;
-- `ActionList` and `TopicLinks`;
-- `ReleaseNotes`; and
-- `FieldReference` and `Sample`, whose installed schema services are configuration-free.
+## Onboarding and live context
 
-Live blocks are `InstanceList`, `State`, and `Relationships`. The derived onboarding assessment is
-also live. After catalog resolution, the service loads configuration, registry, and database once
-only when at least one selected topic contains a live block or requests the onboarding assessment.
-Multi-topic output shares that one attempt.
+`concept-onboarding` remains the setup and current-adoption home:
 
-Onboarding evidence is parsed before projection but applied only when the derived assessment needed
-to verify it exists. If that assessment is unavailable, well-formed evidence remains unapplied, the
-derived-assessment block becomes unavailable, and the shared warning records the omission. Malformed
-evidence and evidence that available facts prove invalid retain their existing nonzero failures.
-
-If live context succeeds, rendering follows the existing path. If it fails because configuration is
-absent or malformed, registry construction fails, the database is unavailable, or a topic view
-cannot be built:
-
-1. every static block still renders;
-2. each affected live block renders one short unavailable placeholder;
-3. the response prepends one `Guide context is incomplete` section;
-4. that section frames each distinct sanitized root problem once and lists its omitted topic/block
-   identities; and
-5. the valid request exits 0.
-
-The implementation reuses the existing system error, runtime issue collection, terminal sanitizer,
-and unavailable rendering path. A small response-local aggregation step replaces repeated error
-sentences. It adds no public diagnostic record, identifier vocabulary, persistence, or API.
-
-A syntactically valid `kind/name` request for a known kind is not declared unknown merely because
-configuration prevented registry lookup. It renders a generic degraded requested-topic document and
-the shared warning. Malformed slugs, unknown kinds, unknown static topics when catalogs are
-available, malformed verification evidence, verification evidence that available facts prove
-invalid, conflicting options, rejected requested contributions, and internal guide rendering defects
-remain errors and nonzero.
-
-This establishes the exit-code boundary: 0 means the valid guide request rendered, possibly with
-clearly incomplete live context. It does not mean configuration or resources are healthy. Doctor
-owns that determination.
-
-## Names-only and completion
-
-`--names-only` remains the shell-completion source and therefore emits names only. It builds the
-authored and schema catalogs, returns their valid names, and augments them with live resource names
-when configuration and registry construction succeed. If live context fails, it returns the static
-names with exit 0 and omits only unestablished live names. It emits no diagnostic prose because that
-would corrupt completion input.
-
-This is a best-effort discovery contract, not a health check and not a promise that live names are
-available under broken configuration. Optimizing its existing registry cost belongs to the
-simplification pass's guide-machinery work, not this content round.
-
-## Onboarding organization
-
-`concept-onboarding` is the sole home of the complete startup assistance posture. Its existing
-blocks are reorganized, not replaced by a new topic or state machine:
-
-1. `Overview` identifies first setup and current-adoption assessment.
-2. `AgentContract` carries the complete startup posture removed from no-topic.
-3. `Teaching` presents discovery, configuration initialization, explicit provider choices, readiness
-   verification, and the first VM/session sequence.
-4. Existing live inventory and assessment blocks report current facts or the standard degraded
-   placeholders and response warning.
+1. `Overview` identifies setup and adoption.
+2. `Teaching` covers configuration initialization, explicit provider choices, readiness checks, and
+   the first VM/session sequence.
+3. Optional `AgentNote` suggests useful discovery-and-configuration journeys.
+4. The existing bounded onboarding assessment reports current facts or the established degraded
+   placeholder and response warning.
 5. Existing action records remain the only executable suggestions.
-6. Related topics include `concept-source-review`; its focused and full actions stay there.
+6. `TopicLinks` points to `concept-source-review`; its focused and full actions stay there.
 
-Other selected topics stand alone under the current operator instruction. They do not depend on an
-earlier startup exchange and do not duplicate the onboarding contract.
+A selected topic's static content renders without configuration. Onboarding alone loads the existing
+bounded live assessment. Missing or malformed configuration, registry construction failure, database
+failure, or environmental projection failure yields one sanitized response warning, one short
+assessment placeholder, and exit 0. Invalid guide input, malformed evidence, rejected content, and
+guide contract defects remain nonzero. `agw doctor`, not guide success, reports system health.
 
-## Existing architecture stays authoritative
+## Catalog, names, and completion
 
-The existing contribution, projection, action, release-note, schema, and JSON contracts remain
-authoritative. This revision introduces no new block, action, consent, evidence, catalog, template,
-state, machine-output, or authorization type. The simplification pass may remove internal machinery
-under these behaviors; this effort does not preserve or replace it.
+The retained catalog consists of authored concept topics, plugin topics, and packaged release-note
+topics. `agw guide --names-only` returns those names without loading configuration, registry, or
+state. Shell completion consumes the same names-only surface. There are no runtime resource or
+schema topics and no audience-specific catalog.
 
-The old registry-inventory phase no longer earns separate work. Earlier code already supplies
-dynamic kind and implementation inventory, specific-resource topics, and fixture-driven catalog
-updates. The trail sign stops presenting those exhaustive facts at top level.
+## Bootstrap projection
 
-## Acceptance and release relationship
+`packaging/agentworks/assistance.md` remains the sole authored bootstrap body. The generator
+projects its exact bytes into the README, website, Claude Code package, and Codex package. The
+prompt relies on ordinary package resolution for `agentworks-cli>=0.14`; it does not implement
+exact-version selection, prerelease policy, source review, authorization teaching, or a bootstrap
+state machine. Continuing assistance starts at `agw guide --agent`.
 
-Closeout uses one provider-backed path from an exact reviewed candidate wheel and labels that
-pre-publication substitution. After publication, a bounded canonical-prompt smoke installs the exact
-stable release and reaches the trail sign. Generated package parity and focused installation tests
-cover native wrappers.
-
-These are child-effort acceptance checks. They do not supersede the saga's release-PR candidate,
-publication, or final custom-domain gates.
+Generation parity and package fingerprints remain structural safeguards. Tests do not parse or
+assert the prompt's authored sentences.
 
 ## Test and documentation posture
 
-Tests protect behavior and structure, not authored wording. Required new coverage is limited to:
+Tests protect the following boundaries:
 
-- no-topic returns before either catalog or any live dependency for absent, valid, and malformed
-  configuration;
-- human and agent trail signs have their intended structural destination sets;
-- every fixed destination resolves through the selected-topic path;
-- a static-only topic never loads configuration;
-- malformed configuration on live topics yields exit 0, all static blocks, one diagnostics section,
-  and a placeholder for every omitted live block;
-- multi-topic output deduplicates one shared root failure;
-- a valid exact resource request degrades rather than becoming falsely unknown;
-- well-formed onboarding evidence remains unapplied and degrades when its live assessment is
-  unavailable;
-- invalid requests and requested contribution defects remain nonzero; and
-- names-only preserves static names when live names cannot be established.
+- both trail-sign modes expose the same exact destination slugs and every slug resolves;
+- no-topic returns before catalog or live-state loading;
+- `concept-assistant-agent` resolves as an ordinary topic;
+- optional `AgentNote` blocks appear only in agent rendering while shared blocks remain identical;
+- onboarding assessment success and established fail-soft behavior remain intact;
+- names-only and completion use the retained shared catalog; and
+- generated assistance projections and version fingerprints remain byte-identical.
 
-Permanent CLI documentation explains the trail sign, the selected-topic degradation model, and
-best-effort topic discovery. No completion code or sample configuration change is expected.
+Tests do not pin authored prose, agent-note count, or journey wording. Permanent CLI documentation
+describes the current shared catalog, mode shaping, onboarding assessment, and short bootstrap. The
+sample configuration is unaffected.
 
 ## Risks
 
-- **A successful guide response is mistaken for healthy state.** The one prominent warning and
-  permanent documentation state that doctor owns health.
-- **Partial pages hide omissions.** Every omitted block remains visible as a short placeholder, and
-  the response-level warning names affected topic/block identities.
-- **Diagnostics become repetitive.** Root problems are deduplicated once per response; placeholders
-  never repeat the detailed message.
-- **Static and live dependencies drift.** The closed block vocabulary drives the decision, and a new
-  block must be classified in the same exhaustive predicate.
-- **The fixed destination tuple drifts from topic resolution.** One structural test resolves every
-  slug without pinning prose.
-- **The parallel cleanup changes shared files.** Coordinate with the simplification pass's unchecked
-  Wave 1 guide-machinery item and preserve its file ownership before implementation.
+- **The fixed tuple drifts from topic resolution.** Structural coverage pins and resolves its slugs.
+- **Agent context grows into a second guide.** General posture has one topic; local notes are
+  optional plain content with no new framework.
+- **Ordinary information becomes audience-gated again.** Shared-block identity and shared
+  destination tests enforce one catalog; only `AgentNote` is mode-specific.
+- **Bootstrap complexity regrows.** One short canonical file is projected verbatim, and continuing
+  behavior belongs to the installed guide.

@@ -122,7 +122,7 @@ class Teaching:
 
 
 @dataclass(frozen=True, slots=True)
-class AgentContract:
+class AgentNote:
     id: BlockId
     markdown: str
 
@@ -143,7 +143,7 @@ class TopicLinks:
     id: BlockId
 
 
-type GuideBlock = Overview | Teaching | AgentContract | ReleaseNotes | ActionList | TopicLinks
+type GuideBlock = Overview | Teaching | AgentNote | ReleaseNotes | ActionList | TopicLinks
 
 
 @dataclass(frozen=True, slots=True)
@@ -609,7 +609,7 @@ def _parse_block(value: object, source: str, topic: str, index: int) -> GuideBlo
     known = {
         "overview",
         "teaching",
-        "agent-contract",
+        "agent-note",
         "release-notes",
         "action-list",
         "topic-links",
@@ -619,7 +619,7 @@ def _parse_block(value: object, source: str, topic: str, index: int) -> GuideBlo
     block_id = _string(data["id"], source=source, topic=topic, path=f"{path}.id")
     if not _ID_RE.fullmatch(block_id):
         raise _error(InvalidBlockError, source, topic, f"{path}.id", "is not a valid block ID")
-    if discriminator in {"overview", "teaching", "agent-contract"}:
+    if discriminator in {"overview", "teaching", "agent-note"}:
         exact = _mapping(
             value, {"type", "id", "markdown"}, {"type", "id", "markdown"}, source=source, topic=topic, path=path
         )
@@ -650,7 +650,7 @@ def _parse_block(value: object, source: str, topic: str, index: int) -> GuideBlo
             return Overview(BlockId(block_id), markdown)
         if discriminator == "teaching":
             return Teaching(BlockId(block_id), markdown)
-        return AgentContract(BlockId(block_id), markdown)
+        return AgentNote(BlockId(block_id), markdown)
     if discriminator == "action-list":
         exact = _mapping(
             value,
@@ -721,7 +721,7 @@ def _action_record_value(action: GuideAction) -> dict[str, object]:
 _BLOCK_DISCRIMINATORS: dict[type[GuideBlock], str] = {
     Overview: "overview",
     Teaching: "teaching",
-    AgentContract: "agent-contract",
+    AgentNote: "agent-note",
     ReleaseNotes: "release-notes",
     ActionList: "action-list",
     TopicLinks: "topic-links",
@@ -739,7 +739,7 @@ def _decoded_contribution(value: TopicContribution) -> dict[str, object]:
     block_values: list[dict[str, object]] = []
     for block in value.blocks:
         block_value: dict[str, object] = {"type": _BLOCK_DISCRIMINATORS[type(block)], "id": block.id}
-        if isinstance(block, (Overview, Teaching, AgentContract)):
+        if isinstance(block, (Overview, Teaching, AgentNote)):
             block_value["markdown"] = block.markdown
         elif isinstance(block, ActionList):
             block_value["actions"] = [_action_record_value(action) for action in block.actions]
@@ -788,9 +788,7 @@ def parse_topic_contribution(value: object, source: str) -> TopicContribution:
     if len(ids) != len(set(ids)):
         raise _error(InvalidBlockError, source, topic, "blocks", "contains duplicate block IDs")
     authored_bytes = sum(
-        len(block.markdown.encode("utf-8"))
-        for block in blocks
-        if isinstance(block, (Overview, Teaching, AgentContract))
+        len(block.markdown.encode("utf-8")) for block in blocks if isinstance(block, (Overview, Teaching, AgentNote))
     )
     authored_bytes += sum(
         _action_bytes(action) for block in blocks if isinstance(block, ActionList) for action in block.actions

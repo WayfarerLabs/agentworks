@@ -1,6 +1,6 @@
 {
   "name": "agentworks",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Bootstrap the Agentworks CLI and hand off to its built-in agent guide.",
   "author": {
     "name": "Wayfarer Labs",
@@ -13,10 +13,10 @@
   "interface": {
     "displayName": "Agentworks",
     "shortDescription": "Bootstrap Agentworks CLI",
-    "longDescription": "Install or update the Agentworks CLI, verify it, and open its agent guide.",
+    "longDescription": "Install or update the Agentworks CLI and open its agent guide.",
     "developerName": "Wayfarer Labs",
     "category": "Productivity",
     "capabilities": ["CLI bootstrap"],
-    "defaultPrompt": ["Install or update Agentworks and open its guide."]
+    "defaultPrompt": ["Help me install or update Agentworks and open its guide."]
   }
 }

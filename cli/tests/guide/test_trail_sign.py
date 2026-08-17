@@ -15,7 +15,7 @@ from agentworks.guide import (
 from agentworks.guide.assessment import VerificationOutcome
 from agentworks.guide.contract import ActionId
 from agentworks.guide.service import _EmptyInventory, render_guide
-from agentworks.guide.trail_sign import TRAIL_DESTINATIONS, trail_destinations
+from agentworks.guide.trail_sign import TRAIL_DESTINATIONS
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -44,21 +44,19 @@ def test_no_topic_trail_sign_bypasses_catalogs_and_live_context(
         load_registry_fn=forbidden,  # type: ignore[arg-type]
     )
 
-    expected = {
-        GuideMode.AGENT: (
-            "concept-onboarding",
-            "concept-management",
-            "concept-troubleshooting",
-            "concept-release-notes",
-            "concept-migration",
-            "concept-secrets",
-            "concept-reporting-bugs",
-        ),
-        GuideMode.HUMAN: ("concept-onboarding", "concept-management"),
-    }
+    expected = (
+        "concept-assistant-agent",
+        "concept-onboarding",
+        "concept-management",
+        "concept-troubleshooting",
+        "concept-release-notes",
+        "concept-migration",
+        "concept-secrets",
+        "concept-reporting-bugs",
+    )
     assert response.exit_code == 0
-    assert tuple(str(destination.slug) for destination in trail_destinations(mode)) == expected[mode]
-    for slug in expected[mode]:
+    assert tuple(str(destination.slug) for destination in TRAIL_DESTINATIONS) == expected
+    for slug in expected:
         assert f"`{slug}`" in response.markdown
 
 
@@ -71,12 +69,13 @@ def test_every_fixed_destination_resolves_through_selected_topic_path(
     monkeypatch.setattr("agentworks.guide.service.render_trail_sign", forbidden_trail_sign)
 
     for destination in TRAIL_DESTINATIONS:
-        response = render_guide(
-            (str(destination.slug),),
-            GuideMode.AGENT,
-            load_config_fn=_broken_config,
-        )
-        assert response.exit_code == 0
+        for mode in GuideMode:
+            response = render_guide(
+                (str(destination.slug),),
+                mode,
+                load_config_fn=_broken_config,
+            )
+            assert response.exit_code == 0
 
 
 def test_static_selected_topic_does_not_load_live_context() -> None:

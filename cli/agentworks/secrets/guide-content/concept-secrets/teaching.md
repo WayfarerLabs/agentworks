@@ -18,6 +18,9 @@ when prompt, biometric, or renewed-authentication impact is already explicit in 
 instruction or after one resolving decision. Then resolve through the ordinary secure input boundary
 and its injected interaction policy. Never inspect a source broadly to find the value.
 
+Do not display, log, or retain a resolved secret value. Pass it only to the authorized sink that
+requested it.
+
 Secret resolution accepts structured multiline text without compaction or alternate encoding. It
 preserves carriage returns, line feeds, and terminal line endings exactly; NUL is the one globally
 rejected string value. A source-level verification therefore proves resolvability, not suitability

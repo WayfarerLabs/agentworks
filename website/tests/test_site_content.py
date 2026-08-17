@@ -164,11 +164,12 @@ class SourceContractTests(RepositoryFixture):
         original = readme.read_bytes()
         begin_marker = site_builder.ASSISTANCE_README_BEGIN
         end_marker = site_builder.ASSISTANCE_README_END
+        canonical_body = ONBOARDING_PROMPT.encode()
         variants = (
             original.replace(begin_marker, b"<!-- changed -->", 1),
             original.replace(end_marker, begin_marker, 1),
             original.replace(b"```markdown\n", b"```text\n", 1),
-            original.replace(b"# Agentworks CLI bootstrap", b"# Drifted bootstrap", 1),
+            original.replace(canonical_body, b" " + canonical_body, 1),
             original.replace(begin_marker, begin_marker + b"\n" + begin_marker, 1),
         )
         for changed in variants:

@@ -507,14 +507,55 @@ operator ruling without changing this completed phase's record.
 - [x] Update permanent guide documentation and command signposts for the temporary unreleased state.
       Record that completions and sample configuration are either updated or unaffected. The CLI
       grammar child restores `resource explain` and `graph show`; 0.14.0 must not ship before it.
-- [ ] Run focused guide/completion tests, the full non-integration suite, Ruff, formatting, mypy,
+- [x] Run focused guide/completion tests, the full non-integration suite, Ruff, formatting, mypy,
       Rulesync drift, locked-SDD, and file lint. Complete the required project and integration
-      review on one ready deletion PR.
+      review on one ready deletion PR. PR #556 completed this gate; the saga ledger records its
+      merge and exact-wheel acceptance.
 
 Definition of done: one guide surface remains for concepts, workflow synthesis, navigation,
 evidence, bounded actions, and the onboarding assessment; command-owned raw fact presentation and
 its orphaned guide machinery are absent; the assessment uses its smaller projector; and the saga's
 CLI grammar release gate is explicit and still open.
+
+The operator's 2026-08-16 corrected-guide ruling supersedes Phase 4's audience-specific destination
+sets and required per-topic agent contracts without altering that completed journey. The trail-sign
+form and command-owned deletion remain; the correction below makes the retained guide equally useful
+to humans and assistant agents and removes the remaining bootstrap and content complexity.
+
+## Phase 4 correction: one topic catalog and thin bootstrap
+
+- [x] Reconcile the active FRD, HLA, bootstrap LLD, and permanent guide documentation around one
+      ordinary topic catalog, identical trail-sign destinations, one addressable
+      `concept-assistant-agent` topic, and optional topic-local agent notes. Integrate the delivered
+      corrected-model message and preserve every completed checkbox above unchanged.
+- [x] Replace the audience-filtered trail-sign tuple with one eight-destination tuple shared by
+      human and agent modes. Human mode gives a short choice prompt; agent mode points first to
+      `concept-assistant-agent`; both expose the same slugs and continue to bypass catalogs and live
+      state.
+- [x] Replace required `AgentContract` blocks with optional `AgentNote` blocks. Move general posture
+      into `concept-assistant-agent`, retain ordinary topic content for both audiences, and keep an
+      agent-only note only where genuinely useful. Add one concise onboarding note containing the
+      authored cross-kind journey hints without a hint schema, exact-count invariant, or prose
+      tests.
+- [x] Replace the canonical bootstrap with the operator-approved few-line description, repository
+      pointer, `agentworks-cli` installation command for Python 3.12+, and `agw guide --agent`
+      handoff. Regenerate README, website, Claude Code, and Codex projections; retain byte-parity
+      and version/fingerprint safeguards while deleting semantic and wording tests for the authored
+      prompt.
+- [x] Update completions and permanent docs or record them unaffected. Run focused guide,
+      assistance, generation, and website tests plus the full non-integration suite, Ruff,
+      formatting, mypy, Rulesync drift, locked-SDD, and file lint. Complete project and fresh-eyes
+      reviews, resolve material findings, and hand off one ready PR under the saga gate.
+
+Definition of done: humans and assistant agents can reach the same useful information;
+agent-specific guidance has one obvious home plus rare local notes; the bootstrap only installs and
+hands off; no new router, hint framework, state machine, or prose-policing tests exist; and the
+result is materially smaller than the superseded model.
+
+Historical correction for the completed record above: the corrected model consolidated concise
+general assistance posture but intentionally dropped the former repeated startup disclosure; it did
+not delete authored-prompt semantic or wording tests, and instead made retained projection-version
+assertions derive from canonical metadata.
 
 ## Phase 5: representative acceptance and closeout
 

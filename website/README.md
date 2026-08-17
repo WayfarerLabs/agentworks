@@ -236,7 +236,7 @@ The builder reads four permanent repository inputs:
   summary remains repository documentation, not additional landing-page content. Its generated
   assistance fence is also checked as an exact projection, not treated as an authored second body.
 - `packaging/agentworks/assistance.md` is the single authored source for the Home onboarding prompt.
-  It remains a thin install-or-update, version-verification, and `agw guide --agent` handoff.
+  It remains a thin install-or-update and `agw guide --agent` handoff.
 - `docs/manifesto.md` owns every body heading and block rendered on the Manifesto page.
 - `SECURITY.md` owns every body heading and block rendered on the Security page, including the
   private vulnerability reporting channel and URL.
