@@ -152,7 +152,7 @@ def test_skills_share_exact_body_and_skill_description_owner(clean_package_root:
     assert claude_frontmatter == codex_frontmatter
     assert claude_frontmatter["description"] == metadata["skillDescription"]
     assert claude_frontmatter["metadata"] == {
-        "agentworks-package-version": "1.0.0",
+        "agentworks-package-version": "1.0.1",
         "agentworks-min-cli-version": "0.14.0",
     }
 

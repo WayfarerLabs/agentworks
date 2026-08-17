@@ -11,7 +11,7 @@ from agentworks.guide.agent_mode import GuideMode
 from agentworks.guide.contract import (
     FRAMEWORK_HEADING_LABEL,
     ActionList,
-    AgentContract,
+    AgentNote,
     GuideBlock,
     Overview,
     ReleaseNotes,
@@ -66,13 +66,15 @@ def render_trail_sign(mode: GuideMode) -> str:
     """Render the catalog-free no-topic destination sign."""
     from agentworks.guide.trail_sign import trail_destinations
 
-    destinations = trail_destinations(mode)
+    destinations = trail_destinations()
+    rows = "\n".join(f"- {destination.intent}: `{destination.slug}`." for destination in destinations)
     if mode is GuideMode.AGENT:
-        rows = "\n".join(f"- {destination.agent_intent}: `{destination.slug}`." for destination in destinations)
-        intro = "Choose the destination that matches the operator's current goal."
+        intro = (
+            "Start with `concept-assistant-agent`, then choose the destination that matches the operator's "
+            "current goal."
+        )
     else:
-        rows = "\n".join(f"- {destination.human_choice}: `{destination.slug}`." for destination in destinations)
-        intro = "Choose the path that matches this installation."
+        intro = "Choose the destination that matches your current goal."
     discovery = (
         "Use shell completion or `agw guide --names-only` to discover every installed and currently available topic."
     )
@@ -131,13 +133,13 @@ def _action_list(block: ActionList) -> str:
     return _action_records(block.actions)
 
 
-def _heading(block: GuideBlock, mode: GuideMode) -> str:
+def _heading(block: GuideBlock) -> str:
     if isinstance(block, Overview):
         return "Overview"
     if isinstance(block, Teaching):
         return "How it works"
-    if isinstance(block, AgentContract):
-        return "Agent operating contract" if mode is GuideMode.AGENT else "Consent and safety"
+    if isinstance(block, AgentNote):
+        return "Agent note"
     if isinstance(block, ReleaseNotes):
         return "Packaged release evidence"
     if isinstance(block, ActionList):
@@ -209,15 +211,13 @@ def render_topic(
     verification_evidence: tuple[VerificationEvidence, ...] = (),
 ) -> RenderedTopic:
     """Render one topic without consulting configuration or invoking capabilities."""
-    blocks = contribution.blocks
-    if mode is GuideMode.AGENT:
-        blocks = tuple(block for block in blocks if isinstance(block, AgentContract)) + tuple(
-            block for block in blocks if not isinstance(block, AgentContract)
-        )
+    blocks = tuple(
+        block for block in contribution.blocks if mode is GuideMode.AGENT or not isinstance(block, AgentNote)
+    )
     rendered: list[RenderedBlock] = []
     issues: list[str] = []
     for block in blocks:
-        source = block.markdown if isinstance(block, (Overview, Teaching, AgentContract)) else None
+        source = block.markdown if isinstance(block, (Overview, Teaching, AgentNote)) else None
         if source is not None:
             body = source
         elif isinstance(block, ReleaseNotes):
@@ -236,7 +236,7 @@ def render_topic(
             body = "\n".join(f"- `{topic}`" for topic in contribution.related_topics) or "No related topics."
         if source is None:
             source = body
-        markdown = f"{framework_heading(_heading(block, mode))}\n\n{body}"
+        markdown = f"{framework_heading(_heading(block))}\n\n{body}"
         rendered.append(RenderedBlock(GuideBlockKey(str(contribution.topic), str(block.id)), source, markdown))
     if contribution.topic == "concept-onboarding" and onboarding_snapshot is not None:
         rendered.append(_onboarding_plan(onboarding_snapshot, verification_evidence))

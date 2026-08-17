@@ -18,17 +18,17 @@ uv tool install agentworks-cli
 The everyday command is `agw`. The longer form `agentworks` is also installed if you ever want to
 type it out; examples throughout this document use `agw`.
 
-Run `agw guide --agent` to give an Agentworks assistant agent a fixed trail sign to the main guide
-destinations. This no-topic handoff does not inspect configuration or live state. People running
-`agw guide` get the shorter new-installation or existing-installation choice. The assistant decides
-what to do next; the guide does not route requests or grant authorization.
+Run `agw guide` for a fixed trail sign to the main guide destinations. Human and agent modes show
+the same eight topics without inspecting the topic catalog, configuration, or live state. Agent mode
+first points an external helper to `concept-assistant-agent`; human mode simply asks you to choose
+the topic matching your goal.
 
-Use `concept-onboarding` for repeatable first setup and current adoption, `concept-management` for
-ongoing operation, `concept-release-notes` for the installed version's packaged canonical history,
-and `concept-source-review` for an optional read-only review of exact canonical source. Current
-facts are not a version-to-version delta. Use `agw guide --names-only` when a completion or tool
-needs the valid topic names; it returns only installed authored, plugin-authored, and packaged
-release-note topics without loading configuration, the resource registry, or state.
+Use `concept-assistant-agent` for the external assistant's operating posture, `concept-onboarding`
+for repeatable first setup and current adoption, `concept-management` for ongoing operation,
+`concept-release-notes` for packaged history, and `concept-source-review` for an optional read-only
+source review. Selected topics share their ordinary content across modes; only an optional agent
+note is mode-specific. Use `agw guide --names-only` when a completion or tool needs every installed
+authored, plugin-authored, and packaged release-note topic name.
 
 Raw resource, relationship, schema, and sample facts belong to commands rather than guide topics.
 Use `agw graph show`, `agw resource kinds`, `agw resource list`, `agw resource explain`, and

@@ -4,24 +4,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agentworks.guide.agent_mode import GuideMode
 from agentworks.guide.contract import TopicSlug
 
 
 @dataclass(frozen=True, slots=True)
 class TrailDestination:
     slug: TopicSlug
-    agent_intent: str
-    human_choice: str | None = None
+    intent: str
 
 
 TRAIL_DESTINATIONS = (
-    TrailDestination(TopicSlug("concept-onboarding"), "First setup or current adoption", "New installation"),
-    TrailDestination(
-        TopicSlug("concept-management"),
-        "Configuration and ongoing operation",
-        "Existing installation",
-    ),
+    TrailDestination(TopicSlug("concept-assistant-agent"), "Working with an Agentworks assistant agent"),
+    TrailDestination(TopicSlug("concept-onboarding"), "First setup or current adoption"),
+    TrailDestination(TopicSlug("concept-management"), "Configuration and ongoing operation"),
     TrailDestination(TopicSlug("concept-troubleshooting"), "Diagnosis and recovery"),
     TrailDestination(TopicSlug("concept-release-notes"), "Changes across releases"),
     TrailDestination(TopicSlug("concept-migration"), "Exceptional breaking-input migration"),
@@ -30,8 +25,6 @@ TRAIL_DESTINATIONS = (
 )
 
 
-def trail_destinations(mode: GuideMode) -> tuple[TrailDestination, ...]:
-    """Return the fixed destinations visible in one presentation mode."""
-    if mode is GuideMode.AGENT:
-        return TRAIL_DESTINATIONS
-    return tuple(destination for destination in TRAIL_DESTINATIONS if destination.human_choice is not None)
+def trail_destinations() -> tuple[TrailDestination, ...]:
+    """Return the fixed destinations shared by every presentation mode."""
+    return TRAIL_DESTINATIONS

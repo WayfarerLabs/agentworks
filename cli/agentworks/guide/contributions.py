@@ -8,7 +8,7 @@ from agentworks.guide.contract import (
     ActionId,
     ActionInput,
     ActionList,
-    AgentContract,
+    AgentNote,
     BlockId,
     ConsentBoundary,
     GuideAction,
@@ -50,14 +50,16 @@ def _concept(
     summary: str,
     *,
     release_notes: bool = False,
+    agent_note: bool = False,
     related_topics: tuple[str, ...] = (),
     actions: tuple[GuideAction, ...] = (),
 ) -> TopicContribution:
     blocks: tuple[GuideBlock, ...] = (
         Overview(BlockId("overview"), _markdown(slug, "overview")),
-        AgentContract(BlockId("agent-contract"), _markdown(slug, "agent-contract")),
         Teaching(BlockId("teaching"), _markdown(slug, "teaching")),
     )
+    if agent_note:
+        blocks += (AgentNote(BlockId("agent-note"), _markdown(slug, "agent-note")),)
     if release_notes:
         blocks += (ReleaseNotes(BlockId("release-notes")),)
     if actions:
@@ -461,6 +463,12 @@ def guide_contributions() -> tuple[TopicContribution, ...]:
 
     return (
         _concept(
+            "concept-assistant-agent",
+            "Agentworks assistant agents",
+            "Use an external assistant under the operator's instruction and the installed CLI's authority.",
+            related_topics=("concept-onboarding", "concept-management"),
+        ),
+        _concept(
             "concept-manifesto",
             "Agentworks Manifesto",
             "Find the canonical statement of the project's values and use it as design context.",
@@ -469,7 +477,8 @@ def guide_contributions() -> tuple[TopicContribution, ...]:
         _concept(
             "concept-onboarding",
             "Agentworks onboarding",
-            "Start safely, assess current adoption, and use one durable authorization envelope for in-scope work.",
+            "Set up Agentworks, assess current adoption, and choose the smallest useful next step.",
+            agent_note=True,
             related_topics=(
                 "concept-source-review",
                 "concept-manifesto",

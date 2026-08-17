@@ -5,7 +5,6 @@ from __future__ import annotations
 from importlib.resources import files
 
 from agentworks.guide.contract import (
-    AgentContract,
     BlockId,
     Overview,
     Teaching,
@@ -28,7 +27,6 @@ def guide_contributions() -> tuple[TopicContribution, ...]:
             "Understand secret declarations, sources, and typed proof without exposing secret values.",
             (
                 Overview(BlockId("overview"), _markdown("overview")),
-                AgentContract(BlockId("agent-contract"), _markdown("agent-contract")),
                 Teaching(BlockId("teaching"), _markdown("teaching")),
             ),
         ),

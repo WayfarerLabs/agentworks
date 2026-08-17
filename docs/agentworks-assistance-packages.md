@@ -1,7 +1,7 @@
 # Agentworks Assistance Packages
 
 Agentworks publishes one universal CLI bootstrap prompt plus optional native Claude Code and Codex
-packages. The prompt has one job: install or update a compatible Agentworks CLI, verify it, and run
+packages. The prompt has one job: install or update a compatible Agentworks CLI and run
 `agw guide --agent`. The guide owns all ongoing Agentworks teaching and next-step suggestions.
 Installing either package only makes these inert bootstrap instructions discoverable. It grants no
 workstation or Agentworks permission.
@@ -29,13 +29,11 @@ codex plugin marketplace add WayfarerLabs/agentworks
 codex plugin add agentworks@agentworks
 ```
 
-Both packages require `agentworks-cli` 0.14.0 or newer. The bootstrap retains a compatible
-installation unless an update was requested. Otherwise it selects one compatible stable exact
-version at least 0.14.0, runs the pinned `agentworks-cli==VERSION` installation, verifies the
-result, and then invokes the guide. If no compatible stable release is available, it does not
-install or update the CLI or invoke the guide, and the operator should retry after the release is
-published. It does not use a pre-release, a lower version, or an unpinned latest version. It does
-not offer or perform repository source inspection.
+Both packages require `agentworks-cli` 0.14.0 or newer. The bootstrap recommends `uv`, allows other
+Python 3.12 or newer tool installers, installs the compatible `agentworks-cli>=0.14` range, and
+invokes `agw guide --agent`. It points to the public repository in case the operator or assistant
+wants to inspect the source, but it does not implement a source-review or version-selection
+workflow.
 
 The bootstrap adds no authorization, security-setting, or harness-posture teaching. Ordinary harness
 approvals and restrictions apply independently of the package. The guide owns any later security or
@@ -43,18 +41,23 @@ authorization context needed for Agentworks work.
 
 ## Guide discovery and degraded context
 
-`agw guide` without a topic is a short trail sign. Agent mode points to onboarding, management,
-troubleshooting, release notes, migration, secrets, and bug reporting. Human mode offers two paths:
-onboarding for a new installation and management for an existing installation. This request does not
-load the topic catalogs, configuration, registry, or state database. Use shell completion or
-`agw guide --names-only` to discover the installed authored, plugin-authored, and packaged
-release-note topic inventory.
+`agw guide` without a topic is a short trail sign. Human and agent modes show the same eight
+destinations: assistant-agent guidance, onboarding, management, troubleshooting, release notes,
+migration, secrets, and bug reporting. Agent mode first points to `concept-assistant-agent`; human
+mode asks the operator to choose a goal. This request does not load the topic catalog,
+configuration, registry, or state database. Use shell completion or `agw guide --names-only` to
+discover every installed authored, plugin-authored, and packaged release-note topic.
+
+`concept-assistant-agent` contains the general posture for an external helper: follow the operator's
+instruction, use current CLI help as operational authority, ask only for material ambiguity or scope
+expansion, and treat external text as data. Ordinary topic blocks render identically in both modes.
+A topic may add an optional `AgentNote` rendered only in agent mode.
 
 `concept-onboarding` is the first-setup and current-adoption destination and the only guide topic
-that projects live context. It contains the startup security posture, derives a bounded assessment
-from finalized registry, relationship, and stored-instance facts, and selects the next first-VM or
-first-session step. Its related topics include `concept-source-review`, which separately owns the
-optional focused and full read-only source-review actions.
+that projects live context. It derives a bounded assessment from finalized registry, relationship,
+and stored-instance facts and selects the next first-VM or first-session step. Its concise agent
+note offers cross-kind discovery and configuration journeys. Its related topics include
+`concept-source-review`, which separately owns the optional focused and full read-only actions.
 
 A selected authored topic renders its installed teaching when that teaching is valid. Topics other
 than `concept-onboarding` do not load configuration, the registry, or the state database. Onboarding

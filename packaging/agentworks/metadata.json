@@ -1,6 +1,6 @@
 {
   "name": "agentworks",
-  "packageVersion": "1.0.0",
+  "packageVersion": "1.0.1",
   "minimumCliVersion": "0.14.0",
   "description": "Bootstrap the Agentworks CLI and hand off to its built-in agent guide.",
   "publisher": {
@@ -11,12 +11,12 @@
   "repository": "https://github.com/WayfarerLabs/agentworks",
   "license": "MIT",
   "displayName": "Agentworks",
-  "skillDescription": "Install or update the Agentworks CLI, verify its version, and run its built-in agent guide. Use when the operator wants to bootstrap Agentworks assistance.",
+  "skillDescription": "Install or update the Agentworks CLI and run its built-in agent guide. Use when the operator wants to bootstrap Agentworks assistance.",
   "interface": {
     "shortDescription": "Bootstrap Agentworks CLI",
-    "longDescription": "Install or update the Agentworks CLI, verify it, and open its agent guide.",
+    "longDescription": "Install or update the Agentworks CLI and open its agent guide.",
     "category": "Productivity",
     "capabilities": ["CLI bootstrap"],
-    "defaultPrompt": ["Install or update Agentworks and open its guide."]
+    "defaultPrompt": ["Help me install or update Agentworks and open its guide."]
   }
 }

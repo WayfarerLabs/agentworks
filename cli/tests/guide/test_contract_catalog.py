@@ -8,6 +8,7 @@ from agentworks.guide import (
     ActionId,
     ActionInput,
     ActionList,
+    AgentNote,
     BlockId,
     BrokenTopicLinkError,
     ConsentBoundary,
@@ -248,6 +249,15 @@ def test_unknown_nested_field_and_duplicate_block_are_rejected() -> None:
 def test_every_guide_block_variant_has_a_decoded_discriminator() -> None:
     """A new block variant must reach the decoded shape, which no type can force."""
     assert set(get_args(GuideBlock.__value__)) == set(_BLOCK_DISCRIMINATORS)
+
+
+def test_optional_agent_note_round_trips_through_the_contribution_parser() -> None:
+    value = _topic("concept-safe")
+    value["blocks"] = [{"type": "agent-note", "id": "agent-note", "markdown": "Optional context."}]
+
+    parsed = parse_topic_contribution(value, "core")
+
+    assert isinstance(parsed.blocks[0], AgentNote)
 
 
 def test_typed_records_reach_the_catalog_as_validated_copies() -> None:

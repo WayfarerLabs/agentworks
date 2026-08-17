@@ -8,7 +8,6 @@ from agentworks.guide.contract import (
     ActionId,
     ActionInput,
     ActionList,
-    AgentContract,
     BlockId,
     ConsentBoundary,
     GuideAction,
@@ -66,7 +65,6 @@ def guide_contributions() -> tuple[TopicContribution, ...]:
             "Enable shipped user install commands only when admin or agent templates select them.",
             (
                 Overview(BlockId("overview"), _markdown("overview")),
-                AgentContract(BlockId("agent-contract"), _markdown("agent-contract")),
                 Teaching(BlockId("teaching"), _markdown("teaching")),
                 ActionList(BlockId("actions"), _actions()),
             ),

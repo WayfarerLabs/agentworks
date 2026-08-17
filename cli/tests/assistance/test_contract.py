@@ -88,7 +88,7 @@ def test_catalogs_and_manifests_have_neutral_identity_and_complete_codex_policy(
     assert interface["developerName"] == METADATA["publisher"]["name"]
     assert {key: interface[key] for key in METADATA["interface"]} == METADATA["interface"]
     assert codex_manifest["skills"] == "./skills/"
-    assert codex_manifest["version"] == claude_manifest["version"] == "1.0.0"
+    assert codex_manifest["version"] == claude_manifest["version"] == "1.0.1"
 
 
 def test_readme_projection_is_exact() -> None:

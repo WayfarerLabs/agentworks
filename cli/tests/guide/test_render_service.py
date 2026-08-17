@@ -4,7 +4,7 @@ from typing import Literal
 
 import pytest
 
-from agentworks.guide import GuideMode, UnknownGuideTopicError
+from agentworks.guide import AgentNote, GuideMode, UnknownGuideTopicError
 from agentworks.guide.agent_mode import select_guide_mode
 from agentworks.guide.contributions import guide_contributions
 from agentworks.guide.render import render_topic, sanitize_terminal_output
@@ -30,15 +30,18 @@ def test_mode_precedence(
     assert select_guide_mode(explicit, environ, tty) is expected
 
 
-def test_human_and_agent_rendering_have_semantic_parity() -> None:
-    topic = next(item for item in guide_contributions() if item.topic == "concept-management")
+def test_agent_note_is_agent_only_and_shared_blocks_have_semantic_parity() -> None:
+    topic = next(item for item in guide_contributions() if item.topic == "concept-onboarding")
 
     human = render_topic(topic, GuideMode.HUMAN)
     agent = render_topic(topic, GuideMode.AGENT)
 
-    assert {block.key for block in human.blocks} == {block.key for block in agent.blocks}
+    note_ids = {str(block.id) for block in topic.blocks if isinstance(block, AgentNote)}
+    human_keys = {block.key for block in human.blocks}
+    assert note_ids.isdisjoint(block.key.block_id for block in human.blocks)
+    assert note_ids <= {block.key.block_id for block in agent.blocks}
     assert {block.key: block.source_payload for block in human.blocks} == {
-        block.key: block.source_payload for block in agent.blocks
+        block.key: block.source_payload for block in agent.blocks if block.key in human_keys
     }
 
 
