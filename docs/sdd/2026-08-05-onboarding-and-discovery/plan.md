@@ -523,20 +523,20 @@ to humans and assistant agents and removes the remaining bootstrap and content c
 
 ## Phase 4 correction: one topic catalog and thin bootstrap
 
-- [ ] Reconcile the active FRD, HLA, bootstrap LLD, and permanent guide documentation around one
+- [x] Reconcile the active FRD, HLA, bootstrap LLD, and permanent guide documentation around one
       ordinary topic catalog, identical trail-sign destinations, one addressable
       `concept-assistant-agent` topic, and optional topic-local agent notes. Integrate the delivered
       corrected-model message and preserve every completed checkbox above unchanged.
-- [ ] Replace the audience-filtered trail-sign tuple with one eight-destination tuple shared by
+- [x] Replace the audience-filtered trail-sign tuple with one eight-destination tuple shared by
       human and agent modes. Human mode gives a short choice prompt; agent mode points first to
       `concept-assistant-agent`; both expose the same slugs and continue to bypass catalogs and live
       state.
-- [ ] Replace required `AgentContract` blocks with optional `AgentNote` blocks. Move general posture
+- [x] Replace required `AgentContract` blocks with optional `AgentNote` blocks. Move general posture
       into `concept-assistant-agent`, retain ordinary topic content for both audiences, and keep an
       agent-only note only where genuinely useful. Add one concise onboarding note containing the
       authored cross-kind journey hints without a hint schema, exact-count invariant, or prose
       tests.
-- [ ] Replace the canonical bootstrap with the operator-approved few-line description, repository
+- [x] Replace the canonical bootstrap with the operator-approved few-line description, repository
       pointer, `agentworks-cli` installation command for Python 3.12+, and `agw guide --agent`
       handoff. Regenerate README, website, Claude Code, and Codex projections; retain byte-parity
       and version/fingerprint safeguards while deleting semantic and wording tests for the authored
