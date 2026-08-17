@@ -61,15 +61,14 @@ def _structural_shell(body: str, package_path: str) -> str:
         raise GuideContentError(f"guide shell {package_path!r} contains a Setext heading")
     for scanned in lines:
         line = scanned.raw.rstrip("\r\n")
-        if not scanned.outside_code or not scanned.directive_eligible:
+        if not scanned.outside_code:
             continue
-        stripped = line.strip()
-        if stripped == AGENT_OPEN:
+        if line == AGENT_OPEN:
             if agent_only:
                 raise GuideContentError(f"guide shell {package_path!r} nests an agent-only fence")
             agent_only = True
             continue
-        if stripped == AGENT_CLOSE:
+        if line == AGENT_CLOSE:
             if not agent_only:
                 raise GuideContentError(f"guide shell {package_path!r} closes an unopened agent-only fence")
             agent_only = False

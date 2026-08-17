@@ -88,7 +88,9 @@ def _destination(value: str, start: int, *, inline: bool) -> tuple[int, int, int
     while cursor < len(value) and value[cursor] in " \t":
         cursor += 1
     destination_start = cursor
-    if cursor < len(value) and value[cursor] == "<":
+    if inline and cursor > start and cursor < len(value) and value[cursor] in {'"', "'", "("}:
+        destination_end = cursor
+    elif cursor < len(value) and value[cursor] == "<":
         cursor += 1
         destination_start = cursor
         while cursor < len(value) and (value[cursor] != ">" or _escaped(value, cursor)):

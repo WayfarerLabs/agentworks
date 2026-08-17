@@ -20,7 +20,6 @@ class MarkdownLine:
     content_start: int
     outside_code: bool
     structural: bool
-    directive_eligible: bool
     container: tuple[int, int | None]
 
 
@@ -109,10 +108,7 @@ def scan_markdown(markdown: str, source: str) -> tuple[MarkdownLine, ...]:
         structural = not indented_code
         container = (quote_depth, list_indent if in_list else None)
         outside = active_fence is None
-        directive_eligible = outside and structural and container == (0, None)
-        scanned.append(
-            MarkdownLine(raw, content, len(line) - len(content), outside, structural, directive_eligible, container)
-        )
+        scanned.append(MarkdownLine(raw, content, len(line) - len(content), outside, structural, container))
 
         if active_fence is None:
             if structural and (opening := _opening_fence(content)) is not None:

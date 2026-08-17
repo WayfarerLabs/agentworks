@@ -38,11 +38,11 @@ def filter_agent_only(markdown: str, mode: GuideMode) -> str:
     hidden = False
     rendered: list[str] = []
     for line in scan_markdown(markdown, "guide shell"):
-        stripped = line.raw.strip()
-        if line.directive_eligible and stripped == AGENT_OPEN:
+        raw = line.raw.rstrip("\r\n")
+        if line.outside_code and raw == AGENT_OPEN:
             hidden = True
             continue
-        if line.directive_eligible and stripped == AGENT_CLOSE:
+        if line.outside_code and raw == AGENT_CLOSE:
             hidden = False
             continue
         if mode is GuideMode.AGENT or not hidden:
@@ -174,6 +174,8 @@ def _rewrite_destination(value: str, source: GuideSource, *, image: bool) -> str
         unescaped.append(destination[index])
         index += 1
     destination = "".join(unescaped)
+    if not destination:
+        return value
     if destination.startswith("#") or destination.lower().startswith("https://"):
         return f"<{destination}>" if wrapped else destination
     if destination.startswith("//") or destination.startswith("/") or _SCHEME_RE.match(destination):
@@ -220,7 +222,7 @@ def _shell_nodes(markdown: str, source: str) -> tuple[_TextSegment | _IncludeNod
     text: list[str] = []
     for line in scan_markdown(markdown, source):
         raw = line.raw.rstrip("\r\n")
-        directive = directive_body(raw) if line.directive_eligible else None
+        directive = directive_body(raw) if line.outside_code else None
         if directive is None:
             text.append(line.raw)
             continue

@@ -52,7 +52,7 @@ Each shell has:
 - required frontmatter containing only `description` in the first format version;
 - a filename stem that maps to the global `concept-<stem>` slug;
 - exactly one H1 outside agent-only regions, used as the title; and
-- one Markdown body containing any structural directives.
+- one Markdown body containing any top-level structural directives.
 
 Global slug collisions and malformed shells are catalog errors. `--names-only` and completion use
 the same discovery path without loading configuration or operator state. Exact packaged release-note
@@ -94,13 +94,19 @@ next heading of equal or higher rank. It shifts every ATX heading outside fenced
 amount and rejects a result outside H2-H6. Imported text is never parsed again for directives, so
 composition is one level deep. Setext headings are rejected in shells and selected sections.
 
-The expander rewrites only repository-relative Markdown destinations. Absolute HTTPS and
-fragment-only destinations pass through. Relative destinations are resolved lexically against the
-source Markdown resource and required to remain inside its known repository mapping. Links become
-canonical GitHub `blob/main` URLs; images become canonical raw-GitHub `main` URLs. Inline and
-reference-style forms share this rule and keep their definitions inside the same emitted shell or
-extracted section. Relative-link fragments are split before path normalization and then reattached;
-query handling is out of scope. The guide never fetches, validates, or embeds remote content.
+Both control forms execute only as exact standalone HTML-comment lines beginning at column zero,
+between authored top-level Markdown blocks or sections. Directive-looking comments inside list or
+blockquote containers, inside code fences, or with leading or trailing whitespace remain ordinary
+Markdown.
+
+The expander rewrites only repository-relative Markdown destinations. Absolute HTTPS, fragment-only,
+and empty current-document destinations pass through. Relative destinations are resolved lexically
+against the source Markdown resource and required to remain inside its known repository mapping.
+Links become canonical GitHub `blob/main` URLs; images become canonical raw-GitHub `main` URLs.
+Inline and reference-style forms share this rule and keep their definitions inside the same emitted
+shell or extracted section. Relative-link fragments are split before path normalization and then
+reattached; query handling is out of scope. The guide never fetches, validates, or embeds remote
+content.
 
 ## Safety and failure behavior
 

@@ -901,9 +901,11 @@ not construct the catalog or load configuration, registry, or state.
 Concepts are auto-discovered from Markdown files directly under first-party package-local
 `guide-content/` directories. Restricted frontmatter supplies the description and the filename
 supplies the global `concept-*` identity. Shells support ordinary Markdown, agent-only fences, and
-bounded exact-section imports from packaged Markdown with static heading offsets. Relative links and
-images in imports are rewritten to canonical repository URLs. The root README is packaged as an
-include-only source so `concept-core-model` can reuse its canonical sections.
+bounded exact-section imports from packaged Markdown with static heading offsets. Fence and import
+comments execute only as standalone column-zero lines between top-level Markdown blocks; nested
+comments remain content. Relative links and images in imports are rewritten to canonical repository
+URLs. The root README is packaged as an include-only source so `concept-core-model` can reuse its
+canonical sections.
 
 Current capability and adoption questions point to `concept-onboarding`, ongoing operation points to
 `concept-management`, and temporal version-change questions point to `concept-release-notes`. Raw

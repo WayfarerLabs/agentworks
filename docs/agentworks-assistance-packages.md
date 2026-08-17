@@ -59,11 +59,13 @@ static teaching that points to current CLI inspection commands for live facts. I
 
 Concepts are auto-discovered Markdown shells in first-party package-local `guide-content/`
 directories. Their restricted frontmatter supplies the discovery description. Shells may contain
-ordinary Markdown, agent-only fences, and bounded exact-section imports from packaged Markdown.
-Imports preserve relative links and images by rewriting them to canonical repository URLs. The guide
-does not execute operations, load configuration, inspect the registry or database, resolve secrets,
-or access the network. Invalid topic syntax, unknown topics, and structurally invalid requested
-content remain errors.
+ordinary Markdown, agent-only fences, and bounded exact-section imports from packaged Markdown. Both
+control forms use exact standalone column-zero comment lines between top-level Markdown blocks;
+comments inside lists, block quotes, or code remain ordinary Markdown. Imports preserve relative
+links and images by rewriting them to canonical repository URLs. The guide does not execute
+operations, load configuration, inspect the registry or database, resolve secrets, or access the
+network. Invalid topic syntax, unknown topics, and structurally invalid requested content remain
+errors.
 
 `agw guide --names-only` prints one valid topic name per line. It discovers packaged filenames and
 release history without loading operator state. Raw kind, resource, relationship, schema, and sample

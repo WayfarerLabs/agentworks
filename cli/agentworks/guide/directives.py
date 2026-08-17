@@ -10,14 +10,14 @@ from agentworks.guide.contract import GuideContentError
 AGENT_OPEN = "<!-- agw:agent-only -->"
 AGENT_CLOSE = "<!-- /agw:agent-only -->"
 
-_DIRECTIVE_RE = re.compile(r"^[ \t]*<!--\s*(?P<body>/?agw:[\s\S]*?)\s*-->[ \t]*$")
+_DIRECTIVE_RE = re.compile(r"^<!--\s*(?P<body>/?agw:[\s\S]*?)\s*-->$")
 _ATTRIBUTE_RE = re.compile(r'(?:^|[ \t]+)([a-z][a-z-]*)="([^"\n]*)"')
 _INTEGER_RE = re.compile(r"[+-]?[0-9]+")
 _INCLUDE_NAME = "agw:include"
 
 
 def directive_body(line: str) -> str | None:
-    """Return one standalone Agentworks directive body, if present."""
+    """Return one exact column-zero Agentworks directive body, if present."""
     match = _DIRECTIVE_RE.fullmatch(line)
     return None if match is None else match.group("body")
 

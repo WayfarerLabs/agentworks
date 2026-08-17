@@ -70,10 +70,11 @@ discovery boundary.
 
 Each shell has restricted frontmatter containing only a single-line `description`, followed by one
 unfenced level-1 heading and ordinary reviewed Markdown. Agent-only fences and bounded exact-section
-includes are the only directives. Shells do not call Python or inspect configuration, resources,
-secrets, provider state, or the workstation. Signpost command-owned facts instead of copying them
-into teaching. The guide contract and structural tests own the exact grammar and package-data
-boundary.
+includes are the only directives. Their comment lines must stand alone at column zero between
+top-level Markdown blocks; comments inside lists, block quotes, or code remain content. Shells do
+not call Python or inspect configuration, resources, secrets, provider state, or the workstation.
+Signpost command-owned facts instead of copying them into teaching. The guide contract and
+structural tests own the exact grammar and package-data boundary.
 
 ## Shipping a plugin
 

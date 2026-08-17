@@ -35,16 +35,33 @@ def test_agent_fence_is_local_and_filters_before_include_work(tmp_path: Path) ->
         render_shell(topic, GuideMode.AGENT, package_root=tmp_path)
 
 
-def test_container_prefixed_agent_markers_do_not_hide_human_content() -> None:
+def test_container_prefixed_control_lines_are_inert_but_column_zero_controls_execute(tmp_path: Path) -> None:
+    included = tmp_path / "source.md"
+    included.write_text("## Selected\n\nIncluded body.\n", encoding="utf-8")
     topic = _topic(
-        "# Demo\n\n> <!-- agw:agent-only -->\n> Quoted.\n> <!-- /agw:agent-only -->\n\n"
-        "- <!-- agw:agent-only -->\n  Listed.\n  <!-- /agw:agent-only -->\n"
+        "# Demo\n\n"
+        "> <!-- agw:agent-only -->\n"
+        '> <!-- agw:include path="missing.md" heading="Missing" -->\n'
+        "> Quoted.\n"
+        "> <!-- /agw:agent-only -->\n\n"
+        "- Outer\n"
+        "  - <!-- agw:agent-only -->\n"
+        '    <!-- agw:include path="missing.md" heading="Missing" -->\n'
+        "    Listed.\n"
+        "    <!-- /agw:agent-only -->\n\n"
+        "<!-- agw:agent-only -->\n"
+        "Hidden.\n"
+        "<!-- /agw:agent-only -->\n"
+        '<!-- agw:include path="source.md" heading="Selected" -->\n'
     )
 
-    rendered = render_shell(topic, GuideMode.HUMAN)
+    rendered = render_shell(topic, GuideMode.HUMAN, package_root=tmp_path)
 
     assert "Quoted." in rendered
     assert "Listed." in rendered
+    assert "Hidden." not in rendered
+    assert "Included body." in rendered
+    assert rendered.count('<!-- agw:include path="missing.md" heading="Missing" -->') == 2
 
 
 def test_include_extracts_one_section_shifts_headings_and_stays_inert(tmp_path: Path) -> None:
@@ -174,6 +191,13 @@ def test_link_scanner_distinguishes_prose_escapes_and_balanced_destinations() ->
     assert rendered.count("docs/a%28b%29.md#part") == 1
     assert rendered.count("docs/a%28b%29.md)") == 1
     assert "docs/reference.md#part" in rendered
+
+
+def test_empty_inline_destinations_remain_current_document_links() -> None:
+    source = GuideSource("source.md", "README.md", "")
+    markdown = '[Empty]() and [Titled]( "title") and [Angled](<> "title").\n'
+
+    assert rewrite_relative_destinations(markdown, source) == markdown
 
 
 def test_missing_explicit_reference_fails_but_plain_brackets_remain_prose() -> None:

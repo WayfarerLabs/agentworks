@@ -27,8 +27,10 @@ Use `concept-assistant-agent` for the external assistant's operating posture, `c
 for repeatable first setup and current adoption, `concept-management` for ongoing operation,
 `concept-core-model` for the domain model, `concept-release-notes` for packaged history, and
 `concept-source-review` for optional read-only source review. Selected concepts are Markdown files;
-small fenced passages can appear only in agent mode. Use `agw guide --names-only` when a completion
-or tool needs every installed concept and packaged release-note topic name.
+small top-level fenced passages can appear only in agent mode. The fence markers and section
+includes are exact standalone column-zero comment lines; similar comments nested in Markdown
+containers remain content. Use `agw guide --names-only` when a completion or tool needs every
+installed concept and packaged release-note topic name.
 
 Raw resource, relationship, schema, and sample facts belong to commands rather than guide topics.
 Use `agw graph show`, `agw resource kinds`, `agw resource list`, `agw resource explain`, and

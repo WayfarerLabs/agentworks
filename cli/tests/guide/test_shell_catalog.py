@@ -95,11 +95,20 @@ def test_fence_info_and_suffix_lines_keep_directives_inert(tmp_path: Path) -> No
     assert discover_concept_shells(tmp_path).names() == ("concept-code",)
 
 
-def test_container_prefixed_directives_are_ordinary_markdown(tmp_path: Path) -> None:
+def test_container_prefixed_control_lines_are_ordinary_markdown(tmp_path: Path) -> None:
     _shell(
         tmp_path,
         "guide-content/containers.md",
-        body="# Containers\n\n> <!-- agw:unknown -->\n\n- <!-- agw:unknown -->\n",
+        body=(
+            "# Containers\n\n"
+            "> <!-- agw:agent-only -->\n"
+            '> <!-- agw:include path="../bad.md" heading="Bad" -->\n'
+            "> <!-- /agw:agent-only -->\n\n"
+            "- Outer\n"
+            "  - <!-- agw:agent-only -->\n"
+            '    <!-- agw:include path="../bad.md" heading="Bad" -->\n'
+            "    <!-- /agw:agent-only -->\n"
+        ),
     )
 
     assert discover_concept_shells(tmp_path).names() == ("concept-containers",)
