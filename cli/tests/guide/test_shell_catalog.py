@@ -131,6 +131,10 @@ def test_container_prefixed_control_lines_are_ordinary_markdown(tmp_path: Path) 
     [
         "# Demo\n\n> Quoted heading\n> ---\n",
         "# Demo\n\n- Listed heading\n  ===\n",
+        "# Demo\n\n- > List quote heading\n  > ===\n",
+        "# Demo\n\n> - Quote list heading\n>   ===\n",
+        "# Demo\n\n- Outer\n  - Nested list heading\n    ===\n",
+        "# Demo\n\n- Outer\n  - Inner\n    > Three-deep heading\n    > ===\n",
     ],
 )
 def test_setext_headings_in_supported_containers_fail(tmp_path: Path, body: str) -> None:
@@ -148,6 +152,20 @@ def test_setext_looking_content_inside_a_container_fence_is_inert(tmp_path: Path
     )
 
     assert discover_concept_shells(tmp_path).names() == ("concept-code",)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "# Demo\n\n\t### Tab-indented heading\n",
+        "# Demo\n\n- Item\n  \t### Tab-indented continuation\n",
+    ],
+)
+def test_leading_tab_indentation_fails_closed(tmp_path: Path, body: str) -> None:
+    _shell(tmp_path, "guide-content/tabs.md", body=body)
+
+    with pytest.raises(GuideContentError):
+        discover_concept_shells(tmp_path)
 
 
 def test_repository_catalog_contains_every_fixed_destination() -> None:
