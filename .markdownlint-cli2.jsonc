@@ -18,5 +18,12 @@
         ".claude/**",
         "AGENTS.md",
         ".codex/**",
+        // This canonical prompt intentionally keeps each prose paragraph on
+        // one line so its exact website projection can flow at container width.
+        // Its generated skills are byte-identical and share that exception;
+        // dedicated projection tests validate all three Markdown documents.
+        "packaging/agentworks/agent-onboarding-prompt.md",
+        "plugins/claude-code/agentworks/skills/agentworks/SKILL.md",
+        "plugins/codex/agentworks/skills/agentworks/SKILL.md",
     ],
 }

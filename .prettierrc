@@ -5,6 +5,17 @@
       "options": {
         "proseWrap": "always"
       }
+    },
+    {
+      "files": [
+        "README.md",
+        "packaging/agentworks/agent-onboarding-prompt.md",
+        "plugins/claude-code/agentworks/skills/agentworks/SKILL.md",
+        "plugins/codex/agentworks/skills/agentworks/SKILL.md"
+      ],
+      "options": {
+        "proseWrap": "preserve"
+      }
     }
   ]
 }
