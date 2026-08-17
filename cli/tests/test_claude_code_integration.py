@@ -110,6 +110,11 @@ def test_validation_accepts_the_optional_fields_and_empty_config() -> None:
     _validate({})
 
 
+@pytest.mark.parametrize("value", ["low", "medium", "high", "xhigh", "max", "ultracode"])
+def test_validation_accepts_supported_reasoning_efforts(value: str) -> None:
+    _validate({"reasoning_effort": value})
+
+
 def test_validation_rejects_unknown_field() -> None:
     with pytest.raises(ConfigError, match="permision_mode: unknown field; expected one of:"):
         _validate({"permision_mode": "typo"})
@@ -119,6 +124,11 @@ def test_validation_rejects_unknown_field() -> None:
 def test_validation_rejects_non_string_flag_values(field: str) -> None:
     with pytest.raises(ConfigError):
         _validate({field: 3})
+
+
+def test_validation_rejects_unknown_reasoning_effort() -> None:
+    with pytest.raises(ConfigError):
+        _validate({"reasoning_effort": "definitely-invalid"})
 
 
 def test_validation_rejects_non_list_extra_args() -> None:

@@ -355,18 +355,20 @@ spec:
 
 - Its config is all optional, and every field is documented by
   `agw resource explain harness-integration/claude-code`. What the reference cannot tell you: the
-  fields that forward a value verbatim to `claude` are not validated here, because the valid choices
-  are Claude's and they move between its releases. An invalid one fails at launch with the tool's
-  own error, which `session create` / `session resume` capture into their error message when the
-  workload exits immediately.
+  `permission_mode` and `model` values are not validated here, because their choices are Claude's
+  and move between releases. An invalid one fails at launch with the tool's own error, which
+  `session create` / `session resume` capture when the workload exits immediately.
 - The only requirement checked on the launch target is that `claude` is installed. The chosen action
   (resume vs new session) is announced in the pane on start, so it is never silent.
 - Remote Control needs a Claude subscription login and any organization-level enablement Anthropic
   requires; API-key authentication does not support it. Vim mode and the terminal bell are passed as
   session-local settings, so they do not rewrite the launch user's shared Claude configuration. The
   terminal ultimately decides whether a bell is audible, visual, or ignored.
-- `reasoning_effort` sets Claude's effort level for the session. Supported levels depend on the
-  selected model; current Claude Code releases expose `low`, `medium`, `high`, `xhigh`, and `max`.
+- `reasoning_effort` sets Claude's effort choice for the session and accepts `low`, `medium`,
+  `high`, `xhigh`, `max`, or `ultracode`. Agentworks validates these values because Claude silently
+  falls back to its default for an unknown value. When a valid level is unavailable on the selected
+  model, Claude lowers it to the closest supported level; `ultracode` starts at `xhigh` with
+  Ultracode enabled.
 
 The `codex` integration runs Codex the same way and ships as the opt-in `codex` system plugin.
 

@@ -47,7 +47,9 @@ class ClaudeCodeConfig(AgwModel):
     The ``--permission-mode`` and ``--model`` CHOICE sets are Claude's own
     and drift between releases, so the values are forwarded unvalidated:
     an invalid one surfaces as Claude's own startup error in the pane,
-    which is a better answer than a list of ours going stale.
+    which is a better answer than a list of ours going stale. ``--effort``
+    is the exception: Claude silently falls back on an unknown value, so the
+    integration validates its documented CLI vocabulary instead.
     """
 
     name: Literal["claude-code"]
@@ -59,10 +61,11 @@ class ClaudeCodeConfig(AgwModel):
     model: str | None = None
     """Forwarded as ``--model``."""
 
-    reasoning_effort: str | None = None
-    """Forwarded as ``--effort``. Available levels depend on the selected
-    Claude model, so values forward unvalidated. A child template's declared
-    value replaces its parent's."""
+    reasoning_effort: Literal["low", "medium", "high", "xhigh", "max", "ultracode"] | None = None
+    """Forwarded as ``--effort``. Claude may lower a valid level when the
+    selected model does not support it; ``ultracode`` starts at ``xhigh``
+    with Ultracode enabled. A child template's declared value replaces its
+    parent's."""
 
     remote_control: bool = False
     """When true, enable Claude Code Remote Control and use the Agentworks
