@@ -349,6 +349,7 @@ spec:
   harness_integration:
     name: claude-code
     permission_mode: acceptEdits
+    reasoning_effort: high
     vim_mode: true
 ```
 
@@ -364,6 +365,8 @@ spec:
   requires; API-key authentication does not support it. Vim mode and the terminal bell are passed as
   session-local settings, so they do not rewrite the launch user's shared Claude configuration. The
   terminal ultimately decides whether a bell is audible, visual, or ignored.
+- `reasoning_effort` sets Claude's effort level for the session. Supported levels depend on the
+  selected model; current Claude Code releases expose `low`, `medium`, `high`, `xhigh`, and `max`.
 
 The `codex` integration runs Codex the same way and ships as the opt-in `codex` system plugin.
 

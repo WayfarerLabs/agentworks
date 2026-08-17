@@ -429,12 +429,12 @@ resumable sessions. Five rules, each earned:
   the code-generated skeleton must stay clear of doubled-brace words. Single braces (`${VAR}`, JSON)
   are untouched.
 - **Model the common flags; leave the rest to `extra_args`.** A small optional vocabulary
-  (`permission_mode`, `model`, `remote_control`, `vim_mode`, `terminal_bell`) plus a verbatim,
-  appended-last `extra_args` list keeps the integration useful without chasing the tool's whole flag
-  surface. Session-local tool settings share one generated `--settings` JSON argument. Append
-  `extra_args` after the managed flags so operators can override them or add unmodeled ones. Claude
-  treats repeated `--settings` flags as last-wins, so a raw one replaces the generated session
-  settings rather than extending them.
+  (`permission_mode`, `model`, `reasoning_effort`, `remote_control`, `vim_mode`, `terminal_bell`)
+  plus a verbatim, appended-last `extra_args` list keeps the integration useful without chasing the
+  tool's whole flag surface. Session-local tool settings share one generated `--settings` JSON
+  argument. Append `extra_args` after the managed flags so operators can override them or add
+  unmodeled ones. Claude treats repeated `--settings` flags as last-wins, so a raw one replaces the
+  generated session settings rather than extending them.
 - **Use `-c` for common Codex settings without dedicated flags.** Keep Codex-owned choice sets
   unvalidated and TOML-encode string values before forwarding them. The built-in integration models
   `reasoning_effort`, `vim_mode`, and explicit `web_search` modes this way; its legacy boolean
