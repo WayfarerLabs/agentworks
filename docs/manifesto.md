@@ -31,7 +31,7 @@ Agentic engineering is inherently risky. These risks come from multiple directio
 
 - **Honest mistakes** - An agent can simply make a mistake that results in data loss, corruption, or
   unintended side effects. It's very easy to find stories of agents wiping out entire directories or
-  otherwise causing havoc.
+  otherwise wreaking havoc.
 - **Prompt injection** - Agents exposed to untrusted content can potentially be manipulated into
   doing things outside their operator's intent or control.
 - **Supply chain attacks** - Agents may download and run compromised software or dependencies,
@@ -74,7 +74,7 @@ run containers, and genuine multi-user collaboration.
 The VM provides the hard isolation boundary. Within it, ordinary Linux users, groups, and filesystem
 permissions provide further separation and controlled collaboration between agents.
 
-### Identity and Workload Should Be Separable
+### Identity and Workload Are Distinct Concerns
 
 Many tools in the agentic ecosystem conflate identity and workload within a single overarching
 "agent" abstraction. That conflation can make it difficult to manage workloads effectively,
@@ -111,9 +111,10 @@ world, the best platforms will automate the setup (context, tools, and guardrail
 mechanics of preparing and launching the harness, and then get out of the way, letting the harness
 and models operate unimpeded. Agentworks aims to be exactly that.
 
-Built-in "auto" modes do not change this requirement. Their authorization layer can accelerate
-routine work, but it is not a security boundary. Auto modes should operate inside a least-privilege
-environment so that a mistaken authorization remains contained.
+The recent rise of "auto" modes does not change this requirement. Auto modes can absolutely
+accelerate routine work, but we reject treating them as sufficient security boundaries. Pairing auto
+mode with a least-privilege environment gives operators the best of both worlds: speed, with a
+backstop when either the harness or model goes off the rails.
 
 ### Harness-Agnostic Infrastructure Is Worth Building
 

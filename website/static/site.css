@@ -1,15 +1,19 @@
 :root {
-    --canvas: #f5f2e8;
-    --panel: #ebe7dc;
-    --ink: #292b30;
-    --ink-muted: #4b4e55;
-    --line-subtle: #8a867c;
-    --accent: #d94a1e;
-    --hot: #ffe09a;
+    --canvas: #fbfaf7;
+    --panel: #f0efea;
+    --panel-strong: #e8e6df;
+    --ink: #252422;
+    --ink-muted: #686660;
+    --line-subtle: #8d8a82;
+    --accent: #dc5127;
+    --shell: #262522;
+    --shell-ink: #f7f5ef;
+    --shell-muted: #c9c5ba;
+    --hot: #f7ded5;
     --status: #7de2c5;
     color: var(--ink);
     background: var(--canvas);
-    font-family: system-ui, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     font-synthesis: none;
 }
 
@@ -25,8 +29,9 @@ html {
 body {
     min-width: 0;
     margin: 0;
-    padding: clamp(1rem, 4vw, 3rem);
-    line-height: 1.65;
+    padding-inline: clamp(1rem, 4vw, 3rem);
+    padding-bottom: clamp(1.25rem, 4vw, 3rem);
+    line-height: 1.68;
 }
 
 html:has(body.game-page),
@@ -139,14 +144,14 @@ body.game-page #lander-game {
 header,
 main,
 footer {
-    width: min(100%, 60rem);
+    width: min(100%, 68rem);
     margin-inline: auto;
 }
 
 main {
     display: grid;
     gap: clamp(2.5rem, 7vw, 5rem);
-    padding-block: clamp(2.5rem, 8vw, 6rem);
+    padding-block: clamp(3rem, 8vw, 6.5rem);
 }
 
 .home-main {
@@ -172,6 +177,12 @@ a {
     overflow-wrap: anywhere;
 }
 
+.site-header a,
+.site-footer a,
+.page-toc a {
+    text-decoration: none;
+}
+
 a:hover {
     text-decoration-thickness: 0.14em;
 }
@@ -187,7 +198,8 @@ button:focus-visible,
     position: absolute;
     z-index: 10;
     padding: 0.65rem 0.85rem;
-    background: var(--canvas);
+    background: var(--shell-ink);
+    color: var(--shell);
     font-family: ui-monospace, "Cascadia Code", "Liberation Mono", Menlo, monospace;
     transform: translateY(-180%);
 }
@@ -201,8 +213,12 @@ button:focus-visible,
     align-items: center;
     justify-content: space-between;
     gap: 1rem 2rem;
-    padding-bottom: 1rem;
-    border-bottom: 1px solid var(--ink-muted);
+    min-height: 4rem;
+    padding-block: 0.75rem;
+    background: var(--shell);
+    color: var(--shell-ink);
+    box-shadow: 0 0 0 100vmax var(--shell);
+    clip-path: inset(0 -100vmax);
 }
 
 .header-identity,
@@ -214,25 +230,28 @@ button:focus-visible,
 }
 
 .header-identity {
-    gap: 0.7rem;
+    gap: 0.75rem;
 }
 
 .header-mark {
-    width: 1.2rem;
-    height: 1.8rem;
+    width: 1.45rem;
+    height: 2rem;
     flex: 0 0 auto;
+    padding: 0.2rem;
+    border-radius: 0.25rem;
+    background: var(--shell-ink);
     object-fit: contain;
 }
 
 .breadcrumbs {
     flex-wrap: wrap;
     gap: 0.35rem;
-    font-family: ui-monospace, "Cascadia Code", "Liberation Mono", Menlo, monospace;
-    font-weight: 700;
+    font-size: 0.92rem;
+    font-weight: 650;
 }
 
 .breadcrumb-separator {
-    color: var(--ink-muted);
+    color: var(--shell-muted);
 }
 
 nav {
@@ -249,14 +268,36 @@ nav {
     margin: 0;
     color: var(--ink-muted);
     font-family: ui-monospace, "Cascadia Code", "Liberation Mono", Menlo, monospace;
-    font-size: 0.78rem;
+    font-size: 0.76rem;
     font-weight: 700;
     letter-spacing: 0.08em;
     text-transform: uppercase;
 }
 
+.site-header nav {
+    color: var(--shell-muted);
+    font-family: inherit;
+    font-size: 0.84rem;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+}
+
 .service-links {
     gap: 0.5rem 1rem;
+}
+
+.site-header a {
+    color: var(--shell-ink);
+}
+
+.site-header a:hover,
+.site-header a:focus-visible {
+    color: #fff;
+}
+
+.site-header [aria-current="page"] {
+    color: var(--shell-muted);
 }
 
 .service-links a {
@@ -284,25 +325,25 @@ h3 {
 h1 {
     max-width: 18ch;
     margin-top: 0.35rem;
-    font-size: clamp(2.7rem, 9vw, 6rem);
-    letter-spacing: -0.045em;
+    font-size: clamp(2.65rem, 7vw, 4.75rem);
+    letter-spacing: -0.052em;
 }
 
 h2 {
     max-width: 28ch;
     margin-bottom: 1.25rem;
-    font-size: clamp(1.45rem, 4vw, 2.25rem);
-    letter-spacing: -0.025em;
+    font-size: clamp(1.55rem, 4vw, 2.35rem);
+    letter-spacing: -0.035em;
 }
 
 h3 {
     margin-block: 2.5rem 1rem;
-    font-size: clamp(1.15rem, 3vw, 1.5rem);
+    font-size: clamp(1.15rem, 3vw, 1.4rem);
 }
 
 code {
     padding: 0.08em 0.25em;
-    background: var(--panel);
+    background: var(--panel-strong);
     font-family: ui-monospace, "Cascadia Code", "Liberation Mono", Menlo, monospace;
     font-size: 0.92em;
     overflow-wrap: anywhere;
@@ -310,36 +351,34 @@ code {
 
 .identity-panel,
 .status-panel {
-    padding: clamp(1rem, 3vw, 2rem);
-    border: 1px solid var(--ink-muted);
-    background: var(--panel);
+    padding: 0;
 }
 
 .identity-panel {
     display: grid;
-    gap: 2rem;
-    border-top: 4px solid var(--accent);
+    gap: clamp(2rem, 6vw, 5rem);
+    align-items: center;
 }
 
 .identity-panel h1 {
     max-width: 100%;
-    font-size: clamp(2.7rem, 6vw, 4.75rem);
+    font-size: clamp(3.25rem, 8vw, 5.75rem);
 }
 
 .hero-heading {
     display: grid;
     align-content: start;
-    gap: 1rem;
+    gap: 1.25rem;
 }
 
 .hero-mark {
-    width: clamp(3.2rem, 12vw, 4.8rem);
-    height: clamp(4.8rem, 18vw, 7.2rem);
+    width: clamp(3rem, 10vw, 4.25rem);
+    height: clamp(4.5rem, 15vw, 6.4rem);
     object-fit: contain;
 }
 
 .status-panel {
-    border-left: 4px solid var(--accent);
+    width: min(100%, 54rem);
 }
 
 .status-panel h2 {
@@ -349,25 +388,31 @@ code {
 .onboarding-tabs {
     display: flex;
     align-items: flex-end;
-    gap: 0.25rem;
-    margin-block: 1.5rem 0.75rem;
-    border-bottom: 1px solid var(--ink-muted);
+    gap: 1.75rem;
+    margin-block: 2rem 1.25rem;
+    border-bottom: 1px solid var(--line-subtle);
 }
 
 .onboarding-tabs button {
-    padding: 0.65rem 0.9rem;
-    border: 1px solid var(--ink-muted);
-    border-bottom: 0;
-    background: var(--panel);
-    color: var(--ink);
+    position: relative;
+    margin-bottom: -1px;
+    padding: 0.65rem 0.1rem 0.8rem;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--ink-muted);
     font: inherit;
     font-weight: 700;
     cursor: pointer;
 }
 
 .onboarding-tabs button[aria-selected="true"] {
-    background: var(--canvas);
-    box-shadow: inset 0 -4px 0 var(--accent);
+    border-bottom-color: var(--accent);
+    color: var(--ink);
+}
+
+.onboarding-tabs button:hover {
+    color: var(--ink);
 }
 
 .onboarding-panel {
@@ -390,6 +435,18 @@ code {
     margin-block: 1rem 0.75rem;
 }
 
+.onboarding-panel[role="tabpanel"] h3 {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
 .onboarding-prompt-shell {
     position: relative;
     margin-block: 1.25rem 0.75rem;
@@ -398,10 +455,11 @@ code {
 .onboarding-prompt {
     max-height: 28rem;
     margin: 0;
-    padding: 1rem 4rem 1rem 1rem;
+    padding: 1.25rem 4rem 1.25rem 1.25rem;
     overflow: auto;
-    border: 1px solid var(--ink-muted);
-    background: var(--canvas);
+    border: 0;
+    border-radius: 0.45rem;
+    background: var(--panel);
     white-space: pre-wrap;
 }
 
@@ -416,19 +474,21 @@ code {
     top: 0.7rem;
     right: 0.7rem;
     display: inline-flex;
-    width: 2.75rem;
-    height: 2.75rem;
+    width: 2.5rem;
+    height: 2.5rem;
     align-items: center;
     justify-content: center;
     padding: 0.65rem;
-    border: 1px solid var(--ink);
-    background: var(--panel);
-    color: var(--ink);
+    border: 0;
+    border-radius: 0.35rem;
+    background: transparent;
+    color: var(--ink-muted);
     cursor: pointer;
 }
 
 .copy-prompt-button:hover {
-    background: var(--hot);
+    background: var(--panel-strong);
+    color: var(--ink);
 }
 
 .copy-prompt-button svg {
@@ -445,10 +505,11 @@ code {
 
 .onboarding-commands {
     margin-block: 1rem;
-    padding: 1rem;
+    padding: 1.25rem;
     overflow: auto;
-    border: 1px solid var(--line-subtle);
-    background: var(--canvas);
+    border: 0;
+    border-radius: 0.45rem;
+    background: var(--panel);
     white-space: pre-wrap;
 }
 
@@ -488,10 +549,9 @@ code {
     align-items: baseline;
     justify-content: space-between;
     gap: 0.75rem 2rem;
-    padding-top: 1rem;
-    border-top: 1px solid var(--line-subtle);
+    padding-top: 1.5rem;
     color: var(--ink-muted);
-    font-family: ui-monospace, "Cascadia Code", "Liberation Mono", Menlo, monospace;
+    font-family: inherit;
     font-size: 0.82rem;
 }
 
@@ -502,6 +562,15 @@ code {
 .site-footer nav {
     align-items: center;
     gap: 0.5rem 1.25rem;
+}
+
+.site-footer a {
+    color: var(--ink-muted);
+}
+
+.site-footer a:hover,
+.site-footer a:focus-visible {
+    color: var(--ink);
 }
 
 .footer-game-link {
@@ -520,15 +589,25 @@ code {
 }
 
 .long-form-content {
-    width: min(100%, 72ch);
+    width: min(100%, 76ch);
 }
 
 .long-form-content h1 {
     margin-top: 0;
+    max-width: 16ch;
+    font-size: clamp(2.75rem, 6vw, 4rem);
 }
 
 .long-form-content h2 {
-    margin-top: 3rem;
+    margin-top: 3.75rem;
+}
+
+.long-form-content h3 {
+    margin-top: 2.75rem;
+}
+
+.long-form-body {
+    font-size: 1.03rem;
 }
 
 .long-form-content > :first-child {
@@ -536,11 +615,11 @@ code {
 }
 
 .page-toc {
-    margin-block: 1.5rem 2.5rem;
-    padding: 1rem;
-    border-left: 4px solid var(--accent);
-    background: var(--panel);
-    font-size: 0.92rem;
+    margin-block: 1.75rem 3rem;
+    padding: 0;
+    color: var(--ink-muted);
+    font-size: 0.86rem;
+    line-height: 1.45;
 }
 
 .page-toc-title {
@@ -556,7 +635,17 @@ code {
 .page-toc-list,
 .page-toc-sublist {
     margin-block: 0;
-    padding-left: 1.25rem;
+    padding-left: 0;
+    list-style: none;
+}
+
+.page-toc a {
+    color: var(--ink-muted);
+}
+
+.page-toc a:hover,
+.page-toc a:focus-visible {
+    color: var(--ink);
 }
 
 .page-toc li + li {
@@ -565,6 +654,7 @@ code {
 
 .page-toc-sublist {
     margin-top: 0.45rem;
+    padding-left: 0.9rem;
 }
 
 @media (min-width: 48rem) {
@@ -581,8 +671,8 @@ code {
 
     .long-form-layout {
         display: grid;
-        grid-template-columns: minmax(10rem, 13rem) minmax(0, 1fr);
-        column-gap: clamp(2rem, 4vw, 3.5rem);
+        grid-template-columns: minmax(11rem, 14rem) minmax(0, 1fr);
+        column-gap: clamp(3rem, 6vw, 5.5rem);
         align-items: start;
     }
 
@@ -595,6 +685,10 @@ code {
         grid-row: 1 / span 2;
         grid-column: 1;
         margin-block: 0;
+        position: sticky;
+        top: 2rem;
+        max-height: calc(100vh - 4rem);
+        overflow-y: auto;
     }
 
     .long-form-body {
@@ -605,8 +699,24 @@ code {
 
 @media (max-width: 35rem) {
     .site-header {
-        align-items: flex-start;
-        flex-direction: column;
+        align-items: center;
+        flex-direction: row;
+        gap: 0.75rem;
+    }
+
+    .site-header .service-links {
+        gap: 0.65rem;
+    }
+
+    .site-header .service-links span {
+        width: 0;
+        height: 0;
+        padding: 0;
+        margin: 0;
+        overflow: hidden;
+        font-size: 0;
+        white-space: nowrap;
+        border: 0;
     }
 
     .site-footer {
