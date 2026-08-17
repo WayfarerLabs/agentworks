@@ -1,12 +1,13 @@
 """The ``claude-code`` harness integration: run Claude Code as the session workload,
 resuming its transcript when one exists and launching fresh otherwise.
 
-Config vocabulary (all optional): ``permission_mode`` and ``model`` map to
-the ``--permission-mode`` / ``--model`` flags verbatim; ``remote_control``
-enables Claude Code Remote Control; ``vim_mode`` and ``terminal_bell`` become
-session-local settings; and ``extra_args`` is a list of raw argv tokens
-appended last (the operator escape hatch for any flag the harness integration
-does not model). See ``claude-code-lld.md``.
+Config vocabulary (all optional): ``permission_mode``, ``model``, and
+``reasoning_effort`` map to the ``--permission-mode`` / ``--model`` /
+``--effort`` flags verbatim; ``remote_control`` enables Claude Code Remote
+Control; ``vim_mode`` and ``terminal_bell`` become session-local settings; and
+``extra_args`` is a list of raw argv tokens appended last (the operator escape
+hatch for any flag the harness integration does not model). See
+``claude-code-lld.md``.
 
 Addressing uses a stored per-session Claude session id (a v4 uuid) kept in
 the harness integration's state namespace under ``session_id``: minted once on the first
@@ -46,7 +47,9 @@ class ClaudeCodeConfig(AgwModel):
     The ``--permission-mode`` and ``--model`` CHOICE sets are Claude's own
     and drift between releases, so the values are forwarded unvalidated:
     an invalid one surfaces as Claude's own startup error in the pane,
-    which is a better answer than a list of ours going stale.
+    which is a better answer than a list of ours going stale. ``--effort``
+    is the exception: Claude silently falls back on an unknown value, so the
+    integration validates its documented CLI vocabulary instead.
     """
 
     name: Literal["claude-code"]
@@ -57,6 +60,12 @@ class ClaudeCodeConfig(AgwModel):
 
     model: str | None = None
     """Forwarded as ``--model``."""
+
+    reasoning_effort: Literal["low", "medium", "high", "xhigh", "max", "ultracode"] | None = None
+    """Forwarded as ``--effort``. Claude may lower a valid level when the
+    selected model does not support it; ``ultracode`` starts at ``xhigh``
+    with Ultracode enabled. A child template's declared value replaces its
+    parent's."""
 
     remote_control: bool = False
     """When true, enable Claude Code Remote Control and use the Agentworks
@@ -232,6 +241,8 @@ class ClaudeCodeIntegration(HarnessIntegration):
             tokens += ["--permission-mode", self.config.permission_mode]
         if self.config.model is not None:
             tokens += ["--model", self.config.model]
+        if self.config.reasoning_effort is not None:
+            tokens += ["--effort", self.config.reasoning_effort]
         if self.config.remote_control:
             # The flag's value is optional. Supplying the display name keeps a
             # later positional in extra_args from becoming the Remote Control

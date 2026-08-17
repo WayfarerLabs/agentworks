@@ -100,6 +100,7 @@ def test_validation_accepts_the_optional_fields_and_empty_config() -> None:
         {
             "permission_mode": "acceptEdits",
             "model": "opus",
+            "reasoning_effort": "high",
             "remote_control": True,
             "vim_mode": True,
             "terminal_bell": True,
@@ -109,14 +110,25 @@ def test_validation_accepts_the_optional_fields_and_empty_config() -> None:
     _validate({})
 
 
+@pytest.mark.parametrize("value", ["low", "medium", "high", "xhigh", "max", "ultracode"])
+def test_validation_accepts_supported_reasoning_efforts(value: str) -> None:
+    _validate({"reasoning_effort": value})
+
+
 def test_validation_rejects_unknown_field() -> None:
     with pytest.raises(ConfigError, match="permision_mode: unknown field; expected one of:"):
         _validate({"permision_mode": "typo"})
 
 
-def test_validation_rejects_non_string_model() -> None:
-    with pytest.raises(ConfigError, match="model: must be a string"):
-        _validate({"model": 3})
+@pytest.mark.parametrize("field", ["model", "reasoning_effort"])
+def test_validation_rejects_non_string_flag_values(field: str) -> None:
+    with pytest.raises(ConfigError):
+        _validate({field: 3})
+
+
+def test_validation_rejects_unknown_reasoning_effort() -> None:
+    with pytest.raises(ConfigError):
+        _validate({"reasoning_effort": "definitely-invalid"})
 
 
 def test_validation_rejects_non_list_extra_args() -> None:
@@ -310,11 +322,14 @@ def test_base_hoist_is_a_no_op() -> None:
 # -- the managed flags and extra_args ----------------------------------------
 
 
-def test_permission_mode_and_model_map_to_their_flags() -> None:
+def test_permission_mode_model_and_reasoning_effort_map_to_their_flags() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
-    command = _harness_integration({"permission_mode": "acceptEdits", "model": "sonnet"}).start(_op_ctx(target))
+    command = _harness_integration(
+        {"permission_mode": "acceptEdits", "model": "sonnet", "reasoning_effort": "high"}
+    ).start(_op_ctx(target))
     assert "--permission-mode acceptEdits" in command
     assert "--model sonnet" in command
+    assert "--effort high" in command
 
 
 def _claude_argv(command: str) -> list[str]:
@@ -328,6 +343,7 @@ def _claude_argv(command: str) -> list[str]:
 def test_session_preferences_default_off() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
     argv = _claude_argv(_harness_integration().start(_op_ctx(target)))
+    assert "--effort" not in argv
     assert "--remote-control" not in argv
     assert "--settings" not in argv
 
@@ -369,13 +385,14 @@ def test_vim_mode_and_terminal_bell_share_session_local_settings(
 
 def test_extra_args_appended_verbatim_last_and_quoted() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
-    command = _harness_integration({"model": "opus", "vim_mode": True, "extra_args": ["--foo", "bar baz"]}).start(
-        _op_ctx(target)
-    )
+    command = _harness_integration(
+        {"model": "opus", "reasoning_effort": "high", "vim_mode": True, "extra_args": ["--foo", "bar baz"]}
+    ).start(_op_ctx(target))
     # One argv token stays one token: "bar baz" is quoted, not re-split.
     assert shlex.quote("bar baz") in command
     # Appended last: after the managed flag and settings override.
     assert command.index("--model") < command.index("--foo")
+    assert command.index("--effort") < command.index("--foo")
     assert command.index("--settings") < command.index("--foo")
 
 
