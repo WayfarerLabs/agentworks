@@ -89,7 +89,19 @@ deliberately narrow `cli-conventions.md`.
   plus two blacklists, ~150 substring asserts), `test_authored_coverage.py:25-47` and `:106-118`
   (verbatim pins; the manifesto pin traces to #470), scattered pins in `test_render_service.py`,
   `test_schema_adapter.py`, `test_assessment.py`, `test_json_action_contract.py`,
-  `test_operational_json_boundaries.py`.
+  `test_operational_json_boundaries.py`. (**Corrected 2026-08-16**, every claim re-derived at HEAD
+  by the sweep's decision inventory. Four of the six file references no longer describe anything.
+  `test_schema_adapter.py` and `guide/test_view.py` do not exist: PR `8043d438`, "remove
+  command-owned fact views", deleted both. That same commit retired **the #470 manifesto pin**,
+  replacing the verbatim block-text comparison in `test_authored_coverage.py` with a structural link
+  assertion, so that file carries no verbatim prose pin at HEAD and neither of its two cited ranges
+  describes one. `test_render_service.py` and `test_operational_json_boundaries.py` carry no
+  multi-word substring assertions at all. What survives is real but smaller than the entry says:
+  `test_migration_topic.py` is 432 lines, so the cited `:408-460` runs off the end of it, and its
+  required-phrase tuple at `:388-417` holds **30 entries, not 47**, against 65 substring assertions
+  in the whole file rather than ~150. `test_json_action_contract.py` has 8. The two excluded files,
+  `test_contract_catalog.py` and `test_assessment.py`, belong to the guide item and were not
+  re-counted here.)
 
 ## Secrets (#453)
 
@@ -267,6 +279,20 @@ deliberately narrow `cli-conventions.md`.
   `cli/tests/manifests/test_emit.py`'s 22 disk-backed load cycles are **withdrawn** as a finding:
   they are the loader half of a two-parser soundness pairing, not redundant ceremony. The original
   entry appears to have counted by token rather than by shape.
+
+  **Corrected again 2026-08-16**, each claim re-derived at HEAD by the sweep's decision inventory.
+  `cli/tests/capabilities/test_retired_shapes.py` **no longer exists**: PR `ab0a6303`, "remove
+  retired compatibility rewrites", deleted it together with the `retired_shapes.py` module it
+  tested. The three blacklists are therefore moot, and note what that costs us rather than just
+  noting the deletion: this entry claimed they were "redundant with its own structural tests", and
+  that claim can now never be tested, because the structural tests went with them. It is the one
+  assertion in this document that the sweep was unable to check by execution.
+  `test_capability_shape.py:21-32` is a fixture helper and a `parametrize` opening at HEAD, not
+  pins; every message assertion in that file is a `match=` site, so the finding resolves into the
+  sweep's group 1 rather than into rows of its own. `test_samples.py`'s generated-comment block sits
+  at `:142-152`, a little above the cited range, and is otherwise exactly as described.
+  `schema/test_errors.py` is confirmed: 26 assertions compare a rendered message against a quoted
+  string, so "20+ sentence pins" was right.
 
 ## Database and migrations (#472, #478, #503, #504, #469, #499)
 

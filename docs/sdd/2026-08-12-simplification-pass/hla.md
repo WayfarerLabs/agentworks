@@ -42,8 +42,8 @@ contract whose only consumer is a test.
 
 ### What a source-scanning guard protects, not how it inspects
 
-Source-scanning guards are a large family, estimated by the sweep's decision inventory at roughly
-1,955 lines; that inventory, not this doctrine, carries the file list. They do not sort as one shape
+Source-scanning guards are a large family; [sweep-inventory.md](sweep-inventory.md)'s group 6, not
+this doctrine, carries the file list and the per-guard decision. They do not sort as one shape
 (operator ruling 9), and the always-on `no-prose-policing-tests` rule draws the line that decides
 them: its target is "the spelling of our own source code". Inspecting source with `ast` is a
 technique, not a smell; what decides is what the assertion protects.
@@ -53,8 +53,21 @@ technique, not a smell; what decides is what the assertion protects.
   (`guide/test_power_import_boundary.py` is the standing example, forbidding the guide package from
   reaching `subprocess`, sockets, or secrets), and drift against a canonical source.
 - **Delete** a guard pinning how our code is written rather than what it may reach: identifier
-  spellings, call-graph shape, statement order. The `phase7` corpus was this family, and so is
-  `resources/test_graph_guard.py`.
+  spellings, call-graph shape, statement order. The `phase7` corpus was this family, and so are
+  three of the four banned patterns in `resources/test_graph_guard.py`: the `dependencies()`
+  re-walk, the lazy readiness recompute, and the `references` field. Each says which call shapes may
+  appear in which module.
+
+**Corrected 2026-08-16** (raised by the sweep's decision inventory, accepted by the effort lead): an
+earlier revision of that second bullet named the whole of `resources/test_graph_guard.py` as the
+example, and it was wrong on its own criterion. The file's fourth banned pattern, a capability
+registry probed outside the builder and publishers, governs **what a module may reach** rather than
+how the reaching is spelled, which puts it in the keep bullet beside the import-boundary guard. It
+is also the one guard here with no observational twin available even in principle: a consumer that
+re-derives the graph correctly agrees with it until the two diverge, so no behavioral test can
+distinguish a second derivation from the first. That detector and its allow-list stay; the other
+three go. An example that contradicts its own doctrine teaches the error to everyone who reads it,
+which is why this is corrected in place rather than left to the inventory.
 
 "Statement order" there means order pinned **lexically**, by reading the source. Order often matters
 behaviorally, and asserting its consequence is not the same shape: PR #523 hoisted a policy check
@@ -70,7 +83,7 @@ Tailscale-ordering pin whose property observational tests already covered.
 
 ### `match=` splits three ways
 
-It appears at 696 sites, and the criteria above do not decide it on their own (operator ruling 10).
+It appears at 663 sites, and the criteria above do not decide it on their own (operator ruling 10).
 Deleting it wholesale drops real branch coverage; preserving it by adding a production discriminator
 is exactly what R2.2 forbids. So:
 
@@ -87,6 +100,31 @@ No case licenses matching wording we author. `no-prose-policing-tests` permits p
 where the prose arrives from outside the repository, so a `match=` against a provider's or an
 upstream tool's error text is the one surviving form; every message this repository writes is
 authored prose, error messages included.
+
+**Corrected 2026-08-16** (sweep inventory, verified at HEAD). Two numbers here were wrong. The count
+was 696 and is 663, the wave 1 landings having taken the rest; a textual grep answers 664, one of
+which is a docstring mentioning `match=` rather than a site. And this taxonomy is keyed on a pytest
+spelling the website suite does not use: `website/tests` is `unittest` and carries **51
+`assertRaisesRegex` sites**, which are the same three cases and which a `match=`-keyed scan misses
+entirely. Read every rule above as governing both spellings.
+
+Case 2's "where the code already offers a handle" turned out to be the common case rather than the
+rare one, which is worth stating because it sized a whole batch. Two handles already exist in
+production and neither needs a change: `AgentworksError` carries `entity_kind` and `entity_name`
+(populated at 286 raise sites, already asserted on at 75 test sites), and `schema.errors._problems`
+exposes `path`, `unknown_field` and `alternatives` and is already imported by
+`cli/tests/schema/test_errors.py`. Check for a handle before falling through to the delete arm, and
+check that it DISCRIMINATES: the platform-config family carries `entity_kind` identically on all
+sixteen sites, so the handle is present and useless there.
+
+### The rubric for a borderline assertion
+
+**Keep where the assertion is the only probe for a behavior that has demonstrably regressed or
+plausibly can. Delete where the assertion's only failure mode is a rewording.** Principle 3's reason
+for deleting a restatement, that a test which can only fail when someone edits the thing it restates
+is cost rather than coverage, does not reach an assertion that also fails when a real behavior
+breaks. (Operator ruling, 2026-08-16; this is what R2.4's "case by case, mostly by deletion" means,
+not a loosening of it.)
 
 ## Guidance delivery
 
