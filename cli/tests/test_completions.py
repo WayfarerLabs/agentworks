@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -242,6 +243,7 @@ printf '%s\\n' "${{COMPREPLY[@]}}"
         assert complete(["agw", "guide", mode, "list", ""]) == []
         assert complete(["agw", "guide", mode, expected_topics[0], ""]) == expected_topics
 
+    @pytest.mark.skipif(shutil.which("zsh") is None, reason="zsh is not installed")
     @pytest.mark.parametrize("mode", ["--agent", "--human"])
     def test_generated_zsh_guide_completion_is_terminal_after_list_with_mode(self, mode: str) -> None:
         generated = generate("zsh")
