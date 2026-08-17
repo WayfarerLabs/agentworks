@@ -170,6 +170,62 @@ class TestDynamicCompletionsMapping:
         assert "agw guide list" in POWERSHELL_SNIPPETS["guide_topics"]
         assert "agw guide list" in DYNAMIC_FUNCTIONS["guide_topics"]
 
+    def test_guide_list_is_a_terminal_first_positional_in_the_generated_spec(self) -> None:
+        spec = build_spec(app)
+        topics = next(param for param in spec.subcommands["guide"].params if param.name == "topics")
+
+        assert topics.is_argument
+        assert topics.multiple
+        assert topics.dynamic_completer == "guide_topics"
+        assert topics.terminal_values == ["list"]
+        assert "list" in topics.help
+
+        generated = {shell: generate(shell) for shell in ("bash", "zsh", "powershell")}
+        bash = _generated_block(generated["bash"], "        guide)", "            ;;")
+        zsh_helper = _generated_block(
+            generated["zsh"],
+            "_agentworks_guide_topics_values() {",
+            "}",
+        )
+        powershell = _generated_braced_block(generated["powershell"], "        'guide' {")
+
+        assert "$cword -eq 2" in bash
+        assert "$cword -gt 2" in bash
+        assert '${words[2]} == "list"' in bash
+        assert 'compgen -W "list $(agw guide list' in bash
+
+        assert "CURRENT == 3" in zsh_helper
+        assert "CURRENT -gt 3" in zsh_helper
+        assert '${words[3]} == "list"' in zsh_helper
+        assert "_agentworks_guide_topics" in zsh_helper
+
+        assert "$tokenCount -eq 3" in powershell
+        assert "$tokenCount -gt 3" in powershell
+        assert "$tokens[2]" in powershell
+        assert "CompletionResult]::new('list'" in powershell
+        assert "agw guide list" in powershell
+
+    def test_generated_bash_guide_completion_is_terminal_after_list(self) -> None:
+        from agentworks.guide.service import list_guide_topics
+
+        expected_topics = list_guide_topics().markdown.splitlines()
+        script = generate("bash")
+
+        def complete(words: list[str]) -> list[str]:
+            shell_words = " ".join(f"'{word}'" for word in words)
+            invocation = f"""{script}
+COMP_WORDS=({shell_words})
+COMP_CWORD={len(words) - 1}
+_agentworks
+printf '%s\\n' "${{COMPREPLY[@]}}"
+"""
+            completed = subprocess.run(["bash"], input=invocation, capture_output=True, text=True, check=True)
+            return [candidate for candidate in completed.stdout.splitlines() if candidate]
+
+        assert complete(["agw", "guide", ""]) == ["list", *expected_topics]
+        assert complete(["agw", "guide", "list", ""]) == []
+        assert complete(["agw", "guide", expected_topics[0], ""]) == expected_topics
+
     def test_database_backed_snippets_share_hidden_probe_contract(self) -> None:
         from agentworks.completions.bash import DYNAMIC_SNIPPETS as BASH_SNIPPETS
         from agentworks.completions.powershell import DYNAMIC_SNIPPETS as POWERSHELL_SNIPPETS

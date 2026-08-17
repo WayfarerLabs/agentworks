@@ -157,6 +157,17 @@ def _emit_leaf_completions(lines: list[str], spec: CommandSpec, token_offset: in
         elif param.dynamic_completer and param.dynamic_completer in DYNAMIC_SNIPPETS:
             words = DYNAMIC_SNIPPETS[param.dynamic_completer]
         if words:
+            if param.terminal_values:
+                terminal_words = " ".join(param.terminal_values)
+                lines.append(f'{indent}if [[ $cword -eq {pos_token} && "$cur" != -* ]]; then')
+                lines.append(f'{indent}    COMPREPLY=($(compgen -W "{terminal_words} {words}" -- "$cur"))')
+                lines.append(f"{indent}    return")
+                lines.append(f"{indent}fi")
+                terminal_match = " || ".join(f'${{words[{pos_token}]}} == "{value}"' for value in param.terminal_values)
+                lines.append(f'{indent}if [[ $cword -gt {pos_token} && "$cur" != -* && ({terminal_match}) ]]; then')
+                lines.append(f"{indent}    COMPREPLY=()")
+                lines.append(f"{indent}    return")
+                lines.append(f"{indent}fi")
             lines.append(f'{indent}if [[ $cword {cmp_op} {pos_token} && "$cur" != -* ]]; then')
             if param.dynamic_completer == "files":
                 lines.append(f"{indent}    COMPREPLY=()")

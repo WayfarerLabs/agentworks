@@ -139,6 +139,7 @@ class ParamSpec:
     choices: list[str] | None = None
     suggestions: list[str] | None = None
     dynamic_completer: str | None = None
+    terminal_values: list[str] | None = None
 
 
 @dataclass
@@ -339,6 +340,13 @@ STATIC_COMPLETION_SUGGESTIONS: dict[tuple[str, str], tuple[str, ...]] = {
     ("graph.show", "depth"): ("1", "2", "3", "all"),
 }
 
+# Reserved values offered only at the first position of a variadic argument.
+# Once entered exactly, they complete the command and suppress later positional
+# candidates. The CLI remains one command; this only describes its argv shape.
+TERMINAL_POSITIONAL_VALUES: dict[tuple[str, str], tuple[str, ...]] = {
+    ("guide", "topics"): ("list",),
+}
+
 
 # -- Introspection ---------------------------------------------------------
 
@@ -411,11 +419,14 @@ def _build_param_spec(param: _ClickParameter, command_path: str) -> ParamSpec:
     lookup_path = ".".join(command_path.split(".")[1:]) if "." in command_path else command_path
     dynamic = DYNAMIC_COMPLETIONS.get((lookup_path, param.name or ""))
     suggestions = STATIC_COMPLETION_SUGGESTIONS.get((lookup_path, param.name or ""))
+    terminal_values = TERMINAL_POSITIONAL_VALUES.get((lookup_path, param.name or ""))
 
     # Click models variadic Arguments via `nargs=-1` (not `multiple`), and
     # `multiple=True` on Options. Normalize both into ParamSpec.multiple so
     # completion generators have a single "accepts more than one value" flag.
     accepts_multi = bool(param.multiple) or (is_argument and param.nargs == -1)
+    if terminal_values is not None and not (is_argument and accepts_multi):
+        raise ValueError(f"terminal positional values require a variadic argument: {lookup_path}.{param.name}")
 
     return ParamSpec(
         name=param.name or "",
@@ -428,6 +439,7 @@ def _build_param_spec(param: _ClickParameter, command_path: str) -> ParamSpec:
         choices=choices,
         suggestions=None if suggestions is None else list(suggestions),
         dynamic_completer=dynamic,
+        terminal_values=None if terminal_values is None else list(terminal_values),
     )
 
 
@@ -456,6 +468,7 @@ def _spec_to_dict(spec: CommandSpec) -> dict:  # type: ignore[type-arg]
                 "choices": p.choices,
                 "suggestions": p.suggestions,
                 "dynamic_completer": p.dynamic_completer,
+                "terminal_values": p.terminal_values,
             }
             for p in spec.params
         ],

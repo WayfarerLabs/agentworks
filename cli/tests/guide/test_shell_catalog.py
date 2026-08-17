@@ -63,6 +63,21 @@ def test_discovery_order_is_package_path_order(tmp_path: Path) -> None:
     assert discover_concept_shells(tmp_path).names() == ("concept-second", "concept-first")
 
 
+def test_index_order_overrides_package_path_and_duplicate_values_break_ties_by_slug(tmp_path: Path) -> None:
+    _shell(tmp_path, "a/guide-content/zulu.md", index_order="20")
+    _shell(tmp_path, "b/guide-content/bravo.md", index_order="10")
+    _shell(tmp_path, "c/guide-content/alpha.md", index_order="20")
+
+    catalog = discover_concept_shells(tmp_path)
+
+    assert catalog.names() == ("concept-zulu", "concept-bravo", "concept-alpha")
+    assert tuple(topic.slug for topic in catalog.indexed_topics()) == (
+        "concept-bravo",
+        "concept-alpha",
+        "concept-zulu",
+    )
+
+
 @pytest.mark.parametrize(("value", "expected"), [("0", 0), ("0000", 0), ("9999", 9999)])
 def test_optional_index_order_accepts_the_closed_bounded_decimal_form(
     tmp_path: Path, value: str, expected: int
@@ -89,6 +104,14 @@ def test_frontmatter_rejects_unknown_duplicate_misordered_or_unbounded_fields(tm
     path = tmp_path / "guide-content" / "bad.md"
     path.parent.mkdir(parents=True)
     path.write_text(f"---\n{frontmatter}\n---\n# Bad\n", encoding="utf-8")
+
+    with pytest.raises(GuideContentError):
+        discover_concept_shells(tmp_path)
+
+
+@pytest.mark.parametrize("control", ["\0", "\u2028", "\u2029"])
+def test_description_rejects_controls_and_unicode_line_separators(tmp_path: Path, control: str) -> None:
+    _shell(tmp_path, "guide-content/bad.md", description=f"Before{control}after")
 
     with pytest.raises(GuideContentError):
         discover_concept_shells(tmp_path)
@@ -158,6 +181,7 @@ def test_include_path_preserves_only_bounded_raw_segments() -> None:
     ],
 )
 def test_malformed_shells_fail_the_catalog(tmp_path: Path, relative: str, text: str) -> None:
+    _index(tmp_path)
     path = tmp_path / relative
     path.parent.mkdir(parents=True)
     path.write_text(text, encoding="utf-8")
@@ -251,12 +275,11 @@ def test_leading_tab_indentation_fails_closed(tmp_path: Path, body: str) -> None
         discover_concept_shells(tmp_path)
 
 
-def test_repository_catalog_selects_eight_featured_concepts_from_frontmatter() -> None:
+def test_repository_catalog_index_metadata_resolves_to_ordinary_concepts() -> None:
     catalog = discover_concept_shells()
     indexed = catalog.indexed_topics()
 
-    assert len(indexed) == 8
+    assert indexed
     assert all(topic.index_order is not None for topic in indexed)
-    names = set(catalog.names())
-    assert {"concept-apt", "concept-core-model", "concept-install-commands"} <= names
+    assert all(catalog.lookup(topic.slug) is topic for topic in indexed)
     assert catalog.index.source.package_path == CORE_INDEX_PATH

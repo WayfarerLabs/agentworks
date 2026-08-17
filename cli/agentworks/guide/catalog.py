@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import PurePosixPath
@@ -116,6 +117,8 @@ def _parse_shell(resource: Traversable, package_path: str) -> ConceptShell | Ind
     description = match.group("description").strip()
     if not description:
         raise GuideContentError(f"guide shell {package_path!r} has an empty description")
+    if any(unicodedata.category(character) in {"Cc", "Zl", "Zp"} for character in description):
+        raise GuideContentError(f"guide shell {package_path!r} has a description containing control characters")
     index_order_text = match.group("index_order")
     index_order = int(index_order_text) if index_order_text is not None else None
     body = match.group("body")

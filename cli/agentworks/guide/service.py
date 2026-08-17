@@ -26,6 +26,8 @@ class GuideResponse:
 
 
 def _normalize_requested(requested: tuple[str, ...]) -> tuple[str, ...]:
+    if "list" in requested:
+        raise ValidationError("the reserved guide argument 'list' must be used alone; run `agw guide list`")
     normalized: list[str] = []
     for slug in requested:
         if not is_concept_topic(slug) and topic_version(slug) is None:
@@ -50,7 +52,9 @@ def _render_index(catalog: GuideCatalog, mode: GuideMode, package_root: Traversa
     sections = [render_shell(catalog.index, mode, package_root=package_root).rstrip()]
     if rows:
         sections.append(rows)
-    sections.append(f"{omitted} other concepts are available. Run `agw guide list` to see every topic name.")
+    noun = "concept" if omitted == 1 else "concepts"
+    verb = "is" if omitted == 1 else "are"
+    sections.append(f"{omitted} other {noun} {verb} available. Run `agw guide list` to see every topic name.")
     return sanitize_terminal_output("\n\n".join(sections) + "\n")
 
 

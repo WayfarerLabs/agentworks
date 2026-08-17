@@ -965,7 +965,7 @@ provider state, network, transports, or subprocesses.
 
 `agw guide list` discovers installed shell filenames and packaged release-note topics without
 loading operator state. This stable one-name-per-line stream backs Bash, Zsh, and PowerShell topic
-completion.
+completion. `list` is reserved in this position and must be used without topic names.
 
 `concept-management` covers day-two operation without duplicating the command registry. It points to
 JSON v1 graph/list/detail surfaces and the installed Typer help for the stable `config`, `graph`,

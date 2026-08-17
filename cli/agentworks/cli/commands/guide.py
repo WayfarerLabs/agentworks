@@ -17,7 +17,7 @@ from agentworks.guide.service import list_guide_topics, render_guide
 def guide(
     topics: Annotated[
         list[str] | None,
-        typer.Argument(help="One or more exact guide topic names."),
+        typer.Argument(help="One or more exact topic names, or list by itself to emit every topic name."),
     ] = None,
     agent: bool | None = typer.Option(
         None,

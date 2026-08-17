@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -43,8 +44,9 @@ def test_no_topic_renders_index_shell_and_catalog_rows_without_release_history(
         "# Fixture index\n\nShared marker.\n\n<!-- agw:agent-only -->\nAgent marker.\n<!-- /agw:agent-only -->\n\n"
         '<!-- agw:include path="docs/source.md" heading="Imported fixture" heading-offset="1" -->\n',
     )
-    _shell(tmp_path, "zulu", index_order=1)
-    _shell(tmp_path, "alpha", index_order=1)
+    _shell(tmp_path, "alpha", index_order=20)
+    _shell(tmp_path, "zulu", index_order=10)
+    _shell(tmp_path, "beta", index_order=20)
     _shell(tmp_path, "omitted")
 
     def forbidden() -> ReleaseHistory:
@@ -54,13 +56,32 @@ def test_no_topic_renders_index_shell_and_catalog_rows_without_release_history(
 
     response = render_guide((), mode, package_root=tmp_path)
     lines = response.markdown.splitlines()
+    row_slugs = [line.split("`", 2)[1] for line in lines if line.startswith("- `concept-")]
 
-    assert lines.index("- `concept-alpha`: alpha fixture.") < lines.index("- `concept-zulu`: zulu fixture.")
-    assert lines[-1].startswith("1 ")
+    assert row_slugs == ["concept-zulu", "concept-alpha", "concept-beta"]
     assert "`agw guide list`" in lines[-1]
     assert "### Imported fixture" in response.markdown
     assert "Included marker." in response.markdown
     assert ("Agent marker." in response.markdown) is (mode is GuideMode.AGENT)
+
+
+@pytest.mark.parametrize(
+    ("omitted", "expected_noun", "expected_verb"),
+    [(0, "concepts", "are"), (1, "concept", "is"), (2, "concepts", "are")],
+)
+def test_index_footer_count_uses_matching_number_grammar(
+    tmp_path: Path, omitted: int, expected_noun: str, expected_verb: str
+) -> None:
+    _shell(tmp_path, "indexed", index_order=1)
+    for index in range(omitted):
+        _shell(tmp_path, f"omitted-{index}")
+
+    footer = render_guide((), GuideMode.HUMAN, package_root=tmp_path).markdown.splitlines()[-1]
+    grammar = re.match(r"^(\d+) other (concepts?) (is|are)\b", footer)
+
+    assert grammar is not None
+    assert grammar.groups() == (str(omitted), expected_noun, expected_verb)
+    assert "`agw guide list`" in footer
 
 
 def test_list_uses_static_shells_and_packaged_release_history(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -82,13 +103,18 @@ def test_list_uses_static_shells_and_packaged_release_history(tmp_path: Path, mo
 
 def test_list_is_an_exact_reserved_cli_positional_and_names_only_is_removed() -> None:
     listed = CliRunner().invoke(app, ["guide", "list"])
+    help_result = CliRunner().invoke(app, ["guide", "--help"])
     old_option = CliRunner().invoke(app, ["guide", "--names-only"])
     mixed = CliRunner().invoke(app, ["guide", "list", "concept-onboarding"])
 
     assert listed.exit_code == 0
     assert "concept-onboarding" in listed.stdout.splitlines()
+    assert help_result.exit_code == 0
+    assert "list" in help_result.stdout
     assert old_option.exit_code != 0
     assert mixed.exit_code != 0
+    assert mixed.exception is not None
+    assert "agw guide list" in str(mixed.exception)
 
 
 def test_selected_requests_resolve_atomically(tmp_path: Path) -> None:
