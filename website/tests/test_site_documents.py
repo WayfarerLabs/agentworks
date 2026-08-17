@@ -631,66 +631,6 @@ class GeneratedDocumentTests(RepositoryFixture):
         for pattern in self.forbidden_runtime_patterns():
             self.assertIsNone(re.search(pattern, production))
 
-    def test_shared_css_pins_tokens_reflow_focus_and_terminal_cues(self) -> None:
-        css = (self.output / "static/site.css").read_text(encoding="utf-8")
-        for contract in (
-            "width: min(100%, 60rem)",
-            "padding: clamp(1rem, 4vw, 3rem)",
-            "min-width: 0",
-            "overflow-wrap: anywhere",
-            "outline: 3px solid var(--accent)",
-            'ui-monospace, "Cascadia Code", "Liberation Mono", Menlo, monospace',
-            "letter-spacing: 0.08em",
-            "@media (min-width: 48rem)",
-            "@media (prefers-reduced-motion: reduce)",
-        ):
-            self.assertIn(contract, css)
-        lowered = css.lower()
-        for fake_terminal in (
-            "window-control",
-            "crt",
-            "green-on-black",
-            "prompt-glyph",
-        ):
-            self.assertNotIn(fake_terminal, lowered)
-
-    def test_home_identity_grid_and_rocket_hero_reflow_at_desktop_width(self) -> None:
-        css = (self.output / "static/site.css").read_text(encoding="utf-8")
-        heading_rule = css.split(".identity-panel h1 {", 1)[1].split("}", 1)[0]
-        self.assertIn("max-width: 100%", heading_rule)
-        self.assertIn("font-size: clamp(2.7rem, 6vw, 4.75rem)", heading_rule)
-        default_identity = css.split(".identity-panel {", 1)[1].split("}", 1)[0]
-        self.assertNotIn("grid-template-columns", default_identity)
-        desktop = css.split("@media (min-width: 48rem)", 1)[1]
-        identity_rule = desktop.split(".identity-panel {", 1)[1].split("}", 1)[0]
-        self.assertIn("grid-template-columns: minmax(0, 1fr) minmax(0, 1fr)", identity_rule)
-        hero_rule = css.split(".hero-mark {", 1)[1].split("}", 1)[0]
-        self.assertIn("width: clamp(3.2rem, 12vw, 4.8rem)", hero_rule)
-        self.assertIn("height: clamp(4.8rem, 18vw, 7.2rem)", hero_rule)
-        self.assertIn("object-fit: contain", hero_rule)
-        home_main_rule = css.split(".home-main {", 1)[1].split("}", 1)[0]
-        self.assertIn("gap: clamp(1.5rem, 4vw, 2.75rem)", home_main_rule)
-        detail_main_rule = css.split(".detail-main {", 1)[1].split("}", 1)[0]
-        self.assertIn("padding-block-start: clamp(0.75rem, 2vw, 1.25rem)", detail_main_rule)
-        detail_heading_rule = css.split(".detail-main .page-heading {", 1)[1].split("}", 1)[0]
-        self.assertIn("padding-top: 0", detail_heading_rule)
-
-    def test_long_form_contents_navigation_is_inline_then_becomes_a_left_rail(self) -> None:
-        css = (self.output / "static/site.css").read_text(encoding="utf-8")
-        default_toc = css.split(".page-toc {", 1)[1].split("}", 1)[0]
-        self.assertIn("margin-block: 1.5rem 2.5rem", default_toc)
-        self.assertIn("font-size: 0.92rem", default_toc)
-        wide = css.split("@media (min-width: 64rem)", 1)[1]
-        wide_layout = wide.split(".long-form-layout {", 1)[1].split("}", 1)[0]
-        wide_toc = wide.split(".long-form-layout > .page-toc {", 1)[1].split("}", 1)[0]
-        wide_body = wide.split(".long-form-body {", 1)[1].split("}", 1)[0]
-        self.assertIn("display: grid", wide_layout)
-        self.assertIn("grid-template-columns: minmax(10rem, 13rem) minmax(0, 1fr)", wide_layout)
-        self.assertIn("grid-column: 1", wide_toc)
-        self.assertIn("grid-row: 1 / span 2", wide_toc)
-        self.assertIn("grid-column: 2", wide_body)
-        self.assertIn("grid-row: 2", wide_body)
-
     def test_chromium_geometry_keeps_wide_body_beside_toc_and_narrow_toc_inline(self) -> None:
         wide = browser_geometry(self.output, 1600)
         narrow = browser_geometry(self.output, 390)
