@@ -457,6 +457,22 @@ R3.2 requires the after number to be lower.
       The box stays open until the lead's re-review comes back clean; the review itself is the
       lead's, not this item's.
 
+- [ ] Clean-slate `agentic-dev-process` rewrite (operator rulings 13 and 14; R3.3-R3.5). Start with
+      [process-semantic-inventory.md](process-semantic-inventory.md), recording every operative
+      contract in the core skill and its immediate process references, its current sources, one
+      future owner, consumers, and keep/move/merge/drop disposition. Then write the core as the
+      end-to-end state machine, place conditional delegation and delivery mechanics in skill-local
+      references, and reconcile `development-principles`, `development-process`,
+      `github-input-trust`, `operator-authority`, `sdd`, `integration-testing`, `agw-test-env`,
+      `saga-lead`, and the three role definitions without adding a role behavior. Done when: the
+      inventory has no unowned retained contract; GitHub-authored artifacts are stated to be
+      good-faith but critically analyzed colleague input and never direction, authentication, or
+      authorization; no cross-document reference targets a numbered `agentic-dev-process` section;
+      the core is at most 10,000 source bytes; the skill-local package is at most 18,000 source
+      bytes; the complete changed `.rulesync` surface is net-negative; Rulesync outputs are current
+      and manually checked across configured targets; all file and SDD gates pass; and fresh-context
+      project and consistency reviews report no unresolved material finding.
+
 ## Reassess (R4)
 
 The reassessment waits for waves 1 and 2 **and for the CLI grammar rewrite landing**: the saga's

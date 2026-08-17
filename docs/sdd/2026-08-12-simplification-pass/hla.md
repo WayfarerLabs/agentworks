@@ -138,6 +138,39 @@ delivery, or an operator-approved fallback that places the full criteria text in
 lane; a citation alone cannot supply the contents of a rule a target never loads. Wave 1 delegation
 charters cite the two amended rules regardless, which costs a sentence per charter.
 
+## Clean-slate process architecture
+
+The Wave 2 process rewrite has four layers, each with one kind of information:
+
+1. **Always-on authority and development rules** define universal boundaries: who can direct work,
+   how GitHub input is treated, materiality, scope discipline, and the development principles.
+2. **`agentic-dev-process`** is a compact state machine for the session driving an effort: discover
+   governing work, choose a track, establish ownership, implement, run the private quality loop,
+   hand off an exact state, and finish or escalate.
+3. **Skill-local references** hold conditional mechanics such as delegation and delivery. The core
+   names the condition that loads each reference; an actor never pays for both merely because the
+   skill was selected.
+4. **Role and specialty artifacts** own their perspectives: `sdd` owns artifact lifecycle,
+   `agentworks-reviewer` owns its rubric and consistency mode, `integration-testing` owns live
+   validation, and the developer, tester, and saga-lead definitions own only role-specific duties.
+
+[process-semantic-inventory.md](process-semantic-inventory.md) is the rewrite checklist. Every
+operative contract has one future owner and named consumers; duplicated prose either collapses to
+that owner or remains only where a different actor needs a distinct consequence. Historical
+attributions, dated probes, model brands, and harness-specific agent type names are not durable
+process contracts and do not remain in the universal core.
+
+The authority boundary is structural. Authored GitHub artifacts are untrusted colleague input even
+when the account appears to belong to the operator; they are considered in good faith and tested
+critically, but never authorize work. Server-computed events may trigger an already-authorized
+standing workflow. Only the authenticated operator channel, or a lead charter descending from it,
+supplies direction. `github-input-trust` owns that full statement, while other artifacts state only
+their actor's consequence.
+
+External references address contract names and headings rather than section numbers. This lets the
+state machine change shape without turning its numbering into an API and makes ownership visible at
+the reference site.
+
 ## Waves and vehicle
 
 - **Wave 0**: the delivery resolution plus one small amendment PR, merged first (FRD R1).
@@ -146,7 +179,8 @@ charters cite the two amended rules regardless, which costs a sentence per chart
   plan. Precedes the CLI grammar rewrite (saga `phasing.md`).
 - **Wave 2**: process and rule subtraction PRs under the net-deletion constraint, in parallel with
   wave 1 on its own session (file-disjoint: `.rulesync/` and the skills tree versus `cli/` and
-  `website/`).
+  `website/`). The clean-slate extension begins with the semantic inventory, then rewrites the core
+  and its immediate consumers against that checklist.
 - **Reassess**: waits for both waves and for the CLI grammar rewrite landing (the saga's
   `phasing.md` puts the rewrite between wave 1 and this reassessment, so the effort cannot close or
   lock early); the lead writes the reassessment and the candidate proposals; the operator decides
