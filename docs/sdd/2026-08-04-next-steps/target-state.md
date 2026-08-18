@@ -288,6 +288,27 @@ effort: typed per-secret outcomes, explicit failure categories, policy-aware int
 requirements, timeouts and cleanup, and bounded-lifetime source clients. The simple case must not
 get more verbose.
 
+**Interaction channels (operator ruling, 2026-08-18, from the onboarding-run field evidence):** the
+single "interactive" signal conflated two orthogonal things and is split. Consent (may resolution
+block on a human?) is policy: allowed by default, refused only under `--non-interactive`, and
+TTY-ness no longer feeds it. Ability (can this process conduct a terminal prompt?) is a per-source
+fact probed at the boundary. Backends declare an interaction channel on the secret-backend contract
+(`none`, `terminal`, `out-of-band`): terminal-channel sources without a usable terminal are skipped
+into fall-through rather than refusing the resolution; out-of-band sources need consent only,
+because the operator configuring an approval-prompting source is the consent, the source timeout
+bounds the wait, and `--non-interactive` is the explicit fast-fail. A generalized
+`--allow-interaction` flag was built, reviewed, and rejected before shipping: it let callers
+override the wrong proxy instead of removing it. `secret verify --allow-interaction` rides one
+release as a deprecated no-op. Shipped as PR #608.
+
+**Workload-gated config issues (operator ruling, 2026-08-18, same evidence):** config problems are
+classified by the fact, not by the commands that tolerate them. A workload-gated issue is one that
+only matters when something provisions or interacts with a workload (today's one member: operator
+SSH key files missing from disk, a filesystem fact rather than config shape); the loader records it,
+one `load_config` parameter says whether it is fatal (default) or warn-only, and the read-only and
+diagnostic commands pass warn-only. No severity taxonomy is built until a second class member
+exists. Shipped as PR #604; the use-time refactor that retires the parameter is issue #603.
+
 ### Harness scopes (destination 4)
 
 One registered integration identity with per-scope participation (operator simplification,
