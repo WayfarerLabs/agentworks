@@ -3,6 +3,11 @@ name: Release to PyPI
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to re-run for (e.g. v0.14.0)"
+        required: true
 
 permissions:
   contents: read
@@ -19,8 +24,10 @@ jobs:
       - name: Verify tag is reachable from main
         run: |
           git fetch origin main
-          if ! git merge-base --is-ancestor "${{ github.sha }}" origin/main; then
-            echo "Error: tag ${{ github.ref_name }} is not an ancestor of main"
+          TAG="${{ inputs.tag || github.ref_name }}"
+          SHA="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "Error: tag ${TAG} is not an ancestor of main"
             exit 1
           fi
 
@@ -32,6 +39,15 @@ jobs:
         working-directory: cli
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          # The package-fingerprint guard diffs against origin/main and fails
+          # closed when the ref is absent, so the tag checkout must carry it.
+          fetch-depth: 0
+
+      - name: Fetch the authoritative package base ref
+        run: git fetch origin main
+        working-directory: .
 
       - uses: astral-sh/setup-uv@v7
         with:
@@ -58,6 +74,8 @@ jobs:
         working-directory: cli
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - uses: astral-sh/setup-uv@v7
         with:
