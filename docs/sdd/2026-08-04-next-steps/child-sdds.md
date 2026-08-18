@@ -107,14 +107,14 @@ locked.
       dozen journey hints, the assistant topic ordinary among nine, and the bootstrap at 107 words
       of install-and-handoff. All lanes plus the tester's exact-wheel pass converged; the round
       restored the secrets don't-display teaching and told the truth of the startup-posture drop
-- [ ] Markdown concept shells (operator ruling 2026-08-17, recorded in `target-state.md`; design
+- [x] Markdown concept shells (operator ruling 2026-08-17, recorded in `target-state.md`; design
       checkpoint on draft PR #580): the typed guide model is replaced by auto-discovered Markdown
       shells with a closed two-addition list (agent fences and the bounded README-consuming import;
       the live projections were removed by same-day direction, leaving shells fully static); typed
       blocks, actions, consent/evidence replay, the onboarding assessment, and manual registration
       go. Saga checkpoint review posted with two review items (charter the outdated always-on rule
       updates per keep-collateral-in-sync; state the plugin-topic story). No 0.14 gate is minted for
-      this implementation absent direction. Shipped as PR #587 (merged 2026-08-16) with the
+      this implementation absent direction. Shipped as PR #587 (merged 2026-08-17) with the
       nested-container fix PR #591 (merged 2026-08-17; the remaining theoretical CommonMark edges
       closed by operator declaration on that PR)
 - [ ] Derived index and grammar-native guide (operator ruling 2026-08-17, recorded in
