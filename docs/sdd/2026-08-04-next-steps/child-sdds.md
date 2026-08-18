@@ -16,8 +16,8 @@ locked.
 - [x] Picked up by an effort lead (HLA, plan, residual inventory; PR #406)
 - [x] Implementation complete, pre-roadmap SDD closeouts done (PR #406, 2026-08-05: all five
       pre-roadmap SDDs locked, plan 46/46, docs promoted including ADR 0020)
-- [ ] Ships in 0.14.0 with phase 1 (cut held for the guide first slice per operator ruling,
-      2026-08-06; see `phasing.md` release mapping)
+- [x] Shipped in 0.14.0 (released 2026-08-18; the cut had been held for the guide first slice per
+      operator ruling, 2026-08-06)
 - [x] Locked (`locked.md` on `main` via PR #406)
 
 ### Wave 2 (adopted child): 2026-07-31-declarative-schema
@@ -187,7 +187,7 @@ locked.
 - [x] Implementation complete (PR #536, 2026-08-15): all sixteen rows moved byte-identical into the
       opt-in `apt` and `install-command` plugins, the AC4 composite gate pinned through the real
       recipe path, guide loading request-scoped per the fail-soft contract. **This lane is closed**
-- [ ] Ships in 0.14.0 (gates the cut per `phasing.md` release mapping)
+- [x] Shipped in 0.14.0 (released 2026-08-18)
 - [x] Locked (`locked.md` rode PR #536 and binds on `main`)
 
 ### Simplification pass (pre-0.14): 2026-08-12-simplification-pass
@@ -298,7 +298,7 @@ mechanism); tracked here because its outcome gates the 0.14.0 cut per `phasing.m
       structural union with null-companion canonicalization shared by validation, extraction, and
       fill, the EnvEntry construction shim removed by operator ruling, and the three-tier rule
       codified in `cli/agentworks/capabilities/README.md`
-- [ ] Ships in 0.14.0 (gates the cut per `phasing.md` release mapping)
+- [x] Shipped in 0.14.0 (released 2026-08-18)
 
 ### Dispatched task (not a child SDD): concise operator content
 

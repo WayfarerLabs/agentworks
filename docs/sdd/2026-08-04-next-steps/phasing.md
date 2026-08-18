@@ -164,10 +164,13 @@ off whenever bandwidth allows, on its own merits and its own schedule.
   satisfied (the CLI grammar rewrite merged and locked with PR #491; breaking-truth, installer,
   safer-migrations, and the README bootstrap closed earlier), and the simplification-pass gate is
   removed as recorded above. The grammar-native guide gate is satisfied (PR #593, merged
-  2026-08-18). What 0.14.0 still waits for: the issue #589 changelog repair executed as a manual
-  release-branch edit after the final pre-release merge (the saga lead holds the prepared entries),
-  and the operator's personal edit pass over guide content and website wording, which the operator
-  holds and needs no gate since the operator cuts the release.
+  2026-08-18). **0.14.0 shipped 2026-08-18**: release PR #402 merged with the issue #589 changelog
+  repair applied on the release branch (both breaking-migration entries complete on the GitHub
+  Release and the installed release-notes topic, tester-verified on the exact wheel), and the PyPI
+  publication landed via trusted publishing after PR #600 fixed the release workflow's missing base
+  ref (the first tag-time run's fingerprint guard failed closed in a shallow checkout; the
+  re-dispatch against tag `v0.14.0` published with the `release` environment's tag-only policy
+  temporarily bridged for the one run and verified restored). `agentworks-cli` 0.14.0 is live.
 
 - **Later:** remaining waves map to releases as they prove out; no need to pin numbers now.
 
