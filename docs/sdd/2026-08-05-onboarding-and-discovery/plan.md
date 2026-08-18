@@ -650,7 +650,7 @@ runtime state.
 
 ## Phase 4 correction: shell-backed guide index
 
-- [ ] Before implementation merges, have the saga lead record the operator's 2026-08-17 index and
+- [x] Before implementation merges, have the saga lead record the operator's 2026-08-17 index and
       guide-grammar rulings in the saga-owned target state, superseding its fixed trail-sign and
       direct-topic forms. This child records the dependency but does not edit the saga-owned
       artifact.

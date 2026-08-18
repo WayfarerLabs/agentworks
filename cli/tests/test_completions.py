@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import os
-import pty
 import re
-import select
 import shutil
 import sqlite3
 import subprocess
@@ -247,6 +245,9 @@ printf '%s\\n' "${{COMPREPLY[@]}}"
 
     @pytest.mark.skipif(shutil.which("zsh") is None, reason="Zsh is not installed")
     def test_generated_zsh_guide_completion_dispatches_through_global_mode(self, tmp_path: Path) -> None:
+        import pty
+        import select
+
         script = generate("zsh").replace('\n_agentworks "$@"\n', "\ncompdef _agentworks agw agentworks\n")
         script_path = tmp_path / "_agentworks"
         script_path.write_text(script, encoding="utf-8")
