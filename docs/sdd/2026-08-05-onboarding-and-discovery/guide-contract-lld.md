@@ -1,6 +1,6 @@
 # Guide Contract Low-Level Design
 
-- Status: Current Markdown-shell destination with shell-backed index
+- Status: Current Markdown-shell destination with shell-backed index and guide noun/verb grammar
 - Scope: concept discovery, bounded shell expansion, mode selection, and inert release evidence
 - FRD: `frd.md` R1 through R5
 - HLA: `hla.md`, Shell-backed index through Safety and failure behavior
@@ -14,7 +14,7 @@ concept shells.
 The guide has three content paths:
 
 1. A reserved no-topic index shell renders with catalog-derived topic rows and no operator state.
-2. Selected `concept-*` topics render auto-discovered Markdown shells.
+2. `agw guide show TOPIC` renders one auto-discovered Markdown shell or exact release topic.
 3. Exact historical release-note topics render bounded sections from the packaged changelog as inert
    generated evidence. They are not shells.
 
@@ -59,6 +59,10 @@ description. Python does not register those values per topic.
 `agw guide list` discovers names from shell filenames plus the separately generated exact
 release-note names. It loads no operator state. Shell structural defects, including duplicate slugs,
 fail the catalog request rather than producing a partial or ambiguous catalog.
+
+The no-topic index uses that same complete catalog. A defect in any discovered shell therefore
+prevents the index from rendering. This intentionally withdraws the former fixed trail sign's
+catalog-free exemption instead of maintaining a second fallback topic list.
 
 Exactly one reserved `_index.md` exists in the core guide-content directory. It follows the same
 description, H1, fence, include, and rendering rules, must omit `index-order`, and is excluded from
@@ -163,9 +167,10 @@ shell.
 
 ## Rendering and failure behavior
 
-For selected shells, rendering proceeds in this order:
+For `agw guide show TOPIC`, rendering proceeds in this order:
 
-1. resolve and structurally validate every requested shell atomically;
+1. discover and structurally validate the complete catalog, then resolve the one requested shell or
+   exact release topic;
 2. filter agent-only fences for the selected mode;
 3. resolve visible packaged includes;
 4. rewrite visible repository-relative destinations; and
@@ -197,9 +202,24 @@ are listable evidence, not omitted authored concepts. `agw guide list` emits all
 slugs plus exact packaged release-note topic names, one per line, for both operators and shell
 completion.
 
-`list` is one reserved exact positional form of the existing top-level `guide` command. This keeps
-`agw guide concept-onboarding` intact and avoids introducing a second group or topic router. The old
-guide-specific `--names-only` option is removed rather than retained as an alias.
+`guide` is one Typer command group with two real subcommands:
+
+- `agw guide list` emits the stable topic-name stream; and
+- `agw guide show TOPIC` accepts exactly one topic and renders it.
+
+Invoking `agw guide` without a subcommand renders the index through the group callback. The callback
+retains `--agent/--human` for the bootstrap's `agw guide --agent` form. That group-level option is
+valid only when no subcommand follows. `agw guide --agent show TOPIC`, `agw guide --human list`, and
+equivalent group-option/subcommand combinations fail with recovery guidance: move the mode option to
+`show`, or omit it for mode-independent `list`. `show` exposes its own `--agent/--human` option. The
+unreleased direct/variadic `agw guide TOPIC...` form and old guide-specific `--names-only` option
+are removed without aliases.
+
+Typer's ordinary command tree completes `list` and `show`. Only `show`'s single `TOPIC` argument
+uses the existing dynamic topic-name source, which calls `agw guide list`. Catalog discovery and
+validation are atomic for index, list, show, and completion; no path returns a partial catalog when
+an unrelated shell is malformed. There is no reserved positional value, terminal-value schema, or
+guide-specific positional parser in the completion generators.
 
 Mode selection retains this precedence:
 
@@ -248,7 +268,8 @@ Focused tests protect behavior and boundaries:
   source;
 - nonzero structural failures and proof that selected rendering does not load operator state;
 - reserved index discovery, deterministic index ordering, ordinary-only omitted counts, mode
-  precedence, `guide list`, completion, and packaged exact release evidence; and
+  precedence, real `guide list`/`guide show` subcommands, one-topic show completion, and packaged
+  exact release evidence; and
 - shell and exact README package-data presence in a direct wheel, source distribution, wheel rebuilt
   from that source distribution, and verified editable-source fallback.
 

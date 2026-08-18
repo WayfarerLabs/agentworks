@@ -1,6 +1,6 @@
 # HLA: Agentworks Assistance, Discovery, and Management
 
-- Status: Active, shell-backed index correction
+- Status: Active, shell-backed index and grammar correction
 - FRD: `docs/sdd/2026-08-05-onboarding-and-discovery/frd.md`
 - Guide LLD: `docs/sdd/2026-08-05-onboarding-and-discovery/guide-contract-lld.md`
 
@@ -23,7 +23,7 @@ canonical prompt
 shell-backed concept index
       |
       v
-selected concept shell
+`guide show` for one selected concept shell
       +-- inline Markdown
       +-- optional agent-only regions
       +-- optional packaged section imports
@@ -40,9 +40,18 @@ After rendering that shell, the index renderer appends every ordinary concept ca
 `index-order`, sorted by order and then slug. Equal values are valid. The generated footer reports
 the number of ordinary concepts not selected for the index and points to `agw guide list`.
 
-Exact generated release-note topics remain available through `agw guide list` and direct selection,
-but do not enter the omitted-concept count. The no-topic path loads the static package catalog but
-no configuration, registry, database, network, or managed resources.
+Exact generated release-note topics remain available through `agw guide list` and
+`agw guide show TOPIC`, but do not enter the omitted-concept count. Every catalog-backed path
+(index, list, show, and topic completion) validates the same complete static catalog atomically; an
+unrelated malformed shell therefore prevents each path instead of yielding partial guidance. None of
+these paths loads configuration, registry, database, network, or managed resources.
+
+The guide is a normal Typer command group. Its callback renders the index only when no subcommand is
+selected. `list` emits the stable name stream. `show` accepts exactly one topic and renders that
+shell or exact release section. The group-level mode option belongs only to the no-subcommand index;
+using it before `list` or `show` is rejected with recovery guidance, while `show` owns its local
+mode option. This keeps command completion structural: Typer owns the `list` and `show` verbs, while
+only `show`'s topic argument uses dynamic topic completion.
 
 ## Shell catalog
 
@@ -155,8 +164,8 @@ not grow guide behavior.
 Tests cover discovery, frontmatter shape, slug collisions, H1 structure, mode filtering, bounded
 unique-heading imports, inert imported directives, root-README package inclusion,
 repository-relative destination rewriting, reserved index-shell discovery, catalog-derived index
-ordering, `guide list`, and completion. Boundary tests prove rendering does not load configuration
-or operational state.
+ordering, `guide list`, single-topic `guide show`, and ordinary subcommand/argument completion.
+Boundary tests prove rendering does not load configuration or operational state.
 
 Tests do not assert authored wording, duplicate shell prose, or recreate removed schemas in test
 fixtures. Permanent CLI documentation describes the shell model. Sample configuration is unaffected.

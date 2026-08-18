@@ -1,6 +1,6 @@
 # FRD: Agentworks Assistance, Discovery, and Management
 
-- Status: Active, shell-backed index correction
+- Status: Active, shell-backed index and grammar correction
 - Start date: 2026-08-05
 - Saga: `docs/sdd/2026-08-04-next-steps`
 
@@ -14,6 +14,11 @@ unchanged.
 
 The operator's 2026-08-17 index ruling replaces the fixed trail sign and guide-specific
 `--names-only` option with a shell-backed, catalog-derived index and `agw guide list`.
+
+The operator's 2026-08-17 grammar ruling makes `list` and `show` real guide verbs. The default
+`agw guide` renders the index, `agw guide list` emits topic names, and `agw guide show TOPIC`
+renders exactly one topic. The unreleased direct and variadic `agw guide TOPIC...` form has no
+compatibility alias.
 
 ## Summary
 
@@ -54,6 +59,10 @@ The generated index reports how many ordinary concept shells were not selected a
 explicit count exception: they remain listable and directly addressable, but historical versions do
 not inflate the omitted-concept count.
 
+Catalog discovery is atomic. A structural defect in any ordinary shell prevents the no-topic index,
+topic-name list, topic completion, and `show` rendering from succeeding rather than preserving the
+former catalog-free trail-sign exemption or emitting a partial catalog.
+
 ### R2: Concept shells define the ordinary catalog
 
 Each ordinary concept is a package-owned Markdown file that is a direct child of a `guide-content`
@@ -63,9 +72,9 @@ may contain one bounded non-negative `index-order`; exactly one level-one headin
 fences supplies the display title.
 
 The guide discovers shells from the trusted roots deterministically. Adding a valid shell makes the
-topic addressable through `agw guide`, `agw guide list`, and shell completion without adding a
-Python topic registration record. Duplicate slugs or malformed shells are authored-content defects
-and fail clearly.
+topic addressable through `agw guide show TOPIC`, visible through `agw guide list`, and available to
+shell completion without adding a Python topic registration record. Duplicate slugs or malformed
+shells are authored-content defects and fail clearly.
 
 Shells and imported sections use ATX headings only; Setext headings are structural authored-content
 defects. This keeps the single-H1 and heading-offset rules literal.
@@ -118,11 +127,11 @@ names, or general template engine.
 
 ### R4: Selected guidance is static and deterministic
 
-Rendering a selected shell reads only trusted packaged Markdown, except that editable source
-execution may read the one canonical root README after verifying the fixed repository layout. It
-does not load configuration, registries, databases, resources, secrets, providers, transports,
-network state, or subprocesses. Concepts point to command-owned help and inspection surfaces when
-the operator needs current facts.
+`agw guide show TOPIC` reads only trusted packaged Markdown, except that editable source execution
+may read the one canonical root README after verifying the fixed repository layout. It does not load
+configuration, registries, databases, resources, secrets, providers, transports, network state, or
+subprocesses. Concepts point to command-owned help and inspection surfaces when the operator needs
+current facts.
 
 Malformed shells, invalid directives, or broken includes fail clearly because they are repository
 defects rather than operator state. Missing or malformed operator configuration cannot break static
@@ -168,10 +177,13 @@ configuration changes only if implementation introduces a real setting, which is
    resolves.
 2. A valid shell is discovered without a per-topic Python registration record; its filename,
    frontmatter description, and unfenced H1 produce its slug, summary, and title.
-3. `agw guide list` and shell completion expose discovered concepts and exact packaged release-note
-   topics without configuration or state loading. Duplicate or malformed shells fail
-   deterministically when their catalog is used. The index's omitted count includes only ordinary
-   concept shells not selected for the index, never generated historical release topics.
+3. `agw guide list` and `agw guide show TOPIC` are real subcommands. `show` accepts exactly one
+   dynamically completed topic; `list` exposes discovered concepts and exact packaged release-note
+   topics without configuration or state loading. A duplicate or malformed shell atomically prevents
+   index, list, show, and completion from returning a partial catalog. The index's omitted count
+   includes only ordinary concept shells not selected for the index, never generated historical
+   release topics. Group-level mode flags are valid only for the no-subcommand index; `show` owns
+   its mode option and mode-independent `list` owns none.
 4. Inline Markdown renders in both modes. Agent-only content renders only in agent mode, and a
    hidden fence cannot trigger an import. General assistant posture lives in
    `concept-assistant-agent`; ordinary information remains human-visible.
@@ -202,7 +214,7 @@ configuration changes only if implementation introduces a real setting, which is
 - Reintroducing runtime resource, schema, graph, or command-output topic families.
 - Loading operator state, executing guide suggestions, resolving secrets, probing providers,
   connecting to VMs, or mutating state while rendering.
-- Changing JSON v1 contracts or anticipating names from the parallel CLI grammar rewrite.
+- Changing JSON v1 contracts or any non-guide CLI grammar.
 
 ## Decisions
 
@@ -218,3 +230,6 @@ configuration changes only if implementation introduces a real setting, which is
 - **D7: The index is content plus catalog metadata.** One reserved Markdown shell owns its authored
   framing; optional `index-order` values select and order ordinary concepts without a Python tuple
   or another template directive.
+- **D8: Guide uses the ordinary noun/verb grammar.** `list` and `show` are real subcommands; `show`
+  accepts one topic, so completion uses the ordinary command tree rather than a guide-specific
+  positional parser.
