@@ -114,7 +114,16 @@ locked.
       blocks, actions, consent/evidence replay, the onboarding assessment, and manual registration
       go. Saga checkpoint review posted with two review items (charter the outdated always-on rule
       updates per keep-collateral-in-sync; state the plugin-topic story). No 0.14 gate is minted for
-      this implementation absent direction
+      this implementation absent direction. Shipped as PR #587 (merged 2026-08-16) with the
+      nested-container fix PR #591 (merged 2026-08-17; the remaining theoretical CommonMark edges
+      closed by operator declaration on that PR)
+- [ ] Derived index and grammar-native guide (operator ruling 2026-08-17, recorded in
+      `target-state.md`; **gates 0.14.0**; PR #593): the no-topic response derives from the shell
+      catalog through a reserved `_index.md`, and the final public grammar is `agw guide`,
+      `agw guide list`, and `agw guide show TOPIC` with no compatibility alias. Direction arrived in
+      the child session with the gate confirmed through the saga lead's channel; the child FRD, HLA,
+      and LLD record it at `1d31beab`, and the implementation iterates on the PR under the standard
+      lanes. Merging saga PR #594 discharged the recording prerequisite
 - [ ] Remaining phases (wave 2 adoption, closeout) per the effort's per-phase PR plan. The README
       bootstrap shipped with the assistance phase (PR #480), so the bootstraps gate is satisfied;
       the generated block pins version 0.14.0 or newer and resolves when the release ships
