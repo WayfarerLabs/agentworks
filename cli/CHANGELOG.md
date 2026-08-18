@@ -5,8 +5,12 @@
 
 ### ⚠ BREAKING CHANGES
 
+Before upgrading from 0.13, run `agw resource migrate --all` on 0.13 to perform the backed-up,
+registry-verified conversion of legacy TOML resources; 0.14 removes that command, so the
+automated migration path exists only before the upgrade.
+
 * **config:** Before, legacy resource sections could trigger a tailored TOML migration error and some resource commands bypassed that refusal; legacy sibling capability fields and presence-selected platform fields also received bespoke rewrites. After, these inputs reach ordinary closed-world validation, and every config-dependent command requires a valid settings-only config.toml. Before upgrading, move each TOML resource into a YAML manifest, then remove all retired resource sections in one cutover. Fold provider, platform, backend, and harness configuration into their tagged tables; replace Azure service_principal with auth.mode service-principal, AWS credentials with auth.mode access-key, and Lima vm_host with placement.mode ssh. Use ambient or local modes for retired explicit-null selectors.
-* **git-credential:** Git credential token acquisition keeps the version 2 secret arm, but v0.13 YAML manifests that wrote an outer token: null no longer load.
+* **git-credential:** Git credential token acquisition keeps the version 2 secret arm, but v0.13 YAML manifests that wrote an outer `token: null` no longer load. Either omit `token` to keep the default secret name, or write `token: {mode: secret}`.
 * **config:** `[secret_config].backends` is renamed to `sources`; the ordered precedence list always held source names. Rename the key in `config.toml`. Before: `[secret_config]` with `backends = ["env-var", "prompt"]`. After: `[secret_config]` with `sources = ["env-var", "prompt"]`.
 * **env:** Env entries no longer accept the retired mappings that include the unused source as null. Remove the null companion field in each manifest. Before: `EDITOR: {value: vim, secret: null}`. After: `EDITOR: {value: vim}`. Before: `GITHUB_TOKEN: {value: null, secret: github-token}`. After: `GITHUB_TOKEN: {secret: github-token}`.
 
