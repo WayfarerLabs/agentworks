@@ -1,6 +1,6 @@
 # Resource Show: Implementation Plan
 
-- Status: Reopened for machine-output safety correction
+- Status: Complete
 - Date: 2026-08-18
 - Requirements: `frd.md`
 - Architecture: `hla.md`
@@ -206,15 +206,23 @@ guide-content edits to the guide effort that will follow after `resource show` l
       manifest regression for the reported surrogate, format-control, and separator path.
 - [x] Update permanent machine-output collateral and this in-flight SDD without editing the separate
       installed guide-content surface or saga-owned artifacts.
-- [ ] Run focused/full tests, Ruff, format, strict mypy, repository guards, equal-tier review, and
+- [x] Run focused/full tests, Ruff, format, strict mypy, repository guards, equal-tier review, and
       isolated-HOME real-CLI acceptance against the exact rebased head.
-- [ ] Restore the final lock, publish the complete handoff and review disposition, and set the PR
+- [x] Restore the final lock, publish the complete handoff and review disposition, and set the PR
       ready again only after every corrective check is green.
 
 Definition of done: every JSON v1 command has one atomic terminal-safe UTF-8 encoding boundary,
 `resource show` succeeds on the tester's exact hostile-manifest class with semantically identical
 parsed data, ordinary Unicode remains UTF-8, the installed guide-content diff is empty, and the
 exact final head is reviewed and green.
+
+Final Phase 7 implementation checkpoint `ade93750` is based directly on `origin/main` at `0830cc27`.
+The full non-integration suite passed 7,254 tests with one platform skip; Ruff, format, strict mypy,
+repository file lint, locked-SDD validation, Rulesync drift, forge CI, CodeQL, and diff guards
+passed. Equal-tier review exhaustively round-tripped all 2,285 code points in the unsafe categories
+with no finding. Fresh isolated-HOME acceptance reproduced the reported manifest path through the
+real CLI, emitted one 1,519-byte safe envelope with exact parsed values and ordinary Unicode intact,
+and left no residue. The feature diff under the installed guide-content tree is empty.
 
 ## Coordination and escalation
 
