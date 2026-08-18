@@ -184,7 +184,12 @@ def resource_show(
 
     identity = parse_resource_identity(ref)
     warn = output_format is OutputFormat.HUMAN
-    config = load_config(warn_issues=warn)
+    # Same rationale as `resource list`/`resource kinds`: showing one
+    # resource's facts and readiness needs no operator identity (the
+    # per-resource diagnostics `show_resource` gathers never read
+    # config.operator; see doctor.checks_for_resource), so a placeholder
+    # or missing SSH key doesn't block it.
+    config = load_config(warn_issues=warn, require_ssh_keys=False)
     registry = load_request_registry(config, warn=warn)
     shown = show_resource(config, registry, identity, DatabaseLiveSource(db.DB_PATH))
 

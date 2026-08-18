@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import unicodedata
 from pathlib import Path
+from textwrap import dedent
 from typing import TYPE_CHECKING
 
 import pytest
@@ -28,7 +29,7 @@ from agentworks.resources.inspect import ResourceSummary
 from agentworks.resources.kind import InstanceRef
 from agentworks.resources.reference import RefRelationship
 from agentworks.resources.show import FocusedRelationships, ResourceShow, render_resource_show
-from tests.conftest import CapturedOutput, ManifestDoc, write_cfg
+from tests.conftest import CapturedOutput, ManifestDoc, write_cfg, write_manifests
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -173,7 +174,7 @@ def test_cli_wires_warning_loaders_and_human_renderer(monkeypatch: pytest.Monkey
 
     assert result.exit_code == 0, result.output
     assert [call for call in calls if call[0] != "show"] == [
-        ("config", {"warn_issues": True}),
+        ("config", {"warn_issues": True, "require_ssh_keys": False}),
         ("registry", {"warn": True}),
         ("render", expected),
     ]
@@ -233,7 +234,10 @@ def test_cli_json_uses_resource_show_identity_and_closed_shape(monkeypatch: pyte
         "is_available": True,
         "reason": "backend unavailable",
     }
-    assert calls == [("config", {"warn_issues": False}), ("registry", {"warn": False})]
+    assert calls == [
+        ("config", {"warn_issues": False, "require_ssh_keys": False}),
+        ("registry", {"warn": False}),
+    ]
 
 
 def test_cli_json_safely_encodes_hostile_manifest_text(
@@ -303,6 +307,44 @@ def test_cli_lookup_failure_writes_no_partial_output(monkeypatch: pytest.MonkeyP
     assert result.exit_code != 0
     assert result.stdout_bytes == b""
     assert result.exception is error
+
+
+def test_missing_ssh_keys_do_not_block_resource_show(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A config whose only defect is a nonexistent operator SSH key path
+    (the sample config's placeholder, before ``agw config init`` writes a
+    real one) must not stop `resource show` from rendering one resource's
+    facts and readiness: it needs no operator identity (the per-resource
+    diagnostics `show_resource` gathers route through
+    ``doctor.checks_for_resource``, which never reads ``config.operator``).
+    """
+    from agentworks import config
+
+    write_manifests(tmp_path, ManifestDoc("secret", "npm-token", description="npm registry token"))
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{(tmp_path / "id.pub").as_posix()}"
+        ssh_private_key = "{(tmp_path / "id").as_posix()}"
+
+        [secret_config]
+        sources = ["env-var"]
+        """)
+    )
+    assert not (tmp_path / "id.pub").exists()
+    assert not (tmp_path / "id").exists()
+    monkeypatch.setattr(config, "CONFIG_PATH", config_path)
+
+    result = CliRunner().invoke(app, ["resource", "show", "secret/npm-token"])
+
+    assert result.exit_code == 0, result.output
+    assert "npm-token" in result.output
+    # Readiness actually got computed and rendered, not skipped or blank.
+    assert "is_ready:" in result.output
+    assert "is_available:" in result.output
 
 
 def test_help_and_completion_spec_expose_one_ref_and_closed_output() -> None:
