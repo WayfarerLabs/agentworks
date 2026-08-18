@@ -11,7 +11,7 @@ from typer.testing import CliRunner
 
 from agentworks.cli._app import app
 from agentworks.guide.agent_mode import GuideMode, select_guide_mode
-from agentworks.guide.catalog import CORE_INDEX_PATH
+from agentworks.guide.catalog import CORE_INDEX_PATH, discover_concept_shells
 from agentworks.guide.contract import GuideContentError, UnknownGuideTopicError
 from agentworks.guide.service import list_guide_topics, render_guide
 from agentworks.release_notes import ReleaseHistory, ReleaseSection
@@ -92,6 +92,21 @@ def test_list_uses_static_shells_and_packaged_release_history(tmp_path: Path, mo
         "concept-beta",
         "concept-release-notes/v1-2-3",
     ]
+
+
+def test_packaged_foundational_topics_are_adjacent_and_render_through_the_shell_service() -> None:
+    slugs = (
+        "concept-core-model",
+        "concept-prerequisites",
+        "concept-virtual-machines",
+        "concept-tailscale",
+    )
+    catalog = discover_concept_shells()
+    indexed = tuple(topic.slug for topic in catalog.indexed_topics())
+    start = indexed.index(slugs[0])
+
+    assert indexed[start : start + len(slugs)] == slugs
+    assert all(render_guide(slug, GuideMode.HUMAN).markdown for slug in slugs)
 
 
 def test_cli_exposes_only_default_list_and_single_topic_show() -> None:

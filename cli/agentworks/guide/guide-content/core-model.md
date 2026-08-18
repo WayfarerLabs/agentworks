@@ -1,5 +1,6 @@
 ---
 description: Explain the core Agentworks domain model and how its pieces fit together.
+index-order: 15
 ---
 
 # Agentworks core model

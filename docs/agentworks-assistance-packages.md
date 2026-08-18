@@ -67,10 +67,18 @@ them to canonical repository URLs. The guide does not execute operations, load c
 inspect the registry or database, resolve secrets, or access the network. Invalid topic syntax,
 unknown topics, and structurally invalid requested content remain errors.
 
+Discovery validates the complete installed shell catalog for every index, list, show, and completion
+request. An unrelated malformed shell or duplicate global topic prevents every one of those paths
+from returning partial results.
+
 `agw guide list` prints one valid topic name per line. It discovers packaged filenames and release
 history without loading operator state. `agw guide show TOPIC` renders exactly one of those names
 and owns the optional `--agent/--human` mode override. Raw kind, resource, relationship, schema, and
 sample discovery belongs to the corresponding command completion and inspection surfaces.
+
+The static `concept-prerequisites`, `concept-virtual-machines`, and `concept-tailscale` topics point
+to command-owned workstation, registry-readiness, managed-VM, secret, and rekey facts. Rendering
+them performs none of those inspections or operations.
 
 ## Maintaining generated packages
 

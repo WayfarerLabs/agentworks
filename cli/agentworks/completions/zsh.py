@@ -178,9 +178,12 @@ def _collect_completers(spec: CommandSpec) -> set[str]:
 
 def _emit_group(lines: list[str], spec: CommandSpec, func_name: str) -> None:
     """Emit a zsh function for a command group."""
+    group_args = _build_arguments(spec.params)
     lines.append(f"{func_name}() {{")
     lines.append("    local -a subcommands")
     lines.append("    _arguments -C \\")
+    for arg in group_args:
+        lines.append(f"        {arg} \\")
     lines.append("        '--help[Show help]' \\")
     lines.append("        '1:command:->command' \\")
     lines.append("        '*::arg:->args'")

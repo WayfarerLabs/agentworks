@@ -77,7 +77,9 @@ exact-section includes are the only directives. Their comment lines must stand a
 between top-level Markdown blocks; comments inside lists, block quotes, or code remain content.
 Shells do not call Python or inspect configuration, resources, secrets, provider state, or the
 workstation. Signpost command-owned facts instead of copying them into teaching. The guide contract
-and structural tests own the exact grammar and package-data boundary.
+and structural tests own the exact grammar and package-data boundary. Discovery validates every
+installed first-party shell atomically: a malformed shell or duplicate global filename prevents the
+index, list, show, and topic-completion paths from returning a partial catalog.
 
 ## Shipping a plugin
 

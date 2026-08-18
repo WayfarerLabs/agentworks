@@ -26,6 +26,9 @@ def test_wheel_and_source_distribution_vendor_the_same_canonical_readme(tmp_path
         packaged = set(archive.namelist())
         assert archive.read("agentworks/_guide_sources/README.md") == expected_readme
         assert "agentworks/guide/guide-content/core-model.md" in packaged
+        assert "agentworks/guide/guide-content/prerequisites.md" in packaged
+        assert "agentworks/guide/guide-content/virtual-machines.md" in packaged
+        assert "agentworks/guide/guide-content/tailscale.md" in packaged
         assert "agentworks/guide/guide-content/_index.md" in packaged
         assert "agentworks/plugins/apt/guide-content/apt.md" in packaged
         assert "agentworks/plugins/install_command/guide-content/install-commands.md" in packaged

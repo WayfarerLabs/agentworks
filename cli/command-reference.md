@@ -897,6 +897,10 @@ frontmatter, ordered by that value and slug. Human and agent modes share the sam
 ordinary agent-only fencing may vary the index framing. The static index path discovers the packaged
 catalog but does not load configuration, registry, state, or release history.
 
+Catalog validation is atomic across the index, `list`, `show`, and shell-completion paths. Every
+request validates every installed shell before returning output, so an unrelated malformed shell or
+duplicate global topic blocks the request rather than exposing part of the catalog.
+
 Concepts are auto-discovered from Markdown files directly under first-party package-local
 `guide-content/` directories. Restricted frontmatter supplies the required description and optional
 bounded `index-order`; the filename supplies the global `concept-*` identity. The required core
@@ -964,6 +968,11 @@ points to `agw resource kinds`, `agw resource list`, operational list commands, 
 current facts. Rendering never loads configuration, the registry, database, resources, secrets,
 provider state, network, transports, or subprocesses.
 
+`concept-prerequisites`, `concept-virtual-machines`, and `concept-tailscale` separate the static
+workstation/network prerequisites, the VM platform-versus-site model, and Agentworks' routine
+SSH-over-tailnet and rekey posture. They point to `resource`, `doctor`, `vm`, and `secret` commands
+for live facts; rendering the concepts does not inspect those systems.
+
 `agw guide list` discovers installed shell filenames and packaged release-note topics without
 loading operator state. This stable one-name-per-line stream backs Bash, Zsh, and PowerShell topic
 completion for the single topic accepted by `agw guide show`.
@@ -990,6 +999,9 @@ During the unreleased 0.14 transition, `agw graph show`, `agw resource kinds`, `
 | `agw guide show TOPIC`                                    | Render one exact topic                        |
 | `agw guide show TOPIC --agent/--human`                    | Override the selected topic's presentation    |
 | `agw guide show concept-assistant-agent`                  | Render the external-assistant posture         |
+| `agw guide show concept-prerequisites`                    | Render workstation and access prerequisites   |
+| `agw guide show concept-virtual-machines`                 | Explain VM platforms, sites, and inspection   |
+| `agw guide show concept-tailscale`                        | Explain Tailscale use and VM rekeying         |
 | `agw guide show concept-release-notes`                    | Render the release-history guidance shell     |
 | `agw guide show concept-release-notes/vMAJOR-MINOR-PATCH` | Render one exact packaged historical section  |
 | `agw guide show concept-source-review`                    | Render optional source-review guidance        |
@@ -1005,6 +1017,9 @@ points:
 | Work through an external helper | `concept-assistant-agent`                            | Installed CLI and command help                                                                                               |
 | Adopt a capability              | `concept-management`                                 | `agw resource list --include-disabled` and the owning configuration surface                                                  |
 | Assess current adoption         | `concept-onboarding`                                 | JSON v1 command inspection                                                                                                   |
+| Prepare the workstation         | `concept-prerequisites`                              | Installed CLI, SSH identity, provider access, and doctor                                                                     |
+| Choose a VM site                | `concept-virtual-machines`                           | Separate `vm-platform` and `vm-site` registry inventories                                                                    |
+| Manage tailnet access           | `concept-tailscale`                                  | Secret prediction, VM rekey, and operator-owned Tailscale sharing                                                            |
 | Review changes across versions  | `concept-release-notes`, then packaged version topic | Offline packaged changelog; bounded canonical fallback only for missing local history                                        |
 | Inspect canonical source        | `concept-source-review`                              | Exact version from `agw version`; focused or full inert review action                                                        |
 | Resolve upgrade deprecations    | `concept-management`                                 | Follow the emitted migration instruction before unrelated changes                                                            |

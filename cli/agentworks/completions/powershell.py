@@ -130,7 +130,7 @@ def _emit_dispatch(lines: list[str], spec: CommandSpec) -> None:
     for name, sub in sorted(spec.subcommands.items()):
         lines.append(f"        '{name}' {{")
         if sub.subcommands:
-            _emit_group_completions(lines, sub, depth=2)
+            _emit_group_completions(lines, sub)
         else:
             _emit_leaf_completions(lines, sub)
         lines.append("        }")
@@ -138,7 +138,7 @@ def _emit_dispatch(lines: list[str], spec: CommandSpec) -> None:
     lines.append("    }")
 
 
-def _emit_group_completions(lines: list[str], spec: CommandSpec, depth: int) -> None:
+def _emit_group_completions(lines: list[str], spec: CommandSpec) -> None:
     """Emit completions for a command group (has subcommands)."""
     indent = "    " * 3
 
@@ -152,6 +152,21 @@ def _emit_group_completions(lines: list[str], spec: CommandSpec, depth: int) -> 
             f"{indent}        [System.Management.Automation.CompletionResult]::new('{name}', '{name}',"
             f" 'Command', '{escaped}')"
         )
+
+    for param in spec.params:
+        if param.is_argument:
+            continue
+        escaped = param.help.replace("'", "''")
+        for opt in param.opts or [f"--{param.name}"]:
+            lines.append(
+                f"{indent}        [System.Management.Automation.CompletionResult]::new('{opt}', '{opt}',"
+                f" 'ParameterName', '{escaped}')"
+            )
+
+    lines.append(
+        f"{indent}        [System.Management.Automation.CompletionResult]::new('--help', '--help',"
+        " 'ParameterName', 'Show help')"
+    )
 
     _close_result_array_with_filter(lines, f"{indent}    ")
     lines.append(f"{indent}    return")
@@ -179,6 +194,7 @@ def _emit_param_completions(lines: list[str], spec: CommandSpec, token_offset: i
     # Check if the previous token is an option expecting a value
     options_with_values = [p for p in spec.params if not p.is_argument and not p.is_flag]
     positional_args = [p for p in spec.params if p.is_argument]
+    all_options = [p for p in spec.params if not p.is_argument]
 
     if options_with_values:
         lines.append(f"{indent}$prevToken = $tokens[$tokenCount - 2]")
@@ -209,16 +225,60 @@ def _emit_param_completions(lines: list[str], spec: CommandSpec, token_offset: i
         lines.append(f"{indent}}}")
         lines.append("")
 
+    # Count completed positional arguments independently of recognized options.
+    # This keeps dynamic completion attached to the argument even when a flag or
+    # value-taking option appears before it.
+    if positional_args:
+        flag_options = [opt for param in all_options if param.is_flag for opt in param.opts]
+        value_options = [opt for param in all_options if not param.is_flag for opt in param.opts]
+        flags = ", ".join(f"'{opt}'" for opt in flag_options)
+        value_option_literals = ", ".join(f"'{opt}'" for opt in value_options)
+        lines.append(
+            f"{indent}$completedTokenCount = if ($wordToComplete -eq '') "
+            "{ $tokens.Count } else { $tokens.Count - 1 }"
+        )
+        lines.append(f"{indent}$flagOptions = @({flags})")
+        lines.append(f"{indent}$valueOptions = @({value_option_literals})")
+        lines.append(f"{indent}$positionalCount = 0")
+        lines.append(f"{indent}$skipNext = $false")
+        lines.append(f"{indent}$positionalOnly = $false")
+        lines.append(f"{indent}for ($index = {token_offset}; $index -lt $completedTokenCount; $index++) {{")
+        lines.append(f"{indent}    $token = $tokens[$index]")
+        lines.append(f"{indent}    if ($skipNext) {{")
+        lines.append(f"{indent}        $skipNext = $false")
+        lines.append(f"{indent}        continue")
+        lines.append(f"{indent}    }}")
+        lines.append(f"{indent}    if ($positionalOnly) {{")
+        lines.append(f"{indent}        $positionalCount++")
+        lines.append(f"{indent}        continue")
+        lines.append(f"{indent}    }}")
+        lines.append(f"{indent}    if ($token -eq '--') {{")
+        lines.append(f"{indent}        $positionalOnly = $true")
+        lines.append(f"{indent}        continue")
+        lines.append(f"{indent}    }}")
+        lines.append(f"{indent}    if ($flagOptions -contains $token) {{ continue }}")
+        lines.append(f"{indent}    if ($valueOptions -contains $token) {{")
+        lines.append(f"{indent}        $skipNext = $true")
+        lines.append(f"{indent}        continue")
+        lines.append(f"{indent}    }}")
+        lines.append(f"{indent}    $assignedValue = $false")
+        lines.append(f"{indent}    foreach ($option in $valueOptions) {{")
+        lines.append(f'{indent}        if ($token.StartsWith("${{option}}=")) {{ $assignedValue = $true; break }}')
+        lines.append(f"{indent}    }}")
+        lines.append(f"{indent}    if ($assignedValue) {{ continue }}")
+        lines.append(f"{indent}    $positionalCount++")
+        lines.append(f"{indent}}}")
+        lines.append("")
+
     # Positional argument completions. Each positional emits its own handler;
     # variadic positionals (multiple=True) match every position from theirs
     # onward.
     for i, param in enumerate(positional_args):
-        pos_token = token_offset + 1 + i
         cmp_op = "-ge" if param.multiple else "-eq"
         values = param.choices or param.suggestions
         if values:
             lines.append(f"{indent}# Positional: {param.name}")
-            lines.append(f"{indent}if ($wordToComplete -notlike '-*' -and $tokenCount {cmp_op} {pos_token}) {{")
+            lines.append(f"{indent}if ($wordToComplete -notlike '-*' -and $positionalCount {cmp_op} {i}) {{")
             _open_result_array(lines, f"{indent}    ")
             for choice in values:
                 lines.append(
@@ -232,14 +292,13 @@ def _emit_param_completions(lines: list[str], spec: CommandSpec, token_offset: i
         elif param.dynamic_completer and param.dynamic_completer in DYNAMIC_SNIPPETS:
             snippet = DYNAMIC_SNIPPETS[param.dynamic_completer]
             lines.append(f"{indent}# Positional: {param.name}")
-            lines.append(f"{indent}if ($wordToComplete -notlike '-*' -and $tokenCount {cmp_op} {pos_token}) {{")
+            lines.append(f"{indent}if ($wordToComplete -notlike '-*' -and $positionalCount {cmp_op} {i}) {{")
             lines.append(f"{indent}    {snippet}")
             lines.append(f"{indent}    return")
             lines.append(f"{indent}}}")
             lines.append("")
 
     # Fall through to option completions
-    all_options = [p for p in spec.params if not p.is_argument]
     if all_options:
         lines.append(f"{indent}# Options")
         lines.append(f"{indent}if ($wordToComplete -like '-*') {{")

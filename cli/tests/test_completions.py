@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -177,6 +178,7 @@ class TestDynamicCompletionsMapping:
         listed = guide.subcommands["list"]
         show = guide.subcommands["show"]
         (topic,) = [param for param in show.params if param.is_argument]
+        group_options = [opt for param in guide.params for opt in param.opts]
 
         assert set(guide.subcommands) == {"list", "show"}
         assert not listed.params
@@ -184,6 +186,7 @@ class TestDynamicCompletionsMapping:
         assert topic.required
         assert not topic.multiple
         assert topic.dynamic_completer == "guide_topics"
+        assert group_options == ["--agent", "--human"]
 
         generated = {shell: generate(shell) for shell in ("bash", "zsh", "powershell")}
         bash = _generated_block(generated["bash"], "        guide)", "        resource)")
@@ -191,12 +194,15 @@ class TestDynamicCompletionsMapping:
         zsh_show = _generated_braced_block(generated["zsh"], "_agentworks_guide_show() {")
         powershell = _generated_braced_block(generated["powershell"], "        'guide' {")
 
-        assert 'compgen -W "list show"' in bash
+        assert 'compgen -W "list show --agent --human --help"' in bash
         assert "agw guide list" in bash
         assert "list" in zsh_group and "show" in zsh_group
+        assert all(option in zsh_group for option in group_options)
         assert "1:topic:_agentworks_guide_topics" in zsh_show
+        assert all(option in zsh_show for option in group_options)
         assert "CompletionResult]::new('list'" in powershell
         assert "CompletionResult]::new('show'" in powershell
+        assert all(f"CompletionResult]::new('{option}'" in powershell for option in group_options)
         assert "agw guide list" in powershell
 
     def test_generated_bash_guide_completion_follows_the_group_grammar(self) -> None:
@@ -216,10 +222,49 @@ printf '%s\\n' "${{COMPREPLY[@]}}"
             completed = subprocess.run(["bash"], input=invocation, capture_output=True, text=True, check=True)
             return [candidate for candidate in completed.stdout.splitlines() if candidate]
 
-        assert complete(["agw", "guide", ""]) == ["list", "show"]
+        assert complete(["agw", "guide", ""]) == ["list", "show", "--agent", "--human", "--help"]
+        assert complete(["agw", "guide", "--"]) == ["--agent", "--human", "--help"]
         assert complete(["agw", "guide", "list", ""]) == []
         assert complete(["agw", "guide", "show", ""]) == expected_topics
+        for option in ("--agent", "--human"):
+            assert complete(["agw", "guide", "show", option, ""]) == expected_topics
+            assert complete(["agw", "guide", "show", option, expected_topics[0], ""]) == []
         assert complete(["agw", "guide", "show", expected_topics[0], ""]) == []
+
+    @pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell is not installed")
+    def test_generated_powershell_guide_completion_follows_the_group_grammar(self, tmp_path: Path) -> None:
+        import json
+
+        from agentworks.guide.service import list_guide_topics
+
+        expected_topics = list_guide_topics().markdown.splitlines()
+        script_path = tmp_path / "agentworks-completion.ps1"
+        script_path.write_text(generate("powershell"), encoding="utf-8")
+        quoted_path = str(script_path).replace("'", "''")
+        command = f"""
+. '{quoted_path}'
+function Complete([string]$line) {{
+    @((TabExpansion2 -inputScript $line -cursorColumn $line.Length).CompletionMatches.CompletionText)
+}}
+[pscustomobject]@{{
+    group = @(Complete 'agw guide --')
+    agent = @(Complete 'agw guide show --agent ')
+    human = @(Complete 'agw guide show --human ')
+    terminal = @(Complete 'agw guide show --agent {expected_topics[0]} ')
+}} | ConvertTo-Json -Depth 3 -Compress
+"""
+        completed = subprocess.run(
+            [shutil.which("pwsh") or "pwsh", "-NoProfile", "-NonInteractive", "-Command", command],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        result = json.loads(completed.stdout)
+
+        assert result["group"] == ["--agent", "--human", "--help"]
+        assert result["agent"] == expected_topics
+        assert result["human"] == expected_topics
+        assert result["terminal"] == []
 
     def test_database_backed_snippets_share_hidden_probe_contract(self) -> None:
         from agentworks.completions.bash import DYNAMIC_SNIPPETS as BASH_SNIPPETS
@@ -338,11 +383,12 @@ printf '%s\\0' "${{COMPREPLY[@]}}"
             "                'verify' {",
         )
 
-        bash_position = re.search(r"\$cword -(ge|eq) (\d+)", bash)
+        bash_position = re.search(r"\$positional_count -(ge|eq) (\d+)", bash)
         assert bash_position is not None
         bash_operator, bash_threshold = bash_position.groups()
         assert bash_operator == "ge"
-        assert all(position >= int(bash_threshold) for position in (3, 4, 8))
+        assert bash_threshold == "0"
+        assert "--allow-interaction) continue" in bash
         assert '"$cur" != -*' in bash
         assert "agw secret list --names-only" in bash
 
@@ -353,11 +399,12 @@ printf '%s\\0' "${{COMPREPLY[@]}}"
         zsh_candidates = _generated_block(generated["zsh"], "_agentworks_secrets() {", "}")
         assert "agw secret list --names-only" in zsh_candidates
 
-        powershell_position = re.search(r"\$tokenCount -(ge|eq) (\d+)", powershell)
+        powershell_position = re.search(r"\$positionalCount -(ge|eq) (\d+)", powershell)
         assert powershell_position is not None
         powershell_operator, powershell_threshold = powershell_position.groups()
         assert powershell_operator == "ge"
-        assert all(position >= int(powershell_threshold) for position in (4, 5, 9))
+        assert powershell_threshold == "0"
+        assert "$flagOptions" in powershell
         assert "$wordToComplete -notlike '-*'" in powershell
         assert "agw secret list --names-only" in powershell
 
@@ -848,16 +895,17 @@ class TestVariadicPositionalCompletion:
         output = generate("bash")
         # Look for the console-create block specifically: 'sessions' completer
         # snippet is `agentworks session list --no-status ...`, guarded by a
-        # -ge cword check (matches every position from the variadic's offset on).
-        assert "cword -ge" in output
+        # -ge positional-count check (matches every position from the
+        # variadic's offset on while ignoring recognized options).
+        assert "positional_count -ge" in output
         # And the standard -eq for non-variadic positionals still works.
-        assert "cword -eq" in output
+        assert "positional_count -eq" in output
 
     def test_powershell_uses_ge_for_variadic(self) -> None:
         output = generate("powershell")
         # Same idea: -ge for the variadic.
-        assert "tokenCount -ge" in output
-        assert "tokenCount -eq" in output
+        assert "positionalCount -ge" in output
+        assert "positionalCount -eq" in output
 
 
 class TestKindsSourcedCompleter:

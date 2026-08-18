@@ -699,6 +699,10 @@ destination is the ordinary noun/verb grammar: default index, `list`, and single
       returning partial results. Remove hard-coded featured counts from permanent docs, document the
       underscore shell-name reservation, and take the bounded protocol/index-check cleanups. Keep
       authored index headings in `_index.md` and defer PowerShell's native filesystem fallback.
+- [x] Close the exact-head completion findings with shared-spec group options and option-aware
+      positional counting in every generated backend. Add ordered static prerequisites,
+      virtual-machine, and Tailscale concepts that point to command-owned live facts without loading
+      operator state during guide rendering.
 - [ ] Run focused guide/completion/package tests, the full non-integration suite, Ruff, formatting,
       mypy, Rulesync drift, locked-SDD, and file lint. Complete exact-head project, cold,
       integration, and saga re-reviews before returning the PR ready.

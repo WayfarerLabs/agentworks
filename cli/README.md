@@ -24,12 +24,16 @@ but does not read configuration, live state, or release history.
 
 Use `agw guide show concept-assistant-agent` for the external assistant's operating posture,
 `agw guide show concept-onboarding` for repeatable first setup and current adoption, and
-`agw guide show concept-management` for ongoing operation. The domain model, packaged history, and
-optional read-only source review have equivalent `guide show` topics. Selected concepts are Markdown
-files; small top-level fenced passages can appear only in agent mode. The fence markers and section
-includes are exact standalone column-zero comment lines; similar comments nested in Markdown
-containers remain content. Use `agw guide list` when a completion or tool needs every installed
-concept and packaged release-note topic name.
+`agw guide show concept-management` for ongoing operation. Prerequisites, VM platforms and sites,
+Tailscale, the domain model, packaged history, and optional read-only source review have equivalent
+`guide show` topics. Selected concepts are Markdown files; small top-level fenced passages can
+appear only in agent mode. The fence markers and section includes are exact standalone column-zero
+comment lines; similar comments nested in Markdown containers remain content. Use `agw guide list`
+when a completion or tool needs every installed concept and packaged release-note topic name.
+
+Every guide entry point validates the complete installed concept-shell catalog before returning
+output. An unrelated malformed shell or duplicate global topic therefore blocks the index, list,
+single-topic show, and dynamic topic completion together instead of exposing a partial catalog.
 
 Raw resource, relationship, schema, and sample facts belong to commands rather than guide topics.
 Use `agw graph show`, `agw resource kinds`, `agw resource list`, `agw resource explain`, and

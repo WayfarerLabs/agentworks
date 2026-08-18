@@ -97,3 +97,5 @@ Guide topic completion is intentionally package-only: `agw guide list` emits aut
 first-party concept shells and packaged release-note topics without loading operator state. Resource
 and kind completion use their command-owned list surfaces instead. The ordinary command tree offers
 the `list` and `show` subcommands; only `agw guide show TOPIC` attaches the dynamic topic completer.
+The list service validates the complete shell catalog first, so an unrelated malformed or duplicate
+shell suppresses topic completion rather than producing a partial candidate stream.
