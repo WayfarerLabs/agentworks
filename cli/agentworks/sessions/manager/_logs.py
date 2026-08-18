@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING
-
-import typer
 
 import agentworks.sessions.manager as _mgr
 from agentworks.db import SessionStatus
@@ -69,4 +68,34 @@ def session_logs(
         )
         # Raw data pipe (opaque tmux capture-pane output), not a structured message.
         # Intentionally not routed through the output handler.
-        typer.echo(captured, nl=False)
+        _write_raw_capture(captured)
+
+
+def _write_raw_capture(captured: str) -> None:
+    """Write scrollback text as exact UTF-8 bytes, bypassing text-mode stdout.
+
+    Session scrollback can hold arbitrary Unicode captured verbatim from a
+    workload (it is the raw data pipe the module docstring describes, not
+    a structured message), so this is a third Unicode boundary distinct
+    from the two the CLI entrypoint already owns: terminal display, which
+    degrades unencodable characters instead of crashing
+    (``_reconfigure_std_streams`` in ``cli/_entry.py``), and the
+    machine-output JSON layer, which already writes exact UTF-8 through
+    its own binary writer. Routing this payload through the reconfigured
+    text-mode ``sys.stdout`` would re-encode it into a legacy console's
+    codepage and silently alias distinct input (a genuine non-ASCII
+    character and a literal ``?``) onto the same output byte, corrupting
+    a redirected capture. Writing straight to the binary buffer keeps
+    this boundary byte-for-byte regardless of the console's codepage.
+
+    Streams without a ``.buffer`` (the ``StringIO``-like stand-ins tests
+    and embedders install, mirroring the guard in
+    ``_reconfigure_std_streams``) fall back to the text write.
+    """
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is not None:
+        buffer.write(captured.encode("utf-8"))
+        buffer.flush()
+    else:
+        sys.stdout.write(captured)
+        sys.stdout.flush()

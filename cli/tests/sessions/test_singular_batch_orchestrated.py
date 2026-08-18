@@ -601,6 +601,56 @@ def test_session_logs_reachable_vm_is_one_boundary_burst(
     assert resolve_counter == [["proxmox-token"]]
 
 
+def test_session_logs_writes_exact_utf8_bytes_on_a_legacy_console(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Session scrollback is the raw data pipe ``_logs.py``'s module
+    docstring describes, not a structured message: it can carry arbitrary
+    Unicode captured verbatim from a workload. The CLI entrypoint's
+    legacy-console policy degrades unencodable output to a literal ``?``
+    for human display; routing the raw capture through that same
+    text-mode stream would silently alias a genuine non-ASCII character
+    onto the same byte as a literal ``?``, corrupting a redirected
+    capture. The raw boundary instead writes exact UTF-8 bytes no matter
+    what codepage the console reports."""
+    import io
+    import sys
+
+    from agentworks.db import SessionStatus
+
+    config = make_config()
+    _seed_singular(db)
+    _reachable(monkeypatch, True)
+    monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, *, target, db: session)
+    monkeypatch.setattr(
+        session_manager,
+        "check_session_status",
+        lambda session, *, target: SessionStatus.OK,
+    )
+    payload = "result=雪\n"
+    monkeypatch.setattr("agentworks.sessions.tmux.capture_output", lambda *a, **k: payload)
+
+    # A Windows-style legacy console: cp1252, strict, CRLF (matches the
+    # stand-in ``cli/tests/test_console_streams.py`` uses for the same
+    # field shape). ``errors="strict"`` makes any accidental fall-through
+    # to the text path raise instead of silently degrading the assertion.
+    raw = io.BytesIO()
+    console = io.TextIOWrapper(raw, encoding="cp1252", errors="strict", newline="\r\n")
+    monkeypatch.setattr(sys, "stdout", console)
+
+    session_manager.session_logs(db, config, name="s1", interaction=InteractionPolicy.REFUSE)
+    console.flush()
+
+    assert raw.getvalue() == payload.encode("utf-8")
+    # Through a text-mode legacy console, the genuine character and a
+    # literal "?" would both degrade to this same byte string. The raw
+    # boundary keeps them distinguishable.
+    assert raw.getvalue() != b"result=?\n"
+
+
 def test_describe_session_holds_across_the_probe(
     db: Database,
     make_config,  # noqa: ANN001
