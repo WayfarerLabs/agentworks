@@ -28,7 +28,10 @@ if TYPE_CHECKING:
 
 _ATX_RE = re.compile(r"^([ ]{0,3})(#{1,6})(?:[ \t]+|$)(.*?)([ \t]+#+[ \t]*)?$")
 _SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
-_README_RESOURCE = "_guide_sources/README.md"
+_CURATED_REPOSITORY_PATHS = {
+    "_guide_sources/README.md": "README.md",
+    "_guide_sources/docs/manifesto.md": "docs/manifesto.md",
+}
 _GITHUB_BLOB = "https://github.com/WayfarerLabs/agentworks/blob/main/"
 _GITHUB_RAW = "https://raw.githubusercontent.com/WayfarerLabs/agentworks/main/"
 
@@ -50,23 +53,27 @@ def filter_agent_only(markdown: str, mode: GuideMode) -> str:
     return "".join(rendered)
 
 
-def _verified_root_readme() -> Path | None:
+def _verified_repository_source(path: str) -> Path | None:
+    repository_path = _CURATED_REPOSITORY_PATHS.get(path)
+    if repository_path is None:
+        return None
     repository_root = Path(__file__).resolve().parents[3]
     if not (
         (repository_root / ".git").exists()
         and (repository_root / "README.md").is_file()
+        and (repository_root / "docs" / "manifesto.md").is_file()
         and (repository_root / "cli" / "pyproject.toml").is_file()
         and (repository_root / "cli" / "agentworks").is_dir()
     ):
         return None
-    return repository_root / "README.md"
+    return repository_root / repository_path
 
 
 def _read_bytes(resource: Traversable, path: str) -> bytes:
     try:
         data = resource.read_bytes()
     except (FileNotFoundError, OSError):
-        if path != _README_RESOURCE or (fallback := _verified_root_readme()) is None:
+        if (fallback := _verified_repository_source(path)) is None:
             raise GuideContentError(f"packaged guide include {path!r} is unavailable") from None
         try:
             data = fallback.read_bytes()
@@ -86,7 +93,7 @@ def _load_include(path: str, package_root: Traversable | None) -> GuideSource:
         markdown = data.decode("utf-8")
     except UnicodeDecodeError:
         raise GuideContentError(f"packaged guide include {path!r} is not valid UTF-8") from None
-    repository_path = "README.md" if path == _README_RESOURCE else f"cli/agentworks/{path}"
+    repository_path = _CURATED_REPOSITORY_PATHS.get(path, f"cli/agentworks/{path}")
     return GuideSource(path, repository_path, markdown.replace("\r\n", "\n").replace("\r", "\n"))
 
 
@@ -104,11 +111,11 @@ def _extract_section(source: GuideSource, heading: str, offset: int) -> str:
         if match is None:
             continue
         level = len(match.group(2))
-        if 2 <= level <= 6 and _heading_text(match) == heading:
+        if 1 <= level <= 6 and _heading_text(match) == heading:
             matches.append((index, level))
     if len(matches) != 1:
         raise GuideContentError(
-            f"guide include {source.package_path!r} must contain exactly one H2-H6 heading {heading!r}"
+            f"guide include {source.package_path!r} must contain exactly one H1-H6 heading {heading!r}"
         )
     start, start_level = matches[0]
     end = len(lines)
@@ -142,7 +149,7 @@ def _extract_section(source: GuideSource, heading: str, offset: int) -> str:
 
 def _normal_path(repository_path: str) -> tuple[PurePosixPath, PurePosixPath]:
     source = PurePosixPath(repository_path)
-    root = PurePosixPath() if repository_path == "README.md" else PurePosixPath("cli/agentworks")
+    root = PurePosixPath("cli/agentworks") if source.parts[:2] == ("cli", "agentworks") else PurePosixPath()
     return source, root
 
 

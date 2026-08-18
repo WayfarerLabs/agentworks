@@ -68,19 +68,20 @@ Exactly one reserved `_index.md` exists in the core guide-content directory. It 
 description, H1, fence, include, and rendering rules, must omit `index-order`, and is excluded from
 the ordinary concept namespace. No other underscore-prefixed Markdown filename is valid.
 
-The root `README.md` is not a shell and is not discovered. One custom Hatch build hook materializes
-it at `agentworks/_guide_sources/README.md` as an include-only resource:
+The root `README.md` and `docs/manifesto.md` are not shells and are not discovered. One custom Hatch
+build hook materializes them at `agentworks/_guide_sources/README.md` and
+`agentworks/_guide_sources/docs/manifesto.md` as include-only resources:
 
 - a direct wheel reads the repository-root file and maps it to the package path;
 - a source distribution reads the repository-root file and vendors it at that package path; and
 - a wheel built from the source distribution uses the vendored file already selected with the
   `agentworks` package, without overwriting it.
 
-The hook fails the build if the required source for its mode is absent. A source/editable run whose
-package resource is absent may read `<verified-repository-root>/README.md` only after confirming the
-fixed layout: `.git`, `README.md`, `cli/pyproject.toml`, and `cli/agentworks/`. It does not use the
-working directory or search parent directories. No checked-in generated README mirror, runtime
-network fetch, or other repository-root include source exists.
+The hook fails the build if either required source for its mode is absent. A source/editable run
+whose package resource is absent may read the exact README or manifesto only after confirming the
+fixed layout: `.git`, `README.md`, `docs/manifesto.md`, `cli/pyproject.toml`, and `cli/agentworks/`.
+It does not use the working directory or search parent directories. No checked-in generated mirror,
+runtime network fetch, or other repository-root include source exists.
 
 ## Directive grammar
 
@@ -114,19 +115,21 @@ before include resolution, so a human-hidden region cannot read a packaged docum
 
 ```markdown
 <!-- agw:include path="_guide_sources/README.md" heading="Core Concepts" heading-offset="0" -->
+
+<!-- agw:include path="_guide_sources/docs/manifesto.md" heading="The Agentworks Manifesto" heading-offset="1" -->
 ```
 
 `path` is relative to `importlib.resources.files("agentworks")`. It must be a bounded Markdown
 resource below that package root with no absolute form, empty, dot, or parent segment, and no
-filesystem fallback except the exact verified source-checkout case above. The curated
-`_guide_sources/README.md` resource and normal Markdown inside the `agentworks` package are the only
+filesystem fallback except the exact verified source-checkout case above. The two curated
+`_guide_sources/` resources and normal Markdown inside the `agentworks` package are the only
 sources. No other package or repository-root file is an include source. The target must be UTF-8
 Markdown within the repository's content-size limit.
 
-`heading` matches exactly one H2-H6 ATX heading outside code fences. Matching compares the visible
-heading text after removing the ATX marker and optional closing hashes. H1 imports, zero matches,
-and multiple matches are structural errors. Expansion inserts the matching heading and its body
-through, but not including, the next heading of equal or higher rank.
+`heading` matches exactly one H1-H6 ATX heading outside code fences. Matching compares the visible
+heading text after removing the ATX marker and optional closing hashes. Zero matches and multiple
+matches are structural errors. Expansion inserts the matching heading and its body through, but not
+including, the next heading of equal or higher rank.
 
 `heading-offset` is an optional signed base-10 integer and defaults to `0`. The expander adds it to
 the level of every ATX heading in the selected section outside code fences. The offset is static for
@@ -152,8 +155,8 @@ link:  https://github.com/WayfarerLabs/agentworks/blob/main/cli/agentworks/<path
 image: https://raw.githubusercontent.com/WayfarerLabs/agentworks/main/cli/agentworks/<path>
 ```
 
-For the curated `_guide_sources/README.md` mirror, resolution instead starts at the repository root,
-so `docs/images/agw-topology.png` becomes
+For the two curated `_guide_sources/` mirrors, resolution instead starts at the repository root, so
+`docs/images/agw-topology.png` in the README becomes
 `https://raw.githubusercontent.com/WayfarerLabs/agentworks/main/docs/images/agw-topology.png`.
 Normal package documents retain the `cli/agentworks/` prefix shown above. A relative link from the
 root mirror uses the equivalent `https://github.com/WayfarerLabs/agentworks/blob/main/<path>` form.
@@ -259,18 +262,18 @@ Focused tests protect behavior and boundaries:
 - filename discovery, global slug uniqueness, restricted frontmatter, and the unfenced single-H1
   invariant;
 - balanced non-nested agent fences and filtering before include work;
-- exact unique H2-H6 ATX-section extraction beneath the one `agentworks` package root, bounded
+- exact unique H1-H6 ATX-section extraction beneath the one `agentworks` package root, bounded
   static heading offsets, canonical URL rewriting for repository-relative links and images,
   section-local reference definitions, size bounds, and inert non-recursive included text;
-- exact packaging of the canonical root README, `concept-core-model` rendering its selected sections
-  and images, the actual `#named-consoles` relative fragment, and no other repository-root include
-  source;
+- exact packaging of the canonical root README and manifesto, their composed concepts rendering from
+  direct and rebuilt distribution artifacts, the actual `#named-consoles` relative fragment, and no
+  other repository-root include source;
 - nonzero structural failures and proof that selected rendering does not load operator state;
 - reserved index discovery, deterministic index ordering, ordinary-only omitted counts, mode
   precedence, real `guide list`/`guide show` subcommands, one-topic show completion, and packaged
   exact release evidence; and
-- shell and exact README package-data presence in a direct wheel, source distribution, wheel rebuilt
-  from that source distribution, and verified editable-source fallback.
+- shell and exact curated package-data presence in a direct wheel, source distribution, wheel
+  rebuilt from that source distribution, and verified editable-source fallback.
 
 Tests use fixture content to assert structure and behavior. They do not pin, blacklist, snapshot, or
 otherwise police the wording of repository-authored Markdown, descriptions, warnings, or prompts.

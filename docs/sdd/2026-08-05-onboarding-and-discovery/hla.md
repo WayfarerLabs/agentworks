@@ -81,15 +81,16 @@ removed. Separately installed plugins do not gain a shell contribution API in th
 documentation; their agent-only fences contain only local handling context, never generally useful
 content hidden from humans.
 
-The canonical repository-root `README.md` is the sole include source outside the normal package
-documents. A custom Hatch build hook vendors its exact bytes at
-`agentworks/_guide_sources/README.md` for direct wheels and source distributions; a wheel built from
-the source distribution uses that already-vendored package copy. A verified repository-layout
-fallback reads the canonical root file during editable source execution. Discovery never treats the
-mirror as a shell. `concept-core-model` imports its “Architecture at a Glance” and “Core Concepts”
-sections. No other repository-root document becomes package data or an include root in this format
-version. Shells and include sources are validated and shipped in the same artifact; later repository
-edits cannot change an installed guide.
+The canonical repository-root `README.md` and `docs/manifesto.md` are the only include sources
+outside normal package documents. A custom Hatch build hook vendors their exact bytes beneath
+`agentworks/_guide_sources/` for direct wheels and source distributions; a wheel built from the
+source distribution uses those already-vendored package copies. A verified repository-layout
+fallback reads the same two canonical files during editable source execution. Discovery never treats
+either mirror as a shell. `concept-core-model` imports the README's “Architecture at a Glance” and
+“Core Concepts” sections; `concept-manifesto` imports the manifesto's complete H1 section with a
+fixed heading offset. No other repository-root document becomes package data or an include root in
+this format version. Shells and include sources are validated and shipped in the same artifact;
+later repository edits cannot change an installed guide.
 
 ## Shell expansion
 
@@ -102,7 +103,7 @@ Expansion is a fixed pipeline, not a general interpreter:
 5. frame the resulting Markdown.
 
 Agent fences are balanced and non-nested. Imports name a relative Markdown resource beneath the
-installed `agentworks` package, an exact H2-H6 ATX heading, and an optional integer heading offset
+installed `agentworks` package, an exact H1-H6 ATX heading, and an optional integer heading offset
 whose default is zero. The extractor accepts exactly one match outside fenced code and stops at the
 next heading of equal or higher rank. It shifts every ATX heading outside fenced code by the same
 amount and rejects a result outside H2-H6. Imported text is never parsed again for directives, so
@@ -124,12 +125,12 @@ content.
 
 ## Safety and failure behavior
 
-Shell discovery uses trusted package data only. Imports use trusted package data plus the single
-canonical root-README fallback in a verified editable checkout. Rendering loads no configuration,
-registry, database, resources, secrets, providers, transports, network state, or subprocesses. A
-malformed shell, invalid directive, duplicate slug, missing or ambiguous import heading, invalid
-topic, or incompatible CLI option remains nonzero. Missing or malformed operator state is irrelevant
-to this static path.
+Shell discovery uses trusted package data only. Imports use trusted package data plus the two exact
+canonical README and manifesto fallbacks in a verified editable checkout. Rendering loads no
+configuration, registry, database, resources, secrets, providers, transports, network state, or
+subprocesses. A malformed shell, invalid directive, duplicate slug, missing or ambiguous import
+heading, invalid topic, or incompatible CLI option remains nonzero. Missing or malformed operator
+state is irrelevant to this static path.
 
 Filtering precedes expansion. Therefore content hidden from human mode cannot cause an import or
 structural failure in that mode.

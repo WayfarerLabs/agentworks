@@ -98,18 +98,19 @@ context that would not justify another topic or hide generally useful informatio
 `concept-core-model` is the representative composed shell. It imports the relevant “Architecture at
 a Glance” and “Core Concepts” sections from the canonical repository-root `README.md`, covering the
 VM, workspace, agent, session, harness-integration, and console model without duplicating that
-prose. One small Hatch build hook vendors the exact root README as a trusted, include-only package
-resource in both the source distribution and wheel; a verified repository checkout supplies that
-same canonical file during editable source execution. It does not make other repository-root files
-discoverable or create a general documentation-root API. The shell and its packaged README bytes
-come from the same artifact, so a later repository heading edit cannot break an installed guide.
+prose. `concept-manifesto` imports the complete canonical `docs/manifesto.md` document. One small
+Hatch build hook vendors those two exact documents as trusted, include-only package resources in
+both the source distribution and wheel; a verified repository checkout supplies those same canonical
+files during editable source execution. It does not make other repository-root files discoverable or
+create a general documentation-root API. Each shell and its packaged source bytes come from the same
+artifact, so a later repository heading edit cannot break an installed guide.
 
 ### R3: Shell composition stays small and structural
 
 A shell supports only these additions to ordinary Markdown:
 
 1. balanced, non-nested agent-only fences whose contents are omitted unless agent mode is active;
-2. an import of one exact, uniquely named H2-H6 Markdown section from another packaged document in
+2. an import of one exact, uniquely named H1-H6 Markdown section from another packaged document in
    the installed `agentworks` package tree, with one static heading-level offset.
 
 Imports are bounded and inert. They cannot load arbitrary filesystem paths, recurse, or execute
@@ -128,10 +129,10 @@ names, or general template engine.
 ### R4: Selected guidance is static and deterministic
 
 `agw guide show TOPIC` reads only trusted packaged Markdown, except that editable source execution
-may read the one canonical root README after verifying the fixed repository layout. It does not load
-configuration, registries, databases, resources, secrets, providers, transports, network state, or
-subprocesses. Concepts point to command-owned help and inspection surfaces when the operator needs
-current facts.
+may read the canonical root README and manifesto after verifying the fixed repository layout. It
+does not load configuration, registries, databases, resources, secrets, providers, transports,
+network state, or subprocesses. Concepts point to command-owned help and inspection surfaces when
+the operator needs current facts.
 
 Malformed shells, invalid directives, or broken includes fail clearly because they are repository
 defects rather than operator state. Missing or malformed operator configuration cannot break static
@@ -187,7 +188,7 @@ configuration changes only if implementation introduces a real setting, which is
 4. Inline Markdown renders in both modes. Agent-only content renders only in agent mode, and a
    hidden fence cannot trigger an import. General assistant posture lives in
    `concept-assistant-agent`; ordinary information remains human-visible.
-5. A shell can import one exact unique H2-H6 ATX-heading section from a bounded Markdown resource
+5. A shell can import one exact unique H1-H6 ATX-heading section from a bounded Markdown resource
    beneath the installed `agentworks` package and apply one static offset while keeping every result
    in H2-H6. Imported directives remain inert, absolute references remain usable,
    repository-relative links and images become canonical HTTPS URLs, and missing or ambiguous

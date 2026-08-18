@@ -908,8 +908,9 @@ bounded `index-order`; the filename supplies the global `concept-*` identity. Th
 addressable concept. Shells support ordinary Markdown, agent-only fences, and bounded exact-section
 imports from packaged Markdown with static heading offsets. Fence and import comments execute only
 as standalone column-zero lines between top-level Markdown blocks; nested comments remain content.
-Relative links and images in imports are rewritten to canonical repository URLs. The root README is
-packaged as an include-only source so `concept-core-model` can reuse its canonical sections.
+Relative links and images in imports are rewritten to canonical repository URLs. The root README and
+`docs/manifesto.md` are packaged as include-only sources so `concept-core-model` and
+`concept-manifesto` can reuse their canonical content.
 
 Current capability and adoption questions point to `concept-onboarding`, ongoing operation points to
 `concept-management`, and temporal version-change questions point to `concept-release-notes`. Raw

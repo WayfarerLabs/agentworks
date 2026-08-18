@@ -83,6 +83,16 @@ def test_include_extracts_one_section_shifts_headings_and_stays_inert(tmp_path: 
     assert '<!-- agw:include path="bad.md" heading="Bad" -->' in rendered
 
 
+def test_include_can_select_a_whole_h1_document_and_shift_it_below_the_shell(tmp_path: Path) -> None:
+    included = tmp_path / "source.md"
+    included.write_text("# Source\n\nIntro.\n\n## Section\n\nBody.\n", encoding="utf-8")
+    topic = _topic('# Demo\n\n<!-- agw:include path="source.md" heading="Source" heading-offset="1" -->\n')
+
+    rendered = render_shell(topic, GuideMode.HUMAN, package_root=tmp_path)
+
+    assert rendered == "# Demo\n\n## Source\n\nIntro.\n\n### Section\n\nBody.\n"
+
+
 def test_include_heading_link_literal_is_parsed_before_shell_links_are_rewritten(tmp_path: Path) -> None:
     included = tmp_path / "docs" / "source.md"
     included.parent.mkdir()
@@ -459,8 +469,9 @@ def test_core_model_uses_root_mapping_for_real_images_and_fragment() -> None:
     assert "https://github.com/WayfarerLabs/agentworks/blob/main/cli/command-reference.md#named-consoles" in rendered
 
 
-def test_root_readme_fallback_requires_the_fixed_editable_layout(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("package_path", ["_guide_sources/README.md", "_guide_sources/docs/manifesto.md"])
+def test_curated_source_fallback_requires_the_fixed_editable_layout(
+    package_path: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repository = tmp_path / "repo"
     module = repository / "cli" / "agentworks" / "guide" / "render.py"
@@ -468,7 +479,9 @@ def test_root_readme_fallback_requires_the_fixed_editable_layout(
     (repository / ".git").mkdir()
     (repository / "cli" / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
     (repository / "README.md").write_text("## Selected\n\nEditable source.\n", encoding="utf-8")
+    (repository / "docs").mkdir()
+    (repository / "docs" / "manifesto.md").write_text("## Selected\n\nEditable source.\n", encoding="utf-8")
     monkeypatch.setattr(render_module, "__file__", str(module))
-    topic = _topic('# Demo\n<!-- agw:include path="_guide_sources/README.md" heading="Selected" -->\n')
+    topic = _topic(f'# Demo\n<!-- agw:include path="{package_path}" heading="Selected" -->\n')
 
     assert "Editable source." in render_shell(topic, GuideMode.HUMAN, package_root=tmp_path / "empty")

@@ -729,6 +729,21 @@ one group-owned mode option applies to the index and `show`, while `list` remain
 - [ ] Re-run focused/full/static gates and exact-head project, cold, integration, complexity, and
       saga reviews before completing the delivery record.
 
+The operator's 2026-08-18 manifesto ruling extends the same bounded composition model rather than
+adding another guide mechanism: selecting the manifesto concept should render the canonical
+document, with its GitHub URL retained only as a source link.
+
+## Phase 4 correction: complete manifesto concept
+
+- [x] Amend the active FRD, HLA, and guide LLD so the two exact curated repository documents are the
+      root README and `docs/manifesto.md`, and permit an H1 section only when its static offset
+      keeps every rendered heading in H2-H6.
+- [x] Vendor the exact manifesto bytes beside the README in wheels and source distributions, retain
+      the verified editable fallback, and have `concept-manifesto` import the complete canonical
+      document with one heading offset. Add only structural packaging/import coverage.
+- [ ] Re-run focused/full/static gates and exact-head project, cold, integration, complexity, and
+      saga reviews before completing the delivery record.
+
 ## Phase 5: representative acceptance and closeout
 
 - [ ] Run one provider-backed journey from an exact reviewed candidate wheel through the no-topic

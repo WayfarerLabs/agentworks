@@ -12,7 +12,7 @@ def _build(command: list[str], cwd: Path, environment: dict[str, str]) -> None:
     subprocess.run(command, cwd=cwd, env=environment, check=True, capture_output=True, text=True)
 
 
-def test_wheel_and_source_distribution_vendor_the_same_canonical_readme(tmp_path: Path) -> None:
+def test_wheel_and_source_distribution_vendor_the_same_canonical_guide_sources(tmp_path: Path) -> None:
     project = Path(__file__).parents[2]
     repository = project.parent
     environment = {**os.environ, "UV_CACHE_DIR": str(tmp_path / "uv-cache")}
@@ -22,9 +22,11 @@ def test_wheel_and_source_distribution_vendor_the_same_canonical_readme(tmp_path
     wheel = next(direct_dist.glob("*.whl"))
     source_distribution = next(direct_dist.glob("*.tar.gz"))
     expected_readme = (repository / "README.md").read_bytes()
+    expected_manifesto = (repository / "docs" / "manifesto.md").read_bytes()
     with zipfile.ZipFile(wheel) as archive:
         packaged = set(archive.namelist())
         assert archive.read("agentworks/_guide_sources/README.md") == expected_readme
+        assert archive.read("agentworks/_guide_sources/docs/manifesto.md") == expected_manifesto
         assert "agentworks/guide/guide-content/core-model.md" in packaged
         assert "agentworks/guide/guide-content/prerequisites.md" in packaged
         assert "agentworks/guide/guide-content/virtual-machines.md" in packaged
@@ -39,12 +41,14 @@ def test_wheel_and_source_distribution_vendor_the_same_canonical_readme(tmp_path
         archive.extractall(extracted, filter="data")
     source_root = next(extracted.iterdir())
     assert (source_root / "agentworks" / "_guide_sources" / "README.md").read_bytes() == expected_readme
+    assert (source_root / "agentworks" / "_guide_sources" / "docs" / "manifesto.md").read_bytes() == expected_manifesto
 
     rebuilt_dist = tmp_path / "rebuilt-dist"
     _build(["uv", "build", "--wheel", "--out-dir", str(rebuilt_dist)], source_root, environment)
     rebuilt_wheel = next(rebuilt_dist.glob("*.whl"))
     with zipfile.ZipFile(rebuilt_wheel) as archive:
         assert archive.read("agentworks/_guide_sources/README.md") == expected_readme
+        assert archive.read("agentworks/_guide_sources/docs/manifesto.md") == expected_manifesto
 
     wheel_environment = tmp_path / "wheel-environment"
     _build(
@@ -67,7 +71,8 @@ def test_wheel_and_source_distribution_vendor_the_same_canonical_readme(tmp_path
                 "assert all(topic.slug in index for topic in catalog.indexed_topics()); "
                 "assert set(catalog.names()) <= set(list_guide_topics().markdown.splitlines()); "
                 "core = render_guide('concept-core-model', GuideMode.HUMAN); "
-                "assert core.markdown.count('raw.githubusercontent.com') == 2"
+                "assert core.markdown.count('raw.githubusercontent.com') == 2; "
+                "render_guide('concept-manifesto', GuideMode.HUMAN)"
             ),
         ],
         cwd=tmp_path,
