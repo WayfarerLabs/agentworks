@@ -1,5 +1,136 @@
 # Changelog
 
+## [0.14.0](https://github.com/WayfarerLabs/agentworks/compare/v0.13.0...v0.14.0) (2026-08-18)
+
+
+### ⚠ BREAKING CHANGES
+
+Before upgrading from 0.13, run `agw resource migrate --all` on 0.13 to perform the backed-up,
+registry-verified conversion of legacy TOML resources; 0.14 removes that command, so the
+automated migration path exists only before the upgrade.
+
+* **config:** Before, legacy resource sections could trigger a tailored TOML migration error and some resource commands bypassed that refusal; legacy sibling capability fields and presence-selected platform fields also received bespoke rewrites. After, these inputs reach ordinary closed-world validation, and every config-dependent command requires a valid settings-only config.toml. Before upgrading, move each TOML resource into a YAML manifest, then remove all retired resource sections in one cutover. Fold provider, platform, backend, and harness configuration into their tagged tables; replace Azure service_principal with auth.mode service-principal, AWS credentials with auth.mode access-key, and Lima vm_host with placement.mode ssh. Use ambient or local modes for retired explicit-null selectors.
+* **git-credential:** Git credential token acquisition keeps the version 2 secret arm, but v0.13 YAML manifests that wrote an outer `token: null` no longer load. Either omit `token` to keep the default secret name, or write `token: {mode: secret}`.
+* **config:** `[secret_config].backends` is renamed to `sources`; the ordered precedence list always held source names. Rename the key in `config.toml`. Before: `[secret_config]` with `backends = ["env-var", "prompt"]`. After: `[secret_config]` with `sources = ["env-var", "prompt"]`.
+* **env:** Env entries no longer accept the retired mappings that include the unused source as null. Remove the null companion field in each manifest. Before: `EDITOR: {value: vim, secret: null}`. After: `EDITOR: {value: vim}`. Before: `GITHUB_TOKEN: {value: null, secret: github-token}`. After: `GITHUB_TOKEN: {secret: github-token}`.
+
+### Features
+
+* add always-available Agentworks assistance ([cb00487](https://github.com/WayfarerLabs/agentworks/commit/cb00487f98f64a1d5b5a8af26e9acb1c4c74fe93))
+* **claude:** add reasoning effort ([d83383d](https://github.com/WayfarerLabs/agentworks/commit/d83383d641c10857ea68ca40a512a09512fe5cc4))
+* **claude:** add reasoning effort ([725b393](https://github.com/WayfarerLabs/agentworks/commit/725b393b5a9e83a91aafde6c0d10a8ff0a5bfbc1))
+* **cli:** add Claude session preferences ([55eafb9](https://github.com/WayfarerLabs/agentworks/commit/55eafb94f1a3b9486b6f82a22d03add89f2bafa2))
+* **cli:** add Claude session preferences ([2fe78ec](https://github.com/WayfarerLabs/agentworks/commit/2fe78ec94aaa459e3c7fd9b0a26ee08ffc3ccda1))
+* **cli:** add focused resource show ([bc55961](https://github.com/WayfarerLabs/agentworks/commit/bc559611249cfa45aa2f0c3c725940afe5cd2521))
+* **cli:** add focused resource show ([ef84629](https://github.com/WayfarerLabs/agentworks/commit/ef84629dc3a5cc4365a3793e8892d46696b65262))
+* **cli:** add graph and resource access primitives ([bcc403d](https://github.com/WayfarerLabs/agentworks/commit/bcc403d670837033e2edc1d40266c4c6dda27749))
+* **cli:** add graph inspection and clarify resource commands ([18ed4a7](https://github.com/WayfarerLabs/agentworks/commit/18ed4a7ae33f1a7cce5bd8abe37072f0d0444afa))
+* **cli:** cut over resource graph grammar ([b22df51](https://github.com/WayfarerLabs/agentworks/commit/b22df51217fd7037007d03ad20ddb8eeb3459424))
+* **cli:** expand focused resource show ([bc4ce49](https://github.com/WayfarerLabs/agentworks/commit/bc4ce49a8c6be83cb6af4a46c0cca17778fbfa48))
+* **cli:** implement graph query service ([9c524dd](https://github.com/WayfarerLabs/agentworks/commit/9c524dd8c614ea808f9dd9549d83e714c307a46c))
+* **codex:** add session preferences ([c2abe0c](https://github.com/WayfarerLabs/agentworks/commit/c2abe0c8a3ab683cf9a5dd2552042b0b9fe5c0be))
+* **codex:** add session preferences ([7101556](https://github.com/WayfarerLabs/agentworks/commit/71015560415ee52171438d5072f9d27dfedc8328))
+* **config:** remove retired compatibility rewrites ([ab0a630](https://github.com/WayfarerLabs/agentworks/commit/ab0a6303f6e3cba268f781af09348b1cc3b78bf5))
+* **config:** rename secret source precedence key ([24442cf](https://github.com/WayfarerLabs/agentworks/commit/24442cf2ff8a09a8fc54565a2cbbd32ff79b0a0f))
+* **env:** reject retired null companion entries ([7e9ca79](https://github.com/WayfarerLabs/agentworks/commit/7e9ca79f79ee6f22f218f5819114bf849db44c8d))
+* **git-credential:** rename secret token acquisition mode ([345162e](https://github.com/WayfarerLabs/agentworks/commit/345162eda013ac07fd4bef172f0c370ac4628f09))
+* **guide:** adopt noun verb command grammar ([093c545](https://github.com/WayfarerLabs/agentworks/commit/093c545b2c941fdc96f20efb1f7104c0c9fb383a))
+* **guide:** derive index from concept shells ([0830cc2](https://github.com/WayfarerLabs/agentworks/commit/0830cc2744b68422244f657769c0a6dfb3d81fb8))
+* **guide:** derive index from concept shells ([d9c06f6](https://github.com/WayfarerLabs/agentworks/commit/d9c06f6565f98d52b19e311557b2f626332862d7))
+* **guide:** render the canonical manifesto ([e8f2594](https://github.com/WayfarerLabs/agentworks/commit/e8f25945d88a12b2bf4811b9ff71da173e01e728))
+* **guide:** replace guide model with markdown shells ([d090044](https://github.com/WayfarerLabs/agentworks/commit/d090044652fa41514fa83a5fa5823a94895c1519))
+* **guide:** replace typed topics with markdown shells ([4ac084c](https://github.com/WayfarerLabs/agentworks/commit/4ac084cdd9aa15dc7dcf4408fe94a70989f3c0ea))
+* **guide:** share corrected assistance model ([1c93eea](https://github.com/WayfarerLabs/agentworks/commit/1c93eea5b23ff333477fee97a0c8d31334362690))
+* **guide:** share one simple assistance model ([b84a813](https://github.com/WayfarerLabs/agentworks/commit/b84a813f7ffe975a19389077f441e3fb9ae86688))
+* **guide:** simplify discovery into trail signs ([cc5bec8](https://github.com/WayfarerLabs/agentworks/commit/cc5bec832d5534b2046467d1d276cb832e86a9b3))
+* **guide:** simplify onboarding discovery ([3afcef8](https://github.com/WayfarerLabs/agentworks/commit/3afcef816749e2d980c5d56405ee055c4e60fc23))
+* **guide:** teach installer resource plugins ([b9aca08](https://github.com/WayfarerLabs/agentworks/commit/b9aca08db2c226064a9d4505f92494e65eb11a45))
+* **plugins:** add Grok Build integration ([30f09ef](https://github.com/WayfarerLabs/agentworks/commit/30f09ef79ea41c3fb032f4e285915790e693aee7))
+* **plugins:** add Grok Build integration ([703fb62](https://github.com/WayfarerLabs/agentworks/commit/703fb625dcecf72cef653a79eac7536db63e1114))
+* **plugins:** move installer manifests to opt-in plugins ([e0d805d](https://github.com/WayfarerLabs/agentworks/commit/e0d805d5e9432594b750138f99e450697c2c64a0))
+* **website:** add via Agent and Manual setup paths ([f47ff7d](https://github.com/WayfarerLabs/agentworks/commit/f47ff7ddb90bec1bbc6ec76af765fef70a3fab8c))
+
+
+### Bug Fixes
+
+* **claude:** keep effort values open ([197e5c4](https://github.com/WayfarerLabs/agentworks/commit/197e5c4ffd72023597493aae3c8a6a2fc2b0cbac))
+* **claude:** keep reasoning effort values open ([04b163e](https://github.com/WayfarerLabs/agentworks/commit/04b163e2e1b03aa9f2f8200225b2c26408bc8af5))
+* **claude:** validate reasoning effort values ([7b899f9](https://github.com/WayfarerLabs/agentworks/commit/7b899f95fc932bfffd9095cc334e7997b68e912d))
+* **cli:** align focused resource show invariants ([4defbca](https://github.com/WayfarerLabs/agentworks/commit/4defbca1d25b7acf226458df34e7918bb7f0caf2))
+* **cli:** clarify Claude settings precedence ([6fe4af4](https://github.com/WayfarerLabs/agentworks/commit/6fe4af4d127bc605ec8bfcbe041beae093c16e8c))
+* **cli:** harden resource show Unicode output ([9ab4237](https://github.com/WayfarerLabs/agentworks/commit/9ab423714b23971b9ec7dfebed9d86a80deb28d1))
+* **cli:** keep graph facts single-line ([6dba08e](https://github.com/WayfarerLabs/agentworks/commit/6dba08e30885025d2e0ea0ce74ddffd1e7e98ffa))
+* **cli:** safely encode machine output Unicode ([ade9375](https://github.com/WayfarerLabs/agentworks/commit/ade93750f229f500bc27308c890cac27aa7f752e))
+* **cli:** sanitize graph human output ([663c7b6](https://github.com/WayfarerLabs/agentworks/commit/663c7b61592a5c78ee8b75fa9f50aa2c30a96b45))
+* **completion:** normalize guide positional context ([e50d559](https://github.com/WayfarerLabs/agentworks/commit/e50d559acbdefa6df9aaef4482a9fb0eb6d369b8))
+* **config:** restore token null migration guidance ([45227f2](https://github.com/WayfarerLabs/agentworks/commit/45227f2197568753ae7103bfbdff7f612ed6c424))
+* **db:** classify a busy state database as BUSY, not MALFORMED ([fe83aaf](https://github.com/WayfarerLabs/agentworks/commit/fe83aaf70417d4089a1e0a17c5e76320287a42f7))
+* **db:** route the read-only constructor through the busy predicate ([ebe68b6](https://github.com/WayfarerLabs/agentworks/commit/ebe68b6645b3772ac2541fa4b22f4674f004670d))
+* **guide:** bound remaining container edges ([7823d5b](https://github.com/WayfarerLabs/agentworks/commit/7823d5b11ce96de0d53054d502a17b9a99d57f27))
+* **guide:** close fail-soft exception gaps ([3fd08e9](https://github.com/WayfarerLabs/agentworks/commit/3fd08e9a3097a241fe72dcf18996e3e4b8924665))
+* **guide:** close final portability and saga gates ([802d24b](https://github.com/WayfarerLabs/agentworks/commit/802d24bec0f0126d1bbe20aef017b08405745b6d))
+* **guide:** close final trail-sign gaps ([fedeefd](https://github.com/WayfarerLabs/agentworks/commit/fedeefd632e4fda9d048d3c7e2d3c658c929128b))
+* **guide:** complete grammar review corrections ([cf4471b](https://github.com/WayfarerLabs/agentworks/commit/cf4471b8241323cf06467aa37438841809dd37d4))
+* **guide:** complete reserved list contract ([61e1c3c](https://github.com/WayfarerLabs/agentworks/commit/61e1c3cb92b3e0b3c8e432f5f39d1db8bb1ab8b3))
+* **guide:** finish assistance simplification ([cd7b19c](https://github.com/WayfarerLabs/agentworks/commit/cd7b19c17225ea6e1b42734937ec84a8bce03c68))
+* **guide:** harden bounded markdown parsing ([712eda5](https://github.com/WayfarerLabs/agentworks/commit/712eda528f5478019eaeb204dbcbaa6cd0f9382e))
+* **guide:** incorporate final simplification feedback ([0bbe588](https://github.com/WayfarerLabs/agentworks/commit/0bbe58840bf96fce1a264a8d89f1b76ea2e65d58))
+* **guide:** isolate installer adapter failures ([62179a3](https://github.com/WayfarerLabs/agentworks/commit/62179a3184107c6ed1e1e12d6ebecdc377e081fb))
+* **guide:** make front-door commands executable ([893cb3b](https://github.com/WayfarerLabs/agentworks/commit/893cb3b9e482f2fbeb4b8042759916f0a2bf9a3c))
+* **guide:** preserve projection error boundary ([043b7f8](https://github.com/WayfarerLabs/agentworks/commit/043b7f8da5af3516c46a1685d976e58c9945871e))
+* **guide:** preserve shell structure during expansion ([52ab781](https://github.com/WayfarerLabs/agentworks/commit/52ab781b4c76df716e57f38483d070398d918923))
+* **guide:** require top-level shell directives ([32b1d7d](https://github.com/WayfarerLabs/agentworks/commit/32b1d7d1b2f50bb77e536e908f57b657c15c6404))
+* **guide:** shift nested container headings ([999859b](https://github.com/WayfarerLabs/agentworks/commit/999859ba16877d8c984719aea28d8d8ded95298c))
+* **guide:** shift nested container headings ([0e1a99b](https://github.com/WayfarerLabs/agentworks/commit/0e1a99b5189954f2d67458b7ea8d0254b8530101))
+* **guide:** simplify assistance index ([5d82456](https://github.com/WayfarerLabs/agentworks/commit/5d824568e32c28d3bf7d276fdeaa82a2ec3ba78f))
+* **guide:** unify mode ownership ([cb17875](https://github.com/WayfarerLabs/agentworks/commit/cb178751cf4634700e2894f8402ed129e6376213))
+* **guide:** use safe plugin verification topics ([11ed089](https://github.com/WayfarerLabs/agentworks/commit/11ed08900c56dacb126eeae7e0bf95357081708d))
+* **guide:** validate raw include path segments ([d8bb046](https://github.com/WayfarerLabs/agentworks/commit/d8bb046e2b93c3b5ae2d8a558b58a89324511518))
+* **guide:** validate shell directives during discovery ([0bf8b39](https://github.com/WayfarerLabs/agentworks/commit/0bf8b393d96fa320d521e1b679a05b2c03a2a400))
+* **guide:** verify installer plugin config ([2e1aa60](https://github.com/WayfarerLabs/agentworks/commit/2e1aa602d740a4607888f25d63754f655d7670b3))
+* **json:** restore the stdout write loop the deletion removed ([1e5a638](https://github.com/WayfarerLabs/agentworks/commit/1e5a638213dd2c77d244997c79af7573104b7ea6))
+* **packaging:** keep initial plugin version ([475c63f](https://github.com/WayfarerLabs/agentworks/commit/475c63fc9864f3f2b8c6e350abfde455d97319d0))
+* **plugins:** close installer review gaps ([7d49bf6](https://github.com/WayfarerLabs/agentworks/commit/7d49bf62144ec6830fb48cf14d2b8ad5db882c9a))
+* **plugins:** refuse an impl whose config_for is not callable ([1f0a81e](https://github.com/WayfarerLabs/agentworks/commit/1f0a81e9041afa34d56c2dae27ea542c05b45ccb))
+* **plugins:** tighten Grok integration contracts ([92b81b0](https://github.com/WayfarerLabs/agentworks/commit/92b81b0332115846444d3fe1dbe9729125918c87))
+* **secrets:** check interaction at preview's two published entry points ([9892610](https://github.com/WayfarerLabs/agentworks/commit/9892610d6cbf6b7537c98b1eb0c4e5ba492fbd25))
+* **secrets:** check interaction where no policy can escape the check ([29c75f0](https://github.com/WayfarerLabs/agentworks/commit/29c75f0f033e6e18e70199f77068a17c7e39e554))
+* **secrets:** check the policy where rejection still costs nothing ([ca4778f](https://github.com/WayfarerLabs/agentworks/commit/ca4778f4f753f9d92f8c3fd79d852da06b7ca49e))
+* **secrets:** restore the source scrubs; the premise for deleting them was false ([cc7dc99](https://github.com/WayfarerLabs/agentworks/commit/cc7dc99108501770d8aa79990cde05516a94c5a3))
+* **secrets:** screen the readiness reason; sink escaping cannot reach it ([fbdeec8](https://github.com/WayfarerLabs/agentworks/commit/fbdeec892f40a174e989c74e99768e7c5d2d72ad))
+* **secrets:** validate interaction at the published service boundary ([9fab9e3](https://github.com/WayfarerLabs/agentworks/commit/9fab9e37016dc02fa8363c7eff42f43f2da80374))
+
+
+### Documentation
+
+* **capabilities:** drop a reserved field and correct two claims ([b1f366f](https://github.com/WayfarerLabs/agentworks/commit/b1f366f1ce91d192d24bd70b2817022ee7be581a))
+* clarify workstation and workload placement ([972c391](https://github.com/WayfarerLabs/agentworks/commit/972c39157c0967764d949793dfbf7a7bcedd7990))
+* clarify workstation and workload placement ([aba556d](https://github.com/WayfarerLabs/agentworks/commit/aba556d18640b224196661bc996298223cbdce03))
+* **cli:** correct admin template usage ownership ([f3d62dc](https://github.com/WayfarerLabs/agentworks/commit/f3d62dc765eaa8bedf588066b475398d81786e45))
+* **cli:** correct declaration trust boundary ([c418ee6](https://github.com/WayfarerLabs/agentworks/commit/c418ee6b0993ce4cf0bd66801511931f0f3709e3))
+* **cli:** correct resource surface ownership ([4ed1ad4](https://github.com/WayfarerLabs/agentworks/commit/4ed1ad4d829ef8370496c966fb6888e8c79b2e58))
+* **codex:** clarify config precedence ([0dd676a](https://github.com/WayfarerLabs/agentworks/commit/0dd676ad5155e69822e2f9b41eabf7d81d4aea4f))
+* **codex:** consolidate extra args contract ([d78edca](https://github.com/WayfarerLabs/agentworks/commit/d78edca78a3e16de290a43cbbe39cc1222017a1e))
+* **codex:** consolidate extra args contract ([afa6135](https://github.com/WayfarerLabs/agentworks/commit/afa613523108370727054d41db8fcaee958e6d72))
+* **guide:** align concept voice and authoring ([c5e9ab2](https://github.com/WayfarerLabs/agentworks/commit/c5e9ab2bb753e6d4095d0eca7880a8bebe003881))
+* **guide:** align review boundaries ([f30566a](https://github.com/WayfarerLabs/agentworks/commit/f30566a915fc99637aa41828a872b97c01988a48))
+* **guide:** correct removed-topic signposts ([fa06c87](https://github.com/WayfarerLabs/agentworks/commit/fa06c8749e70bea4d8bd5d5b810771f41c71236d))
+* **guide:** describe markdown shell ownership ([908ee68](https://github.com/WayfarerLabs/agentworks/commit/908ee6816b6bd4bb504a2e2e76c592bf7222fe2c))
+* **guide:** distinguish guidance from authority ([7c7453d](https://github.com/WayfarerLabs/agentworks/commit/7c7453d999e43b9d78b2c5769b6fe60c0fdd50e0))
+* **guide:** record index delivery ([20f6930](https://github.com/WayfarerLabs/agentworks/commit/20f69307d5e33091c32d91a056fecb3f119a03f3))
+* **guide:** sharpen assistant and troubleshooting topics ([a98c1ac](https://github.com/WayfarerLabs/agentworks/commit/a98c1ac1f0c7e30150d7f7f3ccac42828a52ed06))
+* **guide:** sharpen core concept teaching ([52a17d8](https://github.com/WayfarerLabs/agentworks/commit/52a17d866bd29be2fe41908b66aa6f00507d7e1a))
+* **guide:** teach focused resource inspection ([763b0e0](https://github.com/WayfarerLabs/agentworks/commit/763b0e0e352392c63ca6dd642137115f52639a75))
+* **guide:** teach focused resource inspection ([10dca6e](https://github.com/WayfarerLabs/agentworks/commit/10dca6e2d335fb74e9f80a5027a5847112e1e5a2))
+* **plugins:** clarify disabled plugin publication ([cdff477](https://github.com/WayfarerLabs/agentworks/commit/cdff4773283c61d413ea88ba43e050cd65db28cf))
+* **plugins:** correct installer manifest ownership ([811baf3](https://github.com/WayfarerLabs/agentworks/commit/811baf35d875eea0e1e2b02a7cad6ec79ba215bf))
+* **rules:** finish the two loose ends the rule merge left ([51df926](https://github.com/WayfarerLabs/agentworks/commit/51df926bd0cfeb0df823b1ade8872bf3cd4a586b))
+* **rules:** fix the review findings on the merged rule and its README ([0f4e2bf](https://github.com/WayfarerLabs/agentworks/commit/0f4e2bfc4c6c159adf7fe233b417506167831051))
+* **rules:** merge the five collateral-sync rules into one ([6b86d59](https://github.com/WayfarerLabs/agentworks/commit/6b86d59cce756bdf48b55c04380699188bc1b3af))
+* **rules:** wave 2 rule subtraction; seventeen rules become ten ([c528df5](https://github.com/WayfarerLabs/agentworks/commit/c528df51798fbb3cfccf1a7548262f89f35e97e5))
+* **secrets:** name the boundary the surviving registration checks guard ([3e600b2](https://github.com/WayfarerLabs/agentworks/commit/3e600b290755d7f8dc9ab003b42f333e82052eee))
+* **secrets:** one reason per site, and the em dashes go with it ([457f550](https://github.com/WayfarerLabs/agentworks/commit/457f5506d49445c42969eca7729a8f6f07907e13))
+
 ## [0.13.0](https://github.com/WayfarerLabs/agentworks/compare/v0.12.0...v0.13.0) (2026-08-04)
 
 
