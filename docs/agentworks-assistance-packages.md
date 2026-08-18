@@ -86,6 +86,6 @@ python3 scripts/generate-agentworks-package.py --check
 ```
 
 The generator writes changed files atomically, validates the exact package inventory, and updates
-only the marked README region. A change to an installed generated artifact after the package ships
-requires a package version bump in `metadata.json`; the package version is independent of the CLI
-version.
+only the marked README region. Keep the package at `1.0.0` until its first compatible CLI release.
+After the package ships, a change to an installed generated artifact requires a package version bump
+in `metadata.json`; the package version is independent of the CLI version.

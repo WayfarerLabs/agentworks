@@ -13,6 +13,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
+RELEASE_MANIFEST = Path(".release-please-manifest.json")
 SCRIPT = ROOT / "scripts/generate-agentworks-package.py"
 SPEC = importlib.util.spec_from_file_location("agentworks_package_generator", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
@@ -206,6 +207,12 @@ def _is_strict_version_bump(*, current: str, previous: str) -> bool:
     return current_parts > previous_parts
 
 
+def _package_has_shipped(*, released_cli: str, minimum_cli: str) -> bool:
+    released_parts = tuple(int(part) for part in released_cli.split("."))
+    minimum_parts = tuple(int(part) for part in minimum_cli.split("."))
+    return released_parts >= minimum_parts
+
+
 def test_missing_fingerprint_base_can_skip_only_outside_github_actions() -> None:
     assert _missing_base_policy(github_actions=False) == "skip"
     assert _missing_base_policy(github_actions=True) == "fail"
@@ -225,7 +232,19 @@ def test_package_version_bump_is_strictly_increasing(current: str, previous: str
     assert _is_strict_version_bump(current=current, previous=previous) is expected
 
 
-def test_changed_package_fingerprint_requires_package_version_bump() -> None:
+@pytest.mark.parametrize(
+    ("released_cli", "minimum_cli", "expected"),
+    [
+        ("0.13.9", "0.14.0", False),
+        ("0.14.0", "0.14.0", True),
+        ("0.15.0", "0.14.0", True),
+    ],
+)
+def test_package_ship_boundary_follows_cli_compatibility(released_cli: str, minimum_cli: str, expected: bool) -> None:
+    assert _package_has_shipped(released_cli=released_cli, minimum_cli=minimum_cli) is expected
+
+
+def test_changed_shipped_package_fingerprint_requires_version_bump() -> None:
     configured_base = os.environ.get("AGENTWORKS_PACKAGE_BASE_REF", "origin/main")
     base_check = _git("rev-parse", "--verify", configured_base, check=False)
     if base_check.returncode != 0:
@@ -240,6 +259,13 @@ def test_changed_package_fingerprint_requires_package_version_bump() -> None:
         return
 
     old_metadata = json.loads(old_metadata_result.stdout)
+    old_release_result = _git("show", f"{merge_base}:{RELEASE_MANIFEST}", check=False)
+    assert old_release_result.returncode == 0, "baseline release manifest is unavailable"
+    old_releases = json.loads(old_release_result.stdout)
+    if not _package_has_shipped(released_cli=old_releases["cli"], minimum_cli=old_metadata["minimumCliVersion"]):
+        assert current_metadata["packageVersion"] == "1.0.0"
+        return
+
     old_blobs: dict[Path, bytes] = {}
     for path in generator.PLUGIN_OUTPUTS:
         result = _git("show", f"{merge_base}:{path}", check=False)

@@ -6,7 +6,7 @@ description: >-
 compatibility: >-
   Requires Python 3.12 or newer and network access only when installing or updating the CLI.
 metadata:
-  agentworks-package-version: "1.0.2"
+  agentworks-package-version: "1.0.0"
   agentworks-min-cli-version: "0.14.0"
 ---
 
