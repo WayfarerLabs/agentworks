@@ -1,6 +1,6 @@
 # Resource Show: Functional Requirements
 
-- Status: Complete
+- Status: Reopened for machine-output safety correction
 - Date: 2026-08-17
 - Parent saga: `docs/sdd/2026-08-04-next-steps/`
 - Successor to: `docs/sdd/2026-08-10-cli-grammar/`
@@ -145,7 +145,8 @@ resource.
   live usage, and declaration have been assembled; normal human loader advisories may precede it.
 - **FR29.** Both renderers shall preserve terminal-control safety. Interpolated human scalar facts
   cannot inject sibling lines, and the structured declaration block shall remain parseable after
-  safe encoding.
+  safe encoding. JSON shall escape characters in Unicode categories `Cc`, `Cf`, `Cs`, `Zl`, and `Zp`
+  before UTF-8 encoding while retaining ordinary Unicode and the original parsed string value.
 
 ### Ownership and collateral
 
@@ -156,9 +157,11 @@ resource.
   while consuming shared focused fact producers where needed for consistency.
 - **FR32.** Bash, zsh, and PowerShell completion shall offer registry identities for `REF` through
   the existing `resource_refs` source.
-- **FR33.** Help, machine-output docs, command reference, CLI overview, installed management guide,
-  resource guide, and the 0.14 upgrade map shall teach the focused-superset model in the same
-  change. Historical and locked predecessor artifacts remain unchanged.
+- **FR33.** Help, machine-output docs, command reference, CLI overview, resource guide, and the 0.14
+  upgrade map shall teach the focused-superset model in the same change. The separately owned
+  installed guide-content rewrite shall absorb `resource show` only after this command lands; this
+  branch carries no guide-content delta. Historical and locked predecessor artifacts remain
+  unchanged.
 
 ## Quality requirements
 

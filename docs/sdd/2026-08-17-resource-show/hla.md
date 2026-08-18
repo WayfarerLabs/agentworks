@@ -1,6 +1,6 @@
 # Resource Show: High-Level Architecture
 
-- Status: Complete
+- Status: Reopened for machine-output safety correction
 - Date: 2026-08-17
 - Implements: `frd.md`
 - Code basis: `origin/main` at `217930fd`
@@ -246,8 +246,14 @@ lines may be deduplicated for readability, but JSON retains the authoritative ed
 Every interpolated fact-line scalar in both resource and graph human output passes through one
 shared line-safe filter that removes terminal controls, format/surrogate categories, and Unicode
 line/paragraph separators. Declaration YAML relies on ASCII-only safe encoding, remains parseable,
-and round-trips without a redundant post-encoding sanitizer. JSON assembly and encoding remain
-atomic.
+and round-trips without a redundant post-encoding sanitizer.
+
+The shared machine-output encoder applies the analogous JSON-safe policy to the complete serialized
+document before UTF-8 encoding. Characters in Unicode categories `Cc`, `Cf`, `Cs`, `Zl`, and `Zp`
+are replaced with the escape spelling produced by JSON's own ASCII encoder for that character;
+ordinary Unicode stays unescaped. This handles lone surrogates and astral unsafe code points without
+hand-built escape arithmetic, preserves the exact value after JSON parsing, and keeps assembly and
+encoding atomic for every machine-output command rather than protecting only declaration fields.
 
 ### A7. Keep CLI lifecycle conventional
 
@@ -278,6 +284,9 @@ secret resolution, authenticated runup, provider mutation, and prompting are nev
 Existing declaration, category, disabled/readiness, JSON, completion, typed-error, and terminal
 safety coverage remains. CLI tests assert human warning flags are true, JSON warning flags false,
 machine output is atomic, and the state database is opened only through the read-only live source.
+Shared encoder tests pin every unsafe Unicode category, parsed-value round-trip, ordinary-Unicode
+retention, and empty-stream failure behavior. A real resource manifest test reaches the
+`resource.show` writer with hostile declaration text so the originally reported path cannot regress.
 
 ## Rejected alternatives
 

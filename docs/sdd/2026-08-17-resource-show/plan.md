@@ -1,6 +1,6 @@
 # Resource Show: Implementation Plan
 
-- Status: Complete
+- Status: Reopened for machine-output safety correction
 - Date: 2026-08-18
 - Requirements: `frd.md`
 - Architecture: `hla.md`
@@ -189,12 +189,40 @@ independent fresh-eyes reviews found no remaining Critical or Important issue af
 model-ownership wording correction. Fresh isolated-HOME acceptance passed the real CLI parity,
 graph, declaration, JSON, secret-safety, Unicode-safety, and cleanup crux with no product finding.
 
+## Phase 7: machine-output Unicode correction
+
+After the operator supplied merge intent, exact installed-wheel testing found that a valid manifest
+string containing a lone surrogate crashed `resource show --output json` during UTF-8 encoding and
+that Unicode format and line controls remained active bytes in JSON output. The operator directed a
+bounded shared-encoder correction and separately directed this branch to relinquish all installed
+guide-content edits to the guide effort that will follow after `resource show` lands.
+
+- [x] Rebase onto current `main`, preserve its rewritten guide content, and prove this branch has no
+      diff under `cli/agentworks/guide/guide-content/`.
+- [ ] Extend the shared JSON encoder to escape every `Cc`, `Cf`, `Cs`, `Zl`, and `Zp` character with
+      JSON's own ASCII escape spelling before UTF-8 encoding, retaining ordinary Unicode and parsed
+      values without changing the v1 schema.
+- [ ] Add structural shared-encoder coverage and an end-to-end `resource show --output json`
+      manifest regression for the reported surrogate, format-control, and separator path.
+- [ ] Update permanent machine-output collateral and this in-flight SDD without editing the separate
+      installed guide-content surface or saga-owned artifacts.
+- [ ] Run focused/full tests, Ruff, format, strict mypy, repository guards, equal-tier review, and
+      isolated-HOME real-CLI acceptance against the exact rebased head.
+- [ ] Restore the final lock, publish the complete handoff and review disposition, and set the PR
+      ready again only after every corrective check is green.
+
+Definition of done: every JSON v1 command has one atomic terminal-safe UTF-8 encoding boundary,
+`resource show` succeeds on the tester's exact hostile-manifest class with semantically identical
+parsed data, ordinary Unicode remains UTF-8, the installed guide-content diff is empty, and the
+exact final head is reviewed and green.
+
 ## Coordination and escalation
 
 - The active saga owns changes to its target-state artifacts. This PR carries `saga:next-steps` for
   visibility and does not edit saga-owned files.
-- The separate guide-command deletion effort owns redundant guide removal. This effort updates the
-  existing installed management topic but adds no guide route.
+- The separate guide effort owns the installed guide-content rewrite and its eventual
+  `resource show` teaching update. This effort carries no change under the installed guide-content
+  tree.
 - Stop for operator direction if focused parity requires authenticated runup, secret values, remote
   provider calls, mutation, transitive graph semantics, source-exact manifest retention, capability
   facets, or a compatibility alias.
