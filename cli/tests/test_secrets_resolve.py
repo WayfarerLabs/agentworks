@@ -7,6 +7,7 @@ from typing import ClassVar
 
 import pytest
 
+from agentworks.capabilities.secret_backend import InteractionChannel
 from agentworks.capabilities.secret_backend.client import (
     InteractionBroker,
     RemainingTime,
@@ -180,7 +181,9 @@ def test_not_ready_source_falls_through_without_construction() -> None:
 
 
 class _Interactive(_Second):
-    interactive: ClassVar[bool] = True
+    # Out-of-band is the generic interactive channel here: these tests cover
+    # consent gating, not terminal availability.
+    interaction_channel: ClassVar[InteractionChannel] = InteractionChannel.OUT_OF_BAND
 
 
 class _NeverAttempts(_Second):
@@ -201,7 +204,7 @@ def test_final_evidence_precedence_is_refused_then_soft_miss_then_not_ready() ->
         policy=_policy(partial=True),
         interaction_broker=None,
     )
-    assert refused.outcomes[0].detail is ResolutionDetail.INTERACTION_REFUSED
+    assert refused.outcomes[0].detail is ResolutionDetail.NON_INTERACTIVE_REFUSED
     assert refused.outcomes[0].source == "second"
 
     soft = resolve_batch(

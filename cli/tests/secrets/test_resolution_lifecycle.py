@@ -10,7 +10,7 @@ import pytest
 from pydantic import BaseModel
 
 from agentworks import output
-from agentworks.capabilities.secret_backend import SecretBackend
+from agentworks.capabilities.secret_backend import InteractionChannel, SecretBackend
 from agentworks.capabilities.secret_backend.client import (
     InteractionBroker,
     RemainingTime,
@@ -109,13 +109,13 @@ class _Context(AbstractContextManager[SecretSourceClient]):
 
 
 class _Backend(SecretBackend):
-    contract_version: ClassVar[int] = 2
+    contract_version: ClassVar[int] = 3
     config_model: ClassVar[type[AgwModel]] = _Config
     mapping_model: ClassVar[type[AgwRootModel[Any]]] = _Mapping
     name: ClassVar[str] = "fixture"
     description: ClassVar[str] = "fixture"
     prose = None
-    interactive: ClassVar[bool] = False
+    interaction_channel: ClassVar[InteractionChannel] = InteractionChannel.NONE
     events: ClassVar[list[str]] = []
     values: ClassVar[dict[str, str]] = {}
     failure: ClassVar[BaseException | None] = None
@@ -421,7 +421,7 @@ def test_exact_five_categories_and_exhaustive_detail_table() -> None:
     assert {category.value for category in ResolutionCategory} == {
         "resolved",
         "unavailable",
-        "refused-interaction",
+        "refused-non-interactive",
         "timeout",
         "resolution-failure",
     }

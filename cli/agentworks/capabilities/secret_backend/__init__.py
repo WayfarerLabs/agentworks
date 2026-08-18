@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from agentworks.capabilities.secret_backend.base import SECRET_BACKEND_REGISTRY, SecretBackend
+from agentworks.capabilities.secret_backend.base import (
+    SECRET_BACKEND_REGISTRY,
+    InteractionChannel,
+    SecretBackend,
+)
 from agentworks.capabilities.secret_backend.client import (
     InteractionBroker,
     RemainingTime,
@@ -31,6 +35,7 @@ __all__ = [
     "EnvVarMapping",
     "EnvVarSourceConfig",
     "InteractionBroker",
+    "InteractionChannel",
     "PromptBackend",
     "PromptMapping",
     "PromptSourceConfig",

@@ -5,12 +5,15 @@ from __future__ import annotations
 import concurrent.futures
 import contextlib
 import getpass
+import os
+import sys
 from typing import TYPE_CHECKING
 
 import pytest
 
 from agentworks import output
 from agentworks.output import Role
+from agentworks.output import terminal_prompt_available as _real_terminal_prompt_available
 
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
@@ -317,3 +320,58 @@ def test_default_handler_style_status_never_colorizes() -> None:
     handler = output._DefaultHandler()
     assert handler.style_status("[ok]", output.StatusStyle.GOOD) == "[ok]"
     assert handler.style_status("[FAIL]", output.StatusStyle.BAD) == "[FAIL]"
+
+
+# -- terminal_prompt_available: the ability probe --------------------------
+
+
+def test_terminal_prompt_available_short_circuits_on_tty_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A TTY stdin answers True without ever touching /dev/tty.
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(os, "open", lambda *a, **k: pytest.fail("must not probe /dev/tty with a TTY stdin"))
+    assert _real_terminal_prompt_available() is True
+
+
+def test_terminal_prompt_available_opens_and_closes_controlling_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Non-TTY stdin defers to the controlling terminal, mirroring getpass's
+    # own fallback order. The probe must close the fd it opens rather than
+    # leaking it.
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(os, "name", "posix")
+    real_open = os.open
+    opened: list[int] = []
+    closed: list[int] = []
+
+    def _tty_open(path: str, flags: int, *args: int) -> int:
+        assert path == "/dev/tty"
+        fd = real_open(os.devnull, flags, *args)
+        opened.append(fd)
+        return fd
+
+    monkeypatch.setattr(os, "open", _tty_open)
+    monkeypatch.setattr(os, "close", lambda fd: closed.append(fd))
+
+    assert _real_terminal_prompt_available() is True
+    assert opened
+    assert closed == opened
+
+
+def test_terminal_prompt_available_false_when_no_controlling_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(os, "open", lambda *a, **k: (_ for _ in ()).throw(OSError("no controlling terminal")))
+    assert _real_terminal_prompt_available() is False
+
+
+def test_terminal_prompt_available_conservative_on_non_posix(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Piped stdin with an attached console is answered False on non-POSIX
+    # platforms even though getpass's msvcrt path could still serve it;
+    # a skipped source is accepted over a prompt that may misfire there.
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setattr(os, "open", lambda *a, **k: pytest.fail("must not probe /dev/tty on non-POSIX"))
+    assert _real_terminal_prompt_available() is False

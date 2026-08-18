@@ -581,6 +581,7 @@ def test_secret_describe_json_preserves_nulls_and_source_order(monkeypatch) -> N
             source="work-op",
             identifier="op://Work/token",
             skipped_not_ready=(SkippedSource("prompt-fallback", "source unavailable"),),
+            skipped_no_terminal=(),
         ),
     )
     monkeypatch.setattr(config, "load_config", lambda **_kwargs: object())

@@ -121,3 +121,19 @@ def test_prompt_secret_also_converts_vendored_abort_to_user_abort(monkeypatch: p
         TyperHandler().prompt_secret("Token", level=0)
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
+
+
+def test_prompt_secret_refuses_without_a_terminal_instead_of_reading_stdin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Without a terminal, click.prompt(hide_input=True) falls back to
+    # reading stdin directly, which hangs on an open, silent pipe. This is
+    # the last-resort backstop: the resolver already skips a terminal-channel
+    # source when no terminal is available, so reaching this site means a
+    # caller prompted anyway, and it must refuse before any prompt function
+    # runs rather than risk the hang.
+    monkeypatch.setattr("agentworks.output.terminal_prompt_available", lambda: False)
+    monkeypatch.setattr(click, "prompt", lambda *_a, **_k: pytest.fail("must not prompt without a terminal"))
+    with pytest.raises(UserAbort) as caught:
+        TyperHandler().prompt_secret("Token", level=0)
+    assert caught.value.__cause__ is None

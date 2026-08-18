@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 class ResolutionCategory(StrEnum):
     RESOLVED = "resolved"
     UNAVAILABLE = "unavailable"
-    REFUSED_INTERACTION = "refused-interaction"
+    REFUSED_NON_INTERACTIVE = "refused-non-interactive"
     TIMEOUT = "timeout"
     RESOLUTION_FAILURE = "resolution-failure"
 
@@ -35,7 +35,8 @@ class ResolutionDetail(StrEnum):
     SOURCE_NOT_READY = "source-not-ready"
     SOURCE_BACKEND_PLUGIN_DISABLED = "source-backend-plugin-disabled"
     SOFT_MISS = "soft-miss"
-    INTERACTION_REFUSED = "interaction-refused"
+    NON_INTERACTIVE_REFUSED = "non-interactive-refused"
+    TERMINAL_UNAVAILABLE = "terminal-unavailable"
     BATCH_DOOMED = "batch-doomed-before-interaction"
     DEADLINE_EXCEEDED = "deadline-exceeded"
     HARD_MAPPING = "hard-mapping"
@@ -52,7 +53,8 @@ class ResolutionRemediation(StrEnum):
     CONFIGURE_SOURCE = "configure-source"
     ENABLE_SOURCE = "enable-source"
     ENABLE_PLUGIN = "enable-plugin"
-    ALLOW_INTERACTION = "allow-interaction"
+    REMOVE_NON_INTERACTIVE = "remove-non-interactive"
+    USE_TERMINAL = "use-terminal"
     RESOLVE_BLOCKING_SECRETS = "resolve-blocking-secrets"
     CHECK_MAPPING = "check-mapping"
     SIGN_IN = "sign-in"
@@ -95,8 +97,16 @@ OUTCOME_RULES: dict[ResolutionDetail, OutcomeRule] = {
     ResolutionDetail.SOFT_MISS: (
         OutcomeRule(ResolutionCategory.UNAVAILABLE, ResolutionRemediation.CONFIGURE_SOURCE, True, True)
     ),
-    ResolutionDetail.INTERACTION_REFUSED: (
-        OutcomeRule(ResolutionCategory.REFUSED_INTERACTION, ResolutionRemediation.ALLOW_INTERACTION, True, True)
+    ResolutionDetail.NON_INTERACTIVE_REFUSED: (
+        OutcomeRule(
+            ResolutionCategory.REFUSED_NON_INTERACTIVE,
+            ResolutionRemediation.REMOVE_NON_INTERACTIVE,
+            True,
+            True,
+        )
+    ),
+    ResolutionDetail.TERMINAL_UNAVAILABLE: (
+        OutcomeRule(ResolutionCategory.UNAVAILABLE, ResolutionRemediation.USE_TERMINAL, True, True)
     ),
     ResolutionDetail.BATCH_DOOMED: (
         OutcomeRule(ResolutionCategory.UNAVAILABLE, ResolutionRemediation.RESOLVE_BLOCKING_SECRETS, False, False)

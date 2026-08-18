@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any, ClassVar, final
 
 from agentworks.capabilities.base import Capability, RunContext
@@ -21,6 +22,27 @@ if TYPE_CHECKING:
     from agentworks.schema import AgwModel, AgwRootModel
 
 
+class InteractionChannel(StrEnum):
+    """How a backend involves a human at resolution time, if at all.
+
+    A static declaration on each backend class, like ``config_model``; it is
+    a fact about the implementation, never configuration. Consumers branch by
+    identity (``is``), so these members are the only legitimate values.
+
+    - ``NONE``: resolution never blocks on a human (``env-var``).
+    - ``TERMINAL``: resolution collects input through this process's
+      terminal (``prompt``). Only attemptable where a terminal is actually
+      available; the resolver checks that fact per source.
+    - ``OUT_OF_BAND``: resolution may trigger an approval outside this
+      process, such as a biometric or re-auth prompt on the operator's
+      desktop (``onepassword``). It needs no terminal here.
+    """
+
+    NONE = "none"
+    TERMINAL = "terminal"
+    OUT_OF_BAND = "out-of-band"
+
+
 class SecretBackend(Capability):
     """One implementation kind from which configured sources create clients.
 
@@ -34,7 +56,7 @@ class SecretBackend(Capability):
     owner_kind: ClassVar[str] = "secret-source"
     config_model: ClassVar[type[AgwModel]]
     mapping_model: ClassVar[type[AgwRootModel[Any]]]
-    interactive: ClassVar[bool]
+    interaction_channel: ClassVar[InteractionChannel]
 
     @classmethod
     @abstractmethod

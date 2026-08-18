@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, TextIO
 import click
 import typer
 
+from agentworks import output as _output
 from agentworks.errors import UserAbort
 from agentworks.output import (
     Role,
@@ -212,6 +213,15 @@ class TyperHandler:
             raise UserAbort("interrupted") from None
 
     def prompt_secret(self, label: str, level: int, hint: str | None = None) -> str:
+        # Module-attribute read, not an import-time binding, so tests and the
+        # resolver's gate share one patchable source of the terminal fact.
+        if not _output.terminal_prompt_available():
+            # Last-resort backstop: the resolver already skips terminal-channel
+            # sources when no terminal is available, so reaching this means a
+            # caller prompted anyway. A hidden prompt without a terminal would
+            # read stdin, which hangs on an open, silent pipe; refuse instead.
+            typer.echo(f"{_pad(level)}Cannot prompt for a secret: no terminal is available.", err=True)
+            raise UserAbort("no terminal for a secret prompt")
         try:
             if hint:
                 # Hint renders one level deeper than the label so today's

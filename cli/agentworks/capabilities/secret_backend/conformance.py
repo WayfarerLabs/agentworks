@@ -54,9 +54,11 @@ def _secret_backend_conformance_error(impl: type[SecretBackend]) -> str | None:
     way ``resolve.py`` calls it. Return values and annotations are not
     re-checked, at registration or per call.
     """
-    interactive = getattr(impl, "interactive", None)
-    if type(interactive) is not bool:
-        return f"its interactive class attribute is {interactive!r}, not a bool"
+    from agentworks.capabilities.secret_backend.base import InteractionChannel
+
+    channel = getattr(impl, "interaction_channel", None)
+    if type(channel) is not InteractionChannel:
+        return f"its interaction_channel class attribute is {channel!r}, not an InteractionChannel member"
 
     for name, parameters in _OPERATION_CONTRACTS.items():
         error = _classmethod_conformance_error(impl, name=name, parameters=parameters)

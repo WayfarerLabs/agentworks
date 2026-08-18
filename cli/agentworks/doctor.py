@@ -251,12 +251,13 @@ def _secret_check(
     preview = preview_resolution(decl, sources)
     if preview.category is PreviewCategory.ATTEMPTABLE:
         return HealthCheck(label, Status.OK, f"would attempt via {preview.source}")
-    if preview.skipped_not_ready:
-        skipped = "; ".join(f"{source.source} ({source.reason})" for source in preview.skipped_not_ready)
+    skipped_sources = (*preview.skipped_not_ready, *preview.skipped_no_terminal)
+    if skipped_sources:
+        skipped = "; ".join(f"{source.source} ({source.reason})" for source in skipped_sources)
         return HealthCheck(
             label,
             Status.WARN,
-            f"not attemptable through any active source; not ready: {skipped}",
+            f"not attemptable through any active source; skipped: {skipped}",
         )
     return HealthCheck(label, Status.WARN, "not attemptable through any active source")
 

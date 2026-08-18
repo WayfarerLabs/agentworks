@@ -8,9 +8,8 @@ import typer
 
 from agentworks import output
 from agentworks.cli._app import app
-from agentworks.cli._helpers import get_db
+from agentworks.cli._helpers import get_db, ordinary_interaction_policy
 from agentworks.machine_output import OutputFormat
-from agentworks.secrets.policy import InteractionPolicy
 
 secret_app = typer.Typer(
     name="secret",
@@ -127,19 +126,21 @@ def secret_verify(
     allow_interaction: bool = typer.Option(
         False,
         "--allow-interaction",
-        help="Allow sources that may prompt, authenticate, or require operator presence.",
+        help="Deprecated no-op: interactive sources are allowed by default; use --non-interactive to refuse them.",
     ),
 ) -> None:
     """Prove that declared secrets resolve without displaying their values."""
-    interaction = InteractionPolicy.ALLOW if allow_interaction else InteractionPolicy.REFUSE
+    interaction = ordinary_interaction_policy()
     from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
-    from agentworks.errors import ValidationError
     from agentworks.secrets.outcomes import ResolutionCategory
     from agentworks.secrets.verification import render_verification, verify_secrets
 
-    if allow_interaction and output.non_interactive():
-        raise ValidationError("--allow-interaction cannot be used with --non-interactive")
+    if allow_interaction and not output.deprecations_suppressed():
+        output.warn(
+            "secret verify: --allow-interaction is deprecated and has no effect; "
+            "interactive sources are allowed by default, use --non-interactive to refuse them"
+        )
     config = load_config()
     registry = load_request_registry(config)
     outcomes = verify_secrets(config, registry, names, interaction=interaction)

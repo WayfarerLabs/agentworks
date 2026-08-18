@@ -77,7 +77,11 @@ def _backend_readiness(name: str, impl: Any) -> Readiness:
 
 SECRET_BACKEND_DESCRIPTOR = CapabilityKindDescriptor(
     kind="secret-backend",
-    contract_version=2,
+    # v3: `interactive: bool` became `interaction_channel: InteractionChannel`
+    # (none / terminal / out-of-band), so the resolver can gate terminal
+    # prompting on terminal availability while out-of-band approval needs
+    # consent only.
+    contract_version=3,
     implementation_contract=SecretBackend,
     registry=_backend_registry,
     required_operations=frozenset(
@@ -88,7 +92,7 @@ SECRET_BACKEND_DESCRIPTOR = CapabilityKindDescriptor(
             "create_client",
         },
     ),
-    required_attributes=frozenset({"interactive", "config_model", "mapping_model"}),
+    required_attributes=frozenset({"interaction_channel", "config_model", "mapping_model"}),
     entry_factory=_backend_entry,
     readiness=_backend_readiness,
     publisher_source="agentworks.capabilities.secret_backend",

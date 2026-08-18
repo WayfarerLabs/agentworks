@@ -60,8 +60,8 @@ def test_refusal_constructs_nothing_and_records_typed_outcome() -> None:
         interaction_broker=broker,
     )
     assert broker.names == []
-    assert batch.outcomes[0].category is ResolutionCategory.REFUSED_INTERACTION
-    assert batch.outcomes[0].detail is ResolutionDetail.INTERACTION_REFUSED
+    assert batch.outcomes[0].category is ResolutionCategory.REFUSED_NON_INTERACTIVE
+    assert batch.outcomes[0].detail is ResolutionDetail.NON_INTERACTIVE_REFUSED
 
 
 def test_false_mapping_opts_out_before_broker() -> None:
@@ -90,7 +90,10 @@ def test_allowed_prompt_without_broker_is_state_error() -> None:
         )
 
 
-def test_prompt_uses_no_tty_or_global_interactivity_read(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_prompt_uses_no_global_consent_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The typed core takes consent only through the policy it was handed; the
+    # terminal FACT (terminal_prompt_available, pinned by the autouse fixture)
+    # is the one process read the resolver legitimately makes.
     monkeypatch.setattr(output, "is_interactive", lambda: pytest.fail("typed core read global TTY state"))
     monkeypatch.setattr(output, "non_interactive", lambda: pytest.fail("typed core read global policy"))
     broker = _Broker()

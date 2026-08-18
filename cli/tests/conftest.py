@@ -854,3 +854,18 @@ def _isolated_database(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     their own path and are unaffected.
     """
     monkeypatch.setattr("agentworks.db.DB_PATH", tmp_path / "isolated-test.db")
+
+
+@pytest.fixture(autouse=True)
+def _terminal_prompt_pinned_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The default test world has a terminal available for secret prompts.
+
+    ``output.terminal_prompt_available()`` probes the real process (stdin
+    TTY-ness, /dev/tty), which varies between a dev shell and CI, so leaving
+    it live would make any test that walks the secret source chain mean
+    different things in different environments. Tests that exercise the
+    no-terminal behavior monkeypatch the same attribute to False; tests of
+    the probe itself bind the real function at import time, which this
+    per-test patch does not touch.
+    """
+    monkeypatch.setattr("agentworks.output.terminal_prompt_available", lambda: True)

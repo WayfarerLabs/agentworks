@@ -171,17 +171,14 @@ def test_sweep_fails_fast_non_interactively_on_a_prompt_only_secret(
     """Issue #202, re-pinned at the sweep. A secret only the prompt
     source could supply, under ``--non-interactive``: the sweep refuses
     before any prompt or mutation rather than letting the command reach
-    a resolve-end failure. Interactive, the same graph passes and the
-    value check defers to resolve time.
+    a resolve-end failure. With consent and a terminal, the same graph
+    passes and the value check defers to resolve time.
     """
-    from agentworks import output
-
     config, registry, nodes = _site_graph(tmp_path, '"prompt"')
     monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN", raising=False)
 
-    monkeypatch.setattr(output, "is_interactive", lambda: False)
     with pytest.raises(ConfigError, match="not attemptable by any active source"):
         preflight_all(nodes, RunContext(config=config), registry=registry, interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(output, "is_interactive", lambda: True)
+    monkeypatch.setattr("agentworks.output.terminal_prompt_available", lambda: True)
     preflight_all(nodes, RunContext(config=config), registry=registry, interaction=InteractionPolicy.ALLOW)  # type: ignore[arg-type]

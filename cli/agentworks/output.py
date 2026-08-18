@@ -44,6 +44,7 @@ terminal handler and only on an interactive TTY (suppressed under
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 from contextlib import contextmanager
@@ -624,6 +625,34 @@ def non_interactive() -> bool:
     stdin; color depends only on the flag and the output stream.
     """
     return _non_interactive
+
+
+def terminal_prompt_available() -> bool:
+    """Whether a terminal prompt can reach a real terminal.
+
+    A fact about the process, not a policy: consent to block on a human is
+    the --non-interactive switch's job. Mirrors getpass's fallback order: a
+    hidden prompt reads the controlling terminal when one can be opened, and
+    falls back to reading stdin otherwise. That fallback would block forever
+    on an open, silent stdin pipe, so callers treat "no terminal" as
+    unattemptable (the secret resolver skips terminal-channel sources; the
+    prompt handler refuses) instead of ever reading a non-terminal stdin.
+
+    The /dev/tty probe is POSIX-only. On Windows this deliberately answers
+    from stdin's own TTY-ness alone, which refuses the piped-stdin case even
+    when an attached console could serve getpass's msvcrt path: a skipped
+    source in that corner is accepted over a prompt that may misfire.
+    """
+    if sys.stdin.isatty():
+        return True
+    if os.name != "posix":
+        return False
+    try:
+        fd = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
+    except OSError:
+        return False
+    os.close(fd)
+    return True
 
 
 _suppress_deprecations: bool = False

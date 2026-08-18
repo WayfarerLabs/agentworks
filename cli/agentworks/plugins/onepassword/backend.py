@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, NoReturn
 
 from pydantic import AfterValidator, BaseModel, Field
 
-from agentworks.capabilities.secret_backend.base import SecretBackend
+from agentworks.capabilities.secret_backend.base import InteractionChannel, SecretBackend
 from agentworks.capabilities.secret_backend.client import (
     InteractionBroker,
     RemainingTime,
@@ -252,7 +252,7 @@ class OnePasswordBackend(SecretBackend):
     leave the subprocess boundary. Raw output never reaches the typed core.
     """
 
-    contract_version: ClassVar[int] = 2
+    contract_version: ClassVar[int] = 3
     config_model: ClassVar[type[AgwModel]] = OnePasswordSourceConfig
     mapping_model: ClassVar[type[AgwRootModel[Any]]] = OnePasswordMapping
     name: ClassVar[str] = "onepassword"
@@ -277,19 +277,19 @@ class OnePasswordBackend(SecretBackend):
         """,
     )
 
-    # interactive = True: resolving a onepassword secret may involve
-    # operator interaction, because `op read` can trigger a biometric or
-    # re-auth prompt. That is the same property the prompt backend has (it
-    # asks the operator for the value), so onepassword carries the flag for
-    # the same reason, not as a special case.
+    # OUT_OF_BAND: `op read` can trigger a biometric or re-auth prompt, but
+    # that approval happens on the operator's desktop, outside this process,
+    # so resolution needs no terminal here. Under --non-interactive the
+    # resolver refuses this source, which is the explicit fast-fail for
+    # unattended runs.
     #
-    # The practical effect: preview_resolution never probes this backend
-    # (probing would fire the biometric at every preflight and once per
-    # secret in `agw doctor`); it reports onepassword optimistically on
-    # would_attempt alone. A non-interactive transport that authenticates
-    # without a human (1Password Connect, a service account; not built
-    # here) would not be interactive.
-    interactive: ClassVar[bool] = True
+    # The practical effect otherwise: preview_resolution never probes this
+    # backend (probing would fire the biometric at every preflight and once
+    # per secret in `agw doctor`); it reports onepassword optimistically on
+    # would_attempt alone. A transport that authenticates without a human
+    # (1Password Connect, a service account; not built here) would declare
+    # InteractionChannel.NONE.
+    interaction_channel: ClassVar[InteractionChannel] = InteractionChannel.OUT_OF_BAND
 
     @classmethod
     def backend_readiness(cls) -> Readiness:

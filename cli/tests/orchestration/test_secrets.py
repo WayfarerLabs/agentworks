@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 import pytest
 
+from agentworks.capabilities.secret_backend import InteractionChannel
 from agentworks.errors import ConfigError, StateError
 from agentworks.naming import MAX_FREEFORM_NAME_LENGTH, validate_name
 from agentworks.orchestration.secrets import (
@@ -124,11 +125,11 @@ class _FakeSource:
         self,
         name: str,
         values: dict[str, str] | None = None,
-        interactive: bool = False,
+        channel: InteractionChannel = InteractionChannel.NONE,
         not_ready_reason: str | None = None,
     ) -> None:
         self.name = name
-        self.interactive = interactive
+        self.channel = channel
         self._values = values or {}
         self.resolve_calls: list[list[str]] = []
         # ActiveSource carries its stored readiness verdict; preview_resolution
@@ -182,13 +183,13 @@ def _sources(*source_states: _FakeSource) -> list[ActiveSource]:
 
         class _PredictionBackend(SecretBackend):
             _state: ClassVar[_FakeSource] = state
-            contract_version: ClassVar[int] = 2
+            contract_version: ClassVar[int] = 3
             config_model: ClassVar[type[AgwModel]] = _PredictionConfig
             mapping_model: ClassVar[type[AgwRootModel[Any]]] = _PredictionMapping
             name: ClassVar[str] = "prediction"
             description: ClassVar[str] = "prediction fixture"
             prose = None
-            interactive: ClassVar[bool] = state.interactive
+            interaction_channel: ClassVar[InteractionChannel] = state.channel
 
             @classmethod
             def backend_readiness(cls) -> Readiness:
@@ -254,39 +255,62 @@ def test_prediction_none_when_nothing_would_resolve() -> None:
     assert preview == {}
 
 
-def test_interactive_source_predicted_resolvable_when_interactive(
+def test_terminal_source_predicted_resolvable_with_a_terminal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A prompt source reports resolvable without probing (probing would BE
-    the prompt) WHEN interactive input is available this run."""
-    from agentworks import output
-
-    monkeypatch.setattr(output, "is_interactive", lambda: True)
-    prompt = _FakeSource("prompt", interactive=True)
+    the prompt) when a terminal is available to this process."""
+    monkeypatch.setattr("agentworks.output.terminal_prompt_available", lambda: True)
+    prompt = _FakeSource("prompt", channel=InteractionChannel.TERMINAL)
     preview = predict_resolution([_decl("a")], _sources(prompt), interaction=InteractionPolicy.ALLOW)["a"]
     assert preview.category is PreviewCategory.ATTEMPTABLE
     assert preview.source == "prompt"
     assert prompt.resolve_calls == []
 
 
-def test_interactive_source_predicted_unresolvable_when_non_interactive(
+def test_interactive_source_predicted_unresolvable_under_non_interactive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Under --non-interactive / no TTY the prompt source's backend no-ops
-    at resolve time, so preflight prediction must call a prompt-only secret
+    """Under --non-interactive an interactive source's backend no-ops at
+    resolve time, so preflight prediction must call a prompt-only secret
     unresolvable and fail fast (issue #202), still without probing."""
-    from agentworks import output
-
-    monkeypatch.setattr(output, "is_interactive", lambda: False)
-    prompt = _FakeSource("prompt", interactive=True)
+    monkeypatch.setattr("agentworks.output.terminal_prompt_available", lambda: True)
+    prompt = _FakeSource("prompt", channel=InteractionChannel.TERMINAL)
     preview = predict_resolution([_decl("a")], _sources(prompt), interaction=InteractionPolicy.REFUSE)["a"]
-    assert preview.category is PreviewCategory.REFUSED_INTERACTION
+    assert preview.category is PreviewCategory.REFUSED_NON_INTERACTIVE
     assert preview.source == "prompt"
     assert prompt.resolve_calls == []
 
 
+def test_terminal_source_predicted_skipped_without_a_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without a terminal a prompt source cannot take a turn even under
+    ALLOW; the walk records the skip and falls through."""
+    monkeypatch.setattr("agentworks.output.terminal_prompt_available", lambda: False)
+    prompt = _FakeSource("prompt", channel=InteractionChannel.TERMINAL)
+    preview = predict_resolution([_decl("a")], _sources(prompt), interaction=InteractionPolicy.ALLOW)["a"]
+    assert preview.category is PreviewCategory.UNAVAILABLE
+    assert len(preview.skipped_no_terminal) == 1
+    assert preview.skipped_no_terminal[0].source == "prompt"
+    assert prompt.resolve_calls == []
+
+
+def test_out_of_band_source_predicted_resolvable_without_a_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An out-of-band source needs consent only: its approval happens outside
+    this process, so a missing terminal does not unpredict it."""
+    monkeypatch.setattr("agentworks.output.terminal_prompt_available", lambda: False)
+    vault = _FakeSource("op", channel=InteractionChannel.OUT_OF_BAND)
+    preview = predict_resolution([_decl("a")], _sources(vault), interaction=InteractionPolicy.ALLOW)["a"]
+    assert preview.category is PreviewCategory.ATTEMPTABLE
+    assert preview.source == "op"
+    assert vault.resolve_calls == []
+
+
 def test_prediction_respects_source_opt_out() -> None:
-    prompt = _FakeSource("prompt", interactive=True)
+    prompt = _FakeSource("prompt", channel=InteractionChannel.TERMINAL)
     decl = _decl("a", backend_mappings={"prompt": False})
     preview = predict_resolution([decl], _sources(prompt), interaction=InteractionPolicy.REFUSE)["a"]
     assert preview.category is PreviewCategory.UNAVAILABLE
@@ -310,6 +334,7 @@ def test_preview_rows_reject_a_source_name_validate_name_accepts() -> None:
             source=forged,
             identifier=None,
             skipped_not_ready=(),
+            skipped_no_terminal=(),
         )
 
 
@@ -363,7 +388,7 @@ def test_operation_preview_rejects_a_non_enum_policy_before_walking_any_source()
     policy, so the constructor's totality never covers this call."""
     from agentworks.secrets.preview import preview_operation_resolution
 
-    prompt = _FakeSource("prompt", interactive=True)
+    prompt = _FakeSource("prompt", channel=InteractionChannel.TERMINAL)
     with pytest.raises(StateError):
         preview_operation_resolution(_decl("a"), _sources(prompt), interaction="refuse")  # type: ignore[arg-type]
     assert prompt.resolve_calls == []
@@ -409,17 +434,15 @@ def _env_and_prompt_setup(tmp_path: Path) -> tuple[Config, Registry]:
     return config, build_registry(config)
 
 
-def test_require_predicted_refs_prompt_only_passes_when_interactive(
+def test_require_predicted_refs_prompt_only_passes_with_a_terminal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """env-var unset, prompt in the chain, interactive input available:
-    the ref is predicted resolvable (via prompt), so preflight passes and
-    the value check defers to resolve time."""
-    from agentworks import output
-
+    """env-var unset, prompt in the chain, a terminal available: the ref is
+    predicted resolvable (via prompt), so preflight passes and the value
+    check defers to resolve time."""
     config, registry = _env_and_prompt_setup(tmp_path)
     monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN", raising=False)
-    monkeypatch.setattr(output, "is_interactive", lambda: True)
+    monkeypatch.setattr("agentworks.output.terminal_prompt_available", lambda: True)
     require_predicted_refs("vm-site/px", (_px_ref(),), config, registry, interaction=InteractionPolicy.ALLOW)
 
 
@@ -429,11 +452,8 @@ def test_require_predicted_refs_prompt_only_fails_fast_when_non_interactive(
     """Same setup under --non-interactive: prompt cannot resolve, so
     preflight prediction fails fast (issue #202) instead of deferring to a
     harmless resolve-end failure."""
-    from agentworks import output
-
     config, registry = _px_site_setup(tmp_path, '"prompt"')
     monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN", raising=False)
-    monkeypatch.setattr(output, "is_interactive", lambda: False)
     with pytest.raises(ConfigError, match="not attemptable by any active source"):
         require_predicted_refs("vm-site/px", (_px_ref(),), config, registry, interaction=InteractionPolicy.REFUSE)
 
@@ -459,7 +479,7 @@ def test_require_predicted_refs_refuses_with_owner_usage_framing(
         "vm-site/px: secret 'proxmox-token' (the Proxmox API token) is not attemptable by any active source"
     )
     assert exc.value.hint == (
-        "preview category: refused-interaction. Run `agw secret describe proxmox-token` for details."
+        "preview category: refused-non-interactive. Run `agw secret describe proxmox-token` for details."
     )
 
 
@@ -576,12 +596,10 @@ def test_require_declared_refs_says_nothing_about_resolvability(
     question, asked by the preflight sweep; a node asking it would make
     every resource that names a secret carry a verdict about the
     operator's source chain."""
-    from agentworks import output
     from agentworks.orchestration.secrets import require_declared_refs
 
     config, registry = _px_site_setup(tmp_path, '"prompt"')
     monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN", raising=False)
-    monkeypatch.setattr(output, "is_interactive", lambda: False)
 
     require_declared_refs("vm-site/px", (_px_ref(),), registry)  # no raise
     # ... while the prediction the SWEEP runs over the same reference does refuse.

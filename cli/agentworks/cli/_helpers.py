@@ -24,10 +24,17 @@ if TYPE_CHECKING:
 
 
 def ordinary_interaction_policy() -> InteractionPolicy:
-    """Derive ordinary-operation interaction authority at a CLI root."""
+    """Derive ordinary-operation interaction consent at a CLI root.
+
+    Consent is the operator's explicit switch alone: --non-interactive
+    refuses every source that may block on a human, and everything else
+    allows them. Whether a terminal-channel source can actually run is a
+    separate fact (``output.terminal_prompt_available``) that the resolver
+    applies per source; TTY-ness plays no part in consent.
+    """
     from agentworks import output
 
-    return InteractionPolicy.ALLOW if output.is_interactive() else InteractionPolicy.REFUSE
+    return InteractionPolicy.REFUSE if output.non_interactive() else InteractionPolicy.ALLOW
 
 
 def get_db() -> Database:

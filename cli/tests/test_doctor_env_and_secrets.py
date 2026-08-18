@@ -337,8 +337,7 @@ def test_check_secrets_flags_a_not_ready_only_source(tmp_path: Path, monkeypatch
     g = _check_secrets(config, build_registry(config))
     warns = [c for c in g.checks if c.status == Status.WARN]
     assert any(
-        "op-only" in c.name and "not ready" in (c.message or "") and "op CLI not installed" in (c.message or "")
-        for c in warns
+        "op-only" in c.name and "op CLI not installed" in (c.message or "") for c in warns
     ), [(c.name, c.message) for c in warns]
 
 

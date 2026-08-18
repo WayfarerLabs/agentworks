@@ -184,7 +184,7 @@ def test_nonempty_operational_lists_have_exact_ordered_json(monkeypatch: pytest.
         (["vm", "list", "--output", "json"], "vm.list", expected_vms),
         (["workspace", "list", "--output", "json"], "workspace.list", expected_workspaces),
         (["agent", "list", "--output", "json"], "agent.list", expected_agents),
-        (["session", "list", "--output", "json"], "session.list", expected_sessions),
+        (["--non-interactive", "session", "list", "--output", "json"], "session.list", expected_sessions),
         (["console", "list", "--output", "json"], "console.list", expected_consoles),
     ):
         _invoke_twice(argv, _document_bytes(command, data))
@@ -519,7 +519,7 @@ def test_session_json_status_repairs_and_no_status_are_preserved(
         lambda rows, *, db, config: {"live": SessionStatus.OK},
     )
 
-    status_result = CliRunner().invoke(app, ["session", "list", "--output", "json"])
+    status_result = CliRunner().invoke(app, ["--non-interactive", "session", "list", "--output", "json"])
     assert status_result.exit_code == 0, status_result.output
     status_document = cast("dict[str, object]", json.loads(status_result.stdout_bytes))
     rows = cast("list[dict[str, object]]", cast("dict[str, object]", status_document["data"])["sessions"])
@@ -541,7 +541,7 @@ def test_session_json_status_repairs_and_no_status_are_preserved(
 
     monkeypatch.setattr(manager, "ensure_pids_batch", forbidden)
     monkeypatch.setattr(manager, "batch_check_all_sessions", forbidden)
-    no_status = CliRunner().invoke(app, ["session", "list", "--no-status", "--output", "json"])
+    no_status = CliRunner().invoke(app, ["--non-interactive", "session", "list", "--no-status", "--output", "json"])
     assert no_status.exit_code == 0, no_status.output
     no_status_rows = json.loads(no_status.stdout_bytes)["data"]["sessions"]
     assert [row["status"] for row in no_status_rows] == ["unavailable", "unavailable"]
@@ -592,7 +592,7 @@ def test_session_describe_json_positive_and_stopped_pid_with_degraded_template(
     monkeypatch.setattr(manager, "_ensure_pid", repair)
     monkeypatch.setattr(manager, "check_session_status", lambda row, *, target: SessionStatus.OK)
 
-    live = CliRunner().invoke(app, ["session", "describe", "live", "--output", "json"])
+    live = CliRunner().invoke(app, ["--non-interactive", "session", "describe", "live", "--output", "json"])
     assert live.exit_code == 0, live.output
     live_record = json.loads(live.stdout_bytes)["data"]["session"]
     assert (live_record["pid"], live_record["status"], live_record["harness_integration"]) == (
@@ -605,7 +605,7 @@ def test_session_describe_json_positive_and_stopped_pid_with_degraded_template(
 
     monkeypatch.setattr(manager, "_ensure_pid", lambda row, *, target, db: row)
     monkeypatch.setattr(manager, "check_session_status", lambda row, *, target: SessionStatus.STOPPED)
-    stopped = CliRunner().invoke(app, ["session", "describe", "stopped", "--output", "json"])
+    stopped = CliRunner().invoke(app, ["--non-interactive", "session", "describe", "stopped", "--output", "json"])
     assert stopped.exit_code == 0, stopped.output
     stopped_record = json.loads(stopped.stdout_bytes)["data"]["session"]
     assert stopped_record["pid"] is None
@@ -663,8 +663,8 @@ def test_session_list_and_describe_degrade_harness_integration_without_error_tex
     monkeypatch.setattr(manager, "_ensure_pid", lambda row, *, target, db: row)
     monkeypatch.setattr(manager, "check_session_status", lambda row, *, target: SessionStatus.STOPPED)
 
-    listing = CliRunner().invoke(app, ["session", "list", "--no-status", "--output", "json"])
-    description = CliRunner().invoke(app, ["session", "describe", "stopped", "--output", "json"])
+    listing = CliRunner().invoke(app, ["--non-interactive", "session", "list", "--no-status", "--output", "json"])
+    description = CliRunner().invoke(app, ["--non-interactive", "session", "describe", "stopped", "--output", "json"])
 
     assert listing.exit_code == description.exit_code == 0
     assert all(row["harness_integration"] is None for row in json.loads(listing.stdout_bytes)["data"]["sessions"])

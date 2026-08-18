@@ -6,7 +6,7 @@ import os
 from contextlib import AbstractContextManager
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
-from agentworks.capabilities.secret_backend.base import SecretBackend
+from agentworks.capabilities.secret_backend.base import InteractionChannel, SecretBackend
 from agentworks.capabilities.secret_backend.client import (
     InteractionBroker,
     RemainingTime,
@@ -76,7 +76,7 @@ class _EnvVarContext(AbstractContextManager[SecretSourceClient]):
 class EnvVarBackend(SecretBackend):
     """Resolve secrets from operator-side environment variables."""
 
-    contract_version: ClassVar[int] = 2
+    contract_version: ClassVar[int] = 3
     config_model: ClassVar[type[AgwModel]] = EnvVarSourceConfig
     mapping_model: ClassVar[type[AgwRootModel[Any]]] = EnvVarMapping
     name: ClassVar[str] = "env-var"
@@ -92,7 +92,7 @@ class EnvVarBackend(SecretBackend):
         unset variable is a soft miss, so resolution can continue to a later source.
         """,
     )
-    interactive: ClassVar[bool] = False
+    interaction_channel: ClassVar[InteractionChannel] = InteractionChannel.NONE
 
     @classmethod
     def backend_readiness(cls) -> Readiness:

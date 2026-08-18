@@ -9,6 +9,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Literal, Self
 
 from agentworks import output
+from agentworks.capabilities.secret_backend.base import InteractionChannel
 from agentworks.capabilities.secret_backend.client import (
     InteractionBroker,
     RemainingTime,
@@ -78,8 +79,8 @@ class ActiveSource:
         return self.source.name
 
     @property
-    def interactive(self) -> bool:
-        return self.backend_class.interactive
+    def interaction_channel(self) -> InteractionChannel:
+        return self.backend_class.interaction_channel
 
     def mapping_for(self, secret: SecretDecl) -> tuple[bool, MappingValue | None]:
         """Return mapping presence separately from its JSON-native value."""
@@ -179,13 +180,16 @@ class ResolutionBatch:
 
 @dataclass(slots=True)
 class _Evidence:
-    refused: list[tuple[str, str | None]]
+    # ``blocked`` records interaction-gate skips with the detail the gate
+    # decided (non-interactive refusal or a missing terminal), so collapsing
+    # needs no second look at why the source could not take its turn.
+    blocked: list[tuple[ResolutionDetail, str, str | None]]
     soft_missed: list[tuple[str, str | None]]
     not_ready: list[tuple[str, str | None, str | None]]
 
     @classmethod
     def empty(cls) -> _Evidence:
-        return cls(refused=[], soft_missed=[], not_ready=[])
+        return cls(blocked=[], soft_missed=[], not_ready=[])
 
 
 class _MonotonicBudget:
@@ -409,10 +413,37 @@ def _outcome(
     )
 
 
+def _blocked_turn(source: ActiveSource, interaction: InteractionPolicy) -> ResolutionDetail | None:
+    """Why this source may not take a resolution turn, or None if it may.
+
+    The interaction gate, applying the two orthogonal signals per the
+    operator's ruling:
+
+    - CONSENT is the policy bit alone. ``REFUSE`` (the --non-interactive
+      switch) blocks every source whose channel may block on a human, as the
+      explicit fast-fail for unattended runs.
+    - A TERMINAL source additionally needs a real terminal here
+      (``output.terminal_prompt_available``); without one it is skipped into
+      fall-through like a not-ready source, because prompting would read a
+      non-terminal stdin.
+    - An OUT_OF_BAND source needs consent only: the operator configuring an
+      approval-prompting source is the consent, and the source's resolution
+      timeout bounds the wait for the out-of-band approval.
+    """
+    channel = source.interaction_channel
+    if channel is InteractionChannel.NONE:
+        return None
+    if interaction is InteractionPolicy.REFUSE:
+        return ResolutionDetail.NON_INTERACTIVE_REFUSED
+    if channel is InteractionChannel.TERMINAL and not output.terminal_prompt_available():
+        return ResolutionDetail.TERMINAL_UNAVAILABLE
+    return None
+
+
 def _collapse(name: str, evidence: _Evidence, *, sources_empty: bool) -> ResolutionOutcome:
-    if evidence.refused:
-        source, identifier = evidence.refused[0]
-        return _outcome(name, ResolutionDetail.INTERACTION_REFUSED, source=source, identifier=identifier)
+    if evidence.blocked:
+        detail, source, identifier = evidence.blocked[0]
+        return _outcome(name, detail, source=source, identifier=identifier)
     if evidence.soft_missed:
         source, identifier = evidence.soft_missed[0]
         return _outcome(name, ResolutionDetail.SOFT_MISS, source=source, identifier=identifier)
@@ -445,7 +476,7 @@ def _remaining_attemptable(
     for source in sources:
         if not source.readiness.is_ready:
             continue
-        if source.interactive and policy.interaction is InteractionPolicy.REFUSE:
+        if _blocked_turn(source, policy.interaction) is not None:
             continue
         if source.would_attempt(secret):
             return True
@@ -533,11 +564,12 @@ def resolve_batch(
             for request, identifier in projected:
                 evidence[request.name].not_ready.append((source.name, identifier, source.disabled_backend_plugin))
             continue
-        if source.interactive and policy.interaction is InteractionPolicy.REFUSE:
+        blocked = _blocked_turn(source, policy.interaction)
+        if blocked is not None:
             for request, identifier in projected:
-                evidence[request.name].refused.append((source.name, identifier))
+                evidence[request.name].blocked.append((blocked, source.name, identifier))
             continue
-        if source.interactive and policy.completion is CompletionPolicy.COMPLETE:
+        if source.interaction_channel is not InteractionChannel.NONE and policy.completion is CompletionPolicy.COMPLETE:
             still_missing = [secret for secret in deduped if secret.name not in outcomes]
             terminal_exists = any(outcome.category is not ResolutionCategory.RESOLVED for outcome in outcomes.values())
             if not terminal_exists:
@@ -554,12 +586,12 @@ def resolve_batch(
                     if secret.name not in outcomes:
                         outcomes[secret.name] = _outcome(secret.name, ResolutionDetail.BATCH_DOOMED)
                 break
-        if source.backend_class.name == "prompt" and interaction_broker is None:
-            raise StateError("the prompt source requires an interaction broker")
+        if source.interaction_channel is InteractionChannel.TERMINAL and interaction_broker is None:
+            raise StateError("a terminal-channel source requires an interaction broker")
 
         requests = tuple(request for request, _identifier in projected)
         identifiers = {request.name: identifier for request, identifier in projected}
-        broker = interaction_broker if source.backend_class.name == "prompt" else None
+        broker = interaction_broker if source.interaction_channel is InteractionChannel.TERMINAL else None
         failure_kind: SecretClientFailureKind | None = None
         timed_out = False
         unexpected = False

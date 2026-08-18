@@ -271,11 +271,15 @@ with a hint (`agw secret describe <name>` shows how each source maps it), before
 before any VM is started. Actual presence, authentication, transport, and provider failures remain
 the typed resolution boundary's job. The set of secrets is computed from the command's static
 filters (positional targets, `--vm`, `--workspace`, `--agent`, etc.); dynamic predicates like
-`--all-stopped` apply later, so the prompted set may over-approximate. Non-interactive mode (no TTY
-or `--non-interactive`) surfaces missing secrets as `SecretUnavailableError` with a per-secret hint
-naming which sources were tried. Commands that join existing shells (`session attach`,
-`session list`, `console attach` against a live tmux session, `console add-sessions`) consume no
-secrets.
+`--all-stopped` apply later, so the prompted set may over-approximate. By default resolution may
+block on a human (a terminal prompt, or an out-of-band approval such as a 1Password biometric
+check); `--non-interactive` is the explicit switch that refuses every source that could. A
+terminal-channel source (`prompt`) with no terminal available to this process is skipped into
+fall-through instead, the same as a not-ready source; the command fails only if no remaining source
+can attempt the secret. Either way, a secret no active source can resolve surfaces as
+`SecretUnavailableError` with a per-secret hint naming which sources were tried. Commands that join
+existing shells (`session attach`, `session list`, `console attach` against a live tmux session,
+`console add-sessions`) consume no secrets.
 
 **Miss semantics:** what "not found" means depends on the selected backend. Conventional sources
 (`env-var`, `prompt`) treat a missing value as a soft miss and fall through to the next source. A
@@ -359,16 +363,21 @@ identifier, typed detail, and remediation. If any row is not `resolved`, every r
 and the command exits 1; an all-resolved batch exits 0. Registry, configuration, and usage failures
 occur before the table and use normal CLI error framing.
 
-By default verification refuses interactive sources, so it cannot unexpectedly prompt or initiate
-provider authentication. Opt in explicitly when an interactive source is required:
+By default verification allows sources that may block on a human, matching the resolver's default
+consent everywhere else: a terminal-channel source (`prompt`) with no terminal available is skipped
+into fall-through rather than failing the whole batch, and an out-of-band source (`onepassword`) may
+still trigger a biometric or re-auth prompt outside this process. Use the global `--non-interactive`
+flag to refuse every source that could block on a human, the explicit fast-fail for scripted or CI
+runs:
 
 ```bash
-agw secret verify tailscale-auth-key --allow-interaction
+agw secret verify tailscale-auth-key --non-interactive
 ```
 
-`--allow-interaction` permits prompts, biometric checks, and renewed authentication. It is rejected
-when the global `--non-interactive` flag is set. Outcome rows use only framework-owned categories
-and remediation; resolved values and provider-authored payloads are never rendered.
+`secret verify --allow-interaction` is deprecated and has no effect (interactive sources are already
+allowed by default); it emits a one-release deprecation warning, silenced by `--no-deprecations`.
+Outcome rows use only framework-owned categories and remediation; resolved values and
+provider-authored payloads are never rendered.
 
 `agw doctor` keeps three adjacent secret groups. `Secret backends` reports implementation readiness;
 `Secret sources` shows every declared source with its selected backend, active/inactive,
@@ -380,11 +389,12 @@ prompt at command time):
 - **OK** when at least one active source would attempt the secret (`would attempt via env-var`,
   `would attempt via prompt`, ...). `would attempt via prompt` is the heads-up that the next command
   needing this secret will ask for it interactively.
-- **WARN** when nothing in the chain is attemptable (config-valid but no mapping path, e.g. a
+- **WARN** when nothing in the chain is attemptable: either config-valid but no mapping path (e.g. a
   mapping-required source has no mapping and `prompt` is opted out via
-  `backend_mappings.prompt = false`). An unknown `backend_mappings` source name fails Registry
-  construction first, so doctor reports it under Configuration and does not construct the Secrets
-  group.
+  `backend_mappings.prompt = false`), or every active source was skipped (not ready, or a
+  terminal-channel source with no terminal available to this process). An unknown `backend_mappings`
+  source name fails Registry construction first, so doctor reports it under Configuration and does
+  not construct the Secrets group.
 
 Source-applicability detail (per-source soft-skip reasons, inactive mappings, per-secret references)
 lives in `agw secret list` and `agw secret describe`. `AGENTWORKS_*` identity overrides surface in
@@ -393,10 +403,10 @@ caught earlier as a hard config-load error before doctor runs. Git-credential to
 secrets: their _resolvability_ reports as ordinary `git-token-<name>` rows in the Secrets group,
 like any other secret. Doctor never opens a source, reads an environment variable, invokes a client,
 or prompts. Its preview is a value-free applicability prediction, not proof that a value exists. Use
-`agw secret verify NAME...` for an explicit value-free proof; interactive sources require
-`--allow-interaction`. Capability token authentication still occurs at the capability `runup()`
-stage inside provisioning operations. The Tailscale group checks only workstation connectivity; the
-auth key is the `tailscale-auth-key` secret row.
+`agw secret verify NAME...` for an explicit value-free proof: interactive sources are attempted by
+default, and `--non-interactive` refuses them. Capability token authentication still occurs at the
+capability `runup()` stage inside provisioning operations. The Tailscale group checks only
+workstation connectivity; the auth key is the `tailscale-auth-key` secret row.
 
 When the config or a resource manifest fails to load, the groups that depend on them (VM sites,
 Secrets) do not vanish: each renders a single

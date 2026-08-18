@@ -68,18 +68,18 @@ account to the source; the optional source timeout is new and defaults to 30 sec
 Resolution opens one lazy client for each source it actually attempts. The factory is resource-free;
 the context enters, prepares one batch, resolves once, and closes before the next source begins.
 `agentworks.secrets.resolve.OutputInteractionBroker` is the module-owned public CLI broker; the
-source orchestrator passes it only to the prompt backend and passes `None` to every other backend
-factory. OnePassword owns a positive external-operation timeout and applies the shrinking remaining
-budget to each `op read`. Env-var and prompt perform no non-human blocking I/O and declare no
-timeout.
+source orchestrator passes it only to the terminal-channel backend (`prompt`) and passes `None` to
+every other backend factory. OnePassword owns a positive external-operation timeout and applies the
+shrinking remaining budget to each `op read`. Env-var and prompt perform no non-human blocking I/O
+and declare no timeout.
 
-Results use five value-free categories: `resolved`, `unavailable`, `refused-interaction`, `timeout`,
-and `resolution-failure`. A not-ready outcome retains only bounded remediation metadata; a disabled
-system-plugin backend is attributed by plugin name and rendered with a fixed enablement action.
-Resolved values live only in a private operation batch and the existing operation cache. Outcomes,
-identifiers, errors, warnings, and logs never contain a value. NUL is rejected before a value can
-become resolved. Carriage returns and line feeds remain ordinary opaque string content, so a
-structured credential can retain the formatting and terminal newline it had at the source.
+Results use five value-free categories: `resolved`, `unavailable`, `refused-non-interactive`,
+`timeout`, and `resolution-failure`. A not-ready outcome retains only bounded remediation metadata;
+a disabled system-plugin backend is attributed by plugin name and rendered with a fixed enablement
+action. Resolved values live only in a private operation batch and the existing operation cache.
+Outcomes, identifiers, errors, warnings, and logs never contain a value. NUL is rejected before a
+value can become resolved. Carriage returns and line feeds remain ordinary opaque string content, so
+a structured credential can retain the formatting and terminal newline it had at the source.
 
 Syntax constraints belong to the consumer. Environment injection and `agw env show --resolve`, Git
 authenticated probes and credential lines, Proxmox API headers, and Tailscale stdin joins each
@@ -100,6 +100,19 @@ Use `agw secret list` and `agw secret describe NAME` for value-free inspection. 
 `agw secret verify NAME...` for one real batch proof. It deduplicates names in first-written order,
 resolves the batch once, and emits one value-free row per unique name with category, source, safe
 identifier, detail, and remediation. It exits 1 after rendering if any row is not `resolved`.
-Verification refuses interaction by default. Add `--allow-interaction` only with operator consent
-for prompts, biometric checks, or renewed authentication; the opt-in is incompatible with global
-`--non-interactive`.
+Resolution allows sources that may block on a human by default; `--non-interactive` is the explicit
+switch that refuses them. `secret verify --allow-interaction` is a deprecated no-op kept for one
+release (interaction is already allowed by default); it warns unless `--no-deprecations` is set.
+
+## Interaction channels
+
+Each backend declares a static `interaction_channel` fact on its class (`none`, `terminal`, or
+`out-of-band`; see `InteractionChannel` in
+[`capabilities/secret_backend/base.py`](../capabilities/secret_backend/base.py)). `none` (`env-var`)
+never blocks on a human. `terminal` (`prompt`) collects input through this process's own terminal,
+so the resolver additionally requires a terminal to be available
+(`output.terminal_prompt_available()`); without one it skips the source into fall-through rather
+than failing the whole batch. `out-of-band` (`onepassword`) may trigger an approval outside this
+process (a biometric or re-auth prompt on the operator's desktop), so it needs consent only, no
+terminal: the operator configuring an approval-prompting source is the consent, and the source's own
+resolution timeout bounds the wait.

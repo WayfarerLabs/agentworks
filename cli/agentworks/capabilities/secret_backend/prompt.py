@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, NoReturn
 
 from pydantic import BaseModel, model_validator
 
-from agentworks.capabilities.secret_backend.base import SecretBackend
+from agentworks.capabilities.secret_backend.base import InteractionChannel, SecretBackend
 from agentworks.capabilities.secret_backend.client import (
     InteractionBroker,
     RemainingTime,
@@ -93,7 +93,7 @@ class _PromptContext(AbstractContextManager[SecretSourceClient]):
 class PromptBackend(SecretBackend):
     """Resolve secrets through a caller-authorized interactive prompt."""
 
-    contract_version: ClassVar[int] = 2
+    contract_version: ClassVar[int] = 3
     config_model: ClassVar[type[AgwModel]] = PromptSourceConfig
     mapping_model: ClassVar[type[AgwRootModel[Any]]] = PromptMapping
     name: ClassVar[str] = "prompt"
@@ -106,7 +106,7 @@ class PromptBackend(SecretBackend):
         resolved are requested. Prompt has no per-secret mapping vocabulary.
         """,
     )
-    interactive: ClassVar[bool] = True
+    interaction_channel: ClassVar[InteractionChannel] = InteractionChannel.TERMINAL
 
     @classmethod
     def backend_readiness(cls) -> Readiness:

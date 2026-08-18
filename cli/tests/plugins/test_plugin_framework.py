@@ -23,6 +23,7 @@ import pytest
 import agentworks
 import agentworks.plugins as plugins_pkg
 from agentworks.capabilities.descriptor import capability_descriptors
+from agentworks.capabilities.secret_backend import InteractionChannel
 from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.errors import StateError
 from agentworks.origin import Origin
@@ -187,16 +188,16 @@ class _BackendMissingItsOperations:
     contract_version = 1
     name = "barely-a-backend"
     description = "none of the backend operations"
-    interactive = False
+    interaction_channel = InteractionChannel.NONE
     config_model: type[AgwRootModel[Any]] = AgwRootModel[str]
 
 
-class _BackendWithoutInteractive:
+class _BackendWithoutChannel:
     """Another lookalike, proving plausible members do not replace nominality."""
 
     contract_version = 1
-    name = "no-interactive-backend"
-    description = "omits the interactive member"
+    name = "no-channel-backend"
+    description = "omits the interaction_channel member"
     config_model: type[AgwRootModel[Any]] = AgwRootModel[str]
 
     def not_ready(self) -> Readiness:
@@ -243,10 +244,12 @@ class _BackendWithZeroParameterFactory(ConformingSecretBackend):
         raise NotImplementedError
 
 
-class _BackendWithNonBooleanInteractive(ConformingSecretBackend):
-    name = "non-boolean-interactive-backend"
-    description = "mistakenly uses an integer interaction flag"
-    interactive = 1  # type: ignore[assignment]
+class _BackendWithPlainStringChannel(ConformingSecretBackend):
+    name = "plain-string-channel-backend"
+    description = "mistakenly uses a plain string interaction channel"
+    # Equal to InteractionChannel.NONE but not identical, which is exactly
+    # the value the exactness check exists to reject.
+    interaction_channel = "none"  # type: ignore[assignment]
 
 
 def test_git_contract_v2_retains_public_credential_lines_hook() -> None:
@@ -330,7 +333,7 @@ class _PlatformWithAnUncallableConfigHook(ConformingVMPlatform):
         ("vm-platform", _AbstractPlatform, "it is abstract"),
         ("vm-platform", _PlatformWithoutADescription, "'description' class attribute"),
         ("secret-backend", _BackendMissingItsOperations, "does not derive from SecretBackend"),
-        ("secret-backend", _BackendWithoutInteractive, "does not derive from SecretBackend"),
+        ("secret-backend", _BackendWithoutChannel, "does not derive from SecretBackend"),
         ("vm-platform", _PlatformWithoutAConfigModel, "declares no config_model"),
         ("vm-platform", _PlatformWithoutAModel, "not a AgwModel subclass"),
         ("vm-platform", _PlatformWithAnUntaggedModel, "does not tag itself"),
@@ -418,13 +421,13 @@ def test_a_mixed_valid_and_version_one_plugin_contribution_seats_nothing() -> No
         (_BackendWithInstanceReadiness, "backend_readiness must be declared as @classmethod"),
         (_BackendWithInstanceTimeout, "external_operation_timeout must be declared as @classmethod"),
         (_BackendWithZeroParameterFactory, "create_client must declare a 'cls' binding parameter"),
-        (_BackendWithNonBooleanInteractive, "interactive class attribute is 1, not a bool"),
+        (_BackendWithPlainStringChannel, "interaction_channel class attribute is 'none', not an InteractionChannel"),
     ],
     ids=(
         "instance-readiness-method",
         "instance-timeout-method",
         "zero-parameter-classmethod",
-        "malformed-interactive",
+        "malformed-interaction-channel",
     ),
 )
 def test_malformed_secret_backend_registration_is_atomic(backend: type, expected: str) -> None:

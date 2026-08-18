@@ -15,6 +15,7 @@ from typer.testing import CliRunner
 
 from agentworks import output
 from agentworks.bootstrap import build_registry
+from agentworks.capabilities.secret_backend import InteractionChannel
 from agentworks.capabilities.secret_backend.client import (
     SecretClientFailure,
     SecretClientFailureKind,
@@ -62,7 +63,9 @@ def _plain(text: str) -> str:
 
 
 class _InteractiveBackend(_Backend):
-    interactive: ClassVar[bool] = True
+    # Out-of-band is the generic interactive channel here: these tests cover
+    # consent gating, not terminal availability.
+    interaction_channel: ClassVar[InteractionChannel] = InteractionChannel.OUT_OF_BAND
 
 
 class _SeparatorBackend(_Backend):
@@ -167,9 +170,9 @@ def _outcome(
             ResolutionCategory.UNAVAILABLE,
             ResolutionRemediation.CONFIGURE_SOURCE,
         ),
-        ResolutionDetail.INTERACTION_REFUSED: (
-            ResolutionCategory.REFUSED_INTERACTION,
-            ResolutionRemediation.ALLOW_INTERACTION,
+        ResolutionDetail.NON_INTERACTIVE_REFUSED: (
+            ResolutionCategory.REFUSED_NON_INTERACTIVE,
+            ResolutionRemediation.REMOVE_NON_INTERACTIVE,
         ),
         ResolutionDetail.DEADLINE_EXCEEDED: (
             ResolutionCategory.TIMEOUT,
@@ -345,7 +348,7 @@ def test_verify_refuses_interactive_source_without_construction(monkeypatch: pyt
         ["token"],
         interaction=InteractionPolicy.REFUSE,
     )
-    assert outcome.detail is ResolutionDetail.INTERACTION_REFUSED
+    assert outcome.detail is ResolutionDetail.NON_INTERACTIVE_REFUSED
     assert _Backend.events == []
 
 
@@ -609,7 +612,7 @@ def test_render_verification_uses_only_shared_outcome_fields(capsys: pytest.Capt
     outcomes = (
         _outcome("ok", ResolutionDetail.RESOLVED),
         _outcome("missing", ResolutionDetail.SOFT_MISS),
-        _outcome("prompted", ResolutionDetail.INTERACTION_REFUSED),
+        _outcome("prompted", ResolutionDetail.NON_INTERACTIVE_REFUSED),
         _outcome("slow", ResolutionDetail.DEADLINE_EXCEEDED),
         _outcome("auth", ResolutionDetail.AUTHENTICATION),
         _outcome("network", ResolutionDetail.CONNECTIVITY),
@@ -814,22 +817,26 @@ def test_secret_verify_cli_unicode_separator_cannot_forge_a_row(
     assert "forged-row" not in result.output
 
 
-def test_secret_verify_cli_default_refusal_does_not_read_global_state(
+def test_secret_verify_cli_resolves_interactive_source_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Consent defaults to ALLOW: a plain verify resolves an interactive
+    source; --non-interactive is the explicit refusal switch."""
+    _Backend.values = {"token": "sentinel-interactive"}
     _install_cli_registry(monkeypatch, "token")
     monkeypatch.setattr(
-        "agentworks.cli.commands.secret.output.non_interactive",
-        lambda: pytest.fail("default refusal must not read global interaction state"),
+        "agentworks.secrets.resolve.active_sources",
+        lambda config, candidate: [_source(backend_class=_InteractiveBackend)],
     )
 
     result = CliRunner().invoke(app, ["secret", "verify", "token"])
 
-    assert result.exit_code == 1
-    assert "unavailable" in result.stdout
+    assert result.exit_code == 0
+    assert "resolved" in result.stdout
+    assert "sentinel-interactive" not in result.output
 
 
-def test_secret_verify_cli_allow_interaction_resolves_interactive_source(
+def test_secret_verify_cli_non_interactive_refuses_interactive_source(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _Backend.values = {"token": "sentinel-interactive"}
@@ -839,14 +846,39 @@ def test_secret_verify_cli_allow_interaction_resolves_interactive_source(
         lambda config, candidate: [_source(backend_class=_InteractiveBackend)],
     )
 
-    result = CliRunner().invoke(app, ["secret", "verify", "token", "--allow-interaction"])
+    result = CliRunner().invoke(app, ["--non-interactive", "secret", "verify", "token"])
 
+    assert result.exit_code == 1
+    assert "refused-non-interactive" in result.stdout
+    assert "sentinel-interactive" not in result.output
+    assert _Backend.events == []
+
+
+def test_secret_verify_cli_allow_interaction_is_an_accepted_deprecated_no_op(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The retired opt-in stays accepted for one release: it changes nothing
+    (interaction is already allowed) and warns through the deprecation
+    channel, which --no-deprecations silences."""
+    _Backend.values = {"token": "sentinel-interactive"}
+    _install_cli_registry(monkeypatch, "token")
+    monkeypatch.setattr(
+        "agentworks.secrets.resolve.active_sources",
+        lambda config, candidate: [_source(backend_class=_InteractiveBackend)],
+    )
+
+    result = CliRunner().invoke(app, ["secret", "verify", "token", "--allow-interaction"])
     assert result.exit_code == 0
     assert "resolved" in result.stdout
-    assert "sentinel-interactive" not in result.output
+    assert "Warning:" in result.stderr
+
+    silenced = CliRunner().invoke(app, ["--no-deprecations", "secret", "verify", "token", "--allow-interaction"])
+    assert silenced.exit_code == 0
+    assert "resolved" in silenced.stdout
+    assert "Warning:" not in silenced.stderr
 
 
-def test_secret_verify_cli_onepassword_plugin_requires_and_honors_opt_in(
+def test_secret_verify_cli_onepassword_plugin_default_allows_and_non_interactive_refuses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[list[str]] = []
@@ -873,11 +905,11 @@ def test_secret_verify_cli_onepassword_plugin_requires_and_honors_opt_in(
         lambda config, candidate: [_onepassword_source()],
     )
 
-    refused = CliRunner().invoke(app, ["secret", "verify", "token"])
-    allowed = CliRunner().invoke(app, ["secret", "verify", "token", "--allow-interaction"])
+    refused = CliRunner().invoke(app, ["--non-interactive", "secret", "verify", "token"])
+    allowed = CliRunner().invoke(app, ["secret", "verify", "token"])
 
     assert refused.exit_code == 1
-    assert "refused-interaction" in refused.stdout
+    assert "refused-non-interactive" in refused.stdout
     assert calls == [["op", "read", "--no-newline", "op://Work/item/password"]]
     assert allowed.exit_code == 0
     assert "resolved" in allowed.stdout
@@ -898,7 +930,7 @@ def test_secret_verify_entrypoint_prompt_user_abort_exits_one_without_table(
     )
     monkeypatch.setattr(output, "prompt_secret", lambda *args, **kwargs: (_ for _ in ()).throw(abort))
 
-    exit_code = _run_main(monkeypatch, "secret", "verify", "token", "--allow-interaction")
+    exit_code = _run_main(monkeypatch, "secret", "verify", "token")
 
     captured = capsys.readouterr()
     assert exit_code == 1
@@ -923,7 +955,7 @@ def test_secret_verify_entrypoint_prompt_eof_exits_one_without_table(
         lambda prompt: (_ for _ in ()).throw(EOFError("sentinel-prompt-eof")),
     )
 
-    exit_code = _run_main(monkeypatch, "secret", "verify", "token", "--allow-interaction")
+    exit_code = _run_main(monkeypatch, "secret", "verify", "token")
 
     captured = capsys.readouterr()
     assert exit_code == 1
@@ -965,28 +997,6 @@ def test_provider_keyboard_interrupt_preserves_identity_cleanup_and_cli_exit_130
     assert "CATEGORY" not in captured.out
     assert "sentinel" not in captured.err
     assert _Backend.events == ["factory", "enter", "prepare", "resolve", "exit"]
-
-
-def test_secret_verify_cli_global_refusal_wins_before_config(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    monkeypatch.setattr(
-        "agentworks.config.load_config",
-        lambda: pytest.fail("config must not load for conflicting interaction flags"),
-    )
-    exit_code = _run_main(
-        monkeypatch,
-        "--non-interactive",
-        "secret",
-        "verify",
-        "token",
-        "--allow-interaction",
-    )
-    captured = capsys.readouterr()
-    assert exit_code == 1
-    assert "--allow-interaction cannot be used with --non-interactive" in captured.err
-    assert captured.out == ""
 
 
 @pytest.mark.parametrize("color", [False, True])

@@ -29,6 +29,7 @@ from agentworks.capabilities.git_credential.base import GitCredentialProvider, H
 from agentworks.capabilities.harness_integration.base import HarnessIntegration
 from agentworks.capabilities.secret_backend import (
     InteractionBroker,
+    InteractionChannel,
     RemainingTime,
     SecretBackend,
     SecretLookupRequest,
@@ -173,8 +174,8 @@ class ConformingSecretBackend(SecretBackend):
     config_model: ClassVar[type[AgwModel]] = AgwModel
     mapping_model: ClassVar[type[AgwRootModel[Any]]] = AgwRootModel[str]
 
-    contract_version = 2
-    interactive = False
+    contract_version = 3
+    interaction_channel = InteractionChannel.NONE
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)

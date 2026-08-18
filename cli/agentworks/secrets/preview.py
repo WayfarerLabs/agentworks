@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 class PreviewCategory(StrEnum):
     ATTEMPTABLE = "attemptable"
-    REFUSED_INTERACTION = "refused-interaction"
+    REFUSED_NON_INTERACTIVE = "refused-non-interactive"
     UNAVAILABLE = "unavailable"
 
 
@@ -59,9 +59,13 @@ class ResolutionPreview:
     source: str | None
     identifier: str | None
     skipped_not_ready: tuple[SkippedSource, ...]
+    # Terminal-channel sources the walk skipped because no terminal is
+    # available to this process; a separate list so the not-ready one keeps
+    # meaning exactly what its name says.
+    skipped_no_terminal: tuple[SkippedSource, ...]
 
     def __post_init__(self) -> None:
-        if self.category in {PreviewCategory.ATTEMPTABLE, PreviewCategory.REFUSED_INTERACTION}:
+        if self.category in {PreviewCategory.ATTEMPTABLE, PreviewCategory.REFUSED_NON_INTERACTIVE}:
             if self.source is None:
                 raise ValueError("attemptable preview requires a source")
         elif self.source is not None or self.identifier is not None:
@@ -82,13 +86,22 @@ class ResolutionPreview:
             raise ValueError("invalid preview identifier")
 
 
+# The fixed, first-party reason a terminal-channel source is skipped in a
+# preview; the resolver's equivalent is ResolutionDetail.TERMINAL_UNAVAILABLE.
+NO_TERMINAL_REASON = "no terminal available for a prompt"
+
+
 def _preview(
     secret: SecretDecl,
     sources: Sequence[ActiveSource],
     *,
     interaction: InteractionPolicy | None,
 ) -> ResolutionPreview:
+    from agentworks.capabilities.secret_backend.base import InteractionChannel
+    from agentworks.output import terminal_prompt_available
+
     skipped: list[SkippedSource] = []
+    skipped_no_terminal: list[SkippedSource] = []
     first_refused: tuple[str, str | None] | None = None
     for source in sources:
         try:
@@ -103,9 +116,18 @@ def _preview(
                 raise StateError(f"secret source {source.name!r} has invalid readiness") from None
             skipped.append(SkippedSource(source=source.name, reason=reason))
             continue
-        if interaction is InteractionPolicy.REFUSE and source.interactive:
+        # Gate order mirrors the resolver's ``_blocked_turn``: consent first,
+        # then the terminal fact, so predictions never disagree with the pass.
+        channel = source.interaction_channel
+        if interaction is InteractionPolicy.REFUSE and channel is not InteractionChannel.NONE:
             if first_refused is None:
                 first_refused = (source.name, identifier)
+            continue
+        # A fact, not a policy, so it applies to the inspection variant
+        # (``interaction=None``) too: without a terminal a terminal-channel
+        # source cannot take a turn no matter what an operation consents to.
+        if channel is InteractionChannel.TERMINAL and not terminal_prompt_available():
+            skipped_no_terminal.append(SkippedSource(source=source.name, reason=NO_TERMINAL_REASON))
             continue
         return ResolutionPreview(
             name=secret.name,
@@ -113,15 +135,17 @@ def _preview(
             source=source.name,
             identifier=identifier,
             skipped_not_ready=tuple(skipped),
+            skipped_no_terminal=tuple(skipped_no_terminal),
         )
     if first_refused is not None:
         source_name, identifier = first_refused
         return ResolutionPreview(
             name=secret.name,
-            category=PreviewCategory.REFUSED_INTERACTION,
+            category=PreviewCategory.REFUSED_NON_INTERACTIVE,
             source=source_name,
             identifier=identifier,
             skipped_not_ready=tuple(skipped),
+            skipped_no_terminal=tuple(skipped_no_terminal),
         )
     return ResolutionPreview(
         name=secret.name,
@@ -129,6 +153,7 @@ def _preview(
         source=None,
         identifier=None,
         skipped_not_ready=tuple(skipped),
+        skipped_no_terminal=tuple(skipped_no_terminal),
     )
 
 

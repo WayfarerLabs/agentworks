@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from agentworks.cli._helpers import parse_csv_filter
+import sys
+
+import pytest
+
+from agentworks import output
+from agentworks.cli._helpers import ordinary_interaction_policy, parse_csv_filter
+from agentworks.secrets.policy import InteractionPolicy
 
 
 def test_parse_csv_filter_none_passes_through() -> None:
@@ -51,3 +57,44 @@ def test_parse_csv_filter_preserves_duplicate_values() -> None:
     # collapsing here would hide a typo from a user trying to spot one.
     assert parse_csv_filter("ws1,ws1") == ["ws1", "ws1"]
     assert parse_csv_filter("ws1,ws2,ws1") == ["ws1", "ws2", "ws1"]
+
+
+# -- ordinary_interaction_policy: consent is the flag alone ------------------
+#
+# The field bug this fix closes: a configured, verified 1Password source was
+# unusable from a non-TTY agent shell because consent derivation read TTY-ness
+# (docs/sdd/2026-08-04-next-steps/message-2026-08-18-agentic-onboarding-run.md).
+# These pin the replacement invariant directly, at the one function that
+# derives it, rather than only through a command built on top of it.
+
+
+def test_ordinary_interaction_policy_allows_by_default_without_a_tty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output.set_non_interactive(False)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(
+        output,
+        "is_interactive",
+        lambda: pytest.fail("consent must not consult TTY-ness"),
+    )
+    assert ordinary_interaction_policy() is InteractionPolicy.ALLOW
+
+
+def test_ordinary_interaction_policy_allows_by_default_with_a_tty(monkeypatch: pytest.MonkeyPatch) -> None:
+    output.set_non_interactive(False)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    assert ordinary_interaction_policy() is InteractionPolicy.ALLOW
+
+
+def test_ordinary_interaction_policy_refuses_under_non_interactive_regardless_of_tty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output.set_non_interactive(True)
+    try:
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+        assert ordinary_interaction_policy() is InteractionPolicy.REFUSE
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+        assert ordinary_interaction_policy() is InteractionPolicy.REFUSE
+    finally:
+        output.set_non_interactive(False)

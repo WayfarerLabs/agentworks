@@ -702,10 +702,11 @@ never probe an interaction to answer readiness.
 
 `agw secret list` shows, per active source column, the lookup identifier / `would attempt` /
 `not ready: <reason>` / `won't attempt`; `agw secret describe <name>` shows one secret in full
-(mappings flagged not-ready where they apply, and a resolution preview that skips not-ready
-sources); `agw doctor` has a **Secret backends** group (one readiness row per implementation) plus
-one non-probing row per secret previewing whether a source could attempt it and whether that source
-is ready. Doctor never resolves a secret or reports a runtime resolution outcome.
+(mappings flagged not-ready where they apply, and a resolution preview that skips not-ready sources
+and, for a terminal-channel source such as `prompt`, sources with no terminal available);
+`agw doctor` has a **Secret backends** group (one readiness row per implementation) plus one
+non-probing row per secret previewing whether a source could attempt it and whether that source is
+ready. Doctor never resolves a secret or reports a runtime resolution outcome.
 
 Use `agw secret verify NAME...` when you need proof rather than a preview. It deduplicates names in
 first-written order, performs one real batch resolution, and renders one value-free row per unique
@@ -713,9 +714,12 @@ name. Each row reports category, source, safe identifier, typed detail, and reme
 all-resolved batch exits 0; if any row is not `resolved`, the full table is still rendered and the
 command exits 1.
 
-Interactive sources are refused by default. Add `--allow-interaction` only when you consent to a
-prompt, biometric check, or backend authentication. That opt-in is incompatible with the global
-`--non-interactive` flag. Guide rendering and readiness or preview rows do not grant that consent.
+Sources that may block on a human are allowed by default. A terminal-channel source (`prompt`) needs
+a terminal available to this process, or it is skipped into fall-through; an out-of-band source
+(`onepassword`) may still trigger a biometric or re-auth prompt outside this process, needing only
+that consent default, no terminal. Add the global `--non-interactive` flag to refuse every source
+that could block on a human. Guide rendering and readiness or preview rows never themselves grant
+consent or resolve a value.
 
 ## Inspecting the whole picture
 

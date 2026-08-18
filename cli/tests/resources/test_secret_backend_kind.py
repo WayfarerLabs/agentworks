@@ -37,19 +37,19 @@ def test_kind_attributes() -> None:
     assert "secret-provider" not in KIND_REGISTRY  # collapsed 2026-07-07
 
 
-def test_descriptor_declares_the_nominal_version_two_backend_contract() -> None:
+def test_descriptor_declares_the_nominal_version_three_backend_contract() -> None:
     from agentworks.capabilities.secret_backend import SecretBackend
     from agentworks.capabilities.secret_backend.kinds import SECRET_BACKEND_DESCRIPTOR as descriptor
 
     assert descriptor.implementation_contract is SecretBackend
-    assert descriptor.contract_version == 2
+    assert descriptor.contract_version == 3
     assert descriptor.required_operations == {
         "backend_readiness",
         "would_attempt",
         "describe_lookup",
         "create_client",
     }
-    assert descriptor.required_attributes == {"interactive", "config_model", "mapping_model"}
+    assert descriptor.required_attributes == {"interaction_channel", "config_model", "mapping_model"}
 
 
 def test_core_registry_stores_the_exact_builtin_classes() -> None:

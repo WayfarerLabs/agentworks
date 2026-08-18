@@ -15,6 +15,7 @@ from agentworks.capabilities.conformance import conformance_error
 from agentworks.capabilities.descriptor import descriptor_for
 from agentworks.capabilities.secret_backend import (
     InteractionBroker,
+    InteractionChannel,
     RemainingTime,
     SecretBackend,
     SecretSourceClient,
@@ -51,7 +52,7 @@ def _reason(**changes: object) -> str:
     return reason
 
 
-def test_a_nominal_concrete_version_two_backend_conforms() -> None:
+def test_a_nominal_concrete_current_version_backend_conforms() -> None:
     assert conformance_error(DESCRIPTOR, _backend()) is None
 
 
@@ -67,10 +68,10 @@ def test_an_abstract_backend_is_rejected_as_not_constructible() -> None:
     class AbstractBackend(SecretBackend):
         name = "abstract"
         description = "still abstract"
-        contract_version = 2
+        contract_version = 3
         config_model = GoodConfig
         mapping_model = GoodMapping
-        interactive = False
+        interaction_channel = InteractionChannel.NONE
 
     reason = conformance_error(DESCRIPTOR, AbstractBackend)
     assert reason is not None
@@ -82,10 +83,10 @@ def test_a_non_callable_factory_hits_the_generic_operation_check_first() -> None
     assert "required secret-backend operations: create_client" in _reason(create_client=None)
 
 
-class MissingInteractiveBackend(SecretBackend):
+class MissingChannelBackend(SecretBackend):
     name = "phase3-fixture"
     description = "omits one required class fact"
-    contract_version = 2
+    contract_version = 3
     config_model = GoodConfig
     mapping_model = GoodMapping
 
@@ -114,14 +115,18 @@ class MissingInteractiveBackend(SecretBackend):
 
 
 def test_a_missing_required_class_attribute_is_rejected() -> None:
-    assert conformance_error(DESCRIPTOR, MissingInteractiveBackend) == (
-        "it is missing the required secret-backend attributes: interactive"
+    assert conformance_error(DESCRIPTOR, MissingChannelBackend) == (
+        "it is missing the required secret-backend attributes: interaction_channel"
     )
 
 
-@pytest.mark.parametrize("value", [0, 1, "yes", None], ids=("zero", "one", "string", "none"))
-def test_interactive_must_be_exactly_bool(value: object) -> None:
-    assert _reason(interactive=value) == f"its interactive class attribute is {value!r}, not a bool"
+# "terminal" is the important rejection: an equal-but-not-identical plain
+# string would silently take the wrong branch at every identity comparison.
+@pytest.mark.parametrize("value", [False, True, "terminal", None], ids=("false", "true", "plain-string", "none"))
+def test_interaction_channel_must_be_an_exact_member(value: object) -> None:
+    assert _reason(interaction_channel=value) == (
+        f"its interaction_channel class attribute is {value!r}, not an InteractionChannel member"
+    )
 
 
 class UntaggedConfig(AgwModel):

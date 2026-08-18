@@ -371,6 +371,10 @@ def secret_description_data(description: SecretDescription) -> JsonObject:
                     {"source": skipped.source, "reason": skipped.reason}
                     for skipped in description.resolution.skipped_not_ready
                 ],
+                "skipped_no_terminal": [
+                    {"source": skipped.source, "reason": skipped.reason}
+                    for skipped in description.resolution.skipped_no_terminal
+                ],
             },
         },
     }
@@ -539,6 +543,8 @@ def render_secret_description(desc: SecretDescription) -> None:
     # not-ready here (R9.6), then the optimistic would-resolve verdict under it.
     for skipped in desc.resolution.skipped_not_ready:
         output.detail(f"- skipped {skipped.source}: not ready: {skipped.reason}")
+    for skipped in desc.resolution.skipped_no_terminal:
+        output.detail(f"- skipped {skipped.source}: {skipped.reason}")
     if desc.resolution.category is not PreviewCategory.ATTEMPTABLE:
         output.detail("not attemptable through any active source")
     else:
