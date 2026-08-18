@@ -386,6 +386,51 @@ def test_render_shows_not_ready_annotation_and_skip(
     assert "would attempt via prompt" in out
 
 
+def test_resolution_preview_summary_names_full_fallthrough_chain(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch
+) -> None:
+    """Three active, ready sources: the summary names all three, not just
+    the winner. The preview picks its winner by mapping applicability alone
+    (no value is ever read), so naming only the winner reads as more
+    certain than it is when a later source in the chain is what actually
+    resolves at runtime (field evidence: sources = ["env-var", "personal-op",
+    "prompt"], env var unset, summary read "would attempt via env-var" and
+    was taken as the final answer even though the chain kept going)."""
+    from agentworks.secrets.inspect import render_secret_description
+
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/op")
+    cfg = _write_cfg(
+        tmp_path,
+        settings="""
+        [plugins]
+        system = ["onepassword"]
+
+        [secret_config]
+        sources = ["env-var", "personal-op", "prompt"]
+        """,
+        manifests=[
+            ManifestDoc("secret-source", "personal-op", {"backend": {"name": "onepassword"}}),
+            ManifestDoc(
+                "secret",
+                "api-key",
+                {"backend_mappings": {"personal-op": "op://Vault/api/field"}},
+                description="API key",
+            ),
+        ],
+    )
+    monkeypatch.delenv("AW_SECRET_API_KEY", raising=False)
+    config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
+    desc = describe_secret(config, registry, "api-key")
+    render_secret_description(desc)
+
+    out = capsys.readouterr().out
+    preview_section = out.split("Resolution preview:", 1)[1]
+    assert "env-var" in preview_section
+    assert "personal-op" in preview_section
+    assert "prompt" in preview_section
+
+
 def test_interactive_optimism_preview_unchanged_under_readiness(tmp_path: Path, monkeypatch) -> None:
     """LLD e acceptance line: the interactive-optimism preview is UNCHANGED.
     Readiness is the offline layer UNDER interactive-optimism: with an earlier
@@ -515,9 +560,13 @@ def test_render_emits_header_usages_mappings_preview(
     assert "Backend mappings:" in out
     assert "env-var (env-var, synthesized default): AW_SECRET_API_KEY" in out
     assert "prompt (prompt, synthesized default): (prompt at resolution time)" in out
-    # Resolution preview
+    # Resolution preview: names the winner and, since prompt is also active
+    # and reachable, the fall-through chain behind it (structural check on
+    # the preview section only, not the connecting prose).
     assert "Resolution preview:" in out
-    assert "would attempt via env-var" in out
+    preview_section = out.split("Resolution preview:", 1)[1]
+    assert "env-var" in preview_section
+    assert "prompt" in preview_section
 
 
 # -- Used-by (Phase 3c dynamic dimension) -----------------------------------
