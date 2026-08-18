@@ -25,10 +25,11 @@ pre-existing manifest and each manifest-producing retired section as canonical `
 into their parent and exclude `[secret_backends.*]`, which has no one-for-one manifest. Freeze that
 complete identity set before backup.
 
-Offer separate untouched backups of the config and resource directory at fresh operator-selected
-destinations outside both active trees. State every source and destination. If the resources
-directory is absent, record that baseline instead of creating one. If either backup is declined or
-cannot be verified byte-for-byte, stop before editing and leave the active files unchanged.
+Before editing, make separate untouched backups of the config and resource directory at fresh
+operator-selected destinations outside both active trees. Record every source and destination. If
+the resources directory is absent, record that baseline instead of creating one. If the operator
+declines either backup, or if one cannot be verified byte-for-byte, stop before editing and leave
+the active files unchanged.
 
 ## Rewrite one resource at a time
 
@@ -55,7 +56,7 @@ For an ordinary named section, the suffix becomes `metadata.name`, `description`
 `metadata.description`, and remaining values move under `spec`. Tagged capabilities must follow
 their live `resource explain` output.
 
-Edit only one pre-recorded manifest path at a time and do not change the frozen identity set. State
+Edit only one pre-recorded manifest path at a time and do not change the frozen identity set. Record
 the file and expected resulting identity before each edit. Preserve the last verified files if the
 operator declines an edit. The current field reference owns details, including authentication,
 placement, and git-token shapes; do not infer them from this migration summary.

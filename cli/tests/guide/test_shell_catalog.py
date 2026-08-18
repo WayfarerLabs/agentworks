@@ -52,6 +52,9 @@ def test_only_direct_markdown_children_of_guide_content_are_discovered(tmp_path:
     _shell(tmp_path, "one/guide-content/alpha.md")
     _shell(tmp_path, "one/guide-content/nested/ignored.md")
     _shell(tmp_path, "ordinary/beta.md")
+    (tmp_path / "one" / "guide-content" / "README.md").write_text(
+        "Author documentation, not a concept shell.\n", encoding="utf-8"
+    )
 
     assert discover_concept_shells(tmp_path).names() == ("concept-alpha",)
 

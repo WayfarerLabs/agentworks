@@ -153,6 +153,8 @@ def _shell_resources(root: Traversable) -> tuple[tuple[str, Traversable], ...]:
             child_relative = relative / child.name
             if child.is_dir():
                 walk(child, child_relative)
+            elif relative.name == "guide-content" and child.name == "README.md":
+                continue
             elif relative.name == "guide-content" and child.name.endswith(".md"):
                 found.append((child_relative.as_posix(), child))
 
@@ -161,7 +163,7 @@ def _shell_resources(root: Traversable) -> tuple[tuple[str, Traversable], ...]:
 
 
 def discover_concept_shells(package_root: Traversable | None = None) -> GuideCatalog:
-    """Discover and validate all direct Markdown children of first-party guide-content directories."""
+    """Discover and validate concept shells in first-party guide-content directories."""
     root = files("agentworks") if package_root is None else package_root
     shells = tuple(_parse_shell(resource, path) for path, resource in _shell_resources(root))
     index = next((shell for shell in shells if isinstance(shell, IndexShell)), None)

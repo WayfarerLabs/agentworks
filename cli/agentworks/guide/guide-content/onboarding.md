@@ -32,7 +32,7 @@ secret-source order. It does not hold declared resources; those live in YAML man
 Choose an existing SSH key pair or create one specifically for Agentworks:
 
 ```bash
-ssh-keygen -t ed25519 -f /path/to/your/ssh_key
+ssh-keygen -t ed25519 -f /path/to/agentworks_ssh_key
 ```
 
 <!-- agw:agent-only -->
@@ -76,9 +76,9 @@ Git credentials are declared resources. Inspect existing choices with
 
 Templates capture repeatable choices for VMs, administrators, workspaces, agents, and sessions.
 Harness integrations describe the coding assistants that sessions can run. Use `agw resource kinds`
-for the complete vocabulary and `agw resource list --kind KIND --include-disabled` for any kind you
-want to inspect. Shipped defaults are a useful starting point; add manifests when they do not fit
-the operator's intended setup.
+for the complete vocabulary and `agw resource list --kind KIND --include-disabled` for any kind
+relevant to the installation. Shipped defaults are a useful starting point; add manifests when they
+do not fit the operator's intended setup.
 
 If Agentworks does not provide an integration for a chosen harness, use the built-in `shell`
 integration in an agent-mode session and run the harness's CLI directly. `agw session create --help`

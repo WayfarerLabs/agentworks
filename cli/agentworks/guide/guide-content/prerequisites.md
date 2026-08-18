@@ -3,7 +3,7 @@ description: Understand what must be in place before Agentworks can create and o
 index-order: 16
 ---
 
-# Before you start
+# Prerequisites
 
 Agentworks runs on Linux, macOS, and Windows with Python 3.12 or newer. The remaining prerequisites
 are about reaching and operating the VMs where Agentworks-managed workloads run.
@@ -11,15 +11,14 @@ are about reaching and operating the VMs where Agentworks-managed workloads run.
 ## Agentworks CLI
 
 `uv tool install agentworks-cli` is the recommended isolated installation.
-`pipx install agentworks-cli` is also supported. Run `agw version` to confirm the command you are
-using.
+`pipx install agentworks-cli` is also supported. Run `agw version` to confirm the active command.
 
 ## Tailscale
 
 Routine communication with managed VMs uses Tailscale, including SSH. The workstation must be
 connected to the intended tailnet, and Agentworks needs access to a Tailscale auth key when joining
 a VM. A reusable, non-ephemeral key is the recommended default, but Agentworks does not restrict
-which key type you choose.
+which key type the operator chooses.
 
 See `agw guide show concept-tailscale` and the
 [official auth-key documentation](https://tailscale.com/docs/features/access-control/auth-keys) for

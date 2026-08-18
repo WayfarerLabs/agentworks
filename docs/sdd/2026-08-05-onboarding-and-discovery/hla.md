@@ -57,9 +57,10 @@ argument uses dynamic topic completion.
 ## Shell catalog
 
 The catalog starts at `importlib.resources.files("agentworks")`, walks the installed first-party
-package tree, and discovers direct `.md` children of directories named `guide-content`. It never
-scans another installed package, the working tree, or candidate code. Core, subsystem, and curated
-plugin concepts therefore share one convention instead of a root or topic registry.
+package tree, and discovers direct `.md` children of directories named `guide-content`, except the
+exact author-facing `README.md` in each such directory. It never scans another installed package,
+the working tree, or candidate code. Core, subsystem, and curated plugin concepts therefore share
+one convention instead of a root or topic registry.
 
 Each shell has:
 

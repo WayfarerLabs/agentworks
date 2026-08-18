@@ -24,7 +24,8 @@ Markdown and exactly two directive forms: an agent-only fence and a packaged-sec
 ## Concept shells and discovery
 
 Each concept is one UTF-8 Markdown file named `<stem>.md` directly under a directory named
-`guide-content` in the installed first-party `agentworks` package tree. Discovery starts at
+`guide-content` in the installed first-party `agentworks` package tree. An exact `README.md` in such
+a directory is author documentation and is not discovered as a shell. Discovery starts at
 `importlib.resources.files("agentworks")` and walks only that traversable package resource. The
 guide does not scan the working tree, current directory, another installed package, or a
 filesystem-relative fallback.

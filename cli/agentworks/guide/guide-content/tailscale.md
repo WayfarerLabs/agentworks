@@ -33,12 +33,12 @@ records the new tailnet address, refreshes SSH configuration, and verifies Tails
 `--ignore-env` bypasses an environment-provided key so another configured secret source can supply
 the replacement.
 
-An advanced use case is moving a VM to another tailnet. This can be used in situations where you
-want the workloads to run on a different tailnet (e.g. for access to private infrastructure) yet you
-don't want to run your entire Agentworks system on that tailnet. In this case, `rekey` can be used
-after initial provisioning to move the VM to the other tailnet. The old connection is lost when the
-VM leaves its current tailnet, so first confirm the replacement key joins the intended destination
-and that the operator can share the machine to an appropriate user on the original tailnet. If
-either is unavailable, do not start the rekey. `agw vm rekey NAME --wait-for-share` pauses after the
-move so the operator can complete that sharing before Agentworks verifies connectivity. Consult
-Tailscale's [machine-sharing workflow](https://tailscale.com/kb/1084/sharing) for more information.
+An advanced use case moves a VM to another tailnet. This is useful when workloads need access to
+private infrastructure on another tailnet but the operator does not want the entire Agentworks
+system there. After initial provisioning, `rekey` can move the VM to that tailnet. The old
+connection is lost when the VM leaves its current tailnet, so first confirm the replacement key
+joins the intended destination and that the operator can share the machine to an appropriate user on
+the original tailnet. If either is unavailable, do not start the rekey.
+`agw vm rekey NAME --wait-for-share` pauses after the move so the operator can complete that sharing
+before Agentworks verifies connectivity. Consult Tailscale's
+[machine-sharing workflow](https://tailscale.com/kb/1084/sharing) for more information.

@@ -12,8 +12,9 @@ drive the `agw` CLI, edit configuration, and inspect files. The assistant agent 
 Agentworks-managed agent, which is a declared identity that works inside Agentworks VMs and
 workspaces.
 
-This approach can be very helpful, but it also gives the assistant meaningful access. Choose a
-security posture and degree of oversight appropriate to the environment and the work.
+This approach can be very helpful, but it also gives the assistant meaningful access. Agentworks
+recommends a strict security posture and careful oversight. The operator ultimately decides which
+controls fit the environment and the work.
 
 <!-- agw:agent-only -->
 
