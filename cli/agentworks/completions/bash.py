@@ -27,7 +27,7 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
     "secrets": ("$(agw secret list --names-only 2>/dev/null)"),
     "resource_kinds": ("$(agw resource kinds --names-only 2>/dev/null)"),
     "resource_refs": ("$(agw resource list --names-only 2>/dev/null)"),
-    "guide_topics": ("$(agw guide --names-only 2>/dev/null)"),
+    "guide_topics": ("$(agw guide list 2>/dev/null)"),
 }
 
 
@@ -43,7 +43,10 @@ def generate_bash(spec: CommandSpec, version: str) -> str:
     lines.append("")
 
     lines.append("_agentworks() {")
-    lines.append("    local cur prev words cword candidate")
+    lines.append(
+        "    local cur prev words cword candidate positional_count word_index skip_next positional_only"
+        " group_command command_index"
+    )
     lines.append("    if type _init_completion &>/dev/null; then")
     lines.append("        _init_completion || return")
     lines.append("    else")
@@ -73,7 +76,6 @@ def _emit_dispatch(lines: list[str], spec: CommandSpec) -> None:
 
     lines.append("    # Determine command context")
     lines.append('    local cmd1="${words[1]:-}"')
-    lines.append('    local cmd2="${words[2]:-}"')
     lines.append("")
 
     # Level 1: completing the top-level command name
@@ -102,25 +104,62 @@ def _emit_dispatch(lines: list[str], spec: CommandSpec) -> None:
 def _emit_group_completions(lines: list[str], spec: CommandSpec) -> None:
     """Emit completions for a command group (has subcommands)."""
     sub_names = sorted(spec.subcommands.keys())
-    sub_names_str = " ".join(sub_names)
+    group_params = [param for param in spec.params if not param.is_argument]
+    group_options = [opt for param in group_params for opt in (param.opts or [f"--{param.name}"])]
+    flag_options = [opt for param in group_params if param.is_flag for opt in (param.opts or [f"--{param.name}"])]
+    value_options = [opt for param in group_params if not param.is_flag for opt in (param.opts or [f"--{param.name}"])]
+    candidates = " ".join([*sub_names, *group_options, "--help"])
 
-    # If we're completing the subcommand name
-    lines.append("            if [[ $cword -eq 2 ]]; then")
-    lines.append(f'                COMPREPLY=($(compgen -W "{sub_names_str}" -- "$cur"))')
+    # Find the first positional token after the group while skipping its
+    # recognized options. Its absolute index is also the leaf parser's start.
+    lines.append('            group_command=""')
+    lines.append("            command_index=-1")
+    lines.append("            skip_next=false")
+    lines.append("            positional_only=false")
+    lines.append("            for ((word_index=2; word_index<cword; word_index++)); do")
+    lines.append('                candidate="${words[word_index]}"')
+    lines.append('                if [[ "$skip_next" == true ]]; then')
+    lines.append("                    skip_next=false")
+    lines.append("                    continue")
+    lines.append("                fi")
+    lines.append('                if [[ "$candidate" == -- ]]; then')
+    lines.append("                    positional_only=true")
+    lines.append("                    continue")
+    lines.append("                fi")
+    if flag_options or value_options:
+        lines.append('                if [[ "$positional_only" != true ]]; then')
+        lines.append('                    case "$candidate" in')
+        if flag_options:
+            lines.append(f"                        {'|'.join(flag_options)}) continue ;;")
+        if value_options:
+            patterns = "|".join(value_options)
+            assigned_patterns = "|".join(f"{option}=*" for option in value_options)
+            lines.append(f"                        {patterns}) skip_next=true; continue ;;")
+            lines.append(f"                        {assigned_patterns}) continue ;;")
+        lines.append("                    esac")
+        lines.append("                fi")
+    lines.append('                group_command="$candidate"')
+    lines.append("                command_index=$word_index")
+    lines.append("                break")
+    lines.append("            done")
+
+    # If no completed subcommand exists, complete group options and commands.
+    lines.append('            if [[ -z "$group_command" ]]; then')
+    lines.append(f'                COMPREPLY=($(compgen -W "{candidates}" -- "$cur"))')
     lines.append("                return")
     lines.append("            fi")
 
     # Dispatch to leaf commands
-    lines.append('            case "$cmd2" in')
+    lines.append('            case "$group_command" in')
     for name in sub_names:
         sub = spec.subcommands[name]
         lines.append(f"                {name})")
-        _emit_leaf_completions(lines, sub, token_offset=3)
+        _emit_leaf_completions(lines, sub, token_offset="command_index + 1")
         lines.append("                    ;;")
     lines.append("            esac")
 
 
-def _emit_leaf_completions(lines: list[str], spec: CommandSpec, token_offset: int) -> None:
+def _emit_leaf_completions(lines: list[str], spec: CommandSpec, token_offset: int | str) -> None:
     """Emit completions for a leaf command."""
     indent = "            " if token_offset == 2 else "                    "
 
@@ -144,12 +183,47 @@ def _emit_leaf_completions(lines: list[str], spec: CommandSpec, token_offset: in
             lines.append(f"{indent}        ;;")
         lines.append(f"{indent}esac")
 
+    # Count completed positional arguments independently of recognized options.
+    # This keeps dynamic completion attached to the argument even when a flag or
+    # value-taking option appears before it.
+    if positional_args:
+        flag_options = [opt for param in all_options if param.is_flag for opt in param.opts]
+        value_options = [opt for param in all_options if not param.is_flag for opt in param.opts]
+        lines.append(f"{indent}positional_count=0")
+        lines.append(f"{indent}skip_next=false")
+        lines.append(f"{indent}positional_only=false")
+        lines.append(f"{indent}for ((word_index={token_offset}; word_index<cword; word_index++)); do")
+        lines.append(f'{indent}    candidate="${{words[word_index]}}"')
+        lines.append(f'{indent}    if [[ "$skip_next" == true ]]; then')
+        lines.append(f"{indent}        skip_next=false")
+        lines.append(f"{indent}        continue")
+        lines.append(f"{indent}    fi")
+        lines.append(f'{indent}    if [[ "$positional_only" == true ]]; then')
+        lines.append(f"{indent}        ((positional_count+=1))")
+        lines.append(f"{indent}        continue")
+        lines.append(f"{indent}    fi")
+        lines.append(f'{indent}    if [[ "$candidate" == -- ]]; then')
+        lines.append(f"{indent}        positional_only=true")
+        lines.append(f"{indent}        continue")
+        lines.append(f"{indent}    fi")
+        if flag_options or value_options:
+            lines.append(f'{indent}    case "$candidate" in')
+            if flag_options:
+                lines.append(f"{indent}        {'|'.join(flag_options)}) continue ;;")
+            if value_options:
+                patterns = "|".join(value_options)
+                assigned_patterns = "|".join(f"{option}=*" for option in value_options)
+                lines.append(f"{indent}        {patterns}) skip_next=true; continue ;;")
+                lines.append(f"{indent}        {assigned_patterns}) continue ;;")
+            lines.append(f"{indent}    esac")
+        lines.append(f"{indent}    ((positional_count+=1))")
+        lines.append(f"{indent}done")
+
     # Positional argument completions. Each positional emits its own handler;
     # variadic positionals (multiple=True) match every position from theirs
     # onward (e.g. console create's "sessions" continues completing the 2nd,
     # 3rd, ... argument).
     for i, param in enumerate(positional_args):
-        pos_token = token_offset + i
         cmp_op = "-ge" if param.multiple else "-eq"
         words: str | None = None
         if param.choices or param.suggestions:
@@ -157,7 +231,7 @@ def _emit_leaf_completions(lines: list[str], spec: CommandSpec, token_offset: in
         elif param.dynamic_completer and param.dynamic_completer in DYNAMIC_SNIPPETS:
             words = DYNAMIC_SNIPPETS[param.dynamic_completer]
         if words:
-            lines.append(f'{indent}if [[ $cword {cmp_op} {pos_token} && "$cur" != -* ]]; then')
+            lines.append(f'{indent}if [[ $positional_count {cmp_op} {i} && "$cur" != -* ]]; then')
             if param.dynamic_completer == "files":
                 lines.append(f"{indent}    COMPREPLY=()")
                 lines.append(f"{indent}    while IFS= read -r candidate; do")
@@ -170,14 +244,12 @@ def _emit_leaf_completions(lines: list[str], spec: CommandSpec, token_offset: in
             lines.append(f"{indent}fi")
 
     # Fall through to option completions
-    if all_options:
-        opts = []
-        for param in all_options:
-            opt = param.opts[0] if param.opts else f"--{param.name}"
-            opts.append(opt)
-        opts.append("--help")
-        opts_str = " ".join(opts)
-        lines.append(f'{indent}if [[ "$cur" == -* ]]; then')
-        lines.append(f'{indent}    COMPREPLY=($(compgen -W "{opts_str}" -- "$cur"))')
-        lines.append(f"{indent}    return")
-        lines.append(f"{indent}fi")
+    opts = []
+    for param in all_options:
+        opts.extend(param.opts or [f"--{param.name}"])
+    opts.append("--help")
+    opts_str = " ".join(opts)
+    lines.append(f'{indent}if [[ "$cur" == -* ]]; then')
+    lines.append(f'{indent}    COMPREPLY=($(compgen -W "{opts_str}" -- "$cur"))')
+    lines.append(f"{indent}    return")
+    lines.append(f"{indent}fi")

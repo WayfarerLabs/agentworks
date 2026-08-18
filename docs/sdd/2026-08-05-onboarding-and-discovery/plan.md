@@ -643,17 +643,118 @@ operator state cannot affect guidance; and the implementation is materially smal
 corrected typed model it replaces. Current FRD R1 through R5 and acceptance criteria 1 through 8 and
 10 hold; R6, R7, and acceptance criterion 9 remain for closeout.
 
+The operator's 2026-08-17 index ruling supersedes the fixed trail-sign tuple and guide-specific
+`--names-only` shape without changing the completed Markdown-shell record above. The index remains
+static Markdown plus discovered shell metadata; this correction does not add a third directive or
+runtime state.
+
+## Phase 4 correction: shell-backed guide index
+
+- [x] Before implementation merges, have the saga lead record the operator's 2026-08-17 index and
+      guide-grammar rulings in the saga-owned target state, superseding its fixed trail-sign and
+      direct-topic forms. This child records the dependency but does not edit the saga-owned
+      artifact.
+- [x] Amend the active FRD, HLA, and guide LLD for one reserved `_index.md`, optional bounded
+      `index-order` frontmatter, deterministic `(index_order, slug)` ordering, ordinary-only omitted
+      counts, and `agw guide list`. Preserve every completed checkbox above unchanged.
+- [x] Replace the hard-coded trail-sign module and tuple with the reserved index shell plus
+      generated catalog rows. Add the existing eight featured concepts to the index through
+      frontmatter only; keep shells not selected for the index addressable and listable. Do not add
+      an index directive, template engine, registration map, configuration read, or runtime-state
+      load.
+- [x] Replace the guide-specific `--names-only` option with the exact `agw guide list` positional
+      form while preserving `agw guide concept-*`. Repoint Bash, Zsh, and PowerShell guide-topic
+      completion to the list form and remove stale trail-sign/names-only code and docs.
+- [x] Update permanent CLI and completion documentation. Add structural coverage for index-shell
+      discovery, optional frontmatter validation, deterministic ordering, exact generated-release
+      exclusion from the omitted count, full list output, completion parity, and state-free
+      rendering without testing authored prose.
+- [x] Run focused guide/completion and package tests, the full non-integration suite, Ruff,
+      formatting, mypy, Rulesync drift, locked-SDD, and file lint. Complete project and fresh-eyes
+      reviews, resolve material findings, and hand off one ready PR with the saga label.
+
+Definition of done: adding or removing `index-order` changes the concise no-topic index without a
+Python edit; `_index.md` owns authored framing; `agw guide list` exposes every ordinary and exact
+release topic; historical release topics never inflate the omitted-concept count; and the old trail
+sign tuple, module, and guide-specific `--names-only` option are absent.
+
+The operator's later 2026-08-17 grammar ruling supersedes the checked reserved-positional and
+variadic-topic implementation record above without rewriting that completed journey. The public
+destination is the ordinary noun/verb grammar: default index, `list`, and single-topic `show`.
+
+## Phase 4 correction: grammar-native guide commands
+
+- [x] Amend the active FRD, HLA, and guide LLD for `agw guide`, `agw guide list`, and
+      `agw guide show TOPIC`. Make `show` single-topic and remove the unreleased direct/variadic
+      form without an alias.
+- [x] Replace the single `guide [TOPIC...]` command with one guide group whose no-subcommand
+      callback renders the index and whose real `list` and `show` subcommands own listing and
+      one-topic rendering. Preserve `agw guide --agent`; make `show` own its mode option; and reject
+      a group-level mode followed by either subcommand with recovery guidance rather than adding a
+      second topic router.
+- [x] Delete `ParamSpec.terminal_values`, its registration, generator branches, and implementation-
+      source tests. Let ordinary command completion expose `list`/`show`; attach the existing static
+      topic-name completer only to `show TOPIC`.
+- [x] Record that catalog defects atomically prevent index, list, show, and completion from
+      returning partial results. Remove hard-coded featured counts from permanent docs, document the
+      underscore shell-name reservation, and take the bounded protocol/index-check cleanups. Keep
+      authored index headings in `_index.md` and defer PowerShell's native filesystem fallback.
+- [x] Close the exact-head completion findings with shared-spec group options and option-aware
+      positional counting in every generated backend. Add ordered static prerequisites,
+      virtual-machine, and Tailscale concepts that point to command-owned live facts without loading
+      operator state during guide rendering.
+- [x] Run focused guide/completion/package tests, the full non-integration suite, Ruff, formatting,
+      mypy, Rulesync drift, locked-SDD, and file lint. Complete exact-head project, cold,
+      integration, and saga re-reviews before returning the PR ready.
+
+Definition of done: `agw guide`, `agw guide list`, and `agw guide show TOPIC` are the only guide
+grammar; topic rendering accepts one topic; completion uses the ordinary command tree; no terminal-
+value or guide positional-parser machinery remains; and the saga target state records the same
+destination before merge.
+
+The exact-head completion review found that the checked local-mode/rejection design above forced a
+guide-specific exception into otherwise ordinary group completion. The operator's standing
+simplification direction resolves that intermediate design without rewriting its completed record:
+one group-owned mode option applies to the index and `show`, while `list` remains mode-independent.
+
+## Phase 4 correction: one guide mode owner
+
+- [x] Amend the active FRD, HLA, and guide LLD so `--agent/--human` is one group-level option used
+      by the no-subcommand index and `show`. Accept it before `list` without changing list output;
+      do not duplicate it on `show` or encode a terminal group-option exception in completion.
+- [x] Remove `show`'s local mode option and callback rejection, pass the group-selected mode through
+      the ordinary Typer context, and align CLI examples and structural completion coverage.
+- [x] Correct the Tailscale concept to distinguish assigning a separately obtained auth key from
+      creating or rotating one, and state the different-tailnet access impact plus refusal path.
+- [x] Re-run focused/full/static gates and exact-head project, cold, integration, complexity, and
+      saga reviews before completing the delivery record.
+
+The operator's 2026-08-18 manifesto ruling extends the same bounded composition model rather than
+adding another guide mechanism: selecting the manifesto concept should render the canonical
+document, with its GitHub URL retained only as a source link.
+
+## Phase 4 correction: complete manifesto concept
+
+- [x] Amend the active FRD, HLA, and guide LLD so the two exact curated repository documents are the
+      root README and `docs/manifesto.md`, and permit an H1 section only when its static offset
+      keeps every rendered heading in H2-H6.
+- [x] Vendor the exact manifesto bytes beside the README in wheels and source distributions, retain
+      the verified editable fallback, and have `concept-manifesto` import the complete canonical
+      document with one heading offset. Add only structural packaging/import coverage.
+- [x] Re-run focused/full/static gates and exact-head project, cold, integration, complexity, and
+      saga reviews before completing the delivery record.
+
 ## Phase 5: representative acceptance and closeout
 
 - [ ] Run one provider-backed journey from an exact reviewed candidate wheel through the no-topic
-      trail sign and `concept-onboarding` to a verified VM and started session. Label the candidate
-      substitution rather than claiming the not-yet-published stable bootstrap was exercised. After
-      publication, run one bounded canonical-prompt smoke that installs the exact stable release,
-      verifies it, and reaches the trail sign. Use generated-package parity and focused
-      clean-install probes for native wrappers rather than repeating the provider journey three
-      times. Done when: evidence records the exact versions, provider resources, observed results,
-      cleanup, and any operator intervention. This evidence does not replace the saga's release-PR,
-      publication, or final custom-domain gates.
+      guide index and `agw guide show concept-onboarding` to a verified VM and started session.
+      Label the candidate substitution rather than claiming the not-yet-published stable bootstrap
+      was exercised. After publication, run one bounded canonical-prompt smoke that installs the
+      exact stable release, verifies it, and reaches the guide index. Use generated-package parity
+      and focused clean-install probes for native wrappers rather than repeating the provider
+      journey three times. Done when: evidence records the exact versions, provider resources,
+      observed results, cleanup, and any operator intervention. This evidence does not replace the
+      saga's release-PR, publication, or final custom-domain gates.
 - [ ] Confirm permanent guide, assistance, JSON, and contribution documentation is self-sufficient;
       no current behavior relies on this SDD. Promote only missing current facts, not design
       history.

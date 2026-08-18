@@ -1,9 +1,9 @@
 # Guide Contract Low-Level Design
 
-- Status: Current Markdown-shell destination
+- Status: Current Markdown-shell destination with shell-backed index and guide noun/verb grammar
 - Scope: concept discovery, bounded shell expansion, mode selection, and inert release evidence
 - FRD: `frd.md` R1 through R5
-- HLA: `hla.md`, Fixed trail sign through Safety and failure behavior
+- HLA: `hla.md`, Shell-backed index through Safety and failure behavior
 
 The immutable implementation journey remains in `plan.md`. This contract replaces the retained
 typed-block, action, evidence, and onboarding-assessment machinery with auto-discovered Markdown
@@ -13,8 +13,8 @@ concept shells.
 
 The guide has three content paths:
 
-1. A fixed no-topic trail sign renders without discovering shells or loading state.
-2. Selected `concept-*` topics render auto-discovered Markdown shells.
+1. A reserved no-topic index shell renders with catalog-derived topic rows and no operator state.
+2. `agw guide show TOPIC` renders one auto-discovered Markdown shell or exact release topic.
 3. Exact historical release-note topics render bounded sections from the packaged changelog as inert
    generated evidence. They are not shells.
 
@@ -24,7 +24,8 @@ Markdown and exactly two directive forms: an agent-only fence and a packaged-sec
 ## Concept shells and discovery
 
 Each concept is one UTF-8 Markdown file named `<stem>.md` directly under a directory named
-`guide-content` in the installed first-party `agentworks` package tree. Discovery starts at
+`guide-content` in the installed first-party `agentworks` package tree. An exact `README.md` in such
+a directory is author documentation and is not discovered as a shell. Discovery starts at
 `importlib.resources.files("agentworks")` and walks only that traversable package resource. The
 guide does not scan the working tree, current directory, another installed package, or a
 filesystem-relative fallback.
@@ -44,32 +45,44 @@ Every shell begins with this restricted frontmatter shape:
 ```markdown
 ---
 description: Help an operator get started with Agentworks.
+index-order: 20
 ---
 ```
 
 `description` is required, non-empty, single-line text used for discovery and completion metadata.
-No other frontmatter key, YAML feature, or executable value is accepted. The body contains exactly
-one authored ATX level-1 heading outside agent-only fences, which supplies the topic title. Setext
-headings are not accepted anywhere in the shell. The filename supplies identity; the heading
-supplies title; frontmatter supplies description. Python does not register those values per topic.
+`index-order` is optional and, when present, is a one-to-four-digit non-negative base-10 integer. It
+selects the concept for the concise index. Equal values sort by slug. No other frontmatter key, YAML
+feature, or executable value is accepted. The body contains exactly one authored ATX level-1 heading
+outside agent-only fences, which supplies the topic title. Setext headings are not accepted anywhere
+in the shell. The filename supplies identity; the heading supplies title; frontmatter supplies
+description. Python does not register those values per topic.
 
-`agw guide --names-only` discovers names from shell filenames plus the separately generated exact
+`agw guide list` discovers names from shell filenames plus the separately generated exact
 release-note names. It loads no operator state. Shell structural defects, including duplicate slugs,
 fail the catalog request rather than producing a partial or ambiguous catalog.
 
-The root `README.md` is not a shell and is not discovered. One custom Hatch build hook materializes
-it at `agentworks/_guide_sources/README.md` as an include-only resource:
+The no-topic index uses that same complete catalog. A defect in any discovered shell therefore
+prevents the index from rendering. This intentionally withdraws the former fixed trail sign's
+catalog-free exemption instead of maintaining a second fallback topic list.
+
+Exactly one reserved `_index.md` exists in the core guide-content directory. It follows the same
+description, H1, fence, include, and rendering rules, must omit `index-order`, and is excluded from
+the ordinary concept namespace. No other underscore-prefixed Markdown filename is valid.
+
+The root `README.md` and `docs/manifesto.md` are not shells and are not discovered. One custom Hatch
+build hook materializes them at `agentworks/_guide_sources/README.md` and
+`agentworks/_guide_sources/docs/manifesto.md` as include-only resources:
 
 - a direct wheel reads the repository-root file and maps it to the package path;
 - a source distribution reads the repository-root file and vendors it at that package path; and
 - a wheel built from the source distribution uses the vendored file already selected with the
   `agentworks` package, without overwriting it.
 
-The hook fails the build if the required source for its mode is absent. A source/editable run whose
-package resource is absent may read `<verified-repository-root>/README.md` only after confirming the
-fixed layout: `.git`, `README.md`, `cli/pyproject.toml`, and `cli/agentworks/`. It does not use the
-working directory or search parent directories. No checked-in generated README mirror, runtime
-network fetch, or other repository-root include source exists.
+The hook fails the build if either required source for its mode is absent. A source/editable run
+whose package resource is absent may read the exact README or manifesto only after confirming the
+fixed layout: `.git`, `README.md`, `docs/manifesto.md`, `cli/pyproject.toml`, and `cli/agentworks/`.
+It does not use the working directory or search parent directories. No checked-in generated mirror,
+runtime network fetch, or other repository-root include source exists.
 
 ## Directive grammar
 
@@ -103,19 +116,21 @@ before include resolution, so a human-hidden region cannot read a packaged docum
 
 ```markdown
 <!-- agw:include path="_guide_sources/README.md" heading="Core Concepts" heading-offset="0" -->
+
+<!-- agw:include path="_guide_sources/docs/manifesto.md" heading="The Agentworks Manifesto" heading-offset="1" -->
 ```
 
 `path` is relative to `importlib.resources.files("agentworks")`. It must be a bounded Markdown
 resource below that package root with no absolute form, empty, dot, or parent segment, and no
-filesystem fallback except the exact verified source-checkout case above. The curated
-`_guide_sources/README.md` resource and normal Markdown inside the `agentworks` package are the only
+filesystem fallback except the exact verified source-checkout case above. The two curated
+`_guide_sources/` resources and normal Markdown inside the `agentworks` package are the only
 sources. No other package or repository-root file is an include source. The target must be UTF-8
 Markdown within the repository's content-size limit.
 
-`heading` matches exactly one H2-H6 ATX heading outside code fences. Matching compares the visible
-heading text after removing the ATX marker and optional closing hashes. H1 imports, zero matches,
-and multiple matches are structural errors. Expansion inserts the matching heading and its body
-through, but not including, the next heading of equal or higher rank.
+`heading` matches exactly one H1-H6 ATX heading outside code fences. Matching compares the visible
+heading text after removing the ATX marker and optional closing hashes. Zero matches and multiple
+matches are structural errors. Expansion inserts the matching heading and its body through, but not
+including, the next heading of equal or higher rank.
 
 `heading-offset` is an optional signed base-10 integer and defaults to `0`. The expander adds it to
 the level of every ATX heading in the selected section outside code fences. The offset is static for
@@ -141,8 +156,8 @@ link:  https://github.com/WayfarerLabs/agentworks/blob/main/cli/agentworks/<path
 image: https://raw.githubusercontent.com/WayfarerLabs/agentworks/main/cli/agentworks/<path>
 ```
 
-For the curated `_guide_sources/README.md` mirror, resolution instead starts at the repository root,
-so `docs/images/agw-topology.png` becomes
+For the two curated `_guide_sources/` mirrors, resolution instead starts at the repository root, so
+`docs/images/agw-topology.png` in the README becomes
 `https://raw.githubusercontent.com/WayfarerLabs/agentworks/main/docs/images/agw-topology.png`.
 Normal package documents retain the `cli/agentworks/` prefix shown above. A relative link from the
 root mirror uses the equivalent `https://github.com/WayfarerLabs/agentworks/blob/main/<path>` form.
@@ -156,9 +171,10 @@ shell.
 
 ## Rendering and failure behavior
 
-For selected shells, rendering proceeds in this order:
+For `agw guide show TOPIC`, rendering proceeds in this order:
 
-1. resolve and structurally validate every requested shell atomically;
+1. discover and structurally validate the complete catalog, then resolve the one requested shell or
+   exact release topic;
 2. filter agent-only fences for the selected mode;
 3. resolve visible packaged includes;
 4. rewrite visible repository-relative destinations; and
@@ -177,19 +193,40 @@ when it needs current facts.
 Final output strips C0 controls except line feed and tab, plus DEL and C1 controls, from authored,
 included, and generated release-note text.
 
-## Retained independent behavior
+## Index and list behavior
 
-The no-topic human and agent trail signs keep their fixed shared destination tuple and return before
-shell discovery or include loading. The fixed tuple deliberately duplicates selected-topic slugs so
-malformed configuration or shell content cannot affect the cheap entry path.
+The no-topic human and agent paths discover the static catalog, render `_index.md` through the
+ordinary shell pipeline, then append topics with `index-order` sorted by `(index_order, slug)`. Each
+row uses the concept slug and description already owned by frontmatter. Every selected destination
+therefore resolves by construction; no duplicated Python tuple remains.
 
-The tuple is `concept-assistant-agent`, `concept-onboarding`, `concept-management`,
-`concept-troubleshooting`, `concept-release-notes`, `concept-migration`, `concept-secrets`, and
-`concept-reporting-bugs`. Every destination must resolve in the selected-topic catalog.
+The footer reports `len(ordinary concepts) - len(indexed concepts)` and points to `agw guide list`.
+Exact generated release-note topics are deliberately absent from both operands: historical versions
+are listable evidence, not omitted authored concepts. `agw guide list` emits all ordinary concept
+slugs plus exact packaged release-note topic names, one per line, for both operators and shell
+completion.
+
+`guide` is one Typer command group with two real subcommands:
+
+- `agw guide list` emits the stable topic-name stream; and
+- `agw guide show TOPIC` accepts exactly one topic and renders it.
+
+Invoking `agw guide` without a subcommand renders the index through the group callback. The callback
+retains `--agent/--human` for the bootstrap's `agw guide --agent` form and owns that option for the
+whole group. `agw guide --agent show TOPIC` renders the selected topic in agent mode. The same
+option before `list` is accepted but does not alter its stable, mode-independent output. `show` does
+not duplicate the option after its verb. The unreleased direct/variadic `agw guide TOPIC...` form
+and old guide-specific `--names-only` option are removed without aliases.
+
+Typer's ordinary command tree completes `list` and `show`. Only `show`'s single `TOPIC` argument
+uses the existing dynamic topic-name source, which calls `agw guide list`. Catalog discovery and
+validation are atomic for index, list, show, and completion; no path returns a partial catalog when
+an unrelated shell is malformed. There is no reserved positional value, terminal-value schema, or
+guide-specific positional parser in the completion generators.
 
 Mode selection retains this precedence:
 
-1. explicit `--agent` or `--human`;
+1. the explicit group-level `--agent` or `--human` option;
 2. the exact registered `CLAUDECODE=1` execution signature; and
 3. human for TTY stdout, otherwise agent.
 
@@ -226,17 +263,18 @@ Focused tests protect behavior and boundaries:
 - filename discovery, global slug uniqueness, restricted frontmatter, and the unfenced single-H1
   invariant;
 - balanced non-nested agent fences and filtering before include work;
-- exact unique H2-H6 ATX-section extraction beneath the one `agentworks` package root, bounded
+- exact unique H1-H6 ATX-section extraction beneath the one `agentworks` package root, bounded
   static heading offsets, canonical URL rewriting for repository-relative links and images,
   section-local reference definitions, size bounds, and inert non-recursive included text;
-- exact packaging of the canonical root README, `concept-core-model` rendering its selected sections
-  and images, the actual `#named-consoles` relative fragment, and no other repository-root include
-  source;
+- exact packaging of the canonical root README and manifesto, their composed concepts rendering from
+  direct and rebuilt distribution artifacts, the actual `#named-consoles` relative fragment, and no
+  other repository-root include source;
 - nonzero structural failures and proof that selected rendering does not load operator state;
-- fixed trail-sign bypass, mode precedence, names-only discovery, completion, and packaged exact
-  release evidence; and
-- shell and exact README package-data presence in a direct wheel, source distribution, wheel rebuilt
-  from that source distribution, and verified editable-source fallback.
+- reserved index discovery, deterministic index ordering, ordinary-only omitted counts, mode
+  precedence, real `guide list`/`guide show` subcommands, one-topic show completion, and packaged
+  exact release evidence; and
+- shell and exact curated package-data presence in a direct wheel, source distribution, wheel
+  rebuilt from that source distribution, and verified editable-source fallback.
 
 Tests use fixture content to assert structure and behavior. They do not pin, blacklist, snapshot, or
 otherwise police the wording of repository-authored Markdown, descriptions, warnings, or prompts.

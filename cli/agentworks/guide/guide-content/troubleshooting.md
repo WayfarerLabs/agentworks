@@ -1,17 +1,34 @@
 ---
-description: Diagnose Agentworks failures from framed errors and narrow explicit checks.
+description: Narrow an Agentworks failure to configuration, readiness, state, or connectivity.
+index-order: 40
 ---
 
 # Troubleshooting
 
-Start with the framed error and current registry verdict. Use explicit, non-mutating checks to
-distinguish configuration, readiness, and connectivity failures. Record the named resource, typed
-error, and a redacted reproduction before changing state.
+Start with the exact error from the command that failed. Run `agw doctor` once for a broad check of
+the workstation, configuration, dependencies, and database; then move to the smallest relevant
+surface instead of changing several things at once.
 
-When workstation examination is inside the operator's instruction, run `agw doctor --output json`
-and use its checks to select a narrower verification surface. Doctor output is evidence, not
-authorization to install tools, edit configuration, start a VM, or apply another repair.
+For a disabled or not-ready resource, use `agw resource list --kind KIND --include-disabled` and
+`agw resource explain KIND/NAME` to separate enablement from missing configuration or host
+requirements.
 
-Before a repair outside the current instruction, state its exact target, expected change, and how
-success will be checked. Ask before performing it. If declined, preserve the observed state and
-provide the read-only evidence and applicable command help.
+## VM and SSH connectivity
+
+`agw vm describe NAME` shows the recorded power state, Tailscale address, and recent events.
+`agw vm verify-connection NAME` tests the canonical admin connection without starting the VM. If
+that succeeds, `agw vm shell NAME` opens the Agentworks-managed SSH path.
+
+For raw SSH, the default alias is `ssh awvm--NAME`. Run `agw config sync-ssh-config` if the
+generated entry is stale; installations may configure a different alias prefix.
+
+When the failure appears to be below SSH, use `tailscale status` to confirm the workstation is
+connected and can see the VM, then `tailscale ping HOST` with the Tailscale address from
+`agw vm describe NAME`. `agw vm logs NAME` shows the VM's recent SSH logs.
+
+If Tailscale itself needs repair, `agw vm shell NAME --platform` provides a platform-native recovery
+path where the selected platform supports one. It is an explicit recovery tool, not the routine
+connection path.
+
+After one change, rerun the narrow check that exposed the problem. Use
+`agw guide show concept-reporting-bugs` when the failure needs to be reported.

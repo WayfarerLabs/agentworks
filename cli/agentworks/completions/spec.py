@@ -106,6 +106,7 @@ def is_legacy_database_completion(argv: list[str]) -> bool:
 class _ClickParameter(Protocol):
     name: str | None
     opts: list[str]
+    secondary_opts: list[str]
     multiple: bool
     nargs: int
     required: bool
@@ -184,7 +185,7 @@ class CommandSpec:
 #   "resource_refs"   -> agw resource list --names-only
 #                        (kind/name per line, verbatim -- the candidate
 #                        IS a KIND/NAME token)
-#   "guide_topics"    -> agw guide --names-only
+#   "guide_topics"    -> agw guide list
 #   "files"           -> native shell filesystem completion
 #
 # The template + git_credentials completers source from the Resource
@@ -216,7 +217,7 @@ class CommandSpec:
 
 DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("database.restore", "backup_path"): "files",
-    ("guide", "topics"): "guide_topics",
+    ("guide.show", "topic"): "guide_topics",
     ("vm.start", "name"): "vms",
     ("vm.stop", "name"): "vms",
     ("vm.delete", "name"): "vms",
@@ -339,7 +340,6 @@ STATIC_COMPLETION_SUGGESTIONS: dict[tuple[str, str], tuple[str, ...]] = {
     ("graph.show", "depth"): ("1", "2", "3", "all"),
 }
 
-
 # -- Introspection ---------------------------------------------------------
 
 
@@ -404,7 +404,7 @@ def _build_param_spec(param: _ClickParameter, command_path: str) -> ParamSpec:
 
     opts: list[str] = []
     if is_option:
-        opts = list(param.opts)
+        opts = [*param.opts, *param.secondary_opts]
 
     # DYNAMIC_COMPLETIONS keys use paths without the root app name
     # (e.g. "vm.shell" not "agentworks.vm.shell")

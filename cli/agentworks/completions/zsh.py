@@ -109,7 +109,7 @@ _agentworks_resource_refs() {
     "guide_topics": """\
 _agentworks_guide_topics() {
     local -a topics
-    topics=(${(f)"$(agw guide --names-only 2>/dev/null)"})
+    topics=(${(f)"$(agw guide list 2>/dev/null)"})
     _describe 'guide topic' topics
 }""",
 }
@@ -178,9 +178,12 @@ def _collect_completers(spec: CommandSpec) -> set[str]:
 
 def _emit_group(lines: list[str], spec: CommandSpec, func_name: str) -> None:
     """Emit a zsh function for a command group."""
+    group_args = _build_arguments(spec.params)
     lines.append(f"{func_name}() {{")
     lines.append("    local -a subcommands")
     lines.append("    _arguments -C \\")
+    for arg in group_args:
+        lines.append(f"        {arg} \\")
     lines.append("        '--help[Show help]' \\")
     lines.append("        '1:command:->command' \\")
     lines.append("        '*::arg:->args'")
@@ -262,8 +265,8 @@ def _build_arguments(params: list[ParamSpec]) -> list[str]:
                 positional_index += 1
         elif param.is_flag:
             escaped_help = param.help.replace("'", "'\\''")
-            opt = param.opts[0] if param.opts else f"--{param.name}"
-            args.append(f"'{opt}[{escaped_help}]'")
+            for opt in param.opts or [f"--{param.name}"]:
+                args.append(f"'{opt}[{escaped_help}]'")
         else:
             escaped_help = param.help.replace("'", "'\\''")
             opt = param.opts[0] if param.opts else f"--{param.name}"

@@ -1,5 +1,6 @@
 ---
 description: Configure and verify named secrets without exposing their values.
+index-order: 70
 ---
 
 # Secret handling

@@ -86,12 +86,17 @@ The tree itself needs nothing, but four things are hand-maintained and the tests
 - **A new resource-list completer** must join `RESOURCE_LIST_DYNAMIC_COMPLETIONS` and keep its
   callback marker-free, because that names-only path is registry-only.
 
-Any list command backing a completer also owes `--names-only` per the `cli-conventions` rule: one
-name per line, no header, no formatting, and no round-trips that make pressing Tab slow.
-`agw resource list` is the one deliberate divergence: it emits `kind/name`, because two kinds can
-publish the same name, and every backend slices the prefix off shell-side. A registry-backed
-completer that forgets the slice emits `kind/name` candidates.
+Any ordinary list command backing a completer also owes `--names-only` per the `cli-conventions`
+rule: one name per line, no header, no formatting, and no round-trips that make pressing Tab slow. A
+dedicated name-stream-only list form is the narrow exception and does not need a second presentation
+flag. `agw resource list` is the one deliberate output divergence: it emits `kind/name`, because two
+kinds can publish the same name, and every backend slices the prefix off shell-side. A
+registry-backed completer that forgets the slice emits `kind/name` candidates.
 
-Guide topic completion is intentionally package-only: `agw guide --names-only` emits auto-discovered
+Guide topic completion is intentionally package-only: `agw guide list` emits auto-discovered
 first-party concept shells and packaged release-note topics without loading operator state. Resource
-and kind completion use their command-owned list surfaces instead.
+and kind completion use their command-owned list surfaces instead. The ordinary command tree offers
+the `list` and `show` subcommands; guide-global `--agent/--human` may precede either, and only the
+single topic on `show` attaches the dynamic topic completer. The list service validates the complete
+shell catalog first, so an unrelated malformed or duplicate shell suppresses topic completion rather
+than producing a partial candidate stream.

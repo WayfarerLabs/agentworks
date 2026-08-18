@@ -1,6 +1,6 @@
 # FRD: Agentworks Assistance, Discovery, and Management
 
-- Status: Active, Markdown-shell correction
+- Status: Active, shell-backed index and grammar correction
 - Start date: 2026-08-05
 - Saga: `docs/sdd/2026-08-04-next-steps`
 
@@ -11,6 +11,19 @@ stays visible in `plan.md`; this document states the current requirements.
 The operator's 2026-08-17 naming ruling renames the canonical body to
 `packaging/agentworks/agent-onboarding-prompt.md`; its content and projection contract are
 unchanged.
+
+The operator's 2026-08-17 index ruling replaces the fixed trail sign and guide-specific
+`--names-only` option with a shell-backed, catalog-derived index and `agw guide list`.
+
+The operator's 2026-08-17 grammar ruling makes `list` and `show` real guide verbs. The default
+`agw guide` renders the index, `agw guide list` emits topic names, and `agw guide show TOPIC`
+renders exactly one topic. The unreleased direct and variadic `agw guide TOPIC...` form has no
+compatibility alias.
+
+The operator's 2026-08-17 bootstrap-current-release ruling replaces the constrained CLI install
+range with `uv tool install --upgrade agentworks-cli`. The metadata minimum remains a compatibility
+floor rather than an installation constraint. The unreleased assistance package remains at its
+initial version, `1.0.0`; ordinary package-version bumps begin after that package first ships.
 
 ## Summary
 
@@ -38,25 +51,35 @@ commands they point to own execution, validation, and machine-readable facts.
 
 ## Requirements
 
-### R1: No-topic remains a trail sign
+### R1: No-topic renders a shell-backed index
 
-`agw guide` with no topic gives the same concise eight-destination trail sign already approved for
-human and agent modes: `concept-assistant-agent`, `concept-onboarding`, `concept-management`,
-`concept-troubleshooting`, `concept-release-notes`, `concept-migration`, `concept-secrets`, and
-`concept-reporting-bugs`. It does not discover shells, read configuration, or inspect state. Missing
-and malformed configuration are irrelevant to this path.
+`agw guide` with no topic renders one reserved package-owned index shell, then appends a concise
+catalog-derived list of concepts whose frontmatter opts into the index. Human and agent modes share
+the same ordered concepts; ordinary agent-only fencing may vary the shell's short introductory
+context. The index discovers and validates only static packaged guide content. It does not read
+configuration or inspect state, so missing and malformed operator configuration remain irrelevant.
+
+The generated index reports how many ordinary concept shells were not selected and points to
+`agw guide list` for the complete topic-name stream. Exact generated release-note topics are the one
+explicit count exception: they remain listable and directly addressable, but historical versions do
+not inflate the omitted-concept count.
+
+Catalog discovery is atomic. A structural defect in any ordinary shell prevents the no-topic index,
+topic-name list, topic completion, and `show` rendering from succeeding rather than preserving the
+former catalog-free trail-sign exemption or emitting a partial catalog.
 
 ### R2: Concept shells define the ordinary catalog
 
 Each ordinary concept is a package-owned Markdown file that is a direct child of a `guide-content`
 directory in the installed first-party `agentworks` package tree. Its filename determines the
-globally unique `concept-<shell-name>` slug. Required frontmatter contains a short `description`,
-and exactly one level-one heading outside agent-only fences supplies the display title.
+globally unique `concept-<shell-name>` slug. Required frontmatter contains a short `description` and
+may contain one bounded non-negative `index-order`; exactly one level-one heading outside agent-only
+fences supplies the display title.
 
 The guide discovers shells from the trusted roots deterministically. Adding a valid shell makes the
-topic addressable through `agw guide`, `--names-only`, and shell completion without adding a Python
-topic registration record. Duplicate slugs or malformed shells are authored-content defects and fail
-clearly.
+topic addressable through `agw guide show TOPIC`, visible through `agw guide list`, and available to
+shell completion without adding a Python topic registration record. Duplicate slugs or malformed
+shells are authored-content defects and fail clearly.
 
 Shells and imported sections use ATX headings only; Setext headings are structural authored-content
 defects. This keeps the single-H1 and heading-offset rules literal.
@@ -67,9 +90,11 @@ tree. This supersedes their former plugin-topic namespace rather than preserving
 compatibility grammar. Separately installed plugins do not contribute guide shells in this format
 version; adding a plugin contribution API is out of scope.
 
-Humans and assistant agents use one catalog. Packaged exact-version release-note topics remain a
-separate direct, inert evidence surface with no typed guide block; they do not turn the shell format
-into a generic topic plugin API.
+Humans and assistant agents use one catalog. Equal `index-order` values are valid and sort by slug;
+omitting the field keeps a concept directly addressable and listable without placing it in the
+concise index. Packaged exact-version release-note topics remain a separate direct, inert evidence
+surface with no typed guide block; they do not turn the shell format into a generic topic plugin
+API.
 
 `concept-assistant-agent` remains the one complete home for general assistant-agent posture. Other
 concepts are ordinary human-readable documentation; an agent-only fence adds only small local
@@ -78,18 +103,19 @@ context that would not justify another topic or hide generally useful informatio
 `concept-core-model` is the representative composed shell. It imports the relevant “Architecture at
 a Glance” and “Core Concepts” sections from the canonical repository-root `README.md`, covering the
 VM, workspace, agent, session, harness-integration, and console model without duplicating that
-prose. One small Hatch build hook vendors the exact root README as a trusted, include-only package
-resource in both the source distribution and wheel; a verified repository checkout supplies that
-same canonical file during editable source execution. It does not make other repository-root files
-discoverable or create a general documentation-root API. The shell and its packaged README bytes
-come from the same artifact, so a later repository heading edit cannot break an installed guide.
+prose. `concept-manifesto` imports the complete canonical `docs/manifesto.md` document. One small
+Hatch build hook vendors those two exact documents as trusted, include-only package resources in
+both the source distribution and wheel; a verified repository checkout supplies those same canonical
+files during editable source execution. It does not make other repository-root files discoverable or
+create a general documentation-root API. Each shell and its packaged source bytes come from the same
+artifact, so a later repository heading edit cannot break an installed guide.
 
 ### R3: Shell composition stays small and structural
 
 A shell supports only these additions to ordinary Markdown:
 
 1. balanced, non-nested agent-only fences whose contents are omitted unless agent mode is active;
-2. an import of one exact, uniquely named H2-H6 Markdown section from another packaged document in
+2. an import of one exact, uniquely named H1-H6 Markdown section from another packaged document in
    the installed `agentworks` package tree, with one static heading-level offset.
 
 Imports are bounded and inert. They cannot load arbitrary filesystem paths, recurse, or execute
@@ -107,8 +133,8 @@ names, or general template engine.
 
 ### R4: Selected guidance is static and deterministic
 
-Rendering a selected shell reads only trusted packaged Markdown, except that editable source
-execution may read the one canonical root README after verifying the fixed repository layout. It
+`agw guide show TOPIC` reads only trusted packaged Markdown, except that editable source execution
+may read the canonical root README and manifesto after verifying the fixed repository layout. It
 does not load configuration, registries, databases, resources, secrets, providers, transports,
 network state, or subprocesses. Concepts point to command-owned help and inspection surfaces when
 the operator needs current facts.
@@ -135,7 +161,8 @@ wording of authored guidance.
 
 `packaging/agentworks/agent-onboarding-prompt.md` is the one authored bootstrap body. It briefly
 identifies Agentworks, points to the public repository, recommends `uv` while allowing other Python
-3.12+ installers, installs `agentworks-cli>=0.14`, and runs `agw guide --agent`.
+3.12+ installers, installs or upgrades to the current available `agentworks-cli`, and runs
+`agw guide --agent`.
 
 The README, website, Claude Code package, and Codex package project that body byte-for-byte. The
 installed guide owns continuing assistance.
@@ -143,25 +170,31 @@ installed guide owns continuing assistance.
 ### R7: Closeout proves one complete path
 
 Before publication, the effort closes with one representative live journey from an exact reviewed
-candidate wheel through the trail sign and onboarding guidance to a usable VM and started session.
+candidate wheel through the guide index and onboarding guidance to a usable VM and started session.
 After publication, one bounded smoke uses the canonical prompt to install the stable release and
-reach the trail sign. Generated parity replaces repeated provider-backed journeys for each wrapper.
+reach the guide index. Generated parity replaces repeated provider-backed journeys for each wrapper.
 
 Permanent documentation describes the final behavior without depending on this SDD. The sample
 configuration changes only if implementation introduces a real setting, which is not expected.
 
 ## Acceptance criteria
 
-1. No-topic human and agent requests preserve the exact shared eight-destination trail sign, resolve
-   every destination, exit 0, and load neither the shell catalog nor state.
+1. No-topic human and agent requests render the reserved index shell plus the same catalog-derived,
+   deterministically ordered concepts, exit 0, and load no operator state. Every indexed destination
+   resolves.
 2. A valid shell is discovered without a per-topic Python registration record; its filename,
    frontmatter description, and unfenced H1 produce its slug, summary, and title.
-3. `agw guide --names-only` and shell completion expose discovered concepts without configuration or
-   state loading. Duplicate or malformed shells fail deterministically when their catalog is used.
+3. `agw guide list` and `agw guide show TOPIC` are real subcommands. `show` accepts exactly one
+   dynamically completed topic; `list` exposes discovered concepts and exact packaged release-note
+   topics without configuration or state loading. A duplicate or malformed shell atomically prevents
+   index, list, show, and completion from returning a partial catalog. The index's omitted count
+   includes only ordinary concept shells not selected for the index, never generated historical
+   release topics. One group-level mode flag selects human or agent rendering for the index and
+   `show`; it does not alter mode-independent `list` output.
 4. Inline Markdown renders in both modes. Agent-only content renders only in agent mode, and a
    hidden fence cannot trigger an import. General assistant posture lives in
    `concept-assistant-agent`; ordinary information remains human-visible.
-5. A shell can import one exact unique H2-H6 ATX-heading section from a bounded Markdown resource
+5. A shell can import one exact unique H1-H6 ATX-heading section from a bounded Markdown resource
    beneath the installed `agentworks` package and apply one static offset while keeping every result
    in H2-H6. Imported directives remain inert, absolute references remain usable,
    repository-relative links and images become canonical HTTPS URLs, and missing or ambiguous
@@ -188,7 +221,7 @@ configuration changes only if implementation introduces a real setting, which is
 - Reintroducing runtime resource, schema, graph, or command-output topic families.
 - Loading operator state, executing guide suggestions, resolving secrets, probing providers,
   connecting to VMs, or mutating state while rendering.
-- Changing JSON v1 contracts or anticipating names from the parallel CLI grammar rewrite.
+- Changing JSON v1 contracts or any non-guide CLI grammar.
 
 ## Decisions
 
@@ -201,3 +234,9 @@ configuration changes only if implementation introduces a real setting, which is
 - **D5: No onboarding state machine.** Onboarding is static documentation with no assessment,
   evidence, projection, or action-selection path.
 - **D6: Bootstrap remains disposable context.** It installs the CLI and hands off.
+- **D7: The index is content plus catalog metadata.** One reserved Markdown shell owns its authored
+  framing; optional `index-order` values select and order ordinary concepts without a Python tuple
+  or another template directive.
+- **D8: Guide uses the ordinary noun/verb grammar.** `list` and `show` are real subcommands; `show`
+  accepts one topic, so completion uses the ordinary command tree rather than a guide-specific
+  positional parser.

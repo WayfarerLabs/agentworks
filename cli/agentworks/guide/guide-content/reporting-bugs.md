@@ -1,5 +1,6 @@
 ---
 description: Prepare and submit a minimal, redacted Agentworks bug report.
+index-order: 80
 ---
 
 # Reporting bugs
@@ -11,6 +12,6 @@ feedback do not belong in the bug workflow.
 
 Search the repository's existing issues before drafting. If none matches, use the repository's
 [bug-report template](https://github.com/WayfarerLabs/agentworks/blob/main/.github/ISSUE_TEMPLATE/bug_report.md).
-Reading GitHub and submitting an issue are external effects. Show the exact redacted draft to the
-operator and obtain authorization before submitting it. If external access or submission is
-declined, leave the draft locally with the operator and change nothing on GitHub.
+Reading GitHub and submitting an issue are external effects. The operator should review the exact
+redacted draft and authorize submission. Without that authorization, keep the draft local and change
+nothing on GitHub.

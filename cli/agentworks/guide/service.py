@@ -9,7 +9,6 @@ from agentworks.errors import ValidationError
 from agentworks.guide.catalog import GuideCatalog, discover_concept_shells
 from agentworks.guide.contract import ConceptShell, UnknownGuideTopicError, is_concept_topic
 from agentworks.guide.render import render_release_topic, render_shell
-from agentworks.guide.trail_sign import render_trail_sign
 from agentworks.release_notes import read_release_history, topic_version
 from agentworks.terminal import sanitize_terminal_output
 
@@ -26,14 +25,10 @@ class GuideResponse:
     markdown: str
 
 
-def _normalize_requested(requested: tuple[str, ...]) -> tuple[str, ...]:
-    normalized: list[str] = []
-    for slug in requested:
-        if not is_concept_topic(slug) and topic_version(slug) is None:
-            raise ValidationError(f"invalid guide topic {slug!r}")
-        if slug not in normalized:
-            normalized.append(slug)
-    return tuple(normalized)
+def _validate_topic(topic: str) -> str:
+    if not is_concept_topic(topic) and topic_version(topic) is None:
+        raise ValidationError(f"invalid guide topic {topic!r}")
+    return topic
 
 
 def _release_names() -> tuple[str, ...]:
@@ -42,6 +37,19 @@ def _release_names() -> tuple[str, ...]:
 
 def _all_names(catalog: GuideCatalog) -> tuple[str, ...]:
     return tuple(sorted((*catalog.names(), *_release_names())))
+
+
+def _render_index(catalog: GuideCatalog, mode: GuideMode, package_root: Traversable | None) -> str:
+    indexed = catalog.indexed_topics()
+    rows = "\n".join(f"- `{topic.slug}`: {topic.description}" for topic in indexed)
+    omitted = len(catalog.topics) - len(indexed)
+    sections = [render_shell(catalog.index, mode, package_root=package_root).rstrip()]
+    if rows:
+        sections.append(rows)
+    noun = "concept" if omitted == 1 else "concepts"
+    verb = "is" if omitted == 1 else "are"
+    sections.append(f"{omitted} other {noun} {verb} available. Run `agw guide list` to see every topic name.")
+    return sanitize_terminal_output("\n\n".join(sections) + "\n")
 
 
 def _resolve(slug: str, catalog: GuideCatalog) -> ConceptShell | str:
@@ -57,29 +65,28 @@ def _resolve(slug: str, catalog: GuideCatalog) -> ConceptShell | str:
 
 
 def render_guide(
-    requested: tuple[str, ...],
+    topic: str | None,
     mode: GuideMode,
     *,
-    names_only: bool = False,
     package_root: Traversable | None = None,
 ) -> GuideResponse:
-    """Render a catalog-free trail sign, topic names, or selected static topics."""
-    requested = _normalize_requested(requested)
-    if not requested and not names_only:
-        return GuideResponse(render_trail_sign(mode))
-
+    """Render the shell-backed index or one selected static topic."""
+    if topic is not None:
+        topic = _validate_topic(topic)
     catalog = discover_concept_shells(package_root)
-    if names_only:
-        if requested:
-            raise ValidationError("topic arguments cannot be used with --names-only")
-        return GuideResponse("".join(f"{name}\n" for name in _all_names(catalog)))
+    if topic is None:
+        return GuideResponse(_render_index(catalog, mode, package_root))
 
-    selected = tuple(_resolve(slug, catalog) for slug in requested)
-    documents = tuple(
-        render_shell(topic, mode, package_root=package_root)
-        if isinstance(topic, ConceptShell)
-        else render_release_topic(topic)
-        for topic in selected
+    selected = _resolve(topic, catalog)
+    markdown = (
+        render_shell(selected, mode, package_root=package_root)
+        if isinstance(selected, ConceptShell)
+        else render_release_topic(selected)
     )
-    markdown = "\n\n---\n\n".join(document.rstrip() for document in documents) + "\n"
     return GuideResponse(sanitize_terminal_output(markdown))
+
+
+def list_guide_topics(*, package_root: Traversable | None = None) -> GuideResponse:
+    """Emit every static concept and packaged exact release topic name."""
+    catalog = discover_concept_shells(package_root)
+    return GuideResponse("".join(f"{name}\n" for name in _all_names(catalog)))

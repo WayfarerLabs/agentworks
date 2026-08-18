@@ -1,6 +1,6 @@
 # HLA: Agentworks Assistance, Discovery, and Management
 
-- Status: Active, Markdown-shell correction
+- Status: Active, shell-backed index and grammar correction
 - FRD: `docs/sdd/2026-08-05-onboarding-and-discovery/frd.md`
 - Guide LLD: `docs/sdd/2026-08-05-onboarding-and-discovery/guide-contract-lld.md`
 
@@ -12,7 +12,7 @@ onboarding-assessment designs are historical; this document states the current a
 The assistance surface has four layers:
 
 1. One short canonical prompt installs the CLI and hands off to `agw guide --agent`.
-2. One fixed no-topic trail sign points toward useful concepts without loading the catalog or state.
+2. One reserved index shell frames a concise catalog-derived concept index without loading state.
 3. One auto-discovered catalog renders package-owned Markdown concept shells.
 4. Operational CLI commands own execution and machine-readable facts.
 
@@ -20,10 +20,10 @@ The assistance surface has four layers:
 canonical prompt
       |
       v
-fixed no-topic trail sign
+shell-backed concept index
       |
       v
-selected concept shell
+`guide show` for one selected concept shell
       +-- inline Markdown
       +-- optional agent-only regions
       +-- optional packaged section imports
@@ -32,29 +32,44 @@ selected concept shell
 current CLI commands for any operation
 ```
 
-## Fixed trail sign
+## Shell-backed index
 
-The no-topic path preserves the approved shared tuple—`concept-assistant-agent`,
-`concept-onboarding`, `concept-management`, `concept-troubleshooting`, `concept-release-notes`,
-`concept-migration`, `concept-secrets`, and `concept-reporting-bugs`—and returns before catalog
-discovery. Human and agent wording may differ briefly, but both modes point to the same concepts and
-neither path loads configuration, registry, database, network, or managed resources.
+One reserved `_index.md` document in the core guide-content directory owns the no-topic framing and
+uses the ordinary shell renderer, including agent-only fencing. It is not an addressable concept.
+After rendering that shell, the index renderer appends every ordinary concept carrying
+`index-order`, sorted by order and then slug. Equal values are valid. The generated footer reports
+the number of ordinary concepts not selected for the index and points to `agw guide list`.
+
+Exact generated release-note topics remain available through `agw guide list` and
+`agw guide show TOPIC`, but do not enter the omitted-concept count. Every catalog-backed path
+(index, list, show, and topic completion) validates the same complete static catalog atomically; an
+unrelated malformed shell therefore prevents each path instead of yielding partial guidance. None of
+these paths loads configuration, registry, database, network, or managed resources.
+
+The guide is a normal Typer command group. Its callback renders the index only when no subcommand is
+selected. `list` emits the stable name stream. `show` accepts exactly one topic and renders that
+shell or exact release section. One group-level `--agent/--human` option selects rendering mode for
+both the no-subcommand index and `show`; it may precede either subcommand and has no effect on
+mode-independent `list` output. `show` does not duplicate that option. This keeps command completion
+structural: Typer owns the group option plus the `list` and `show` verbs, while only `show`'s topic
+argument uses dynamic topic completion.
 
 ## Shell catalog
 
 The catalog starts at `importlib.resources.files("agentworks")`, walks the installed first-party
-package tree, and discovers direct `.md` children of directories named `guide-content`. It never
-scans another installed package, the working tree, or candidate code. Core, subsystem, and curated
-plugin concepts therefore share one convention instead of a root or topic registry.
+package tree, and discovers direct `.md` children of directories named `guide-content`, except the
+exact author-facing `README.md` in each such directory. It never scans another installed package,
+the working tree, or candidate code. Core, subsystem, and curated plugin concepts therefore share
+one convention instead of a root or topic registry.
 
 Each shell has:
 
-- required frontmatter containing only `description` in the first format version;
+- required `description` frontmatter plus one optional bounded non-negative `index-order`;
 - a filename stem that maps to the global `concept-<stem>` slug;
 - exactly one H1 outside agent-only regions, used as the title; and
 - one Markdown body containing any top-level structural directives.
 
-Global slug collisions and malformed shells are catalog errors. `--names-only` and completion use
+Global slug collisions and malformed shells are catalog errors. `agw guide list` and completion use
 the same discovery path without loading configuration or operator state. Exact packaged release-note
 subtopics remain a separate direct evidence source because they are version records rather than
 authored concepts.
@@ -67,15 +82,16 @@ removed. Separately installed plugins do not gain a shell contribution API in th
 documentation; their agent-only fences contain only local handling context, never generally useful
 content hidden from humans.
 
-The canonical repository-root `README.md` is the sole include source outside the normal package
-documents. A custom Hatch build hook vendors its exact bytes at
-`agentworks/_guide_sources/README.md` for direct wheels and source distributions; a wheel built from
-the source distribution uses that already-vendored package copy. A verified repository-layout
-fallback reads the canonical root file during editable source execution. Discovery never treats the
-mirror as a shell. `concept-core-model` imports its “Architecture at a Glance” and “Core Concepts”
-sections. No other repository-root document becomes package data or an include root in this format
-version. Shells and include sources are validated and shipped in the same artifact; later repository
-edits cannot change an installed guide.
+The canonical repository-root `README.md` and `docs/manifesto.md` are the only include sources
+outside normal package documents. A custom Hatch build hook vendors their exact bytes beneath
+`agentworks/_guide_sources/` for direct wheels and source distributions; a wheel built from the
+source distribution uses those already-vendored package copies. A verified repository-layout
+fallback reads the same two canonical files during editable source execution. Discovery never treats
+either mirror as a shell. `concept-core-model` imports the README's “Architecture at a Glance” and
+“Core Concepts” sections; `concept-manifesto` imports the manifesto's complete H1 section with a
+fixed heading offset. No other repository-root document becomes package data or an include root in
+this format version. Shells and include sources are validated and shipped in the same artifact;
+later repository edits cannot change an installed guide.
 
 ## Shell expansion
 
@@ -88,7 +104,7 @@ Expansion is a fixed pipeline, not a general interpreter:
 5. frame the resulting Markdown.
 
 Agent fences are balanced and non-nested. Imports name a relative Markdown resource beneath the
-installed `agentworks` package, an exact H2-H6 ATX heading, and an optional integer heading offset
+installed `agentworks` package, an exact H1-H6 ATX heading, and an optional integer heading offset
 whose default is zero. The extractor accepts exactly one match outside fenced code and stops at the
 next heading of equal or higher rank. It shifts every ATX heading outside fenced code by the same
 amount and rejects a result outside H2-H6. Imported text is never parsed again for directives, so
@@ -110,12 +126,12 @@ content.
 
 ## Safety and failure behavior
 
-Shell discovery uses trusted package data only. Imports use trusted package data plus the single
-canonical root-README fallback in a verified editable checkout. Rendering loads no configuration,
-registry, database, resources, secrets, providers, transports, network state, or subprocesses. A
-malformed shell, invalid directive, duplicate slug, missing or ambiguous import heading, invalid
-topic, or incompatible CLI option remains nonzero. Missing or malformed operator state is irrelevant
-to this static path.
+Shell discovery uses trusted package data only. Imports use trusted package data plus the two exact
+canonical README and manifesto fallbacks in a verified editable checkout. Rendering loads no
+configuration, registry, database, resources, secrets, providers, transports, network state, or
+subprocesses. A malformed shell, invalid directive, duplicate slug, missing or ambiguous import
+heading, invalid topic, or incompatible CLI option remains nonzero. Missing or malformed operator
+state is irrelevant to this static path.
 
 Filtering precedes expansion. Therefore content hidden from human mode cannot cause an import or
 structural failure in that mode.
@@ -150,8 +166,9 @@ not grow guide behavior.
 
 Tests cover discovery, frontmatter shape, slug collisions, H1 structure, mode filtering, bounded
 unique-heading imports, inert imported directives, root-README package inclusion,
-repository-relative destination rewriting, no-topic bypass, names-only, and completion. Boundary
-tests prove rendering does not load configuration or operational state.
+repository-relative destination rewriting, reserved index-shell discovery, catalog-derived index
+ordering, `guide list`, single-topic `guide show`, and ordinary subcommand/argument completion.
+Boundary tests prove rendering does not load configuration or operational state.
 
 Tests do not assert authored wording, duplicate shell prose, or recreate removed schemas in test
 fixtures. Permanent CLI documentation describes the shell model. Sample configuration is unaffected.
@@ -166,5 +183,5 @@ fixtures. Permanent CLI documentation describes the shell model. Sample configur
 - **Imported references grow a general URL resolver.** Rewriting is limited to repository-relative
   Markdown link and image destinations under two known source mappings and fixed canonical GitHub
   bases. Remote content and bytes remain outside the guide.
-- **Removed guide logic returns in frontmatter.** Frontmatter contains description only; actions and
-  assessments stay ordinary prose or command-owned behavior.
+- **Removed guide logic returns in frontmatter.** Frontmatter contains description plus optional
+  index ordering only; actions and assessments stay ordinary prose or command-owned behavior.

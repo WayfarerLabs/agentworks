@@ -104,6 +104,11 @@ silently breaking completion. New list commands should ship `--names-only` from 
 service-layer `list_*` function takes a `names_only: bool = False` kwarg and short-circuits the
 table render in favor of one `output.info(row.name)` per row when set.
 
+A dedicated list form whose only output is already the stable one-name-per-line stream is the narrow
+exception. For example, `agw guide list` has no human table presentation to switch away from, so it
+does not also expose `--names-only`. Its list form remains static and side-effect-free because it
+backs shell completion directly.
+
 **Render-only work is skipped under `--names-only`.** Anything computed purely for display (status
 columns that probe live state, formatted timestamps, derived counts) belongs after the
 short-circuit, not before. The `session list` SSH status batch is the precedent: it computes the

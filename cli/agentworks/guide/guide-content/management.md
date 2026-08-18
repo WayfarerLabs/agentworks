@@ -1,29 +1,37 @@
 ---
-description: Configure and operate Agentworks resources and managed instances deliberately.
+description: Inspect, configure, and operate an existing Agentworks installation.
+index-order: 30
 ---
 
-# Resource management
+# Managing Agentworks
 
-Kinds define the vocabulary, declared resources hold operator intent, capability implementations
-provide behavior, and live instances record managed state. See `concept-core-model` for the domain
-model and `concept-onboarding` for a first setup.
+Agentworks separates declared resources from the live VMs, workspaces, agents, sessions, and
+consoles created from them. Use resource commands for configuration and the owning operational group
+for live instances.
 
-Use `agw resource kinds --output json` for the installed kind vocabulary. Use
-`agw resource list --kind KIND --include-disabled --output json` for current registered members,
-origins, enablement, and readiness. Use `agw graph show KIND/NAME --output json` for relationships.
-The applicable VM, workspace, agent, session, console, and secret list or describe commands own
-their operational facts.
+## Inspect what is available
 
-Use `agw GROUP --help` for the current group surface and `agw GROUP COMMAND --help` for exact
-syntax. Create and change declarable resources through their owning commands or canonical manifests,
-then read command-owned JSON facts to confirm the result. Disabled and not-ready implementations are
-facts, not instructions to enable or repair them.
+`agw resource kinds` lists the installed vocabulary. Use
+`agw resource list --kind KIND --include-disabled` to inspect one kind, including its origin,
+enablement, and readiness. `agw graph show KIND/NAME` shows how a resource relates to others.
 
-Before a proposed operation reaches a new target or can mutate configuration, infrastructure, or
-external systems, state the target and expected effect. If that work is outside the operator's
-current instruction, ask first. If declined, leave state unchanged and provide the relevant
-read-only inspection or command help instead.
+Use `--output json` when the result will be consumed programmatically.
 
-After an upgrade, resolve emitted deprecation instructions before changing unrelated state. Use
-`concept-migration` only for exceptional breaking-input conversion. For failures, start with
-`concept-troubleshooting`.
+## Change declared resources
+
+`agw resource explain KIND` describes a manifest shape, while `agw resource explain KIND/NAME`
+describes one capability implementation. Start new declarations with `agw resource sample KIND`;
+edit existing operator-owned declarations with `agw resource edit KIND/NAME`.
+
+Workstation settings and enabled system plugins remain in the operator configuration and can be
+changed with `agw config edit`.
+
+## Operate live instances
+
+The `vm`, `workspace`, `agent`, `session`, and `console` groups own their live state. Begin with
+`agw GROUP list`, inspect one item with `agw GROUP describe NAME`, and use `agw GROUP --help` for
+the current operations. Read the result after a change rather than assuming it succeeded.
+
+For setup, return to `agw guide show concept-onboarding`. For failures, use
+`agw guide show concept-troubleshooting`. Exceptional conversion from retired configuration belongs
+to `agw guide show concept-migration`.
