@@ -140,13 +140,14 @@ resource object with `declaration: null`.
 
 The human renderer emits the uniform facts, then a deterministic block-style YAML declaration for a
 declarable row. Every value interpolated into a fact line passes through a line-safe scalar helper
-that applies `sanitize_terminal_output` and removes line feeds and tabs, matching graph's existing
-inert-scalar boundary. The declaration mapping is encoded as YAML first and the complete YAML text
-is then passed through `sanitize_terminal_output`: intentional document line feeds remain, while a
-scalar's embedded line break remains governed by YAML quoting or block-scalar structure instead of
-becoming a new fact line. Capability output has no YAML block and makes the null declaration
-legible. Rendering starts only after `show_resource` returns; JSON encoding completes before the
-first stdout write.
+that applies `sanitize_terminal_output`, then removes Unicode control, format, surrogate, line
+separator, and paragraph separator categories. Ordinary Unicode remains legible. The declaration
+mapping is encoded with PyYAML's non-Unicode output mode so every non-ASCII scalar code point is an
+ASCII escape, then the complete YAML text passes through `sanitize_terminal_output`. Intentional
+document line feeds remain, no unsafe Unicode control or separator remains literal, and parsing the
+block recovers the original JSON values. Capability output has no YAML block and makes the null
+declaration legible. Rendering starts only after `show_resource` returns; JSON encoding completes
+before the first stdout write.
 
 ### A5. Keep the CLI and completion wiring conventional
 
@@ -164,12 +165,12 @@ Service tests use a finalized registry with representative operator, auto, built
 disabled, and not-ready rows. Projection tests assert the complete record and JSON structure, plus
 declaration round trips and exact exclusion of framework fields. Renderer tests feed inert records
 and assert complete fact projection without pinning labels or sentences. Structural injection tests
-place line feeds, tabs, DEL, C1, and ANSI controls in identity-adjacent text, descriptions,
-readiness reasons, origin details, and declaration scalars; they prove facts cannot inject sibling
-lines and that the emitted declaration contains no literal C0 controls other than its structural
-line feeds, no literal DEL or C1 controls, and no terminal escape sequence. Parsing the declaration
-shall recover the original scalar values because the YAML encoder represents embedded controls as
-inert printable escapes before terminal sanitization.
+place line feeds, tabs, DEL, C1, ANSI controls, Unicode line and paragraph separators, bidirectional
+and other format controls, lone surrogates, and ordinary Unicode in identity-adjacent text,
+descriptions, readiness reasons, origin details, and declaration scalars. They prove scalar facts
+cannot inject sibling lines, ordinary Unicode remains legible there, and the YAML block contains no
+literal unsafe Unicode. Parsing the declaration recovers the original scalar values, including
+ordinary Unicode and the escaped unsafe code points.
 
 CLI tests replace config and registry loading with controlled boundaries, assert the machine command
 identity and output schema, assert both loader warning flags are false, and make database access

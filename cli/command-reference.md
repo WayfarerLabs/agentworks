@@ -72,14 +72,17 @@ remain hidden unless `--include-disabled` is requested.
 }}
 ```
 
-`category` is `declarable` or `capability`, and `enablement` is `enabled` or `disabled`. `readiness`
-is null for a disabled row. For an enabled row it is `{is_ready, is_available, reason}`, where
-`reason` may be null. A declarable resource's `declaration` is `{apiVersion, kind, metadata, spec}`;
-metadata contains its non-null shared manifest fields, and spec contains every non-null loaded kind
-field, including defaults. Dates, timestamps, enums, nested models, mappings, and collections use
-JSON-native values. A capability's declaration is null. The declaration is normalized registry
-state: it does not preserve comments, source key order, omitted-versus-defaulted distinctions, or an
-effective inheritance merge.
+`category` is `declarable` or `capability`, and `enablement` is `enabled` or `disabled`. A disabled
+row has null `readiness`. An enabled row has `{is_ready, is_available, reason}` in one of three
+states: ready is `{true, true, null}`; blocked is `{false, true, reason}`; and an unavailable or
+deliberately omitted host check is `{false, false, reason}`. `is_available` therefore distinguishes
+a check that produced a verdict from one that could not or deliberately did not run. A declarable
+resource's `declaration` is `{apiVersion, kind, metadata, spec}`; metadata contains its non-null
+shared manifest fields, and spec contains every non-null loaded kind field, including defaults.
+Dates, timestamps, enums, nested models, mappings, and collections use JSON-native values. A
+capability's declaration is null. The declaration is normalized registry state: it does not preserve
+comments, source key order, omitted-versus-defaulted distinctions, or an effective inheritance
+merge.
 
 `agw resource kinds --output json` uses command `resource.kinds` and data
 `{kinds: [{kind, category, resource_count, description}]}`. `category` is exactly `declarable` or

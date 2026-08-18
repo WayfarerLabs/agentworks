@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import unicodedata
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -85,32 +86,36 @@ def test_human_renderer_makes_disabled_capability_nulls_structural(
 def test_human_renderer_neutralizes_scalar_lines_and_preserves_yaml_values(
     captured_output: CapturedOutput,
 ) -> None:
-    hostile = "one\npeer\t\x1b[31mred\x7f\u009b"
+    ordinary_unicode = "café 雪"
+    hostile = "one\npeer\t\x1b[31mred\x7f\u0085\u009b\u2028\u2029\u202e\u2066\ud800"
+    combined = f"{ordinary_unicode} {hostile}"
     declaration: JsonObject = {
         "apiVersion": "agentworks/v1",
         "kind": "secret",
-        "metadata": {"name": "npm-token", "description": hostile},
-        "spec": {"hint": hostile},
+        "metadata": {"name": "npm-token", "description": combined},
+        "spec": {"hint": combined},
     }
     shown = ResourceShow(
-        identity=ResourceIdentity("secret", f"npm-{hostile}"),
+        identity=ResourceIdentity("secret", f"npm-{combined}"),
         category="declarable",
-        description=hostile,
-        origin=Origin.system_plugin(plugin=hostile, source=hostile),
+        description=combined,
+        origin=Origin.system_plugin(plugin=combined, source=combined),
         enablement=Enablement.enabled,
-        readiness=ResourceReadiness(False, True, hostile),
+        readiness=ResourceReadiness(False, True, combined),
         declaration=declaration,
     )
 
     render_resource_show(shown)
 
     messages = [message for _role, _level, message in captured_output.lines]
-    assert all("\n" not in message and "\t" not in message for message in messages)
     assert all(
-        not any(ord(character) < 0x20 or 0x7F <= ord(character) <= 0x9F for character in message)
+        not any(unicodedata.category(character) in {"Cc", "Cf", "Cs", "Zl", "Zp"} for character in message)
         for message in messages
     )
+    top_level = [message for _role, level, message in captured_output.lines if level == 0]
+    assert any(ordinary_unicode in message for message in top_level)
     nested = [message for _role, level, message in captured_output.lines if level == 1]
+    assert all(message.isascii() for message in nested[3:])
     assert yaml.safe_load("\n".join(nested[3:])) == declaration
 
 

@@ -9,6 +9,7 @@ manifest envelope represented by their loaded Pydantic model.
 from __future__ import annotations
 
 import math
+import unicodedata
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, assert_never
 
@@ -26,6 +27,9 @@ from agentworks.terminal import sanitize_terminal_output
 if TYPE_CHECKING:
     from agentworks.origin import Origin
     from agentworks.resources.registry import Registry
+
+
+_UNSAFE_LINE_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,7 +162,10 @@ def resource_show_data(shown: ResourceShow) -> JsonObject:
 
 
 def _line_safe(value: str) -> str:
-    return sanitize_terminal_output(value).replace("\n", "").replace("\t", "")
+    sanitized = sanitize_terminal_output(value)
+    return "".join(
+        character for character in sanitized if unicodedata.category(character) not in _UNSAFE_LINE_CATEGORIES
+    )
 
 
 def _human_scalar(value: str | bool | None) -> str:
@@ -192,7 +199,7 @@ def render_resource_show(shown: ResourceShow) -> None:
     output.info("Declaration:")
     document = yaml.safe_dump(
         shown.declaration,
-        allow_unicode=True,
+        allow_unicode=False,
         default_flow_style=False,
         sort_keys=False,
     )
