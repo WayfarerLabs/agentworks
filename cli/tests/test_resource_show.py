@@ -16,13 +16,18 @@ from agentworks.completions.bash import generate_bash
 from agentworks.completions.powershell import generate_powershell
 from agentworks.completions.spec import DYNAMIC_COMPLETIONS, CommandSpec, build_spec, completion_version
 from agentworks.completions.zsh import generate_zsh
+from agentworks.doctor import HealthCheck, Status
 from agentworks.errors import NotFoundError
 from agentworks.machine_output import JsonObject
 from agentworks.origin import Origin
 from agentworks.output import Role
 from agentworks.resources.access import ResourceIdentity
 from agentworks.resources.graph import Enablement
-from agentworks.resources.show import ResourceReadiness, ResourceShow, render_resource_show
+from agentworks.resources.graph_query import GraphEdge, GraphEdgeType, GraphIdentity, GraphNodeType
+from agentworks.resources.inspect import ResourceSummary
+from agentworks.resources.kind import InstanceRef
+from agentworks.resources.reference import RefRelationship
+from agentworks.resources.show import FocusedRelationships, ResourceReadiness, ResourceShow, render_resource_show
 from tests.conftest import CapturedOutput
 
 if TYPE_CHECKING:
@@ -31,12 +36,21 @@ if TYPE_CHECKING:
 
 def _shown(*, declaration: JsonObject | None = None) -> ResourceShow:
     return ResourceShow(
-        identity=ResourceIdentity("secret", "npm-token"),
+        summary=ResourceSummary(
+            kind="secret",
+            name="npm-token",
+            origin=Origin.operator_declared(file=Path("resources/secrets.yaml"), line=7),
+            reference_count=0,
+            used_by_count=0,
+            description="npm registry token",
+            not_ready_reason="backend unavailable",
+        ),
         category="declarable" if declaration is not None else "capability",
-        description="npm registry token",
-        origin=Origin.operator_declared(file=Path("resources/secrets.yaml"), line=7),
         enablement=Enablement.enabled,
         readiness=ResourceReadiness(is_ready=False, is_available=True, reason="backend unavailable"),
+        relationships=FocusedRelationships((), ()),
+        used_by=(),
+        diagnostics=(),
         declaration=declaration,
     )
 
@@ -56,31 +70,32 @@ def test_human_renderer_projects_complete_structural_facts_and_parseable_manifes
 
     top_level = [message for role, level, message in captured_output.lines if role is Role.BODY and level == 0]
     nested = [message for role, level, message in captured_output.lines if role is Role.BODY and level == 1]
-    assert len(top_level) == 7
+    assert len(top_level) >= 12
     assert len(nested) > 3
     assert all(value in "\n".join(top_level) for value in ("secret", "npm-token", "declarable", "enabled"))
     assert all(value in "\n".join(nested[:3]) for value in ("false", "true", "backend unavailable"))
-    assert yaml.safe_load("\n".join(nested[3:])) == declaration
+    declaration_lines = nested[-len(yaml.safe_dump(declaration, allow_unicode=False, sort_keys=False).splitlines()) :]
+    assert yaml.safe_load("\n".join(declaration_lines)) == declaration
 
 
 def test_human_renderer_makes_disabled_capability_nulls_structural(
     captured_output: CapturedOutput,
 ) -> None:
     shown = ResourceShow(
-        identity=ResourceIdentity("vm-platform", "example"),
+        summary=ResourceSummary("vm-platform", "example", None, 0, None, "", disabled=True),
         category="capability",
-        description="",
-        origin=None,
         enablement=Enablement.disabled,
         readiness=None,
+        relationships=FocusedRelationships((), ()),
+        used_by=None,
+        diagnostics=(),
         declaration=None,
     )
 
     render_resource_show(shown)
 
-    assert len(captured_output.lines) == 7
-    assert all(role is Role.BODY and level == 0 for role, level, _message in captured_output.lines)
-    assert sum(message.endswith("null") for _role, _level, message in captured_output.lines) == 2
+    assert all(role is Role.BODY for role, _level, _message in captured_output.lines)
+    assert sum(message.endswith("null") for _role, _level, message in captured_output.lines) >= 3
 
 
 def test_human_renderer_neutralizes_scalar_lines_and_preserves_yaml_values(
@@ -95,13 +110,30 @@ def test_human_renderer_neutralizes_scalar_lines_and_preserves_yaml_values(
         "metadata": {"name": "npm-token", "description": combined},
         "spec": {"hint": combined},
     }
+    dependency = GraphEdge(
+        GraphEdgeType.DECLARED,
+        GraphIdentity(GraphNodeType.RESOURCE, "secret", f"npm-{combined}"),
+        GraphIdentity(GraphNodeType.RESOURCE, "secret-source", combined),
+        RefRelationship.USES,
+        combined,
+        ResourceIdentity("secret", combined),
+    )
     shown = ResourceShow(
-        identity=ResourceIdentity("secret", f"npm-{combined}"),
+        summary=ResourceSummary(
+            "secret",
+            f"npm-{combined}",
+            Origin.system_plugin(plugin=combined, source=combined),
+            0,
+            0,
+            combined,
+            combined,
+        ),
         category="declarable",
-        description=combined,
-        origin=Origin.system_plugin(plugin=combined, source=combined),
         enablement=Enablement.enabled,
         readiness=ResourceReadiness(False, True, combined),
+        relationships=FocusedRelationships((dependency,), ()),
+        used_by=(InstanceRef(combined, combined),),
+        diagnostics=(HealthCheck(combined, Status.WARN, combined, combined),),
         declaration=declaration,
     )
 
@@ -115,41 +147,43 @@ def test_human_renderer_neutralizes_scalar_lines_and_preserves_yaml_values(
     top_level = [message for _role, level, message in captured_output.lines if level == 0]
     assert any(ordinary_unicode in message for message in top_level)
     nested = [message for _role, level, message in captured_output.lines if level == 1]
-    assert all(message.isascii() for message in nested[3:])
-    assert yaml.safe_load("\n".join(nested[3:])) == declaration
+    declaration_lines = nested[-len(yaml.safe_dump(declaration, allow_unicode=False, sort_keys=False).splitlines()) :]
+    assert all(message.isascii() for message in declaration_lines)
+    assert yaml.safe_load("\n".join(declaration_lines)) == declaration
 
 
-def test_cli_wires_silent_loaders_and_human_renderer(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cli_wires_warning_loaders_and_human_renderer(monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks import bootstrap, config
-    from agentworks.cli.commands import resource
     from agentworks.resources import show
+    from agentworks.resources.graph_query import DatabaseLiveSource
 
+    loaded_config = object()
     registry = object()
     expected = _shown()
     calls: list[tuple[object, ...]] = []
-    monkeypatch.setattr(config, "load_config", lambda **kwargs: calls.append(("config", kwargs)) or object())
+    monkeypatch.setattr(config, "load_config", lambda **kwargs: calls.append(("config", kwargs)) or loaded_config)
     monkeypatch.setattr(
         bootstrap,
         "load_request_registry",
         lambda _config, **kwargs: calls.append(("registry", kwargs)) or registry,
     )
-    monkeypatch.setattr(
-        show,
-        "show_resource",
-        lambda actual, identity: calls.append(("show", actual, identity)) or expected,
-    )
+    monkeypatch.setattr(show, "show_resource", lambda *args: calls.append(("show", *args)) or expected)
     monkeypatch.setattr(show, "render_resource_show", lambda shown: calls.append(("render", shown)))
-    monkeypatch.setattr(resource, "get_db", lambda: pytest.fail("resource show opened the database"))
-
     result = CliRunner().invoke(app, ["resource", "show", "secret/npm-token"])
 
     assert result.exit_code == 0, result.output
-    assert calls == [
-        ("config", {"warn_issues": False}),
-        ("registry", {"warn": False}),
-        ("show", registry, ResourceIdentity("secret", "npm-token")),
+    assert [call for call in calls if call[0] != "show"] == [
+        ("config", {"warn_issues": True}),
+        ("registry", {"warn": True}),
         ("render", expected),
     ]
+    show_call = next(call for call in calls if call[0] == "show")
+    assert show_call[1] is loaded_config
+    assert show_call[2] is registry
+    identity = show_call[3]
+    assert isinstance(identity, ResourceIdentity)
+    assert (identity.kind, identity.name) == ("secret", "npm-token")
+    assert isinstance(show_call[4], DatabaseLiveSource)
 
 
 def test_cli_json_uses_resource_show_identity_and_closed_shape(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -157,9 +191,14 @@ def test_cli_json_uses_resource_show_identity_and_closed_shape(monkeypatch: pyte
     from agentworks.resources import show
 
     expected = _shown(declaration=None)
-    monkeypatch.setattr(config, "load_config", lambda **_kwargs: object())
-    monkeypatch.setattr(bootstrap, "load_request_registry", lambda _config, **_kwargs: object())
-    monkeypatch.setattr(show, "show_resource", lambda _registry, _identity: expected)
+    calls: list[tuple[str, object]] = []
+    monkeypatch.setattr(config, "load_config", lambda **kwargs: calls.append(("config", kwargs)) or object())
+    monkeypatch.setattr(
+        bootstrap,
+        "load_request_registry",
+        lambda _config, **kwargs: calls.append(("registry", kwargs)) or object(),
+    )
+    monkeypatch.setattr(show, "show_resource", lambda *_args: expected)
 
     result = CliRunner().invoke(
         app,
@@ -174,11 +213,18 @@ def test_cli_json_uses_resource_show_identity_and_closed_shape(monkeypatch: pyte
     assert list(resource) == [
         "kind",
         "name",
-        "category",
-        "description",
         "origin",
+        "reference_count",
+        "used_by_count",
+        "description",
+        "not_ready_reason",
+        "disabled",
+        "category",
         "enablement",
         "readiness",
+        "relationships",
+        "used_by",
+        "diagnostics",
         "declaration",
     ]
     assert resource["declaration"] is None
@@ -187,6 +233,7 @@ def test_cli_json_uses_resource_show_identity_and_closed_shape(monkeypatch: pyte
         "is_available": True,
         "reason": "backend unavailable",
     }
+    assert calls == [("config", {"warn_issues": False}), ("registry", {"warn": False})]
 
 
 @pytest.mark.parametrize(
@@ -217,7 +264,7 @@ def test_cli_lookup_failure_writes_no_partial_output(monkeypatch: pytest.MonkeyP
     error = NotFoundError("missing")
     monkeypatch.setattr(config, "load_config", lambda **_kwargs: object())
     monkeypatch.setattr(bootstrap, "load_request_registry", lambda _config, **_kwargs: object())
-    monkeypatch.setattr(show, "show_resource", lambda _registry, _identity: (_ for _ in ()).throw(error))
+    monkeypatch.setattr(show, "show_resource", lambda *_args: (_ for _ in ()).throw(error))
 
     result = CliRunner().invoke(
         app,

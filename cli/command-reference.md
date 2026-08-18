@@ -68,9 +68,21 @@ remain hidden unless `--include-disabled` is requested.
 
 ```text
 {resource: {
-  kind, name, category, description, origin, enablement, readiness, declaration
+  kind, name, origin, reference_count, used_by_count, description, not_ready_reason, disabled,
+  category, enablement, readiness,
+  relationships: {dependencies: [edge...], dependents: [edge...]},
+  used_by: [{kind, name}...] | null,
+  diagnostics: [{name, status, message, hint}...],
+  declaration
 }}
 ```
+
+The first eight fields are the exact matching `resource list` row contract. Each relationship edge
+has `edge_type`, `source`, `target`, `relationship`, `usage`, and `declared_by`; the arrays contain
+only edges touching the selected row and retain canonical graph order and duplicates. `used_by` is
+null when the kind has no live-instance concept and is an array, possibly empty, when it does;
+`used_by_count` is the matching null or array length. Diagnostics are the same resource-attributable
+checks used by `agw doctor`, not a filtered fleet-wide report.
 
 `category` is `declarable` or `capability`, and `enablement` is `enabled` or `disabled`. A disabled
 row has null `readiness`. An enabled row has `{is_ready, is_available, reason}` in one of three
@@ -82,7 +94,8 @@ shared manifest fields, and spec contains every non-null loaded kind field, incl
 Dates, timestamps, enums, nested models, mappings, and collections use JSON-native values. A
 capability's declaration is null. The declaration is normalized registry state: it does not preserve
 comments, source key order, omitted-versus-defaulted distinctions, or an effective inheritance
-merge.
+merge. Human mode retains loader advisories; JSON mode suppresses them and writes one envelope only
+after every focused fact has been assembled.
 
 `agw resource kinds --output json` uses command `resource.kinds` and data
 `{kinds: [{kind, category, resource_count, description}]}`. `category` is exactly `declarable` or
@@ -1080,14 +1093,15 @@ registry is the framework that owns every operator-declared, auto-declared, buil
 system-plugin resource the CLI knows about: secrets, VM templates, agent templates, workspace
 templates, apt / install-command entries, git credential providers, secret backends, etc. Apt and
 user install-command catalog rows carry the system-plugin origin and remain present, but disabled,
-until their owning plugin is enabled. Use `agw resource show` for one loaded row, `agw graph show`
-for relationships, `agw resource explain` for accepted fields, `agw doctor` for diagnosis, and the
-per-kind command for domain-specific synthesis (for example, `agw secret describe`).
+until their owning plugin is enabled. Use `agw resource show` for one loaded row plus its direct
+relationships, current users, and focused health checks, `agw graph show` for relationship
+traversal, `agw resource explain` for accepted fields, `agw doctor` for the fleet-wide health
+report, and the per-kind command for domain-specific synthesis (for example, `agw secret describe`).
 
 | Command                              | Description                                                          |
 | ------------------------------------ | -------------------------------------------------------------------- |
 | `agw resource list`                  | List every resource in the registry across all kinds                 |
-| `agw resource show KIND/NAME`        | Show one loaded row and its normalized declaration                   |
+| `agw resource show KIND/NAME`        | Show the complete focused facts for one loaded row                   |
 | `agw resource kinds`                 | List every kind: category (declarable/capability), counts, purpose   |
 | `agw resource explain TARGET`        | Show what a KIND (or a KIND/NAME capability) accepts, field by field |
 | `agw resource edit KIND/NAME`        | Open the declaring YAML manifest in $EDITOR                          |

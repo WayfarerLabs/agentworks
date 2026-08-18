@@ -166,10 +166,12 @@ def resource_show(
         ),
     ] = OutputFormat.HUMAN,
 ) -> None:
-    """Show the loaded facts and normalized declaration for one resource."""
+    """Show complete focused facts for one loaded resource."""
+    import agentworks.db as db
     from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
     from agentworks.resources.access import parse_resource_identity
+    from agentworks.resources.graph_query import DatabaseLiveSource
     from agentworks.resources.show import (
         render_resource_show,
         resource_show_data,
@@ -177,9 +179,10 @@ def resource_show(
     )
 
     identity = parse_resource_identity(ref)
-    config = load_config(warn_issues=False)
-    registry = load_request_registry(config, warn=False)
-    shown = show_resource(registry, identity)
+    warn = output_format is OutputFormat.HUMAN
+    config = load_config(warn_issues=warn)
+    registry = load_request_registry(config, warn=warn)
+    shown = show_resource(config, registry, identity, DatabaseLiveSource(db.DB_PATH))
 
     if output_format is OutputFormat.JSON:
         from click import get_binary_stream

@@ -118,6 +118,16 @@ class GraphDistanceGroup:
     edges: tuple[GraphEdge, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class FocusedGraphFacts:
+    """Direct declared relationships and current live usage for one resource."""
+
+    focus: ResourceIdentity
+    dependencies: tuple[GraphEdge, ...]
+    dependents: tuple[GraphEdge, ...]
+    used_by: tuple[InstanceRef, ...] | None
+
+
 def resource_graph_identity(value: ResourceIdentity) -> GraphIdentity:
     return GraphIdentity(GraphNodeType.RESOURCE, value.kind, value.name)
 
@@ -153,7 +163,7 @@ def edge_fact_key(edge: GraphEdge) -> tuple[object, ...]:
     )
 
 
-def _declared_edge(ref: ResourceReference) -> GraphEdge:
+def declared_graph_edge(ref: ResourceReference) -> GraphEdge:
     declared_by = None
     if ref.declared_by is not None:
         declared_by = ResourceIdentity(ref.declared_by[0], ref.declared_by[1])
@@ -283,6 +293,55 @@ class DatabaseLiveSource:
         self.state = LiveSourceState.OPEN
 
 
+def focused_graph_facts(
+    registry: Registry,
+    focus: ResourceIdentity,
+    live_source: DatabaseLiveSource,
+) -> FocusedGraphFacts:
+    """Return only declared edges touching ``focus`` and its current live users."""
+    with live_source:
+        if not registry.is_finalized:
+            raise StateError("graph queries require a finalized registry", entity_kind="registry")
+        resolved = resolve_resource(registry, focus)
+        focus_graph = resource_graph_identity(focus)
+
+        dependencies = tuple(
+            sorted(
+                (
+                    declared_graph_edge(ref)
+                    for ref in registry.graph.edges_of(focus.kind, focus.name)
+                    if ref.relationship in GRAPH_TRAVERSED_RELATIONSHIPS
+                ),
+                key=edge_fact_key,
+            )
+        )
+        dependents = tuple(
+            sorted(
+                (
+                    declared_graph_edge(ref)
+                    for ref in registry.graph.incoming_edges_of(focus.kind, focus.name)
+                    if ref.relationship in GRAPH_TRAVERSED_RELATIONSHIPS
+                ),
+                key=edge_fact_key,
+            )
+        )
+        if any(edge.source != focus_graph for edge in dependencies):
+            raise AssertionError("a focused dependency does not start at the focus")
+        if any(edge.target != focus_graph for edge in dependents):
+            raise AssertionError("a focused dependent does not end at the focus")
+
+        used_by: tuple[InstanceRef, ...] | None = None
+        if live_source.supports(focus.kind):
+            used_by = tuple(
+                sorted(
+                    live_source.instances_for(registry, focus_graph, resolved.resource),
+                    key=lambda ref: identity_key(live_graph_identity(ref)),
+                )
+            )
+
+    return FocusedGraphFacts(focus, dependencies, dependents, used_by)
+
+
 def show_graph(
     registry: Registry,
     focus: ResourceIdentity,
@@ -313,13 +372,13 @@ def show_graph(
             if direction in {GraphDirection.DEPENDENCIES, GraphDirection.BOTH}:
                 for ref in registry.graph.edges_of(current.kind, current.name):
                     if ref.relationship in GRAPH_TRAVERSED_RELATIONSHIPS:
-                        edge = _declared_edge(ref)
+                        edge = declared_graph_edge(ref)
                         candidates.append((edge.target, edge))
 
             if direction in {GraphDirection.DEPENDENTS, GraphDirection.BOTH}:
                 for ref in registry.graph.incoming_edges_of(current.kind, current.name):
                     if ref.relationship in GRAPH_TRAVERSED_RELATIONSHIPS:
-                        edge = _declared_edge(ref)
+                        edge = declared_graph_edge(ref)
                         candidates.append((edge.source, edge))
 
                 if live_source.supports(current.kind):
@@ -340,7 +399,7 @@ def show_graph(
             for ref in registry.graph.edges_of(source.kind, source.name):
                 if ref.relationship not in GRAPH_TRAVERSED_RELATIONSHIPS:
                     continue
-                edge = _declared_edge(ref)
+                edge = declared_graph_edge(ref)
                 if edge.target in reached_resources:
                     edges_by_key.setdefault(edge_fact_key(edge), edge)
 
@@ -388,12 +447,32 @@ def group_graph_result(result: GraphResult) -> tuple[GraphDistanceGroup, ...]:
     )
 
 
-def _identity_data(identity: GraphIdentity) -> JsonObject:
+def graph_identity_data(identity: GraphIdentity) -> JsonObject:
+    """Project one graph identity through the shared closed JSON shape."""
     return {
         "node_type": identity.node_type.value,
         "kind": identity.kind,
         "name": identity.name,
     }
+
+
+def graph_edge_data(edge: GraphEdge) -> JsonObject:
+    """Project one declared or live edge through the shared closed JSON shape."""
+    return {
+        "edge_type": edge.edge_type.value,
+        "source": graph_identity_data(edge.source),
+        "target": graph_identity_data(edge.target),
+        "relationship": edge.relationship.value,
+        "usage": edge.usage,
+        "declared_by": (
+            None if edge.declared_by is None else {"kind": edge.declared_by.kind, "name": edge.declared_by.name}
+        ),
+    }
+
+
+def instance_ref_data(ref: InstanceRef) -> JsonObject:
+    """Project one live instance identity without exposing provider state."""
+    return {"kind": ref.instance_kind, "name": ref.instance_name}
 
 
 def graph_result_data(result: GraphResult) -> JsonObject:
@@ -413,17 +492,5 @@ def graph_result_data(result: GraphResult) -> JsonObject:
             }
             for node in result.nodes
         ],
-        "edges": [
-            {
-                "edge_type": edge.edge_type.value,
-                "source": _identity_data(edge.source),
-                "target": _identity_data(edge.target),
-                "relationship": edge.relationship.value,
-                "usage": edge.usage,
-                "declared_by": (
-                    None if edge.declared_by is None else {"kind": edge.declared_by.kind, "name": edge.declared_by.name}
-                ),
-            }
-            for edge in result.edges
-        ],
+        "edges": [graph_edge_data(edge) for edge in result.edges],
     }

@@ -28,9 +28,14 @@ from agentworks.resources.graph import (
 )
 from agentworks.resources.graph_query import (
     DatabaseLiveSource,
+    FocusedGraphFacts,
     GraphDirection,
     GraphResult,
+    focused_graph_facts,
+    graph_edge_data,
+    graph_identity_data,
     graph_result_data,
+    instance_ref_data,
     show_graph,
 )
 from agentworks.resources.kind import (
@@ -53,6 +58,7 @@ __all__ = [
     "ALWAYS_MATERIALIZE_SOURCE",
     "DependencyGraph",
     "DatabaseLiveSource",
+    "FocusedGraphFacts",
     "Enablement",
     "GraphDirection",
     "GraphResult",
@@ -68,6 +74,10 @@ __all__ = [
     "TemplateReference",
     "ReferenceEntry",
     "collect_secrets_for",
+    "focused_graph_facts",
+    "graph_edge_data",
+    "graph_identity_data",
     "graph_result_data",
+    "instance_ref_data",
     "show_graph",
 ]

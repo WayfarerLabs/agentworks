@@ -14,7 +14,7 @@ section. This module covers:
   (env-block, system secret, git-credential paths all covered).
 - Kinds with no instance concept (apt / install-commands, providers,
   backends): inherit the default-empty fallback in
-  ``inspect._count_used_by``; list rows render ``USED BY`` as ``-``.
+  ``inspect.used_by_for``; list rows render ``USED BY`` as ``-``.
 """
 
 from __future__ import annotations
@@ -694,7 +694,7 @@ def test_list_view_renders_dash_for_no_instance_kinds(tmp_path: Path, monkeypatc
 
 def test_kinds_without_instances_hook_inherit_dash(tmp_path: Path) -> None:
     """Apt / install-command kinds, git_credential_provider, and
-    secret_backend don't implement ``instances``: ``inspect._count_used_by``
+    secret_backend don't implement ``instances``: ``inspect.used_by_for``
     returns ``None`` for them, which the list view renders as ``-``.
     """
 
@@ -711,7 +711,7 @@ def test_kinds_without_instances_hook_inherit_dash(tmp_path: Path) -> None:
         handler = KIND_REGISTRY[kind]
         # The Protocol declares ``instances`` but kinds without the
         # instance concept don't define the method on their class.
-        # ``inspect._count_used_by`` keys off this absence.
+        # ``inspect.used_by_for`` keys off this absence.
         assert not hasattr(handler, "instances"), (
             f"{kind} unexpectedly implements instances() -- the kind has no "
             f"live-instance concept; remove the override or override it to "

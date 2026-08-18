@@ -7,18 +7,21 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import pytest
 from pydantic import Field
 
 from agentworks.bootstrap import build_registry
-from agentworks.config import load_config
+from agentworks.config import Config, load_config
+from agentworks.db import Database
 from agentworks.declared_resource import METADATA_FIELDS, DeclaredResource
+from agentworks.machine_output import JsonObject
 from agentworks.origin import Origin
-from agentworks.resources import KIND_REGISTRY, Registry
+from agentworks.resources import KIND_REGISTRY, DatabaseLiveSource, Registry
 from agentworks.resources.access import ResourceIdentity
 from agentworks.resources.graph import DisabledMark, Readiness
+from agentworks.resources.inspect import list_resources, resource_listing_data
 from agentworks.resources.show import project_declaration, resource_show_data, show_resource
 from agentworks.schema import AgwModel
 from agentworks.topics import TopicProse
@@ -75,7 +78,7 @@ class _ReadinessKind:
         raise AssertionError("error-policy kinds do not synthesize")
 
 
-def _request_registry(tmp_path: Path) -> Registry:
+def _request_context(tmp_path: Path) -> tuple[Config, Registry]:
     config_path = write_cfg(
         tmp_path,
         ManifestDoc(
@@ -85,7 +88,12 @@ def _request_registry(tmp_path: Path) -> Registry:
             description="npm registry token",
         ),
     )
-    return build_registry(load_config(config_path, warn_issues=False), probe_host_readiness=False)
+    config = load_config(config_path, warn_issues=False)
+    return config, build_registry(config, probe_host_readiness=False)
+
+
+def _show(config: Config, registry: Registry, identity: ResourceIdentity, tmp_path: Path):
+    return show_resource(config, registry, identity, DatabaseLiveSource(tmp_path / "absent.db"))
 
 
 def _readiness_registry(
@@ -175,13 +183,13 @@ def test_normalized_manifest_reconstructs_the_loaded_row() -> None:
 
 
 def test_service_projects_declarable_and_capability_rows(tmp_path: Path) -> None:
-    registry = _request_registry(tmp_path)
+    config, registry = _request_context(tmp_path)
 
-    declarable = show_resource(registry, ResourceIdentity("secret", "npm-token"))
-    capability = show_resource(registry, ResourceIdentity("vm-platform", "lima"))
+    declarable = _show(config, registry, ResourceIdentity("secret", "npm-token"), tmp_path)
+    capability = _show(config, registry, ResourceIdentity("vm-platform", "lima"), tmp_path)
 
     assert declarable.category == "declarable"
-    assert declarable.description == "npm registry token"
+    assert declarable.summary.description == "npm registry token"
     assert declarable.declaration is not None
     assert declarable.declaration["spec"] == {
         "hint": "rotate quarterly",
@@ -195,28 +203,47 @@ def test_service_projects_declarable_and_capability_rows(tmp_path: Path) -> None
     assert not capability.readiness.is_available
 
 
+def test_show_summary_is_the_exact_matching_list_row(tmp_path: Path) -> None:
+    config, registry = _request_context(tmp_path)
+    database_path = tmp_path / "state.db"
+    database = Database(database_path)
+    listing = list_resources(registry, database, include_disabled=True)
+    database.close()
+    identity = ResourceIdentity("secret", "npm-token")
+
+    shown = show_resource(config, registry, identity, DatabaseLiveSource(database_path))
+    list_row = next(row for row in listing.rows if (row.kind, row.name) == (identity.kind, identity.name))
+    list_data = resource_listing_data(listing)["resources"]
+    assert isinstance(list_data, list)
+    list_rows = cast("list[JsonObject]", list_data)
+    list_row_data = next(row for row in list_rows if row["kind"] == identity.kind and row["name"] == identity.name)
+    show_data = resource_show_data(shown)["resource"]
+    assert isinstance(show_data, dict)
+
+    assert shown.summary == list_row
+    assert list(show_data.items())[:8] == list(list_row_data.items())
+    assert shown.used_by == ()
+    assert shown.summary.used_by_count == 0
+
+
 def test_service_does_not_traverse_resolve_secrets_or_run_provider_operations(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
-    from agentworks.resources.graph import DependencyGraph
     from agentworks.secrets import orchestration, resolve
 
-    registry = _request_registry(tmp_path)
+    config, registry = _request_context(tmp_path)
 
     def forbidden(*_args: object, **_kwargs: object) -> None:
         pytest.fail("resource show crossed an operation boundary")
 
-    monkeypatch.setattr(DependencyGraph, "edges_of", forbidden)
-    monkeypatch.setattr(DependencyGraph, "incoming_edges_of", forbidden)
-    monkeypatch.setattr(DependencyGraph, "dependents_of", forbidden)
     monkeypatch.setattr(resolve, "resolve_batch", forbidden)
     monkeypatch.setattr(orchestration, "resolve_for_command", forbidden)
     monkeypatch.setattr(LimaPlatform, "create", forbidden)
 
-    assert show_resource(registry, ResourceIdentity("secret", "npm-token")).declaration is not None
-    assert show_resource(registry, ResourceIdentity("vm-platform", "lima")).declaration is None
+    assert _show(config, registry, ResourceIdentity("secret", "npm-token"), tmp_path).declaration is not None
+    assert _show(config, registry, ResourceIdentity("vm-platform", "lima"), tmp_path).declaration is None
 
 
 @pytest.mark.parametrize(
@@ -231,18 +258,29 @@ def test_enabled_rows_retain_stored_readiness_facts(
 ) -> None:
     registry = _readiness_registry(monkeypatch, verdict=verdict)
 
-    shown = show_resource(registry, ResourceIdentity("show-test", verdict))
+    shown = show_resource(
+        cast("Config", object()),
+        registry,
+        ResourceIdentity("show-test", verdict),
+        DatabaseLiveSource(Path("/missing-show-test.db")),
+    )
 
     assert shown.readiness is not None
     assert shown.readiness.is_ready is is_ready
     assert shown.readiness.is_available is is_available
     assert shown.readiness.reason is not None
+    assert shown.diagnostics == ()
 
 
 def test_disabled_row_projects_null_readiness(monkeypatch: pytest.MonkeyPatch) -> None:
     registry = _readiness_registry(monkeypatch, verdict="blocked", disabled=True)
 
-    shown = show_resource(registry, ResourceIdentity("show-test", "blocked"))
+    shown = show_resource(
+        cast("Config", object()),
+        registry,
+        ResourceIdentity("show-test", "blocked"),
+        DatabaseLiveSource(Path("/missing-show-test.db")),
+    )
     data = resource_show_data(shown)["resource"]
 
     assert shown.enablement.value == "disabled"
@@ -252,7 +290,7 @@ def test_disabled_row_projects_null_readiness(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_every_registered_declarable_row_projects_to_closed_json(tmp_path: Path) -> None:
-    registry = _request_registry(tmp_path)
+    config, registry = _request_context(tmp_path)
     projected_kinds: set[str] = set()
     kinds_with_rows: set[str] = set()
 
@@ -265,7 +303,7 @@ def test_every_registered_declarable_row_projects_to_closed_json(tmp_path: Path)
         kinds_with_rows.add(kind)
         projected_kinds.add(kind)
         for name, _row in rows:
-            shown = show_resource(registry, ResourceIdentity(kind, name))
+            shown = _show(config, registry, ResourceIdentity(kind, name), tmp_path)
             assert shown.declaration is not None
             json.dumps(resource_show_data(shown), allow_nan=False)
 
@@ -273,9 +311,9 @@ def test_every_registered_declarable_row_projects_to_closed_json(tmp_path: Path)
 
 
 def test_secret_declaration_contains_lookup_configuration_not_values(tmp_path: Path) -> None:
-    registry = _request_registry(tmp_path)
+    config, registry = _request_context(tmp_path)
 
-    shown = show_resource(registry, ResourceIdentity("secret", "npm-token"))
+    shown = _show(config, registry, ResourceIdentity("secret", "npm-token"), tmp_path)
 
     assert shown.declaration is not None
     spec = shown.declaration["spec"]
@@ -296,6 +334,11 @@ def test_category_row_mismatch_fails_instead_of_projecting_partial_data(
     )
 
     with pytest.raises(AssertionError):
-        show_resource(registry, ResourceIdentity("show-test", "blocked"))
+        show_resource(
+            cast("Config", object()),
+            registry,
+            ResourceIdentity("show-test", "blocked"),
+            DatabaseLiveSource(Path("/missing-show-test.db")),
+        )
 
     assert original.category == "declarable"

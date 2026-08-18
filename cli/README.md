@@ -193,9 +193,11 @@ Settings sections (`config.toml`, permanent):
   plugins (see [System Plugins](#system-plugins) below)
 
 Resources are declared as YAML manifests. `agw resource kinds` lists every kind with its category
-and purpose, `agw resource show KIND/NAME` shows one loaded row and its normalized declaration,
+and purpose, `agw resource show KIND/NAME` shows one complete focused card with list facts, direct
+relationships, current users, attributable health checks, and the normalized declaration,
 `agw resource explain KIND` documents what one accepts field by field, and
-`agw graph show KIND/NAME` traverses its declared and current live relationships.
+`agw graph show KIND/NAME` traverses beyond that row through declared and current live
+relationships.
 
 The table below exists for one thing this repository is otherwise the only record of: which removed
 legacy TOML section used to declare each kind. Those sections no longer load; the mapping is a

@@ -15,12 +15,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentworks.path_rendering import format_host_path
+from agentworks.resources.access import ResourceIdentity
 
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.machine_output import JsonObject
     from agentworks.resources.registry import Registry
-    from agentworks.secrets.sources import SourceProvenance
+    from agentworks.secrets.base import SecretDecl
+    from agentworks.secrets.resolve import ActiveSource
+    from agentworks.secrets.sources import SecretSourceDecl, SourceProvenance
+    from agentworks.vms.admin import AdminConfig
     from agentworks.vms.sites import VMSiteDecl
 
 
@@ -152,7 +156,7 @@ def health_report_data(report: HealthReport) -> JsonObject:
         "groups": [
             {
                 "name": group.name,
-                "checks": [_health_check_data(check) for check in group.checks],
+                "checks": [health_check_data(check) for check in group.checks],
             }
             for group in report.groups
         ],
@@ -165,7 +169,7 @@ def health_report_data(report: HealthReport) -> JsonObject:
     }
 
 
-def _health_check_data(check: HealthCheck) -> JsonObject:
+def health_check_data(check: HealthCheck) -> JsonObject:
     """Serialize the same check facts rendered to humans."""
     return {
         "name": check.name,
@@ -173,6 +177,140 @@ def _health_check_data(check: HealthCheck) -> JsonObject:
         "message": check.message,
         "hint": check.hint,
     }
+
+
+def _stored_readiness_check(
+    registry: Registry,
+    identity: ResourceIdentity,
+) -> HealthCheck | None:
+    """Build doctor's stored-readiness row, or no row when disabled."""
+    from agentworks.resources.graph import Enablement
+
+    if registry.graph.enablement_of(identity.kind, identity.name) is Enablement.disabled:
+        return None
+    reason = registry.graph.readiness_of(identity.kind, identity.name).reason
+    if reason is not None:
+        return HealthCheck(identity.name, Status.INFO, f"not ready: {reason}")
+    return HealthCheck(identity.name, Status.OK)
+
+
+def _vm_site_check(
+    config: Config,
+    registry: Registry,
+    name: str,
+    decl: VMSiteDecl,
+) -> HealthCheck:
+    """Build the exact per-site row used by bulk and focused doctor views."""
+    reason = registry.graph.readiness_of("vm-site", name).reason
+    if reason is not None:
+        return HealthCheck(name, Status.INFO, f"not ready: {reason}")
+    try:
+        from agentworks.capabilities.base import RunContext
+        from agentworks.vms.nodes import vm_site_node
+
+        vm_site_node(registry, name).preflight(RunContext(config=config))
+    except Exception as error:
+        return HealthCheck(
+            name,
+            Status.WARN,
+            f"{_platform_summary(decl)}; preflight: {error}",
+            hint=getattr(error, "hint", None),
+        )
+    return HealthCheck(name, Status.OK, _platform_summary(decl))
+
+
+def _secret_source_check(status: SecretSourceStatus) -> HealthCheck:
+    """Build one value-free source participation/readiness row."""
+    from agentworks.secrets.sources import SourceProvenance
+
+    provenance_labels = {
+        SourceProvenance.OPERATOR_OVERRIDE: "operator override of synthesized default",
+        SourceProvenance.SYNTHESIZED_DEFAULT: "synthesized default",
+        SourceProvenance.DECLARED: "declared",
+    }
+    participation = "active" if status.active else "inactive"
+    enablement = "enabled" if status.enabled else "disabled"
+    readiness = f"not ready: {status.not_ready_reason}" if status.not_ready_reason is not None else "ready"
+    return HealthCheck(
+        status.name,
+        Status.INFO,
+        f"backend {status.backend}; {participation}; {enablement}; {provenance_labels[status.provenance]}; {readiness}",
+    )
+
+
+def _secret_check(
+    name: str,
+    decl: SecretDecl,
+    sources: tuple[ActiveSource, ...],
+) -> HealthCheck:
+    """Build one value-free secret resolution preview row."""
+    from agentworks.secrets.preview import PreviewCategory, preview_resolution
+
+    auto = getattr(decl.origin, "variant", None) == "auto-declared"
+    label = f"Secret {name!r} (auto)" if auto else f"Secret {name!r}"
+    preview = preview_resolution(decl, sources)
+    if preview.category is PreviewCategory.ATTEMPTABLE:
+        return HealthCheck(label, Status.OK, f"would attempt via {preview.source}")
+    if preview.skipped_not_ready:
+        skipped = "; ".join(f"{source.source} ({source.reason})" for source in preview.skipped_not_ready)
+        return HealthCheck(
+            label,
+            Status.WARN,
+            f"not attemptable through any active source; not ready: {skipped}",
+        )
+    return HealthCheck(label, Status.WARN, "not attemptable through any active source")
+
+
+def _admin_dotfiles_check(admin: AdminConfig) -> HealthCheck | None:
+    """Build the default admin-template dotfiles row when a source exists."""
+    if not admin.dotfiles_source:
+        return None
+    from agentworks.sources import parse_source_ref
+
+    ref = parse_source_ref(admin.dotfiles_source)
+    if ref.kind == "git" or Path(ref.path).expanduser().exists():
+        return HealthCheck("Admin dotfiles", Status.OK, admin.dotfiles_source)
+    return HealthCheck("Admin dotfiles", Status.WARN, f"source missing: {admin.dotfiles_source}")
+
+
+def checks_for_resource(
+    config: Config,
+    registry: Registry,
+    identity: ResourceIdentity,
+) -> tuple[HealthCheck, ...]:
+    """Return only doctor's checks whose subject is ``identity``."""
+    from agentworks.resources.access import resolve_resource
+
+    row = resolve_resource(registry, identity).resource
+    check: HealthCheck | None = None
+    if identity.kind in {"vm-platform", "secret-backend"}:
+        check = _stored_readiness_check(registry, identity)
+    elif identity.kind == "vm-site":
+        from agentworks.vms.sites import VMSiteDecl
+
+        if not isinstance(row, VMSiteDecl):
+            raise AssertionError("vm-site published an unexpected row type")
+        check = _vm_site_check(config, registry, identity.name, row)
+    elif identity.kind == "secret-source":
+        from agentworks.secrets.sources import SecretSourceDecl
+
+        if not isinstance(row, SecretSourceDecl):
+            raise AssertionError("secret-source published an unexpected row type")
+        check = _secret_source_check(_secret_source_status(config, registry, identity.name, row))
+    elif identity.kind == "secret":
+        from agentworks.secrets.base import SecretDecl
+        from agentworks.secrets.resolve import active_sources
+
+        if not isinstance(row, SecretDecl):
+            raise AssertionError("secret published an unexpected row type")
+        check = _secret_check(identity.name, row, active_sources(config, registry))
+    elif identity == ResourceIdentity("admin-template", "default"):
+        from agentworks.vms.admin import AdminConfig
+
+        if not isinstance(row, AdminConfig):
+            raise AssertionError("admin-template published an unexpected row type")
+        check = _admin_dotfiles_check(row)
+    return () if check is None else (check,)
 
 
 def run_checks(*, completion_version: str | None = None) -> HealthReport:
@@ -312,20 +450,16 @@ def _check_vm_platforms(registry: Registry) -> HealthGroup:
     ready-placeholder readiness as a misleading ``[ok]``. This matches the
     "disabled hides" default-surface rule that ``agw resource list`` uses.
     """
-    from agentworks.resources.graph import Enablement
+    from agentworks.resources.access import ResourceIdentity
 
     g = HealthGroup("VM platforms")
     # Publication order (built-ins in name order, then plugin rows in
     # plugin-publication order), preserved: the pre-refactor group rendered in
     # this order, and the reordering is not one of the R9 deltas.
     for name, _decl in registry.iter_kind_items("vm-platform"):
-        if registry.graph.enablement_of("vm-platform", name) is Enablement.disabled:
-            continue
-        reason = registry.graph.readiness_of("vm-platform", name).reason
-        if reason is not None:
-            g.info(name, f"not ready: {reason}")
-        else:
-            g.ok(name)
+        check = _stored_readiness_check(registry, ResourceIdentity("vm-platform", name))
+        if check is not None:
+            g.checks.append(check)
     return g
 
 
@@ -434,30 +568,10 @@ def _check_vm_sites(
     not_ready: dict[str, str] = {}
     for name in sorted(sites):
         decl = sites[name]
-        # Read the site's stored readiness verdict off the graph (R11), no
-        # recompute. A site whose platform is disabled (the opt-in axis) or
-        # host-unsupported reads not-ready here too.
         reason = registry.graph.readiness_of("vm-site", name).reason
         if reason is not None:
             not_ready[name] = reason
-            g.info(name, f"not ready: {reason}")
-            continue
-        try:
-            from agentworks.capabilities.base import RunContext
-            from agentworks.vms.nodes import vm_site_node
-
-            site_node = vm_site_node(registry, name)
-            site_node.preflight(RunContext(config=config))
-        except Exception as error:
-            # A failing preflight on an enabled site is the error the
-            # operator's next command hits: warn.
-            g.warn(
-                name,
-                f"{_platform_summary(decl)}; preflight: {error}",
-                hint=getattr(error, "hint", None),
-            )
-            continue
-        g.ok(name, _platform_summary(decl))
+        g.checks.append(_vm_site_check(config, registry, name, decl))
 
     default_site = config.defaults.site
     if default_site is not None and default_site in not_ready:
@@ -615,14 +729,9 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     from agentworks.resources.access import admin_template
 
     admin = admin_template(registry)
-    if admin.dotfiles_source:
-        from agentworks.sources import parse_source_ref
-
-        ref = parse_source_ref(admin.dotfiles_source)
-        if ref.kind == "git" or Path(ref.path).expanduser().exists():
-            g.ok("Admin dotfiles", admin.dotfiles_source)
-        else:
-            g.warn("Admin dotfiles", f"source missing: {admin.dotfiles_source}")
+    dotfiles_check = _admin_dotfiles_check(admin)
+    if dotfiles_check is not None:
+        g.checks.append(dotfiles_check)
 
     # Git token health is preflight-only in doctor: the token secret's
     # resolvability shows in the Secrets group (`_check_secrets` covers
@@ -679,7 +788,7 @@ def _check_secret_backends(registry: Registry) -> HealthGroup:
     ``[ok]``. This matches the "disabled hides" default-surface rule that
     ``agw resource list`` uses.
     """
-    from agentworks.resources.graph import Enablement
+    from agentworks.resources.access import ResourceIdentity
 
     g = HealthGroup("Secret backends")
     backends = sorted(registry.iter_kind_items("secret-backend"), key=lambda item: item[0])
@@ -687,62 +796,52 @@ def _check_secret_backends(registry: Registry) -> HealthGroup:
         g.info("Registered backends", "none")
         return g
     for name, _decl in backends:
-        if registry.graph.enablement_of("secret-backend", name) is Enablement.disabled:
-            continue
-        reason = registry.graph.readiness_of("secret-backend", name).reason
-        if reason is not None:
-            g.info(name, f"not ready: {reason}")
-        else:
-            g.ok(name)
+        check = _stored_readiness_check(registry, ResourceIdentity("secret-backend", name))
+        if check is not None:
+            g.checks.append(check)
     return g
+
+
+def _secret_source_status(
+    config: Config,
+    registry: Registry,
+    name: str,
+    row: SecretSourceDecl,
+) -> SecretSourceStatus:
+    from agentworks.resources.graph import Enablement
+    from agentworks.secrets.sources import source_provenance
+
+    return SecretSourceStatus(
+        name=name,
+        backend=row.backend.name,
+        provenance=source_provenance(row),
+        active=name in config.secret_config_data.sources,
+        enabled=registry.graph.enablement_of("secret-source", name) is not Enablement.disabled,
+        not_ready_reason=registry.graph.readiness_of("secret-source", name).reason,
+    )
 
 
 def _secret_source_statuses(config: Config, registry: Registry) -> tuple[SecretSourceStatus, ...]:
     """Project every source row without invoking a capability operation."""
-    from agentworks.resources.graph import Enablement
-    from agentworks.secrets.sources import SecretSourceDecl, source_provenance
+    from agentworks.secrets.sources import SecretSourceDecl
 
-    active_source_names = set(config.secret_config_data.sources)
     statuses: list[SecretSourceStatus] = []
     for name, row in sorted(registry.iter_kind_items("secret-source"), key=lambda item: item[0]):
         if not isinstance(row, SecretSourceDecl):
             continue
-        statuses.append(
-            SecretSourceStatus(
-                name=name,
-                backend=row.backend.name,
-                provenance=source_provenance(row),
-                active=name in active_source_names,
-                enabled=registry.graph.enablement_of("secret-source", name) is not Enablement.disabled,
-                not_ready_reason=registry.graph.readiness_of("secret-source", name).reason,
-            )
-        )
+        statuses.append(_secret_source_status(config, registry, name, row))
     return tuple(statuses)
 
 
 def _check_secret_sources(config: Config, registry: Registry) -> HealthGroup:
     """Explain participation and readiness for every declared source row."""
-    from agentworks.secrets.sources import SourceProvenance
-
-    provenance_labels = {
-        SourceProvenance.OPERATOR_OVERRIDE: "operator override of synthesized default",
-        SourceProvenance.SYNTHESIZED_DEFAULT: "synthesized default",
-        SourceProvenance.DECLARED: "declared",
-    }
     group = HealthGroup("Secret sources")
     statuses = _secret_source_statuses(config, registry)
     if not statuses:
         group.info("Declared sources", "none")
         return group
     for status in statuses:
-        participation = "active" if status.active else "inactive"
-        enablement = "enabled" if status.enabled else "disabled"
-        readiness = f"not ready: {status.not_ready_reason}" if status.not_ready_reason is not None else "ready"
-        group.info(
-            status.name,
-            f"backend {status.backend}; {participation}; {enablement}; "
-            f"{provenance_labels[status.provenance]}; {readiness}",
-        )
+        group.checks.append(_secret_source_check(status))
     return group
 
 
@@ -757,26 +856,12 @@ def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
         g.info("Declared secrets", "none")
         return g
 
-    from agentworks.secrets.preview import PreviewCategory, preview_resolution
     from agentworks.secrets.resolve import active_sources
 
     sources = active_sources(config, registry)
 
     for name, decl in sorted(secrets.items()):
-        auto = getattr(decl.origin, "variant", None) == "auto-declared"
-        label = f"Secret {name!r} (auto)" if auto else f"Secret {name!r}"
-        preview = preview_resolution(decl, sources)
-        if preview.category is PreviewCategory.ATTEMPTABLE:
-            g.ok(label, f"would attempt via {preview.source}")
-        else:
-            if preview.skipped_not_ready:
-                skipped = "; ".join(f"{source.source} ({source.reason})" for source in preview.skipped_not_ready)
-                g.warn(
-                    label,
-                    f"not attemptable through any active source; not ready: {skipped}",
-                )
-            else:
-                g.warn(label, "not attemptable through any active source")
+        g.checks.append(_secret_check(name, decl, sources))
 
     return g
 
