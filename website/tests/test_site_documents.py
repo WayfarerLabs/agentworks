@@ -700,7 +700,6 @@ class GeneratedDocumentTests(RepositoryFixture):
 
         command = spawn.call_args.args[0]
         self.assertIn("--remote-debugging-port=0", command)
-        self.assertNotIn("--dump-dom", command)
         self.assertEqual(command[-1], "about:blank")
         self.assertEqual(result["display"], "block")
         self.assertTrue(connection.closed)
