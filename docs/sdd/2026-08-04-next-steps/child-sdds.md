@@ -107,14 +107,23 @@ locked.
       dozen journey hints, the assistant topic ordinary among nine, and the bootstrap at 107 words
       of install-and-handoff. All lanes plus the tester's exact-wheel pass converged; the round
       restored the secrets don't-display teaching and told the truth of the startup-posture drop
-- [ ] Markdown concept shells (operator ruling 2026-08-17, recorded in `target-state.md`; design
+- [x] Markdown concept shells (operator ruling 2026-08-17, recorded in `target-state.md`; design
       checkpoint on draft PR #580): the typed guide model is replaced by auto-discovered Markdown
       shells with a closed two-addition list (agent fences and the bounded README-consuming import;
       the live projections were removed by same-day direction, leaving shells fully static); typed
       blocks, actions, consent/evidence replay, the onboarding assessment, and manual registration
       go. Saga checkpoint review posted with two review items (charter the outdated always-on rule
       updates per keep-collateral-in-sync; state the plugin-topic story). No 0.14 gate is minted for
-      this implementation absent direction
+      this implementation absent direction. Shipped as PR #587 (merged 2026-08-17) with the
+      nested-container fix PR #591 (merged 2026-08-17; the remaining theoretical CommonMark edges
+      closed by operator declaration on that PR)
+- [ ] Derived index and grammar-native guide (operator ruling 2026-08-17, recorded in
+      `target-state.md`; **gates 0.14.0**; PR #593): the no-topic response derives from the shell
+      catalog through a reserved `_index.md`, and the final public grammar is `agw guide`,
+      `agw guide list`, and `agw guide show TOPIC` with no compatibility alias. Direction arrived in
+      the child session with the gate confirmed through the saga lead's channel; the child FRD, HLA,
+      and LLD record it at `1d31beab`, and the implementation iterates on the PR under the standard
+      lanes. Merging saga PR #594 discharged the recording prerequisite
 - [ ] Remaining phases (wave 2 adoption, closeout) per the effort's per-phase PR plan. The README
       bootstrap shipped with the assistance phase (PR #480), so the bootstraps gate is satisfied;
       the generated block pins version 0.14.0 or newer and resolves when the release ships
@@ -580,14 +589,17 @@ open-ended research placeholder.
     merged and locked). The hard-gate ledger: the grammar gate closed with #491, the breaking-truth
     task and installer-plugins moves closed their lanes earlier ("This lane is closed" on each entry
     above), the README bootstrap gate is satisfied (PR #480), and the corrected-guide-model gate is
-    satisfied (PR #579, merged 2026-08-17; see the onboarding entry). One gate remains open. The
-    **simplification pass gates 0.14.0** (operator ruling, 2026-08-16, recorded in
-    `target-state.md`): the sweep's execution, the gcp dedup, and the pass's reassessment and lock
-    complete before the release, hardening and subsuming `phasing.md`'s test-consolidation soft
-    gate, whose vehicle the sweep already is. Follow-on efforts the reassessment proposes do not
-    inherit the gate. A 2026-08-16 operator clarification is recorded here because a checked entry
-    above says the harness-integration window ran "until the grammar rewrite's breaking PRs land":
-    the operator's actual constraint was an opening edge only (the integration waits for the
+    satisfied (PR #579, merged 2026-08-17; see the onboarding entry). Two 2026-08-17 rulings
+    (recorded in `target-state.md`) reshaped the remaining gates: the **grammar-native guide (PR
+    #593) gates 0.14.0**, since the release does not ship the retired guide grammar, and the
+    **simplification pass no longer gates**, its remaining work (sweep, gcp dedup, reassessment,
+    lock) continuing on its own merits as repository-internal test quality invisible in the shipped
+    artifact; the test-consolidation soft gate resolves as cut with it. The other artifact-facing
+    release item is the changelog repair (issue #589, executed as a manual release-branch edit after
+    the final merge), and the operator holds a personal edit pass over guide content and website
+    wording before the cut. A 2026-08-16 operator clarification is recorded here because a checked
+    entry above says the harness-integration window ran "until the grammar rewrite's breaking PRs
+    land": the operator's actual constraint was an opening edge only (the integration waits for the
     surfaces it sits on, all landed), command grammar is not such a surface, and no closing edge
     ever existed. The integration may be built at any time.
 
