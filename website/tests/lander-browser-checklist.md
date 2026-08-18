@@ -253,7 +253,7 @@ readiness, kill fallback, primary-error precedence, and server-thread cleanup.
 
 - Date: 2026-08-17
 - Pre-fix source: `aba556d18640b224196661bc996298223cbdce03`
-- Corrected source: `a1712c4da357117262b81ed873d7040225f01959`
+- Corrected source: `0557492a7b975ad63629fefb4236617f993cabe4`
 - Failure evidence: PR #595 CI run `32097702176`, Website job `95592145030`
 - Outcome: PASS for the remaining Phase 4J probes
 
@@ -266,9 +266,11 @@ kills the owned process, and removes the isolated profile.
 Stress execution exposed two additional lifecycle races before commit: Chrome can briefly leave a
 child writing its profile after the parent exits, and `DevToolsActivePort` can exist before it has
 content or a published page target. Cleanup now gives profile writers a bounded quiescence window,
-and shared DevTools discovery waits for complete port and page-target publication. The formerly
-failing description probe passed 30 consecutive real-Chromium iterations after both corrections; the
-complete Phase 4J module passed 9 of 9 tests, including screenshots and reduced motion.
+and every Chromium harness now uses shared discovery with one absolute five-second deadline for
+complete port and page-target publication. A stalled HTTP endpoint cannot extend that deadline by
+starting another long request. The formerly failing description probe passed 30 consecutive
+real-Chromium iterations after both corrections; the complete Phase 4J module passed 7 of 7 tests,
+including screenshots and reduced motion, and the shared lifecycle suite passed 10 of 10 tests.
 
 ### Historical route-proof automated execution record
 
