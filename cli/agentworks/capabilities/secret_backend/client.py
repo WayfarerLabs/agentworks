@@ -101,12 +101,26 @@ class SecretClientFailure(Exception):
 
 
 class SecretClientTimeout(Exception):
-    """A client boundary timed out after its underlying work stopped."""
+    """A client boundary timed out after its underlying work stopped.
 
-    __slots__ = ()
+    ``guidance`` is optional, backend-authored, and STATIC: fixed prose a
+    backend supplies about a common cause of its own timeouts. It must
+    never be built from the timed-out subprocess or process's own output;
+    this exception carries no native text at all (that boundary is what
+    keeps a timeout value-free). ``None`` when the backend has nothing
+    more specific to say than "it timed out."
+    """
+
+    __slots__ = ("guidance",)
+
+    guidance: str | None
+
+    def __init__(self, *, guidance: str | None = None) -> None:
+        super().__init__()
+        self.guidance = guidance
 
     def __str__(self) -> str:
         return "secret client operation timed out"
 
     def __repr__(self) -> str:
-        return "SecretClientTimeout()"
+        return f"SecretClientTimeout(guidance={self.guidance!r})"

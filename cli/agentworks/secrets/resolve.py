@@ -396,6 +396,7 @@ def _outcome(
     source: str | None = None,
     identifier: str | None = None,
     remediation_target: str | None = None,
+    guidance: str | None = None,
 ) -> ResolutionOutcome:
     rule = OUTCOME_RULES[detail]
     return ResolutionOutcome(
@@ -406,6 +407,7 @@ def _outcome(
         source=source,
         identifier=identifier,
         remediation_target=remediation_target,
+        guidance=guidance,
     )
 
 
@@ -562,6 +564,7 @@ def resolve_batch(
         broker = interaction_broker if source.backend_class.name == "prompt" else None
         failure_kind: SecretClientFailureKind | None = None
         timed_out = False
+        timeout_guidance: str | None = None
         unexpected = False
         timeout = source.backend_class.external_operation_timeout(source.config)
         # Empty rather than unbound, so a failure branch that ever stopped
@@ -572,8 +575,9 @@ def resolve_batch(
             returned = _drive_source(source, requests, broker=broker, timeout=timeout)
         except UserAbort:
             raise
-        except SecretClientTimeout:
+        except SecretClientTimeout as timeout_exc:
             timed_out = True
+            timeout_guidance = timeout_exc.guidance
         except SecretClientFailure as failure:
             failure_kind = failure.kind
         except Exception:
@@ -606,6 +610,7 @@ def resolve_batch(
                     detail,
                     source=source.name,
                     identifier=identifiers[request.name],
+                    guidance=timeout_guidance,
                 )
             continue
 

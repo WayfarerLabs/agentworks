@@ -141,8 +141,22 @@ def _raise_client_failure(kind: SecretClientFailureKind) -> NoReturn:
     raise SecretClientFailure(kind=kind, remediation=remediation) from None
 
 
+_TIMEOUT_GUIDANCE = (
+    "a pending approval prompt in the 1Password desktop app is a common "
+    "cause; approve or dismiss it and retry. `op whoami` can report signed "
+    "out even when desktop-app integration still works, so it is not a "
+    "reliable way to rule this out"
+)
+"""Fixed, backend-authored prose surfaced on a timeout (never derived from
+``op``'s own output, which this backend keeps out of rendered diagnostics
+entirely). Named after field evidence: a pending desktop-app approval
+prompt is the most common real cause of an ``op`` timeout, and the
+adjacent ``op whoami`` trap ("not signed in" even when reads work) sends
+operators chasing the wrong fix."""
+
+
 def _raise_client_timeout() -> NoReturn:
-    raise SecretClientTimeout from None
+    raise SecretClientTimeout(guidance=_TIMEOUT_GUIDANCE) from None
 
 
 def _check_op_uri(uri: str) -> str:

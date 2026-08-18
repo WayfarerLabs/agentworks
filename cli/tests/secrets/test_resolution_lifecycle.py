@@ -350,6 +350,42 @@ def test_source_failures_are_value_free_and_batch_attributed(
     assert _Backend.events[-1] == "exit"
 
 
+def test_timeout_guidance_flows_through_to_the_outcome_and_remediation() -> None:
+    """A backend-authored, fixed guidance string on ``SecretClientTimeout``
+    reaches the outcome's ``guidance`` field and ``format_remediation``'s
+    rendered text: the channel the onepassword backend uses to name a
+    pending desktop-app approval prompt as a likely timeout cause without
+    ever touching native process output."""
+    _Backend.failure = SecretClientTimeout(guidance="a fixed cause, spelled out here")
+    batch = resolve_batch(
+        [SecretDecl(name="token", description="token")],
+        [_source()],
+        policy=_policy(),
+        interaction_broker=None,
+    )
+
+    outcome = batch.outcomes[0]
+    assert outcome.detail is ResolutionDetail.DEADLINE_EXCEEDED
+    assert outcome.guidance == "a fixed cause, spelled out here"
+    assert format_remediation(outcome) == "increase-timeout (a fixed cause, spelled out here)"
+
+
+def test_timeout_without_guidance_renders_the_bare_remediation() -> None:
+    """Most timeouts carry no backend guidance; the rendering stays exactly
+    as it was before ``guidance`` existed."""
+    _Backend.failure = SecretClientTimeout()
+    batch = resolve_batch(
+        [SecretDecl(name="token", description="token")],
+        [_source()],
+        policy=_policy(),
+        interaction_broker=None,
+    )
+
+    outcome = batch.outcomes[0]
+    assert outcome.guidance is None
+    assert format_remediation(outcome) == "increase-timeout"
+
+
 def test_not_ready_source_constructs_nothing() -> None:
     batch = resolve_batch(
         [SecretDecl(name="token", description="token")],
@@ -480,6 +516,21 @@ def test_illegal_outcome_tuple_is_rejected() -> None:
             detail=ResolutionDetail.SOURCE_BACKEND_PLUGIN_DISABLED,
             remediation=ResolutionRemediation.ENABLE_PLUGIN,
             source="source",
+        )
+
+
+def test_guidance_is_rejected_outside_the_allowed_detail() -> None:
+    """``guidance`` is deliberately narrow: only ``DEADLINE_EXCEEDED`` allows
+    it today, so a different detail carrying one is a construction bug, not
+    a valid outcome."""
+    with pytest.raises(ValueError, match="forbids guidance"):
+        ResolutionOutcome(
+            name="token",
+            category=ResolutionCategory.UNAVAILABLE,
+            detail=ResolutionDetail.SOFT_MISS,
+            remediation=ResolutionRemediation.CONFIGURE_SOURCE,
+            source="source",
+            guidance="not allowed here",
         )
 
 
