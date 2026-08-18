@@ -136,9 +136,12 @@ off whenever bandwidth allows, on its own merits and its own schedule.
   notice, backup, and restore are table-stakes UX for the release that migrates every existing
   install, and the backup is also the 0.14-to-0.13 rollback path), and the pre-0.14
   test-consolidation child as a soft gate (the trim runs while the context is loaded, before the
-  repo draws post-release attention). The resource-CLI grammar break shares the window if the
-  operator blesses it: breaking surface changes belong in the same cushioned release. While `main`
-  holds unreleased breaking changes, urgent operator fixes ship from a `0.13.x` backport branch.
+  repo draws post-release attention). **Resolved as cut (operator ruling, 2026-08-17, in
+  `target-state.md`)**: the simplification pass's sweep absorbed the trim's estate and no longer
+  gates the release, so the soft gate resolves with it; the sweep continues on its own merits. The
+  resource-CLI grammar break shares the window if the operator blesses it: breaking surface changes
+  belong in the same cushioned release. While `main` holds unreleased breaking changes, urgent
+  operator fixes ship from a `0.13.x` backport branch.
 
   **Ruling (operator, 2026-08-12):** the grammar rewrite is no longer conditional. 0.14.0 does not
   ship until it lands, so it joins the cut as a hard gate. **Original sequence (operator,

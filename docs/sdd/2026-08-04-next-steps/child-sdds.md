@@ -580,14 +580,17 @@ open-ended research placeholder.
     merged and locked). The hard-gate ledger: the grammar gate closed with #491, the breaking-truth
     task and installer-plugins moves closed their lanes earlier ("This lane is closed" on each entry
     above), the README bootstrap gate is satisfied (PR #480), and the corrected-guide-model gate is
-    satisfied (PR #579, merged 2026-08-17; see the onboarding entry). One gate remains open. The
-    **simplification pass gates 0.14.0** (operator ruling, 2026-08-16, recorded in
-    `target-state.md`): the sweep's execution, the gcp dedup, and the pass's reassessment and lock
-    complete before the release, hardening and subsuming `phasing.md`'s test-consolidation soft
-    gate, whose vehicle the sweep already is. Follow-on efforts the reassessment proposes do not
-    inherit the gate. A 2026-08-16 operator clarification is recorded here because a checked entry
-    above says the harness-integration window ran "until the grammar rewrite's breaking PRs land":
-    the operator's actual constraint was an opening edge only (the integration waits for the
+    satisfied (PR #579, merged 2026-08-17; see the onboarding entry). Two 2026-08-17 rulings
+    (recorded in `target-state.md`) reshaped the remaining gates: the **grammar-native guide (PR
+    #593) gates 0.14.0**, since the release does not ship the retired guide grammar, and the
+    **simplification pass no longer gates**, its remaining work (sweep, gcp dedup, reassessment,
+    lock) continuing on its own merits as repository-internal test quality invisible in the shipped
+    artifact; the test-consolidation soft gate resolves as cut with it. The other artifact-facing
+    release item is the changelog repair (issue #589, executed as a manual release-branch edit after
+    the final merge), and the operator holds a personal edit pass over guide content and website
+    wording before the cut. A 2026-08-16 operator clarification is recorded here because a checked
+    entry above says the harness-integration window ran "until the grammar rewrite's breaking PRs
+    land": the operator's actual constraint was an opening edge only (the integration waits for the
     surfaces it sits on, all landed), command grammar is not such a surface, and no closing edge
     ever existed. The integration may be built at any time.
 

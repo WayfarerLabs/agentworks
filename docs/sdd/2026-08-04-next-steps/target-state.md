@@ -92,16 +92,31 @@ whatever other simplifications the onboarding and discovery track has accumulate
 own reading is that earlier phases of that effort landed tech debt while unattended. Shipped
 2026-08-15 (PRs #519 and #537).
 
-**Ruling (operator, 2026-08-18, the derived index):** the guide's no-topic response derives from the
-shell catalog instead of a hand-maintained tuple, confirmed through the saga lead's authenticated
-channel as the final 0.14 guide work (the onboarding effort's PR #593). A reserved `_index.md` shell
+**Ruling (operator, 2026-08-17, the derived index and grammar-native guide; gates 0.14.0):** the
+guide's no-topic response derives from the shell catalog instead of a hand-maintained tuple, and the
+guide's final public grammar is `agw guide` (the index), `agw guide list`, and single-topic
+`agw guide show TOPIC`, with no direct or variadic compatibility alias. Direction arrived in the
+onboarding child session (its FRD, HLA, and LLD record it at PR #593 head `1d31beab`), with the gate
+and scope confirmed through the saga lead's authenticated channel. A reserved `_index.md` shell
 renders first, followed by ordered ordinary concept metadata (an optional bounded `index-order`
 frontmatter features concepts; generated exact release-note topics stay listable but outside the
 omitted-concept count), all still static and package-only with no config, runtime state, registry,
-or release-history loading. Guide-specific `--names-only` is replaced by `agw guide list`. This
-supersedes the 2026-08-12 trail-sign ruling's catalog-free clause and the shells ruling's "loads
-neither the shell catalog" sentence below; the trail-sign intent (point, do not teach) survives as
-`_index.md`'s content, now owned like any other shell.
+or release-history loading. This supersedes the 2026-08-12 trail-sign ruling's shipped
+fixed-destination response (the catalog-free rendering of PRs #519/#537, later the corrected model's
+shared destination tuple) and, in the onboarding effort's own record, the shells FRD's acceptance
+that the no-topic path loads no shell catalog; the trail-sign intent (point, do not teach) survives
+as `_index.md`'s content, now owned like any other shell. **This work gates 0.14.0**; the release
+does not ship the retired guide grammar.
+
+**Ruling (operator, 2026-08-17, the simplification pass no longer gates 0.14.0):** superseding the
+2026-08-16 gate ruling below, the pass's remaining work (the sweep's execution, the gcp dedup, the
+reassessment, and the lock) continues on its own merits but does not gate the release. The
+distinction the operator drew: the remaining sweep estate is repository-internal test quality,
+invisible in the shipped artifact, while the release's real gates are artifact-facing (the guide
+grammar above; the changelog repair in issue #589). This also resolves `phasing.md`'s
+test-consolidation soft gate, which the superseded ruling had subsumed: the operator's call is cut.
+Separately, the operator holds a personal edit pass over guide content and website wording before
+the cut; it rides the operator's own hands and needs no gate, since the operator cuts the release.
 
 **Ruling (operator, 2026-08-17, markdown concept shells):** the guide's retained typed model is
 replaced by auto-discovered Markdown concept shells, confirmed through the saga lead's authenticated
