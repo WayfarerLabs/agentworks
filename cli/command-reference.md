@@ -8,11 +8,12 @@ internals that affect operator behavior. Installation and configuration guidance
 
 ### Machine-readable output
 
-The operational inspection commands `agw graph show`, `agw resource list`, `agw resource kinds`,
-`agw secret list`, `agw secret describe`, `agw vm list`, `agw vm describe`, `agw workspace list`,
-`agw workspace describe`, `agw agent list`, `agw agent describe`, `agw session list`,
-`agw session describe`, `agw console list`, `agw console describe`, and `agw doctor` accept
-`--output json`. The default `--output human` preserves the normal terminal presentation.
+The operational inspection commands `agw graph show`, `agw resource list`, `agw resource show`,
+`agw resource kinds`, `agw secret list`, `agw secret describe`, `agw vm list`, `agw vm describe`,
+`agw workspace list`, `agw workspace describe`, `agw agent list`, `agw agent describe`,
+`agw session list`, `agw session describe`, `agw console list`, `agw console describe`, and
+`agw doctor` accept `--output json`. The default `--output human` preserves the normal terminal
+presentation.
 
 Each successful JSON response is one UTF-8 document followed by one line feed, with no BOM, ANSI
 sequences, table layout, progress messages, or empty-state prose. Its top-level keys are always in
@@ -63,6 +64,23 @@ deduplicated, grouped, or sorted.
 preserve the selected kind order, then name order, and counts are post-filter values. Disabled rows
 remain hidden unless `--include-disabled` is requested.
 
+`agw resource show KIND/NAME --output json` uses command `resource.show` and data:
+
+```text
+{resource: {
+  kind, name, category, description, origin, enablement, readiness, declaration
+}}
+```
+
+`category` is `declarable` or `capability`, and `enablement` is `enabled` or `disabled`. `readiness`
+is null for a disabled row. For an enabled row it is `{is_ready, is_available, reason}`, where
+`reason` may be null. A declarable resource's `declaration` is `{apiVersion, kind, metadata, spec}`;
+metadata contains its non-null shared manifest fields, and spec contains every non-null loaded kind
+field, including defaults. Dates, timestamps, enums, nested models, mappings, and collections use
+JSON-native values. A capability's declaration is null. The declaration is normalized registry
+state: it does not preserve comments, source key order, omitted-versus-defaulted distinctions, or an
+effective inheritance merge.
+
 `agw resource kinds --output json` uses command `resource.kinds` and data
 `{kinds: [{kind, category, resource_count, description}]}`. `category` is exactly `declarable` or
 `capability`; kinds sort lexically.
@@ -89,6 +107,7 @@ For example:
 
 ```bash
 agw resource list --kind secret --output json
+agw resource show secret/npm-token --output json
 agw graph show secret/npm-token --output json
 ```
 
@@ -990,7 +1009,8 @@ resource schema and sample surfaces. Rendering never reads a path, runs doctor, 
 or authorizes an agent to do so.
 
 During the unreleased 0.14 transition, `agw graph show`, `agw resource kinds`, `agw resource list`,
-`agw resource explain`, and `agw resource sample` are the available command-owned fact surfaces.
+`agw resource show`, `agw resource explain`, and `agw resource sample` are the available
+command-owned fact surfaces.
 
 | Command                                                   | Description                                   |
 | --------------------------------------------------------- | --------------------------------------------- |
@@ -1052,17 +1072,19 @@ usage, and provenance when present; live instance edges are marked as current co
 
 ### Resource Registry
 
-Inventory, explanation, authoring, and editing for the Resource Registry. The registry is the
-framework that owns every operator-declared, auto-declared, built-in, and system-plugin resource the
-CLI knows about: secrets, VM templates, agent templates, workspace templates, apt / install-command
-entries, git credential providers, secret backends, etc. Apt and user install-command catalog rows
-carry the system-plugin origin and remain present, but disabled, until their owning plugin is
-enabled. For relationships, use `agw graph show`; for kind-specific detail, use the per-kind command
-(for example, `agw secret describe`).
+Inventory, focused inspection, explanation, authoring, and editing for the Resource Registry. The
+registry is the framework that owns every operator-declared, auto-declared, built-in, and
+system-plugin resource the CLI knows about: secrets, VM templates, agent templates, workspace
+templates, apt / install-command entries, git credential providers, secret backends, etc. Apt and
+user install-command catalog rows carry the system-plugin origin and remain present, but disabled,
+until their owning plugin is enabled. Use `agw resource show` for one loaded row, `agw graph show`
+for relationships, `agw resource explain` for accepted fields, `agw doctor` for diagnosis, and the
+per-kind command for domain-specific synthesis (for example, `agw secret describe`).
 
 | Command                              | Description                                                          |
 | ------------------------------------ | -------------------------------------------------------------------- |
 | `agw resource list`                  | List every resource in the registry across all kinds                 |
+| `agw resource show KIND/NAME`        | Show one loaded row and its normalized declaration                   |
 | `agw resource kinds`                 | List every kind: category (declarable/capability), counts, purpose   |
 | `agw resource explain TARGET`        | Show what a KIND (or a KIND/NAME capability) accepts, field by field |
 | `agw resource edit KIND/NAME`        | Open the declaring YAML manifest in $EDITOR                          |
@@ -1074,7 +1096,8 @@ where variant is `operator`, `auto`, `builtin`, or `plugin`. Disabled rows (a no
 plugin's capabilities and bundled resources) are hidden by default; pass `--include-disabled` to
 reveal them (combine with `--origin plugin` to see just a not-enabled plugin's rows). `--names-only`
 emits `kind/name` per line and backs shell completion (`/` cannot appear in resource names, so the
-split is unambiguous). `resource edit` and `graph show` accept the same `kind/name` identity shape.
+split is unambiguous). `resource show`, `resource edit`, and `graph show` accept the same
+`kind/name` identity shape.
 
 `resource schema` emits JSON Schema (draft 2020-12) for manifests: one document schema per kind plus
 an any-kind one, derived from the same models the loader validates against, so it cannot describe a

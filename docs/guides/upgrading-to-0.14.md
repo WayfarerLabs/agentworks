@@ -41,10 +41,12 @@ Refresh them after upgrading:
 agw completion install
 ```
 
-The generic `agw resource describe KIND/NAME` command is removed. Use `agw graph show KIND/NAME` for
-declared and live relationships, `agw resource list` for inventory and origin, `agw doctor` for
-readiness, `agw resource edit` for an operator manifest location, and the resource's owning command
-for kind-specific details.
+The generic `agw resource describe KIND/NAME` command is removed. Use `agw resource show KIND/NAME`
+for one loaded row and its normalized declaration, `agw graph show KIND/NAME` for declared and live
+relationships, `agw resource explain TARGET` for accepted authoring fields, `agw doctor` for
+diagnosis, `agw resource edit KIND/NAME` for the operator manifest location, and the resource's
+owning command for kind-specific synthesis such as `agw secret describe NAME`. There is no
+`resource describe` compatibility alias.
 
 ## TOML resource sections: removed
 

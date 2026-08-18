@@ -5,6 +5,7 @@
 - Requirements: `frd.md`
 - Architecture: `hla.md`
 - Code basis: `origin/main` at `217930fd`
+- Implementation base: `8464b064`
 - Delivery vehicle: one branch and PR, `feat/resource-show`
 
 ## Delivery posture
@@ -21,16 +22,16 @@ merge intent are all present.
 
 ## Phase 1: contract and safe projection
 
-- [ ] Add the closed resource-show and readiness records in a focused resource module.
-- [ ] Implement shared identity resolution, category lookup, row description, stored enablement,
+- [x] Add the closed resource-show and readiness records in a focused resource module.
+- [x] Implement shared identity resolution, category lookup, row description, stored enablement,
       stored readiness, and safe origin carry-through.
-- [ ] Implement the normalized declaration projector from `DeclaredResource`, `METADATA_FIELDS`,
+- [x] Implement the normalized declaration projector from `DeclaredResource`, `METADATA_FIELDS`,
       Pydantic JSON mode, and the canonical manifest API version.
-- [ ] Prove outer, metadata, and spec ordering; defaults; null omission; nested JSON conversion;
+- [x] Prove outer, metadata, and spec ordering; defaults; null omission; nested JSON conversion;
       framework-field exclusion; capability null declaration; and category/row invariants.
-- [ ] Prove representative secret declarations contain only lookup configuration and never resolved
+- [x] Prove representative secret declarations contain only lookup configuration and never resolved
       values.
-- [ ] Prove disabled rows project null readiness while enabled ready, not-ready, and unavailable
+- [x] Prove disabled rows project null readiness while enabled ready, not-ready, and unavailable
       verdicts retain their structural facts.
 
 Definition of done: the presentation-free service returns one complete JSON-native fact record and
@@ -38,16 +39,16 @@ has no database, relationship, provider-operation, or secret-resolution dependen
 
 ## Phase 2: projections and CLI wiring
 
-- [ ] Add the `resource.show` JSON v1 command identifier and exact data projector.
-- [ ] Add the terminal-safe human renderer, including deterministic normalized manifest YAML for
+- [x] Add the `resource.show` JSON v1 command identifier and exact data projector.
+- [x] Add the terminal-safe human renderer, including deterministic normalized manifest YAML for
       declarable resources and a legible null declaration for capabilities.
-- [ ] Register `resource show REF --output human|json` in the existing resource group with lazy
+- [x] Register `resource show REF --output human|json` in the existing resource group with lazy
       imports and no `get_db` path.
-- [ ] Add `resource.show/ref -> resource_refs` to the completion specification and verify all three
+- [x] Add `resource.show/ref -> resource_refs` to the completion specification and verify all three
       shell generators.
-- [ ] Add service, renderer, CLI, machine-output, completion, help, malformed/unknown selector, and
+- [x] Add service, renderer, CLI, machine-output, completion, help, malformed/unknown selector, and
       no-partial-output coverage, including silent loader flags, without prose-policing assertions.
-- [ ] Add structural line-injection and terminal-control tests for scalar fact lines and parseable
+- [x] Add structural line-injection and terminal-control tests for scalar fact lines and parseable
       sanitized YAML declaration output.
 
 Definition of done: human and JSON commands project the same service record, completion offers the
@@ -55,24 +56,24 @@ same registry identities as edit and graph, and removed `resource describe` stil
 
 ## Phase 3: collateral-complete cutover
 
-- [ ] Update the machine-output schema and resource command table in `cli/command-reference.md`.
-- [ ] Update `cli/README.md`, `docs/guides/resources.md`, and the 0.14 upgrade map to distinguish
+- [x] Update the machine-output schema and resource command table in `cli/command-reference.md`.
+- [x] Update `cli/README.md`, `docs/guides/resources.md`, and the 0.14 upgrade map to distinguish
       show, explain, graph, doctor, edit, and secret describe.
-- [ ] Sweep active code, help, completions, tests, and permanent documentation for stale ownership
+- [x] Sweep active code, help, completions, tests, and permanent documentation for stale ownership
       claims. Leave historical ADR and locked SDD text intact.
-- [ ] Confirm no guide command or generated topic is added merely to duplicate the CLI command.
+- [x] Confirm no guide command or generated topic is added merely to duplicate the CLI command.
 
 Definition of done: every active operator surface teaches one consistent ownership map and the
 successor does not rewrite historical contracts.
 
 ## Phase 4: verification and delivery
 
-- [ ] Run focused resource-show, manifest, machine-output, completion, graph, explain, edit, and
+- [x] Run focused resource-show, manifest, machine-output, completion, graph, explain, edit, and
       secret-describe tests.
-- [ ] Run `uv run pytest tests/ -m 'not integration'`, `uv run ruff check .`,
+- [x] Run `uv run pytest tests/ -m 'not integration'`, `uv run ruff check .`,
       `uv run ruff format --check .`, and `uv run mypy agentworks/ tests/` from `cli/`.
-- [ ] Run repository file lint, locked-SDD, Rulesync drift, and committed-diff guards.
-- [ ] Exercise real local human and JSON commands for declarable, capability, disabled/not-ready,
+- [x] Run repository file lint, locked-SDD, Rulesync drift, and committed-diff guards.
+- [x] Exercise real local human and JSON commands for declarable, capability, disabled/not-ready,
       malformed, and unknown selectors without live external backends.
 - [ ] Obtain an equal-or-higher-tier project review and a fresh-eyes review of the exact committed
       implementation; fix every clear material finding and rerun affected gates.

@@ -1,0 +1,301 @@
+"""Structural contracts for the focused resource-show service."""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from enum import StrEnum
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal
+
+import pytest
+from pydantic import Field
+
+from agentworks.bootstrap import build_registry
+from agentworks.config import load_config
+from agentworks.declared_resource import METADATA_FIELDS, DeclaredResource
+from agentworks.origin import Origin
+from agentworks.resources import KIND_REGISTRY, Registry
+from agentworks.resources.access import ResourceIdentity
+from agentworks.resources.graph import DisabledMark, Readiness
+from agentworks.resources.show import project_declaration, resource_show_data, show_resource
+from agentworks.schema import AgwModel
+from agentworks.topics import TopicProse
+from agentworks.vms.template import VMTemplate
+from tests.conftest import ManifestDoc, write_cfg
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+    from agentworks.resources.graph import DependencyState, EnablementSource
+    from agentworks.resources.reference import ResourceReference
+
+
+class _Color(StrEnum):
+    BLUE = "blue"
+
+
+class _Nested(AgwModel):
+    observed_at: datetime
+    labels: dict[str, list[int]]
+
+
+class _ProjectionRow(DeclaredResource):
+    inherits: list[str] = Field(default_factory=list)
+    color: _Color = _Color.BLUE
+    nested: _Nested
+    tags: list[str] = Field(default_factory=list)
+    optional: str | None = None
+
+
+class _ReadinessRow(DeclaredResource):
+    verdict: Literal["blocked", "unavailable"]
+
+    def not_ready(self, deps: Mapping[tuple[str, str], DependencyState]) -> Readiness:
+        del deps
+        if self.verdict == "blocked":
+            return Readiness.blocked("host check failed")
+        return Readiness.unavailable("host check omitted")
+
+
+@dataclass(frozen=True)
+class _ReadinessKind:
+    kind: str = "show-test"
+    model: type[DeclaredResource] = _ReadinessRow
+    miss_policy: Literal["auto-declare", "error"] = "error"
+    auto_declare_names: frozenset[str] | None = None
+    category: Literal["declarable", "capability"] = "declarable"
+    description: str = "Test kind"
+    prose: TopicProse = TopicProse(title="Test", overview="Test")
+    builtin_override: Literal["allow", "reserved"] = "allow"
+
+    def synthesize(self, references: Sequence[ResourceReference]) -> Any:
+        del references
+        raise AssertionError("error-policy kinds do not synthesize")
+
+
+def _request_registry(tmp_path: Path) -> Registry:
+    config_path = write_cfg(
+        tmp_path,
+        ManifestDoc(
+            "secret",
+            "npm-token",
+            {"hint": "rotate quarterly", "backend_mappings": {"env-var": "NPM_TOKEN"}},
+            description="npm registry token",
+        ),
+    )
+    return build_registry(load_config(config_path, warn_issues=False), probe_host_readiness=False)
+
+
+def _readiness_registry(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    verdict: Literal["blocked", "unavailable"],
+    disabled: bool = False,
+) -> Registry:
+    kind = _ReadinessKind()
+    monkeypatch.setitem(KIND_REGISTRY, kind.kind, kind)
+    registry = Registry.empty()
+    registry.add(
+        kind.kind,
+        verdict,
+        _ReadinessRow(name=verdict, verdict=verdict),
+        Origin.built_in(source="tests.resources.test_show"),
+    )
+    sources: Sequence[EnablementSource] = ()
+    if disabled:
+        sources = (lambda _resources: {(kind.kind, verdict): DisabledMark(reason="disabled for test", source="test")},)
+    registry.finalize(enablement_sources=sources)
+    return registry
+
+
+def test_declaration_projection_uses_shared_fields_and_pydantic_json_mode() -> None:
+    moment = datetime(2026, 8, 17, 12, 30, tzinfo=UTC)
+    row = _ProjectionRow(
+        name="child",
+        description="projection fixture",
+        expires=moment,
+        inherits=["base"],
+        nested=_Nested(observed_at=moment, labels={"counts": [1, 2]}),
+        origin=Origin.operator_declared(file=Path("resources.yaml"), line=7),
+    )
+
+    declaration = project_declaration("projection-test", row)
+
+    assert list(declaration) == ["apiVersion", "kind", "metadata", "spec"]
+    metadata = declaration["metadata"]
+    spec = declaration["spec"]
+    assert isinstance(metadata, dict)
+    assert isinstance(spec, dict)
+    assert list(metadata) == ["name", "description", "expires"]
+    assert list(spec) == ["inherits", "color", "nested", "tags"]
+    assert metadata["expires"] == "2026-08-17T12:30:00Z"
+    assert spec["color"] == "blue"
+    assert spec["tags"] == []
+    assert spec["nested"] == {
+        "observed_at": "2026-08-17T12:30:00Z",
+        "labels": {"counts": [1, 2]},
+    }
+    assert "optional" not in spec
+    assert not ({"declared_at", "origin"} & set(metadata))
+    assert not ({"declared_at", "origin"} & set(spec))
+    json.dumps(declaration, allow_nan=False)
+
+
+def test_framework_field_split_is_complete() -> None:
+    assert set(DeclaredResource.model_fields) == METADATA_FIELDS | {"declared_at", "origin"}
+
+
+def test_normalized_manifest_reconstructs_the_loaded_row() -> None:
+    row = VMTemplate(
+        name="dev",
+        description="development VM",
+        cpus=4,
+        apt=["zsh"],
+        origin=Origin.operator_declared(file=Path("vm-templates.yaml"), line=3),
+    )
+    declaration = project_declaration("vm-template", row)
+    metadata = declaration["metadata"]
+    spec = declaration["spec"]
+    assert isinstance(metadata, dict)
+    assert isinstance(spec, dict)
+
+    reconstructed = VMTemplate.model_validate(
+        {
+            **metadata,
+            **spec,
+            "origin": row.origin,
+            "declared_at": row.declared_at,
+        }
+    )
+
+    framework = {"declared_at", "origin"}
+    assert reconstructed.model_dump(exclude=framework) == row.model_dump(exclude=framework)
+
+
+def test_service_projects_declarable_and_capability_rows(tmp_path: Path) -> None:
+    registry = _request_registry(tmp_path)
+
+    declarable = show_resource(registry, ResourceIdentity("secret", "npm-token"))
+    capability = show_resource(registry, ResourceIdentity("vm-platform", "lima"))
+
+    assert declarable.category == "declarable"
+    assert declarable.description == "npm registry token"
+    assert declarable.declaration is not None
+    assert declarable.declaration["spec"] == {
+        "hint": "rotate quarterly",
+        "backend_mappings": {"env-var": "NPM_TOKEN"},
+    }
+    assert declarable.readiness is not None
+    assert declarable.readiness.is_ready
+    assert capability.category == "capability"
+    assert capability.declaration is None
+    assert capability.readiness is not None
+    assert not capability.readiness.is_available
+
+
+def test_service_does_not_traverse_resolve_secrets_or_run_provider_operations(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.resources.graph import DependencyGraph
+    from agentworks.secrets import orchestration, resolve
+
+    registry = _request_registry(tmp_path)
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("resource show crossed an operation boundary")
+
+    monkeypatch.setattr(DependencyGraph, "edges_of", forbidden)
+    monkeypatch.setattr(DependencyGraph, "incoming_edges_of", forbidden)
+    monkeypatch.setattr(DependencyGraph, "dependents_of", forbidden)
+    monkeypatch.setattr(resolve, "resolve_batch", forbidden)
+    monkeypatch.setattr(orchestration, "resolve_for_command", forbidden)
+    monkeypatch.setattr(LimaPlatform, "create", forbidden)
+
+    assert show_resource(registry, ResourceIdentity("secret", "npm-token")).declaration is not None
+    assert show_resource(registry, ResourceIdentity("vm-platform", "lima")).declaration is None
+
+
+@pytest.mark.parametrize(
+    ("verdict", "is_ready", "is_available"),
+    [("blocked", False, True), ("unavailable", False, False)],
+)
+def test_enabled_rows_retain_stored_readiness_facts(
+    monkeypatch: pytest.MonkeyPatch,
+    verdict: Literal["blocked", "unavailable"],
+    is_ready: bool,
+    is_available: bool,
+) -> None:
+    registry = _readiness_registry(monkeypatch, verdict=verdict)
+
+    shown = show_resource(registry, ResourceIdentity("show-test", verdict))
+
+    assert shown.readiness is not None
+    assert shown.readiness.is_ready is is_ready
+    assert shown.readiness.is_available is is_available
+    assert shown.readiness.reason is not None
+
+
+def test_disabled_row_projects_null_readiness(monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = _readiness_registry(monkeypatch, verdict="blocked", disabled=True)
+
+    shown = show_resource(registry, ResourceIdentity("show-test", "blocked"))
+    data = resource_show_data(shown)["resource"]
+
+    assert shown.enablement.value == "disabled"
+    assert shown.readiness is None
+    assert isinstance(data, dict)
+    assert data["readiness"] is None
+
+
+def test_every_registered_declarable_row_projects_to_closed_json(tmp_path: Path) -> None:
+    registry = _request_registry(tmp_path)
+    projected_kinds: set[str] = set()
+    kinds_with_rows: set[str] = set()
+
+    for kind, handler in KIND_REGISTRY.items():
+        if handler.category != "declarable":
+            continue
+        rows = tuple(registry.iter_kind_items(kind))
+        if not rows:
+            continue
+        kinds_with_rows.add(kind)
+        projected_kinds.add(kind)
+        for name, _row in rows:
+            shown = show_resource(registry, ResourceIdentity(kind, name))
+            assert shown.declaration is not None
+            json.dumps(resource_show_data(shown), allow_nan=False)
+
+    assert projected_kinds == kinds_with_rows
+
+
+def test_secret_declaration_contains_lookup_configuration_not_values(tmp_path: Path) -> None:
+    registry = _request_registry(tmp_path)
+
+    shown = show_resource(registry, ResourceIdentity("secret", "npm-token"))
+
+    assert shown.declaration is not None
+    spec = shown.declaration["spec"]
+    assert isinstance(spec, dict)
+    assert set(spec) == {"hint", "backend_mappings"}
+    assert spec["backend_mappings"] == {"env-var": "NPM_TOKEN"}
+
+
+def test_category_row_mismatch_fails_instead_of_projecting_partial_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = _readiness_registry(monkeypatch, verdict="blocked")
+    original = KIND_REGISTRY["show-test"]
+    monkeypatch.setitem(
+        KIND_REGISTRY,
+        "show-test",
+        _ReadinessKind(category="capability"),
+    )
+
+    with pytest.raises(AssertionError):
+        show_resource(registry, ResourceIdentity("show-test", "blocked"))
+
+    assert original.category == "declarable"

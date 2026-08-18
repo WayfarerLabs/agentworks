@@ -71,6 +71,7 @@ def test_output_formats_are_closed_to_human_and_json() -> None:
 def test_machine_output_commands_are_the_complete_v1_contract() -> None:
     assert [command.value for command in MachineOutputCommand] == [
         "resource.list",
+        "resource.show",
         "resource.kinds",
         "graph.show",
         "vm.list",

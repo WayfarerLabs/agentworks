@@ -21,6 +21,7 @@ registry, is identified by `kind` + `name`, and can be inspected uniformly:
 ```bash
 agw resource list                       # everything, all kinds and origins
 agw resource list --kind secret         # one kind
+agw resource show vm-template/dev       # one loaded row and normalized declaration
 agw graph show vm-template/dev          # declared and live relationships
 agw resource kinds                      # every kind: category, counts, purpose
 ```
@@ -31,6 +32,14 @@ secret backends), **auto-declared** (the framework filled in a referenced-but-un
 e.g. the `tailscale-auth-key` secret or `git-token-<name>` secrets), and **system-plugin**
 (contributed by an installed system plugin, regardless of whether its rows are enabled; see "System
 plugins" below). Filter by origin with `agw resource list --origin operator|auto|builtin|plugin`.
+
+`agw resource show KIND/NAME` is the focused view of one concrete registry row. For a declarable
+resource it includes a normalized manifest with loaded defaults and JSON-native values. The result
+does not preserve source comments, source key order, omitted-versus-defaulted distinctions, or merge
+inheritance. Capability resources have no declaration, so their declaration is null. Use
+`resource explain` for accepted fields, `graph show` for relationships, `doctor` for diagnosis,
+`resource edit` for the declaring file, and `secret describe` for secret-specific mapping and
+resolution preview.
 
 ## Declaring resources: YAML manifests
 
@@ -707,6 +716,7 @@ prompt, biometric check, or backend authentication. That opt-in is incompatible 
 
 ```bash
 agw resource list --origin operator     # what you have declared, either source
+agw resource show secret/npm-token      # the loaded row and normalized declaration
 agw graph show secret/npm-token         # where it's referenced, what uses it
 agw doctor                              # offline secret attempt/readiness preview
 ```
@@ -714,10 +724,10 @@ agw doctor                              # offline secret attempt/readiness previ
 ### JSON for automation
 
 The read-only graph, resource, secret, and health commands also support `--output json`:
-`graph show`, `resource list`, `resource kinds`, `secret list`, `secret describe`, and `doctor`.
-Each successful response is one JSON document with `schema_version`, `command`, and `data` fields.
-The backend lists and reference arrays retain their operational precedence and graph order, and the
-secret views report only lookup prediction and metadata, never a secret value.
+`graph show`, `resource list`, `resource show`, `resource kinds`, `secret list`, `secret describe`,
+and `doctor`. Each successful response is one JSON document with `schema_version`, `command`, and
+`data` fields. The backend lists and reference arrays retain their operational precedence and graph
+order, and the secret views report only lookup prediction and metadata, never a secret value.
 
 `--output human` is the default and keeps the terminal-oriented rendering. `--names-only` remains
 reserved for shell completion, so it cannot be combined with JSON output. `agw doctor --output json`

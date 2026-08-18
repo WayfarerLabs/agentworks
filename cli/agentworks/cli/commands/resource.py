@@ -1,4 +1,4 @@
-"""``agentworks resource`` inventory, explanation, authoring, and editing."""
+"""``agentworks resource`` inventory, inspection, explanation, authoring, and editing."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 resource_app = typer.Typer(
     name="resource",
-    help="Inventory, explain, author, and edit Resource Registry entries.",
+    help="Inventory, inspect, explain, author, and edit Resource Registry entries.",
     no_args_is_help=True,
 )
 app.add_typer(resource_app)
@@ -148,6 +148,51 @@ def resource_list(
         )
         return
     render_resource_table(listing)
+
+
+@resource_app.command("show")
+def resource_show(
+    ref: Annotated[
+        str,
+        typer.Argument(
+            help="Resource as KIND/NAME (e.g. secret/npm-token, vm-template/dev).",
+        ),
+    ],
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option(
+            "--output",
+            help="Output format: human or json. Default: human.",
+        ),
+    ] = OutputFormat.HUMAN,
+) -> None:
+    """Show the loaded facts and normalized declaration for one resource."""
+    from agentworks.bootstrap import load_request_registry
+    from agentworks.config import load_config
+    from agentworks.resources.access import parse_resource_identity
+    from agentworks.resources.show import (
+        render_resource_show,
+        resource_show_data,
+        show_resource,
+    )
+
+    identity = parse_resource_identity(ref)
+    config = load_config(warn_issues=False)
+    registry = load_request_registry(config, warn=False)
+    shown = show_resource(registry, identity)
+
+    if output_format is OutputFormat.JSON:
+        from click import get_binary_stream
+
+        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+
+        write_json_envelope(
+            MachineOutputCommand.RESOURCE_SHOW,
+            resource_show_data(shown),
+            get_binary_stream("stdout"),
+        )
+        return
+    render_resource_show(shown)
 
 
 @resource_app.command("kinds")

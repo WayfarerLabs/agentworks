@@ -39,6 +39,7 @@ class MachineOutputCommand(StrEnum):
     """The closed set of command identifiers in the JSON v1 contract."""
 
     RESOURCE_LIST = "resource.list"
+    RESOURCE_SHOW = "resource.show"
     RESOURCE_KINDS = "resource.kinds"
     GRAPH_SHOW = "graph.show"
     VM_LIST = "vm.list"
