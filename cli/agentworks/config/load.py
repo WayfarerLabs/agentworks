@@ -56,6 +56,7 @@ def load_config(
     warn_issues: bool = True,
     warn_deprecations: bool = True,
     raise_errors: bool = False,
+    require_ssh_keys: bool = True,
 ) -> Config:
     """Load and validate the agentworks configuration.
 
@@ -67,6 +68,14 @@ def load_config(
             silenceable per-invocation via --no-deprecations).
         raise_errors: Raise typed errors for early file failures instead of
             using the legacy stderr and ``SystemExit`` path.
+        require_ssh_keys: Fail the load when the operator's SSH key files
+            (``operator.ssh_public_key``, ``ssh_private_key``,
+            ``extra_ssh_public_keys``) do not exist on disk (default:
+            True). Set to False for callers that inspect installed
+            vocabulary rather than reach a VM: existence becomes a soft
+            entry in ``config.config_issues`` instead of a ``ConfigError``.
+            Never lower this for a command that uses the operator's
+            identity to connect to or provision anything.
 
     Returns:
         Validated Config object.
@@ -138,7 +147,7 @@ def load_config(
     enabled_system_plugins = _load_plugins(data, issues, decls)
 
     config = Config(
-        operator=_load_operator(data, issues),
+        operator=_load_operator(data, issues, require_ssh_keys=require_ssh_keys),
         paths=_load_paths(data),
         defaults=_load_defaults(data),
         source_path=config_path,

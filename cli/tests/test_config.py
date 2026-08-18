@@ -397,6 +397,44 @@ def test_extra_ssh_public_keys_missing_file(tmp_path: Path) -> None:
         load_config(config_file)
 
 
+def test_require_ssh_keys_false_softens_missing_keys_to_issues(tmp_path: Path) -> None:
+    """``require_ssh_keys=False`` (the flag `resource kinds` / `resource
+    list` pass) turns a missing primary or extra key file into a
+    ``config_issues`` entry instead of aborting the load, while every
+    other operator field still loads normally."""
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{(tmp_path / "id.pub").as_posix()}"
+        ssh_private_key = "{(tmp_path / "id").as_posix()}"
+        extra_ssh_public_keys = ["{(tmp_path / "extra.pub").as_posix()}"]
+    """)
+    )
+    cfg = load_config(config_file, warn_issues=False, require_ssh_keys=False)
+    assert any("ssh_public_key does not exist" in issue for issue in cfg.config_issues)
+    assert any("ssh_private_key does not exist" in issue for issue in cfg.config_issues)
+    assert any("extra_ssh_public_keys" in issue and "does not exist" in issue for issue in cfg.config_issues)
+    assert cfg.operator.ssh_public_key == (tmp_path / "id.pub")
+    assert cfg.operator.ssh_private_key == (tmp_path / "id")
+
+
+def test_require_ssh_keys_true_still_raises_by_default(tmp_path: Path) -> None:
+    """The default stays strict: a caller that does not pass
+    ``require_ssh_keys=False`` gets today's hard failure, exactly as
+    every mutation/provisioning command relies on."""
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{(tmp_path / "id.pub").as_posix()}"
+        ssh_private_key = "{(tmp_path / "id").as_posix()}"
+    """)
+    )
+    with pytest.raises(ConfigError, match="ssh_public_key does not exist"):
+        load_config(config_file)
+
+
 def test_extra_ssh_public_keys_defaults_empty(config_dir: Path) -> None:
     cfg = load_config(config_dir)
     assert cfg.operator.extra_ssh_public_keys == []

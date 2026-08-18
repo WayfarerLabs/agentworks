@@ -44,11 +44,13 @@ def _write_base(
 ) -> None:
     """Write a settings-only config.toml plus its resources/ manifests.
     ``settings`` carries settings-only TOML ([secret_config]); resources
-    go in ``manifests``."""
+    go in ``manifests``.
+
+    The operator key paths deliberately point at files that do not
+    exist: listing resources needs no operator identity, and ``_load``
+    below loads with ``require_ssh_keys=False`` to match."""
     pub = config_path.parent / "id.pub"
     priv = config_path.parent / "id"
-    pub.write_text("ssh-ed25519 AAAA...")
-    priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
     config_path.write_text(
         dedent(f"""\
         [operator]
@@ -62,7 +64,7 @@ def _write_base(
 
 
 def _load(cfg_file: Path):
-    cfg = load_config(cfg_file, warn_issues=False)
+    cfg = load_config(cfg_file, warn_issues=False, require_ssh_keys=False)
     return build_registry(cfg)
 
 
@@ -263,7 +265,7 @@ def test_names_only_candidate_order_matches_a_healthy_database(tmp_path: Path) -
 
     cfg_file = tmp_path / "config.toml"
     _write_base(cfg_file, manifests=[_VM_DEFAULT])
-    registry = build_registry(load_config(cfg_file))
+    registry = build_registry(load_config(cfg_file, require_ssh_keys=False))
     database = Database(tmp_path / "agentworks.db")
     try:
         with_database = list_resources(registry, database)

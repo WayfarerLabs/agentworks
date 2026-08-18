@@ -17,9 +17,11 @@ from agentworks.resources import KIND_REGISTRY
 
 
 def _write_base(cfg_path: Path) -> None:
+    # `resource kinds` lists installed vocabulary, not operator identity,
+    # so the key paths below are deliberately left pointing at files that
+    # do not exist: the command must not need them (see
+    # `load_config(require_ssh_keys=False)` at its call site).
     tmp = cfg_path.parent
-    (tmp / "id.pub").write_text("ssh-ed25519 AAAA...")
-    (tmp / "id").write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
     cfg_path.write_text(
         dedent(f"""\
         [operator]
@@ -63,6 +65,25 @@ def test_names_only_needs_no_config(tmp_path: Path, monkeypatch) -> None:
     assert "harness-integration" in lines
     assert "secret-source" in lines
     assert "harness" not in lines
+
+
+def test_missing_ssh_keys_do_not_block_kind_listing(tmp_path: Path, monkeypatch) -> None:
+    """A config whose only defect is a nonexistent operator SSH key path
+    (the sample config's placeholder, before ``agw config init`` writes a
+    real one) must not stop `resource kinds` from listing the installed
+    vocabulary: it needs no operator identity."""
+    from typer.testing import CliRunner
+
+    from agentworks.cli import app
+
+    cfg = tmp_path / "config.toml"
+    _write_base(cfg)
+    assert not (tmp_path / "id.pub").exists()
+    assert not (tmp_path / "id").exists()
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+
+    result = CliRunner().invoke(app, ["resource", "kinds"])
+    assert result.exit_code == 0, result.output
 
 
 def test_table_shows_categories_and_counts(tmp_path: Path, monkeypatch) -> None:

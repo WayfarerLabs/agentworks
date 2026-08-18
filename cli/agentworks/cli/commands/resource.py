@@ -103,7 +103,11 @@ def resource_list(
     if kind is not None:
         kinds = tuple(k.strip() for k in kind.split(",") if k.strip())
 
-    config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
+    # Listing the installed vocabulary needs no operator identity, so a
+    # placeholder or missing SSH key (the sample config's default, before
+    # `agw config init` writes a real one) doesn't block it; see
+    # `load_config`'s `require_ssh_keys` doc.
+    config = load_config(warn_issues=output_format is OutputFormat.HUMAN, require_ssh_keys=False)
     registry = load_request_registry(config, warn=output_format is OutputFormat.HUMAN)
     db = None if names_only else get_db()
     # ``list_resources`` validates ``origin_filter`` (typed
@@ -240,7 +244,9 @@ def resource_kinds(
     from agentworks.config import load_config
     from agentworks.resources.inspect import list_kinds, render_kind_table, resource_kinds_data
 
-    config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
+    # Same rationale as `resource list`: kind listing needs no operator
+    # identity, so a placeholder or missing SSH key doesn't block it.
+    config = load_config(warn_issues=output_format is OutputFormat.HUMAN, require_ssh_keys=False)
     registry = load_request_registry(config, warn=output_format is OutputFormat.HUMAN)
     rows = list_kinds(registry)
     if output_format is OutputFormat.JSON:
