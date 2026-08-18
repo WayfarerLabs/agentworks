@@ -1,6 +1,6 @@
 # Resource Show: High-Level Architecture
 
-- Status: Reopened for final review cleanup
+- Status: Complete
 - Date: 2026-08-17
 - Implements: `frd.md`
 - Code basis: `origin/main` at `217930fd`

@@ -1,6 +1,6 @@
 # Resource Show: Functional Requirements
 
-- Status: Reopened for final review cleanup
+- Status: Complete
 - Date: 2026-08-17
 - Parent saga: `docs/sdd/2026-08-04-next-steps/`
 - Successor to: `docs/sdd/2026-08-10-cli-grammar/`
