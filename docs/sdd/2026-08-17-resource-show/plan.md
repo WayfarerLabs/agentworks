@@ -1,26 +1,30 @@
 # Resource Show: Implementation Plan
 
-- Status: Complete; draft pending operator merge intent
-- Date: 2026-08-17
+- Status: Reopened after operator scope correction
+- Date: 2026-08-18
 - Requirements: `frd.md`
 - Architecture: `hla.md`
 - Code basis: `origin/main` at `217930fd`
-- Implementation base: `8464b064`
-- Delivery vehicle: one branch and PR, `feat/resource-show`
+- Delivery vehicle: one branch and draft PR, `feat/resource-show` / #597
 
 ## Delivery posture
 
-This successor is one compact PR because the service, CLI registration, machine contract,
-completion, tests, and teaching collateral are one atomic user-visible command. The branch starts at
-the exact remote main tip requested by the operator. The locked predecessor SDD remains historical;
-this directory records the explicit successor ruling.
+The first implementation checkpoint proved the command, normalized declaration, machine contract,
+completion, and terminal-safety foundations. Public review then exposed an incorrect product
+premise: the artifacts treated overlap with list, graph, and doctor as a defect. The operator ruled
+that a focused show should be a superset of the bulk views. The SDD was reopened, its premature lock
+removed, and the same draft PR remains the delivery vehicle.
 
-The PR begins as draft while implementation and review are active. It receives `saga:next-steps` so
-the active saga can incorporate the successor direction without editing saga-owned artifacts here.
-It becomes ready only after the full implementation, private review, live acceptance, and operator
-merge intent are all present.
+The predecessor SDD remains historical and unchanged. This successor records the later ruling. The
+PR stays draft until the revised implementation, review, verification, and explicit merge intent are
+complete.
 
-## Phase 1: contract and safe projection
+## Superseded first checkpoint (historical record)
+
+The following completed work remains truthful. The operator's focused-superset ruling supersedes
+only its no-overlap boundary and requires the new phases below.
+
+### Original Phase 1: contract and safe projection
 
 - [x] Add the closed resource-show and readiness records in a focused resource module.
 - [x] Implement shared identity resolution, category lookup, row description, stored enablement,
@@ -34,10 +38,7 @@ merge intent are all present.
 - [x] Prove disabled rows project null readiness while enabled ready, not-ready, and unavailable
       verdicts retain their structural facts.
 
-Definition of done: the presentation-free service returns one complete JSON-native fact record and
-has no database, relationship, provider-operation, or secret-resolution dependency.
-
-## Phase 2: projections and CLI wiring
+### Original Phase 2: projections and CLI wiring
 
 - [x] Add the `resource.show` JSON v1 command identifier and exact data projector.
 - [x] Add the terminal-safe human renderer, including deterministic normalized manifest YAML for
@@ -51,10 +52,7 @@ has no database, relationship, provider-operation, or secret-resolution dependen
 - [x] Add structural line-injection and terminal-control tests for scalar fact lines and parseable
       sanitized YAML declaration output.
 
-Definition of done: human and JSON commands project the same service record, completion offers the
-same registry identities as edit and graph, and removed `resource describe` still does not dispatch.
-
-## Phase 3: collateral-complete cutover
+### Original Phase 3: collateral-complete cutover
 
 - [x] Update the machine-output schema and resource command table in `cli/command-reference.md`.
 - [x] Update `cli/README.md`, `docs/guides/resources.md`, and the 0.14 upgrade map to distinguish
@@ -63,10 +61,7 @@ same registry identities as edit and graph, and removed `resource describe` stil
       claims. Leave historical ADR and locked SDD text intact.
 - [x] Confirm no guide command or generated topic is added merely to duplicate the CLI command.
 
-Definition of done: every active operator surface teaches one consistent ownership map and the
-successor does not rewrite historical contracts.
-
-## Phase 4: verification and delivery
+### Original Phase 4: verification and delivery
 
 - [x] Run focused resource-show, manifest, machine-output, completion, graph, explain, edit, and
       secret-describe tests.
@@ -81,38 +76,91 @@ successor does not rewrite historical contracts.
       trailer, push, and update the draft PR. Move it to ready only under the process merge-intent
       rule.
 
-### Closeout evidence
+## Phase 1: shared focused facts
 
-- Exact reviewed implementation head: `6f0bd59e` on base `217930fd`, with the reviewed design
-  checkpoint at `8464b064`.
-- Full exact-head non-integration suite: 7,205 passed in 50.60 seconds.
-- Exact-head Ruff check, Ruff format across 693 files, and strict mypy across 692 source files
-  passed.
-- Repository Prettier, markdownlint across 337 files, cspell across 314 files, locked-SDD, Rulesync
-  drift, and diff checks passed.
-- The focused integrated command, service, renderer, machine-output, and completion suite passed 121
-  tests. Both independent review lanes reran the 39-test review-fix focus and reported no remaining
-  Critical or Important findings.
-- Local real-CLI acceptance covered declarable not-ready JSON, capability human output, disabled
-  declarable JSON, malformed selectors, and unknown selectors without a database or external
-  backend. The final review fix touched only Unicode rendering, its structural tests, and contract
-  prose; its exact focused and static gates passed afterward.
-- Draft PR #597 received a clean public saga-lead artifact checkpoint. It remains draft pending the
-  operator's merge-intent signal.
+- [ ] Extract a one-row `ResourceSummary` builder and make `resource list` consume it without public
+      output change.
+- [ ] Add direct declared dependency/dependent projection beside graph traversal, reusing canonical
+      graph identity, edge construction, and ordering.
+- [ ] Add lazy read-only focused live usage with the same optional kind hook and absent-database
+      semantics as graph/list inspection.
+- [ ] Prove list/show row parity, count/detail reconciliation, direct-only edges, ordering,
+      duplicates, inherited declarer provenance, supported/unsupported live use, and database
+      lifecycle.
+
+Definition of done: one selected resource can be projected with every list fact plus direct
+relationship and live-use detail, while list and graph retain their public behavior.
+
+## Phase 2: reusable doctor checks
+
+- [ ] Extract structured per-row health-check builders from the VM-platform, VM-site,
+      secret-backend, secret-source, secret, and applicable admin-template doctor paths.
+- [ ] Add `checks_for_resource` without running or filtering the complete doctor report.
+- [ ] Make bulk doctor groups consume the same builders and preserve existing group order,
+      empty/degraded behavior, counts, status, message, and hint output.
+- [ ] Prove focused/bulk check parity and exclusion of global/cross-row checks.
+- [ ] Prove no prompt, secret resolution, authenticated runup, remote provider mutation, or
+      unrelated system sweep occurs.
+
+Definition of done: every health fact doctor attributes to the selected row is available to show
+from the same structured producer.
+
+## Phase 3: complete show composition and projections
+
+- [ ] Expand `ResourceShow` and JSON v1 with exact list-row fields, structural state axes, direct
+      relationships, live usage, diagnostics, and normalized declaration.
+- [ ] Update the human renderer with safe condition, diagnostics, relationship, live-use, and
+      declaration sections.
+- [ ] Change the CLI to ordinary human loader warnings, clean JSON warnings, the read-only live
+      source, focused diagnostics, and completed-record rendering.
+- [ ] Preserve the existing parser/resolver, `resource.show` identifier, completion source,
+      declarable/capability projection, disabled/readiness truth, and Unicode/terminal safety.
+- [ ] Extend structural service, renderer, machine-output, CLI, help, completion, typed-error, and
+      no-prose-policing coverage.
+
+Definition of done: human and JSON project the same complete focused superset and all compact facts
+reconcile with their detailed sections.
+
+## Phase 4: collateral and review
+
+- [ ] Update command reference, CLI overview, installed management guide, resource guide, and 0.14
+      upgrade map from “ownership without overlap” to the focused-superset model.
+- [ ] Sweep active code, help, tests, and docs for stale no-database/no-graph/no-diagnostic claims.
+- [ ] Run the artifact checkpoint review against the revised FRD/HLA before implementation is
+      declared final.
+- [ ] Run equal-or-higher-tier project review and independent fresh-eyes review on the exact revised
+      implementation; fix every clear material finding and rerun affected gates.
+
+Definition of done: active teaching matches the operator ruling and independent review finds no
+remaining Critical or Important issue.
+
+## Phase 5: verification and delivery
+
+- [ ] Run focused summary, graph, doctor, show, manifest, machine-output, completion, explain, edit,
+      and secret-describe tests.
+- [ ] Run `uv run pytest tests/ -m 'not integration'`, `uv run ruff check .`,
+      `uv run ruff format --check .`, and `uv run mypy agentworks/ tests/` from `cli/`.
+- [ ] Run repository file lint, locked-SDD, Rulesync drift, and committed-diff guards.
+- [ ] Exercise real local human and JSON output for declarable, capability, disabled/not-ready,
+      relationship/live-use, diagnostics, malformed, and unknown cases without an external backend.
+- [ ] Record exact evidence, restore `locked.md` only after the revised artifacts and implementation
+      are final, commit with the required session trailer, push, and update the draft PR.
+
+Definition of done: the exact reviewed head is green, collateral-complete, and remains draft until
+the operator supplies merge intent.
 
 ## Coordination and escalation
 
-- The active saga owns any update to its target-state ruling. This PR supplies the operator-approved
-  successor artifact and uses the saga label for visibility rather than editing saga-owned files.
-- The separate guide-command deletion effort owns redundant guide removal. This effort adds no guide
-  route and does not restore a deleted one.
-- Stop for operator direction if implementation requires source-exact manifest retention, capability
-  facet projection, inheritance resolution, a database read, a provider call, secret resolution, or
-  any restoration of the old card's relational fields.
+- The active saga owns changes to its target-state artifacts. This PR carries `saga:next-steps` for
+  visibility and does not edit saga-owned files.
+- The separate guide-command deletion effort owns redundant guide removal. This effort updates the
+  existing installed management topic but adds no guide route.
+- Stop for operator direction if focused parity requires authenticated runup, secret values, remote
+  provider calls, mutation, transitive graph semantics, source-exact manifest retention, capability
+  facets, or a compatibility alias.
 
 ## Research disposition
 
-External prior-art research is skipped. This is a narrow successor inside an already reviewed local
-grammar, and the deciding inputs are the repository's locked CLI grammar, current manifest model,
-machine-output contract, and direct operator ruling. External command examples would not settle the
-project-specific declaration, capability, or ownership boundaries.
+External prior-art research remains unnecessary. The deciding product input is the operator's
+focused-superset ruling; the implementation authorities are the repository's current list, graph,
+doctor, manifest, machine-output, and CLI conventions.

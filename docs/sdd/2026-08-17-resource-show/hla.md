@@ -1,194 +1,287 @@
 # Resource Show: High-Level Architecture
 
-- Status: Approved by the operator for implementation
+- Status: Revised after operator review; implementation in progress
 - Date: 2026-08-17
 - Implements: `frd.md`
 - Code basis: `origin/main` at `217930fd`
 
 ## Summary
 
-`resource show` is one registry-backed read path with two projections. The CLI parses the shared
-resource identity, loads one finalized request registry, asks a presentation-free service for a
-closed `ResourceShow` fact record, and selects the human or JSON renderer. Neither renderer reaches
-back into config, registry, graph, a capability implementation, or the database.
+`resource show` composes the existing bulk facts into one focused record. The CLI parses a shared
+resource identity, loads one ordinary finalized request registry, and calls one bounded show
+service. That service composes the selected row's list-compatible summary, direct graph/live-usage
+slice, resource-attributable doctor checks, and normalized declaration, then returns a closed result
+for human or JSON projection.
 
-The architectural distinction from the deleted card is structural. The service has no relationship
-or live-instance inputs, and its record has no place to carry those facts. Its only richer field is
-the normalized declaration available when the selected row implements the common `DeclaredResource`
-contract.
+The architectural distinction from the deleted generic card is no longer “contains no overlapping
+facts.” It is a precise composition boundary. The old card was an ad hoc presentation service. The
+new `show` is the complete focused projection of existing authorities: list summary, graph edges,
+doctor checks, manifest model, and shared identity/origin services. It performs no unbounded
+traversal and invents no second meaning for a shared fact.
 
 ## Current anchors
 
-- `resources.access.parse_resource_identity` and `resolve_resource` already own selector syntax and
-  typed registry lookup.
-- `DeclaredResource` and `METADATA_FIELDS` already define the declarable row's envelope, spec, and
-  framework field split.
-- `Registry.graph` already stores enablement and readiness verdicts produced during registry
-  finalization.
-- `machine_output.py` already owns the closed JSON v1 command enumeration, origin projection, and
-  atomic JSON writer.
-- `resources.render.format_origin_line` already owns the human origin spelling.
-- The completion specification already exposes the `resource_refs` source used by resource edit and
-  graph show.
+- `resources.access.parse_resource_identity` and `resolve_resource` own selector syntax and typed
+  registry lookup.
+- `resources.inspect.ResourceSummary`, `not_ready_reason_for`, and `used_by_for` own the facts
+  behind each `resource list` row.
+- `DependencyGraph.edges_of` and `incoming_edges_of`, plus graph-query identity/edge ordering, own
+  direct declared relationships.
+- `DatabaseLiveSource` owns a lazy, read-only, snapshot-scoped live-instance projection.
+- `doctor.HealthCheck` and the existing per-row doctor routines own structured status, message, and
+  remediation facts.
+- `DeclaredResource`, `METADATA_FIELDS`, and `EnvelopeMetadata` define a loaded declarable row's
+  normalized envelope.
+- `machine_output.py`, `resources.render`, and terminal sanitization own closed JSON, origin
+  spelling, and safe human output.
 
 ## Architectural decisions
 
-### A1. Add a focused closed service record
+### A1. Extract one shared list-row summary builder
 
-A small module beside resource inspection owns frozen records conceptually equivalent to:
+`resources.inspect` gains a focused summary function conceptually equivalent to:
 
 ```text
-ResourceReadiness(is_ready, is_available, reason)
-ResourceShow(
-    identity,
-    category,
-    description,
-    origin,
-    enablement,
-    readiness | null,
-    declaration,
+summarize_resource(registry, identity, live_usage) -> ResourceSummary
+```
+
+`list_resources` calls that builder for each surviving row. `resource show` calls it once after its
+live-usage slice is available. Kind, name, origin, reference count, used-by count, description,
+not-ready reason, and disabled state therefore have one producer and retain the exact
+`resource.list` meaning.
+
+The summary builder receives the already-projected live-usage result rather than opening a database.
+This keeps inventory iteration and focused lifecycle policy outside the pure row projection. A
+supported kind with no current instances supplies an empty tuple and count zero; an unsupported kind
+supplies null and preserves list's “no instance concept” distinction.
+
+The ordinary request registry is finalized with host readiness probing enabled, exactly as
+`resource list` and `doctor` do. `show` resolves the row before asking the finalized graph for
+state; an absent graph node is an internal invariant failure, not a second readiness fallback.
+
+### A2. Add a direct focused graph slice beside the traversal service
+
+`resources.graph_query` adds a closed direct-slice record:
+
+```text
+FocusedGraphFacts(
+    focus: ResourceIdentity,
+    dependencies: tuple[GraphEdge, ...],
+    dependents: tuple[GraphEdge, ...],
+    used_by: tuple[InstanceRef, ...] | null,
 )
 ```
 
-`show_resource(registry, identity)` performs one shared validated lookup. It reads category from the
-registered kind handler, uniform row facts from the resolved row, and the already-finalized state
-axes from `registry.graph`. The declaration is a closed JSON object or null. The result carries no
-registry, graph, handler, row, implementation class, config, or database object.
+The record carries its focus even when every detailed tuple is empty. The service validates that
+focus, reads `edges_of` and `incoming_edges_of` exactly once, converts declared references through
+the same `GraphEdge` constructor used by `show_graph`, and orders them with the existing canonical
+edge key. It enforces that every dependency starts at the focus, every dependent ends at it, and
+every live instance uses it. It asks `DatabaseLiveSource` for instances only when the selected kind
+implements the existing `instances` hook. The live source stays unopened for an unsupported kind and
+treats an absent database as an empty supported result, matching graph query semantics.
 
-The module also owns the JSON projector and human renderer because all three are one small cohesive
-feature. If the implementation would push the existing broad `resources.inspect` module past a clear
-reading boundary, the focused module is preferred over regrowing the former card service there.
+This is not `show_graph(..., depth=1)` followed by filtering. That traversal intentionally includes
+the induced graph among reached neighbors; a focused resource record must contain only edges that
+touch the selected row. `show_graph` reuses the extracted declared-edge and ordering helpers, so the
+two projections cannot disagree about identity, direction, relationship, usage, or declarer.
 
-### A2. Reconstruct a normalized declaration only from `DeclaredResource`
+### A3. Make resource-attributable doctor checks reusable
 
-For a `declarable` kind, the row must be a `DeclaredResource`. The projector calls
-`model_dump(mode="json", include=declared_field_names, exclude_none=True)` once and partitions the
-result using the shared base models:
+`doctor.py` keeps the complete fleet-wide orchestration and adds a narrow service:
 
-- metadata keys are emitted in `EnvelopeMetadata.model_fields` declaration order;
-- spec keys retain the concrete Pydantic model field order; and
-- the outer envelope is `apiVersion`, `kind`, `metadata`, then `spec`.
+```text
+checks_for_resource(config, registry, identity) -> tuple[HealthCheck, ...]
+```
 
-`declared_field_names` is the concrete model's fields minus the framework-only fields derived from
-`DeclaredResource.model_fields` and `METADATA_FIELDS`. The include set prevents `declared_at` and
-`origin` from entering recursive serialization at all rather than dumping and deleting them later.
+The service dispatches only to the per-row checks doctor already performs. Small fact builders are
+extracted from the existing bulk loops, and both the bulk group and focused service consume the same
+`HealthCheck` objects:
 
-The API version comes from `manifests.envelope.API_VERSION`. The projector includes defaults because
-the command answers what the normalized loaded row contains, not which keys were authored. Nulls are
-omitted because the canonical manifest does not need them to reproduce the normalized row. An empty
-spec remains an empty object.
+- enabled VM platform and secret backend: the stored readiness row; disabled rows have no doctor row
+  and therefore no focused diagnostic;
+- VM site: stored readiness or the existing per-site preflight result and platform summary;
+- secret source: backend, participation, provenance, enablement, and readiness;
+- secret: the existing value-free resolution preview; and
+- `admin-template/default` only: the existing dotfiles-source check when its source is non-empty.
 
-The projector does not use the permissive teaching-oriented YAML value fallback: an unexpected
-non-JSON value is a contract failure, not text to stringify. Pydantic JSON mode is the only
-recursive conversion authority. Framework fields `declared_at` and `origin` are excluded through the
-derived include set and also covered by a completeness test against the shared framework contract.
+Cross-row doctor facts stay in the bulk orchestrator: default-site warnings, VM rows that name a
+missing/not-ready site, plugin roster, config/manifest health, state schema/contents, install tools,
+tailscale, Python, system slug, and completions. `show` already exposes direct dependents and live
+usage, so it does not duplicate consumer warnings as if they were the selected row's own check.
 
-For a `capability` kind, declaration is null without reflecting over the dataclass. A category/row
-contract mismatch raises loudly as an internal invariant failure rather than leaking a partial view.
+The focused service never runs the complete doctor report and never filters rendered names or prose.
+It preserves doctor's existing safety: VM-site preflight is the same read-only local preflight
+doctor already invokes; secret inspection uses `preview_resolution`; no secret resolves, no prompt
+occurs, no authenticated runup runs, and no remote provider mutation is introduced.
 
-### A3. Keep readiness and enablement factual and separate
+### A4. Compose one closed presentation-free record
 
-The CLI uses the ordinary request-registry build, matching `resource list`, so the record reports
-the same finalized host-readiness and plugin-enablement facts operators already see in inventory.
-`show_resource` reads only `enablement_of` and `readiness_of`; it never recomputes either and never
-dispatches a kind hook.
+The focused module keeps `ResourceReadiness` and adds the shared fact records directly:
 
-The record preserves enablement as the existing `enabled` or `disabled` enum value. For an enabled
-row, it preserves readiness's three structural facts: `is_ready`, `is_available`, and optional
-`reason`. For a disabled row, readiness is null. Finalization deliberately skips readiness
-evaluation for disabled nodes and stores a ready placeholder for fold mechanics; projecting that
-placeholder as an observed verdict would be false. Renderers may choose concise labels but may not
-collapse the axes or turn a reason into remediation. `doctor` remains the diagnostic owner.
+```text
+ResourceShow(
+    summary: ResourceSummary,
+    category,
+    enablement,
+    readiness | null,
+    declaration,
+    relationships: FocusedRelationships,
+    used_by: tuple[InstanceRef, ...] | null,
+    diagnostics: tuple[HealthCheck, ...],
+)
+```
 
-### A4. Human and JSON output are projections of the completed record
+`show_resource(config, registry, identity, live_source)` is the complete bounded composition entry
+point. It performs the shared validated lookup, obtains its focused graph/live facts, list summary,
+and attributable doctor checks, asserts all focused facts belong to the same identity, and assembles
+one immutable result. Database lifecycle, diagnostic dispatch, and reconciliation are service-layer
+work rather than CLI orchestration, so a future non-CLI caller cannot accidentally build a partial
+or mismatched card. The returned result retains no registry, database, handler, config, provider, or
+capability implementation object.
 
-JSON v1 adds `MachineOutputCommand.RESOURCE_SHOW`. The data shape is:
+The structural `enablement` and `readiness` fields deliberately coexist with list-compatible
+`disabled` and `not_ready_reason`. The latter are the stable compact inventory projection; the
+former preserve the complete state axes. Tests pin their reconciliation rather than allowing either
+surface to drift.
+
+### A5. Preserve normalized declaration projection
+
+For a declarable kind, the row must implement `DeclaredResource`. The projector calls
+`model_dump(mode="json", include=declared_field_names, exclude_none=True)` and partitions the result
+using the shared base models:
+
+- metadata keys follow `EnvelopeMetadata.model_fields` order;
+- spec keys follow concrete Pydantic field order; and
+- the envelope is `apiVersion`, `kind`, `metadata`, then `spec`.
+
+The include set is the concrete model's fields minus framework-only fields derived from
+`DeclaredResource.model_fields` and `METADATA_FIELDS`. Defaults are included because this is the
+loaded row; nulls are omitted. Pydantic JSON mode is the recursive conversion authority, and the
+closed JSON carrier rejects an unexpected object instead of converting it to text.
+
+For a capability kind, declaration is null without reflecting over implementation code. A category
+and row mismatch is an internal invariant failure. Source comments/order, omitted-versus-defaulted
+syntax, and effective inheritance merging remain outside this projection.
+
+### A6. Project one stable superset in JSON and human forms
+
+The `resource.show` JSON `resource` object begins with the exact list-row keys and adds the richer
+fields:
 
 ```json
 {
   "resource": {
-    "kind": "secret",
-    "name": "npm-token",
-    "category": "declarable",
-    "description": "npm registry token",
+    "kind": "vm-site",
+    "name": "local",
     "origin": {
       "variant": "operator-declared",
-      "file": "/home/operator/.config/agentworks/resources/secrets.yaml",
+      "file": "/home/operator/.config/agentworks/resources/sites.yaml",
       "line": 7,
       "source": null,
       "source_resource": null,
       "plugin": null
     },
+    "reference_count": 0,
+    "used_by_count": 1,
+    "description": "Local development site",
+    "not_ready_reason": null,
+    "disabled": false,
+    "category": "declarable",
     "enablement": "enabled",
     "readiness": {
       "is_ready": true,
       "is_available": true,
       "reason": null
     },
+    "relationships": {
+      "dependencies": [
+        {
+          "edge_type": "declared",
+          "source": { "node_type": "resource", "kind": "vm-site", "name": "local" },
+          "target": { "node_type": "resource", "kind": "vm-platform", "name": "lima" },
+          "relationship": "uses",
+          "usage": "the VM platform",
+          "declared_by": null
+        }
+      ],
+      "dependents": []
+    },
+    "used_by": [{ "kind": "vm", "name": "agent" }],
+    "diagnostics": [
+      {
+        "name": "local",
+        "status": "ok",
+        "message": "platform lima (placement: local)",
+        "hint": null
+      }
+    ],
     "declaration": {
       "apiVersion": "agentworks/v1",
-      "kind": "secret",
-      "metadata": { "name": "npm-token", "description": "npm registry token" },
-      "spec": {}
+      "kind": "vm-site",
+      "metadata": {
+        "name": "local",
+        "description": "Local development site"
+      },
+      "spec": {
+        "platform": {
+          "name": "lima",
+          "placement": { "mode": "local" }
+        }
+      }
     }
   }
 }
 ```
 
-The concrete origin object retains the existing fixed six-field shape. A capability uses the same
-resource object with `declaration: null`.
+Origin, relationship, instance, and health-check projections reuse their existing machine helpers.
+The human renderer emits the same facts as concise sections. Repeated authored relationship display
+lines may be deduplicated for readability, but JSON retains the authoritative edges.
 
-The human renderer emits the uniform facts, then a deterministic block-style YAML declaration for a
-declarable row. Every value interpolated into a fact line passes through a line-safe scalar helper
-that applies `sanitize_terminal_output`, then removes Unicode control, format, surrogate, line
-separator, and paragraph separator categories. Ordinary Unicode remains legible. The declaration
-mapping is encoded with PyYAML's non-Unicode output mode so every non-ASCII scalar code point is an
-ASCII escape, then the complete YAML text passes through `sanitize_terminal_output`. Intentional
-document line feeds remain, no unsafe Unicode control or separator remains literal, and parsing the
-block recovers the original JSON values. Capability output has no YAML block and makes the null
-declaration legible. Rendering starts only after `show_resource` returns; JSON encoding completes
-before the first stdout write.
+Every interpolated fact-line scalar passes through the existing line-safe filtering that removes
+terminal controls, format/surrogate categories, and Unicode line/paragraph separators. Declaration
+YAML remains ASCII-escaped, parseable, and round-trips. JSON assembly and encoding remain atomic.
 
-### A5. Keep the CLI and completion wiring conventional
+### A7. Keep CLI lifecycle conventional
 
-The command function is added to the existing resource Typer group. It parses the identity before
-config work, loads config and a finalized request registry, calls `show_resource`, and dispatches
-one renderer. Both loader calls suppress advisory output so a later typed lookup or projection
-failure cannot leave a warning-prefixed partial result. It does not call `get_db`.
+The command parses identity before config work, then loads config and the ordinary request registry.
+Human mode passes the same warning flags as `resource list`; JSON suppresses ambient warnings. The
+CLI constructs `DatabaseLiveSource(db.DB_PATH)`, passes it with config, registry, and identity to
+the single `show_resource` service, then chooses a renderer. It does not coordinate graph reads,
+diagnostic dispatch, database entry/exit, or record assembly. All selected-resource fact assembly
+completes before human fact output starts; ordinary human loader warnings may already have been
+emitted by the shared loader.
 
-The argument is named `ref`, matching `resource edit`, and maps to `resource_refs` in the completion
-spec. The existing generic bash, zsh, and PowerShell generators require no algorithm change.
+The argument remains `ref` and maps to the existing `resource_refs` completion source. The generic
+bash, zsh, and PowerShell generators require no algorithm change.
 
-### A6. Prove the ownership boundary observationally
+### A8. Prove parity and safety structurally
 
-Service tests use a finalized registry with representative operator, auto, built-in, capability,
-disabled, and not-ready rows. Projection tests assert the complete record and JSON structure, plus
-declaration round trips and exact exclusion of framework fields. Renderer tests feed inert records
-and assert complete fact projection without pinning labels or sentences. Structural injection tests
-place line feeds, tabs, DEL, C1, ANSI controls, Unicode line and paragraph separators, bidirectional
-and other format controls, lone surrogates, and ordinary Unicode in identity-adjacent text,
-descriptions, readiness reasons, origin details, and declaration scalars. They prove scalar facts
-cannot inject sibling lines, ordinary Unicode remains legible there, and the YAML block contains no
-literal unsafe Unicode. Parsing the declaration recovers the original scalar values, including
-ordinary Unicode and the escaped unsafe code points.
+Tests compare a selected `ResourceShow`'s first eight fields with the matching `ResourceSummary`
+from a real `list_resources` call. Direct-graph tests cover both directions, duplicates, inherited
+declarer provenance, canonical order, no induced neighbor edge, supported-empty/unsupported/absent
+live usage, snapshot lifecycle, and no traversal beyond the focused node.
 
-CLI tests replace config and registry loading with controlled boundaries, assert the machine command
-identity and output schema, assert both loader warning flags are false, and make database access
-fail if attempted. Existing graph, explain, secret-describe, edit, and removed-spelling tests remain
-the regression proof that ownership did not move. A registered-kind sweep projects every declarable
-row fixture available to the framework and proves the declaration is JSON encodable without secret
-resolution.
+Doctor tests compare focused checks with the exact `HealthCheck` objects inserted into bulk groups
+for each attributed kind. They pin that disabled VM platforms/backends produce no check and that
+dotfiles is attributed only to `admin-template/default` with a non-empty source, including the
+empty-string no-check case. They also prove unrelated global/cross-row checks are absent and that
+secret resolution, authenticated runup, provider mutation, and prompting are never reached.
+
+Existing declaration, category, disabled/readiness, JSON, completion, typed-error, and terminal
+safety coverage remains. CLI tests assert human warning flags are true, JSON warning flags false,
+machine output is atomic, and the state database is opened only through the read-only live source.
 
 ## Rejected alternatives
 
-- **Rename or restore the deleted card:** rejected because it would mix graph, database, and
-  diagnostic ownership again.
-- **Put concrete values in `resource explain`:** rejected because explain is config-free accepted
-  shape, not a loaded row.
-- **Put declarations in `graph show`:** rejected because declarations are node content, not
-  relationships.
-- **Reflect capability implementation configuration:** rejected because capability explain owns the
-  schema and future facets, while consuming resources own placement.
-- **Preserve source-exact YAML:** rejected because registry rows intentionally do not retain that
-  syntax or comments, and pretending otherwise would create a second manifest storage model.
-- **Add a compatibility alias:** rejected by explicit operator direction and the 0.14 break posture.
+- **Avoid overlap by keeping only declaration:** rejected by the operator. Bulk inventory and health
+  scans are not substitutes for complete focused inspection.
+- **Restore `resource describe`:** rejected. The durable factual verb is `show`, with no alias or
+  compatibility runway.
+- **Run all of doctor and filter its output:** rejected because labels/prose are not resource
+  identities and unrelated checks would perform unnecessary work.
+- **Call `show_graph(depth=1)` and trim it:** rejected because its induced-neighborhood semantics
+  are intentionally broader than direct focused edges.
+- **Add per-kind card renderers:** rejected because shared structured summary, graph, health, and
+  declaration facts already compose the complete generic view.
+- **Reflect capability configuration or preserve source-exact YAML:** rejected because capability
+  explain and source manifests remain the respective authorities.
