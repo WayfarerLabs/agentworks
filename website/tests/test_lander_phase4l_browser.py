@@ -14,13 +14,8 @@ from functools import partial
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-from lander_chromium_phase4k import (
-    DevToolsConnection,
-    _button_names,
-    _devtools_target,
-    _QuietHandler,
-    dispatch_key,
-)
+from chromium_test_support import DevToolsConnection, cleanup_profile, devtools_target
+from lander_chromium_phase4k import _button_names, _QuietHandler, dispatch_key
 from site_test_support import RepositoryFixture, mock, snapshot
 from test_lander_phase4k_browser_cleanup import _FakeProcess, _NullRootRaceConnection
 
@@ -139,7 +134,7 @@ def browser_phase4l_contract(
     chromium_path: str | None = None,
     connection_factory: Callable[[str], DevToolsConnection] = DevToolsConnection,
     popen_factory: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
-    target_factory: Callable[[Path, subprocess.Popen[bytes]], str] = _devtools_target,
+    target_factory: Callable[[Path, subprocess.Popen[bytes]], str] = devtools_target,
     tempdir_factory: Callable[[], tempfile.TemporaryDirectory[str]] = tempfile.TemporaryDirectory,
 ) -> dict[str, object]:
     chromium = chromium_path or next(
@@ -253,7 +248,7 @@ def browser_phase4l_contract(
             thread.join(timeout=5)
         page.write_text(source, encoding="utf-8")
         probe_path.unlink(missing_ok=True)
-        profile.cleanup()
+        cleanup_profile(profile)
 
 
 class Phase4LBrowserTests(RepositoryFixture):

@@ -2,138 +2,24 @@
 
 from __future__ import annotations
 
-import base64
-import hashlib
 import json
-import os
 import shutil
-import socket
-import struct
 import subprocess
 import sys
 import tempfile
 import threading
 import time
-import urllib.parse
-import urllib.request
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable
 
+from chromium_test_support import DevToolsConnection, cleanup_profile, devtools_target
+
 
 class _QuietHandler(SimpleHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None:
         pass
-
-
-class DevToolsConnection:
-    """Minimal bounded WebSocket client for one Chromium page target."""
-
-    def __init__(self, url: str) -> None:
-        parsed = urllib.parse.urlsplit(url)
-        self.socket = socket.create_connection((parsed.hostname or "127.0.0.1", parsed.port or 80), timeout=10)
-        key = base64.b64encode(os.urandom(16)).decode("ascii")
-        target = parsed.path + (f"?{parsed.query}" if parsed.query else "")
-        request = (
-            f"GET {target} HTTP/1.1\r\n"
-            f"Host: {parsed.netloc}\r\n"
-            "Upgrade: websocket\r\nConnection: Upgrade\r\n"
-            f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n"
-            "Origin: http://127.0.0.1\r\n\r\n"
-        )
-        try:
-            self.socket.sendall(request.encode("ascii"))
-            response = bytearray()
-            while b"\r\n\r\n" not in response:
-                block = self.socket.recv(4096)
-                if not block:
-                    raise ConnectionError("Chromium closed the DevTools handshake before sending headers")
-                response.extend(block)
-                if len(response) > 65536:
-                    raise ConnectionError("Chromium DevTools handshake headers exceeded 64 KiB")
-            expected = base64.b64encode(
-                hashlib.sha1(f"{key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11".encode()).digest()
-            )
-            if b" 101 " not in response.split(b"\r\n", 1)[0] or expected not in response:
-                raise ConnectionError(f"Chromium rejected DevTools WebSocket: {response[:500]!r}")
-        except BaseException:
-            self.socket.close()
-            raise
-        self.identifier = 0
-
-    def close(self) -> None:
-        try:
-            self._send(b"", opcode=8)
-        finally:
-            self.socket.close()
-
-    def _read_exact(self, length: int) -> bytes:
-        chunks = bytearray()
-        while len(chunks) < length:
-            block = self.socket.recv(length - len(chunks))
-            if not block:
-                raise ConnectionError("Chromium closed the DevTools WebSocket")
-            chunks.extend(block)
-        return bytes(chunks)
-
-    def _send(self, payload: bytes, opcode: int = 1) -> None:
-        mask = os.urandom(4)
-        length = len(payload)
-        header = bytearray((0x80 | opcode, 0x80 | (length if length < 126 else 126 if length <= 0xFFFF else 127)))
-        if length >= 126:
-            header.extend(struct.pack(">H" if length <= 0xFFFF else ">Q", length))
-        header.extend(mask)
-        header.extend(value ^ mask[index % 4] for index, value in enumerate(payload))
-        self.socket.sendall(header)
-
-    def _receive(self) -> dict[str, object]:
-        payload = bytearray()
-        while True:
-            first, second = self._read_exact(2)
-            final = bool(first & 0x80)
-            opcode = first & 0x0F
-            length = second & 0x7F
-            if length == 126:
-                length = struct.unpack(">H", self._read_exact(2))[0]
-            elif length == 127:
-                length = struct.unpack(">Q", self._read_exact(8))[0]
-            mask = self._read_exact(4) if second & 0x80 else b""
-            frame = self._read_exact(length)
-            if mask:
-                frame = bytes(value ^ mask[index % 4] for index, value in enumerate(frame))
-            if opcode == 8:
-                raise ConnectionError("Chromium closed the DevTools WebSocket")
-            if opcode == 9:
-                self._send(frame, opcode=10)
-                continue
-            if opcode in {0, 1}:
-                payload.extend(frame)
-                if final:
-                    return json.loads(payload)
-
-    def call(self, method: str, params: dict[str, object] | None = None) -> dict[str, object]:
-        self.identifier += 1
-        identifier = self.identifier
-        self._send(json.dumps({"id": identifier, "method": method, "params": params or {}},
-                              separators=(",", ":")).encode())
-        while True:
-            response = self._receive()
-            if response.get("id") != identifier:
-                continue
-            if "error" in response:
-                raise AssertionError(f"DevTools {method} failed: {response['error']}")
-            return response.get("result", {})
-
-    def evaluate(self, expression: str) -> object:
-        result = self.call("Runtime.evaluate", {
-            "expression": expression,
-            "awaitPromise": True,
-            "returnByValue": True,
-        })
-        if "exceptionDetails" in result:
-            raise AssertionError(f"Chromium evaluation failed: {result['exceptionDetails']}")
-        return result["result"].get("value")
 
 
 KEY_DATA = {
@@ -360,22 +246,6 @@ def _departure_witness(connection: DevToolsConnection, authority: str) -> dict[s
             "fuelSpent": state["fuel"] < setup["beforeFuel"], "state": state["state"]}
 
 
-def _devtools_target(profile_path: Path, process: subprocess.Popen[bytes]) -> str:
-    port_path = profile_path / "DevToolsActivePort"
-    for _ in range(200):
-        if port_path.exists():
-            break
-        if process.poll() is not None:
-            raise AssertionError("Chromium exited before opening its DevTools endpoint")
-        time.sleep(0.025)
-    else:
-        raise AssertionError("Chromium did not publish its DevTools endpoint")
-    port = int(port_path.read_text(encoding="utf-8").splitlines()[0])
-    with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=10) as response:
-        targets = json.load(response)
-    return next(item["webSocketDebuggerUrl"] for item in targets if item["type"] == "page")
-
-
 def browser_phase4k_contract(
     output: Path,
     *,
@@ -383,7 +253,7 @@ def browser_phase4k_contract(
     popen_factory: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
     server_factory: Callable[..., ThreadingHTTPServer] = ThreadingHTTPServer,
     tempdir_factory: Callable[[], tempfile.TemporaryDirectory[str]] = tempfile.TemporaryDirectory,
-    target_factory: Callable[[Path, subprocess.Popen[bytes]], str] = _devtools_target,
+    target_factory: Callable[[Path, subprocess.Popen[bytes]], str] = devtools_target,
     probe_source_factory: Callable[[], str] = _probe_source,
     chromium_path: str | None = None,
 ) -> dict[str, object]:
@@ -559,7 +429,7 @@ def browser_phase4k_contract(
         if thread is not None and (thread_started or thread.ident is not None):
             cleanup(lambda: thread.join(timeout=5))
         if profile is not None:
-            cleanup(profile.cleanup)
+            cleanup(lambda: cleanup_profile(profile))
         if source is not None:
             cleanup(lambda: page.write_text(source, encoding="utf-8"))
         cleanup(lambda: probe_path.unlink(missing_ok=True))

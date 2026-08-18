@@ -1,21 +1,32 @@
 # ruff: noqa: F405
 
-import html
-import json
 import struct
+import sys
 import threading
 import zlib
 from decimal import Decimal
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
-from lander_chromium_phase4k import _probe_source, browser_phase4k_contract, normalize_accessible
+from chromium_test_support import browser_json_probe
+from lander_chromium_phase4k import (
+    _probe_source,
+    browser_phase4k_contract,
+    normalize_accessible,
+)
 from site_test_support import *  # noqa: F403
 
 
 class QuietHandler(SimpleHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None:
         pass
+
+
+class QuietServer(ThreadingHTTPServer):
+    def handle_error(self, request: object, client_address: object) -> None:
+        if isinstance(sys.exception(), (BrokenPipeError, ConnectionResetError)):
+            return
+        super().handle_error(request, client_address)
 
 
 def _png_rows(path: Path) -> tuple[int, int, int, list[bytearray]]:
@@ -176,69 +187,34 @@ document.querySelector("#phase4j-result").textContent = JSON.stringify(result);
     probe_path.write_text(probe_script, encoding="utf-8")
     stable_source = re.sub(r'<script type="module" src="[^"]*/lander-game\.js"></script>', "", source)
     page.write_text(stable_source.replace("</body>", f"{probe}</body>", 1), encoding="utf-8")
-    server = ThreadingHTTPServer(("127.0.0.1", 0), partial(QuietHandler, directory=str(output)))
+    server = QuietServer(("127.0.0.1", 0), partial(QuietHandler, directory=str(output)))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    profile = tempfile.TemporaryDirectory()
+    artifacts = tempfile.TemporaryDirectory()
     screenshot_paths: list[Path] = []
     try:
-        command = [
-            chromium,
-            "--headless",
-            "--disable-gpu",
-            "--no-sandbox",
-            "--hide-scrollbars",
-            f"--user-data-dir={profile.name}",
-            f"--window-size={width},1000",
-            "--virtual-time-budget=1000",
-            "--dump-dom",
-        ]
-        if reduced_motion:
-            command.append("--force-prefers-reduced-motion=reduce")
         query = "?paused=true" if paused else ""
-        command.append(f"http://127.0.0.1:{server.server_address[1]}/lander/{query}")
-        completed = subprocess.run(
-            command,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=20,
-            env={**os.environ, "HOME": profile.name},
+        geometry = browser_json_probe(
+            chromium,
+            f"http://127.0.0.1:{server.server_address[1]}/lander/{query}",
+            width,
+            "#phase4j-result",
+            reduced_motion=reduced_motion,
         )
         if screenshot:
-            screenshot_geometry = None
+            screenshot_geometry: dict[str, object] | None = None
             for state in ("on", "off"):
-                screenshot_path = Path(profile.name) / f"can-{state}.png"
-                screenshot_completed = subprocess.run(
-                    (
-                        chromium,
-                        "--headless",
-                        "--disable-gpu",
-                        "--no-sandbox",
-                        "--hide-scrollbars",
-                        f"--user-data-dir={Path(profile.name) / f'profile-{state}'}",
-                        f"--window-size={width},1000",
-                        "--virtual-time-budget=1000",
-                        "--dump-dom",
-                        f"--screenshot={screenshot_path}",
-                        f"http://127.0.0.1:{server.server_address[1]}/lander/?refuel={state}",
-                    ),
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=20,
-                    env={**os.environ, "HOME": profile.name},
+                screenshot_path = Path(artifacts.name) / f"can-{state}.png"
+                state_geometry = browser_json_probe(
+                    chromium,
+                    f"http://127.0.0.1:{server.server_address[1]}/lander/?refuel={state}",
+                    width,
+                    "#phase4j-result",
+                    screenshot_path=screenshot_path,
                 )
-                state_match = re.search(r'<pre id="phase4j-result">([^<]+)</pre>', screenshot_completed.stdout)
-                if state_match is None:
-                    raise AssertionError("Chromium omitted Phase 4J screenshot geometry")
                 if state == "on":
-                    screenshot_geometry = json.loads(html.unescape(state_match.group(1)))
+                    screenshot_geometry = state_geometry
                 screenshot_paths.append(screenshot_path)
-            match = re.search(r'<pre id="phase4j-result">([^<]+)</pre>', completed.stdout)
-            if match is None:
-                raise AssertionError("Chromium omitted Phase 4J screenshot geometry")
-            geometry = json.loads(html.unescape(match.group(1)))
             assert screenshot_geometry is not None
             center_x = round(screenshot_geometry["stage"]["left"] + 120)
             center_y = round(screenshot_geometry["stage"]["top"] + 120)
@@ -251,17 +227,11 @@ document.querySelector("#phase4j-result").textContent = JSON.stringify(result);
     finally:
         page.write_text(source, encoding="utf-8")
         probe_path.unlink(missing_ok=True)
-        profile.cleanup()
+        artifacts.cleanup()
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
-    match = re.search(r'<pre id="phase4j-result">([^<]+)</pre>', completed.stdout)
-    if match is None or match.group(1) == "pending":
-        raise AssertionError(f"Chromium did not return Phase 4J geometry: {completed.stderr[-1000:]}")
-    result = json.loads(html.unescape(match.group(1)))
-    if screenshot:
-        result.update({key: geometry[key] for key in ("canPixels", "offPixels", "canDifference")})
-    return result
+    return geometry
 
 
 def browser_description_contract(output: Path) -> dict[str, object]:
@@ -304,41 +274,23 @@ controller.destroy();
     probe_path = output / "phase4j-description.js"
     probe_path.write_text(probe_script, encoding="utf-8")
     page.write_text(source.replace("</body>", f"{probe}</body>", 1), encoding="utf-8")
-    server = ThreadingHTTPServer(("127.0.0.1", 0), partial(QuietHandler, directory=str(output)))
+    server = QuietServer(("127.0.0.1", 0), partial(QuietHandler, directory=str(output)))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    profile = tempfile.TemporaryDirectory()
     try:
-        completed = subprocess.run(
-            (
-                chromium,
-                "--headless",
-                "--disable-gpu",
-                "--no-sandbox",
-                "--hide-scrollbars",
-                f"--user-data-dir={profile.name}",
-                "--window-size=960,1000",
-                "--virtual-time-budget=1000",
-                "--dump-dom",
-                f"http://127.0.0.1:{server.server_address[1]}/lander/",
-            ),
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=20,
-            env={**os.environ, "HOME": profile.name},
+        result = browser_json_probe(
+            chromium,
+            f"http://127.0.0.1:{server.server_address[1]}/lander/",
+            960,
+            "#phase4j-description-result",
         )
     finally:
         page.write_text(source, encoding="utf-8")
         probe_path.unlink(missing_ok=True)
-        profile.cleanup()
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
-    match = re.search(r'<pre id="phase4j-description-result">([^<]+)</pre>', completed.stdout)
-    if match is None or match.group(1) == "pending":
-        raise AssertionError(f"Chromium did not return Phase 4J descriptions: {completed.stderr[-1000:]}")
-    return json.loads(html.unescape(match.group(1)))
+    return result
 
 
 class ArcadeBrowserTests(RepositoryFixture):
