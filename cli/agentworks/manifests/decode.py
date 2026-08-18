@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError as PydanticValidationError
 
-from agentworks.declared_resource import METADATA_FIELDS, DeclaredResource
+from agentworks.declared_resource import FRAMEWORK_FIELDS, METADATA_FIELDS, DeclaredResource
 from agentworks.errors import ConfigError, StateError
 from agentworks.resources import KIND_REGISTRY
 from agentworks.schema import RefOwner, config_error_from, extract_references, filled_defaults, located
@@ -44,13 +44,6 @@ if TYPE_CHECKING:
     from agentworks.env import EnvEntry
     from agentworks.manifests.envelope import Document
     from agentworks.schema.reference import ConfigReference
-
-#: The fields a row carries as METADATA rather than as spec surface. They
-#: are real fields of the model, so a document writing one inside ``spec``
-#: would be accepted and would silently override the envelope; derived from
-#: the base rather than listed, so a fourth metadata field cannot be
-#: rejected by one layer and accepted by the other.
-_ROW_METADATA_FIELDS = frozenset(DeclaredResource.model_fields)
 
 #: The prefix the runtime prelude owns: an operator's value for such a
 #: key is silently overridden at command time, so setting one is a
@@ -188,7 +181,7 @@ def _reject_spec_metadata(doc: Document, spec: Mapping[str, object]) -> None:
     the envelope then refuses as an unknown metadata key.
     """
     misplaced = sorted(METADATA_FIELDS & set(spec))
-    framework = sorted((_ROW_METADATA_FIELDS - METADATA_FIELDS) & set(spec))
+    framework = sorted(FRAMEWORK_FIELDS & set(spec))
     if misplaced:
         raise ConfigError(
             located(doc.location, f"{', '.join(misplaced)} belong(s) in metadata, not in spec"),

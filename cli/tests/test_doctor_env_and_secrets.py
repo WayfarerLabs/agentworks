@@ -9,8 +9,9 @@ import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
-from agentworks.doctor import Status, _check_config, _check_secrets
+from agentworks.doctor import Status, _check_config, _check_secrets, checks_for_resource
 from agentworks.errors import ConfigError
+from agentworks.resources.access import ResourceIdentity
 from tests.conftest import ManifestDoc, write_manifests
 
 if TYPE_CHECKING:
@@ -23,6 +24,7 @@ def _write_config(
     *,
     settings: str = "",
     admin_env: dict[str, object] | None = None,
+    admin_fields: dict[str, object] | None = None,
     manifests: Sequence[ManifestDoc | str] = (),
 ) -> Path:
     """Write a settings-only config.toml plus its resources/ manifests and
@@ -48,6 +50,8 @@ def _write_config(
         + dedent(settings)
     )
     admin_spec: dict[str, object] = {"shell": "zsh"}
+    if admin_fields is not None:
+        admin_spec.update(admin_fields)
     if admin_env is not None:
         admin_spec["env"] = admin_env
     write_manifests(
@@ -57,6 +61,56 @@ def _write_config(
         *manifests,
     )
     return cfg
+
+
+def test_focused_checks_are_the_exact_bulk_resource_rows(tmp_path: Path) -> None:
+    from agentworks.doctor import (
+        _check_secret_backends,
+        _check_secret_sources,
+        _check_vm_platforms,
+    )
+
+    config = load_config(_write_config(tmp_path), warn_issues=False)
+    registry = build_registry(config)
+    cases = (
+        (ResourceIdentity("vm-platform", "lima"), _check_vm_platforms(registry)),
+        (ResourceIdentity("secret-backend", "env-var"), _check_secret_backends(registry)),
+        (ResourceIdentity("secret-source", "env-var"), _check_secret_sources(config, registry)),
+        (ResourceIdentity("secret", "tailscale-auth-key"), _check_secrets(config, registry)),
+    )
+
+    for identity, group in cases:
+        focused = checks_for_resource(config, registry, identity)
+        assert len(focused) == 1
+        assert focused[0] in group.checks
+
+
+def test_focused_admin_dotfiles_matches_bulk_and_empty_source_has_no_check(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks import config as config_module
+
+    empty_path = tmp_path / "empty"
+    empty_path.mkdir()
+    empty_config = load_config(_write_config(empty_path), warn_issues=False)
+    empty_registry = build_registry(empty_config)
+    identity = ResourceIdentity("admin-template", "default")
+    assert checks_for_resource(empty_config, empty_registry, identity) == ()
+
+    configured_path = tmp_path / "configured"
+    configured_path.mkdir()
+    config_path = _write_config(
+        configured_path,
+        admin_fields={"dotfiles_source": "github:operator/dotfiles"},
+    )
+    monkeypatch.setattr(config_module, "CONFIG_PATH", config_path)
+    bulk_group, config, registry = _check_config()
+    assert config is not None
+    assert registry is not None
+    focused = checks_for_resource(config, registry, identity)
+    assert len(focused) == 1
+    assert focused[0] in bulk_group.checks
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +295,7 @@ def test_secret_backends_group_skips_disabled_plugin_backend(tmp_path: Path, mon
     assert by_name["prompt"].status is Status.OK
     # Disabled: skipped here, never a misleading [ok].
     assert "onepassword" not in by_name
+    assert checks_for_resource(config, registry, ResourceIdentity("secret-backend", "onepassword")) == ()
 
     # The System plugins roster IS the enablement authority: it lists the
     # disabled backend's plugin as disabled.
@@ -533,8 +588,35 @@ def test_prompt_only_site_secret_leaves_the_site_row_ok(
 
     g = _check_vm_sites(config, registry)
     row = next(c for c in g.checks if c.name == "azure-dev")
+    focused = checks_for_resource(config, registry, ResourceIdentity("vm-site", "azure-dev"))
     assert row.status is Status.OK, (row.status, row.message)
     assert "azure-vm" in (row.message or "")
+    assert focused == (row,)
+
+
+def test_focused_vm_site_preserves_bulk_preflight_exception_facts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks import doctor
+    from agentworks.errors import StateError
+    from agentworks.vms import nodes
+
+    class _FailingNode:
+        def preflight(self, _context: object) -> None:
+            raise StateError("preflight failed", hint="repair the local prerequisite")
+
+    config = load_config(_sp_site_config(tmp_path), warn_issues=False)
+    registry = build_registry(config)
+    monkeypatch.setattr(nodes, "vm_site_node", lambda *_args: _FailingNode())
+
+    bulk = doctor._check_vm_sites(config, registry)
+    row = next(check for check in bulk.checks if check.name == "azure-dev")
+    focused = checks_for_resource(config, registry, ResourceIdentity("vm-site", "azure-dev"))
+
+    assert focused == (row,)
+    assert row.status is Status.WARN
+    assert row.hint == "repair the local prerequisite"
 
 
 def test_prompt_only_site_secret_still_renders_on_its_own_secret_row(

@@ -8,6 +8,7 @@ building their own safe fact records and for selecting collection order.
 from __future__ import annotations
 
 import json
+import unicodedata
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO, assert_never
@@ -26,6 +27,7 @@ type JsonObject = dict[str, JsonValue]
 # The version every JSON v1 envelope carries. Consumers branch on it; nothing
 # here does, so it stays a named constant rather than a fact any record holds.
 _SCHEMA_VERSION = 1
+_TERMINAL_UNSAFE_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
 
 
 class OutputFormat(StrEnum):
@@ -39,6 +41,7 @@ class MachineOutputCommand(StrEnum):
     """The closed set of command identifiers in the JSON v1 contract."""
 
     RESOURCE_LIST = "resource.list"
+    RESOURCE_SHOW = "resource.show"
     RESOURCE_KINDS = "resource.kinds"
     GRAPH_SHOW = "graph.show"
     VM_LIST = "vm.list"
@@ -68,13 +71,24 @@ def encode_json_envelope(command: MachineOutputCommand, data: JsonObject) -> byt
         "data": data,
     }
     encoded = json.dumps(envelope, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
-    return _escape_terminal_control_characters(encoded).encode("utf-8") + b"\n"
+    return _escape_terminal_unsafe_characters(encoded).encode("utf-8") + b"\n"
 
 
-def _escape_terminal_control_characters(document: str) -> str:
-    """Escape DEL and C1 controls that terminals could interpret specially."""
+def _escape_terminal_unsafe_characters(document: str) -> str:
+    """Escape unsafe Unicode without changing the value parsed from JSON.
+
+    The first ``json.dumps`` has already escaped JSON's C0 syntax controls.
+    This pass covers the wider terminal boundary and, critically, lone
+    surrogates that Python strings can carry but UTF-8 cannot encode. Asking
+    JSON for each character's ASCII spelling handles astral characters and
+    surrogate pairs without duplicating its escape rules. Ordinary Unicode
+    remains readable UTF-8.
+    """
     return "".join(
-        f"\\u{ord(character):04x}" if 0x7F <= ord(character) <= 0x9F else character for character in document
+        json.dumps(character, ensure_ascii=True)[1:-1]
+        if unicodedata.category(character) in _TERMINAL_UNSAFE_CATEGORIES
+        else character
+        for character in document
     )
 
 

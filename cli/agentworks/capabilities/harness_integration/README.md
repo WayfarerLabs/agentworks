@@ -374,8 +374,9 @@ The surrounding wiring supplies the following behavior and debugging boundaries:
   "Building the pane command" below.
 - **Display:** `session list` / `session describe` show the resolved integration name by
   re-resolving the template read-only (no instance is built, no gate runs);
-  `resource list --kind harness-integration` and `graph show harness-integration/<name>` show the
-  registry row.
+  `resource list --kind harness-integration` inventories rows,
+  `resource show harness-integration/<name>` shows one concrete row, and
+  `graph show harness-integration/<name>` shows its relationships.
 
 ### Best Practices
 

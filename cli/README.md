@@ -36,8 +36,8 @@ output. An unrelated malformed shell or duplicate global topic therefore blocks 
 single-topic show, and dynamic topic completion together instead of exposing a partial catalog.
 
 Raw resource, relationship, schema, and sample facts belong to commands rather than guide topics.
-Use `agw graph show`, `agw resource kinds`, `agw resource list`, `agw resource explain`, and
-`agw resource sample` for those command-owned facts.
+Use `agw resource show`, `agw graph show`, `agw resource kinds`, `agw resource list`,
+`agw resource explain`, and `agw resource sample` for those command-owned facts.
 
 ```bash
 # Initial setup
@@ -193,8 +193,11 @@ Settings sections (`config.toml`, permanent):
   plugins (see [System Plugins](#system-plugins) below)
 
 Resources are declared as YAML manifests. `agw resource kinds` lists every kind with its category
-and purpose, `agw resource explain KIND` documents what one accepts field by field, and
-`agw graph show KIND/NAME` traverses its declared and current live relationships.
+and purpose, `agw resource show KIND/NAME` shows one complete focused card with list facts, direct
+relationships, current users, attributable health checks, and the normalized declaration,
+`agw resource explain KIND` documents what one accepts field by field, and
+`agw graph show KIND/NAME` traverses beyond that row through declared and current live
+relationships.
 
 The table below exists for one thing this repository is otherwise the only record of: which removed
 legacy TOML section used to declare each kind. Those sections no longer load; the mapping is a

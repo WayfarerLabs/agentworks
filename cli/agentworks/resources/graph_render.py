@@ -4,26 +4,27 @@ from __future__ import annotations
 
 from agentworks import output
 from agentworks.resources.graph_query import GraphEdge, GraphEdgeType, GraphIdentity, GraphResult, group_graph_result
-from agentworks.terminal import sanitize_terminal_output
-
-
-def _safe(value: str) -> str:
-    return sanitize_terminal_output(value).replace("\n", "").replace("\t", "")
+from agentworks.resources.render import sanitize_fact_line
 
 
 def _identity(value: GraphIdentity) -> str:
-    return f"{_safe(value.node_type.value)} {_safe(value.kind)}/{_safe(value.name)}"
+    return (
+        f"{sanitize_fact_line(value.node_type.value)} {sanitize_fact_line(value.kind)}/{sanitize_fact_line(value.name)}"
+    )
 
 
 def _edge(value: GraphEdge) -> str:
     suffix = "declared" if value.edge_type is GraphEdgeType.DECLARED else "live-usage, current config"
-    return f"{_identity(value.source)} -{_safe(value.relationship.value)}-> {_identity(value.target)} [{suffix}]"
+    return (
+        f"{_identity(value.source)} -{sanitize_fact_line(value.relationship.value)}-> "
+        f"{_identity(value.target)} [{suffix}]"
+    )
 
 
 def render_graph_result(result: GraphResult) -> None:
     """Emit a flat distance-grouped view without deriving graph facts."""
-    output.info(f"Graph: {_safe(result.query.focus.kind)}/{_safe(result.query.focus.name)}")
-    output.detail(f"Direction: {_safe(result.query.direction.value)}")
+    output.info(f"Graph: {sanitize_fact_line(result.query.focus.kind)}/{sanitize_fact_line(result.query.focus.name)}")
+    output.detail(f"Direction: {sanitize_fact_line(result.query.direction.value)}")
     depth = "all" if result.query.depth_limit is None else str(result.query.depth_limit)
     output.detail(f"Depth: {depth}")
     output.info("")
@@ -34,7 +35,10 @@ def render_graph_result(result: GraphResult) -> None:
             output.info("Nodes")
             with output.section():
                 for node in group.nodes:
-                    output.info(f"{_safe(node.node_type.value)} {_safe(node.kind)}/{_safe(node.name)}")
+                    output.info(
+                        f"{sanitize_fact_line(node.node_type.value)} "
+                        f"{sanitize_fact_line(node.kind)}/{sanitize_fact_line(node.name)}"
+                    )
             if group.edges:
                 output.info("Edges")
                 with output.section():
@@ -42,8 +46,9 @@ def render_graph_result(result: GraphResult) -> None:
                         output.info(_edge(edge))
                         with output.section():
                             if edge.usage is not None:
-                                output.info(f"Usage: {_safe(edge.usage)}")
+                                output.info(f"Usage: {sanitize_fact_line(edge.usage)}")
                             if edge.declared_by is not None:
                                 output.info(
-                                    f"Declared by: {_safe(edge.declared_by.kind)}/{_safe(edge.declared_by.name)}"
+                                    f"Declared by: {sanitize_fact_line(edge.declared_by.kind)}/"
+                                    f"{sanitize_fact_line(edge.declared_by.name)}"
                                 )

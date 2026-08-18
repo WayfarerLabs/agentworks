@@ -21,7 +21,8 @@ registry, is identified by `kind` + `name`, and can be inspected uniformly:
 ```bash
 agw resource list                       # everything, all kinds and origins
 agw resource list --kind secret         # one kind
-agw graph show vm-template/dev          # declared and live relationships
+agw resource show vm-template/dev       # one complete focused resource card
+agw graph show vm-template/dev          # traverse declared and live relationships
 agw resource kinds                      # every kind: category, counts, purpose
 ```
 
@@ -31,6 +32,19 @@ secret backends), **auto-declared** (the framework filled in a referenced-but-un
 e.g. the `tailscale-auth-key` secret or `git-token-<name>` secrets), and **system-plugin**
 (contributed by an installed system plugin, regardless of whether its rows are enabled; see "System
 plugins" below). Filter by origin with `agw resource list --origin operator|auto|builtin|plugin`.
+
+`agw resource show KIND/NAME` is the focused view of one concrete registry row. For a declarable
+resource it combines the exact matching `resource list` facts with full stored readiness, direct
+dependencies and dependents, current live users when that kind supports them, the checks `doctor`
+attributes to that resource, and a normalized manifest with loaded defaults and JSON-native values.
+The relationship slice stops after the edges touching the row; use `graph show` to traverse farther.
+The focused diagnostics do not replace the fleet-wide `doctor` report. Capability resources have no
+declaration, so their declaration is null.
+
+The normalized declaration does not preserve source comments, source key order,
+omitted-versus-defaulted distinctions, or merge inheritance. Use `resource explain` for accepted
+fields, `resource edit` for the declaring file, and `secret describe` for secret-specific mapping
+and resolution preview.
 
 ## Declaring resources: YAML manifests
 
@@ -707,17 +721,21 @@ prompt, biometric check, or backend authentication. That opt-in is incompatible 
 
 ```bash
 agw resource list --origin operator     # what you have declared, either source
-agw graph show secret/npm-token         # where it's referenced, what uses it
-agw doctor                              # offline secret attempt/readiness preview
+agw resource show secret/npm-token      # row, direct edges, users, health, declaration
+agw graph show secret/npm-token         # traverse beyond the direct relationship slice
+agw doctor                              # scan health across the complete environment
 ```
 
 ### JSON for automation
 
 The read-only graph, resource, secret, and health commands also support `--output json`:
-`graph show`, `resource list`, `resource kinds`, `secret list`, `secret describe`, and `doctor`.
-Each successful response is one JSON document with `schema_version`, `command`, and `data` fields.
-The backend lists and reference arrays retain their operational precedence and graph order, and the
-secret views report only lookup prediction and metadata, never a secret value.
+`graph show`, `resource list`, `resource show`, `resource kinds`, `secret list`, `secret describe`,
+and `doctor`. Each successful response is one JSON document with `schema_version`, `command`, and
+`data` fields. The backend lists and reference arrays retain their operational precedence and graph
+order, and the secret views report only lookup prediction and metadata, never a secret value.
+`resource show` likewise exposes only value-free secret previews, opens persisted state read-only
+and only for kinds with a live-instance hook, and reports null rather than an empty array when a
+kind has no such concept.
 
 `--output human` is the default and keeps the terminal-oriented rendering. `--names-only` remains
 reserved for shell completion, so it cannot be combined with JSON output. `agw doctor --output json`

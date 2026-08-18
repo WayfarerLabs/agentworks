@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from agentworks.db import Database
     from agentworks.origin import Origin
     from agentworks.resources import Registry
+    from agentworks.resources.access import ResourceIdentity
     from agentworks.resources.kind import InstanceRef
     from agentworks.resources.reference import ReferenceEntry
 
@@ -142,6 +143,28 @@ def _matches_origin(origin: Origin | None, origin_filter: OriginFilter | None) -
 # -- Service layer ----------------------------------------------------------
 
 
+def summarize_resource(
+    registry: Registry,
+    identity: ResourceIdentity,
+    used_by: tuple[InstanceRef, ...] | None,
+) -> ResourceSummary:
+    """Project one registry row through the same compact facts as resource list."""
+    resource = registry.lookup(identity.kind, identity.name)
+    origin = getattr(resource, "origin", None)
+    disabled = registry.graph.enablement_of(identity.kind, identity.name) is Enablement.disabled
+    references: tuple[ReferenceEntry, ...] = registry.graph.dependents_of(identity.kind, identity.name)
+    return ResourceSummary(
+        kind=identity.kind,
+        name=identity.name,
+        origin=origin,
+        reference_count=len(references),
+        used_by_count=None if used_by is None else len(used_by),
+        description=getattr(resource, "description", "") or "",
+        not_ready_reason=not_ready_reason_for(registry, identity.kind, identity.name),
+        disabled=disabled,
+    )
+
+
 def list_resources(
     registry: Registry,
     db: Database | None = None,
@@ -175,6 +198,7 @@ def list_resources(
     """
     from agentworks.errors import NotFoundError, ValidationError
     from agentworks.resources import KIND_REGISTRY
+    from agentworks.resources.access import ResourceIdentity
 
     if origin_filter is not None and origin_filter not in _ORIGIN_FILTER_MAP:
         raise ValidationError(
@@ -220,21 +244,8 @@ def list_resources(
             disabled = registry.graph.enablement_of(kind, name) is Enablement.disabled
             if not include_disabled and disabled:
                 continue
-            references: tuple[ReferenceEntry, ...] = registry.graph.dependents_of(kind, name)
-            description = getattr(resource, "description", "") or ""
-            used_by_count = _count_used_by(db, registry, kind, resource)
-            rows.append(
-                ResourceSummary(
-                    kind=kind,
-                    name=name,
-                    origin=origin,
-                    reference_count=len(references),
-                    used_by_count=used_by_count,
-                    description=description,
-                    not_ready_reason=not_ready_reason_for(registry, kind, name),
-                    disabled=disabled,
-                )
-            )
+            used_by = used_by_for(db, registry, kind, resource)
+            rows.append(summarize_resource(registry, ResourceIdentity(kind, name), used_by))
             variant = origin.variant if origin is not None else None
             if variant == "operator-declared":
                 operator_count += 1
@@ -291,15 +302,6 @@ def used_by_for(db: Database | None, registry: Registry, kind: str, resource: ob
     if method is None:
         return None
     return tuple(method(db, registry, resource))
-
-
-def _count_used_by(db: Database | None, registry: Registry, kind: str, resource: object) -> int | None:
-    """``len()`` variant of ``used_by_for`` used by the list-row builder.
-    Returns ``None`` (renderer shows ``-``) when the kind has no
-    instance concept; otherwise the count of live instances.
-    """
-    refs = used_by_for(db, registry, kind, resource)
-    return None if refs is None else len(refs)
 
 
 def _plugin_provenance(origin: Origin | None) -> str | None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import unicodedata
 from pathlib import Path
 from typing import cast
 
@@ -71,6 +72,7 @@ def test_output_formats_are_closed_to_human_and_json() -> None:
 def test_machine_output_commands_are_the_complete_v1_contract() -> None:
     assert [command.value for command in MachineOutputCommand] == [
         "resource.list",
+        "resource.show",
         "resource.kinds",
         "graph.show",
         "vm.list",
@@ -109,20 +111,16 @@ def test_envelope_is_utf8_deterministic_and_has_one_trailing_newline() -> None:
     assert list(json.loads(first)) == ["schema_version", "command", "data"]
 
 
-def test_envelope_escapes_del_and_c1_controls_without_changing_text() -> None:
-    text = "~\x7f\u009b\u009f\u00a0☃"
+def test_envelope_escapes_terminal_unsafe_unicode_without_changing_text() -> None:
+    ordinary = "~\u00a0 café 雪 ☃"
+    unsafe = "\x00\x1b\x7f\u0085\u009b\u2028\u2029\u202e\u2066\U000e0001\ud800"
+    text = ordinary + unsafe
 
     encoded = encode_json_envelope(MachineOutputCommand.DOCTOR, {"text": text})
 
-    assert b"\\u007f" in encoded
-    assert b"\\u009b" in encoded
-    assert b"\\u009f" in encoded
-    assert b"\x7f" not in encoded
-    assert "\u009b".encode("utf-8") not in encoded
-    assert "\u009f".encode("utf-8") not in encoded
-    assert b"~" in encoded
-    assert "\u00a0".encode("utf-8") in encoded
-    assert "☃".encode() in encoded
+    document = encoded.removesuffix(b"\n").decode("utf-8")
+    assert all(unicodedata.category(character) not in {"Cc", "Cf", "Cs", "Zl", "Zp"} for character in document)
+    assert ordinary.encode() in encoded
     assert json.loads(encoded)["data"]["text"] == text
 
 

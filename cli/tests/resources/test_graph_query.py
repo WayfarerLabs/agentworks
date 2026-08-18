@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import unicodedata
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,6 +32,7 @@ from agentworks.resources.graph_query import (
     GraphQuery,
     GraphResult,
     LiveSourceState,
+    focused_graph_facts,
     graph_result_data,
     group_graph_result,
     show_graph,
@@ -149,6 +151,8 @@ def test_graph_edge_variants_enforce_their_closed_shapes() -> None:
 
     with pytest.raises(ValueError):
         GraphEdge(GraphEdgeType.DECLARED, live, resource, RefRelationship.USES, "x", None)
+    with pytest.raises(ValueError):
+        GraphEdge(GraphEdgeType.DECLARED, resource, resource, cast("RefRelationship", "unknown"), "x", None)
     with pytest.raises(ValueError):
         GraphEdge(GraphEdgeType.LIVE_USAGE, live, resource, RefRelationship.INHERITS, None, None)
 
@@ -274,6 +278,167 @@ def test_no_neighbor_and_legacy_punctuation_are_preserved(monkeypatch: pytest.Mo
     result = _query(_registry(monkeypatch, [name]), tmp_path, name, depth=None)
     assert result.nodes == (GraphNode(GraphNodeType.RESOURCE, "node", name, 0),)
     assert result.edges == ()
+
+
+def test_focused_slice_retains_only_incident_edges_duplicates_and_provenance(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    duplicate = _ref("focus", "b", usage="same")
+    references = [
+        _ref("neighbor", "b", usage="induced"),
+        duplicate,
+        _ref("incoming", "focus", usage="inbound"),
+        _ref(
+            "focus",
+            "a",
+            relationship=RefRelationship.INHERITS,
+            usage="base",
+            declared_by=("node", "declarer"),
+        ),
+        duplicate,
+    ]
+    registry = _registry(
+        monkeypatch,
+        ["focus", "a", "b", "incoming", "neighbor", "declarer"],
+        references,
+    )
+
+    facts = focused_graph_facts(
+        registry,
+        ResourceIdentity("node", "focus"),
+        DatabaseLiveSource(tmp_path / "absent.db"),
+    )
+
+    assert [(edge.target.name, edge.relationship, edge.usage) for edge in facts.dependencies] == [
+        ("a", RefRelationship.INHERITS, "base"),
+        ("b", RefRelationship.USES, "same"),
+        ("b", RefRelationship.USES, "same"),
+    ]
+    assert facts.dependencies[0].declared_by == ResourceIdentity("node", "declarer")
+    assert [(edge.source.name, edge.target.name) for edge in facts.dependents] == [("incoming", "focus")]
+    assert all(edge.source.name != "neighbor" for edge in (*facts.dependencies, *facts.dependents))
+    assert facts.used_by is None
+
+
+def test_focused_slice_includes_direct_edges_outside_traversal_policy(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from agentworks.resources import graph_query
+
+    references = [
+        _ref("focus", "runtime", relationship=RefRelationship.USES),
+        _ref("focus", "base", relationship=RefRelationship.INHERITS),
+    ]
+    registry = _registry(monkeypatch, ["focus", "runtime", "base"], references)
+    monkeypatch.setattr(graph_query, "GRAPH_TRAVERSED_RELATIONSHIPS", frozenset({RefRelationship.USES}))
+
+    facts = focused_graph_facts(
+        registry,
+        ResourceIdentity("node", "focus"),
+        DatabaseLiveSource(tmp_path / "focused-absent.db"),
+    )
+    traversed = show_graph(
+        registry,
+        ResourceIdentity("node", "focus"),
+        GraphDirection.DEPENDENCIES,
+        1,
+        DatabaseLiveSource(tmp_path / "traversal-absent.db"),
+    )
+
+    assert [(edge.target.name, edge.relationship) for edge in facts.dependencies] == [
+        ("base", RefRelationship.INHERITS),
+        ("runtime", RefRelationship.USES),
+    ]
+    assert {(node.name, node.distance) for node in traversed.nodes} == {("focus", 0), ("runtime", 1)}
+
+
+def test_focused_slice_keeps_edge_free_identity_and_live_support_distinction(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class _UninspectedPath:
+        def stat(self) -> None:
+            raise AssertionError("unsupported live usage inspected the database path")
+
+    unsupported = _registry(monkeypatch, ["focus"])
+    unsupported_facts = focused_graph_facts(
+        unsupported,
+        ResourceIdentity("node", "focus"),
+        DatabaseLiveSource(cast("Path", _UninspectedPath())),
+    )
+    assert unsupported_facts.dependencies == unsupported_facts.dependents == ()
+    assert unsupported_facts.used_by is None
+
+    handler = _InstanceHandler(lambda _name: iter(()))
+    supported = _registry(monkeypatch, ["focus"], handler=handler)
+    supported_facts = focused_graph_facts(
+        supported,
+        ResourceIdentity("node", "focus"),
+        DatabaseLiveSource(tmp_path / "still-absent.db"),
+    )
+    assert supported_facts.used_by == ()
+    assert handler.calls == []
+
+
+def test_focused_slice_reads_each_incident_arm_once_without_expanding_neighbors(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from agentworks.resources.graph import DependencyGraph
+
+    registry = _registry(
+        monkeypatch,
+        ["focus", "dependency", "dependent", "outside"],
+        [_ref("focus", "dependency"), _ref("dependent", "focus"), _ref("dependency", "outside")],
+    )
+    outgoing = DependencyGraph.edges_of
+    incoming = DependencyGraph.incoming_edges_of
+    calls: list[tuple[str, str, str]] = []
+
+    def counted_outgoing(graph: DependencyGraph, kind: str, name: str) -> tuple[ResourceReference, ...]:
+        calls.append(("out", kind, name))
+        return outgoing(graph, kind, name)
+
+    def counted_incoming(graph: DependencyGraph, kind: str, name: str) -> tuple[ResourceReference, ...]:
+        calls.append(("in", kind, name))
+        return incoming(graph, kind, name)
+
+    monkeypatch.setattr(DependencyGraph, "edges_of", counted_outgoing)
+    monkeypatch.setattr(DependencyGraph, "incoming_edges_of", counted_incoming)
+
+    facts = focused_graph_facts(
+        registry,
+        ResourceIdentity("node", "focus"),
+        DatabaseLiveSource(tmp_path / "absent.db"),
+    )
+
+    assert calls == [("out", "node", "focus"), ("in", "node", "focus")]
+    assert [(edge.source.name, edge.target.name) for edge in facts.dependencies] == [("focus", "dependency")]
+    assert [(edge.source.name, edge.target.name) for edge in facts.dependents] == [("dependent", "focus")]
+
+
+@pytest.mark.parametrize("arm", ["dependencies", "dependents"])
+def test_focused_slice_rejects_an_edge_that_does_not_touch_its_focus(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    arm: str,
+) -> None:
+    from agentworks.resources.graph import DependencyGraph
+
+    registry = _registry(monkeypatch, ["focus"])
+    if arm == "dependencies":
+        monkeypatch.setattr(DependencyGraph, "edges_of", lambda *_args: (_ref("wrong", "target"),))
+    else:
+        monkeypatch.setattr(DependencyGraph, "incoming_edges_of", lambda *_args: (_ref("source", "wrong"),))
+
+    with pytest.raises(AssertionError):
+        focused_graph_facts(
+            registry,
+            ResourceIdentity("node", "focus"),
+            DatabaseLiveSource(tmp_path / "absent.db"),
+        )
 
 
 def test_real_registry_inbound_edges_retain_relationship_and_usage(tmp_path: Path) -> None:
@@ -427,6 +592,50 @@ def _install_fake_database(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
     _FakeDatabase.close_error = None
     monkeypatch.setattr(graph_query, "Database", _FakeDatabase)
     return counts
+
+
+def test_focused_supported_live_usage_uses_one_read_only_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    counts = _install_fake_database(monkeypatch)
+    database_path = tmp_path / "state.db"
+    database_path.touch()
+    handler = _InstanceHandler(
+        lambda _name: iter((InstanceRef("session", "z"), InstanceRef("vm", "a"))),
+    )
+    registry = _registry(monkeypatch, ["focus"], handler=handler)
+
+    facts = focused_graph_facts(
+        registry,
+        ResourceIdentity("node", "focus"),
+        DatabaseLiveSource(database_path),
+    )
+
+    assert facts.used_by == (InstanceRef("session", "z"), InstanceRef("vm", "a"))
+    assert handler.calls == ["focus"]
+    assert counts == {"database": 1, "transaction_enter": 1, "transaction_exit": 1, "close": 1}
+
+
+def test_focused_supported_live_usage_preserves_present_but_empty(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    counts = _install_fake_database(monkeypatch)
+    database_path = tmp_path / "state.db"
+    database_path.touch()
+    handler = _InstanceHandler(lambda _name: iter(()))
+    registry = _registry(monkeypatch, ["focus"], handler=handler)
+
+    facts = focused_graph_facts(
+        registry,
+        ResourceIdentity("node", "focus"),
+        DatabaseLiveSource(database_path),
+    )
+
+    assert facts.used_by == ()
+    assert handler.calls == ["focus"]
+    assert counts == {"database": 1, "transaction_enter": 1, "transaction_exit": 1, "close": 1}
 
 
 def test_live_source_is_lazy_then_reused_once_across_expanded_resources(
@@ -979,10 +1188,11 @@ def test_human_projection_emits_every_unique_fact_once_in_result_order(captured_
 
 
 def test_human_projection_sanitizes_controls_from_every_dynamic_fact(captured_output: Any) -> None:
-    controls = "\x00\x07\t\n\x1b\x7f\x80\x9f"
+    ordinary_unicode = "café 雪"
+    hostile = "\x00\x07\t\n\x1b\x7f\x80\x9f\u2028\u2029\u202e\u2066\ud800"
 
     def unsafe(marker: str) -> str:
-        return f"{marker[:1]}{controls}{marker[1:]}"
+        return f"{marker[:1]}{hostile}{marker[1:]} {ordinary_unicode}"
 
     source = GraphIdentity(GraphNodeType.LIVE_INSTANCE, unsafe("live-kind"), unsafe("LIVE-NAME"))
     target = GraphIdentity(GraphNodeType.RESOURCE, unsafe("resource-kind"), unsafe("RESOURCE-NAME"))
@@ -1007,7 +1217,11 @@ def test_human_projection_sanitizes_controls_from_every_dynamic_fact(captured_ou
     render_graph_result(result)
     messages = [message for _, _, message in captured_output.lines]
     rendered = "".join(messages)
-    assert all(control not in rendered for control in controls)
+    assert all(
+        not any(unicodedata.category(character) in {"Cc", "Cf", "Cs", "Zl", "Zp"} for character in message)
+        for message in messages
+    )
+    assert ordinary_unicode in rendered
     for marker in (
         "focus-kind",
         "FOCUS-NAME",

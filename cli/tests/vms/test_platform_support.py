@@ -290,9 +290,11 @@ def test_doctor_lists_platforms_and_not_ready_sites(make_config, monkeypatch: py
     roster is the enablement authority, so this section never renders them as a
     misleading ``[ok]``."""
     from agentworks import doctor
+    from agentworks.resources.access import ResourceIdentity
 
     _support(monkeypatch, wsl2="Windows only", lima_local="limactl not installed")
-    registry = build_registry(make_config())
+    config = make_config()
+    registry = build_registry(config)
 
     group = doctor._check_vm_platforms(registry)
     by_name = {c.name: c for c in group.checks}
@@ -307,6 +309,14 @@ def test_doctor_lists_platforms_and_not_ready_sites(make_config, monkeypatch: py
     # roster as disabled instead).
     assert "azure-vm" not in by_name
     assert "proxmox" not in by_name
+    assert (
+        doctor.checks_for_resource(
+            config,
+            registry,
+            ResourceIdentity("vm-platform", "azure-vm"),
+        )
+        == ()
+    )
 
 
 def test_doctor_shows_enabled_plugin_platform_with_real_readiness(make_config, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -312,6 +312,7 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("secret.verify", "names"): "secrets",
     # Resource inventory and graph/edit selectors.
     ("resource.list", "kind"): "resource_kinds",
+    ("resource.show", "ref"): "resource_refs",
     ("resource.edit", "ref"): "resource_refs",
     ("graph.show", "focus"): "resource_refs",
     # `resource explain` takes KIND or KIND/NAME, and completes from
