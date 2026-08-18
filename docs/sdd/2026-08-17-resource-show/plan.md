@@ -1,6 +1,6 @@
 # Resource Show: Implementation Plan
 
-- Status: Reopened after operator scope correction
+- Status: Complete
 - Date: 2026-08-18
 - Requirements: `frd.md`
 - Architecture: `hla.md`
@@ -141,13 +141,21 @@ remaining Critical or Important issue.
 - [x] Run `uv run pytest tests/ -m 'not integration'`, `uv run ruff check .`,
       `uv run ruff format --check .`, and `uv run mypy agentworks/ tests/` from `cli/`.
 - [x] Run repository file lint, locked-SDD, Rulesync drift, and committed-diff guards.
-- [ ] Exercise real local human and JSON output for declarable, capability, disabled/not-ready,
+- [x] Exercise real local human and JSON output for declarable, capability, disabled/not-ready,
       relationship/live-use, diagnostics, malformed, and unknown cases without an external backend.
-- [ ] Record exact evidence, restore `locked.md` only after the revised artifacts and implementation
+- [x] Record exact evidence, restore `locked.md` only after the revised artifacts and implementation
       are final, commit with the required session trailer, push, and update the draft PR.
 
 Definition of done: the exact reviewed head is green, collateral-complete, and remains draft until
 the operator supplies merge intent.
+
+Final implementation checkpoint `bcd3781d` passed 7,216 non-integration tests, the focused test
+sets, Ruff lint and format, strict mypy, repository file lint, locked-SDD validation, Rulesync
+drift, and committed-diff guards. Equal-tier project and independent fresh-eyes reviews reported no
+remaining Critical or Important issue. Real isolated-HOME CLI acceptance passed for list, graph,
+doctor, relationship, live-use, diagnostic, declaration, failure, secret-safety, and terminal-safety
+parity without touching provider or operator state. The published integration report found no
+product issue or blocker, and every forge CI job passed.
 
 ## Coordination and escalation
 

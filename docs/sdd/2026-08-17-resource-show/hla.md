@@ -1,6 +1,6 @@
 # Resource Show: High-Level Architecture
 
-- Status: Revised after operator review; implementation in progress
+- Status: Complete
 - Date: 2026-08-17
 - Implements: `frd.md`
 - Code basis: `origin/main` at `217930fd`
