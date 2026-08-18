@@ -703,7 +703,7 @@ destination is the ordinary noun/verb grammar: default index, `list`, and single
       positional counting in every generated backend. Add ordered static prerequisites,
       virtual-machine, and Tailscale concepts that point to command-owned live facts without loading
       operator state during guide rendering.
-- [ ] Run focused guide/completion/package tests, the full non-integration suite, Ruff, formatting,
+- [x] Run focused guide/completion/package tests, the full non-integration suite, Ruff, formatting,
       mypy, Rulesync drift, locked-SDD, and file lint. Complete exact-head project, cold,
       integration, and saga re-reviews before returning the PR ready.
 
@@ -726,7 +726,7 @@ one group-owned mode option applies to the index and `show`, while `list` remain
       the ordinary Typer context, and align CLI examples and structural completion coverage.
 - [x] Correct the Tailscale concept to distinguish assigning a separately obtained auth key from
       creating or rotating one, and state the different-tailnet access impact plus refusal path.
-- [ ] Re-run focused/full/static gates and exact-head project, cold, integration, complexity, and
+- [x] Re-run focused/full/static gates and exact-head project, cold, integration, complexity, and
       saga reviews before completing the delivery record.
 
 The operator's 2026-08-18 manifesto ruling extends the same bounded composition model rather than
@@ -741,7 +741,7 @@ document, with its GitHub URL retained only as a source link.
 - [x] Vendor the exact manifesto bytes beside the README in wheels and source distributions, retain
       the verified editable fallback, and have `concept-manifesto` import the complete canonical
       document with one heading offset. Add only structural packaging/import coverage.
-- [ ] Re-run focused/full/static gates and exact-head project, cold, integration, complexity, and
+- [x] Re-run focused/full/static gates and exact-head project, cold, integration, complexity, and
       saga reviews before completing the delivery record.
 
 ## Phase 5: representative acceptance and closeout
