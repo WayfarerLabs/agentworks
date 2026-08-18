@@ -144,8 +144,12 @@ def render_agent_listing(listing: AgentListing, *, names_only: bool = False) -> 
     """Render agent list facts with the shared table formatter.
 
     Emits a trailing legend line for the ``*`` marker (see below) only when
-    at least one row actually carries one, so a listing with no implicit
-    grants stays free of an unexplained line.
+    a rendered row actually shows one. The GRANTS cell is truncated to
+    ``MAX_GRANTS_DISPLAY`` before it enters the table (rather than relying
+    on the table's own cap to do it), and the legend condition is read off
+    those same rendered lines, never off the pre-truncation grant data: a
+    marker on a late workspace in a long list can fall outside the cap, and
+    when it does, the legend must not print either.
     """
     agents = listing.agents
 
@@ -160,7 +164,6 @@ def render_agent_listing(listing: AgentListing, *, names_only: bool = False) -> 
 
     headers = ["NAME", "VM", "TEMPLATE", "WORKSPACE GRANTS"]
     rows: list[tuple[str, str, str, str]] = []
-    has_implicit_marker = False
     for agent in agents:
         name = output.truncate(agent.name, _NAME_CELL_WIDTH)
         if agent.grant_all:
@@ -168,19 +171,26 @@ def render_agent_listing(listing: AgentListing, *, names_only: bool = False) -> 
         elif not agent.grants:
             grants = "(none)"
         else:
-            parts = []
-            for grant in agent.grants:
-                # Only a PURELY implicit grant gets the marker; a grant that
-                # is also explicit already reads as intentional.
-                is_implicit_only = grant.grant_type == "implicit"
-                has_implicit_marker = has_implicit_marker or is_implicit_only
-                parts.append(f"{grant.workspace_name}{'*' if is_implicit_only else ''}")
-            grants = ", ".join(parts)
+            # Only a PURELY implicit grant gets the marker; a grant that is
+            # also explicit already reads as intentional.
+            parts = [
+                f"{grant.workspace_name}{'*' if grant.grant_type == 'implicit' else ''}" for grant in agent.grants
+            ]
+            grants = output.truncate(", ".join(parts), MAX_GRANTS_DISPLAY)
         rows.append((name, agent.vm_name, agent.template or "-", grants))
 
-    for line in output.render_table(headers, rows, max_col_width=MAX_GRANTS_DISPLAY):
+    # render_table takes one scalar cap for every column. It must cover the
+    # largest per-column cap this view actually needs (NAME's
+    # _NAME_CELL_WIDTH and GRANTS' MAX_GRANTS_DISPLAY, both already applied
+    # above), or it would re-truncate an already-truncated cell below its
+    # intended width.
+    table_cap = max(_NAME_CELL_WIDTH, MAX_GRANTS_DISPLAY)
+    lines = output.render_table(headers, rows, max_col_width=table_cap)
+    for line in lines:
         output.info(line)
-    if has_implicit_marker:
+
+    data_lines = lines[2:]  # header, rule, then one line per agent
+    if any("*" in line for line in data_lines):
         output.info("* granted implicitly")
 
 
