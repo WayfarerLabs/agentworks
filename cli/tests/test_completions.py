@@ -243,7 +243,10 @@ printf '%s\\n' "${{COMPREPLY[@]}}"
             assert complete(["agw", "guide", option, "show", expected_topics[0], "--"]) == ["--help"]
         assert complete(["agw", "guide", "show", expected_topics[0], ""]) == []
 
-    @pytest.mark.skipif(shutil.which("zsh") is None, reason="Zsh is not installed")
+    @pytest.mark.skipif(
+        os.name != "posix" or shutil.which("zsh") is None,
+        reason="Zsh PTY completion requires a POSIX host with Zsh installed",
+    )
     def test_generated_zsh_guide_completion_dispatches_through_global_mode(self, tmp_path: Path) -> None:
         import pty
         import select
