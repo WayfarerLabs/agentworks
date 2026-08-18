@@ -271,6 +271,10 @@ def _evidence_fence(content: str) -> str:
 
     A changelog line that is itself a fence marker (three or more backticks) would otherwise close
     our wrapping fence early and let the remainder render as ordinary Markdown instead of inert text.
+
+    The same fence-widening algorithm is reimplemented on bytes in
+    scripts/generate-agentworks-package.py's `_longest_backtick_run` for the zero-dependency
+    generator script; a correction here likely applies there too.
     """
     longest = max((len(run) for run in _BACKTICK_RUN_RE.findall(content)), default=0)
     return "`" * max(3, longest + 1)

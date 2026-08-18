@@ -50,7 +50,8 @@ def _render_index(catalog: GuideCatalog, mode: GuideMode, package_root: Traversa
     verb = "is" if omitted == 1 else "are"
     sections.append(
         f"{omitted} other {noun} {verb} available. Run `agw guide list` to see every topic name, "
-        "or address one exact packaged release directly as `concept-release-notes/vMAJOR-MINOR-PATCH`."
+        "or run `agw guide show concept-release-notes/vMAJOR-MINOR-PATCH` for one exact packaged "
+        "release."
     )
     return sanitize_terminal_output("\n\n".join(sections) + "\n")
 
