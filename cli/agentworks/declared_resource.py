@@ -131,11 +131,6 @@ class EnvelopeMetadata(AgwModel):
     RFC 3339 timestamp. Recorded and validated; nothing acts on it yet."""
 
 
-#: The metadata keys a manifest document may carry, derived from the base
-#: that declares them.
-METADATA_FIELDS: Final = frozenset(EnvelopeMetadata.model_fields)
-
-
 class DeclaredResource(EnvelopeMetadata):
     """Common metadata every declared resource carries. Concrete resource
     rows inherit this and add only their kind-specific fields.
@@ -268,6 +263,15 @@ class DeclaredResource(EnvelopeMetadata):
         (``VMSiteDecl``, ``GitCredentialConfig``, ``SessionTemplate``)
         override it.
         """
+
+
+#: The metadata keys a manifest document may carry, derived from the base
+#: that declares them.
+METADATA_FIELDS: Final = frozenset(EnvelopeMetadata.model_fields)
+
+#: The fields carried only for framework bookkeeping, derived from the
+#: complete declared-resource base after removing operator metadata.
+FRAMEWORK_FIELDS: Final = frozenset(DeclaredResource.model_fields) - METADATA_FIELDS
 
 
 def replace_fields(row: Any, **updates: Any) -> Any:

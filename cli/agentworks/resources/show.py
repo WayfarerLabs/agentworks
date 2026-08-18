@@ -10,19 +10,18 @@ represented by their loaded Pydantic model.
 from __future__ import annotations
 
 import math
-import unicodedata
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, assert_never
 
 import yaml
 
 from agentworks import output
-from agentworks.declared_resource import METADATA_FIELDS, DeclaredResource, EnvelopeMetadata
+from agentworks.declared_resource import FRAMEWORK_FIELDS, METADATA_FIELDS, DeclaredResource, EnvelopeMetadata
 from agentworks.doctor import HealthCheck, checks_for_resource, health_check_data
 from agentworks.machine_output import JsonObject, JsonValue, project_origin
 from agentworks.manifests.envelope import API_VERSION
 from agentworks.resources.access import ResourceIdentity, resolve_resource
-from agentworks.resources.graph import Enablement
+from agentworks.resources.graph import Enablement, Readiness
 from agentworks.resources.graph_query import (
     DatabaseLiveSource,
     FocusedGraphFacts,
@@ -32,25 +31,12 @@ from agentworks.resources.graph_query import (
     instance_ref_data,
 )
 from agentworks.resources.inspect import ResourceSummary, summarize_resource
-from agentworks.resources.render import format_origin_line
-from agentworks.terminal import sanitize_terminal_output
+from agentworks.resources.render import format_origin_line, sanitize_fact_line
 
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.resources.kind import InstanceRef
     from agentworks.resources.registry import Registry
-
-
-_UNSAFE_LINE_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
-
-
-@dataclass(frozen=True, slots=True)
-class ResourceReadiness:
-    """The stored readiness verdict for one enabled registry row."""
-
-    is_ready: bool
-    is_available: bool
-    reason: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +54,7 @@ class ResourceShow:
     summary: ResourceSummary
     category: Literal["declarable", "capability"]
     enablement: Enablement
-    readiness: ResourceReadiness | None
+    readiness: Readiness | None
     relationships: FocusedRelationships
     used_by: tuple[InstanceRef, ...] | None
     diagnostics: tuple[HealthCheck, ...]
@@ -76,7 +62,11 @@ class ResourceShow:
 
 
 def _json_value(value: Any) -> JsonValue:
-    """Validate Pydantic JSON-mode output against the closed JSON v1 carrier."""
+    """Validate declared-model output at the closed JSON v1 carrier boundary.
+
+    Plugins may contribute declared resource models, so their Pydantic JSON-mode
+    output is not an interior first-party value and must not be coerced.
+    """
     if value is None or isinstance(value, str | bool | int):
         return value
     if isinstance(value, float):
@@ -94,8 +84,7 @@ def _json_value(value: Any) -> JsonValue:
 
 def project_declaration(kind: str, resource: DeclaredResource) -> JsonObject:
     """Reconstruct one normalized manifest from a loaded declarable row."""
-    framework_fields = set(DeclaredResource.model_fields) - METADATA_FIELDS
-    declared_fields = set(type(resource).model_fields) - framework_fields
+    declared_fields = set(type(resource).model_fields) - FRAMEWORK_FIELDS
     dumped = resource.model_dump(mode="json", include=declared_fields, exclude_none=True)
     json_dumped = _json_value(dumped)
     if not isinstance(json_dumped, dict):
@@ -105,7 +94,7 @@ def project_declaration(kind: str, resource: DeclaredResource) -> JsonObject:
     spec: JsonObject = {
         name: json_dumped[name]
         for name in type(resource).model_fields
-        if name not in METADATA_FIELDS and name not in framework_fields and name in json_dumped
+        if name not in METADATA_FIELDS and name not in FRAMEWORK_FIELDS and name in json_dumped
     }
     return {
         "apiVersion": API_VERSION,
@@ -140,29 +129,13 @@ def show_resource(
         assert_never(handler.category)
 
     enablement = registry.graph.enablement_of(identity.kind, identity.name)
-    readiness: ResourceReadiness | None = None
+    readiness: Readiness | None = None
     if enablement is Enablement.enabled:
-        stored = registry.graph.readiness_of(identity.kind, identity.name)
-        readiness = ResourceReadiness(
-            is_ready=stored.is_ready,
-            is_available=stored.is_available,
-            reason=stored.reason,
-        )
+        readiness = registry.graph.readiness_of(identity.kind, identity.name)
 
     focused: FocusedGraphFacts = focused_graph_facts(registry, identity, live_source)
     summary = summarize_resource(registry, identity, focused.used_by)
     diagnostics = checks_for_resource(config, registry, identity)
-
-    if (summary.kind, summary.name) != (focused.focus.kind, focused.focus.name):
-        raise AssertionError("focused graph identity diverged from the resource summary")
-    if summary.reference_count != len(focused.dependents):
-        raise AssertionError("focused dependents diverged from the resource summary")
-    if summary.used_by_count != (None if focused.used_by is None else len(focused.used_by)):
-        raise AssertionError("focused live usage diverged from the resource summary")
-    if summary.disabled != (enablement is Enablement.disabled):
-        raise AssertionError("resource enablement diverged from the resource summary")
-    if summary.not_ready_reason != (None if readiness is None else readiness.reason):
-        raise AssertionError("resource readiness diverged from the resource summary")
 
     return ResourceShow(
         summary=summary,
@@ -209,19 +182,12 @@ def resource_show_data(shown: ResourceShow) -> JsonObject:
     }
 
 
-def _line_safe(value: str) -> str:
-    sanitized = sanitize_terminal_output(value)
-    return "".join(
-        character for character in sanitized if unicodedata.category(character) not in _UNSAFE_LINE_CATEGORIES
-    )
-
-
 def _human_scalar(value: str | bool | None) -> str:
     if value is None:
         return "null"
     if isinstance(value, bool):
         return "true" if value else "false"
-    return _line_safe(value)
+    return sanitize_fact_line(value)
 
 
 def _render_edge(edge: GraphEdge) -> None:
@@ -229,9 +195,9 @@ def _render_edge(edge: GraphEdge) -> None:
     target = f"{edge.target.kind}/{edge.target.name}"
     declared_by = "null" if edge.declared_by is None else f"{edge.declared_by.kind}/{edge.declared_by.name}"
     output.info(
-        f"{_line_safe(source)} -> {_line_safe(target)} "
-        f"[{_line_safe(edge.relationship.value)}; usage={_human_scalar(edge.usage)}; "
-        f"declared_by={_line_safe(declared_by)}]"
+        f"{sanitize_fact_line(source)} -> {sanitize_fact_line(target)} "
+        f"[{sanitize_fact_line(edge.relationship.value)}; usage={_human_scalar(edge.usage)}; "
+        f"declared_by={sanitize_fact_line(declared_by)}]"
     )
 
 
@@ -246,16 +212,16 @@ def _render_edges(label: str, edges: tuple[GraphEdge, ...]) -> None:
 
 def render_resource_show(shown: ResourceShow) -> None:
     """Render every fact without allowing row text to create sibling lines."""
-    output.info(f"Resource: {_line_safe(shown.summary.kind)}/{_line_safe(shown.summary.name)}")
-    output.info(f"Category: {_line_safe(shown.category)}")
-    output.info(f"Description: {_line_safe(shown.summary.description)}")
-    output.info(f"Origin: {_line_safe(format_origin_line(shown.summary.origin))}")
+    output.info(f"Resource: {sanitize_fact_line(shown.summary.kind)}/{sanitize_fact_line(shown.summary.name)}")
+    output.info(f"Category: {sanitize_fact_line(shown.category)}")
+    output.info(f"Description: {sanitize_fact_line(shown.summary.description)}")
+    output.info(f"Origin: {sanitize_fact_line(format_origin_line(shown.summary.origin))}")
     output.info(f"Reference count: {shown.summary.reference_count}")
     used_by_count = None if shown.summary.used_by_count is None else str(shown.summary.used_by_count)
     output.info(f"Used-by count: {_human_scalar(used_by_count)}")
     output.info(f"Not-ready reason: {_human_scalar(shown.summary.not_ready_reason)}")
     output.info(f"Disabled: {_human_scalar(shown.summary.disabled)}")
-    output.info(f"Enablement: {_line_safe(shown.enablement.value)}")
+    output.info(f"Enablement: {sanitize_fact_line(shown.enablement.value)}")
     if shown.readiness is None:
         output.info("Readiness: null")
     else:
@@ -278,14 +244,14 @@ def render_resource_show(shown: ResourceShow) -> None:
             output.info("none")
         else:
             for ref in shown.used_by:
-                output.info(f"{_line_safe(ref.instance_kind)}/{_line_safe(ref.instance_name)}")
+                output.info(f"{sanitize_fact_line(ref.instance_kind)}/{sanitize_fact_line(ref.instance_name)}")
 
     output.info("Diagnostics:")
     with output.section():
         if not shown.diagnostics:
             output.info("none")
         for check in shown.diagnostics:
-            output.info(f"{_line_safe(check.status.value)}: {_line_safe(check.name)}")
+            output.info(f"{sanitize_fact_line(check.status.value)}: {sanitize_fact_line(check.name)}")
             with output.section():
                 output.info(f"message: {_human_scalar(check.message)}")
                 output.info(f"hint: {_human_scalar(check.hint)}")
@@ -301,14 +267,12 @@ def render_resource_show(shown: ResourceShow) -> None:
         default_flow_style=False,
         sort_keys=False,
     )
-    safe_document = sanitize_terminal_output(document)
     with output.section():
-        for line in safe_document.rstrip("\n").split("\n"):
+        for line in document.rstrip("\n").split("\n"):
             output.info(line)
 
 
 __all__ = [
-    "ResourceReadiness",
     "ResourceShow",
     "FocusedRelationships",
     "project_declaration",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import unicodedata
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
@@ -150,6 +151,8 @@ def test_graph_edge_variants_enforce_their_closed_shapes() -> None:
 
     with pytest.raises(ValueError):
         GraphEdge(GraphEdgeType.DECLARED, live, resource, RefRelationship.USES, "x", None)
+    with pytest.raises(ValueError):
+        GraphEdge(GraphEdgeType.DECLARED, resource, resource, cast("RefRelationship", "unknown"), "x", None)
     with pytest.raises(ValueError):
         GraphEdge(GraphEdgeType.LIVE_USAGE, live, resource, RefRelationship.INHERITS, None, None)
 
@@ -307,7 +310,6 @@ def test_focused_slice_retains_only_incident_edges_duplicates_and_provenance(
         DatabaseLiveSource(tmp_path / "absent.db"),
     )
 
-    assert facts.focus == ResourceIdentity("node", "focus")
     assert [(edge.target.name, edge.relationship, edge.usage) for edge in facts.dependencies] == [
         ("a", RefRelationship.INHERITS, "base"),
         ("b", RefRelationship.USES, "same"),
@@ -317,6 +319,39 @@ def test_focused_slice_retains_only_incident_edges_duplicates_and_provenance(
     assert [(edge.source.name, edge.target.name) for edge in facts.dependents] == [("incoming", "focus")]
     assert all(edge.source.name != "neighbor" for edge in (*facts.dependencies, *facts.dependents))
     assert facts.used_by is None
+
+
+def test_focused_slice_includes_direct_edges_outside_traversal_policy(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from agentworks.resources import graph_query
+
+    references = [
+        _ref("focus", "runtime", relationship=RefRelationship.USES),
+        _ref("focus", "base", relationship=RefRelationship.INHERITS),
+    ]
+    registry = _registry(monkeypatch, ["focus", "runtime", "base"], references)
+    monkeypatch.setattr(graph_query, "GRAPH_TRAVERSED_RELATIONSHIPS", frozenset({RefRelationship.USES}))
+
+    facts = focused_graph_facts(
+        registry,
+        ResourceIdentity("node", "focus"),
+        DatabaseLiveSource(tmp_path / "focused-absent.db"),
+    )
+    traversed = show_graph(
+        registry,
+        ResourceIdentity("node", "focus"),
+        GraphDirection.DEPENDENCIES,
+        1,
+        DatabaseLiveSource(tmp_path / "traversal-absent.db"),
+    )
+
+    assert [(edge.target.name, edge.relationship) for edge in facts.dependencies] == [
+        ("base", RefRelationship.INHERITS),
+        ("runtime", RefRelationship.USES),
+    ]
+    assert {(node.name, node.distance) for node in traversed.nodes} == {("focus", 0), ("runtime", 1)}
 
 
 def test_focused_slice_keeps_edge_free_identity_and_live_support_distinction(
@@ -333,7 +368,6 @@ def test_focused_slice_keeps_edge_free_identity_and_live_support_distinction(
         ResourceIdentity("node", "focus"),
         DatabaseLiveSource(cast("Path", _UninspectedPath())),
     )
-    assert unsupported_facts.focus == ResourceIdentity("node", "focus")
     assert unsupported_facts.dependencies == unsupported_facts.dependents == ()
     assert unsupported_facts.used_by is None
 
@@ -1154,10 +1188,11 @@ def test_human_projection_emits_every_unique_fact_once_in_result_order(captured_
 
 
 def test_human_projection_sanitizes_controls_from_every_dynamic_fact(captured_output: Any) -> None:
-    controls = "\x00\x07\t\n\x1b\x7f\x80\x9f"
+    ordinary_unicode = "café 雪"
+    hostile = "\x00\x07\t\n\x1b\x7f\x80\x9f\u2028\u2029\u202e\u2066\ud800"
 
     def unsafe(marker: str) -> str:
-        return f"{marker[:1]}{controls}{marker[1:]}"
+        return f"{marker[:1]}{hostile}{marker[1:]} {ordinary_unicode}"
 
     source = GraphIdentity(GraphNodeType.LIVE_INSTANCE, unsafe("live-kind"), unsafe("LIVE-NAME"))
     target = GraphIdentity(GraphNodeType.RESOURCE, unsafe("resource-kind"), unsafe("RESOURCE-NAME"))
@@ -1182,7 +1217,11 @@ def test_human_projection_sanitizes_controls_from_every_dynamic_fact(captured_ou
     render_graph_result(result)
     messages = [message for _, _, message in captured_output.lines]
     rendered = "".join(messages)
-    assert all(control not in rendered for control in controls)
+    assert all(
+        not any(unicodedata.category(character) in {"Cc", "Cf", "Cs", "Zl", "Zp"} for character in message)
+        for message in messages
+    )
+    assert ordinary_unicode in rendered
     for marker in (
         "focus-kind",
         "FOCUS-NAME",

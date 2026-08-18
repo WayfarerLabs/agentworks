@@ -89,7 +89,7 @@ class GraphEdge:
             valid = (
                 self.source.node_type is GraphNodeType.RESOURCE
                 and self.target.node_type is GraphNodeType.RESOURCE
-                and self.relationship in GRAPH_TRAVERSED_RELATIONSHIPS
+                and isinstance(self.relationship, RefRelationship)
                 and self.usage is not None
             )
         else:
@@ -122,7 +122,6 @@ class GraphDistanceGroup:
 class FocusedGraphFacts:
     """Direct declared relationships and current live usage for one resource."""
 
-    focus: ResourceIdentity
     dependencies: tuple[GraphEdge, ...]
     dependents: tuple[GraphEdge, ...]
     used_by: tuple[InstanceRef, ...] | None
@@ -307,21 +306,13 @@ def focused_graph_facts(
 
         dependencies = tuple(
             sorted(
-                (
-                    declared_graph_edge(ref)
-                    for ref in registry.graph.edges_of(focus.kind, focus.name)
-                    if ref.relationship in GRAPH_TRAVERSED_RELATIONSHIPS
-                ),
+                (declared_graph_edge(ref) for ref in registry.graph.edges_of(focus.kind, focus.name)),
                 key=edge_fact_key,
             )
         )
         dependents = tuple(
             sorted(
-                (
-                    declared_graph_edge(ref)
-                    for ref in registry.graph.incoming_edges_of(focus.kind, focus.name)
-                    if ref.relationship in GRAPH_TRAVERSED_RELATIONSHIPS
-                ),
+                (declared_graph_edge(ref) for ref in registry.graph.incoming_edges_of(focus.kind, focus.name)),
                 key=edge_fact_key,
             )
         )
@@ -339,7 +330,7 @@ def focused_graph_facts(
                 )
             )
 
-    return FocusedGraphFacts(focus, dependencies, dependents, used_by)
+    return FocusedGraphFacts(dependencies, dependents, used_by)
 
 
 def show_graph(

@@ -1,9 +1,10 @@
 """Framework-layer rendering helpers for resource inspection views.
 
-``format_origin_line`` lives here (not in any kind module) because the
-resource inventory and kind-specific commands such as ``agw secret describe``
-render the same ``Origin`` shape; defining the renderer next to ``Origin``
-keeps the layer correct.
+``sanitize_fact_line`` is the shared boundary for dynamic scalar facts that
+must remain on one terminal-safe line. ``format_origin_line`` lives here (not
+in any kind module) because the resource inventory and kind-specific commands
+such as ``agw secret describe`` render the same ``Origin`` shape; defining the
+renderer next to ``Origin`` keeps the layer correct.
 
 The host paths these renderers embed are spelled by
 ``agentworks.path_rendering.format_host_path``, the repo-wide rule, which
@@ -15,13 +16,26 @@ loads every kind module. Import it from there rather than from here.
 
 from __future__ import annotations
 
+import unicodedata
 from typing import TYPE_CHECKING
 
 from agentworks.path_rendering import format_host_path
+from agentworks.terminal import sanitize_terminal_output
 
 if TYPE_CHECKING:
     from agentworks.origin import Origin
     from agentworks.resources.reference import ReferenceEntry
+
+
+_UNSAFE_LINE_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
+
+
+def sanitize_fact_line(value: str) -> str:
+    """Remove terminal controls and unsafe Unicode categories from a fact line."""
+    sanitized = sanitize_terminal_output(value)
+    return "".join(
+        character for character in sanitized if unicodedata.category(character) not in _UNSAFE_LINE_CATEGORIES
+    )
 
 
 def format_reference_entry(entry: ReferenceEntry) -> str:
@@ -73,4 +87,4 @@ def format_origin_line(origin: Origin | None) -> str:
     raise AssertionError(f"unhandled Origin variant: {origin.variant!r}")
 
 
-__all__ = ["format_origin_line"]
+__all__ = ["format_origin_line", "sanitize_fact_line"]

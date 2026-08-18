@@ -15,7 +15,7 @@ from pydantic import Field
 from agentworks.bootstrap import build_registry
 from agentworks.config import Config, load_config
 from agentworks.db import Database
-from agentworks.declared_resource import METADATA_FIELDS, DeclaredResource
+from agentworks.declared_resource import FRAMEWORK_FIELDS, METADATA_FIELDS, DeclaredResource
 from agentworks.machine_output import JsonObject
 from agentworks.origin import Origin
 from agentworks.resources import KIND_REGISTRY, DatabaseLiveSource, Registry
@@ -146,13 +146,14 @@ def test_declaration_projection_uses_shared_fields_and_pydantic_json_mode() -> N
         "labels": {"counts": [1, 2]},
     }
     assert "optional" not in spec
-    assert not ({"declared_at", "origin"} & set(metadata))
-    assert not ({"declared_at", "origin"} & set(spec))
+    assert not (FRAMEWORK_FIELDS & set(metadata))
+    assert not (FRAMEWORK_FIELDS & set(spec))
     json.dumps(declaration, allow_nan=False)
 
 
 def test_framework_field_split_is_complete() -> None:
-    assert set(DeclaredResource.model_fields) == METADATA_FIELDS | {"declared_at", "origin"}
+    assert not (METADATA_FIELDS & FRAMEWORK_FIELDS)
+    assert set(DeclaredResource.model_fields) == METADATA_FIELDS | FRAMEWORK_FIELDS
 
 
 def test_normalized_manifest_reconstructs_the_loaded_row() -> None:
@@ -178,8 +179,7 @@ def test_normalized_manifest_reconstructs_the_loaded_row() -> None:
         }
     )
 
-    framework = {"declared_at", "origin"}
-    assert reconstructed.model_dump(exclude=framework) == row.model_dump(exclude=framework)
+    assert reconstructed.model_dump(exclude=FRAMEWORK_FIELDS) == row.model_dump(exclude=FRAMEWORK_FIELDS)
 
 
 def test_service_projects_declarable_and_capability_rows(tmp_path: Path) -> None:
@@ -222,11 +222,12 @@ def test_show_summary_is_the_exact_matching_list_row(tmp_path: Path) -> None:
 
     assert shown.summary == list_row
     assert list(show_data.items())[:8] == list(list_row_data.items())
+    assert shown.summary.reference_count == len(shown.relationships.dependents)
     assert shown.used_by == ()
-    assert shown.summary.used_by_count == 0
+    assert shown.summary.used_by_count == len(shown.used_by)
 
 
-def test_service_does_not_traverse_resolve_secrets_or_run_provider_operations(
+def test_service_does_not_resolve_secrets_or_create_a_vm_platform(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -236,7 +237,7 @@ def test_service_does_not_traverse_resolve_secrets_or_run_provider_operations(
     config, registry = _request_context(tmp_path)
 
     def forbidden(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("resource show crossed an operation boundary")
+        pytest.fail("resource show invoked an instrumented operation")
 
     monkeypatch.setattr(resolve, "resolve_batch", forbidden)
     monkeypatch.setattr(orchestration, "resolve_for_command", forbidden)
@@ -266,9 +267,12 @@ def test_enabled_rows_retain_stored_readiness_facts(
     )
 
     assert shown.readiness is not None
+    assert shown.readiness is registry.graph.readiness_of("show-test", verdict)
     assert shown.readiness.is_ready is is_ready
     assert shown.readiness.is_available is is_available
     assert shown.readiness.reason is not None
+    assert shown.summary.disabled is False
+    assert shown.summary.not_ready_reason == shown.readiness.reason
     assert shown.diagnostics == ()
 
 
@@ -285,6 +289,8 @@ def test_disabled_row_projects_null_readiness(monkeypatch: pytest.MonkeyPatch) -
 
     assert shown.enablement.value == "disabled"
     assert shown.readiness is None
+    assert shown.summary.disabled is True
+    assert shown.summary.not_ready_reason is None
     assert isinstance(data, dict)
     assert data["readiness"] is None
 

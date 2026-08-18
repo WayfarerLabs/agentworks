@@ -22,12 +22,12 @@ from agentworks.machine_output import JsonObject
 from agentworks.origin import Origin
 from agentworks.output import Role
 from agentworks.resources.access import ResourceIdentity
-from agentworks.resources.graph import Enablement
+from agentworks.resources.graph import Enablement, Readiness
 from agentworks.resources.graph_query import GraphEdge, GraphEdgeType, GraphIdentity, GraphNodeType
 from agentworks.resources.inspect import ResourceSummary
 from agentworks.resources.kind import InstanceRef
 from agentworks.resources.reference import RefRelationship
-from agentworks.resources.show import FocusedRelationships, ResourceReadiness, ResourceShow, render_resource_show
+from agentworks.resources.show import FocusedRelationships, ResourceShow, render_resource_show
 from tests.conftest import CapturedOutput
 
 if TYPE_CHECKING:
@@ -47,7 +47,7 @@ def _shown(*, declaration: JsonObject | None = None) -> ResourceShow:
         ),
         category="declarable" if declaration is not None else "capability",
         enablement=Enablement.enabled,
-        readiness=ResourceReadiness(is_ready=False, is_available=True, reason="backend unavailable"),
+        readiness=Readiness.blocked("backend unavailable"),
         relationships=FocusedRelationships((), ()),
         used_by=(),
         diagnostics=(),
@@ -130,7 +130,7 @@ def test_human_renderer_neutralizes_scalar_lines_and_preserves_yaml_values(
         ),
         category="declarable",
         enablement=Enablement.enabled,
-        readiness=ResourceReadiness(False, True, combined),
+        readiness=Readiness.blocked(combined),
         relationships=FocusedRelationships((dependency,), ()),
         used_by=(InstanceRef(combined, combined),),
         diagnostics=(HealthCheck(combined, Status.WARN, combined, combined),),
