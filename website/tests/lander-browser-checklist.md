@@ -246,9 +246,29 @@ navigation race observed during local full-suite runs.
 Before commit, the responsive geometry witness passed 40 consecutive two-viewport iterations and the
 Phase 4M witness passed 30 consecutive real-Chromium iterations without a failure. After the
 failure-path mutations were added, the complete website suite passed 161 of 161 tests in 36.618
-seconds. Structural cleanup witnesses reject a return to `--dump-dom` and verify DevTools closure,
-owned-process termination, bounded readiness, kill fallback, primary-error precedence, and
-server-thread cleanup.
+seconds. Structural cleanup witnesses verify DevTools closure, owned-process termination, bounded
+readiness, kill fallback, primary-error precedence, and server-thread cleanup.
+
+#### Phase 4J completion
+
+- Date: 2026-08-17
+- Pre-fix source: `aba556d18640b224196661bc996298223cbdce03`
+- Corrected source: `a1712c4da357117262b81ed873d7040225f01959`
+- Failure evidence: PR #595 CI run `32097702176`, Website job `95592145030`
+- Outcome: PASS for the remaining Phase 4J probes
+
+PR #595 showed that Phase 4J still launched four separate `--dump-dom` browser processes after the
+earlier correction. Its description probe completed locally but timed out after 20 seconds in CI
+while waiting for Chrome to exit. Phase 4J now reads geometry and description results and captures
+screenshots through bounded DevTools sessions, then explicitly closes each connection, terminates or
+kills the owned process, and removes the isolated profile.
+
+Stress execution exposed two additional lifecycle races before commit: Chrome can briefly leave a
+child writing its profile after the parent exits, and `DevToolsActivePort` can exist before it has
+content or a published page target. Cleanup now gives profile writers a bounded quiescence window,
+and shared DevTools discovery waits for complete port and page-target publication. The formerly
+failing description probe passed 30 consecutive real-Chromium iterations after both corrections; the
+complete Phase 4J module passed 9 of 9 tests, including screenshots and reduced motion.
 
 ### Historical route-proof automated execution record
 
