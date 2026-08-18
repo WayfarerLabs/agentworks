@@ -136,9 +136,12 @@ off whenever bandwidth allows, on its own merits and its own schedule.
   notice, backup, and restore are table-stakes UX for the release that migrates every existing
   install, and the backup is also the 0.14-to-0.13 rollback path), and the pre-0.14
   test-consolidation child as a soft gate (the trim runs while the context is loaded, before the
-  repo draws post-release attention). The resource-CLI grammar break shares the window if the
-  operator blesses it: breaking surface changes belong in the same cushioned release. While `main`
-  holds unreleased breaking changes, urgent operator fixes ship from a `0.13.x` backport branch.
+  repo draws post-release attention). **Resolved as cut (operator ruling, 2026-08-17, in
+  `target-state.md`)**: the simplification pass's sweep absorbed the trim's estate and no longer
+  gates the release, so the soft gate resolves with it; the sweep continues on its own merits. The
+  resource-CLI grammar break shares the window if the operator blesses it: breaking surface changes
+  belong in the same cushioned release. While `main` holds unreleased breaking changes, urgent
+  operator fixes ship from a `0.13.x` backport branch.
 
   **Ruling (operator, 2026-08-12):** the grammar rewrite is no longer conditional. 0.14.0 does not
   ship until it lands, so it joins the cut as a hard gate. **Original sequence (operator,
@@ -156,6 +159,15 @@ off whenever bandwidth allows, on its own merits and its own schedule.
   release. The 0.14 breaking-truth items (S5, C3, C4, C7) run as their own dispatched task in
   parallel, since folding them into the grammar rewrite would grow an already massive effort
   (operator, 2026-08-13).
+
+  **Current release map (operator rulings, 2026-08-17, in `target-state.md`):** every gate above is
+  satisfied (the CLI grammar rewrite merged and locked with PR #491; breaking-truth, installer,
+  safer-migrations, and the README bootstrap closed earlier), and the simplification-pass gate is
+  removed as recorded above. What 0.14.0 still waits for: the grammar-native guide (PR #593, the
+  index/`list`/`show` surface with no compatibility alias), the issue #589 changelog repair executed
+  as a manual release-branch edit after the final merge, and the operator's personal edit pass over
+  guide content and website wording, which the operator holds and needs no gate since the operator
+  cuts the release.
 
 - **Later:** remaining waves map to releases as they prove out; no need to pin numbers now.
 
