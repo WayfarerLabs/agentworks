@@ -1,18 +1,29 @@
 ---
-description: Diagnose Agentworks failures from framed errors and narrow explicit checks.
+description: Narrow an Agentworks failure to configuration, readiness, state, or connectivity.
 index-order: 40
 ---
 
 # Troubleshooting
 
-Start with the framed error and current registry verdict. Use explicit, non-mutating checks to
-distinguish configuration, readiness, and connectivity failures. Record the named resource, typed
-error, and a redacted reproduction before changing state.
+Start with the framed error from the command that failed. It should identify the affected operation
+and provide a useful next step without exposing secrets.
 
-When workstation examination is inside the operator's instruction, run `agw doctor --output json`
-and use its checks to select a narrower verification surface. Doctor output is evidence, not
-authorization to install tools, edit configuration, start a VM, or apply another repair.
+Use `agw doctor` for a broad workstation, configuration, dependency, and database check. Then move
+to the smallest owning surface:
 
-Before a repair outside the current instruction, state its exact target, expected change, and how
-success will be checked. Ask before performing it. If declined, preserve the observed state and
-provide the read-only evidence and applicable command help.
+- `agw resource list --kind KIND --include-disabled` for enablement and readiness;
+- `agw resource explain KIND/NAME` for one capability's requirements;
+- `agw GROUP describe NAME` for recorded instance state;
+- `agw vm verify-connection NAME` for an explicit VM connectivity check; and
+- `agw GROUP COMMAND --help` for the current repair or retry options.
+
+Change one thing at a time and rerun the narrow check that motivated it. Preserve the original error
+and a redacted reproduction if the problem needs to be reported through
+`agw guide show concept-reporting-bugs`.
+
+<!-- agw:agent-only -->
+
+Summarize the evidence and propose the smallest relevant repair. Keep the proposal tied to the
+failure being investigated rather than treating diagnostics as a general setup checklist.
+
+<!-- /agw:agent-only -->

@@ -1,42 +1,44 @@
 ---
-description: Use Agentworks' Tailscale credential, routine SSH path, and explicit rekey workflow.
+description: Configure Agentworks' Tailscale access and move a VM between tailnets safely.
 index-order: 18
 ---
 
 # Tailscale networking
 
-Agentworks uses Tailscale as the routine network fabric for managed VMs and SSH as the control plane
-over each VM's tailnet address. Platform-native transport handles provisioning and explicit
-recovery; normal VM, workspace, agent, and session operations return to SSH over the tailnet.
+Agentworks uses Tailscale as the routine network path to managed VMs and SSH as the control plane
+over each VM's tailnet address. Platform-native access is limited to provisioning and explicit
+recovery. This guide does not try to explain Tailscale itself; use the official documentation for
+tailnet policy and key administration.
 
-For ordinary managed VMs, Agentworks recommends a reusable, non-ephemeral auth key. Agentworks
-imposes no key-type restriction and supports other choices, whose lifecycle, approval, and identity
-consequences belong to Tailscale. Review the
-[official Tailscale auth-key documentation](https://tailscale.com/docs/features/access-control/auth-keys)
-before choosing differently. Keep reusable keys in an appropriate secret store and scope their
-availability to the authorized operation.
+## Choose and store an auth key
 
-The default VM template names the `tailscale-auth-key` secret; another template may name a different
-secret. Agentworks resolves that name through the configured secret-source chain when an operation
-needs it, validates it for the line-oriented Tailscale boundary, and delivers it as sensitive input.
-It does not print the value or persist it in the Agentworks database or generated SSH configuration.
-Use `agw secret describe tailscale-auth-key` for a non-resolving source prediction. Resolve or
-verify the secret only when the operator's instruction covers that action.
+A reusable, non-ephemeral auth key is the recommended default for managed VMs. Agentworks imposes no
+key-type restriction, so another choice is valid when its Tailscale lifecycle fits the installation.
+Review the
+[official auth-key documentation](https://tailscale.com/docs/features/access-control/auth-keys)
+before choosing differently.
 
-`agw vm rekey NAME` assigns a separately obtained auth key, switches the VM to that key's tailnet,
-or recovers a VM whose ephemeral node expired. Creating or rotating the credential is a separate,
-external action that requires operator authorization. The command uses the platform-native recovery
-transport, logs out and rejoins Tailscale, records the new tailnet address, refreshes SSH
-configuration, and verifies Tailscale SSH. `--ignore-env` bypasses the environment mapping for the
-auth-key secret so the configured fallback or prompt source can supply the new value.
+The default VM template expects a secret named `tailscale-auth-key`. Another template may use a
+different name. Keep the value in an appropriate secret source and run
+`agw secret describe tailscale-auth-key` to inspect the predicted source without resolving it.
+Agentworks passes the resolved value only to the Tailscale operation that needs it; it does not
+store the value in its database or generated SSH configuration.
 
-Before rekeying to a different tailnet, account for the connectivity break: logging out of the
-current tailnet can leave the VM unreachable until sharing or other authorized access is
-established. If that disruption and access change are not authorized, stop before rekeying and use
-an auth key for a tailnet where the VM is already authorized and reachable.
+## Recover or move a VM's tailnet association
 
-When the separately obtained key joins a different tailnet, run
-`agw vm rekey NAME --wait-for-share`. After the VM joins, Agentworks pauses so the operator can
-follow Tailscale's [machine-sharing workflow](https://tailscale.com/kb/1084/sharing) to share that
-VM back before the command verifies connectivity. Sharing and its access policy remain
-operator-owned external actions; the command does not perform them.
+`agw vm rekey NAME` re-enrolls a VM with a separately obtained replacement auth key. Use it to
+recover a VM whose ephemeral node expired or move a VM to another tailnet as described below. The
+command does not create, rotate, or revoke the auth key. It uses the platform's recovery transport,
+records the new tailnet address, refreshes SSH configuration, and verifies Tailscale SSH.
+`--ignore-env` bypasses an environment-provided key so another configured secret source can supply
+the replacement.
+
+An advanced use case is moving a VM to another tailnet. This can be used in situations where you
+want the workloads to run on a different tailnet (e.g. for access to private infrastructure) yet you
+don't want to run your entire Agentworks system on that tailnet. In this case, `rekey` can be used
+after initial provisioning to move the VM to the other tailnet. The old connection is lost when the
+VM leaves its current tailnet, so first confirm the replacement key joins the intended destination
+and that the operator can share the machine to an appropriate user on the original tailnet. If
+either is unavailable, do not start the rekey. `agw vm rekey NAME --wait-for-share` pauses after the
+move so the operator can complete that sharing before Agentworks verifies connectivity. Consult
+Tailscale's [machine-sharing workflow](https://tailscale.com/kb/1084/sharing) for more information.

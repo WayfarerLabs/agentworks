@@ -1,31 +1,40 @@
 ---
-description: Choose a VM platform and site, then inspect their current readiness and managed VMs.
+description: Understand VM platforms and sites, inspect readiness, and work with managed VMs.
 index-order: 17
 ---
 
 # Virtual machines
 
-A `vm-platform` is a capability implementation: code that knows how to create and operate VMs on a
-backend such as Lima, WSL2, or a supported provider. A `vm-site` is a configured place to create
-VMs. Each site selects one platform and supplies that platform's placement and authentication
-settings. Operators and commands select sites; they do not configure platform capability rows
-directly.
+Agentworks separates the code that operates a VM backend from the configured places where VMs can be
+created.
 
-Use the config-free reference surfaces to understand the available shapes:
+## Platforms and sites
 
-- `agw resource explain vm-platform` lists the platform implementations shipped by this build.
-- `agw resource explain vm-platform/NAME` documents one platform's settings and plugin ownership.
-- `agw resource explain vm-site` documents the declarable site shape.
-- `agw resource sample vm-site` prints an inert site manifest to review or edit.
+A `vm-platform` is an implementation for a backend such as a local hypervisor or cloud provider. A
+`vm-site` selects one platform and supplies its placement and authentication settings. Commands
+create VMs at sites; they do not configure platform implementations directly.
 
-Definitions are not readiness. Inspect the two live registry dimensions separately with
-`agw resource list --kind vm-platform --include-disabled --output json` and
-`agw resource list --kind vm-site --include-disabled --output json`. Those rows expose current
-enablement and `not_ready_reason` facts; `agw doctor --output json` reports the corresponding host
-checks and reasons. A disabled or not-ready row is information, not authorization to enable a
-plugin, change credentials, or repair the workstation.
+See what this installation provides:
 
-Managed VMs are a different state layer. `agw vm list --output json` lists them, and
-`agw vm describe NAME --output json` owns one VM's site, power state, resources, and recorded
-details. Use `agw vm verify-connection NAME` only when an active connectivity check is in scope; it
-tests the canonical admin connection without starting the VM.
+```bash
+agw resource list --kind vm-platform --include-disabled
+agw resource list --kind vm-site --include-disabled
+```
+
+The output distinguishes ready choices from disabled or unavailable ones and explains why a choice
+is not ready when that information is available. Platform definitions and host readiness are
+different facts: use `agw resource explain vm-platform/NAME` for configuration and `agw doctor` for
+workstation checks.
+
+To add a site, begin with `agw resource sample vm-site`. Review or edit an existing operator-owned
+manifest with `agw resource edit vm-site/NAME`.
+
+## Managed VMs
+
+`agw vm list` shows VMs Agentworks already manages. `agw vm describe NAME` owns the detailed site,
+power, resource, and recorded-state view for one VM. Use `--output json` when another tool or agent
+needs structured facts.
+
+`agw vm verify-connection NAME` performs an active SSH check without starting the VM. Creating,
+starting, stopping, backing up, or rekeying a VM belongs to the corresponding `agw vm` command; use
+`agw vm --help` for the current surface.
