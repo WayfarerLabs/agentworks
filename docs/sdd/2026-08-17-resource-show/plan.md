@@ -78,13 +78,13 @@ only its no-overlap boundary and requires the new phases below.
 
 ## Phase 1: shared focused facts
 
-- [ ] Extract a one-row `ResourceSummary` builder and make `resource list` consume it without public
+- [x] Extract a one-row `ResourceSummary` builder and make `resource list` consume it without public
       output change.
-- [ ] Add direct declared dependency/dependent projection beside graph traversal, reusing canonical
+- [x] Add direct declared dependency/dependent projection beside graph traversal, reusing canonical
       graph identity, edge construction, and ordering.
-- [ ] Add lazy read-only focused live usage with the same optional kind hook and absent-database
+- [x] Add lazy read-only focused live usage with the same optional kind hook and absent-database
       semantics as graph/list inspection.
-- [ ] Prove list/show row parity, count/detail reconciliation, direct-only edges, ordering,
+- [x] Prove list/show row parity, count/detail reconciliation, direct-only edges, ordering,
       duplicates, inherited declarer provenance, supported/unsupported live use, and database
       lifecycle.
 
@@ -93,13 +93,13 @@ relationship and live-use detail, while list and graph retain their public behav
 
 ## Phase 2: reusable doctor checks
 
-- [ ] Extract structured per-row health-check builders from the VM-platform, VM-site,
+- [x] Extract structured per-row health-check builders from the VM-platform, VM-site,
       secret-backend, secret-source, secret, and applicable admin-template doctor paths.
-- [ ] Add `checks_for_resource` without running or filtering the complete doctor report.
-- [ ] Make bulk doctor groups consume the same builders and preserve existing group order,
+- [x] Add `checks_for_resource` without running or filtering the complete doctor report.
+- [x] Make bulk doctor groups consume the same builders and preserve existing group order,
       empty/degraded behavior, counts, status, message, and hint output.
-- [ ] Prove focused/bulk check parity and exclusion of global/cross-row checks.
-- [ ] Prove no prompt, secret resolution, authenticated runup, remote provider mutation, or
+- [x] Prove focused/bulk check parity and exclusion of global/cross-row checks.
+- [x] Prove no prompt, secret resolution, authenticated runup, remote provider mutation, or
       unrelated system sweep occurs.
 
 Definition of done: every health fact doctor attributes to the selected row is available to show
@@ -107,15 +107,15 @@ from the same structured producer.
 
 ## Phase 3: complete show composition and projections
 
-- [ ] Expand `ResourceShow` and JSON v1 with exact list-row fields, structural state axes, direct
+- [x] Expand `ResourceShow` and JSON v1 with exact list-row fields, structural state axes, direct
       relationships, live usage, diagnostics, and normalized declaration.
-- [ ] Update the human renderer with safe condition, diagnostics, relationship, live-use, and
+- [x] Update the human renderer with safe condition, diagnostics, relationship, live-use, and
       declaration sections.
-- [ ] Change the CLI to ordinary human loader warnings, clean JSON warnings, the read-only live
+- [x] Change the CLI to ordinary human loader warnings, clean JSON warnings, the read-only live
       source, focused diagnostics, and completed-record rendering.
-- [ ] Preserve the existing parser/resolver, `resource.show` identifier, completion source,
+- [x] Preserve the existing parser/resolver, `resource.show` identifier, completion source,
       declarable/capability projection, disabled/readiness truth, and Unicode/terminal safety.
-- [ ] Extend structural service, renderer, machine-output, CLI, help, completion, typed-error, and
+- [x] Extend structural service, renderer, machine-output, CLI, help, completion, typed-error, and
       no-prose-policing coverage.
 
 Definition of done: human and JSON project the same complete focused superset and all compact facts
@@ -123,12 +123,12 @@ reconcile with their detailed sections.
 
 ## Phase 4: collateral and review
 
-- [ ] Update command reference, CLI overview, installed management guide, resource guide, and 0.14
+- [x] Update command reference, CLI overview, installed management guide, resource guide, and 0.14
       upgrade map from “ownership without overlap” to the focused-superset model.
-- [ ] Sweep active code, help, tests, and docs for stale no-database/no-graph/no-diagnostic claims.
-- [ ] Run the artifact checkpoint review against the revised FRD/HLA before implementation is
+- [x] Sweep active code, help, tests, and docs for stale no-database/no-graph/no-diagnostic claims.
+- [x] Run the artifact checkpoint review against the revised FRD/HLA before implementation is
       declared final.
-- [ ] Run equal-or-higher-tier project review and independent fresh-eyes review on the exact revised
+- [x] Run equal-or-higher-tier project review and independent fresh-eyes review on the exact revised
       implementation; fix every clear material finding and rerun affected gates.
 
 Definition of done: active teaching matches the operator ruling and independent review finds no
@@ -136,11 +136,11 @@ remaining Critical or Important issue.
 
 ## Phase 5: verification and delivery
 
-- [ ] Run focused summary, graph, doctor, show, manifest, machine-output, completion, explain, edit,
+- [x] Run focused summary, graph, doctor, show, manifest, machine-output, completion, explain, edit,
       and secret-describe tests.
-- [ ] Run `uv run pytest tests/ -m 'not integration'`, `uv run ruff check .`,
+- [x] Run `uv run pytest tests/ -m 'not integration'`, `uv run ruff check .`,
       `uv run ruff format --check .`, and `uv run mypy agentworks/ tests/` from `cli/`.
-- [ ] Run repository file lint, locked-SDD, Rulesync drift, and committed-diff guards.
+- [x] Run repository file lint, locked-SDD, Rulesync drift, and committed-diff guards.
 - [ ] Exercise real local human and JSON output for declarable, capability, disabled/not-ready,
       relationship/live-use, diagnostics, malformed, and unknown cases without an external backend.
 - [ ] Record exact evidence, restore `locked.md` only after the revised artifacts and implementation
