@@ -208,12 +208,11 @@ completion.
 - `agw guide show TOPIC` accepts exactly one topic and renders it.
 
 Invoking `agw guide` without a subcommand renders the index through the group callback. The callback
-retains `--agent/--human` for the bootstrap's `agw guide --agent` form. That group-level option is
-valid only when no subcommand follows. `agw guide --agent show TOPIC`, `agw guide --human list`, and
-equivalent group-option/subcommand combinations fail with recovery guidance: move the mode option to
-`show`, or omit it for mode-independent `list`. `show` exposes its own `--agent/--human` option. The
-unreleased direct/variadic `agw guide TOPIC...` form and old guide-specific `--names-only` option
-are removed without aliases.
+retains `--agent/--human` for the bootstrap's `agw guide --agent` form and owns that option for the
+whole group. `agw guide --agent show TOPIC` renders the selected topic in agent mode. The same
+option before `list` is accepted but does not alter its stable, mode-independent output. `show` does
+not duplicate the option after its verb. The unreleased direct/variadic `agw guide TOPIC...` form
+and old guide-specific `--names-only` option are removed without aliases.
 
 Typer's ordinary command tree completes `list` and `show`. Only `show`'s single `TOPIC` argument
 uses the existing dynamic topic-name source, which calls `agw guide list`. Catalog discovery and
@@ -223,7 +222,7 @@ guide-specific positional parser in the completion generators.
 
 Mode selection retains this precedence:
 
-1. explicit `--agent` or `--human`;
+1. the explicit group-level `--agent` or `--human` option;
 2. the exact registered `CLAUDECODE=1` execution signature; and
 3. human for TTY stdout, otherwise agent.
 

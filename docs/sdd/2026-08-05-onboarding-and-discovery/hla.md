@@ -48,10 +48,11 @@ these paths loads configuration, registry, database, network, or managed resourc
 
 The guide is a normal Typer command group. Its callback renders the index only when no subcommand is
 selected. `list` emits the stable name stream. `show` accepts exactly one topic and renders that
-shell or exact release section. The group-level mode option belongs only to the no-subcommand index;
-using it before `list` or `show` is rejected with recovery guidance, while `show` owns its local
-mode option. This keeps command completion structural: Typer owns the `list` and `show` verbs, while
-only `show`'s topic argument uses dynamic topic completion.
+shell or exact release section. One group-level `--agent/--human` option selects rendering mode for
+both the no-subcommand index and `show`; it may precede either subcommand and has no effect on
+mode-independent `list` output. `show` does not duplicate that option. This keeps command completion
+structural: Typer owns the group option plus the `list` and `show` verbs, while only `show`'s topic
+argument uses dynamic topic completion.
 
 ## Shell catalog
 

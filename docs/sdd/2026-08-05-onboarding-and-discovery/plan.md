@@ -712,6 +712,23 @@ grammar; topic rendering accepts one topic; completion uses the ordinary command
 value or guide positional-parser machinery remains; and the saga target state records the same
 destination before merge.
 
+The exact-head completion review found that the checked local-mode/rejection design above forced a
+guide-specific exception into otherwise ordinary group completion. The operator's standing
+simplification direction resolves that intermediate design without rewriting its completed record:
+one group-owned mode option applies to the index and `show`, while `list` remains mode-independent.
+
+## Phase 4 correction: one guide mode owner
+
+- [x] Amend the active FRD, HLA, and guide LLD so `--agent/--human` is one group-level option used
+      by the no-subcommand index and `show`. Accept it before `list` without changing list output;
+      do not duplicate it on `show` or encode a terminal group-option exception in completion.
+- [ ] Remove `show`'s local mode option and callback rejection, pass the group-selected mode through
+      the ordinary Typer context, and align CLI examples and structural completion coverage.
+- [ ] Correct the Tailscale concept to distinguish assigning a separately obtained auth key from
+      creating or rotating one, and state the different-tailnet access impact plus refusal path.
+- [ ] Re-run focused/full/static gates and exact-head project, cold, integration, complexity, and
+      saga reviews before completing the delivery record.
+
 ## Phase 5: representative acceptance and closeout
 
 - [ ] Run one provider-backed journey from an exact reviewed candidate wheel through the no-topic

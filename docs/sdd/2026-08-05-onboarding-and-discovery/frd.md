@@ -182,8 +182,8 @@ configuration changes only if implementation introduces a real setting, which is
    topics without configuration or state loading. A duplicate or malformed shell atomically prevents
    index, list, show, and completion from returning a partial catalog. The index's omitted count
    includes only ordinary concept shells not selected for the index, never generated historical
-   release topics. Group-level mode flags are valid only for the no-subcommand index; `show` owns
-   its mode option and mode-independent `list` owns none.
+   release topics. One group-level mode flag selects human or agent rendering for the index and
+   `show`; it does not alter mode-independent `list` output.
 4. Inline Markdown renders in both modes. Agent-only content renders only in agent mode, and a
    hidden fence cannot trigger an import. General assistant posture lives in
    `concept-assistant-agent`; ordinary information remains human-visible.
