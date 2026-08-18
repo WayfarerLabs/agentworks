@@ -220,7 +220,7 @@ only the destination.
 
 - Core skill: 4,848 source bytes, 82.5% below the former single-file core.
 - Skill-local package: 10,682 source bytes, 61.4% below the former single-file core.
-- Complete `.rulesync` source: 196,464 to 179,625 bytes (-16,839; 8.6%).
+- Complete `.rulesync` source: 196,464 to 179,693 bytes (-16,771; 8.5%).
 - External numbered `agentic-dev-process` references remain at zero.
 - The correction inventory adds AUTH-12, AUTH-13, SHIP-22, SHIP-23, and SPEC-09; existing rows now
   state the restored saga, handoff, and review-lane contracts completely.
