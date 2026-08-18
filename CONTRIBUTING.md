@@ -66,6 +66,10 @@ directory.
 All commit messages follow the [Conventional Commits](https://www.conventionalcommits.org/)
 specification.
 
+Release Please parses `BREAKING CHANGE:` footers as trailers. Keep each footer to one paragraph with
+no blank lines or indented code blocks. No continuation line may begin with a trailer-like `token:`;
+keep before/after examples inline instead.
+
 ## Code Quality
 
 - **Python**: ruff (linting + formatting), mypy (type checking), pytest
