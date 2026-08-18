@@ -17,6 +17,8 @@ import urllib.request
 from pathlib import Path
 from typing import Callable
 
+DEVTOOLS_STARTUP_TIMEOUT = 20.0
+
 
 class DevToolsConnection:
     """Minimal bounded WebSocket client for one Chromium page target."""
@@ -130,8 +132,8 @@ class DevToolsConnection:
 def devtools_target(profile_path: Path, process: subprocess.Popen[bytes]) -> str:
     port_path = profile_path / "DevToolsActivePort"
     last_error: BaseException | None = None
-    deadline = time.monotonic() + 5
-    for _ in range(200):
+    deadline = time.monotonic() + DEVTOOLS_STARTUP_TIMEOUT
+    while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break

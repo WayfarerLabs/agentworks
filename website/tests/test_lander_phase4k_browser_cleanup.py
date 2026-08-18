@@ -188,7 +188,25 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
             ):
                 chromium_support.devtools_target(Path(directory), process)
 
-        self.assertLessEqual(elapsed, 5)
+        self.assertLessEqual(elapsed, chromium_support.DEVTOOLS_STARTUP_TIMEOUT)
+
+    def test_devtools_target_allows_the_full_slow_startup_window(self) -> None:
+        process = _FakeProcess()
+        elapsed = 0.0
+
+        def advance(seconds: float) -> None:
+            nonlocal elapsed
+            elapsed += seconds
+
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                mock.patch.object(chromium_support.time, "monotonic", side_effect=lambda: elapsed),
+                mock.patch.object(chromium_support.time, "sleep", side_effect=advance),
+                self.assertRaises(AssertionError),
+            ):
+                chromium_support.devtools_target(Path(directory), process)
+
+        self.assertEqual(elapsed, chromium_support.DEVTOOLS_STARTUP_TIMEOUT)
 
     def test_json_probe_owns_browser_and_retries_profile_cleanup(self) -> None:
         process = _FakeProcess()
