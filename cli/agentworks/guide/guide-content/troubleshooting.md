@@ -9,9 +9,10 @@ Start with the exact error from the command that failed. Run `agw doctor` once f
 the workstation, configuration, dependencies, and database; then move to the smallest relevant
 surface instead of changing several things at once.
 
-For a disabled or not-ready resource, use `agw resource list --kind KIND --include-disabled` and
-`agw resource explain KIND/NAME` to separate enablement from missing configuration or host
-requirements.
+For a disabled or not-ready resource, use `agw resource show KIND/NAME` to inspect its focused
+condition, direct relationships, current live uses, and attributable diagnostics together. Use
+`agw resource explain KIND` or `agw resource explain KIND/NAME` when the question is what a kind or
+capability accepts.
 
 ## VM and SSH connectivity
 

@@ -13,7 +13,10 @@ for live instances.
 
 `agw resource kinds` lists the installed vocabulary. Use
 `agw resource list --kind KIND --include-disabled` to inspect one kind, including its origin,
-enablement, and readiness. `agw graph show KIND/NAME` shows how a resource relates to others.
+enablement, and readiness. Use `agw resource show KIND/NAME` for the complete focused view of one
+loaded resource, including its direct relationships, current live uses, attributable diagnostics,
+and normalized declaration when it has one. Use `agw graph show KIND/NAME` for broader relationship
+traversal and `agw doctor` for installation-wide health.
 
 Use `--output json` when the result will be consumed programmatically.
 
