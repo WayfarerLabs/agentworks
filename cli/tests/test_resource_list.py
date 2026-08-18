@@ -48,7 +48,7 @@ def _write_base(
 
     The operator key paths deliberately point at files that do not
     exist: listing resources needs no operator identity, and ``_load``
-    below loads with ``require_ssh_keys=False`` to match."""
+    below loads with ``require_ssh_key_files=False`` to match."""
     pub = config_path.parent / "id.pub"
     priv = config_path.parent / "id"
     config_path.write_text(
@@ -64,7 +64,7 @@ def _write_base(
 
 
 def _load(cfg_file: Path):
-    cfg = load_config(cfg_file, warn_issues=False, require_ssh_keys=False)
+    cfg = load_config(cfg_file, warn_issues=False, require_ssh_key_files=False)
     return build_registry(cfg)
 
 
@@ -227,6 +227,31 @@ def test_description_populated_for_operator_and_auto_resources(tmp_path: Path) -
 # -- CLI surface -----------------------------------------------------------
 
 
+def test_missing_ssh_keys_do_not_block_resource_list(tmp_path: Path, monkeypatch) -> None:
+    """A config whose only defect is a nonexistent operator SSH key path
+    (the sample config's placeholder, before ``agw config init`` writes a
+    real one) must not stop `resource list` from listing resources: it
+    needs no operator identity."""
+    from typer.testing import CliRunner
+
+    from agentworks.cli import app
+
+    cfg_file = tmp_path / "config.toml"
+    _write_base(cfg_file, manifests=[_VM_DEFAULT])
+    assert not (tmp_path / "id.pub").exists()
+    assert not (tmp_path / "id").exists()
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
+
+    result = CliRunner().invoke(app, ["resource", "list"])
+
+    assert result.exit_code == 0, result.output
+    assert "vm-template" in result.output
+    # Tolerant, not silent: the missing key is still surfaced as a warning
+    # (a regression that dropped the issue instead of softening it would
+    # go undetected otherwise).
+    assert "Config: operator.ssh_public_key does not exist" in result.output
+
+
 def test_cli_names_only_emits_kind_slash_name_per_line(tmp_path: Path, monkeypatch) -> None:
     """``agw resource list --names-only`` is the source for shell
     completion; the line format is ``<kind>:<name>``. Completion
@@ -265,7 +290,7 @@ def test_names_only_candidate_order_matches_a_healthy_database(tmp_path: Path) -
 
     cfg_file = tmp_path / "config.toml"
     _write_base(cfg_file, manifests=[_VM_DEFAULT])
-    registry = build_registry(load_config(cfg_file, require_ssh_keys=False))
+    registry = build_registry(load_config(cfg_file, require_ssh_key_files=False))
     database = Database(tmp_path / "agentworks.db")
     try:
         with_database = list_resources(registry, database)

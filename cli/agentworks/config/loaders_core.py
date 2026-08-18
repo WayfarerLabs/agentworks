@@ -112,20 +112,19 @@ def _load_operator(
     data: dict[str, object],
     issues: list[str],
     *,
-    require_ssh_keys: bool = True,
+    require_ssh_key_files: bool = True,
 ) -> OperatorConfig:
     """Load ``[operator]``.
 
-    ``require_ssh_keys`` gates only the three file-existence checks below
+    ``require_ssh_key_files`` gates only the three file-existence checks below
     (primary public/private key, extra public keys), not the rest of the
     section. It defaults to True (today's behavior: a missing key file is
     a hard ``ConfigError``) because most callers use the operator identity
     to reach a VM or provision one, where a stale or absent key is a real
-    failure. A caller that inspects installed vocabulary rather than
-    operator identity (``agw resource kinds`` / ``agw resource list``)
-    passes False: key existence becomes a soft issue on ``issues``,
-    alongside the section's other soft issues, instead of aborting the
-    load.
+    failure. A caller that inspects installed vocabulary or displays one
+    resource's facts, rather than reaching operator identity, passes
+    False: key existence becomes a soft issue on ``issues``, alongside the
+    section's other soft issues, instead of aborting the load.
     """
     raw = data.get("operator")
     if not isinstance(raw, dict):
@@ -141,12 +140,12 @@ def _load_operator(
     # quote the setting closer to the way they wrote it in config.toml.
     if not pub.exists():
         message = f"operator.ssh_public_key does not exist: {format_host_path(pub)}"
-        if require_ssh_keys:
+        if require_ssh_key_files:
             raise ConfigError(message, hint=_SSH_KEY_HINT)
         issues.append(message)
     if not priv.exists():
         message = f"operator.ssh_private_key does not exist: {format_host_path(priv)}"
-        if require_ssh_keys:
+        if require_ssh_key_files:
             raise ConfigError(message, hint=_SSH_KEY_HINT)
         issues.append(message)
 
@@ -159,7 +158,7 @@ def _load_operator(
         p = _expand(str(entry))
         if not p.exists():
             message = f"operator.extra_ssh_public_keys: file does not exist: {format_host_path(p)}"
-            if require_ssh_keys:
+            if require_ssh_key_files:
                 raise ConfigError(message)
             issues.append(message)
         extra_keys.append(p)

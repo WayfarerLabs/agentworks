@@ -397,8 +397,8 @@ def test_extra_ssh_public_keys_missing_file(tmp_path: Path) -> None:
         load_config(config_file)
 
 
-def test_require_ssh_keys_false_softens_missing_keys_to_issues(tmp_path: Path) -> None:
-    """``require_ssh_keys=False`` (the flag `resource kinds` / `resource
+def test_require_ssh_key_files_false_softens_missing_keys_to_issues(tmp_path: Path) -> None:
+    """``require_ssh_key_files=False`` (the flag `resource kinds` / `resource
     list` pass) turns a missing primary or extra key file into a
     ``config_issues`` entry instead of aborting the load, while every
     other operator field still loads normally."""
@@ -411,7 +411,7 @@ def test_require_ssh_keys_false_softens_missing_keys_to_issues(tmp_path: Path) -
         extra_ssh_public_keys = ["{(tmp_path / "extra.pub").as_posix()}"]
     """)
     )
-    cfg = load_config(config_file, warn_issues=False, require_ssh_keys=False)
+    cfg = load_config(config_file, warn_issues=False, require_ssh_key_files=False)
     assert any("ssh_public_key does not exist" in issue for issue in cfg.config_issues)
     assert any("ssh_private_key does not exist" in issue for issue in cfg.config_issues)
     assert any("extra_ssh_public_keys" in issue and "does not exist" in issue for issue in cfg.config_issues)
@@ -419,9 +419,9 @@ def test_require_ssh_keys_false_softens_missing_keys_to_issues(tmp_path: Path) -
     assert cfg.operator.ssh_private_key == (tmp_path / "id")
 
 
-def test_require_ssh_keys_true_still_raises_by_default(tmp_path: Path) -> None:
+def test_require_ssh_key_files_true_still_raises_by_default(tmp_path: Path) -> None:
     """The default stays strict: a caller that does not pass
-    ``require_ssh_keys=False`` gets today's hard failure, exactly as
+    ``require_ssh_key_files=False`` gets today's hard failure, exactly as
     every mutation/provisioning command relies on."""
     config_file = tmp_path / "config.toml"
     config_file.write_text(

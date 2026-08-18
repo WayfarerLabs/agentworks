@@ -20,7 +20,7 @@ def _write_base(cfg_path: Path) -> None:
     # `resource kinds` lists installed vocabulary, not operator identity,
     # so the key paths below are deliberately left pointing at files that
     # do not exist: the command must not need them (see
-    # `load_config(require_ssh_keys=False)` at its call site).
+    # `load_config(require_ssh_key_files=False)` at its call site).
     tmp = cfg_path.parent
     cfg_path.write_text(
         dedent(f"""\
@@ -84,6 +84,10 @@ def test_missing_ssh_keys_do_not_block_kind_listing(tmp_path: Path, monkeypatch)
 
     result = CliRunner().invoke(app, ["resource", "kinds"])
     assert result.exit_code == 0, result.output
+    # Tolerant, not silent: the missing key is still surfaced as a warning
+    # (a regression that dropped the issue instead of softening it would
+    # go undetected otherwise).
+    assert "Config: operator.ssh_public_key does not exist" in result.output
 
 
 def test_table_shows_categories_and_counts(tmp_path: Path, monkeypatch) -> None:

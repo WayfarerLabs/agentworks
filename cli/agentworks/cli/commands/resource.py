@@ -106,8 +106,8 @@ def resource_list(
     # Listing the installed vocabulary needs no operator identity, so a
     # placeholder or missing SSH key (the sample config's default, before
     # `agw config init` writes a real one) doesn't block it; see
-    # `load_config`'s `require_ssh_keys` doc.
-    config = load_config(warn_issues=output_format is OutputFormat.HUMAN, require_ssh_keys=False)
+    # `load_config`'s `require_ssh_key_files` doc.
+    config = load_config(warn_issues=output_format is OutputFormat.HUMAN, require_ssh_key_files=False)
     registry = load_request_registry(config, warn=output_format is OutputFormat.HUMAN)
     db = None if names_only else get_db()
     # ``list_resources`` validates ``origin_filter`` (typed
@@ -189,7 +189,7 @@ def resource_show(
     # per-resource diagnostics `show_resource` gathers never read
     # config.operator; see doctor.checks_for_resource), so a placeholder
     # or missing SSH key doesn't block it.
-    config = load_config(warn_issues=warn, require_ssh_keys=False)
+    config = load_config(warn_issues=warn, require_ssh_key_files=False)
     registry = load_request_registry(config, warn=warn)
     shown = show_resource(config, registry, identity, DatabaseLiveSource(db.DB_PATH))
 
@@ -251,7 +251,7 @@ def resource_kinds(
 
     # Same rationale as `resource list`: kind listing needs no operator
     # identity, so a placeholder or missing SSH key doesn't block it.
-    config = load_config(warn_issues=output_format is OutputFormat.HUMAN, require_ssh_keys=False)
+    config = load_config(warn_issues=output_format is OutputFormat.HUMAN, require_ssh_key_files=False)
     registry = load_request_registry(config, warn=output_format is OutputFormat.HUMAN)
     rows = list_kinds(registry)
     if output_format is OutputFormat.JSON:
