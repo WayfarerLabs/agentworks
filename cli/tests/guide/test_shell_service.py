@@ -206,14 +206,33 @@ def test_static_index_list_and_selected_render_do_not_load_operator_state_module
 
 
 def test_exact_release_topic_is_direct_inert_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
-    history = ReleaseHistory((ReleaseSection("1.2.3", "# Heading\n\n[Run](https://example.invalid)"),))
+    body = "# Heading\n\n[Run](https://example.invalid)"
+    history = ReleaseHistory((ReleaseSection("1.2.3", body),))
     monkeypatch.setattr("agentworks.guide.service.read_release_history", lambda: history)
     monkeypatch.setattr("agentworks.guide.render.read_release_history", lambda: history)
 
     response = render_guide("concept-release-notes/v1-2-3", GuideMode.AGENT)
 
-    assert "\\# Heading" in response.markdown
-    assert "[Run](https://example.invalid)" not in response.markdown
+    # Verbatim inside a fence: the fence, not escaping, is what keeps the heading and link inert.
+    assert f"```text\n{body}\n```" in response.markdown
+
+
+def test_exact_release_topic_widens_its_fence_around_an_embedded_fence_marker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = "before\n```\nlooks like a closing fence\n```\nafter"
+    history = ReleaseHistory((ReleaseSection("1.2.3", body),))
+    monkeypatch.setattr("agentworks.guide.service.read_release_history", lambda: history)
+    monkeypatch.setattr("agentworks.guide.render.read_release_history", lambda: history)
+
+    response = render_guide("concept-release-notes/v1-2-3", GuideMode.AGENT)
+
+    opening = re.search(r"^(`{4,})text$", response.markdown, re.MULTILINE)
+    assert opening is not None, "a changelog line with a fence marker must widen the wrapping fence"
+    fence = opening.group(1)
+    closing = response.markdown.index(f"\n{fence}\n", opening.end())
+    # The embedded ``` lines stay inside our wider fence rather than closing it early.
+    assert response.markdown[opening.end() + 1 : closing] == body
 
 
 @pytest.mark.parametrize(
