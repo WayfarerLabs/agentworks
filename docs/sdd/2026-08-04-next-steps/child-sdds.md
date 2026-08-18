@@ -396,8 +396,8 @@ direction; every actionable finding was dispatched the same day.
       granted-implicitly legend, truthful `secret describe` fall-through summary, onepassword
       timeout guidance naming the pending-approval cause), #608 (the interaction-channel split; see
       the secrets ruling in `target-state.md`)
-- [x] Issue #603 filed: move SSH key-file existence from config-load to use time; the
-      workload-gated parameter is the bridge and retires when that lands
+- [x] Issue #603 filed: move SSH key-file existence from config-load to use time; the workload-gated
+      parameter is the bridge and retires when that lands
 - [ ] Routed to the wave-2 discovery surfaces: an agent cannot state a mutation's infrastructure
       effect before making it (effective spec after `inherits` composition and platform defaults
       appears in no CLI surface; first revealed by provisioning). Pairs with schema emission;
