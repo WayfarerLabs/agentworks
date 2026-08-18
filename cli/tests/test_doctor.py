@@ -118,9 +118,7 @@ def test_config_exception_becomes_one_shared_health_fact(tmp_path, monkeypatch: 
     assert config_check["hint"] == f"fix {marker}"
 
 
-def test_fresh_init_shaped_config_reaches_doctors_own_ssh_key_checks(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_fresh_init_shaped_config_reaches_doctors_own_ssh_key_checks(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A fresh-init-shaped config (valid ``[operator]`` section, but
     pointing at SSH key paths that do not exist) must load rather than
     abort, so doctor's own purpose-built SSH-key checks run. Those
