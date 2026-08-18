@@ -72,9 +72,10 @@ request. An unrelated malformed shell or duplicate global topic prevents every o
 from returning partial results.
 
 `agw guide list` prints one valid topic name per line. It discovers packaged filenames and release
-history without loading operator state. `agw guide show TOPIC` renders exactly one of those names
-and owns the optional `--agent/--human` mode override. Raw kind, resource, relationship, schema, and
-sample discovery belongs to the corresponding command completion and inspection surfaces.
+history without loading operator state. `agw guide show TOPIC` renders exactly one of those names.
+The guide-global `--agent/--human` option may precede `show` to select its presentation and has no
+effect on `list`. Raw kind, resource, relationship, schema, and sample discovery belongs to the
+corresponding command completion and inspection surfaces.
 
 The static `concept-prerequisites`, `concept-virtual-machines`, and `concept-tailscale` topics point
 to command-owned workstation, registry-readiness, managed-VM, secret, and rekey facts. Rendering

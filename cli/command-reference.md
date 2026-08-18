@@ -950,12 +950,11 @@ For locally missing history, the shell suggests an explicitly scoped lookup on t
 Agentworks GitHub releases page. Refusal performs no network request or claimed summary. Use current
 command facts to assess an installation.
 
-`agw guide show TOPIC` accepts exactly one topic. `--agent` and `--human` on `show` override
-automatic presentation selection; explicit selection wins over the Claude Code execution signature
-and stdout TTY fallback. The same flags on the no-subcommand group callback select the index mode.
-They do not modify `list` and cannot be placed at group level before a subcommand. Ordinary shell
-content and release evidence are identical in both modes. Content inside an agent-only fence renders
-only in agent mode.
+`agw guide show TOPIC` accepts exactly one topic. The guide-global `--agent` and `--human` options
+override automatic presentation selection for either the no-subcommand index or a following `show`;
+explicit selection wins over the Claude Code execution signature and stdout TTY fallback. They do
+not modify a following `list`. Ordinary shell content and release evidence are identical in both
+modes. Content inside an agent-only fence renders only in agent mode.
 
 `concept-assistant-agent` is the shared, directly addressable home for general external-assistant
 posture. The assistant acts under the operator's current instruction, uses the CLI and its help as
@@ -997,7 +996,7 @@ During the unreleased 0.14 transition, `agw graph show`, `agw resource kinds`, `
 | `agw guide --agent`                                       | Render the index with agent-only context      |
 | `agw guide list`                                          | Emit every topic name for shell completion    |
 | `agw guide show TOPIC`                                    | Render one exact topic                        |
-| `agw guide show TOPIC --agent/--human`                    | Override the selected topic's presentation    |
+| `agw guide --agent/--human show TOPIC`                    | Override the selected topic's presentation    |
 | `agw guide show concept-assistant-agent`                  | Render the external-assistant posture         |
 | `agw guide show concept-prerequisites`                    | Render workstation and access prerequisites   |
 | `agw guide show concept-virtual-machines`                 | Explain VM platforms, sites, and inspection   |

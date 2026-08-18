@@ -23,14 +23,20 @@ It does not print the value or persist it in the Agentworks database or generate
 Use `agw secret describe tailscale-auth-key` for a non-resolving source prediction. Resolve or
 verify the secret only when the operator's instruction covers that action.
 
-`agw vm rekey NAME` rotates a VM's key, switches it to the key's tailnet, or recovers a VM whose
-ephemeral node expired. The command uses the platform-native recovery transport, logs out and
-rejoins Tailscale, records the new tailnet address, refreshes SSH configuration, and verifies
-Tailscale SSH. `--ignore-env` bypasses the environment mapping for the auth-key secret so the
-configured fallback or prompt source can supply the new value.
+`agw vm rekey NAME` assigns a separately obtained auth key, switches the VM to that key's tailnet,
+or recovers a VM whose ephemeral node expired. Creating or rotating the credential is a separate,
+external action that requires operator authorization. The command uses the platform-native recovery
+transport, logs out and rejoins Tailscale, records the new tailnet address, refreshes SSH
+configuration, and verifies Tailscale SSH. `--ignore-env` bypasses the environment mapping for the
+auth-key secret so the configured fallback or prompt source can supply the new value.
 
-When the new key joins a different tailnet, run `agw vm rekey NAME --wait-for-share`. After the VM
-joins, Agentworks pauses so the operator can follow Tailscale's
-[machine-sharing workflow](https://tailscale.com/kb/1084/sharing) to share that VM back before the
-command verifies connectivity. Sharing and its access policy remain operator-owned external actions;
-the command does not perform them.
+Before rekeying to a different tailnet, account for the connectivity break: logging out of the
+current tailnet can leave the VM unreachable until sharing or other authorized access is
+established. If that disruption and access change are not authorized, stop before rekeying and use
+an auth key for a tailnet where the VM is already authorized and reachable.
+
+When the separately obtained key joins a different tailnet, run
+`agw vm rekey NAME --wait-for-share`. After the VM joins, Agentworks pauses so the operator can
+follow Tailscale's [machine-sharing workflow](https://tailscale.com/kb/1084/sharing) to share that
+VM back before the command verifies connectivity. Sharing and its access policy remain
+operator-owned external actions; the command does not perform them.
