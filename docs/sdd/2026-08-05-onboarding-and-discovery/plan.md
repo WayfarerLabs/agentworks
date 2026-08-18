@@ -722,9 +722,9 @@ one group-owned mode option applies to the index and `show`, while `list` remain
 - [x] Amend the active FRD, HLA, and guide LLD so `--agent/--human` is one group-level option used
       by the no-subcommand index and `show`. Accept it before `list` without changing list output;
       do not duplicate it on `show` or encode a terminal group-option exception in completion.
-- [ ] Remove `show`'s local mode option and callback rejection, pass the group-selected mode through
+- [x] Remove `show`'s local mode option and callback rejection, pass the group-selected mode through
       the ordinary Typer context, and align CLI examples and structural completion coverage.
-- [ ] Correct the Tailscale concept to distinguish assigning a separately obtained auth key from
+- [x] Correct the Tailscale concept to distinguish assigning a separately obtained auth key from
       creating or rotating one, and state the different-tailnet access impact plus refusal path.
 - [ ] Re-run focused/full/static gates and exact-head project, cold, integration, complexity, and
       saga reviews before completing the delivery record.
