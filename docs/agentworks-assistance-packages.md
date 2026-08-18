@@ -54,8 +54,9 @@ modes. A shell may fence a small passage that renders only in agent mode.
 
 `agw guide show concept-onboarding` is the first-setup and current-adoption destination. Like every
 concept, it is static teaching that points to current CLI inspection commands for live facts. It
-includes `concept-source-review` as the optional path for inspecting canonical source before
-installation.
+starts with the core model and prerequisites, then covers configuration, resources, diagnostics, and
+the first VM and session. Optional canonical-source inspection remains available separately at
+`concept-source-review`.
 
 Concepts are auto-discovered Markdown shells in first-party package-local `guide-content/`
 directories. Their restricted frontmatter supplies the discovery description and may supply a

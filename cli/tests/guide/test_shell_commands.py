@@ -24,7 +24,7 @@ def _authored_commands(path: Path) -> set[str]:
     return commands
 
 
-def _validate_command(command: str, root: CommandSpec) -> str | None:
+def _validate_command_prefix_and_options(command: str, root: CommandSpec) -> str | None:
     tokens = shlex.split(command)
     current = root
     path = [root]
@@ -51,14 +51,14 @@ def _validate_command(command: str, root: CommandSpec) -> str | None:
     return None
 
 
-def test_authored_agw_command_examples_match_the_cli_spec() -> None:
+def test_authored_agw_command_prefixes_and_options_match_the_cli_spec() -> None:
     package_root = Path(agentworks_file).parent
     spec = build_spec(app)
     checked = 0
 
     for path in sorted(package_root.rglob("guide-content/*.md")):
         for command in sorted(_authored_commands(path)):
-            problem = _validate_command(command, spec)
+            problem = _validate_command_prefix_and_options(command, spec)
             assert problem is None, f"{path.relative_to(package_root)}: {command!r}: {problem}"
             checked += 1
 

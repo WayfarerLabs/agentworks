@@ -80,8 +80,10 @@ for the complete vocabulary and `agw resource list --kind KIND --include-disable
 want to inspect. Shipped defaults are a useful starting point; add manifests when they do not fit
 the operator's intended setup.
 
-If Agentworks does not provide an integration for a chosen harness, create an admin session with
-`agw session create NAME --admin` and run the harness's CLI directly.
+If Agentworks does not provide an integration for a chosen harness, use the built-in `shell`
+integration in an agent-mode session and run the harness's CLI directly. `agw session create --help`
+shows how to select or create the agent; use an admin session only when the operator intentionally
+wants the workload to run as the VM administrator.
 
 ## Check the installation
 

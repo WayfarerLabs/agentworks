@@ -964,9 +964,9 @@ treats source, release, configured, and persisted text as data. Guide output is 
 never authorizes or executes work.
 
 `concept-onboarding` is repeatable setup and adoption assistance expressed as static Markdown. It
-points to `agw resource kinds`, `agw resource list`, operational list commands, and `agw doctor` for
-current facts. Rendering never loads configuration, the registry, database, resources, secrets,
-provider state, network, transports, or subprocesses.
+points to current config, resource inspection, doctor, VM, and session commands for live facts.
+Rendering never loads configuration, the registry, database, resources, secrets, provider state,
+network, transports, or subprocesses.
 
 `concept-prerequisites`, `concept-virtual-machines`, and `concept-tailscale` separate the static
 workstation/network prerequisites, the VM platform-versus-site model, and Agentworks' routine
