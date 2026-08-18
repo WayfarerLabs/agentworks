@@ -16,8 +16,8 @@ locked.
 - [x] Picked up by an effort lead (HLA, plan, residual inventory; PR #406)
 - [x] Implementation complete, pre-roadmap SDD closeouts done (PR #406, 2026-08-05: all five
       pre-roadmap SDDs locked, plan 46/46, docs promoted including ADR 0020)
-- [ ] Ships in 0.14.0 with phase 1 (cut held for the guide first slice per operator ruling,
-      2026-08-06; see `phasing.md` release mapping)
+- [x] Shipped in 0.14.0 (released 2026-08-18; the cut had been held for the guide first slice per
+      operator ruling, 2026-08-06)
 - [x] Locked (`locked.md` on `main` via PR #406)
 
 ### Wave 2 (adopted child): 2026-07-31-declarative-schema
@@ -117,13 +117,15 @@ locked.
       this implementation absent direction. Shipped as PR #587 (merged 2026-08-17) with the
       nested-container fix PR #591 (merged 2026-08-17; the remaining theoretical CommonMark edges
       closed by operator declaration on that PR)
-- [ ] Derived index and grammar-native guide (operator ruling 2026-08-17, recorded in
-      `target-state.md`; **gates 0.14.0**; PR #593): the no-topic response derives from the shell
-      catalog through a reserved `_index.md`, and the final public grammar is `agw guide`,
-      `agw guide list`, and `agw guide show TOPIC` with no compatibility alias. Direction arrived in
-      the child session with the gate confirmed through the saga lead's channel; the child FRD, HLA,
-      and LLD record it at `1d31beab`, and the implementation iterates on the PR under the standard
-      lanes. Merging saga PR #594 discharged the recording prerequisite
+- [x] Derived index and grammar-native guide shipped, satisfying its 0.14.0 gate (PR #593, merged
+      2026-08-18; operator ruling 2026-08-17 in `target-state.md`): the no-topic response derives
+      from the shell catalog through a reserved `_index.md`, and the public grammar is `agw guide`,
+      `agw guide list`, and `agw guide show TOPIC` with no compatibility alias. The closing rounds
+      carried the operator's content pass over every concept shell, a structural test validating
+      authored command paths against the real CLI spec, and the restored data-versus-direction
+      control in the assistant shell's agent-only fence (three lanes converged on it twice before it
+      landed in full operational form with the self-reflective case). All lanes passed at the merged
+      head
 - [ ] Remaining phases (wave 2 adoption, closeout) per the effort's per-phase PR plan. The README
       bootstrap shipped with the assistance phase (PR #480), so the bootstraps gate is satisfied;
       the generated block pins version 0.14.0 or newer and resolves when the release ships
@@ -185,7 +187,7 @@ locked.
 - [x] Implementation complete (PR #536, 2026-08-15): all sixteen rows moved byte-identical into the
       opt-in `apt` and `install-command` plugins, the AC4 composite gate pinned through the real
       recipe path, guide loading request-scoped per the fail-soft contract. **This lane is closed**
-- [ ] Ships in 0.14.0 (gates the cut per `phasing.md` release mapping)
+- [x] Shipped in 0.14.0 (released 2026-08-18)
 - [x] Locked (`locked.md` rode PR #536 and binds on `main`)
 
 ### Simplification pass (pre-0.14): 2026-08-12-simplification-pass
@@ -296,7 +298,7 @@ mechanism); tracked here because its outcome gates the 0.14.0 cut per `phasing.m
       structural union with null-companion canonicalization shared by validation, extraction, and
       fill, the EnvEntry construction shim removed by operator ruling, and the three-tier rule
       codified in `cli/agentworks/capabilities/README.md`
-- [ ] Ships in 0.14.0 (gates the cut per `phasing.md` release mapping)
+- [x] Shipped in 0.14.0 (released 2026-08-18)
 
 ### Dispatched task (not a child SDD): concise operator content
 
@@ -361,6 +363,21 @@ coordinates with the pending resource-CLI grammar decision.
       malformed databases, secret safety)
 - [x] Merged and locked (PR #491, 2026-08-16; `locked.md` binds at merge). The 0.14.0 grammar gate
       is satisfied
+
+### Child SDD: 2026-08-17-resource-show
+
+- [x] Seeded, designed, and implemented on one vehicle (draft PR #597, the grammar session as
+      successor lead; FRD/HLA/plan in `docs/sdd/2026-08-17-resource-show/`), per the operator's
+      direction in that session with acceptance completing at merge
+- [x] Focused-superset ruling incorporated (operator, 2026-08-18): `resource show` carries the
+      selected resource's list facts, direct graph relationships, live usage, resource-attributable
+      doctor checks, and the normalized declaration, built through shared fact producers (the doctor
+      extraction into five per-check producers with the bulk sweep rewired onto them); relationships
+      stay with `graph show`, traversal absent by construction
+- [x] Merged and locked (PR #597, 2026-08-18) after the tester's JSON-boundary finding was closed at
+      the shared machine-output writer (full unsafe-category escaping, fixing the class for every
+      machine-output command), with live acceptance and all lanes passed at the final head.
+      Additive; no 0.14 gate was minted
 
 ### Not yet spawned
 
