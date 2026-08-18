@@ -362,18 +362,33 @@ def _departure_witness(connection: DevToolsConnection, authority: str) -> dict[s
 
 def _devtools_target(profile_path: Path, process: subprocess.Popen[bytes]) -> str:
     port_path = profile_path / "DevToolsActivePort"
+    last_error: BaseException | None = None
     for _ in range(200):
-        if port_path.exists():
-            break
         if process.poll() is not None:
             raise AssertionError("Chromium exited before opening its DevTools endpoint")
+        try:
+            lines = port_path.read_text(encoding="utf-8").splitlines()
+            if not lines:
+                raise ValueError("Chromium published an empty DevTools port file")
+            port = int(lines[0])
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=10) as response:
+                targets = json.load(response)
+            if isinstance(targets, list):
+                target = next(
+                    (
+                        item.get("webSocketDebuggerUrl")
+                        for item in targets
+                        if isinstance(item, dict) and item.get("type") == "page"
+                    ),
+                    None,
+                )
+                if isinstance(target, str):
+                    return target
+            raise ValueError("Chromium did not publish a page target")
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            last_error = error
         time.sleep(0.025)
-    else:
-        raise AssertionError("Chromium did not publish its DevTools endpoint")
-    port = int(port_path.read_text(encoding="utf-8").splitlines()[0])
-    with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=10) as response:
-        targets = json.load(response)
-    return next(item["webSocketDebuggerUrl"] for item in targets if item["type"] == "page")
+    raise AssertionError("Chromium did not publish its DevTools endpoint") from last_error
 
 
 def browser_phase4k_contract(

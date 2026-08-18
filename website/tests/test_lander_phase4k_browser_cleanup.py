@@ -97,6 +97,33 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
         self.assertEqual(eof_socket.receive_count, 1)
         self.assertTrue(eof_socket.closed)
 
+    def test_devtools_target_waits_for_complete_port_and_page_publication(self) -> None:
+        process = _FakeProcess()
+        with tempfile.TemporaryDirectory() as directory:
+            port_path = Path(directory) / "DevToolsActivePort"
+            port_path.write_text("", encoding="utf-8")
+            sleeps = 0
+
+            def publish(seconds: float) -> None:
+                nonlocal sleeps
+                del seconds
+                sleeps += 1
+                if sleeps == 1:
+                    port_path.write_text("9222\n", encoding="utf-8")
+
+            responses = (
+                io.BytesIO(b"[]"),
+                io.BytesIO(b'[{"type":"page","webSocketDebuggerUrl":"ws://chromium.test"}]'),
+            )
+            with (
+                mock.patch.object(phase4k_browser.time, "sleep", side_effect=publish),
+                mock.patch.object(phase4k_browser.urllib.request, "urlopen", side_effect=responses),
+            ):
+                target = phase4k_browser._devtools_target(Path(directory), process)
+
+        self.assertEqual(target, "ws://chromium.test")
+        self.assertEqual(sleeps, 2)
+
     def test_server_allocation_failure_restores_the_artifact(self) -> None:
         sentinel = RuntimeError()
 
