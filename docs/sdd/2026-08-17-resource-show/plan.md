@@ -169,7 +169,8 @@ The focused-superset product contract and public JSON shape remain unchanged.
 - [ ] Share the strict fact-line sanitizer between resource and graph human output, remove redundant
       post-YAML sanitization, and retain hostile-input and round-trip coverage.
 - [ ] Correct the service-boundary test name and acceptance wording, document the closed JSON
-      carrier's plugin boundary, and date the operator's superseding ruling and dual-state decision.
+      carrier's external-data boundary, and date the operator's superseding ruling and dual-state
+      decision.
 - [ ] Run equal-tier project review and independent fresh-eyes review; fix every clear material
       finding and rerun affected gates.
 - [ ] Run focused tests, the full non-integration suite, Ruff, format, strict mypy, repository

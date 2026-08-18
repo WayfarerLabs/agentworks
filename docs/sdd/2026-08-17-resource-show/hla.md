@@ -161,7 +161,9 @@ The include set is the concrete model's fields minus one exported framework-fiel
 `METADATA_FIELDS` and shared with manifest decode. Defaults are included because this is the loaded
 row; nulls are omitted. Pydantic JSON mode is the recursive conversion authority, and the closed
 JSON carrier rejects an unexpected object instead of converting it to text. That guard remains
-load-bearing because plugin-contributed declarable models cross the framework boundary.
+load-bearing because plugin-authored manifest rows feed dynamically typed Pydantic JSON-mode output
+into the closed finite machine carrier. Declarable model classes and kind definitions remain
+core-owned.
 
 For a capability kind, declaration is null without reflecting over implementation code. A category
 and row mismatch is an internal invariant failure. Source comments/order, omitted-versus-defaulted
