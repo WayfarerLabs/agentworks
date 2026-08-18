@@ -1,5 +1,5 @@
-"""`agw version`: prints the installed CLI version, with a graceful
-fallback when the package metadata is unavailable (issue #179)."""
+"""`agw version` and `agw --version`: prints the installed CLI version, with
+a graceful fallback when the package metadata is unavailable (issue #179)."""
 
 from __future__ import annotations
 
@@ -13,6 +13,23 @@ from agentworks.cli.commands import version as version_mod
 def test_version_command_prints_resolved_version(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(version_mod, "resolve_version", lambda: "1.2.3")
     result = CliRunner().invoke(app, ["version"])
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == "1.2.3"
+
+
+def test_version_flag_prints_resolved_version_and_exits(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("agentworks.version.resolve_version", lambda: "1.2.3")
+    result = CliRunner().invoke(app, ["--version"])
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == "1.2.3"
+
+
+def test_version_flag_short_circuits_before_subcommand_parsing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--version`` is eager: it wins even with a bogus subcommand present."""
+    monkeypatch.setattr("agentworks.version.resolve_version", lambda: "1.2.3")
+    result = CliRunner().invoke(app, ["--version", "not-a-real-command"])
     assert result.exit_code == 0, result.output
     assert result.output.strip() == "1.2.3"
 
