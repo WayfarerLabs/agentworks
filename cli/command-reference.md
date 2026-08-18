@@ -26,8 +26,8 @@ this order:
 `schema_version` is integer `1`; `command` is the exact command identifier below; and `data` is an
 object. Every documented object field is present and emitted in the listed order. Arrays retain the
 service's order and are never re-sorted by JSON rendering. Missing values are JSON `null`, never a
-human display sentinel. JSON string text retains Unicode but terminal control characters are
-escaped.
+human display sentinel. JSON string text retains ordinary Unicode; control, format, surrogate,
+line-separator, and paragraph-separator characters are escaped without changing the parsed value.
 
 The shared records are:
 

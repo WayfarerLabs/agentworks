@@ -28,7 +28,7 @@ from agentworks.resources.inspect import ResourceSummary
 from agentworks.resources.kind import InstanceRef
 from agentworks.resources.reference import RefRelationship
 from agentworks.resources.show import FocusedRelationships, ResourceShow, render_resource_show
-from tests.conftest import CapturedOutput
+from tests.conftest import CapturedOutput, ManifestDoc, write_cfg
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -234,6 +234,35 @@ def test_cli_json_uses_resource_show_identity_and_closed_shape(monkeypatch: pyte
         "reason": "backend unavailable",
     }
     assert calls == [("config", {"warn_issues": False}), ("registry", {"warn": False})]
+
+
+def test_cli_json_safely_encodes_hostile_manifest_text(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks import config
+
+    ordinary = "café 雪"
+    unsafe = "\ud800\u2028\u2029\u202e\u2066"
+    hint = f"{ordinary} {unsafe}"
+    config_path = write_cfg(
+        tmp_path,
+        ManifestDoc("secret", "surrogate-probe", {"hint": hint}, description="surrogate probe"),
+    )
+    monkeypatch.setattr(config, "CONFIG_PATH", config_path)
+
+    result = CliRunner().invoke(
+        app,
+        ["resource", "show", "secret/surrogate-probe", "--output", "json"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert result.stderr_bytes == b""
+    document = json.loads(result.stdout_bytes)
+    assert document["data"]["resource"]["declaration"]["spec"]["hint"] == hint
+    encoded_document = result.stdout_bytes.removesuffix(b"\n").decode("utf-8")
+    assert all(unicodedata.category(character) not in {"Cc", "Cf", "Cs", "Zl", "Zp"} for character in encoded_document)
+    assert ordinary.encode() in result.stdout_bytes
 
 
 @pytest.mark.parametrize(

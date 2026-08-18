@@ -199,12 +199,12 @@ guide-content edits to the guide effort that will follow after `resource show` l
 
 - [x] Rebase onto current `main`, preserve its rewritten guide content, and prove this branch has no
       diff under `cli/agentworks/guide/guide-content/`.
-- [ ] Extend the shared JSON encoder to escape every `Cc`, `Cf`, `Cs`, `Zl`, and `Zp` character with
+- [x] Extend the shared JSON encoder to escape every `Cc`, `Cf`, `Cs`, `Zl`, and `Zp` character with
       JSON's own ASCII escape spelling before UTF-8 encoding, retaining ordinary Unicode and parsed
       values without changing the v1 schema.
-- [ ] Add structural shared-encoder coverage and an end-to-end `resource show --output json`
+- [x] Add structural shared-encoder coverage and an end-to-end `resource show --output json`
       manifest regression for the reported surrogate, format-control, and separator path.
-- [ ] Update permanent machine-output collateral and this in-flight SDD without editing the separate
+- [x] Update permanent machine-output collateral and this in-flight SDD without editing the separate
       installed guide-content surface or saga-owned artifacts.
 - [ ] Run focused/full tests, Ruff, format, strict mypy, repository guards, equal-tier review, and
       isolated-HOME real-CLI acceptance against the exact rebased head.
