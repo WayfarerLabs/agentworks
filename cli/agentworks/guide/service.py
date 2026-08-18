@@ -25,16 +25,10 @@ class GuideResponse:
     markdown: str
 
 
-def _normalize_requested(requested: tuple[str, ...]) -> tuple[str, ...]:
-    if "list" in requested:
-        raise ValidationError("the reserved guide argument 'list' must be used alone; run `agw guide list`")
-    normalized: list[str] = []
-    for slug in requested:
-        if not is_concept_topic(slug) and topic_version(slug) is None:
-            raise ValidationError(f"invalid guide topic {slug!r}")
-        if slug not in normalized:
-            normalized.append(slug)
-    return tuple(normalized)
+def _validate_topic(topic: str) -> str:
+    if not is_concept_topic(topic) and topic_version(topic) is None:
+        raise ValidationError(f"invalid guide topic {topic!r}")
+    return topic
 
 
 def _release_names() -> tuple[str, ...]:
@@ -71,25 +65,24 @@ def _resolve(slug: str, catalog: GuideCatalog) -> ConceptShell | str:
 
 
 def render_guide(
-    requested: tuple[str, ...],
+    topic: str | None,
     mode: GuideMode,
     *,
     package_root: Traversable | None = None,
 ) -> GuideResponse:
-    """Render the shell-backed index or selected static topics."""
-    requested = _normalize_requested(requested)
+    """Render the shell-backed index or one selected static topic."""
+    if topic is not None:
+        topic = _validate_topic(topic)
     catalog = discover_concept_shells(package_root)
-    if not requested:
+    if topic is None:
         return GuideResponse(_render_index(catalog, mode, package_root))
 
-    selected = tuple(_resolve(slug, catalog) for slug in requested)
-    documents = tuple(
-        render_shell(topic, mode, package_root=package_root)
-        if isinstance(topic, ConceptShell)
-        else render_release_topic(topic)
-        for topic in selected
+    selected = _resolve(topic, catalog)
+    markdown = (
+        render_shell(selected, mode, package_root=package_root)
+        if isinstance(selected, ConceptShell)
+        else render_release_topic(selected)
     )
-    markdown = "\n\n---\n\n".join(document.rstrip() for document in documents) + "\n"
     return GuideResponse(sanitize_terminal_output(markdown))
 
 

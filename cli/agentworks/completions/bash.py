@@ -157,27 +157,6 @@ def _emit_leaf_completions(lines: list[str], spec: CommandSpec, token_offset: in
         elif param.dynamic_completer and param.dynamic_completer in DYNAMIC_SNIPPETS:
             words = DYNAMIC_SNIPPETS[param.dynamic_completer]
         if words:
-            if param.terminal_values:
-                terminal_words = " ".join(param.terminal_values)
-                flag_options = "|".join(opt for option in all_options if option.is_flag for opt in option.opts)
-                lines.append(f"{indent}local positional_count=0 terminal_selected=false word_index")
-                lines.append(f"{indent}for ((word_index={token_offset}; word_index<cword; word_index++)); do")
-                if flag_options:
-                    lines.append(f'{indent}    case "${{words[word_index]}}" in')
-                    lines.append(f"{indent}        {flag_options}) continue ;;")
-                    lines.append(f"{indent}    esac")
-                terminal_match = " || ".join(f'${{words[word_index]}} == "{value}"' for value in param.terminal_values)
-                lines.append(f"{indent}    if [[ {terminal_match} ]]; then terminal_selected=true; fi")
-                lines.append(f"{indent}    positional_count=$((positional_count + 1))")
-                lines.append(f"{indent}done")
-                lines.append(f'{indent}if [[ $positional_count -eq {i} && "$cur" != -* ]]; then')
-                lines.append(f'{indent}    COMPREPLY=($(compgen -W "{terminal_words} {words}" -- "$cur"))')
-                lines.append(f"{indent}    return")
-                lines.append(f"{indent}fi")
-                lines.append(f'{indent}if [[ "$terminal_selected" == true && "$cur" != -* ]]; then')
-                lines.append(f"{indent}    COMPREPLY=()")
-                lines.append(f"{indent}    return")
-                lines.append(f"{indent}fi")
             lines.append(f'{indent}if [[ $cword {cmp_op} {pos_token} && "$cur" != -* ]]; then')
             if param.dynamic_completer == "files":
                 lines.append(f"{indent}    COMPREPLY=()")

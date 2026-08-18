@@ -216,51 +216,6 @@ def _emit_param_completions(lines: list[str], spec: CommandSpec, token_offset: i
         pos_token = token_offset + 1 + i
         cmp_op = "-ge" if param.multiple else "-eq"
         values = param.choices or param.suggestions
-        if param.terminal_values:
-            terminal_values = tuple(value.replace("'", "''") for value in param.terminal_values)
-            flag_options = tuple(
-                opt.replace("'", "''") for option in spec.params if option.is_flag for opt in option.opts
-            )
-            flag_array = ", ".join(f"'{value}'" for value in flag_options)
-            terminal_array = ", ".join(f"'{value}'" for value in terminal_values)
-            lines.append(f"{indent}# Initial and terminal positional values: {param.name}")
-            lines.append(f"{indent}$completedPositionals = @()")
-            lines.append(
-                f"{indent}for ($wordIndex = {token_offset}; $wordIndex -lt ($tokenCount - 1); $wordIndex++) {{"
-            )
-            lines.append(f"{indent}    if (@({flag_array}) -notcontains $tokens[$wordIndex]) {{")
-            lines.append(f"{indent}        $completedPositionals += $tokens[$wordIndex]")
-            lines.append(f"{indent}    }}")
-            lines.append(f"{indent}}}")
-            lines.append(
-                f"{indent}$terminalSelected = @($completedPositionals | "
-                f"Where-Object {{ @({terminal_array}) -contains $_ }}).Count -gt 0"
-            )
-            lines.append(f"{indent}if ($wordToComplete -notlike '-*' -and $completedPositionals.Count -eq {i}) {{")
-            _open_result_array(lines, f"{indent}    ")
-            for choice in terminal_values:
-                lines.append(
-                    f"{indent}        [System.Management.Automation.CompletionResult]::new('{choice}',"
-                    f" '{choice}', 'ParameterValue', '{choice}')"
-                )
-            _close_result_array_with_filter(lines, f"{indent}    ")
-            if values:
-                _open_result_array(lines, f"{indent}    ")
-                for choice in values:
-                    lines.append(
-                        f"{indent}        [System.Management.Automation.CompletionResult]::new('{choice}',"
-                        f" '{choice}', 'ParameterValue', '{choice}')"
-                    )
-                _close_result_array_with_filter(lines, f"{indent}    ")
-            elif param.dynamic_completer and param.dynamic_completer in DYNAMIC_SNIPPETS:
-                lines.append(f"{indent}    {DYNAMIC_SNIPPETS[param.dynamic_completer]}")
-            lines.append(f"{indent}    return")
-            lines.append(f"{indent}}}")
-            lines.append("")
-            lines.append(f"{indent}if ($wordToComplete -notlike '-*' -and $terminalSelected) {{")
-            lines.append(f"{indent}    return")
-            lines.append(f"{indent}}}")
-            lines.append("")
         if values:
             lines.append(f"{indent}# Positional: {param.name}")
             lines.append(f"{indent}if ($wordToComplete -notlike '-*' -and $tokenCount {cmp_op} {pos_token}) {{")

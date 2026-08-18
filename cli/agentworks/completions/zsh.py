@@ -157,7 +157,7 @@ def generate_zsh(spec: CommandSpec, version: str) -> str:
             lines.append("")
 
     # Emit the main dispatch function
-    _emit_group(lines, spec, func_name="_agentworks", command_depth=0)
+    _emit_group(lines, spec, func_name="_agentworks")
     lines.append("")
     lines.append('_agentworks "$@"')
     lines.append("")
@@ -176,7 +176,7 @@ def _collect_completers(spec: CommandSpec) -> set[str]:
     return completers
 
 
-def _emit_group(lines: list[str], spec: CommandSpec, func_name: str, command_depth: int) -> None:
+def _emit_group(lines: list[str], spec: CommandSpec, func_name: str) -> None:
     """Emit a zsh function for a command group."""
     lines.append(f"{func_name}() {{")
     lines.append("    local -a subcommands")
@@ -215,58 +215,14 @@ def _emit_group(lines: list[str], spec: CommandSpec, func_name: str, command_dep
         sub_func = f"{func_name}_{name.replace('-', '_')}"
         lines.append("")
         if sub.subcommands:
-            _emit_group(lines, sub, func_name=sub_func, command_depth=command_depth + 1)
+            _emit_group(lines, sub, func_name=sub_func)
         else:
-            _emit_leaf(lines, sub, func_name=sub_func, first_positional_word=command_depth + 3)
+            _emit_leaf(lines, sub, func_name=sub_func)
 
 
-def _emit_leaf(lines: list[str], spec: CommandSpec, func_name: str, first_positional_word: int) -> None:
+def _emit_leaf(lines: list[str], spec: CommandSpec, func_name: str) -> None:
     """Emit a zsh function for a leaf command."""
-    terminal_helpers: dict[str, str] = {}
-    positional_word = first_positional_word
-    for param in spec.params:
-        if not param.is_argument:
-            continue
-        if param.terminal_values:
-            helper = f"{func_name}_{param.name}_values"
-            terminal_helpers[param.name] = helper
-            terminal_values = " ".join(param.terminal_values)
-            flag_options = "|".join(opt for option in spec.params if option.is_flag for opt in option.opts)
-            terminal_match = " || ".join(f'${{words[word_index]}} == "{value}"' for value in param.terminal_values)
-            lines.append(f"{helper}() {{")
-            lines.append("    local -i positional_count=0 word_index")
-            lines.append("    local terminal_selected=false")
-            lines.append(f"    for (( word_index = {positional_word}; word_index < CURRENT; word_index++ )); do")
-            if flag_options:
-                lines.append('        case "${words[word_index]}" in')
-                lines.append(f"            {flag_options}) continue ;;")
-                lines.append("        esac")
-            lines.append(f"        if [[ {terminal_match} ]]; then terminal_selected=true; fi")
-            lines.append("        positional_count=$(( positional_count + 1 ))")
-            lines.append("    done")
-            lines.append('    if [[ "$terminal_selected" == true ]]; then')
-            lines.append("        return 0")
-            lines.append("    fi")
-            lines.append("    if (( positional_count == 0 )); then")
-            lines.append("        local -a terminal_values")
-            lines.append(f"        terminal_values=({terminal_values})")
-            lines.append("        _describe 'operation' terminal_values")
-            lines.append("    fi")
-            values = param.choices or param.suggestions
-            if values:
-                regular_values = " ".join(values)
-                lines.append("    local -a positional_values")
-                lines.append(f"    positional_values=({regular_values})")
-                lines.append(f"    _describe '{param.name}' positional_values")
-            elif param.dynamic_completer and param.dynamic_completer in COMPLETER_FUNC_NAMES:
-                lines.append(f'    {COMPLETER_FUNC_NAMES[param.dynamic_completer]} "$@"')
-            lines.append("    return 0")
-            lines.append("}")
-            lines.append("")
-        if not param.multiple:
-            positional_word += 1
-
-    args = _build_arguments(spec.params, terminal_helpers)
+    args = _build_arguments(spec.params)
     if not args:
         lines.append(f"{func_name}() {{")
         lines.append("    _arguments \\")
@@ -283,7 +239,7 @@ def _emit_leaf(lines: list[str], spec: CommandSpec, func_name: str, first_positi
     lines.append("}")
 
 
-def _build_arguments(params: list[ParamSpec], terminal_helpers: dict[str, str]) -> list[str]:
+def _build_arguments(params: list[ParamSpec]) -> list[str]:
     """Build zsh _arguments specs from params."""
     args: list[str] = []
     positional_index = 1
@@ -294,9 +250,7 @@ def _build_arguments(params: list[ParamSpec], terminal_helpers: dict[str, str]) 
             # `*` is zsh's catchall positional spec -- matches every remaining
             # arg, which is what we want for variadic list arguments.
             position_spec = "*" if param.multiple else str(positional_index)
-            if param.name in terminal_helpers:
-                args.append(f"'{position_spec}:{label}:{terminal_helpers[param.name]}'")
-            elif param.choices or param.suggestions:
+            if param.choices or param.suggestions:
                 choices_str = " ".join(param.choices or param.suggestions or ())
                 args.append(f"'{position_spec}:{label}:({choices_str})'")
             elif param.dynamic_completer and param.dynamic_completer in COMPLETER_FUNC_NAMES:

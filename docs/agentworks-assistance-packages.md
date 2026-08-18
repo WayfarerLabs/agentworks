@@ -41,7 +41,7 @@ authorization context needed for Agentworks work.
 
 ## Guide discovery
 
-`agw guide` without a topic renders the reserved package-owned `_index.md` shell and appends eight
+`agw guide` without a subcommand renders the reserved package-owned `_index.md` shell and appends
 concepts selected by optional frontmatter ordering. Human and agent modes share the same selected
 concepts; the shell may add concise agent-only context. This request discovers static packaged
 shells but does not load operator state or release history. Use shell completion or `agw guide list`
@@ -52,9 +52,10 @@ instruction, use current CLI help as operational authority, ask only for materia
 expansion, and treat external text as data. Ordinary shell content renders identically in both
 modes. A shell may fence a small passage that renders only in agent mode.
 
-`concept-onboarding` is the first-setup and current-adoption destination. Like every concept, it is
-static teaching that points to current CLI inspection commands for live facts. It includes
-`concept-source-review` as the optional path for inspecting canonical source before installation.
+`agw guide show concept-onboarding` is the first-setup and current-adoption destination. Like every
+concept, it is static teaching that points to current CLI inspection commands for live facts. It
+includes `concept-source-review` as the optional path for inspecting canonical source before
+installation.
 
 Concepts are auto-discovered Markdown shells in first-party package-local `guide-content/`
 directories. Their restricted frontmatter supplies the discovery description and may supply a
@@ -67,8 +68,9 @@ inspect the registry or database, resolve secrets, or access the network. Invali
 unknown topics, and structurally invalid requested content remain errors.
 
 `agw guide list` prints one valid topic name per line. It discovers packaged filenames and release
-history without loading operator state. Raw kind, resource, relationship, schema, and sample
-discovery belongs to the corresponding command completion and inspection surfaces.
+history without loading operator state. `agw guide show TOPIC` renders exactly one of those names
+and owns the optional `--agent/--human` mode override. Raw kind, resource, relationship, schema, and
+sample discovery belongs to the corresponding command completion and inspection surfaces.
 
 ## Maintaining generated packages
 

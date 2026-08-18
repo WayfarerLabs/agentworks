@@ -60,10 +60,10 @@ def test_wheel_and_source_distribution_vendor_the_same_canonical_readme(tmp_path
                 "from agentworks.guide import GuideMode, discover_concept_shells, render_guide; "
                 "from agentworks.guide.service import list_guide_topics; "
                 "catalog = discover_concept_shells(); "
-                "index = render_guide((), GuideMode.HUMAN).markdown; "
+                "index = render_guide(None, GuideMode.HUMAN).markdown; "
                 "assert all(topic.slug in index for topic in catalog.indexed_topics()); "
                 "assert set(catalog.names()) <= set(list_guide_topics().markdown.splitlines()); "
-                "core = render_guide(('concept-core-model',), GuideMode.HUMAN); "
+                "core = render_guide('concept-core-model', GuideMode.HUMAN); "
                 "assert core.markdown.count('raw.githubusercontent.com') == 2"
             ),
         ],

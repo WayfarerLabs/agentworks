@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 from agentworks.cli._app import app
 from agentworks.guide.agent_mode import GuideMode, select_guide_mode
 from agentworks.guide.catalog import CORE_INDEX_PATH
-from agentworks.guide.contract import UnknownGuideTopicError
+from agentworks.guide.contract import GuideContentError, UnknownGuideTopicError
 from agentworks.guide.service import list_guide_topics, render_guide
 from agentworks.release_notes import ReleaseHistory, ReleaseSection
 
@@ -54,7 +54,7 @@ def test_no_topic_renders_index_shell_and_catalog_rows_without_release_history(
 
     monkeypatch.setattr("agentworks.guide.service.read_release_history", forbidden)
 
-    response = render_guide((), mode, package_root=tmp_path)
+    response = render_guide(None, mode, package_root=tmp_path)
     lines = response.markdown.splitlines()
     row_slugs = [line.split("`", 2)[1] for line in lines if line.startswith("- `concept-")]
 
@@ -70,7 +70,7 @@ def test_index_footer_reports_the_structural_omitted_count(tmp_path: Path, omitt
     for index in range(omitted):
         _shell(tmp_path, f"omitted-{index}")
 
-    footer = render_guide((), GuideMode.HUMAN, package_root=tmp_path).markdown.splitlines()[-1]
+    footer = render_guide(None, GuideMode.HUMAN, package_root=tmp_path).markdown.splitlines()[-1]
     count = re.match(r"^(\d+)\b", footer)
 
     assert count is not None
@@ -94,31 +94,66 @@ def test_list_uses_static_shells_and_packaged_release_history(tmp_path: Path, mo
     ]
 
 
-def test_list_is_an_exact_reserved_cli_positional_and_names_only_is_removed() -> None:
-    listed = CliRunner().invoke(app, ["guide", "list"])
-    mode_listed = [CliRunner().invoke(app, ["guide", mode, "list"]) for mode in ("--agent", "--human")]
-    old_option = CliRunner().invoke(app, ["guide", "--names-only"])
-    mixed = subprocess.run(
-        ["agw", "guide", "list", "concept-onboarding"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+def test_cli_exposes_only_default_list_and_single_topic_show() -> None:
+    runner = CliRunner()
+    default = runner.invoke(app, ["guide"])
+    listed = runner.invoke(app, ["guide", "list"])
+    topics = listed.stdout.splitlines()
+    topic = topics[0]
+    shown = runner.invoke(app, ["guide", "show", topic])
+    direct = runner.invoke(app, ["guide", topic])
+    multiple = runner.invoke(app, ["guide", "show", topic, topic])
+    old_option = runner.invoke(app, ["guide", "--names-only"])
 
+    assert default.exit_code == 0 and default.stdout
     assert listed.exit_code == 0
-    assert "concept-onboarding" in listed.stdout.splitlines()
-    assert all(result.exit_code == 0 and result.stdout == listed.stdout for result in mode_listed)
+    assert topics
+    assert shown.exit_code == 0 and shown.stdout
+    assert direct.exit_code != 0
+    assert multiple.exit_code != 0
     assert old_option.exit_code != 0
-    assert mixed.returncode != 0
-    assert not mixed.stdout
-    assert mixed.stderr
 
 
-def test_selected_requests_resolve_atomically(tmp_path: Path) -> None:
+def test_mode_belongs_to_default_and_show_but_not_group_to_subcommand() -> None:
+    runner = CliRunner()
+    topic = runner.invoke(app, ["guide", "list"]).stdout.splitlines()[0]
+    valid = [runner.invoke(app, ["guide", mode]) for mode in ("--agent", "--human")] + [
+        runner.invoke(app, ["guide", "show", topic, mode]) for mode in ("--agent", "--human")
+    ]
+    misplaced = [
+        runner.invoke(app, ["guide", mode, command, *([topic] if command == "show" else [])])
+        for mode in ("--agent", "--human")
+        for command in ("list", "show")
+    ]
+    list_modes = [runner.invoke(app, ["guide", "list", mode]) for mode in ("--agent", "--human")]
+
+    assert all(result.exit_code == 0 and result.stdout for result in valid)
+    assert all(result.exit_code != 0 and result.stderr for result in misplaced)
+    assert all(result.exit_code != 0 and result.stderr for result in list_modes)
+
+
+def test_selected_topic_resolves_after_complete_catalog_validation(tmp_path: Path) -> None:
     _shell(tmp_path, "known")
 
     with pytest.raises(UnknownGuideTopicError):
-        render_guide(("concept-known", "concept-missing"), GuideMode.HUMAN, package_root=tmp_path)
+        render_guide("concept-missing", GuideMode.HUMAN, package_root=tmp_path)
+
+
+@pytest.mark.parametrize("path", ["index", "list", "show", "completion"])
+def test_unrelated_malformed_shell_atomically_blocks_every_catalog_path(tmp_path: Path, path: str) -> None:
+    _shell(tmp_path, "known")
+    malformed = tmp_path / "other" / "guide-content" / "malformed.md"
+    malformed.parent.mkdir(parents=True)
+    malformed.write_text("---\ndescription: Broken.\n---\n", encoding="utf-8")
+
+    with pytest.raises(GuideContentError):
+        if path == "index":
+            render_guide(None, GuideMode.HUMAN, package_root=tmp_path)
+        elif path == "show":
+            render_guide("concept-known", GuideMode.HUMAN, package_root=tmp_path)
+        else:
+            # Shell completion consumes the same list service as the list command.
+            list_guide_topics(package_root=tmp_path)
 
 
 def test_static_index_list_and_selected_render_do_not_load_operator_state_modules() -> None:
@@ -130,15 +165,16 @@ def test_static_index_list_and_selected_render_do_not_load_operator_state_module
             (
                 "import sys; "
                 "from agentworks.guide.agent_mode import GuideMode; "
+                "from agentworks.guide.catalog import discover_concept_shells; "
                 "from agentworks.guide.service import list_guide_topics, render_guide; "
                 "forbidden = ('agentworks.config', 'agentworks.db', 'agentworks.declared_resource', "
                 "'agentworks.resource_loading', 'agentworks.resource_names', 'agentworks.resources', "
                 "'agentworks.secrets'); "
                 "assert not any(name == root or name.startswith(root + '.') "
                 "for name in sys.modules for root in forbidden); "
-                "render_guide((), GuideMode.HUMAN); "
+                "render_guide(None, GuideMode.HUMAN); "
                 "list_guide_topics(); "
-                "render_guide(('concept-management',), GuideMode.HUMAN); "
+                "render_guide(discover_concept_shells().topics[0].slug, GuideMode.HUMAN); "
                 "assert not any(name == root or name.startswith(root + '.') "
                 "for name in sys.modules for root in forbidden)"
             ),
@@ -156,7 +192,7 @@ def test_exact_release_topic_is_direct_inert_evidence(monkeypatch: pytest.Monkey
     monkeypatch.setattr("agentworks.guide.service.read_release_history", lambda: history)
     monkeypatch.setattr("agentworks.guide.render.read_release_history", lambda: history)
 
-    response = render_guide(("concept-release-notes/v1-2-3",), GuideMode.AGENT)
+    response = render_guide("concept-release-notes/v1-2-3", GuideMode.AGENT)
 
     assert "\\# Heading" in response.markdown
     assert "[Run](https://example.invalid)" not in response.markdown

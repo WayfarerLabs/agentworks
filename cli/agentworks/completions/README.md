@@ -95,6 +95,5 @@ registry-backed completer that forgets the slice emits `kind/name` candidates.
 
 Guide topic completion is intentionally package-only: `agw guide list` emits auto-discovered
 first-party concept shells and packaged release-note topics without loading operator state. Resource
-and kind completion use their command-owned list surfaces instead. The reserved `list` positional is
-offered beside topics only in the first guide argument position; once selected, it terminates topic
-completion.
+and kind completion use their command-owned list surfaces instead. The ordinary command tree offers
+the `list` and `show` subcommands; only `agw guide show TOPIC` attaches the dynamic topic completer.

@@ -164,8 +164,8 @@ def discover_concept_shells(package_root: Traversable | None = None) -> GuideCat
     """Discover and validate all direct Markdown children of first-party guide-content directories."""
     root = files("agentworks") if package_root is None else package_root
     shells = tuple(_parse_shell(resource, path) for path, resource in _shell_resources(root))
-    indexes = tuple(shell for shell in shells if isinstance(shell, IndexShell))
-    if len(indexes) != 1:
+    index = next((shell for shell in shells if isinstance(shell, IndexShell)), None)
+    if index is None:
         raise GuideContentError(f"required reserved guide index {CORE_INDEX_PATH!r} is missing")
     topics = tuple(shell for shell in shells if isinstance(shell, ConceptShell))
     by_slug: dict[str, list[ConceptShell]] = {}
@@ -176,4 +176,4 @@ def discover_concept_shells(package_root: Traversable | None = None) -> GuideCat
         slug, values = collisions[0]
         paths = ", ".join(topic.source.package_path for topic in values)
         raise GuideContentError(f"duplicate guide topic {slug!r} from {paths}")
-    return GuideCatalog(indexes[0], tuple(sorted(topics, key=lambda topic: topic.source.package_path)))
+    return GuideCatalog(index, tuple(sorted(topics, key=lambda topic: topic.source.package_path)))

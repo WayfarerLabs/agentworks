@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import sqlite3
 import subprocess
 import sys
@@ -77,6 +76,7 @@ class TestTopLevelGroups:
             "database",
             "env",
             "graph",
+            "guide",
             "resource",
             "secret",
             "session",
@@ -161,68 +161,45 @@ class TestDynamicCompletionsMapping:
                 f"Completer '{completer_id}' from ({command_path}, {param_name}) has no bash snippet mapping"
             )
 
-    def test_guide_topics_use_the_reserved_list_form_in_every_shell(self) -> None:
+    def test_guide_show_topics_use_the_list_stream_in_every_shell(self) -> None:
         from agentworks.completions.bash import DYNAMIC_SNIPPETS as BASH_SNIPPETS
         from agentworks.completions.powershell import DYNAMIC_SNIPPETS as POWERSHELL_SNIPPETS
         from agentworks.completions.zsh import DYNAMIC_FUNCTIONS
 
-        assert DYNAMIC_COMPLETIONS[("guide", "topics")] == "guide_topics"
+        assert DYNAMIC_COMPLETIONS[("guide.show", "topic")] == "guide_topics"
         assert "agw guide list" in BASH_SNIPPETS["guide_topics"]
         assert "agw guide list" in POWERSHELL_SNIPPETS["guide_topics"]
         assert "agw guide list" in DYNAMIC_FUNCTIONS["guide_topics"]
 
-    def test_guide_list_is_a_terminal_first_positional_in_the_generated_spec(self) -> None:
+    def test_guide_uses_ordinary_subcommands_and_one_dynamic_show_argument(self) -> None:
         spec = build_spec(app)
         guide = spec.subcommands["guide"]
-        topics = next(param for param in guide.params if param.name == "topics")
-        mode = next(param for param in guide.params if param.name == "agent")
+        listed = guide.subcommands["list"]
+        show = guide.subcommands["show"]
+        (topic,) = [param for param in show.params if param.is_argument]
 
-        assert topics.is_argument
-        assert topics.multiple
-        assert topics.dynamic_completer == "guide_topics"
-        assert topics.terminal_values == ["list"]
-        assert mode.is_flag
-        assert mode.opts == ["--agent", "--human"]
+        assert set(guide.subcommands) == {"list", "show"}
+        assert not listed.params
+        assert topic.name == "topic"
+        assert topic.required
+        assert not topic.multiple
+        assert topic.dynamic_completer == "guide_topics"
 
         generated = {shell: generate(shell) for shell in ("bash", "zsh", "powershell")}
-        bash = _generated_block(generated["bash"], "        guide)", "            ;;")
-        zsh_helper = _generated_block(
-            generated["zsh"],
-            "_agentworks_guide_topics_values() {",
-            "}",
-        )
+        bash = _generated_block(generated["bash"], "        guide)", "        resource)")
+        zsh_group = _generated_braced_block(generated["zsh"], "_agentworks_guide() {")
+        zsh_show = _generated_braced_block(generated["zsh"], "_agentworks_guide_show() {")
         powershell = _generated_braced_block(generated["powershell"], "        'guide' {")
 
-        for mode_option in mode.opts:
-            assert mode_option in bash
-            assert mode_option in zsh_helper
-            assert mode_option in powershell
-
-        assert "positional_count=0" in bash
-        assert "--agent|--human) continue" in bash
-        assert '${words[word_index]} == "list"' in bash
-        assert '"$terminal_selected" == true' in bash
-        assert 'compgen -W "list $(agw guide list' in bash
-
-        assert "positional_count=0" in zsh_helper
-        assert "--agent|--human) continue" in zsh_helper
-        assert '${words[word_index]} == "list"' in zsh_helper
-        assert '"$terminal_selected" == true' in zsh_helper
-        assert "_agentworks_guide_topics" in zsh_helper
-
-        assert "$completedPositionals = @()" in powershell
-        assert "@('--agent', '--human') -notcontains" in powershell
-        assert "$terminalSelected" in powershell
+        assert 'compgen -W "list show"' in bash
+        assert "agw guide list" in bash
+        assert "list" in zsh_group and "show" in zsh_group
+        assert "1:topic:_agentworks_guide_topics" in zsh_show
         assert "CompletionResult]::new('list'" in powershell
+        assert "CompletionResult]::new('show'" in powershell
         assert "agw guide list" in powershell
-        assert (
-            powershell.index("$completedPositionals.Count -eq 0")
-            < powershell.index("$wordToComplete -notlike '-*' -and $terminalSelected")
-            < powershell.index("# Positional: topics")
-        )
 
-    @pytest.mark.parametrize("mode", ["--agent", "--human"])
-    def test_generated_bash_guide_completion_is_terminal_after_list_with_mode(self, mode: str) -> None:
+    def test_generated_bash_guide_completion_follows_the_group_grammar(self) -> None:
         from agentworks.guide.service import list_guide_topics
 
         expected_topics = list_guide_topics().markdown.splitlines()
@@ -239,31 +216,10 @@ printf '%s\\n' "${{COMPREPLY[@]}}"
             completed = subprocess.run(["bash"], input=invocation, capture_output=True, text=True, check=True)
             return [candidate for candidate in completed.stdout.splitlines() if candidate]
 
-        assert complete(["agw", "guide", mode, ""]) == ["list", *expected_topics]
-        assert complete(["agw", "guide", mode, "list", ""]) == []
-        assert complete(["agw", "guide", mode, expected_topics[0], ""]) == expected_topics
-
-    @pytest.mark.skipif(shutil.which("zsh") is None, reason="zsh is not installed")
-    @pytest.mark.parametrize("mode", ["--agent", "--human"])
-    def test_generated_zsh_guide_completion_is_terminal_after_list_with_mode(self, mode: str) -> None:
-        generated = generate("zsh")
-        helper = _generated_block(generated, "_agentworks_guide_topics_values() {", "}")
-
-        def complete(positionals: list[str]) -> list[str]:
-            shell_words = " ".join(f"'{word}'" for word in ["agw", "guide", mode, *positionals, ""])
-            invocation = f"""{helper}
-_describe() {{ print -r -- list; }}
-_agentworks_guide_topics() {{ print -r -- concept-fixture; }}
-words=({shell_words})
-CURRENT=${{#words[@]}}
-_agentworks_guide_topics_values
-"""
-            completed = subprocess.run(["zsh", "-f"], input=invocation, capture_output=True, text=True, check=True)
-            return completed.stdout.splitlines()
-
-        assert complete([]) == ["list", "concept-fixture"]
-        assert complete(["list"]) == []
-        assert complete(["concept-fixture"]) == ["concept-fixture"]
+        assert complete(["agw", "guide", ""]) == ["list", "show"]
+        assert complete(["agw", "guide", "list", ""]) == []
+        assert complete(["agw", "guide", "show", ""]) == expected_topics
+        assert complete(["agw", "guide", "show", expected_topics[0], ""]) == []
 
     def test_database_backed_snippets_share_hidden_probe_contract(self) -> None:
         from agentworks.completions.bash import DYNAMIC_SNIPPETS as BASH_SNIPPETS

@@ -891,11 +891,11 @@ and rewrite any that still live in `config.toml`; the
 
 ### Guide
 
-`agw guide [TOPIC]...` renders installed Markdown concept shells. With no topic, it renders the
-reserved core `_index.md` shell and appends concepts selected by their optional `index-order`
+`agw guide` is a command group for installed Markdown concept shells. With no subcommand, it renders
+the reserved core `_index.md` shell and appends concepts selected by their optional `index-order`
 frontmatter, ordered by that value and slug. Human and agent modes share the same selected concepts;
-ordinary agent-only fencing may vary the index framing. The static no-topic path discovers the
-packaged catalog but does not load configuration, registry, state, or release history.
+ordinary agent-only fencing may vary the index framing. The static index path discovers the packaged
+catalog but does not load configuration, registry, state, or release history.
 
 Concepts are auto-discovered from Markdown files directly under first-party package-local
 `guide-content/` directories. Restricted frontmatter supplies the required description and optional
@@ -946,11 +946,12 @@ For locally missing history, the shell suggests an explicitly scoped lookup on t
 Agentworks GitHub releases page. Refusal performs no network request or claimed summary. Use current
 command facts to assess an installation.
 
-Multiple topics render in the requested order and are validated atomically: one unknown topic
-prevents all output. Repeated topics render once at their first position. `--agent` and `--human`
-override automatic presentation selection; explicit selection wins over the Claude Code execution
-signature and stdout TTY fallback. Ordinary shell content and release evidence are identical in both
-modes. Content inside an agent-only fence renders only in agent mode.
+`agw guide show TOPIC` accepts exactly one topic. `--agent` and `--human` on `show` override
+automatic presentation selection; explicit selection wins over the Claude Code execution signature
+and stdout TTY fallback. The same flags on the no-subcommand group callback select the index mode.
+They do not modify `list` and cannot be placed at group level before a subcommand. Ordinary shell
+content and release evidence are identical in both modes. Content inside an agent-only fence renders
+only in agent mode.
 
 `concept-assistant-agent` is the shared, directly addressable home for general external-assistant
 posture. The assistant acts under the operator's current instruction, uses the CLI and its help as
@@ -965,7 +966,7 @@ provider state, network, transports, or subprocesses.
 
 `agw guide list` discovers installed shell filenames and packaged release-note topics without
 loading operator state. This stable one-name-per-line stream backs Bash, Zsh, and PowerShell topic
-completion. `list` is reserved in this position and must be used without topic names.
+completion for the single topic accepted by `agw guide show`.
 
 `concept-management` covers day-two operation without duplicating the command registry. It points to
 JSON v1 graph/list/detail surfaces and the installed Typer help for the stable `config`, `graph`,
@@ -981,17 +982,17 @@ or authorizes an agent to do so.
 During the unreleased 0.14 transition, `agw graph show`, `agw resource kinds`, `agw resource list`,
 `agw resource explain`, and `agw resource sample` are the available command-owned fact surfaces.
 
-| Command                                              | Description                                   |
-| ---------------------------------------------------- | --------------------------------------------- |
-| `agw guide`                                          | Render the shell-backed concise concept index |
-| `agw guide --agent`                                  | Render the index with agent-only context      |
-| `agw guide concept-assistant-agent`                  | Render the external-assistant posture         |
-| `agw guide TOPIC...`                                 | Render one or more exact topics atomically    |
-| `agw guide TOPIC... --agent/--human`                 | Override automatic presentation mode          |
-| `agw guide concept-release-notes`                    | Render the release-history guidance shell     |
-| `agw guide concept-release-notes/vMAJOR-MINOR-PATCH` | Render one exact packaged historical section  |
-| `agw guide concept-source-review`                    | Render optional source-review guidance        |
-| `agw guide list`                                     | Emit every topic name for shell completion    |
+| Command                                                   | Description                                   |
+| --------------------------------------------------------- | --------------------------------------------- |
+| `agw guide`                                               | Render the shell-backed concise concept index |
+| `agw guide --agent`                                       | Render the index with agent-only context      |
+| `agw guide list`                                          | Emit every topic name for shell completion    |
+| `agw guide show TOPIC`                                    | Render one exact topic                        |
+| `agw guide show TOPIC --agent/--human`                    | Override the selected topic's presentation    |
+| `agw guide show concept-assistant-agent`                  | Render the external-assistant posture         |
+| `agw guide show concept-release-notes`                    | Render the release-history guidance shell     |
+| `agw guide show concept-release-notes/vMAJOR-MINOR-PATCH` | Render one exact packaged historical section  |
+| `agw guide show concept-source-review`                    | Render optional source-review guidance        |
 
 ### Guide management coverage
 

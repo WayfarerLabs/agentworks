@@ -687,15 +687,15 @@ destination is the ordinary noun/verb grammar: default index, `list`, and single
 - [x] Amend the active FRD, HLA, and guide LLD for `agw guide`, `agw guide list`, and
       `agw guide show TOPIC`. Make `show` single-topic and remove the unreleased direct/variadic
       form without an alias.
-- [ ] Replace the single `guide [TOPIC...]` command with one guide group whose no-subcommand
+- [x] Replace the single `guide [TOPIC...]` command with one guide group whose no-subcommand
       callback renders the index and whose real `list` and `show` subcommands own listing and
       one-topic rendering. Preserve `agw guide --agent`; make `show` own its mode option; and reject
       a group-level mode followed by either subcommand with recovery guidance rather than adding a
       second topic router.
-- [ ] Delete `ParamSpec.terminal_values`, its registration, generator branches, and implementation-
+- [x] Delete `ParamSpec.terminal_values`, its registration, generator branches, and implementation-
       source tests. Let ordinary command completion expose `list`/`show`; attach the existing static
       topic-name completer only to `show TOPIC`.
-- [ ] Record that catalog defects atomically prevent index, list, show, and completion from
+- [x] Record that catalog defects atomically prevent index, list, show, and completion from
       returning partial results. Remove hard-coded featured counts from permanent docs, document the
       underscore shell-name reservation, and take the bounded protocol/index-check cleanups. Keep
       authored index headings in `_index.md` and defer PowerShell's native filesystem fallback.

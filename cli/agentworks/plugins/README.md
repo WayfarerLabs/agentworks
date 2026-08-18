@@ -71,12 +71,13 @@ discovery boundary.
 Each shell has restricted frontmatter containing a single-line `description` and optional bounded
 `index-order`, followed by one unfenced level-1 heading and ordinary reviewed Markdown. The optional
 order selects the concept for the concise no-topic index. The required reserved `_index.md` belongs
-to the core guide package and is not a plugin concept. Agent-only fences and bounded exact-section
-includes are the only directives. Their comment lines must stand alone at column zero between
-top-level Markdown blocks; comments inside lists, block quotes, or code remain content. Shells do
-not call Python or inspect configuration, resources, secrets, provider state, or the workstation.
-Signpost command-owned facts instead of copying them into teaching. The guide contract and
-structural tests own the exact grammar and package-data boundary.
+to the core guide package and is not a plugin concept. Every other underscore-prefixed Markdown
+filename in a `guide-content/` directory is reserved and invalid. Agent-only fences and bounded
+exact-section includes are the only directives. Their comment lines must stand alone at column zero
+between top-level Markdown blocks; comments inside lists, block quotes, or code remain content.
+Shells do not call Python or inspect configuration, resources, secrets, provider state, or the
+workstation. Signpost command-owned facts instead of copying them into teaching. The guide contract
+and structural tests own the exact grammar and package-data boundary.
 
 ## Shipping a plugin
 
