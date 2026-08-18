@@ -16,7 +16,8 @@ from http.server import ThreadingHTTPServer
 from math import ceil
 from pathlib import Path
 
-from lander_chromium_phase4k import DevToolsConnection, _devtools_target, _QuietHandler
+from chromium_test_support import DevToolsConnection, cleanup_profile, devtools_target
+from lander_chromium_phase4k import _QuietHandler
 from site_test_support import RepositoryFixture
 
 PROBE = r"""
@@ -345,7 +346,7 @@ def browser_phase4q_contract(
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             env={**os.environ, "HOME": profile.name},
         )
-        connection = DevToolsConnection(_devtools_target(Path(profile.name), process))
+        connection = DevToolsConnection(devtools_target(Path(profile.name), process))
         for domain in ("Runtime", "Page"):
             connection.call(f"{domain}.enable")
         connection.call("Emulation.setCPUThrottlingRate", {"rate": cpu_throttling_rate})
@@ -449,7 +450,7 @@ def browser_phase4q_contract(
             thread.join(timeout=5)
         page.write_text(source, encoding="utf-8")
         probe_path.unlink(missing_ok=True)
-        profile.cleanup()
+        cleanup_profile(profile)
 
 
 class Phase4QBrowserTests(RepositoryFixture):

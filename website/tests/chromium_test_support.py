@@ -1,0 +1,281 @@
+"""Shared lifecycle-safe Chromium helpers for website browser tests."""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import os
+import socket
+import struct
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.parse
+import urllib.request
+from pathlib import Path
+from typing import Callable
+
+
+class DevToolsConnection:
+    """Minimal bounded WebSocket client for one Chromium page target."""
+
+    def __init__(self, url: str) -> None:
+        parsed = urllib.parse.urlsplit(url)
+        self.socket = socket.create_connection((parsed.hostname or "127.0.0.1", parsed.port or 80), timeout=10)
+        key = base64.b64encode(os.urandom(16)).decode("ascii")
+        target = parsed.path + (f"?{parsed.query}" if parsed.query else "")
+        request = (
+            f"GET {target} HTTP/1.1\r\n"
+            f"Host: {parsed.netloc}\r\n"
+            "Upgrade: websocket\r\nConnection: Upgrade\r\n"
+            f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n"
+            "Origin: http://127.0.0.1\r\n\r\n"
+        )
+        try:
+            self.socket.sendall(request.encode("ascii"))
+            response = bytearray()
+            while b"\r\n\r\n" not in response:
+                block = self.socket.recv(4096)
+                if not block:
+                    raise ConnectionError("Chromium closed the DevTools handshake before sending headers")
+                response.extend(block)
+                if len(response) > 65536:
+                    raise ConnectionError("Chromium DevTools handshake headers exceeded 64 KiB")
+            expected = base64.b64encode(
+                hashlib.sha1(f"{key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11".encode()).digest()
+            )
+            if b" 101 " not in response.split(b"\r\n", 1)[0] or expected not in response:
+                raise ConnectionError(f"Chromium rejected DevTools WebSocket: {response[:500]!r}")
+        except BaseException:
+            self.socket.close()
+            raise
+        self.identifier = 0
+
+    def close(self) -> None:
+        try:
+            self._send(b"", opcode=8)
+        finally:
+            self.socket.close()
+
+    def _read_exact(self, length: int) -> bytes:
+        chunks = bytearray()
+        while len(chunks) < length:
+            block = self.socket.recv(length - len(chunks))
+            if not block:
+                raise ConnectionError("Chromium closed the DevTools WebSocket")
+            chunks.extend(block)
+        return bytes(chunks)
+
+    def _send(self, payload: bytes, opcode: int = 1) -> None:
+        mask = os.urandom(4)
+        length = len(payload)
+        header = bytearray((0x80 | opcode, 0x80 | (length if length < 126 else 126 if length <= 0xFFFF else 127)))
+        if length >= 126:
+            header.extend(struct.pack(">H" if length <= 0xFFFF else ">Q", length))
+        header.extend(mask)
+        header.extend(value ^ mask[index % 4] for index, value in enumerate(payload))
+        self.socket.sendall(header)
+
+    def _receive(self) -> dict[str, object]:
+        payload = bytearray()
+        while True:
+            first, second = self._read_exact(2)
+            final = bool(first & 0x80)
+            opcode = first & 0x0F
+            length = second & 0x7F
+            if length == 126:
+                length = struct.unpack(">H", self._read_exact(2))[0]
+            elif length == 127:
+                length = struct.unpack(">Q", self._read_exact(8))[0]
+            mask = self._read_exact(4) if second & 0x80 else b""
+            frame = self._read_exact(length)
+            if mask:
+                frame = bytes(value ^ mask[index % 4] for index, value in enumerate(frame))
+            if opcode == 8:
+                raise ConnectionError("Chromium closed the DevTools WebSocket")
+            if opcode == 9:
+                self._send(frame, opcode=10)
+                continue
+            if opcode in {0, 1}:
+                payload.extend(frame)
+                if final:
+                    return json.loads(payload)
+
+    def call(self, method: str, params: dict[str, object] | None = None) -> dict[str, object]:
+        self.identifier += 1
+        identifier = self.identifier
+        self._send(
+            json.dumps({"id": identifier, "method": method, "params": params or {}}, separators=(",", ":")).encode()
+        )
+        while True:
+            response = self._receive()
+            if response.get("id") != identifier:
+                continue
+            if "error" in response:
+                raise AssertionError(f"DevTools {method} failed: {response['error']}")
+            return response.get("result", {})
+
+    def evaluate(self, expression: str) -> object:
+        result = self.call(
+            "Runtime.evaluate",
+            {"expression": expression, "awaitPromise": True, "returnByValue": True},
+        )
+        if "exceptionDetails" in result:
+            raise AssertionError(f"Chromium evaluation failed: {result['exceptionDetails']}")
+        return result["result"].get("value")
+
+
+def devtools_target(profile_path: Path, process: subprocess.Popen[bytes]) -> str:
+    port_path = profile_path / "DevToolsActivePort"
+    last_error: BaseException | None = None
+    deadline = time.monotonic() + 5
+    for _ in range(200):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        if process.poll() is not None:
+            raise AssertionError("Chromium exited before opening its DevTools endpoint")
+        try:
+            lines = port_path.read_text(encoding="utf-8").splitlines()
+            if not lines:
+                raise ValueError("Chromium published an empty DevTools port file")
+            port = int(lines[0])
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/json/list", timeout=min(0.25, remaining)
+            ) as response:
+                targets = json.load(response)
+            if isinstance(targets, list):
+                target = next(
+                    (
+                        item.get("webSocketDebuggerUrl")
+                        for item in targets
+                        if isinstance(item, dict) and item.get("type") == "page"
+                    ),
+                    None,
+                )
+                if isinstance(target, str):
+                    return target
+            raise ValueError("Chromium did not publish a page target")
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            last_error = error
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(0.025, remaining))
+    raise AssertionError("Chromium did not publish its DevTools endpoint") from last_error
+
+
+def cleanup_profile(
+    profile: tempfile.TemporaryDirectory[str],
+    *,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    for attempt in range(40):
+        try:
+            profile.cleanup()
+            return
+        except OSError:
+            if attempt == 39:
+                raise
+            sleep(0.025)
+
+
+def browser_json_probe(
+    chromium: str,
+    url: str,
+    width: int,
+    result_selector: str,
+    *,
+    reduced_motion: bool = False,
+    screenshot_path: Path | None = None,
+    connection_factory: Callable[[str], DevToolsConnection] = DevToolsConnection,
+    popen_factory: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
+    target_factory: Callable[[Path, subprocess.Popen[bytes]], str] = devtools_target,
+    tempdir_factory: Callable[[], tempfile.TemporaryDirectory[str]] = tempfile.TemporaryDirectory,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict[str, object]:
+    profile: tempfile.TemporaryDirectory[str] | None = None
+    process: subprocess.Popen[bytes] | None = None
+    connection: DevToolsConnection | None = None
+    try:
+        profile = tempdir_factory()
+        process = popen_factory(
+            (
+                chromium,
+                "--headless",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--hide-scrollbars",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--remote-allow-origins=*",
+                "--remote-debugging-port=0",
+                f"--user-data-dir={profile.name}",
+                "about:blank",
+            ),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        connection = connection_factory(target_factory(Path(profile.name), process))
+        for domain in ("Runtime", "Page"):
+            connection.call(f"{domain}.enable")
+        connection.call(
+            "Emulation.setDeviceMetricsOverride",
+            {"width": width, "height": 1000, "deviceScaleFactor": 1, "mobile": False},
+        )
+        if reduced_motion:
+            connection.call(
+                "Emulation.setEmulatedMedia",
+                {"features": [{"name": "prefers-reduced-motion", "value": "reduce"}]},
+            )
+        connection.call("Page.navigate", {"url": url})
+        selector = json.dumps(result_selector)
+        readiness = (
+            f"location.href === {json.dumps(url)} && "
+            "document.readyState === 'complete' && "
+            f"document.querySelector({selector})?.textContent !== 'pending'"
+        )
+        for _ in range(200):
+            if connection.evaluate(readiness):
+                break
+            sleep(0.025)
+        else:
+            raise AssertionError("Chromium did not initialize the browser probe")
+        result = connection.evaluate(f"JSON.parse(document.querySelector({selector}).textContent)")
+        if not isinstance(result, dict):
+            raise AssertionError("Chromium returned invalid browser probe data")
+        if screenshot_path is not None:
+            screenshot = connection.call(
+                "Page.captureScreenshot",
+                {"format": "png", "fromSurface": True, "captureBeyondViewport": False},
+            )
+            encoded = screenshot.get("data")
+            if not isinstance(encoded, str):
+                raise AssertionError("Chromium did not return a browser screenshot")
+            screenshot_path.write_bytes(base64.b64decode(encoded, validate=True))
+        return result
+    finally:
+        active_error = sys.exception()
+        cleanup_errors: list[BaseException] = []
+
+        def cleanup(action: Callable[[], object]) -> None:
+            try:
+                action()
+            except BaseException as error:
+                cleanup_errors.append(error)
+
+        if connection is not None:
+            cleanup(connection.close)
+        if process is not None and process.poll() is None:
+            cleanup(process.terminate)
+            if process.poll() is None:
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    cleanup(process.kill)
+                    cleanup(lambda: process.wait(timeout=5))
+        if profile is not None:
+            cleanup(lambda: cleanup_profile(profile, sleep=sleep))
+        if active_error is None and cleanup_errors:
+            raise cleanup_errors[0]

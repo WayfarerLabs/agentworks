@@ -1,20 +1,15 @@
 # ruff: noqa: F405
 
-import base64
-import json
 import struct
 import sys
 import threading
-import time
 import zlib
 from decimal import Decimal
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from typing import Callable
 
+from chromium_test_support import browser_json_probe
 from lander_chromium_phase4k import (
-    DevToolsConnection,
-    _devtools_target,
     _probe_source,
     browser_phase4k_contract,
     normalize_accessible,
@@ -108,116 +103,6 @@ def png_difference(path_a: Path, path_b: Path) -> dict[str, object]:
     return {"colors": sorted(colors), "changed": changed}
 
 
-def chromium_result(
-    chromium: str,
-    url: str,
-    width: int,
-    result_selector: str,
-    *,
-    reduced_motion: bool = False,
-    screenshot_path: Path | None = None,
-    connection_factory: Callable[[str], DevToolsConnection] = DevToolsConnection,
-    popen_factory: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
-    target_factory: Callable[[Path, subprocess.Popen[bytes]], str] = _devtools_target,
-    tempdir_factory: Callable[[], tempfile.TemporaryDirectory[str]] = tempfile.TemporaryDirectory,
-    sleep: Callable[[float], None] = time.sleep,
-) -> dict[str, object]:
-    profile: tempfile.TemporaryDirectory[str] | None = None
-    process: subprocess.Popen[bytes] | None = None
-    connection: DevToolsConnection | None = None
-    try:
-        profile = tempdir_factory()
-        process = popen_factory(
-            (
-                chromium,
-                "--headless",
-                "--disable-gpu",
-                "--no-sandbox",
-                "--hide-scrollbars",
-                "--no-first-run",
-                "--no-default-browser-check",
-                "--remote-allow-origins=*",
-                "--remote-debugging-port=0",
-                f"--user-data-dir={profile.name}",
-                "about:blank",
-            ),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        connection = connection_factory(target_factory(Path(profile.name), process))
-        for domain in ("Runtime", "Page"):
-            connection.call(f"{domain}.enable")
-        connection.call(
-            "Emulation.setDeviceMetricsOverride",
-            {"width": width, "height": 1000, "deviceScaleFactor": 1, "mobile": False},
-        )
-        if reduced_motion:
-            connection.call(
-                "Emulation.setEmulatedMedia",
-                {"features": [{"name": "prefers-reduced-motion", "value": "reduce"}]},
-            )
-        connection.call("Page.navigate", {"url": url})
-        selector = json.dumps(result_selector)
-        readiness = (
-            f"location.href === {json.dumps(url)} && "
-            "document.readyState === 'complete' && "
-            f"document.querySelector({selector})?.textContent !== 'pending'"
-        )
-        for _ in range(200):
-            if connection.evaluate(readiness):
-                break
-            sleep(0.025)
-        else:
-            raise AssertionError("Chromium did not initialize the Phase 4J probe")
-        result = connection.evaluate(f"JSON.parse(document.querySelector({selector}).textContent)")
-        if not isinstance(result, dict):
-            raise AssertionError("Chromium returned invalid Phase 4J probe data")
-        if screenshot_path is not None:
-            screenshot = connection.call(
-                "Page.captureScreenshot",
-                {"format": "png", "fromSurface": True, "captureBeyondViewport": False},
-            )
-            encoded = screenshot.get("data")
-            if not isinstance(encoded, str):
-                raise AssertionError("Chromium did not return a Phase 4J screenshot")
-            screenshot_path.write_bytes(base64.b64decode(encoded, validate=True))
-        return result
-    finally:
-        active_error = sys.exception()
-        cleanup_errors: list[BaseException] = []
-
-        def cleanup(action: Callable[[], object]) -> None:
-            try:
-                action()
-            except BaseException as error:
-                cleanup_errors.append(error)
-
-        if connection is not None:
-            cleanup(connection.close)
-        if process is not None and process.poll() is None:
-            cleanup(process.terminate)
-            if process.poll() is None:
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    cleanup(process.kill)
-                    cleanup(lambda: process.wait(timeout=5))
-        if profile is not None:
-            def cleanup_profile() -> None:
-                for attempt in range(40):
-                    try:
-                        profile.cleanup()
-                        return
-                    except OSError:
-                        if attempt == 39:
-                            raise
-                        sleep(0.025)
-
-            cleanup(cleanup_profile)
-        if active_error is None and cleanup_errors:
-            raise cleanup_errors[0]
-
-
 def browser_arcade_contract(
     output: Path,
     width: int,
@@ -309,7 +194,7 @@ document.querySelector("#phase4j-result").textContent = JSON.stringify(result);
     screenshot_paths: list[Path] = []
     try:
         query = "?paused=true" if paused else ""
-        geometry = chromium_result(
+        geometry = browser_json_probe(
             chromium,
             f"http://127.0.0.1:{server.server_address[1]}/lander/{query}",
             width,
@@ -320,7 +205,7 @@ document.querySelector("#phase4j-result").textContent = JSON.stringify(result);
             screenshot_geometry: dict[str, object] | None = None
             for state in ("on", "off"):
                 screenshot_path = Path(artifacts.name) / f"can-{state}.png"
-                state_geometry = chromium_result(
+                state_geometry = browser_json_probe(
                     chromium,
                     f"http://127.0.0.1:{server.server_address[1]}/lander/?refuel={state}",
                     width,
@@ -393,7 +278,7 @@ controller.destroy();
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        result = chromium_result(
+        result = browser_json_probe(
             chromium,
             f"http://127.0.0.1:{server.server_address[1]}/lander/",
             960,
@@ -406,115 +291,6 @@ controller.destroy();
         server.server_close()
         thread.join(timeout=5)
     return result
-
-
-class ChromiumProbeLifecycleTests(unittest.TestCase):
-    class Profile:
-        name = "/tmp/phase4j-profile"
-
-        def __init__(self, *, cleanup_failures: int = 0) -> None:
-            self.cleaned = False
-            self.cleanup_failures = cleanup_failures
-            self.cleanup_calls = 0
-
-        def cleanup(self) -> None:
-            self.cleanup_calls += 1
-            if self.cleanup_calls <= self.cleanup_failures:
-                raise OSError("profile still active")
-            self.cleaned = True
-
-    class Process:
-        def __init__(self, *, stuck: bool = False) -> None:
-            self.stuck = stuck
-            self.terminated = False
-            self.killed = False
-            self.waits = 0
-            self.finished = False
-
-        def poll(self) -> int | None:
-            return 0 if self.finished else None
-
-        def terminate(self) -> None:
-            self.terminated = True
-
-        def kill(self) -> None:
-            self.killed = True
-
-        def wait(self, timeout: float | None = None) -> int:
-            del timeout
-            self.waits += 1
-            if self.stuck and not self.killed:
-                raise subprocess.TimeoutExpired("chromium-test", 5)
-            self.finished = True
-            return 0
-
-    class Connection:
-        def __init__(self, *, ready: bool) -> None:
-            self.ready = ready
-            self.closed = False
-            self.calls: list[tuple[str, dict[str, object] | None]] = []
-            self.expressions: list[str] = []
-
-        def call(self, method: str, params: dict[str, object] | None = None) -> dict[str, object]:
-            self.calls.append((method, params))
-            return {}
-
-        def evaluate(self, expression: str) -> object:
-            self.expressions.append(expression)
-            if expression.startswith("JSON.parse"):
-                return {"ready": True}
-            return self.ready
-
-        def close(self) -> None:
-            self.closed = True
-
-    def test_probe_owns_browser_until_result_and_cleans_every_resource(self) -> None:
-        process = self.Process()
-        connection = self.Connection(ready=True)
-        profile = self.Profile(cleanup_failures=1)
-        result = chromium_result(
-            "chromium-test",
-            "http://127.0.0.1:8000/lander/",
-            960,
-            "#result",
-            connection_factory=lambda url: connection,
-            popen_factory=lambda *args, **kwargs: process,
-            target_factory=lambda path, owned: "ws://chromium.test",
-            tempdir_factory=lambda: profile,
-            sleep=lambda seconds: None,
-        )
-
-        self.assertEqual(result, {"ready": True})
-        self.assertTrue(connection.closed)
-        self.assertTrue(process.terminated)
-        self.assertFalse(process.killed)
-        self.assertEqual(process.waits, 1)
-        self.assertTrue(profile.cleaned)
-        self.assertEqual(profile.cleanup_calls, 2)
-
-    def test_probe_bounds_readiness_and_kills_a_stuck_browser(self) -> None:
-        process = self.Process(stuck=True)
-        connection = self.Connection(ready=False)
-        profile = self.Profile()
-        with self.assertRaises(AssertionError):
-            chromium_result(
-                "chromium-test",
-                "http://127.0.0.1:8000/lander/",
-                960,
-                "#result",
-                connection_factory=lambda url: connection,
-                popen_factory=lambda *args, **kwargs: process,
-                target_factory=lambda path, owned: "ws://chromium.test",
-                tempdir_factory=lambda: profile,
-                sleep=lambda seconds: None,
-            )
-
-        self.assertEqual(len(connection.expressions), 200)
-        self.assertTrue(connection.closed)
-        self.assertTrue(process.terminated)
-        self.assertTrue(process.killed)
-        self.assertEqual(process.waits, 2)
-        self.assertTrue(profile.cleaned)
 
 
 class ArcadeBrowserTests(RepositoryFixture):

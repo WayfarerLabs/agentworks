@@ -13,7 +13,8 @@ from functools import partial
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-from lander_chromium_phase4k import DevToolsConnection, _devtools_target, _QuietHandler
+from chromium_test_support import DevToolsConnection, cleanup_profile, devtools_target
+from lander_chromium_phase4k import _QuietHandler
 from site_test_support import RepositoryFixture
 
 PROBE = r"""
@@ -114,7 +115,7 @@ def browser_phase4m_contract(output: Path) -> dict[str, object]:
             stderr=subprocess.DEVNULL,
             env={**os.environ, "HOME": profile.name},
         )
-        connection = DevToolsConnection(_devtools_target(Path(profile.name), process))
+        connection = DevToolsConnection(devtools_target(Path(profile.name), process))
         for domain in ("Runtime", "Page"):
             connection.call(f"{domain}.enable")
         loaded_url = f"http://127.0.0.1:{server.server_address[1]}/lander/"
@@ -141,7 +142,7 @@ def browser_phase4m_contract(output: Path) -> dict[str, object]:
             thread.join(timeout=5)
         page.write_text(source, encoding="utf-8")
         probe_path.unlink(missing_ok=True)
-        profile.cleanup()
+        cleanup_profile(profile)
 
 
 class Phase4MBrowserTests(RepositoryFixture):

@@ -9,7 +9,7 @@ from html.parser import HTMLParser
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable
 
-from lander_chromium_phase4k import DevToolsConnection, _devtools_target
+from chromium_test_support import DevToolsConnection, cleanup_profile, devtools_target
 from site_test_support import *  # noqa: F403
 
 
@@ -203,7 +203,7 @@ def browser_geometry(
     chromium_path: str | None = None,
     connection_factory: Callable[[str], DevToolsConnection] = DevToolsConnection,
     popen_factory: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
-    target_factory: Callable[[Path, subprocess.Popen[bytes]], str] = _devtools_target,
+    target_factory: Callable[[Path, subprocess.Popen[bytes]], str] = devtools_target,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, object]:
     chromium = chromium_path or next(
@@ -308,7 +308,7 @@ document.querySelector("#result").textContent = JSON.stringify({
         cleanup(server.shutdown)
         cleanup(server.server_close)
         cleanup(lambda: thread.join(timeout=5))
-        cleanup(profile.cleanup)
+        cleanup(lambda: cleanup_profile(profile))
         if active_error is None and cleanup_errors:
             raise cleanup_errors[0]
 

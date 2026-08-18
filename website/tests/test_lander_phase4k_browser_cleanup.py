@@ -2,25 +2,30 @@
 
 import threading
 
+import chromium_test_support as chromium_support
 import lander_chromium_phase4k as phase4k_browser
 from site_test_support import *  # noqa: F403
 
 
 class _FakeProcess:
-    def __init__(self) -> None:
+    def __init__(self, *, stuck: bool = False) -> None:
         self.alive = True
+        self.stuck = stuck
         self.terminated = False
         self.killed = False
+        self.waits = 0
 
     def poll(self) -> int | None:
         return None if self.alive else 0
 
     def terminate(self) -> None:
         self.terminated = True
-        self.alive = False
 
     def wait(self, timeout: float | None = None) -> int:
         del timeout
+        self.waits += 1
+        if self.stuck and not self.killed:
+            raise subprocess.TimeoutExpired("chromium-test", 5)
         self.alive = False
         return 0
 
@@ -66,6 +71,42 @@ class _NullRootRaceConnection:
         self.closed = True
 
 
+class _ProbeProfile:
+    name = "/tmp/chromium-probe-profile"
+
+    def __init__(self, *, cleanup_failures: int = 0) -> None:
+        self.cleaned = False
+        self.cleanup_failures = cleanup_failures
+        self.cleanup_calls = 0
+
+    def cleanup(self) -> None:
+        self.cleanup_calls += 1
+        if self.cleanup_calls <= self.cleanup_failures:
+            raise OSError("profile still active")
+        self.cleaned = True
+
+
+class _ProbeConnection:
+    def __init__(self, *, ready: bool) -> None:
+        self.ready = ready
+        self.closed = False
+        self.calls: list[tuple[str, dict[str, object] | None]] = []
+        self.expressions: list[str] = []
+
+    def call(self, method: str, params: dict[str, object] | None = None) -> dict[str, object]:
+        self.calls.append((method, params))
+        return {}
+
+    def evaluate(self, expression: str) -> object:
+        self.expressions.append(expression)
+        if expression.startswith("JSON.parse"):
+            return {"ready": True}
+        return self.ready
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class Phase4KBrowserCleanupTests(RepositoryFixture):
     def setUp(self) -> None:
         super().setUp()
@@ -90,10 +131,10 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
     def test_websocket_handshake_eof_fails_once_and_closes_the_socket(self) -> None:
         eof_socket = _HandshakeEofSocket()
         with (
-            mock.patch.object(phase4k_browser.socket, "create_connection", return_value=eof_socket),
+            mock.patch.object(chromium_support.socket, "create_connection", return_value=eof_socket),
             self.assertRaises(ConnectionError),
         ):
-            phase4k_browser.DevToolsConnection("ws://127.0.0.1:9222/devtools/page/1")
+            chromium_support.DevToolsConnection("ws://127.0.0.1:9222/devtools/page/1")
         self.assertEqual(eof_socket.receive_count, 1)
         self.assertTrue(eof_socket.closed)
 
@@ -116,13 +157,86 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
                 io.BytesIO(b'[{"type":"page","webSocketDebuggerUrl":"ws://chromium.test"}]'),
             )
             with (
-                mock.patch.object(phase4k_browser.time, "sleep", side_effect=publish),
-                mock.patch.object(phase4k_browser.urllib.request, "urlopen", side_effect=responses),
+                mock.patch.object(chromium_support.time, "sleep", side_effect=publish),
+                mock.patch.object(chromium_support.urllib.request, "urlopen", side_effect=responses),
             ):
-                target = phase4k_browser._devtools_target(Path(directory), process)
+                target = chromium_support.devtools_target(Path(directory), process)
 
         self.assertEqual(target, "ws://chromium.test")
         self.assertEqual(sleeps, 2)
+
+    def test_devtools_target_bounds_an_accepting_but_stalled_endpoint(self) -> None:
+        process = _FakeProcess()
+        elapsed = 0.0
+
+        def advance(seconds: float) -> None:
+            nonlocal elapsed
+            elapsed += seconds
+
+        def stall(url: str, timeout: float) -> None:
+            del url
+            advance(timeout)
+            raise TimeoutError
+
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "DevToolsActivePort").write_text("9222\n", encoding="utf-8")
+            with (
+                mock.patch.object(chromium_support.time, "monotonic", side_effect=lambda: elapsed),
+                mock.patch.object(chromium_support.time, "sleep", side_effect=advance),
+                mock.patch.object(chromium_support.urllib.request, "urlopen", side_effect=stall),
+                self.assertRaises(AssertionError),
+            ):
+                chromium_support.devtools_target(Path(directory), process)
+
+        self.assertLessEqual(elapsed, 5)
+
+    def test_json_probe_owns_browser_and_retries_profile_cleanup(self) -> None:
+        process = _FakeProcess()
+        connection = _ProbeConnection(ready=True)
+        profile = _ProbeProfile(cleanup_failures=1)
+        result = chromium_support.browser_json_probe(
+            "chromium-test",
+            "http://127.0.0.1:8000/lander/",
+            960,
+            "#result",
+            connection_factory=lambda url: connection,
+            popen_factory=lambda *args, **kwargs: process,
+            target_factory=lambda path, owned: "ws://chromium.test",
+            tempdir_factory=lambda: profile,
+            sleep=lambda seconds: None,
+        )
+
+        self.assertEqual(result, {"ready": True})
+        self.assertTrue(connection.closed)
+        self.assertTrue(process.terminated)
+        self.assertFalse(process.killed)
+        self.assertEqual(process.waits, 1)
+        self.assertTrue(profile.cleaned)
+        self.assertEqual(profile.cleanup_calls, 2)
+
+    def test_json_probe_bounds_readiness_and_kills_a_stuck_browser(self) -> None:
+        process = _FakeProcess(stuck=True)
+        connection = _ProbeConnection(ready=False)
+        profile = _ProbeProfile()
+        with self.assertRaises(AssertionError):
+            chromium_support.browser_json_probe(
+                "chromium-test",
+                "http://127.0.0.1:8000/lander/",
+                960,
+                "#result",
+                connection_factory=lambda url: connection,
+                popen_factory=lambda *args, **kwargs: process,
+                target_factory=lambda path, owned: "ws://chromium.test",
+                tempdir_factory=lambda: profile,
+                sleep=lambda seconds: None,
+            )
+
+        self.assertEqual(len(connection.expressions), 200)
+        self.assertTrue(connection.closed)
+        self.assertTrue(process.terminated)
+        self.assertTrue(process.killed)
+        self.assertEqual(process.waits, 2)
+        self.assertTrue(profile.cleaned)
 
     def test_server_allocation_failure_restores_the_artifact(self) -> None:
         sentinel = RuntimeError()
