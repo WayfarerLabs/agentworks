@@ -124,7 +124,15 @@ missing values (VM selection, workspace selection, name generation) will fail wi
 indicating which flag is required. VM auto-selection still works: if there is exactly one usable VM,
 it is used without prompting. `session create` is an intentional exception: it always prompts for
 workspace and mode (even when only one choice exists) since those are part of the session's identity
-and should be an explicit operator decision.
+and should be an explicit operator decision. Secret resolution is a separate mechanism with its own
+consent rule (see [Environment Variables and Secrets](#environment-variables-and-secrets)): it is
+not gated by TTY-ness at all, only by `--non-interactive`.
+
+Before this change, a non-TTY invocation auto-refused secret resolution; now it attempts secrets the
+same as an interactive shell would, so any command that needs a secret to open a VM connection,
+including `session list` and `session describe` (each opens one for their live SSH status check),
+may block on an out-of-band approval for up to that source's timeout. Unattended jobs that relied on
+the old fail-fast behavior should pass `--non-interactive` explicitly.
 
 Domain errors (SSH timeouts, validation failures, missing resources, etc.) surface as a single clean
 line: `Error: <message>`. Truly unexpected failures (internal bugs, OS-level errors, third-party

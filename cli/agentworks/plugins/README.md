@@ -120,7 +120,8 @@ failing far from the mistake. The checks:
   members.
 - **Metadata**: `name` (non-empty, `/`-free) and `description`, readable as class attributes.
 - **Attributes**: the kind's other non-operation members are present. A `secret-backend` declares
-  `interactive` as exactly `bool`, plus separate `config_model` and `mapping_model` surfaces.
+  `interaction_channel` as exactly an `InteractionChannel` member, plus separate `config_model` and
+  `mapping_model` surfaces.
 - **Constructibility**: nothing would stop the class being constructed (no unimplemented
   `@abstractmethod`). Checked structurally; the impl is never constructed to find out.
 - **Operations**: the domain operations the framework depends on are present and callable. For a

@@ -6,8 +6,10 @@ A secret backend is a nominal, class-registered capability. Implementations subc
 `SecretBackend`; plugins contribute the class itself, and the registry, graph, and published
 capability row all preserve that exact class identity. Registration never constructs a backend.
 
-The supported contract version is `2`. An implementation must declare a non-empty, slash-free
-`name`, a string `description`, `interactive` as exactly `bool`, and both model surfaces:
+The supported contract version is `3`. An implementation must declare a non-empty, slash-free
+`name`, a string `description`, `interaction_channel` as exactly an `InteractionChannel` member
+(`NONE`, `TERMINAL`, or `OUT_OF_BAND`; see `InteractionChannel` in [`base.py`](base.py)), and both
+model surfaces:
 
 - `config_model` is an `AgwModel` describing one source's shared configuration. It includes
   `name: Literal["<backend-name>"]` and may not contain a `SecretRef`, including through nested
@@ -34,6 +36,7 @@ from pydantic import BaseModel
 
 from agentworks.capabilities.secret_backend import (
     InteractionBroker,
+    InteractionChannel,
     RemainingTime,
     SecretBackend,
     SecretLookupRequest,
@@ -70,10 +73,10 @@ class ExampleClient:
 
 
 class ExampleBackend(SecretBackend):
-    contract_version: ClassVar[int] = 2
+    contract_version: ClassVar[int] = 3
     name: ClassVar[str] = "example"
     description: ClassVar[str] = "resolves through the example provider"
-    interactive: ClassVar[bool] = False
+    interaction_channel: ClassVar[InteractionChannel] = InteractionChannel.NONE
     config_model: ClassVar[type[AgwModel]] = ExampleSourceConfig
     mapping_model: ClassVar[type[AgwRootModel[Any]]] = ExampleMapping
 
@@ -127,4 +130,4 @@ Provider failures cross the boundary only through `SecretClientFailure` and `Sec
 provider message, stderr, or secret-bearing context.
 
 The declarable source and map-host schema are framework-owned, not backend authoring surfaces.
-Capability implementations target this version-2 contract without inventing a parallel source API.
+Capability implementations target this version-3 contract without inventing a parallel source API.

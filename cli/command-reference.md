@@ -148,7 +148,11 @@ resolves or serializes a secret value.
 ```text
 {secret: {
   name, kind, origin, description, hint, references, used_by, source_mappings,
-  resolution: {category, source, identifier, skipped_not_ready: [{source, reason}]}
+  resolution: {
+    category, source, identifier,
+    skipped_not_ready: [{source, reason}],
+    skipped_no_terminal: [{source, reason}],
+  }
 }}
 ```
 
@@ -158,9 +162,11 @@ configured source instance and `backend` names its implementation. `provenance` 
 `synthesized-default`, `operator-override-of-synthesized-default`, or `declared`. `would_attempt` is
 boolean. `identifier` is null when a source has no static lookup identifier or will not attempt the
 secret. `not_ready_reason` is null when that source is ready. Resolution `category` is
-`attemptable`, `refused-interaction`, or `unavailable`; `source` and `identifier` are nullable.
-`source_mappings` retains configured source-chain ordering. References and `used_by` retain their
-service ordering.
+`attemptable`, `refused-non-interactive`, or `unavailable`; `source` and `identifier` are nullable.
+`skipped_not_ready` lists active sources the walk skipped because they were not ready;
+`skipped_no_terminal` lists terminal-channel sources (e.g. `prompt`) the walk skipped because no
+terminal was available to this process. `source_mappings` retains configured source-chain ordering.
+References and `used_by` retain their service ordering.
 
 #### VM JSON schemas
 
@@ -360,17 +366,19 @@ release.
 
 ### Secrets
 
-| Command                                           | Description                                       |
-| ------------------------------------------------- | ------------------------------------------------- |
-| `agw secret list`                                 | Preview source applicability without reading      |
-| `agw secret describe NAME`                        | Describe one secret without reading               |
-| `agw secret verify NAME... [--allow-interaction]` | Verify one or more secrets without showing values |
+| Command                                         | Description                                       |
+| ----------------------------------------------- | ------------------------------------------------- |
+| `agw secret list`                               | Preview source applicability without reading      |
+| `agw secret describe NAME`                      | Describe one secret without reading               |
+| `agw secret verify NAME... [--non-interactive]` | Verify one or more secrets without showing values |
 
 The synthesized `env-var` and `prompt` sources work without declarations. Add a `secret-source`
 resource when a backend needs shared configuration or when you want another named source instance.
 `secret verify` resolves every unique requested name in one batch, prints one value-free outcome row
-per name, and exits nonzero when any name does not resolve. It refuses interactive sources by
-default; `--allow-interaction` opts into prompting or provider authentication for that invocation.
+per name, and exits nonzero when any name does not resolve. Sources that may block on a human are
+allowed by default (a terminal-channel source with no terminal available is skipped into
+fall-through instead of failing the batch); the global `--non-interactive` flag refuses every such
+source for that invocation. `--allow-interaction` is a deprecated no-op kept for one release.
 Resolution preserves multiline strings and rejects NUL. A resolved row proves the source contract,
 not that a narrower line-oriented environment, credential, header, or stdin consumer accepts the
 value.

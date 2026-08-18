@@ -8,12 +8,15 @@ resolvability prediction is computed centrally over declarations (not
 by each instance, and not by the nodes that declare them either).
 Prediction is :func:`~agentworks.secrets.resolve.preview_resolution`
 applied per declaration (a prompt backend is reported without probing;
-probing would BE the prompt), with the caller gating the interactive
-answer on ``output.is_interactive()`` so a prompt-only secret fails
-fast under ``--non-interactive`` rather than at resolve end (issue
-#202). Doctor's all-resources sweep and a command's preflight sweep are
-two callers of the same computation, which is why the prediction helper
-takes declarations, not a walk.
+probing would BE the prompt), gating each source the same way resolution
+itself does: refused when the ``InteractionPolicy`` is REFUSE and the
+source's channel may block on a human, and, for a terminal-channel
+backend, additionally skipped when ``output.terminal_prompt_available()``
+is false. That keeps a prompt-only secret failing fast under
+``--non-interactive`` rather than at resolve end (issue #202). Doctor's
+all-resources sweep and a command's preflight sweep are two callers of the
+same computation, which is why the prediction helper takes declarations,
+not a walk.
 
 WHO predicts is load-bearing, not incidental. Resolvability is a
 property of the operation's runtime world, so the OPERATION asks: the
