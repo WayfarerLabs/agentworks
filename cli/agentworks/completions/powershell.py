@@ -91,10 +91,10 @@ def generate_powershell(spec: CommandSpec, version: str) -> str:
     lines.append("")
     lines.append("    $tokens = $commandAst.ToString().Trim() -split '\\s+'")
     lines.append("    $tokenCount = if ($wordToComplete -eq '') { $tokens.Count + 1 } else { $tokens.Count }")
+    lines.append("    $completedTokenCount = if ($wordToComplete -eq '') { $tokens.Count } else { $tokens.Count - 1 }")
     lines.append("")
     lines.append("    # Determine command context")
     lines.append("    $cmd1 = if ($tokenCount -gt 1) { $tokens[1] } else { $null }")
-    lines.append("    $cmd2 = if ($tokenCount -gt 2) { $tokens[2] } else { $null }")
     lines.append("")
 
     _emit_dispatch(lines, spec)
@@ -141,9 +141,50 @@ def _emit_dispatch(lines: list[str], spec: CommandSpec) -> None:
 def _emit_group_completions(lines: list[str], spec: CommandSpec) -> None:
     """Emit completions for a command group (has subcommands)."""
     indent = "    " * 3
+    group_params = [param for param in spec.params if not param.is_argument]
+    flag_options = [opt for param in group_params if param.is_flag for opt in (param.opts or [f"--{param.name}"])]
+    value_options = [opt for param in group_params if not param.is_flag for opt in (param.opts or [f"--{param.name}"])]
+    flags = ", ".join(f"'{opt}'" for opt in flag_options)
+    values = ", ".join(f"'{opt}'" for opt in value_options)
 
-    # If we're completing the subcommand name
-    lines.append(f"{indent}if ($tokenCount -le 3) {{")
+    # Find the first positional token after the group while skipping its
+    # recognized options. Its absolute index is also the leaf parser's start.
+    lines.append(f"{indent}$groupFlagOptions = @({flags})")
+    lines.append(f"{indent}$groupValueOptions = @({values})")
+    lines.append(f"{indent}$groupCommand = $null")
+    lines.append(f"{indent}$groupCommandIndex = -1")
+    lines.append(f"{indent}$skipNext = $false")
+    lines.append(f"{indent}$positionalOnly = $false")
+    lines.append(f"{indent}for ($index = 2; $index -lt $completedTokenCount; $index++) {{")
+    lines.append(f"{indent}    $token = $tokens[$index]")
+    lines.append(f"{indent}    if ($skipNext) {{")
+    lines.append(f"{indent}        $skipNext = $false")
+    lines.append(f"{indent}        continue")
+    lines.append(f"{indent}    }}")
+    lines.append(f"{indent}    if ($token -eq '--') {{")
+    lines.append(f"{indent}        $positionalOnly = $true")
+    lines.append(f"{indent}        continue")
+    lines.append(f"{indent}    }}")
+    lines.append(f"{indent}    if (-not $positionalOnly -and $groupFlagOptions -contains $token) {{ continue }}")
+    lines.append(f"{indent}    if (-not $positionalOnly -and $groupValueOptions -contains $token) {{")
+    lines.append(f"{indent}        $skipNext = $true")
+    lines.append(f"{indent}        continue")
+    lines.append(f"{indent}    }}")
+    lines.append(f"{indent}    $assignedValue = $false")
+    lines.append(f"{indent}    if (-not $positionalOnly) {{")
+    lines.append(f"{indent}        foreach ($option in $groupValueOptions) {{")
+    lines.append(f'{indent}            if ($token.StartsWith("${{option}}=")) {{ $assignedValue = $true; break }}')
+    lines.append(f"{indent}        }}")
+    lines.append(f"{indent}    }}")
+    lines.append(f"{indent}    if ($assignedValue) {{ continue }}")
+    lines.append(f"{indent}    $groupCommand = $token")
+    lines.append(f"{indent}    $groupCommandIndex = $index")
+    lines.append(f"{indent}    break")
+    lines.append(f"{indent}}}")
+    lines.append("")
+
+    # If no completed subcommand exists, complete group options and commands.
+    lines.append(f"{indent}if ($null -eq $groupCommand) {{")
     _open_result_array(lines, f"{indent}    ")
 
     for name, sub in sorted(spec.subcommands.items()):
@@ -174,10 +215,10 @@ def _emit_group_completions(lines: list[str], spec: CommandSpec) -> None:
     lines.append("")
 
     # Dispatch to leaf commands
-    lines.append(f"{indent}switch ($cmd2) {{")
+    lines.append(f"{indent}switch ($groupCommand) {{")
     for name, sub in sorted(spec.subcommands.items()):
         lines.append(f"{indent}    '{name}' {{")
-        _emit_param_completions(lines, sub, token_offset=3)
+        _emit_param_completions(lines, sub, token_offset="$groupCommandIndex + 1")
         lines.append(f"{indent}    }}")
     lines.append(f"{indent}}}")
 
@@ -187,7 +228,7 @@ def _emit_leaf_completions(lines: list[str], spec: CommandSpec) -> None:
     _emit_param_completions(lines, spec, token_offset=2)
 
 
-def _emit_param_completions(lines: list[str], spec: CommandSpec, token_offset: int) -> None:
+def _emit_param_completions(lines: list[str], spec: CommandSpec, token_offset: int | str) -> None:
     """Emit parameter completions for a leaf command."""
     indent = "    " * 4
 
@@ -233,10 +274,6 @@ def _emit_param_completions(lines: list[str], spec: CommandSpec, token_offset: i
         value_options = [opt for param in all_options if not param.is_flag for opt in param.opts]
         flags = ", ".join(f"'{opt}'" for opt in flag_options)
         value_option_literals = ", ".join(f"'{opt}'" for opt in value_options)
-        lines.append(
-            f"{indent}$completedTokenCount = if ($wordToComplete -eq '') "
-            "{ $tokens.Count } else { $tokens.Count - 1 }"
-        )
         lines.append(f"{indent}$flagOptions = @({flags})")
         lines.append(f"{indent}$valueOptions = @({value_option_literals})")
         lines.append(f"{indent}$positionalCount = 0")
@@ -299,20 +336,19 @@ def _emit_param_completions(lines: list[str], spec: CommandSpec, token_offset: i
             lines.append("")
 
     # Fall through to option completions
-    if all_options:
-        lines.append(f"{indent}# Options")
-        lines.append(f"{indent}if ($wordToComplete -like '-*') {{")
-        _open_result_array(lines, f"{indent}    ")
-        for param in all_options:
-            escaped = param.help.replace("'", "''")
-            for opt in param.opts or [f"--{param.name}"]:
-                lines.append(
-                    f"{indent}        [System.Management.Automation.CompletionResult]::new('{opt}', '{opt}',"
-                    f" 'ParameterValue', '{escaped}')"
-                )
-        lines.append(
-            f"{indent}        [System.Management.Automation.CompletionResult]::new('--help', '--help',"
-            " 'ParameterValue', 'Show help')"
-        )
-        _close_result_array_with_filter(lines, f"{indent}    ")
-        lines.append(f"{indent}}}")
+    lines.append(f"{indent}# Options")
+    lines.append(f"{indent}if ($wordToComplete -like '-*') {{")
+    _open_result_array(lines, f"{indent}    ")
+    for param in all_options:
+        escaped = param.help.replace("'", "''")
+        for opt in param.opts or [f"--{param.name}"]:
+            lines.append(
+                f"{indent}        [System.Management.Automation.CompletionResult]::new('{opt}', '{opt}',"
+                f" 'ParameterValue', '{escaped}')"
+            )
+    lines.append(
+        f"{indent}        [System.Management.Automation.CompletionResult]::new('--help', '--help',"
+        " 'ParameterValue', 'Show help')"
+    )
+    _close_result_array_with_filter(lines, f"{indent}    ")
+    lines.append(f"{indent}}}")

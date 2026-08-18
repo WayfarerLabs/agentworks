@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 
 import typer
 
@@ -32,18 +32,14 @@ def guide(
     agent: bool | None = typer.Option(
         None,
         "--agent/--human",
-        help="Render the index for an agent or human, overriding automatic mode selection.",
+        help="Render for an agent or human, overriding automatic mode selection.",
     ),
 ) -> None:
     """Render the guide index when no subcommand is selected."""
+    context.obj = _guide_mode(agent)
     if context.invoked_subcommand is not None:
-        if agent is not None:
-            raise typer.BadParameter(
-                "use the mode option on `agw guide show`, or omit it for `agw guide list`",
-                param_hint="--agent/--human",
-            )
         return
-    typer.echo(render_guide(None, _guide_mode(agent)).markdown, nl=False)
+    typer.echo(render_guide(None, cast("GuideMode", context.obj)).markdown, nl=False)
 
 
 @guide_app.command("list")
@@ -54,12 +50,8 @@ def guide_list() -> None:
 
 @guide_app.command("show")
 def guide_show(
+    context: typer.Context,
     topic: Annotated[str, typer.Argument(help="One exact guide topic name.")],
-    agent: bool | None = typer.Option(
-        None,
-        "--agent/--human",
-        help="Render for an agent or human, overriding automatic mode selection.",
-    ),
 ) -> None:
     """Render one exact guide topic."""
-    typer.echo(render_guide(topic, _guide_mode(agent)).markdown, nl=False)
+    typer.echo(render_guide(topic, cast("GuideMode", context.obj)).markdown, nl=False)

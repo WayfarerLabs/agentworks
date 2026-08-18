@@ -129,22 +129,25 @@ def test_cli_exposes_only_default_list_and_single_topic_show() -> None:
     assert old_option.exit_code != 0
 
 
-def test_mode_belongs_to_default_and_show_but_not_group_to_subcommand() -> None:
+def test_group_mode_applies_to_default_and_show_while_list_ignores_it() -> None:
     runner = CliRunner()
-    topic = runner.invoke(app, ["guide", "list"]).stdout.splitlines()[0]
-    valid = [runner.invoke(app, ["guide", mode]) for mode in ("--agent", "--human")] + [
-        runner.invoke(app, ["guide", "show", topic, mode]) for mode in ("--agent", "--human")
-    ]
-    misplaced = [
-        runner.invoke(app, ["guide", mode, command, *([topic] if command == "show" else [])])
+    listed = runner.invoke(app, ["guide", "list"])
+    topic = "concept-onboarding"
+    assert topic in listed.stdout.splitlines()
+    selected = [runner.invoke(app, ["guide", mode]) for mode in ("--agent", "--human")]
+    shown = [runner.invoke(app, ["guide", mode, "show", topic]) for mode in ("--agent", "--human")]
+    mode_lists = [runner.invoke(app, ["guide", mode, "list"]) for mode in ("--agent", "--human")]
+    local_modes = [
+        runner.invoke(app, ["guide", command, *([topic] if command == "show" else []), mode])
         for mode in ("--agent", "--human")
         for command in ("list", "show")
     ]
-    list_modes = [runner.invoke(app, ["guide", "list", mode]) for mode in ("--agent", "--human")]
 
-    assert all(result.exit_code == 0 and result.stdout for result in valid)
-    assert all(result.exit_code != 0 and result.stderr for result in misplaced)
-    assert all(result.exit_code != 0 and result.stderr for result in list_modes)
+    assert all(result.exit_code == 0 and result.stdout for result in [*selected, *shown])
+    assert selected[0].stdout != selected[1].stdout
+    assert shown[0].stdout != shown[1].stdout
+    assert all(result.exit_code == 0 and result.stdout == listed.stdout for result in mode_lists)
+    assert all(result.exit_code != 0 and result.stderr for result in local_modes)
 
 
 def test_selected_topic_resolves_after_complete_catalog_validation(tmp_path: Path) -> None:
