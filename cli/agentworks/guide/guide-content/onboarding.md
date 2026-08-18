@@ -4,6 +4,11 @@ description: Set up Agentworks or assess an existing installation using current 
 
 # Agentworks onboarding
 
+The Agentworks control plane currently runs on a single machine, called the “workstation.” This is
+the machine you use to manage and access your Agentworks system. The workstation can also host
+Agentworks VMs, but it does not have to: where the control plane runs is independent of where you
+place the VMs that host your workloads.
+
 Agentworks separates declared resources, capability implementations, and live instances. This is a
 repeatable setup path, not a one-time wizard. See `concept-core-model` for the domain model and
 `concept-source-review` if the operator wants to inspect the exact canonical release source.

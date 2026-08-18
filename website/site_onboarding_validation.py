@@ -108,7 +108,7 @@ def validate_onboarding_template(name: str, template: str) -> None:
         for index, attributes in (
             (label, {"class": "status-label"}),
             (heading, {"id": "onboarding-heading"}),
-            (introduction, {}),
+            (introduction, {"id": "onboarding-introduction"}),
         )
     ):
         raise ValueError("index.html: onboarding introduction structure is invalid")

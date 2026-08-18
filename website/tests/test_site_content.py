@@ -53,6 +53,7 @@ class SourceContractTests(RepositoryFixture):
             {
                 "HOME_IDENTITY",
                 "HOME_META_DESCRIPTION",
+                "HOME_ONBOARDING_INTRO",
                 "ONBOARDING_PROMPT",
                 "MANIFESTO_CONTENT",
                 "MANIFESTO_META_DESCRIPTION",
@@ -72,6 +73,26 @@ class SourceContractTests(RepositoryFixture):
             self.assertEqual(rendered.count("<h1 "), 1)
             self.assertTrue(content[f"{contract.contract_id}_META_DESCRIPTION"])
         self.assertIn(site_builder.REPORTING_URL, content["SECURITY_CONTENT"])
+
+    def test_getting_started_introduction_projects_from_readme(self) -> None:
+        readme = self.root / "README.md"
+        source = readme.read_text(encoding="utf-8")
+        heading = "## Getting Started\n\n"
+        start = source.index(heading) + len(heading)
+        end = source.index("\n\n", start)
+        replacement = "A synthetic introduction with `inline code`."
+        readme.write_text(source[:start] + replacement + source[end:], encoding="utf-8")
+
+        content = site_builder.extract_content(self.root)
+        self.assertEqual(
+            content["HOME_ONBOARDING_INTRO"],
+            "A synthetic introduction with <code>inline code</code>.",
+        )
+        document = parse((self.build() / "index.html").read_text(encoding="utf-8"))
+        self.assertEqual(
+            document.text_by_id["onboarding-introduction"],
+            "A synthetic introduction with inline code.",
+        )
 
     def test_supported_source_additions_render_without_contract_edits(self) -> None:
         addition = (

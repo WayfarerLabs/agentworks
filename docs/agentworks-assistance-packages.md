@@ -30,10 +30,10 @@ codex plugin add agentworks@agentworks
 ```
 
 Both packages require `agentworks-cli` 0.14.0 or newer. The bootstrap recommends `uv`, allows other
-Python 3.12 or newer tool installers, installs the compatible `agentworks-cli>=0.14` range, and
-invokes `agw guide --agent`. It points to the public repository in case the operator or assistant
-wants to inspect the source, but it does not implement a source-review or version-selection
-workflow.
+Python 3.12 or newer tool installers, installs or upgrades to the current available
+`agentworks-cli`, and invokes `agw guide --agent`. It points to the public repository in case the
+operator or assistant wants to inspect the source, but it does not implement a source-review or
+version-selection workflow.
 
 The bootstrap adds no authorization, security-setting, or harness-posture teaching. Ordinary harness
 approvals and restrictions apply independently of the package. The guide owns any later security or
