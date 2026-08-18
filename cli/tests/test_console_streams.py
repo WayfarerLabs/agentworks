@@ -127,6 +127,7 @@ def test_guide_list_emits_bare_lf_on_a_legacy_console(monkeypatch: pytest.Monkey
 
     raw_out, out = _cp1252_console()
     monkeypatch.setattr(sys, "stdout", out)
+    monkeypatch.setattr(sys, "stderr", _cp1252_console()[1])
     monkeypatch.setattr(sys, "argv", ["agentworks", "guide", "list"])
     monkeypatch.setenv("AGW_DEBUG", "")
 
