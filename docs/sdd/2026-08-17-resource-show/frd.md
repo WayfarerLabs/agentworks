@@ -1,6 +1,6 @@
 # Resource Show: Functional Requirements
 
-- Status: Complete
+- Status: Reopened for final review cleanup
 - Date: 2026-08-17
 - Parent saga: `docs/sdd/2026-08-04-next-steps/`
 - Successor to: `docs/sdd/2026-08-10-cli-grammar/`
@@ -11,12 +11,14 @@ Add the missing focused inspection question to the resource grammar: given one c
 identity, what does Agentworks know about this resource right now? The answer is a factual,
 diagnostic projection, so the command is `agw resource show KIND/NAME`.
 
-This is an explicit successor ruling to the CLI grammar correction. The predecessor was right to
-remove the old generic `resource describe` spelling and its loosely bounded card service. It was too
-narrow, however, to treat overlap with bulk commands as a reason to omit useful facts.
-`resource list` and `doctor` are fleet-wide scans. A named `show` is expected to contain every fact
-those surfaces would expose about the selected row and to expand compact counts and statuses into
-the detail useful for investigating that one resource.
+This is an explicit successor ruling to the CLI grammar correction. On 2026-08-18, after review of
+the first narrow successor design, the operator ruled that focused inspection should be a superset
+of the bulk resource views. The predecessor was right to remove the old generic `resource describe`
+spelling and its loosely bounded card service. It was too narrow, however, to treat overlap with
+bulk commands as a reason to omit useful facts. `resource list` and `doctor` are fleet-wide scans. A
+named `show` is expected to contain every fact those surfaces would expose about the selected row
+and to expand compact counts and statuses into the detail useful for investigating that one
+resource.
 
 ## Settled product decisions
 
@@ -36,6 +38,10 @@ the detail useful for investigating that one resource.
 6. `resource describe` and `resource.describe` remain removed. There is no alias, compatibility
    shim, or deprecation runway. `secret describe` remains because its secret-specific synthesis is
    still a useful domain view, even where focused facts overlap.
+7. The operator retained both state spellings on 2026-08-18: `disabled` and `not_ready_reason`
+   preserve exact `resource list` parity, while `enablement` and `readiness` expose the richer state
+   axes expected from the focused view. This additive successor does not migrate the existing
+   `resource.list` machine contract.
 
 ## Functional requirements
 
@@ -176,8 +182,8 @@ the detail useful for investigating that one resource.
    secret-source, secret, and admin-template rows matches the bulk doctor's structured check.
 5. Declarable rows carry a normalized declaration; capabilities carry null; disabled/readiness
    semantics and typed lookup failures remain truthful.
-6. Instrumented tests prove the command performs no traversal beyond direct edges, no secret value
-   resolution, no authenticated runup, no remote provider mutation, and no prompt.
+6. Structural and instrumented tests prove the command performs no traversal beyond direct edges, no
+   secret value resolution, no authenticated runup, no remote provider mutation, and no prompt.
 7. `resource describe` remains unavailable, `secret describe` remains unchanged, and completions and
    active documentation consistently teach the focused-superset model.
 8. Focused tests, full non-integration pytest, Ruff, format, strict mypy, repository guards, and

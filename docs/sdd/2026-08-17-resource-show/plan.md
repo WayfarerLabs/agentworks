@@ -1,6 +1,6 @@
 # Resource Show: Implementation Plan
 
-- Status: Complete
+- Status: Reopened for final review cleanup
 - Date: 2026-08-18
 - Requirements: `frd.md`
 - Architecture: `hla.md`
@@ -156,6 +156,30 @@ remaining Critical or Important issue. Real isolated-HOME CLI acceptance passed 
 doctor, relationship, live-use, diagnostic, declaration, failure, secret-safety, and terminal-safety
 parity without touching provider or operator state. The published integration report found no
 product issue or blocker, and every forge CI job passed.
+
+## Phase 6: final review cleanup
+
+The operator approved one bounded cleanup round after the final complexity and saga-lead reviews.
+The focused-superset product contract and public JSON shape remain unchanged.
+
+- [ ] Make focused direct-edge projection independent of graph traversal policy and remove redundant
+      runtime reconciliation plumbing while retaining structural count/detail parity coverage.
+- [ ] Reuse the graph readiness record and one exported framework-field derivation without changing
+      the `resource.show` JSON contract.
+- [ ] Share the strict fact-line sanitizer between resource and graph human output, remove redundant
+      post-YAML sanitization, and retain hostile-input and round-trip coverage.
+- [ ] Correct the service-boundary test name and acceptance wording, document the closed JSON
+      carrier's plugin boundary, and date the operator's superseding ruling and dual-state decision.
+- [ ] Run equal-tier project review and independent fresh-eyes review; fix every clear material
+      finding and rerun affected gates.
+- [ ] Run focused tests, the full non-integration suite, Ruff, format, strict mypy, repository
+      guards, and focused isolated-HOME CLI parity/safety acceptance.
+- [ ] Restore the final lock record, push the complete round, publish the exact-head handoff, and
+      request final re-review.
+
+Definition of done: the cleanup changes no current machine schema or product scope, the exact final
+head is green, independent review finds no remaining Critical or Important issue, and the PR is
+handed off under the draft/ready signal chosen by the operator's merge intent.
 
 ## Coordination and escalation
 

@@ -1,6 +1,6 @@
 # Resource Show: High-Level Architecture
 
-- Status: Complete
+- Status: Reopened for final review cleanup
 - Date: 2026-08-17
 - Implements: `frd.md`
 - Code basis: `origin/main` at `217930fd`
@@ -65,20 +65,21 @@ state; an absent graph node is an internal invariant failure, not a second readi
 
 ```text
 FocusedGraphFacts(
-    focus: ResourceIdentity,
     dependencies: tuple[GraphEdge, ...],
     dependents: tuple[GraphEdge, ...],
     used_by: tuple[InstanceRef, ...] | null,
 )
 ```
 
-The record carries its focus even when every detailed tuple is empty. The service validates that
-focus, reads `edges_of` and `incoming_edges_of` exactly once, converts declared references through
-the same `GraphEdge` constructor used by `show_graph`, and orders them with the existing canonical
-edge key. It enforces that every dependency starts at the focus, every dependent ends at it, and
-every live instance uses it. It asks `DatabaseLiveSource` for instances only when the selected kind
-implements the existing `instances` hook. The live source stays unopened for an unsupported kind and
-treats an absent database as an empty supported result, matching graph query semantics.
+The service validates the focus, reads `edges_of` and `incoming_edges_of` exactly once, converts
+every direct declared reference through the same `GraphEdge` constructor used by `show_graph`, and
+orders it with the existing canonical edge key. Direct projection does not filter through graph
+traversal policy: a future relationship may be deliberately non-traversable and still remains a
+direct fact about the selected row. The service enforces that every dependency starts at the focus,
+every dependent ends at it, and every live instance uses it. It asks `DatabaseLiveSource` for
+instances only when the selected kind implements the existing `instances` hook. The live source
+stays unopened for an unsupported kind and treats an absent database as an empty supported result,
+matching graph query semantics.
 
 This is not `show_graph(..., depth=1)` followed by filtering. That traversal intentionally includes
 the induced graph among reached neighbors; a focused resource record must contain only edges that
@@ -116,7 +117,8 @@ occurs, no authenticated runup runs, and no remote provider mutation is introduc
 
 ### A4. Compose one closed presentation-free record
 
-The focused module keeps `ResourceReadiness` and adds the shared fact records directly:
+The focused module carries the graph's existing `Readiness` record and adds the shared fact records
+directly:
 
 ```text
 ResourceShow(
@@ -133,11 +135,12 @@ ResourceShow(
 
 `show_resource(config, registry, identity, live_source)` is the complete bounded composition entry
 point. It performs the shared validated lookup, obtains its focused graph/live facts, list summary,
-and attributable doctor checks, asserts all focused facts belong to the same identity, and assembles
-one immutable result. Database lifecycle, diagnostic dispatch, and reconciliation are service-layer
-work rather than CLI orchestration, so a future non-CLI caller cannot accidentally build a partial
-or mismatched card. The returned result retains no registry, database, handler, config, provider, or
-capability implementation object.
+and attributable doctor checks, and assembles one immutable result. Every producer is keyed from the
+same validated identity; structural parity tests, rather than same-call runtime re-assertions, pin
+the relationships between compact and detailed facts. Database lifecycle and diagnostic dispatch are
+service-layer work rather than CLI orchestration, so a future non-CLI caller cannot accidentally
+build a partial card. The returned result retains no registry, database, handler, config, provider,
+or capability implementation object.
 
 The structural `enablement` and `readiness` fields deliberately coexist with list-compatible
 `disabled` and `not_ready_reason`. The latter are the stable compact inventory projection; the
@@ -154,10 +157,11 @@ using the shared base models:
 - spec keys follow concrete Pydantic field order; and
 - the envelope is `apiVersion`, `kind`, `metadata`, then `spec`.
 
-The include set is the concrete model's fields minus framework-only fields derived from
-`DeclaredResource.model_fields` and `METADATA_FIELDS`. Defaults are included because this is the
-loaded row; nulls are omitted. Pydantic JSON mode is the recursive conversion authority, and the
-closed JSON carrier rejects an unexpected object instead of converting it to text.
+The include set is the concrete model's fields minus one exported framework-field set derived beside
+`METADATA_FIELDS` and shared with manifest decode. Defaults are included because this is the loaded
+row; nulls are omitted. Pydantic JSON mode is the recursive conversion authority, and the closed
+JSON carrier rejects an unexpected object instead of converting it to text. That guard remains
+load-bearing because plugin-contributed declarable models cross the framework boundary.
 
 For a capability kind, declaration is null without reflecting over implementation code. A category
 and row mismatch is an internal invariant failure. Source comments/order, omitted-versus-defaulted
@@ -237,9 +241,11 @@ Origin, relationship, instance, and health-check projections reuse their existin
 The human renderer emits the same facts as concise sections. Repeated authored relationship display
 lines may be deduplicated for readability, but JSON retains the authoritative edges.
 
-Every interpolated fact-line scalar passes through the existing line-safe filtering that removes
-terminal controls, format/surrogate categories, and Unicode line/paragraph separators. Declaration
-YAML remains ASCII-escaped, parseable, and round-trips. JSON assembly and encoding remain atomic.
+Every interpolated fact-line scalar in both resource and graph human output passes through one
+shared line-safe filter that removes terminal controls, format/surrogate categories, and Unicode
+line/paragraph separators. Declaration YAML relies on ASCII-only safe encoding, remains parseable,
+and round-trips without a redundant post-encoding sanitizer. JSON assembly and encoding remain
+atomic.
 
 ### A7. Keep CLI lifecycle conventional
 
