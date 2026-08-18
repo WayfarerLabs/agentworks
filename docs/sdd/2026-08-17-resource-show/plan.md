@@ -1,6 +1,6 @@
 # Resource Show: Implementation Plan
 
-- Status: In progress
+- Status: Complete; draft pending operator merge intent
 - Date: 2026-08-17
 - Requirements: `frd.md`
 - Architecture: `hla.md`
@@ -75,11 +75,30 @@ successor does not rewrite historical contracts.
 - [x] Run repository file lint, locked-SDD, Rulesync drift, and committed-diff guards.
 - [x] Exercise real local human and JSON commands for declarable, capability, disabled/not-ready,
       malformed, and unknown selectors without live external backends.
-- [ ] Obtain an equal-or-higher-tier project review and a fresh-eyes review of the exact committed
+- [x] Obtain an equal-or-higher-tier project review and a fresh-eyes review of the exact committed
       implementation; fix every clear material finding and rerun affected gates.
-- [ ] Mark the SDD complete with exact evidence, add `locked.md`, commit with the required session
+- [x] Mark the SDD complete with exact evidence, add `locked.md`, commit with the required session
       trailer, push, and update the draft PR. Move it to ready only under the process merge-intent
       rule.
+
+### Closeout evidence
+
+- Exact reviewed implementation head: `6f0bd59e` on base `217930fd`, with the reviewed design
+  checkpoint at `8464b064`.
+- Full exact-head non-integration suite: 7,205 passed in 50.60 seconds.
+- Exact-head Ruff check, Ruff format across 693 files, and strict mypy across 692 source files
+  passed.
+- Repository Prettier, markdownlint across 337 files, cspell across 314 files, locked-SDD, Rulesync
+  drift, and diff checks passed.
+- The focused integrated command, service, renderer, machine-output, and completion suite passed 121
+  tests. Both independent review lanes reran the 39-test review-fix focus and reported no remaining
+  Critical or Important findings.
+- Local real-CLI acceptance covered declarable not-ready JSON, capability human output, disabled
+  declarable JSON, malformed selectors, and unknown selectors without a database or external
+  backend. The final review fix touched only Unicode rendering, its structural tests, and contract
+  prose; its exact focused and static gates passed afterward.
+- Draft PR #597 received a clean public saga-lead artifact checkpoint. It remains draft pending the
+  operator's merge-intent signal.
 
 ## Coordination and escalation
 
