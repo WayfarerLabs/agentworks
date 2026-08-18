@@ -1,6 +1,6 @@
 {
   "name": "agentworks",
-  "packageVersion": "1.0.1",
+  "packageVersion": "1.0.0",
   "minimumCliVersion": "0.14.0",
   "description": "Bootstrap the Agentworks CLI and hand off to its built-in agent guide.",
   "publisher": {

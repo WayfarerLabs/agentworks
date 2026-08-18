@@ -5,6 +5,10 @@ index-order: 20
 
 # Agentworks onboarding
 
+The Agentworks control plane currently runs on one machine called the workstation. The workstation
+manages and accesses the Agentworks system. It may also host Agentworks VMs, but control-plane
+placement is independent of where the VMs that host workloads run.
+
 Onboarding is a repeatable path, not a one-time wizard. Start with
 `agw guide show concept-core-model` and `agw guide show concept-prerequisites`, then work through
 the sections below. On an existing installation, skip anything that is already ready.
@@ -15,7 +19,8 @@ Use CLI introspection to narrow choices as they become relevant.
 `agw resource list --include-disabled` shows installed resources, including disabled or not-ready
 entries, while `agw resource explain KIND/NAME` describes one capability's configuration. If the
 operator has not already selected an option, summarize the meaningful choices and ask. If they have,
-continue within that instruction rather than turning onboarding into a questionnaire.
+continue within that instruction rather than turning onboarding into a questionnaire. Distinguish
+the Agentworks assistant agent from any Agentworks-managed agent resource being created.
 
 <!-- /agw:agent-only -->
 

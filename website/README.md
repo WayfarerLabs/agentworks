@@ -235,20 +235,22 @@ repository is rejected, a successful build creates no Git status residue.
 
 The builder reads four permanent repository inputs:
 
-- `README.md` owns the concise product identity rendered on the landing page. Its short design
-  summary remains repository documentation, not additional landing-page content. Its generated
-  assistance fence is also checked as an exact projection, not treated as an authored second body.
+- `README.md` owns the concise product identity and Getting Started introduction rendered on the
+  landing page. Its short design summary remains repository documentation, not additional
+  landing-page content. Its generated assistance fence is also checked as an exact projection, not
+  treated as an authored second body.
 - `packaging/agentworks/agent-onboarding-prompt.md` is the single authored source for the Home
   onboarding prompt. It remains a thin install-or-update and `agw guide --agent` handoff.
 - `docs/manifesto.md` owns every body heading and block rendered on the Manifesto page.
 - `SECURITY.md` owns every body heading and block rendered on the Security page, including the
   private vulnerability reporting channel and URL.
 
-Home alone selects content by a complete heading path and exact normalized blocks. The Manifesto and
-Security pages each render one complete Markdown document, including its single source `h1`, through
-the same closed transform. Their templates supply only the shared shell and metadata placement.
-Supported document edits appear on the site without synchronized website prose, a source hash, a
-heading inventory, or selected-section configuration.
+Home selects its concise identity by a complete heading path and exact normalized blocks. It selects
+the Getting Started introduction as the unique section's leading paragraph without pinning its
+wording. The Manifesto and Security pages each render one complete Markdown document, including its
+single source `h1`, through the same closed transform. Their templates supply only the shared shell
+and metadata placement. Supported document edits appear on the site without synchronized website
+prose, a source hash, a heading inventory, or selected-section configuration.
 
 Each long-form page derives one `On this page` navigation from its source `h2` and `h3` blocks. It
 appears immediately after the source `h1` in ordinary flow, with `h3` links nested beneath their

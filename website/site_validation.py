@@ -96,6 +96,7 @@ TEMPLATE_TOKENS: Final = {
         SITE_BASE_TOKEN,
         "{{HOME_META_DESCRIPTION}}",
         "{{HOME_IDENTITY}}",
+        "{{HOME_ONBOARDING_INTRO}}",
         "{{ONBOARDING_PROMPT}}",
     },
     "manifesto.html": {
@@ -134,6 +135,7 @@ CONTENT_TOKEN_PLACEMENTS: Final = {
     "index.html": {
         "{{HOME_META_DESCRIPTION}}": ("meta", "description"),
         "{{HOME_IDENTITY}}": ("section-class", "identity-panel"),
+        "{{HOME_ONBOARDING_INTRO}}": ("onboarding-introduction", "onboarding-introduction"),
         "{{ONBOARDING_PROMPT}}": ("element-id", "onboarding-prompt"),
     },
     "manifesto.html": {
@@ -736,6 +738,17 @@ def _validate_content_token_placements(name: str, template: str) -> _TemplatePla
                 or not any(tag == "section" and attrs.get("id") == "onboarding" for tag, attrs in ancestors)
             ):
                 raise ValueError(f"{name}: prompt token {token} must be the exact onboarding code text")
+            continue
+        if placement_kind == "onboarding-introduction":
+            if (
+                kind != "text"
+                or location != "p"
+                or token not in parser.exact_text_placements
+                or not ancestors
+                or ancestors[-1] != ("p", {"id": placement_value})
+                or not any(tag == "section" and attrs.get("id") == "onboarding" for tag, attrs in ancestors)
+            ):
+                raise ValueError(f"{name}: onboarding introduction token is misplaced")
             continue
         allowed_locations = {"div"} if placement_kind != "article-class" else {"article"}
         if kind != "text" or location not in allowed_locations or token not in parser.exact_text_placements:

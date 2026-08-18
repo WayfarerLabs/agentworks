@@ -20,6 +20,11 @@ class TemplateContractTests(RepositoryFixture):
             template.replace("{{HOME_IDENTITY}}", ""),
             template.replace("{{HOME_IDENTITY}}", "{{HOME_IDENTITY}}{{HOME_IDENTITY}}"),
             template.replace("{{HOME_IDENTITY}}", "{{SECURITY_CONTENT}}"),
+            template.replace("{{HOME_ONBOARDING_INTRO}}", ""),
+            template.replace(
+                "{{HOME_ONBOARDING_INTRO}}",
+                "{{HOME_ONBOARDING_INTRO}}{{HOME_ONBOARDING_INTRO}}",
+            ),
             template + "{{not-a-token}}",
             template.replace('href="{{SITE_BASE}}security/"', 'data-base="{{SITE_BASE}}security/"', 1),
         )
@@ -45,12 +50,19 @@ class TemplateContractTests(RepositoryFixture):
         identity = '<div class="sourced-content">{{HOME_IDENTITY}}</div>'
         metadata = 'content="{{HOME_META_DESCRIPTION}}"'
         prompt = '<code id="onboarding-prompt">{{ONBOARDING_PROMPT}}</code>'
+        introduction = '<p id="onboarding-introduction">{{HOME_ONBOARDING_INTRO}}</p>'
         variants = (
             template.replace(metadata, 'content="safe" data-copy="{{HOME_META_DESCRIPTION}}"'),
             template.replace(identity, "<script>{{HOME_IDENTITY}}</script>"),
             template.replace(identity, "<style>{{HOME_IDENTITY}}</style>"),
             template.replace(identity, '<div class="unreviewed">{{HOME_IDENTITY}}</div>'),
             template.replace(identity, '<div class="sourced-content">prefix {{HOME_IDENTITY}}</div>'),
+            template.replace(introduction, f"<script>{introduction}</script>"),
+            template.replace("onboarding-introduction", "other-introduction", 1),
+            template.replace(
+                introduction,
+                '<p id="onboarding-introduction">prefix {{HOME_ONBOARDING_INTRO}}</p>',
+            ),
             template.replace(
                 identity,
                 '</section><section id="unreviewed"><div class="sourced-content">{{HOME_IDENTITY}}</div>',

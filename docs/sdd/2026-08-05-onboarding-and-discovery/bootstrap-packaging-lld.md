@@ -12,7 +12,8 @@ and projection contract.
 
 Agentworks ships one short prompt for any capable external assistant plus optional native Claude
 Code and Codex packages. The prompt identifies the product, points to the public repository,
-installs `agentworks-cli>=0.14`, and hands continuing assistance to `agw guide --agent`.
+installs or upgrades to the current available `agentworks-cli`, and hands continuing assistance to
+`agw guide --agent`.
 
 The bootstrap is not an installer framework, version resolver, prerelease policy, prompt parser,
 source-review workflow, authorization lesson, or assistant state machine. Ordinary package
@@ -28,12 +29,14 @@ LF-terminated UTF-8 Markdown without frontmatter. Its content remains concise an
 - the public repository URL;
 - the `agentworks-cli` PyPI identity and Python 3.12 minimum;
 - `uv` as the recommended tool installer, without excluding other Python tool installers;
-- `uv tool install --upgrade 'agentworks-cli>=0.14'`; and
+- `uv tool install --upgrade agentworks-cli`; and
 - the `agw guide --agent` handoff.
 
 `packaging/agentworks/metadata.json` owns package identity and machine metadata. The current package
-version is `1.0.1`; the minimum CLI version is `0.14.0`. The package version changes whenever an
-installed generated artifact changes and remains independent of the CLI version.
+version is the unreleased initial `1.0.0`; the minimum CLI version is `0.14.0`. The minimum is a
+compatibility floor for consuming the package, not a constraint on installation resolution. After
+the package first ships, its version changes whenever an installed generated artifact changes and
+remains independent of the CLI version.
 
 ## Generated outputs
 
@@ -79,7 +82,7 @@ codex plugin add agentworks@agentworks
 
 Claude and Codex manifest descriptions, publisher data, interface fields, category, installation
 policy, and authentication policy are generated from `metadata.json`. Both skill frontmatter blocks
-carry package version `1.0.1` and minimum CLI version `0.14.0`.
+carry package version `1.0.0` and minimum CLI version `0.14.0` until the first release.
 
 ## Structural safeguards
 
@@ -92,7 +95,8 @@ Repository tests prove:
 - package manifests and marketplaces retain the required neutral identities and Codex policy;
 - the packages contain no executable extension surface;
 - metadata rejects unknown fields and invalid versions;
-- changed installed package fingerprints require a strictly increasing package version; and
+- the unreleased package retains `1.0.0`, while changed installed package fingerprints require a
+  strictly increasing package version after the first release; and
 - malformed markers, stale outputs, unexpected files, or failed atomic replacement fail closed.
 
 Tests protect these structures and projection relationships. They do not assert or blacklist the

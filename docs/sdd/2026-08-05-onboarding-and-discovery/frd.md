@@ -20,6 +20,11 @@ The operator's 2026-08-17 grammar ruling makes `list` and `show` real guide verb
 renders exactly one topic. The unreleased direct and variadic `agw guide TOPIC...` form has no
 compatibility alias.
 
+The operator's 2026-08-17 bootstrap-current-release ruling replaces the constrained CLI install
+range with `uv tool install --upgrade agentworks-cli`. The metadata minimum remains a compatibility
+floor rather than an installation constraint. The unreleased assistance package remains at its
+initial version, `1.0.0`; ordinary package-version bumps begin after that package first ships.
+
 ## Summary
 
 Agentworks provides always-available assistance through its installed CLI and, when the operator
@@ -156,7 +161,8 @@ wording of authored guidance.
 
 `packaging/agentworks/agent-onboarding-prompt.md` is the one authored bootstrap body. It briefly
 identifies Agentworks, points to the public repository, recommends `uv` while allowing other Python
-3.12+ installers, installs `agentworks-cli>=0.14`, and runs `agw guide --agent`.
+3.12+ installers, installs or upgrades to the current available `agentworks-cli`, and runs
+`agw guide --agent`.
 
 The README, website, Claude Code package, and Codex package project that body byte-for-byte. The
 installed guide owns continuing assistance.

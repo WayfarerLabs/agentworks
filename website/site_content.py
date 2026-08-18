@@ -125,6 +125,7 @@ SECURITY_CONTRACT: Final = DocumentContract(
     True,
 )
 DOCUMENT_CONTRACTS: Final = (MANIFESTO_CONTRACT, SECURITY_CONTRACT)
+GETTING_STARTED_CONTRACT: Final = DocumentContract("HOME_ONBOARDING_INTRO", Path("README.md"))
 
 
 class ContractError(ValueError):
@@ -212,7 +213,7 @@ def extract_assistance_prompt(repo_root: Path) -> str:
     return source.decode("utf-8")
 
 
-def _fenced_line_indexes(source: str, contract: ContentContract) -> set[int]:
+def _fenced_line_indexes(source: str, contract: ContentContract | DocumentContract) -> set[int]:
     fenced: set[int] = set()
     fence_character = ""
     fence_length = 0
@@ -314,6 +315,37 @@ def _extract(contract: ContentContract, source: str) -> tuple[Block, ...]:
     if len(matches) != 1:
         raise ContractError(contract, "duplicate expected block sequence")
     return tuple(blocks[matches[0] : matches[0] + len(expected)])
+
+
+def _extract_first_paragraph(
+    contract: DocumentContract,
+    source: str,
+    heading_level: int,
+    heading_text: str,
+) -> Block:
+    """Extract one section's leading paragraph without pinning its wording."""
+    lines = source.split("\n")
+    fenced = _fenced_line_indexes(source, contract)
+    matches = [
+        index
+        for index, line in enumerate(lines)
+        if index not in fenced
+        and (heading := HEADING_PATTERN.match(line)) is not None
+        and len(heading.group(1)) == heading_level
+        and heading.group(2).strip(" \t") == heading_text
+    ]
+    if len(matches) != 1:
+        raise ContractError(contract, "missing or duplicate heading")
+    start = matches[0] + 1
+    while start < len(lines) and not lines[start].strip(" \t"):
+        start += 1
+    end = start
+    while end < len(lines) and lines[end].strip(" \t"):
+        end += 1
+    blocks = _normalized_blocks(lines[start:end])
+    if len(blocks) != 1 or blocks[0].kind != "paragraph":
+        raise ContractError(contract, "heading must begin with one paragraph")
+    return blocks[0]
 
 
 def _render_inline(
@@ -745,11 +777,22 @@ def extract_content(repo_root: Path) -> dict[str, str]:
     home_contract = CONTRACTS[0]
     home_source = _read_utf8(repo_root / home_contract.source, home_contract)
     home_blocks = _extract(home_contract, home_source)
+    onboarding_intro = _extract_first_paragraph(
+        GETTING_STARTED_CONTRACT,
+        home_source,
+        2,
+        "Getting Started",
+    )
     rendered = {
         home_contract.contract_id: _render_blocks(home_blocks, home_contract, {}),
         "HOME_META_DESCRIPTION": html.escape(
             _plain_inline(str(home_blocks[1].value), home_contract, {}),
             quote=True,
+        ),
+        GETTING_STARTED_CONTRACT.contract_id: _render_inline(
+            str(onboarding_intro.value),
+            GETTING_STARTED_CONTRACT,
+            {},
         ),
         "ONBOARDING_PROMPT": render_assistance_prompt(extract_assistance_prompt(repo_root)),
     }

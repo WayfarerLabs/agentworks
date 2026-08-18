@@ -246,9 +246,36 @@ navigation race observed during local full-suite runs.
 Before commit, the responsive geometry witness passed 40 consecutive two-viewport iterations and the
 Phase 4M witness passed 30 consecutive real-Chromium iterations without a failure. After the
 failure-path mutations were added, the complete website suite passed 161 of 161 tests in 36.618
-seconds. Structural cleanup witnesses reject a return to `--dump-dom` and verify DevTools closure,
-owned-process termination, bounded readiness, kill fallback, primary-error precedence, and
-server-thread cleanup.
+seconds. Structural cleanup witnesses verify DevTools closure, owned-process termination, bounded
+readiness, kill fallback, primary-error precedence, and server-thread cleanup.
+
+#### Phase 4J completion
+
+- Date: 2026-08-17
+- Pre-fix source: `aba556d18640b224196661bc996298223cbdce03`
+- Corrected source: `d5468505295cb0977d7802fcd8f392cc82e55749`
+- Failure evidence: PR #595 CI runs `32097702176` and `32100331477`, Website jobs `95592145030` and
+  `95599465244`
+- Outcome: PASS for the remaining Phase 4J probes
+
+PR #595 showed that Phase 4J still launched four separate `--dump-dom` browser processes after the
+earlier correction. Its description probe completed locally but timed out after 20 seconds in CI
+while waiting for Chrome to exit. Phase 4J now reads geometry and description results and captures
+screenshots through bounded DevTools sessions, then explicitly closes each connection, terminates or
+kills the owned process, and removes the isolated profile.
+
+Stress execution exposed two additional lifecycle races before commit: Chrome can briefly leave a
+child writing its profile after the parent exits, and `DevToolsActivePort` can exist before it has
+content or a published page target. Cleanup now gives profile writers a bounded quiescence window,
+and every Chromium harness now uses shared discovery with one absolute 20-second deadline for
+complete port and page-target publication. A stalled HTTP endpoint cannot extend that deadline by
+starting another long request. The initial five-second boundary passed local stress but was too
+short for hosted startup: the second cited job kept a live browser process but did not publish its
+port file in that window. The final boundary accommodates that observed startup variance while
+remaining finite and separately owning browser shutdown. The formerly failing description probe
+passed 30 consecutive real-Chromium iterations after the lifecycle corrections; the complete Phase
+4J module passed 7 of 7 tests, including screenshots and reduced motion, and the shared lifecycle
+suite passed 11 of 11 tests.
 
 ### Historical route-proof automated execution record
 
