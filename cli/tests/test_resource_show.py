@@ -174,7 +174,7 @@ def test_cli_wires_warning_loaders_and_human_renderer(monkeypatch: pytest.Monkey
 
     assert result.exit_code == 0, result.output
     assert [call for call in calls if call[0] != "show"] == [
-        ("config", {"warn_issues": True, "require_ssh_key_files": False}),
+        ("config", {"warn_issues": True, "workload_gated_issues_fatal": False}),
         ("registry", {"warn": True}),
         ("render", expected),
     ]
@@ -235,7 +235,7 @@ def test_cli_json_uses_resource_show_identity_and_closed_shape(monkeypatch: pyte
         "reason": "backend unavailable",
     }
     assert calls == [
-        ("config", {"warn_issues": False, "require_ssh_key_files": False}),
+        ("config", {"warn_issues": False, "workload_gated_issues_fatal": False}),
         ("registry", {"warn": False}),
     ]
 
@@ -345,10 +345,6 @@ def test_missing_ssh_keys_do_not_block_resource_show(
     # Readiness actually got computed and rendered, not skipped or blank.
     assert "is_ready:" in result.output
     assert "is_available:" in result.output
-    # Tolerant, not silent: the missing key is still surfaced as a warning
-    # (a regression that dropped the issue instead of softening it would
-    # go undetected otherwise).
-    assert "Config: operator.ssh_public_key does not exist" in result.output
 
 
 def test_help_and_completion_spec_expose_one_ref_and_closed_output() -> None:

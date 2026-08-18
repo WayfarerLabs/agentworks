@@ -112,19 +112,27 @@ def _load_operator(
     data: dict[str, object],
     issues: list[str],
     *,
-    require_ssh_key_files: bool = True,
+    workload_gated_issues_fatal: bool = True,
 ) -> OperatorConfig:
     """Load ``[operator]``.
 
-    ``require_ssh_key_files`` gates only the three file-existence checks below
-    (primary public/private key, extra public keys), not the rest of the
-    section. It defaults to True (today's behavior: a missing key file is
-    a hard ``ConfigError``) because most callers use the operator identity
-    to reach a VM or provision one, where a stale or absent key is a real
-    failure. A caller that inspects installed vocabulary or displays one
-    resource's facts, rather than reaching operator identity, passes
-    False: key existence becomes a soft issue on ``issues``, alongside the
-    section's other soft issues, instead of aborting the load.
+    A workload-gated issue is a config problem that only matters once
+    something provisions or interacts with a workload: creating a VM,
+    connecting to one, or otherwise using the operator's SSH identity.
+    Key-file existence is exactly that kind of fact, a filesystem
+    condition rather than a config-shape one, so it is not the same kind
+    of problem as a malformed section or an unknown key. Today's only
+    workload-gated check is the three file-existence checks below
+    (primary public/private key, extra public keys); nothing else in
+    this section is workload-gated.
+
+    ``workload_gated_issues_fatal`` (default True) makes those checks a
+    hard ``ConfigError``, because most callers reach a VM or provision
+    one, where a stale or absent key is a real failure regardless of
+    when it is discovered. A caller whose code path never reads the
+    operator's SSH key files, i.e. never connects to or provisions a
+    workload, passes False: the missing file becomes a soft entry on
+    ``issues`` instead, alongside the section's other soft issues.
     """
     raw = data.get("operator")
     if not isinstance(raw, dict):
@@ -140,12 +148,12 @@ def _load_operator(
     # quote the setting closer to the way they wrote it in config.toml.
     if not pub.exists():
         message = f"operator.ssh_public_key does not exist: {format_host_path(pub)}"
-        if require_ssh_key_files:
+        if workload_gated_issues_fatal:
             raise ConfigError(message, hint=_SSH_KEY_HINT)
         issues.append(message)
     if not priv.exists():
         message = f"operator.ssh_private_key does not exist: {format_host_path(priv)}"
-        if require_ssh_key_files:
+        if workload_gated_issues_fatal:
             raise ConfigError(message, hint=_SSH_KEY_HINT)
         issues.append(message)
 
@@ -158,7 +166,7 @@ def _load_operator(
         p = _expand(str(entry))
         if not p.exists():
             message = f"operator.extra_ssh_public_keys: file does not exist: {format_host_path(p)}"
-            if require_ssh_key_files:
+            if workload_gated_issues_fatal:
                 raise ConfigError(message)
             issues.append(message)
         extra_keys.append(p)

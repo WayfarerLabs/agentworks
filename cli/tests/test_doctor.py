@@ -118,6 +118,43 @@ def test_config_exception_becomes_one_shared_health_fact(tmp_path, monkeypatch: 
     assert config_check["hint"] == f"fix {marker}"
 
 
+def test_fresh_init_shaped_config_reaches_doctors_own_ssh_key_checks(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fresh-init-shaped config (valid ``[operator]`` section, but
+    pointing at SSH key paths that do not exist) must load rather than
+    abort, so doctor's own purpose-built SSH-key checks run. Those
+    checks are strictly better than the generic missing-file issue the
+    loader itself records: they also cover readability and (for the
+    private key) permissions.
+
+    Before this class of issue was workload-gated, the ``ConfigError``
+    load_config raised aborted the whole load, so ``_check_config``
+    returned ``config=None`` before ever reaching ``_check_ssh_key``,
+    and the report's Configuration group carried only the generic
+    ``Config`` failure. Structural, not wording: this checks which named
+    checks exist and their status, not any message text.
+    """
+    from agentworks import config, doctor
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        f"""\
+[operator]
+ssh_public_key = "{(tmp_path / "id_ed25519.pub").as_posix()}"
+ssh_private_key = "{(tmp_path / "id_ed25519").as_posix()}"
+"""
+    )
+    monkeypatch.setattr(config, "CONFIG_PATH", config_path)
+
+    config_group, loaded_config, _registry = doctor._check_config()
+
+    assert loaded_config is not None
+    checks_by_name = {check.name: check for check in config_group.checks}
+    assert checks_by_name["SSH public key"].status is Status.FAIL
+    assert checks_by_name["SSH private key"].status is Status.FAIL
+
+
 class TestCompletionChecks:
     """Relevance-aware staleness reporting in `_check_completions`."""
 

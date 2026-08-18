@@ -93,6 +93,32 @@ def test_write_lands_where_the_modeline_says(
     assert str(schema_dir) in capsys.readouterr().out
 
 
+def test_write_tolerates_missing_ssh_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``--install`` only needs ``config.source_path`` to locate the
+    resources directory; it never reads the operator's SSH key files, so
+    a config whose only defect is a nonexistent key path must not block
+    it (the sample config's placeholder, before ``agw config init``
+    writes a real one)."""
+    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", tmp_path / "config.toml")
+    (tmp_path / "config.toml").write_text(
+        f"""\
+[operator]
+ssh_public_key = "{(tmp_path / "id.pub").as_posix()}"
+ssh_private_key = "{(tmp_path / "id").as_posix()}"
+"""
+    )
+    assert not (tmp_path / "id.pub").exists()
+    assert not (tmp_path / "id").exists()
+
+    assert _run(monkeypatch, "--install") == 0
+    schema_dir = tmp_path / RESOURCES_DIRNAME / SCHEMA_DIRNAME
+    assert schema_dir.is_dir()
+    assert str(schema_dir) in capsys.readouterr().out
+
+
 def test_write_with_a_kind_is_a_clean_refusal(
     configured: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

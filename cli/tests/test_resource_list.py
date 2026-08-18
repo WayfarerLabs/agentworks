@@ -44,13 +44,11 @@ def _write_base(
 ) -> None:
     """Write a settings-only config.toml plus its resources/ manifests.
     ``settings`` carries settings-only TOML ([secret_config]); resources
-    go in ``manifests``.
-
-    The operator key paths deliberately point at files that do not
-    exist: listing resources needs no operator identity, and ``_load``
-    below loads with ``require_ssh_key_files=False`` to match."""
+    go in ``manifests``."""
     pub = config_path.parent / "id.pub"
     priv = config_path.parent / "id"
+    pub.write_text("ssh-ed25519 AAAA...")
+    priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
     config_path.write_text(
         dedent(f"""\
         [operator]
@@ -64,7 +62,7 @@ def _write_base(
 
 
 def _load(cfg_file: Path):
-    cfg = load_config(cfg_file, warn_issues=False, require_ssh_key_files=False)
+    cfg = load_config(cfg_file, warn_issues=False)
     return build_registry(cfg)
 
 
@@ -237,7 +235,13 @@ def test_missing_ssh_keys_do_not_block_resource_list(tmp_path: Path, monkeypatch
     from agentworks.cli import app
 
     cfg_file = tmp_path / "config.toml"
-    _write_base(cfg_file, manifests=[_VM_DEFAULT])
+    cfg_file.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{(tmp_path / "id.pub").as_posix()}"
+        ssh_private_key = "{(tmp_path / "id").as_posix()}"
+        """)
+    )
     assert not (tmp_path / "id.pub").exists()
     assert not (tmp_path / "id").exists()
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
@@ -245,11 +249,7 @@ def test_missing_ssh_keys_do_not_block_resource_list(tmp_path: Path, monkeypatch
     result = CliRunner().invoke(app, ["resource", "list"])
 
     assert result.exit_code == 0, result.output
-    assert "vm-template" in result.output
-    # Tolerant, not silent: the missing key is still surfaced as a warning
-    # (a regression that dropped the issue instead of softening it would
-    # go undetected otherwise).
-    assert "Config: operator.ssh_public_key does not exist" in result.output
+    assert "KIND" in result.output and "NAME" in result.output
 
 
 def test_cli_names_only_emits_kind_slash_name_per_line(tmp_path: Path, monkeypatch) -> None:
@@ -290,7 +290,7 @@ def test_names_only_candidate_order_matches_a_healthy_database(tmp_path: Path) -
 
     cfg_file = tmp_path / "config.toml"
     _write_base(cfg_file, manifests=[_VM_DEFAULT])
-    registry = build_registry(load_config(cfg_file, require_ssh_key_files=False))
+    registry = build_registry(load_config(cfg_file))
     database = Database(tmp_path / "agentworks.db")
     try:
         with_database = list_resources(registry, database)

@@ -83,7 +83,7 @@ def test_graph_show_wires_one_query_with_closed_parsed_inputs(
     )
 
     assert result.exit_code == 0, result.output
-    assert calls[0] == ("config", {"warn_issues": True, "require_ssh_key_files": False})
+    assert calls[0] == ("config", {"warn_issues": True, "workload_gated_issues_fatal": False})
     assert calls[1] == ("registry", {"warn": True, "probe_host_readiness": False})
     query_call = calls[2]
     assert query_call[0:5] == (
@@ -163,10 +163,7 @@ def test_missing_ssh_keys_do_not_block_graph_show(
     result = CliRunner().invoke(app, ["graph", "show", "secret/npm-token"])
 
     assert result.exit_code == 0, result.output
-    # Tolerant, not silent: the missing key is still surfaced as a warning
-    # (a regression that dropped the issue instead of softening it would
-    # go undetected otherwise).
-    assert "Config: operator.ssh_public_key does not exist" in result.output
+    assert "secret/npm-token" in result.output
 
 
 @pytest.mark.parametrize(

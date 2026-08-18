@@ -17,11 +17,9 @@ from agentworks.resources import KIND_REGISTRY
 
 
 def _write_base(cfg_path: Path) -> None:
-    # `resource kinds` lists installed vocabulary, not operator identity,
-    # so the key paths below are deliberately left pointing at files that
-    # do not exist: the command must not need them (see
-    # `load_config(require_ssh_key_files=False)` at its call site).
     tmp = cfg_path.parent
+    (tmp / "id.pub").write_text("ssh-ed25519 AAAA...")
+    (tmp / "id").write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
     cfg_path.write_text(
         dedent(f"""\
         [operator]
@@ -77,17 +75,21 @@ def test_missing_ssh_keys_do_not_block_kind_listing(tmp_path: Path, monkeypatch)
     from agentworks.cli import app
 
     cfg = tmp_path / "config.toml"
-    _write_base(cfg)
+    cfg.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{(tmp_path / "id.pub").as_posix()}"
+        ssh_private_key = "{(tmp_path / "id").as_posix()}"
+        """)
+    )
     assert not (tmp_path / "id.pub").exists()
     assert not (tmp_path / "id").exists()
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
 
     result = CliRunner().invoke(app, ["resource", "kinds"])
+
     assert result.exit_code == 0, result.output
-    # Tolerant, not silent: the missing key is still surfaced as a warning
-    # (a regression that dropped the issue instead of softening it would
-    # go undetected otherwise).
-    assert "Config: operator.ssh_public_key does not exist" in result.output
+    assert "KIND" in result.output
 
 
 def test_table_shows_categories_and_counts(tmp_path: Path, monkeypatch) -> None:

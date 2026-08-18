@@ -397,9 +397,9 @@ def test_extra_ssh_public_keys_missing_file(tmp_path: Path) -> None:
         load_config(config_file)
 
 
-def test_require_ssh_key_files_false_softens_missing_keys_to_issues(tmp_path: Path) -> None:
-    """``require_ssh_key_files=False`` (the flag `resource kinds` / `resource
-    list` pass) turns a missing primary or extra key file into a
+def test_workload_gated_issues_fatal_false_softens_missing_keys_to_issues(tmp_path: Path) -> None:
+    """``workload_gated_issues_fatal=False`` (the flag read-only inspection
+    commands pass) turns a missing primary or extra key file into a
     ``config_issues`` entry instead of aborting the load, while every
     other operator field still loads normally."""
     config_file = tmp_path / "config.toml"
@@ -411,7 +411,7 @@ def test_require_ssh_key_files_false_softens_missing_keys_to_issues(tmp_path: Pa
         extra_ssh_public_keys = ["{(tmp_path / "extra.pub").as_posix()}"]
     """)
     )
-    cfg = load_config(config_file, warn_issues=False, require_ssh_key_files=False)
+    cfg = load_config(config_file, warn_issues=False, workload_gated_issues_fatal=False)
     assert any("ssh_public_key does not exist" in issue for issue in cfg.config_issues)
     assert any("ssh_private_key does not exist" in issue for issue in cfg.config_issues)
     assert any("extra_ssh_public_keys" in issue and "does not exist" in issue for issue in cfg.config_issues)
@@ -419,10 +419,10 @@ def test_require_ssh_key_files_false_softens_missing_keys_to_issues(tmp_path: Pa
     assert cfg.operator.ssh_private_key == (tmp_path / "id")
 
 
-def test_require_ssh_key_files_true_still_raises_by_default(tmp_path: Path) -> None:
+def test_workload_gated_issues_fatal_true_still_raises_by_default(tmp_path: Path) -> None:
     """The default stays strict: a caller that does not pass
-    ``require_ssh_key_files=False`` gets today's hard failure, exactly as
-    every mutation/provisioning command relies on."""
+    ``workload_gated_issues_fatal=False`` gets today's hard failure,
+    exactly as every mutation/provisioning command relies on."""
     config_file = tmp_path / "config.toml"
     config_file.write_text(
         dedent(f"""\

@@ -56,7 +56,7 @@ def load_config(
     warn_issues: bool = True,
     warn_deprecations: bool = True,
     raise_errors: bool = False,
-    require_ssh_key_files: bool = True,
+    workload_gated_issues_fatal: bool = True,
 ) -> Config:
     """Load and validate the agentworks configuration.
 
@@ -64,19 +64,20 @@ def load_config(
         path: Override config file path (default: ~/.config/agentworks/config.toml).
         warn_issues: Emit config issues as warnings to stderr (default: True).
             Set to False when the caller handles issues itself (e.g. doctor).
+            Warnings render in human mode only; a JSON-mode caller (which
+            passes warn_issues=False) gets a clean envelope with no signal
+            that a workload-gated issue exists.
         warn_deprecations: Emit deprecation nudges (default: True; also
             silenceable per-invocation via --no-deprecations).
         raise_errors: Raise typed errors for early file failures instead of
             using the legacy stderr and ``SystemExit`` path.
-        require_ssh_key_files: Fail the load when the operator's SSH key files
-            (``operator.ssh_public_key``, ``ssh_private_key``,
-            ``extra_ssh_public_keys``) do not exist on disk (default:
-            True). Set to False for a caller that inspects installed
-            vocabulary or displays one resource's facts, rather than
-            reaching operator identity: existence becomes a soft entry in
-            ``config.config_issues`` instead of a ``ConfigError``. Never
-            lower this for a command that uses the operator's identity to
-            connect to or provision anything.
+        workload_gated_issues_fatal: Whether a workload-gated config issue is
+            a hard ``ConfigError`` (default: True) or a soft entry in
+            ``config.config_issues``. See ``_load_operator``'s docstring for
+            what makes an issue workload-gated (today's only member: a
+            missing operator SSH key file). Pass False only from a command
+            whose code path never reads the operator's SSH key files, i.e.
+            never connects to or provisions a workload.
 
     Returns:
         Validated Config object.
@@ -148,7 +149,7 @@ def load_config(
     enabled_system_plugins = _load_plugins(data, issues, decls)
 
     config = Config(
-        operator=_load_operator(data, issues, require_ssh_key_files=require_ssh_key_files),
+        operator=_load_operator(data, issues, workload_gated_issues_fatal=workload_gated_issues_fatal),
         paths=_load_paths(data),
         defaults=_load_defaults(data),
         source_path=config_path,

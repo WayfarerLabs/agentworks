@@ -647,7 +647,7 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     try:
         from agentworks.config import load_config
 
-        config = load_config(warn_issues=False, raise_errors=True)
+        config = load_config(warn_issues=False, raise_errors=True, workload_gated_issues_fatal=False)
     except (ConfigError, ValidationError) as e:
         # ValidationError is a SIBLING of ConfigError under AgentworksError,
         # not a subclass, so it must be named explicitly. Catching it here

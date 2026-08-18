@@ -54,7 +54,7 @@ def secret_list(
     from agentworks.config import load_config
     from agentworks.secrets.inspect import build_secret_table, render_secret_table, secret_table_data
 
-    config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
+    config = load_config(warn_issues=output_format is OutputFormat.HUMAN, workload_gated_issues_fatal=False)
     registry = load_request_registry(config, warn=output_format is OutputFormat.HUMAN)
     table = build_secret_table(config, registry)
     if names_only:
@@ -103,7 +103,7 @@ def secret_describe(
     from agentworks.config import load_config
     from agentworks.secrets.inspect import describe_secret, render_secret_description, secret_description_data
 
-    config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
+    config = load_config(warn_issues=output_format is OutputFormat.HUMAN, workload_gated_issues_fatal=False)
     registry = load_request_registry(config, warn=output_format is OutputFormat.HUMAN)
     db = get_db()
     desc = describe_secret(config, registry, name, db=db)

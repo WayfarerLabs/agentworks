@@ -77,13 +77,9 @@ def show(
     identity = parse_resource_identity(focus)
     depth_limit = parse_graph_depth(depth)
     graph_direction = GraphDirection(direction)
-    # Same rationale as `resource kinds`/`resource list`/`resource show`:
-    # a graph query displays declared and live relationships, not
-    # operator identity, so a placeholder or missing SSH key doesn't
-    # block it (`load_request_registry` below also runs with host
-    # readiness probing off, so no platform preflight touches
-    # config.operator either).
-    config = load_config(warn_issues=output_format is OutputFormat.HUMAN, require_ssh_key_files=False)
+    # Never reads the operator's SSH key files; see load_config's
+    # workload_gated_issues_fatal doc.
+    config = load_config(warn_issues=output_format is OutputFormat.HUMAN, workload_gated_issues_fatal=False)
     registry = load_request_registry(
         config,
         warn=output_format is OutputFormat.HUMAN,

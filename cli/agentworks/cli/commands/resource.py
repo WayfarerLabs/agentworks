@@ -103,11 +103,9 @@ def resource_list(
     if kind is not None:
         kinds = tuple(k.strip() for k in kind.split(",") if k.strip())
 
-    # Listing the installed vocabulary needs no operator identity, so a
-    # placeholder or missing SSH key (the sample config's default, before
-    # `agw config init` writes a real one) doesn't block it; see
-    # `load_config`'s `require_ssh_key_files` doc.
-    config = load_config(warn_issues=output_format is OutputFormat.HUMAN, require_ssh_key_files=False)
+    # Never reads the operator's SSH key files; see load_config's
+    # workload_gated_issues_fatal doc.
+    config = load_config(warn_issues=output_format is OutputFormat.HUMAN, workload_gated_issues_fatal=False)
     registry = load_request_registry(config, warn=output_format is OutputFormat.HUMAN)
     db = None if names_only else get_db()
     # ``list_resources`` validates ``origin_filter`` (typed
@@ -184,12 +182,9 @@ def resource_show(
 
     identity = parse_resource_identity(ref)
     warn = output_format is OutputFormat.HUMAN
-    # Same rationale as `resource list`/`resource kinds`: showing one
-    # resource's facts and readiness needs no operator identity (the
-    # per-resource diagnostics `show_resource` gathers never read
-    # config.operator; see doctor.checks_for_resource), so a placeholder
-    # or missing SSH key doesn't block it.
-    config = load_config(warn_issues=warn, require_ssh_key_files=False)
+    # Never reads the operator's SSH key files; see load_config's
+    # workload_gated_issues_fatal doc.
+    config = load_config(warn_issues=warn, workload_gated_issues_fatal=False)
     registry = load_request_registry(config, warn=warn)
     shown = show_resource(config, registry, identity, DatabaseLiveSource(db.DB_PATH))
 
@@ -249,9 +244,9 @@ def resource_kinds(
     from agentworks.config import load_config
     from agentworks.resources.inspect import list_kinds, render_kind_table, resource_kinds_data
 
-    # Same rationale as `resource list`: kind listing needs no operator
-    # identity, so a placeholder or missing SSH key doesn't block it.
-    config = load_config(warn_issues=output_format is OutputFormat.HUMAN, require_ssh_key_files=False)
+    # Never reads the operator's SSH key files; see load_config's
+    # workload_gated_issues_fatal doc.
+    config = load_config(warn_issues=output_format is OutputFormat.HUMAN, workload_gated_issues_fatal=False)
     registry = load_request_registry(config, warn=output_format is OutputFormat.HUMAN)
     rows = list_kinds(registry)
     if output_format is OutputFormat.JSON:
@@ -413,7 +408,7 @@ def resource_sample(
 
     from agentworks.config import load_config
 
-    config = load_config()
+    config = load_config(workload_gated_issues_fatal=False)
     resources_dir = config.source_path.parent / RESOURCES_DIRNAME
     path, outcome = write_sample(resources_dir, write, kind, all_kinds=all_kinds)
     verb = "Appended sample to" if outcome == "appended" else "Wrote sample to"
@@ -500,7 +495,7 @@ def resource_schema(
     from agentworks.config import load_config
     from agentworks.manifests.loader import RESOURCES_DIRNAME
 
-    config = load_config()
+    config = load_config(workload_gated_issues_fatal=False)
     schema_dir = config.source_path.parent / RESOURCES_DIRNAME / SCHEMA_DIRNAME
     written = write_schema_set(schema_dir)
     output.info(f"Wrote {len(written)} schemas to {format_host_path(schema_dir)}")
