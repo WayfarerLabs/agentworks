@@ -17,7 +17,8 @@ on).
 - `.rulesync/subagents/*.md`: specialized assistant personas
 - `rulesync.jsonc`: shared config; declares `targets: ["copilot", "claudecode", "codexcli"]` and the
   enabled features
-- `rulesync.local.jsonc`: personal tool targets (gitignored); pick whatever else you use locally
+- `rulesync.local.jsonc`: personal tool targets (gitignored); create it from
+  `rulesync.local.jsonc.example`, then edit it for your tool setup and preferences
 - `.rulesync-version`: pinned rulesync version
 
 ## What gets committed
