@@ -68,7 +68,11 @@ def agent_list(
         typer.Option("--output", help="Output format: human or json. Default: human."),
     ] = OutputFormat.HUMAN,
 ) -> None:
-    """List agents. --vm accepts comma-separated values for OR-within-filter."""
+    """List agents. --vm accepts comma-separated values for OR-within-filter.
+
+    A workspace name suffixed with * in the WORKSPACE GRANTS column holds
+    only an implicit grant (from a session), not a standing one.
+    """
     if names_only and output_format is OutputFormat.JSON:
         raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
 

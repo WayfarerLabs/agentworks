@@ -141,7 +141,12 @@ def agent_listing(
 
 
 def render_agent_listing(listing: AgentListing, *, names_only: bool = False) -> None:
-    """Render agent list facts with the legacy human layout."""
+    """Render agent list facts with the shared table formatter.
+
+    Emits a trailing legend line for the ``*`` marker (see below) only when
+    at least one row actually carries one, so a listing with no implicit
+    grants stays free of an unexplained line.
+    """
     agents = listing.agents
 
     if names_only:
@@ -153,21 +158,30 @@ def render_agent_listing(listing: AgentListing, *, names_only: bool = False) -> 
         output.info("No agents found.")
         return
 
-    names = [output.truncate(agent.name, _NAME_CELL_WIDTH) for agent in agents]
-    name_w = max(len("NAME"), *(len(name) for name in names))
-
-    header = f"{'NAME':<{name_w}} {'VM':<15} {'TEMPLATE':<12} {'WORKSPACE GRANTS'}"
-    output.info(header)
-    output.info("-" * len(header))
-    for agent, name in zip(agents, names, strict=True):
+    headers = ["NAME", "VM", "TEMPLATE", "WORKSPACE GRANTS"]
+    rows: list[tuple[str, str, str, str]] = []
+    has_implicit_marker = False
+    for agent in agents:
+        name = output.truncate(agent.name, _NAME_CELL_WIDTH)
         if agent.grant_all:
             grants = "--ALL--"
         elif not agent.grants:
             grants = "(none)"
         else:
-            parts = [f"{grant.workspace_name}{'*' if grant.grant_type == 'implicit' else ''}" for grant in agent.grants]
-            grants = output.truncate(", ".join(parts), MAX_GRANTS_DISPLAY)
-        output.info(f"{name:<{name_w}} {agent.vm_name:<15} {agent.template or '-':<12} {grants}")
+            parts = []
+            for grant in agent.grants:
+                # Only a PURELY implicit grant gets the marker; a grant that
+                # is also explicit already reads as intentional.
+                is_implicit_only = grant.grant_type == "implicit"
+                has_implicit_marker = has_implicit_marker or is_implicit_only
+                parts.append(f"{grant.workspace_name}{'*' if is_implicit_only else ''}")
+            grants = ", ".join(parts)
+        rows.append((name, agent.vm_name, agent.template or "-", grants))
+
+    for line in output.render_table(headers, rows, max_col_width=MAX_GRANTS_DISPLAY):
+        output.info(line)
+    if has_implicit_marker:
+        output.info("* granted implicitly")
 
 
 def list_agents(

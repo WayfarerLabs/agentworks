@@ -139,6 +139,43 @@ def test_agent_list_names_only_emits_full_name(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# agent list implicit-grant legend: a trailing line appears only when a row
+# actually carries the "*" marker (issue: the marker went unexplained).
+# ---------------------------------------------------------------------------
+
+
+def _seed_agent_with_grant(db: Database, grant_type: str) -> None:
+    db.insert_vm("vm1", site="lima", hostname="h")
+    db.insert_agent("claude", "vm1", "agt-claude")
+    db.insert_workspace("scratch", workspace_path="/tmp/scratch", vm_name="vm1", linux_group="ws-scratch")
+    db.insert_agent_grant("claude", "scratch", grant_type, session_name="s1" if grant_type == "implicit" else None)
+
+
+def test_agent_list_shows_legend_when_an_implicit_grant_is_marked(tmp_path: Path) -> None:
+    db = Database(tmp_path / "test.db")
+    _seed_agent_with_grant(db, "implicit")
+    code, lines = _invoke(db, ["agent", "list"])
+    assert code == 0, lines
+
+    # header + rule + one data row + a trailing legend line.
+    assert len(lines) == 4, lines
+    assert lines[-1].startswith("*"), f"expected a legend line explaining the marker: {lines}"
+    db.close()
+
+
+def test_agent_list_omits_legend_when_no_grant_is_marked(tmp_path: Path) -> None:
+    db = Database(tmp_path / "test.db")
+    _seed_agent_with_grant(db, "explicit")
+    code, lines = _invoke(db, ["agent", "list"])
+    assert code == 0, lines
+
+    # header + rule + one data row, no legend.
+    assert len(lines) == 3, lines
+    assert not any(line.startswith("*") for line in lines)
+    db.close()
+
+
+# ---------------------------------------------------------------------------
 # workspace list (NAME cap 29, truncate keeps 26 + "...")
 # ---------------------------------------------------------------------------
 
