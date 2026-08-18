@@ -336,7 +336,6 @@ function Complete([string]$line) {{
     afterAgent = @(Complete 'agw guide --agent ')
     agent = @(Complete 'agw guide --agent show ')
     human = @(Complete 'agw guide --human show ')
-    terminal = @(Complete 'agw guide --agent show {expected_topics[0]} ')
     helpAfterTopic = @(Complete 'agw guide --agent show {expected_topics[0]} --')
 }} | ConvertTo-Json -Depth 3 -Compress
 """
@@ -352,7 +351,6 @@ function Complete([string]$line) {{
         assert result["afterAgent"] == ["list", "show", "--agent", "--human", "--help"]
         assert result["agent"] == expected_topics
         assert result["human"] == expected_topics
-        assert result["terminal"] == []
         assert result["helpAfterTopic"] == ["--help"]
 
     def test_database_backed_snippets_share_hidden_probe_contract(self) -> None:

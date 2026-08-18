@@ -6,7 +6,7 @@ index-order: 50
 # Agentworks release notes
 
 Release history and current installation state answer different questions. Use command-owned facts
-or `concept-onboarding` for what is configured now.
+or `agw guide show concept-onboarding` for what is configured now.
 
 Run `agw version` to identify the installed release. Then request its exact local topic with
 `agw guide show concept-release-notes/vMAJOR-MINOR-PATCH`. `agw guide list` lists every exact
