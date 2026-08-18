@@ -62,10 +62,12 @@ class ResourceShow:
 
 
 def _json_value(value: Any) -> JsonValue:
-    """Validate declared-model output at the closed JSON v1 carrier boundary.
+    """Validate declared-row output at the closed JSON v1 carrier boundary.
 
-    Plugins may contribute declared resource models, so their Pydantic JSON-mode
-    output is not an interior first-party value and must not be coerced.
+    Declarable kinds and their model classes are core-owned, but plugins may
+    contribute manifest row data. Pydantic JSON mode is dynamically typed, so
+    this runtime guard proves that only a closed, finite ``JsonValue`` crosses
+    the machine contract; unexpected output is rejected rather than coerced.
     """
     if value is None or isinstance(value, str | bool | int):
         return value
