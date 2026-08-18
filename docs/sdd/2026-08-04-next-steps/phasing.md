@@ -163,11 +163,11 @@ off whenever bandwidth allows, on its own merits and its own schedule.
   **Current release map (operator rulings, 2026-08-17, in `target-state.md`):** every gate above is
   satisfied (the CLI grammar rewrite merged and locked with PR #491; breaking-truth, installer,
   safer-migrations, and the README bootstrap closed earlier), and the simplification-pass gate is
-  removed as recorded above. What 0.14.0 still waits for: the grammar-native guide (PR #593, the
-  index/`list`/`show` surface with no compatibility alias), the issue #589 changelog repair executed
-  as a manual release-branch edit after the final merge, and the operator's personal edit pass over
-  guide content and website wording, which the operator holds and needs no gate since the operator
-  cuts the release.
+  removed as recorded above. The grammar-native guide gate is satisfied (PR #593, merged
+  2026-08-18). What 0.14.0 still waits for: the issue #589 changelog repair executed as a manual
+  release-branch edit after the final pre-release merge (the saga lead holds the prepared entries),
+  and the operator's personal edit pass over guide content and website wording, which the operator
+  holds and needs no gate since the operator cuts the release.
 
 - **Later:** remaining waves map to releases as they prove out; no need to pin numbers now.
 
