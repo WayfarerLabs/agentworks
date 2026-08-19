@@ -17,6 +17,14 @@ namely PRs #546, #548, #559 and #560. Every `file:line` was read at that commit.
 as the deletion PRs land, so a later reader should treat them as anchors and re-derive, as
 [findings.md](findings.md) says of its own.
 
+**Re-derived at `426cccae` on 2026-08-19**, against the post-#573 audit and the operator's re-scope.
+Four things came out of it and each has its own section: the completeness re-scan, the re-scope
+subtraction, the callee-side raise screen, and a Totals section counted off the row markup rather
+than carried forward. Every row-level correction is marked in place, so
+`grep 'Corrected 2026-08-19'` lists them all, and every row the re-baseline ADDED carries an `RB-`
+or `G1-C` id. Rows still carrying a `c686cd6d` line number were not re-derived: the re-baseline
+re-derived the rows it touched and the whole of group 1's estate, not the rest.
+
 ## How a row was decided
 
 The standard is the always-on `no-prose-policing-tests` rule, as generalized by R1.2 to every
