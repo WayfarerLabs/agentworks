@@ -258,6 +258,24 @@ def test_source_mapping_respects_opt_out(tmp_path: Path) -> None:
 # -- Resolution preview section --------------------------------------------
 
 
+def _assert_conditional_fallthrough_order(preview_section: str, winner: str, rest: list[str]) -> None:
+    """Structural check for the summary's fall-through framing: the later
+    sources must appear ONLY after a conditional marker that follows the
+    winner, never as a bare continuation, since the preview reads no
+    values and only the winner is anything close to a fact. This pins the
+    conditional relationship (order plus subordination to a condition),
+    not the sentence's wording, per no-prose-policing-tests.
+    """
+    winner_pos = preview_section.index(winner)
+    conditional_pos = preview_section.index("if", winner_pos)
+    assert conditional_pos > winner_pos, "the fall-through chain must be subordinated to a conditional marker"
+    cursor = conditional_pos
+    for name in rest:
+        pos = preview_section.index(name, cursor)
+        assert pos > cursor, f"{name!r} must appear in order after the conditional marker"
+        cursor = pos
+
+
 def test_resolution_preview_picks_env_var_when_var_is_set(tmp_path: Path, monkeypatch) -> None:
     """Env-var first in the chain; the var is actually set. Preview
     reports env-var. This is the case where the operator's shell already
@@ -426,9 +444,7 @@ def test_resolution_preview_summary_names_full_fallthrough_chain(
 
     out = capsys.readouterr().out
     preview_section = out.split("Resolution preview:", 1)[1]
-    assert "env-var" in preview_section
-    assert "personal-op" in preview_section
-    assert "prompt" in preview_section
+    _assert_conditional_fallthrough_order(preview_section, "env-var", ["personal-op", "prompt"])
 
 
 def test_interactive_optimism_preview_unchanged_under_readiness(tmp_path: Path, monkeypatch) -> None:
@@ -561,12 +577,12 @@ def test_render_emits_header_usages_mappings_preview(
     assert "env-var (env-var, synthesized default): AW_SECRET_API_KEY" in out
     assert "prompt (prompt, synthesized default): (prompt at resolution time)" in out
     # Resolution preview: names the winner and, since prompt is also active
-    # and reachable, the fall-through chain behind it (structural check on
-    # the preview section only, not the connecting prose).
+    # and reachable, the fall-through chain conditioned behind it
+    # (structural check on the preview section only, not the connecting
+    # prose).
     assert "Resolution preview:" in out
     preview_section = out.split("Resolution preview:", 1)[1]
-    assert "env-var" in preview_section
-    assert "prompt" in preview_section
+    _assert_conditional_fallthrough_order(preview_section, "env-var", ["prompt"])
 
 
 # -- Used-by (Phase 3c dynamic dimension) -----------------------------------

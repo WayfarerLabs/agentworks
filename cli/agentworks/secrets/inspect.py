@@ -542,14 +542,18 @@ def render_secret_description(desc: SecretDescription) -> None:
     if desc.resolution.category is not PreviewCategory.ATTEMPTABLE:
         output.detail("not attemptable through any active source")
     else:
-        # Name the winner, then the rest of the still-active chain: a
-        # source can "win" the preview by mapping applicability alone
-        # (no value read), so naming only it reads as more certain than
-        # it is when a later source in the chain is what actually
-        # resolves at runtime.
+        # Name the winner, then the rest of the still-active chain UNDER AN
+        # EXPLICIT CONDITION: a source can "win" the preview by mapping
+        # applicability alone (no value is ever read), and at runtime
+        # resolution stops at the first source that actually resolves, so
+        # the later sources are not a guaranteed fall-through, only what
+        # would be tried next if the winner does not pan out.
         chain = [m.source for m in desc.source_mappings if m.would_attempt and m.not_ready_reason is None]
         fallthrough = chain[1:]
         if fallthrough:
-            output.detail(f"would attempt via {desc.resolution.source}, falling through to: {', '.join(fallthrough)}")
+            output.detail(
+                f"would attempt via {desc.resolution.source}; if that does not resolve, "
+                f"next in order: {', '.join(fallthrough)}"
+            )
         else:
             output.detail(f"would attempt via {desc.resolution.source}")
