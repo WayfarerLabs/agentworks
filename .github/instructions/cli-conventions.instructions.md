@@ -75,7 +75,7 @@ within one flag and AND across flags, which is the inconsistency this rule exist
 
 Note the carve-out from the variadic-positional rule above: variadic positionals are for the things
 the command is operating on (the operands); filter options narrow what a list command considers.
-Operands keep their variadic-positional form (`agent grant-workspace my-agent ws1 ws2`); filters
+Operands keep their variadic-positional form (`agent grant-workspaces my-agent ws1 ws2`); filters
 take CSV. Commas cannot appear in resource names (see `validate_name` in `agentworks.naming`), so
 CSV parsing is safe.
 
@@ -125,12 +125,12 @@ finds itself re-implementing a check the manager already does (e.g. "refuse empt
 manager raise and propagate. The contract: service-layer functions raise typed `AgentworksError`
 subclasses from `agentworks.errors`, organized by _kind_ of error (`NotFoundError`,
 `AlreadyExistsError`, `ValidationError`, `StateError`, `AuthorizationError`, `ConnectivityError`,
-`ExternalError`, `ConfigError`, `UserAbort`); the entity dimension (vm, workspace, agent, session,
-console) is carried as the `entity_kind` / `entity_name` attributes on the exception, not as the
-type. The CLI catches and renders them; no `typer.echo`, `print`, or `typer.Exit` from manager
-modules. The sole exception is `sessions/manager/_logs.py`, a raw data pipe that CI allowlists
-alongside the CLI package; the comment in that file says why. See the `agentworks-reviewer` rubric
-for the full check.
+`ExternalError`, `ConfigError`, `UserAbort`, among others; `agentworks.errors` is the complete
+list); the entity dimension (vm, workspace, agent, session, console) is carried as the `entity_kind`
+/ `entity_name` attributes on the exception, not as the type. The CLI catches and renders them; no
+`typer.echo`, `print`, or `typer.Exit` from manager modules. The sole exception is
+`sessions/manager/_logs.py`, a raw data pipe that CI allowlists alongside the CLI package; the
+comment in that file says why. See the `agentworks-reviewer` rubric for the full check.
 
 ## When in doubt
 

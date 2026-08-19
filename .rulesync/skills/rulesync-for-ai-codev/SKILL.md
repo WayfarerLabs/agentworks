@@ -19,7 +19,8 @@ on).
 - `.rulesync/subagents/*.md`: specialized assistant personas
 - `rulesync.jsonc`: shared config; declares `targets: ["copilot", "claudecode", "codexcli"]` and the
   enabled features
-- `rulesync.local.jsonc`: personal tool targets (gitignored); pick whatever else you use locally
+- `rulesync.local.jsonc`: personal tool targets (gitignored); create it from
+  `rulesync.local.jsonc.example`, then edit it for your tool setup and preferences
 - `.rulesync-version`: pinned rulesync version
 
 ## What gets committed
@@ -62,6 +63,6 @@ To verify the committed shared-target output is up to date without regenerating,
 
 ## Reference
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and the
+See [CONTRIBUTING.md](../../../CONTRIBUTING.md) for setup instructions and the
 [Rulesync documentation](https://rulesync.dyoshikawa.com/) for full details on rules, skills,
 subagents, targets, sources, and other features.

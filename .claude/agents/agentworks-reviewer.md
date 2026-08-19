@@ -31,6 +31,10 @@ the existing way, not to widen the surface.
 
 ## How to use
 
+The invoker supplies the actor role, governing SDD (or that none governs), and whether the change is
+intended to merge as-is. These facts are not inferable from a diff and affect the process checks. If
+any are absent, report the gap as a question rather than asserting a violation.
+
 1. Identify the scope: which area is touched (CLI, service-layer manager, DB schema, a specific
    platform provisioner, completion generators, docs, tests), which PR or branch, and what the
    change is trying to do.
@@ -39,8 +43,7 @@ the existing way, not to widen the surface.
    well_. A change can be implementation-clean and still fail check 1 or 2.
 3. Produce findings grouped by severity: **Blocking** (would cause real regressions, undermine the
    project's values, or ship a footgun), **Important** (should fix before merge), **Minor** (nice to
-   clean up but not urgent). Weigh findings by the materiality bar in `agentic-dev-process` section
-   5, which also fixes what each severity obliges: only material findings gate anything.
+   clean up but not urgent). `development-principles`, **Finding materiality**, decides what gates.
 4. Cite specific file paths and line numbers for every finding. Quote the problematic text when the
    location alone is ambiguous. Explain the issue concisely and propose a fix when the right answer
    is clear.
@@ -63,8 +66,9 @@ the existing way, not to widen the surface.
 - The active SDD under `docs/sdd/<sdd_feature_dir>/`, and its saga SDD, if the change is part of an
   SDD effort.
 - `docs/guides/idempotency.md`: the idempotency contract for reinit-able operations.
-- `.rulesync/rules/`: always-on conventions (code style, conventional commits, etc.), and the `sdd`
-  skill for the artifact ownership, mutability, and lock semantics check 14 enforces.
+- `.rulesync/rules/` for always-on conventions, `CONTRIBUTING.md` for repository mechanics such as
+  Conventional Commits, and the `sdd` skill for the artifact ownership, mutability, and lock
+  semantics check 14 enforces.
 - Existing patterns in sibling code (other CLI commands, other manager functions, other
   provisioners, other migrations), for the implementation-discipline checks.
 
@@ -202,10 +206,10 @@ Look for:
   before: cheap, row- or config-based checks bail early, before any prompt or VM start.
 - Scope discipline: a node that READS the operation scope must raise loudly on a scope-less context
   rather than silently skip (today's scope consumer is the required-commands check in
-  `sessions/nodes.py`; a new scope-consuming node that skips instead is a bug); most nodes never
-  read the scope, so the loudness is the consumer's obligation, not a structural guarantee.
-  Orchestrators must attach the right scope to every context they build, and the scope level must
-  name the entity the command is about.
+  `cli/agentworks/capabilities/harness_integration/base.py:287-298`; a new scope-consuming node that
+  skips instead is a bug); most nodes never read the scope, so the loudness is the consumer's
+  obligation, not a structural guarantee. Orchestrators must attach the right scope to every context
+  they build, and the scope level must name the entity the command is about.
 - Creation discipline: `mark_realized` doing more than bookkeeping; a `teardown` whose failure does
   not name the artifact left standing; an unwind window that silently differs from the command's
   stated semantics (what is rolled back on failure, and what is deliberately kept, are decisions the
@@ -377,11 +381,12 @@ most visibly the `manager/` packages under `cli/agentworks/<domain>/`, and inclu
   `NotFoundError`, `AlreadyExistsError`, `ValidationError`, `StateError` (with `BrokenStateError`
   for unrecoverable states that need `--force`), `AuthorizationError`, `ConnectivityError`,
   `ExternalError` (with `ProvisioningError` and `BackupError` for the specific external-failure
-  flavors), `ConfigError`, `UserAbort`. The entity dimension (vm, workspace, agent, session,
-  console, etc.) is carried as the `entity_kind` / `entity_name` attributes on the exception, not as
-  the type. The optional `hint` attribute provides a remediation suggestion the CLI renders on a
-  second line. The message describes the problem in the service layer's vocabulary; the CLI renders
-  it.
+  flavors), `ConfigError`, `UserAbort`, among others; `agentworks.errors` is the complete list, so
+  judge a new kind against that module rather than this sample. The entity dimension (vm, workspace,
+  agent, session, console, etc.) is carried as the `entity_kind` / `entity_name` attributes on the
+  exception, not as the type. The optional `hint` attribute provides a remediation suggestion the
+  CLI renders on a second line. The message describes the problem in the service layer's vocabulary;
+  the CLI renders it.
 - Produces user-facing output and feedback through the `agentworks.output` module, never through
   `typer.echo`, `print`, or by formatting strings into return values.
 - Must not import `typer`. This is enforced by a CI check (`.github/workflows/ci.yml`), which
@@ -486,12 +491,11 @@ Do not credit wording assertions as evidence of quality, and do not ask for them
 
 ### 12b. Defects the change did not set out to fix
 
-When you find a real defect outside the work under review, weigh it against section 1a's three
-conditions (the main work requires it, it fits existing contracts and conventions, it is unlikely to
-break what works today). If the author folded such a fix in, review it on its merits like any other
-change. If it fails a condition, recommend an issue rather than a round: asking for it is how scope
-grows, and a review that expands the contract spends the author's rounds on semantics nobody signed
-up to judge.
+When you find a real defect outside the work under review, apply `development-principles`, **Scope
+discipline**. If the author folded such a fix in, review it on its merits like any other change. If
+it fails the conditions, recommend an issue rather than a round: asking for it is how scope grows,
+and a review that expands the contract spends the author's rounds on semantics nobody signed up to
+judge.
 
 Report it under `Out-of-scope discoveries` (see Output format) with root cause, evidence, and call
 sites, so whoever picks it up starts from your work. That section carries no disposition weight. If
@@ -558,28 +562,26 @@ Look for:
   reworded, moved, or deleted is a violation in its own right (the `sdd` skill permits correcting a
   wrongly-checked box only while that box has not yet merged to `main`, so say which case you
   believe you are looking at).
-- Ownership breaches: edits to an artifact the actor does not own. The operator owns every merged
-  FRD, so a requirements change is an amendment only the operator grants; transcribing a ruling
-  verbatim into a rulings section is not a breach. Other instances: another effort's artifacts, and
-  a child effort updating its saga SDD's ledger instead of flagging the inconsistency. Cross-effort
-  messages are new files only, and never into a locked feature directory.
+- Ownership breaches: edits to an artifact the actor does not own. The operator owns every FRD
+  accepted through authenticated direction, so a requirements change is an amendment only the
+  operator grants; transcribing a ruling verbatim into a rulings section is not a breach. Other
+  instances: another effort's artifacts, and a child effort updating its saga SDD's ledger instead
+  of flagging the inconsistency. Cross-effort messages are new files only, and never into a locked
+  feature directory.
 - Changes under a feature directory whose `locked.md` is already on `main`, other than a `locked.md`
   update or a full wipe to the tombstone.
 - Content that belongs in a permanent home (`docs/arch/`, an ADR, a module README, a rule or skill)
   landing only inside the SDD, where it dies with the SDD.
 
-Two things are genuinely invisible in a diff: who held which role (effort lead versus delegated dev)
-and whether a PR is intended to merge as-is. Both change what is correct here. Take them from the
-invoking prompt, and when the prompt is silent, raise the point under **Questions** rather than
-asserting a violation you cannot see.
+The **How to use** invocation-context contract supplies the facts a diff cannot reveal. Apply its
+question behavior when they are absent.
 
 ## Consistency-review mode: the process tree as one document
 
-When the invoking prompt asks for the periodic whole-tree consistency review from
-`agentic-dev-process` section 5, the fourteen checks above mostly do not apply: the subject is the
-process documents themselves (skills, rules, subagent definitions, read together), not a code
-change. Read the whole tree as an outsider who must work the process out from what it says, and hunt
-six categories:
+When the invoking prompt asks for the `agentic-dev-process` **Process-wide consistency** review, the
+checks above mostly do not apply: the subject is the process documents themselves (skills, rules,
+subagent definitions, read together), not a code change. Read the whole tree as an outsider who must
+work the process out from what it says, and hunt six categories:
 
 1. **Pairwise contradictions**: two documents that state incompatible things outright.
 2. **Silent overrides**: a later or more specific document that changes a rule without acknowledging

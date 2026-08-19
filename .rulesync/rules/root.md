@@ -14,4 +14,5 @@ Please take a look around and familiarize yourself with the structure of the pro
 
 The rule documents generated for your tool alongside this file (for GitHub Copilot, every file under
 `.github/instructions/`) are part of these instructions. Read and apply all of them, whether or not
-your tool attaches them automatically.
+your tool attaches them automatically. A path-scoped rule (one whose delivery is limited to certain
+paths) binds whenever you work under its paths, however it reached you.
