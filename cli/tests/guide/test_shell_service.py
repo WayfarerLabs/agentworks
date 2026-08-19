@@ -10,11 +10,13 @@ import pytest
 from typer.testing import CliRunner
 
 from agentworks.cli._app import app
+from agentworks.completions.spec import build_spec
 from agentworks.guide.agent_mode import GuideMode, select_guide_mode
 from agentworks.guide.catalog import CORE_INDEX_PATH, discover_concept_shells
 from agentworks.guide.contract import GuideContentError, UnknownGuideTopicError
 from agentworks.guide.service import list_guide_topics, render_guide
-from agentworks.release_notes import ReleaseHistory, ReleaseSection
+from agentworks.release_notes import RELEASE_TOPIC, ReleaseHistory, ReleaseSection, topic_version
+from tests.guide.test_shell_commands import _validate_command_prefix_and_options
 
 
 def _index(root: Path, body: str = "# Fixture index\n\n## Topics\n") -> None:
@@ -75,6 +77,34 @@ def test_index_footer_reports_the_structural_omitted_count(tmp_path: Path, omitt
 
     assert count is not None
     assert int(count.group(1)) == omitted
+
+
+def test_index_discloses_an_executable_release_address_form() -> None:
+    """The no-topic index must disclose a real, resolvable exact-release address, not just prose.
+
+    Structural per no-prose-policing-tests: this does not pin the surrounding sentence, only that a
+    `concept-release-notes/vMAJOR-MINOR-PATCH`-shaped `agw guide show` command appears, that its
+    command prefix is genuine (reusing the authored-commands test's own CLI-spec validation), and
+    that its topic is MAJOR-MINOR-PATCH shaped: concrete digits substituted for the placeholder
+    components parse through the guide's own release-topic parser.
+    """
+    response = render_guide(None, GuideMode.HUMAN)
+
+    match = re.search(r"`(agw guide show concept-release-notes/v[^`]+)`", response.markdown)
+    assert match is not None, "no-topic index must disclose an exact-release address form"
+    command = match.group(1)
+
+    problem = _validate_command_prefix_and_options(command, build_spec(app))
+    assert problem is None, f"{command!r}: {problem}"
+
+    topic = command.removeprefix("agw guide show ")
+    prefix = f"{RELEASE_TOPIC}/v"
+    assert topic.startswith(prefix), f"{topic!r} is not a {RELEASE_TOPIC} address"
+    components = topic.removeprefix(prefix).split("-")
+    assert len(components) == 3, f"{topic!r} is not MAJOR-MINOR-PATCH shaped"
+
+    concrete = prefix + "-".join(str(index + 1) for index in range(len(components)))
+    assert topic_version(concrete) == "1.2.3"
 
 
 def test_list_uses_static_shells_and_packaged_release_history(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
