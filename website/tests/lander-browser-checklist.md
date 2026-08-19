@@ -268,14 +268,32 @@ Stress execution exposed two additional lifecycle races before commit: Chrome ca
 child writing its profile after the parent exits, and `DevToolsActivePort` can exist before it has
 content or a published page target. Cleanup now gives profile writers a bounded quiescence window,
 and every Chromium harness now uses shared discovery with one absolute 20-second deadline for
-complete port and page-target publication. A stalled HTTP endpoint cannot extend that deadline by
-starting another long request. The initial five-second boundary passed local stress but was too
-short for hosted startup: the second cited job kept a live browser process but did not publish its
-port file in that window. The final boundary accommodates that observed startup variance while
-remaining finite and separately owning browser shutdown. The formerly failing description probe
-passed 30 consecutive real-Chromium iterations after the lifecycle corrections; the complete Phase
-4J module passed 7 of 7 tests, including screenshots and reduced motion, and the shared lifecycle
-suite passed 11 of 11 tests.
+complete port and page-target publication. The initial five-second boundary passed local stress but
+was too short for hosted startup: the second cited job kept a live browser process but did not
+publish its port file in that window. The final boundary accommodates that observed startup variance
+while remaining finite and separately owning browser shutdown. The formerly failing description
+probe passed 30 consecutive real-Chromium iterations after the lifecycle corrections; the complete
+Phase 4J module passed 7 of 7 tests, including screenshots and reduced motion, and the shared
+lifecycle suite passed 11 of 11 tests.
+
+#### PR #607 target-discovery follow-up
+
+- Date: 2026-08-18
+- Harness source: `945493166b21011942fd2f85ad31172bbd700f6e`
+- Failure evidence: PR #607 CI run `32213180091`, Website job `95949689727`
+- Outcome: PASS after removing the separate HTTP discovery dependency
+
+The cited job showed a different startup state: `DevToolsActivePort` was complete and Chromium
+remained alive, but its `/json/list` HTTP endpoint accepted connections without returning a response
+through the absolute deadline. Increasing the deadline would only make that false failure slower.
+
+Shared discovery now reads both Chromium-published `DevToolsActivePort` lines, connects directly to
+the browser WebSocket, and calls `Target.getTargets` to identify the page. Each connection attempt
+remains capped by the same absolute 20-second startup deadline, and the browser connection is closed
+after discovery. A deterministic stalled-socket regression covers that boundary without relying on
+authored wording. The exact formerly failing Phase 4J description test passed 50 consecutive
+real-Chromium executions; the complete Phase 4J module passed 7 of 7 tests, the shared lifecycle
+suite passed 11 of 11 tests, and the complete website suite passed 155 of 155 tests.
 
 ### Historical route-proof automated execution record
 
