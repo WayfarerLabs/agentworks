@@ -2,16 +2,18 @@
 
 - Status: Draft for review
 - Date: 2026-08-18
+- Amended: 2026-08-19
 - Governing design: [HLA](./hla.md)
 
 ## Contract goals
 
-The contract must let a backend perform provider-aware work without returning a value, must make
-`maybe` impossible at maximum impact, and must keep execution facts distinct from caller authority.
-The shapes below are normative at the design level. Exact module-local naming may change during
-implementation only if the same invariants and public vocabulary remain intact.
+The contract must let a backend perform provider-aware work without returning a value, distinguish
+ordinary absence from inability and failure, eliminate impact-limited uncertainty at maximum impact,
+and keep execution facts distinct from caller authority. The shapes below are normative at the
+design level. Exact module-local naming may change during implementation only if the same invariants
+and public vocabulary remain intact.
 
-## Core types
+## Policy and reason types
 
 ```python
 class OperatorImpact(StrEnum):
@@ -24,67 +26,102 @@ class TerminalAvailability(StrEnum):
     UNAVAILABLE = "unavailable"
 
 
-class PreviewAnswer(StrEnum):
-    YES = "yes"
-    NO = "no"
-    MAYBE = "maybe"
-```
+class IndeterminateReason(StrEnum):
+    OPERATOR_IMPACT_LIMITED = "operator-impact-limited"
 
-`OperatorImpact` is the sole preview policy. `TerminalAvailability` is an observed process fact and
-must be exact-validated before dispatch. Neither type has a truthiness shortcut or string coercion.
 
-The initial closed details are:
-
-```python
-class PreviewDetail(StrEnum):
-    AVAILABLE = "available"
-    NOT_APPLICABLE = "not-applicable"
-    SOFT_MISS = "soft-miss"
-    SOURCE_NOT_READY = "source-not-ready"
-    BACKEND_PLUGIN_DISABLED = "backend-plugin-disabled"
+class BlockReason(StrEnum):
     OPERATOR_IMPACT_LIMITED = "operator-impact-limited"
     TTY_UNAVAILABLE = "tty-unavailable"
-    DEADLINE_EXCEEDED = "deadline-exceeded"
-    HARD_MAPPING = "hard-mapping"
+    SOURCE_NOT_READY = "source-not-ready"
+    BACKEND_PLUGIN_DISABLED = "backend-plugin-disabled"
+    NO_CANDIDATE = "no-candidate"
+
+
+class FailureReason(StrEnum):
+    INVALID_MAPPING = "invalid-mapping"
     AUTHENTICATION = "authentication"
     CONNECTIVITY = "connectivity"
+    DEADLINE_EXCEEDED = "deadline-exceeded"
     EXTERNAL = "external"
     MALFORMED_VALUE = "malformed-value"
     BACKEND_PROTOCOL = "backend-protocol"
     UNEXPECTED = "unexpected"
 ```
 
-The enum is core-owned and shared by preview and actual-resolution result blocks. Backend code
-selects a member but cannot extend the set. Core-only source-readiness and plugin-disabled rows use
-the same vocabulary when building aggregate attempts.
+`OperatorImpact` is the sole preview policy. `TerminalAvailability` is an observed process fact and
+must be exact-validated before dispatch. Neither type has a truthiness shortcut or string coercion.
 
-## Result rules
+The reason enums are core-owned and closed. Backend code selects a permitted member but cannot
+extend the set. `source-not-ready`, `backend-plugin-disabled`, `no-candidate`, `backend-protocol`,
+and `unexpected` are core-constructed only. `no-candidate` is legal only on the aggregate, not a
+source attempt. The two occurrences of `operator-impact-limited` are deliberately typed differently:
+preview uncertainty says broader authority could answer, while actual-resolution blockage says the
+current operation lacks that authority.
+
+There is no common catch-all detail enum. The tagged result determines which reason type, if any, is
+legal.
+
+## Preview result sum
 
 ```python
 @dataclass(frozen=True, slots=True)
-class BackendPreview:
-    answer: PreviewAnswer
-    detail: PreviewDetail
+class PreviewAvailable:
+    pass
 
-    def __repr__(self) -> str:
-        return f"BackendPreview(answer={self.answer.value!r}, detail={self.detail.value!r})"
+
+@dataclass(frozen=True, slots=True)
+class PreviewMissing:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewIndeterminate:
+    reason: IndeterminateReason
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewBlocked:
+    reason: BlockReason
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewFailed:
+    reason: FailureReason
+
+
+type BackendPreview = (
+    PreviewAvailable
+    | PreviewMissing
+    | PreviewIndeterminate
+    | PreviewBlocked
+    | PreviewFailed
+)
 ```
 
-The preview constructor enforces these combinations:
+The five wire statuses are exactly `available`, `missing`, `indeterminate`, `blocked`, and `failed`.
+Status is derived from the concrete variant, not accepted as a freely combinable constructor field.
+Available and missing have no reason. The other variants require a member of their exact reason
+enum.
 
-| Answer | Allowed details                                                                                      |
-| ------ | ---------------------------------------------------------------------------------------------------- |
-| yes    | `available`                                                                                          |
-| maybe  | `operator-impact-limited`                                                                            |
-| no     | `soft-miss`, `tty-unavailable`, and the closed provider, value, timeout, or protocol failure details |
+Backend clients may return:
 
-The type has no name, source, identifier, remediation, message, cause, value, metadata dictionary,
-or provider-native exception. Core already owns the request name, source, and identifier. It adds
-those safe fields after validating the backend result.
+| Variant                | Backend-returnable reasons                                                         |
+| ---------------------- | ---------------------------------------------------------------------------------- |
+| `PreviewAvailable`     | none                                                                               |
+| `PreviewMissing`       | none                                                                               |
+| `PreviewIndeterminate` | `operator-impact-limited`                                                          |
+| `PreviewBlocked`       | `tty-unavailable`                                                                  |
+| `PreviewFailed`        | invalid mapping, authentication, connectivity, deadline, external, malformed value |
 
-`SOURCE_NOT_READY`, `BACKEND_PLUGIN_DISABLED`, and `BACKEND_PROTOCOL` are constructed by core, not
-returned by a backend client. `UNEXPECTED` is core's closed projection of an exception whose text is
-discarded.
+Core may construct blocked results for not-ready or disabled candidate sources, aggregate
+`blocked/no-candidate` when no lookup ran, and failed results for protocol violations or unexpected
+exceptions. Backends never return those core-only reasons.
+
+The variants have no name, source, identifier, remediation, message, cause, value, metadata
+dictionary, provider-native exception, halt flag, or fallback flag. Core already owns request
+identity and source traversal. It adds safe identity fields only after validating the backend
+result.
 
 ## Static lookup description
 
@@ -115,8 +152,13 @@ tables and diagnostics. It does not read environment variables, open a provider,
 answer whether a value exists. The exact `False` opt-out remains framework-owned and never reaches
 the backend.
 
-Core constructs `SecretLookupRequest` only for `CANDIDATE` rows. This preserves cheap mapping tables
-without retaining a second runtime preview.
+Core constructs `SecretLookupRequest` only for `CANDIDATE` rows. Static non-candidates stay in the
+mapping projection but are omitted from the runtime attempt list; they are neither `PreviewMissing`
+nor `PreviewBlocked` because no lookup occurred.
+
+Mapping structure that can be rejected from the declaration fails configuration validation before
+client creation. A provider-specific mapping that passes local validation but the provider rejects
+later becomes `PreviewFailed(INVALID_MAPPING)`.
 
 ## Client creation and source-client methods
 
@@ -172,7 +214,14 @@ class SecretSourceClient(Protocol):
     ) -> Mapping[str, BackendResolution]: ...
 ```
 
-Actual resolution uses an explicit result sum:
+Each method returns exactly one entry for every request it owns. Core validates the whole map before
+rendering, aggregating, or copying any resolved value. Missing keys, extra keys, wrong types,
+backend use of core-only reasons, `PreviewIndeterminate` under `OperatorImpact.ALLOW`, or
+`BackendBlocked(OPERATOR_IMPACT_LIMITED)` under `OperatorImpact.ALLOW` are backend protocol
+failures. Validation uses the exact impact passed to that source turn. Expected provider conditions
+use closed result variants, not exceptions. The exact exception boundary is defined below.
+
+## Actual-resolution result sum
 
 ```python
 @dataclass(frozen=True, slots=True, repr=False)
@@ -188,30 +237,37 @@ class BackendResolved:
 
 
 @dataclass(frozen=True, slots=True)
+class BackendMissing:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
 class BackendBlocked:
-    detail: PreviewDetail
+    reason: BlockReason
 
 
-type BackendResolution = BackendResolved | BackendBlocked
+@dataclass(frozen=True, slots=True)
+class BackendFailed:
+    reason: FailureReason
+
+
+type BackendResolution = BackendResolved | BackendMissing | BackendBlocked | BackendFailed
 ```
 
 `BackendResolved` is the one value-bearing boundary and is legal only on actual resolution. Its
-constructor enforces the minimum framework value contract and its representations are redacted.
-`BackendBlocked` permits exactly `soft-miss`, `operator-impact-limited`, `tty-unavailable`,
-`deadline-exceeded`, `hard-mapping`, `authentication`, `connectivity`, `external`, and
-`malformed-value`. Core-only details and `available` are rejected. Unlike preview, actual resolution
-has no `maybe`: `operator-impact-limited` is a definitive block under the authority of that
-operation.
+constructor enforces the minimum framework value contract and all representations are redacted.
+Backend-returned `BackendBlocked` permits only `operator-impact-limited` and `tty-unavailable`.
+Backend-returned `BackendFailed` permits the same backend failure reasons as preview. Core-only
+reasons are rejected.
 
-For resolution, `terminal` is still an execution fact. The optional interaction broker is an
-authority-bearing capability supplied only when impact and terminal permit it. A backend must not
-infer permission from terminal availability.
-
-Each method returns exactly one entry for each request it owns. Missing keys, extra keys, wrong
-types, illegal detail combinations, and `maybe` under `OperatorImpact.ALLOW` are backend protocol
-failures. Core validates the whole map before rendering, aggregating, or copying any resolved value.
-Expected provider conditions use the closed result blocks, not exceptions. The exact exception
-boundary is defined below.
+Actual resolution has no indeterminate variant. At `OperatorImpact.NONE`, when a necessary action
+exceeds the operation's impact, `BackendBlocked(OPERATOR_IMPACT_LIMITED)` definitively describes
+that operation and falls through or becomes a complete-batch pending frontier. At
+`OperatorImpact.ALLOW`, the same result is a backend protocol failure because no broader impact
+level exists; core converts the entire source turn to failed protocol results and does not repeat
+the frontier. For resolution, `terminal` remains an execution fact. The optional interaction broker
+is an authority-bearing capability supplied only when impact and terminal permit it. A backend must
+not infer permission from terminal availability.
 
 ## Backend algorithm
 
@@ -222,14 +278,21 @@ For each candidate request, a conforming preview follows this order:
 2. Determine the least operator impact of the next necessary action using provider facts and source
    config.
 3. If that action exceeds the allowance, exhaust any remaining permitted alternatives. Return
-   `maybe/operator-impact-limited` only if no permitted route can answer.
+   `PreviewIndeterminate(OPERATOR_IMPACT_LIMITED)` only if broader impact could still answer.
 4. Otherwise perform the bounded provider action. Validate the minimum secret-value contract inside
-   the backend, construct the closed result, and release the local value before returning.
-5. Convert native absence and failures to closed details. Native text and exception messages do not
-   cross the boundary.
+   the backend, construct the exact result, and release the local value before returning.
+5. Classify unambiguous ordinary absence as `PreviewMissing`. Classify invalid mapping, ambiguous
+   absence, and provider, deadline, value, or external failures as `PreviewFailed`. Native text and
+   exception messages do not cross the boundary.
 
-At maximum impact, step 3 is unreachable because there is no higher operator-impact class. A backend
-that still cannot answer returns typed `no` for the current limitation or failure.
+At maximum impact, step 3 is unreachable because there is no higher operator-impact class. The
+backend must still return `PreviewBlocked` when an execution capability is absent and
+`PreviewFailed` when permitted work fails.
+
+Actual resolution follows the same acquisition and classification seam. At step 3 under
+`OperatorImpact.NONE` it returns `BackendBlocked(OPERATOR_IMPACT_LIMITED)` instead of an
+indeterminate result. Step 3 is unreachable at `ALLOW`; a returned impact block is a protocol
+failure.
 
 ## OnePassword impact classification
 
@@ -247,126 +310,157 @@ review. It applies only when the backend cannot establish a known unattended aut
 When service-account or Connect authentication is present, the backend can classify the read as no
 operator impact without an override. When app authentication may occur:
 
-- `operator-action` plus preview impact `NONE` returns `maybe` without starting `op`;
+- `operator-action` plus preview impact `NONE` returns
+  `PreviewIndeterminate(OPERATOR_IMPACT_LIMITED)` without starting `op`;
 - `none` permits the bounded read at preview impact `NONE`;
 - preview impact `ALLOW` permits the bounded read under either setting.
 
 Actual resolution applies the same classification. Under insufficient impact it returns
-`BackendBlocked(operator-impact-limited)` without invoking `op`.
+`BackendBlocked(OPERATOR_IMPACT_LIMITED)` without invoking `op`.
 
 The setting intentionally does not say `biometric`. 1Password may choose cached access, a biometric,
 a device credential, or another app-configured method after invocation; Agentworks cannot reliably
 distinguish those paths beforehand.
 
+When `op read` runs, its normalized outcomes map as follows:
+
+| Normalized provider outcome                | Preview result                     | Resolution result                  |
+| ------------------------------------------ | ---------------------------------- | ---------------------------------- |
+| valid value                                | `PreviewAvailable`                 | `BackendResolved`                  |
+| supported, unambiguous absence marker      | `PreviewMissing`                   | `BackendMissing`                   |
+| provider rejects reference syntax or shape | `PreviewFailed(INVALID_MAPPING)`   | `BackendFailed(INVALID_MAPPING)`   |
+| ambiguous item/field not-found text        | `PreviewFailed(INVALID_MAPPING)`   | `BackendFailed(INVALID_MAPPING)`   |
+| authentication failure                     | `PreviewFailed(AUTHENTICATION)`    | `BackendFailed(AUTHENTICATION)`    |
+| connectivity failure                       | `PreviewFailed(CONNECTIVITY)`      | `BackendFailed(CONNECTIVITY)`      |
+| boundary deadline                          | `PreviewFailed(DEADLINE_EXCEEDED)` | `BackendFailed(DEADLINE_EXCEEDED)` |
+| other classified provider failure          | `PreviewFailed(EXTERNAL)`          | `BackendFailed(EXTERNAL)`          |
+| returned value violates minimum contract   | `PreviewFailed(MALFORMED_VALUE)`   | `BackendFailed(MALFORMED_VALUE)`   |
+
+The provider normalization seam, not ad hoc renderer logic, owns the absent-versus-invalid
+distinction. The supported `op` CLI exposes a flat failure exit and its public documentation does
+not promise a stable error taxonomy. The v1 classifier therefore keeps the current narrow item and
+field not-found markers fail-closed as invalid mapping. It returns missing only for a narrower token
+established by sanitized real-provider evidence for the supported CLI version. Unknown or
+version-drifted text is failed/external. Tests match only recorded external tokens, never broad
+fragments such as `no such` that can occur in connectivity errors.
+
 ## Prompt behavior
 
 | Terminal    | Impact        | Preview behavior                                                   |
 | ----------- | ------------- | ------------------------------------------------------------------ |
-| unavailable | none or allow | `no/tty-unavailable`; never call broker                            |
-| available   | none          | `maybe/operator-impact-limited`; never call broker                 |
-| available   | allow         | request, validate, and discard the value; return definitive result |
+| unavailable | none or allow | `PreviewBlocked(TTY_UNAVAILABLE)`; never call broker               |
+| available   | none          | `PreviewIndeterminate(OPERATOR_IMPACT_LIMITED)`; never call broker |
+| available   | allow         | request, validate, discard; return available or failed             |
 
-Actual resolution uses the same ordering. At `ALLOW`, an absent broker is a core protocol error if
-terminal was declared available. At `NONE`, no broker is exposed.
+Actual resolution uses the same ordering. At `ALLOW`, an absent broker is a core protocol failure if
+terminal was declared available. At `NONE`, no broker is exposed. Prompt cancellation retains the
+existing protected-abort behavior rather than becoming missing or failed.
 
 ## Environment behavior
 
 Env-var preview reads the selected environment variable at both impact levels. Unset is
-`no/soft-miss`; a valid value is `yes/available`; a value rejected by the minimum framework value
-contract is `no/malformed-value`. The local string is discarded before return.
+`PreviewMissing`; a valid value is `PreviewAvailable`; a value rejected by the minimum framework
+value contract is `PreviewFailed(MALFORMED_VALUE)`. The local string is discarded before return.
+Actual resolution returns the corresponding resolution variant.
 
 ## Exhaustive source disposition
 
-Every active source contributes an ordered attempt. Core constructs rows for static non-candidates,
+Every runtime candidate contributes an ordered attempt until success or hard stop. Static
+non-candidates contribute only to the separate mapping projection. Core constructs attempts for
 not-ready sources, disabled backend plugins, boundary expiry, backend protocol failure, and
-unexpected exceptions; a client constructs the remaining rows. The disposition is exhaustive:
+unexpected exceptions; a client constructs the remaining attempts.
 
-| Detail                    | Preview answer and flow                                       | Actual-resolution flow                                     |
-| ------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------- |
-| `available`               | `yes`; stop; an earlier `maybe` keeps the aggregate uncertain | copy the value and stop this request                       |
-| `not-applicable`          | `no`; do not open a client; fall through                      | do not open a client; fall through                         |
-| `source-not-ready`        | `no`; do not open a client; fall through                      | do not open a client; fall through                         |
-| `backend-plugin-disabled` | `no`; do not open a client; fall through                      | do not open a client; fall through                         |
-| `soft-miss`               | `no`; fall through                                            | block this source and fall through                         |
-| `operator-impact-limited` | `maybe`; fall through but lock aggregate certainty at maybe   | block without provider work and fall through               |
-| `tty-unavailable`         | `no`; fall through                                            | block without broker or stdin access and fall through      |
-| `deadline-exceeded`       | `no`; hard-stop this request                                  | hard-stop this request                                     |
-| `hard-mapping`            | `no`; hard-stop this request                                  | hard-stop this request                                     |
-| `authentication`          | `no`; hard-stop this request                                  | hard-stop this request                                     |
-| `connectivity`            | `no`; hard-stop this request                                  | hard-stop this request                                     |
-| `external`                | `no`; hard-stop this request                                  | hard-stop this request                                     |
-| `malformed-value`         | `no`; hard-stop this request                                  | discard the value and hard-stop this request               |
-| `backend-protocol`        | core `no`; hard-stop this request                             | core hard-stop; discard every returned value from the turn |
-| `unexpected`              | core `no`; hard-stop this request                             | core hard-stop; discard exception text and partial values  |
+| Result or condition          | Preview flow                                                         | Actual-resolution flow                                   |
+| ---------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------- |
+| available / resolved         | stop; earlier indeterminate keeps aggregate indeterminate            | copy value and stop                                      |
+| static not applicable        | omit attempt; continue                                               | do not open client; continue                             |
+| source not ready             | core blocked attempt; continue                                       | core block; continue                                     |
+| backend plugin disabled      | core blocked attempt; continue                                       | core block; continue                                     |
+| no runtime candidate         | aggregate blocked/no-candidate; no source attempt                    | existing no-attemptable-source outcome                   |
+| missing                      | continue silently                                                    | continue silently                                        |
+| indeterminate / impact block | continue; pin aggregate uncertainty                                  | continue, or hold frontier during complete-batch staging |
+| blocked / TTY unavailable    | continue; retain exhaustion evidence                                 | continue without broker or stdin access                  |
+| failed                       | stop traversal                                                       | stop traversal                                           |
+| backend protocol failure     | core failed attempt; stop; discard all partial returned values       | core failure; stop; discard all partial returned values  |
+| unexpected exception         | core failed attempt; stop; discard exception text and partial values | core failure; stop; discard text and partial values      |
 
-A hard stop ends later-source traversal for that request. When a preview already has an earlier
-`maybe`, a later hard stop still ends traversal but the aggregate remains `maybe`: the earlier
-higher-precedence source could have resolved under broader authority. Actual-resolution exhaustion
-retains the existing evidence priority: first operator-impact block, then first TTY block, then
-first soft miss, then first not-ready or plugin-disabled source, then no-active-source or
-no-attemptable-source. A later resolved value or hard stop takes precedence over that fallthrough
-evidence.
+A hard stop ends later-source traversal for that request. An earlier preview indeterminate remains
+load-bearing even if a later available or failed attempt is observed; the later failure still ends
+traversal and stays in ordered attempts. Without earlier uncertainty, failure is the aggregate.
+
+Actual-resolution exhaustion retains this evidence priority: first operator-impact block, then first
+TTY block, then first ordinary miss, then first not-ready or disabled source, then the existing
+no-active-source or no-attemptable-source core outcome. A later resolved value or hard failure takes
+precedence over fallthrough evidence.
 
 ## Complete-batch authority staging
 
 Complete actual resolution preserves the existing rule that a known failure in one required secret
 prevents operator-impacting work for another secret that cannot make the batch complete. Static
 `interactive` cannot implement that rule after this rewrite, and non-authoritative preview is not
-reused. Instead, a caller that authorizes `ALLOW` uses two actual-resolution stages:
+reused. A caller that authorizes `ALLOW` therefore uses iterative actual-resolution stages:
 
 1. **No-impact closure:** core creates clients with `OperatorImpact.NONE`, no prompt broker, and the
    real terminal fact. Each required secret advances from its current frontier until it resolves
-   without classified impact, reaches a hard stop or definitive exhaustion, or reaches its first
-   `operator-impact-limited` block. An impact block becomes a pending frontier at that source; this
-   pass does not inspect lower-precedence sources for that secret.
-2. **Viability check:** if any required secret hard-stopped or exhausted, no `ALLOW` client is
-   created. Pending secrets receive the existing core-only `batch-doomed-before-interaction`
-   outcome.
+   without classified impact, returns `BackendFailed`, exhausts, or reaches its first
+   `BackendBlocked(OPERATOR_IMPACT_LIMITED)`. That impact block becomes a pending frontier; the pass
+   does not inspect lower-precedence sources for that secret.
+2. **Viability check:** if any required secret failed or exhausted, no `ALLOW` client is created.
+   Pending secrets receive the existing core-only `batch-doomed-before-interaction` outcome.
 3. **One authority turn:** otherwise core selects the earliest pending source in configured order,
    creates one fresh `ALLOW` client, and batches every request whose frontier is that source. A
-   broker is supplied only where terminal capability permits. Resolved and hard-stop results become
-   final; fallthrough results advance just those requests beyond that source.
+   broker is supplied only where terminal capability permits. Resolved and failed results become
+   final; missing and execution-blocked results advance just those requests beyond that source.
 4. Core returns to no-impact closure for every advanced unresolved frontier, repeats the viability
    check, and permits the next `ALLOW` source turn only while the batch is still completable. The
    loop ends when all required secrets resolve or a known failure dooms the remainder.
 
 No-impact closure calls `resolve`, not `preview`; a value resolved under `NONE` is retained only in
 the private resolution batch and is authoritative. A pending source has performed no
-operator-impacting provider action, so retrying it with `ALLOW` does not duplicate such work. TTY
-blocks and other fallthrough details advance during closure. Rechecking after every authority turn
-preserves the existing before-every-interaction doom guarantee even when that turn discovers a hard
-failure. Caller impact `NONE` uses one ordinary pass where impact blocks fall through as the table
-specifies. Partial resolution has no complete-batch guarantee and likewise uses one pass at the
+operator-impacting provider action, so retrying it with `ALLOW` does not duplicate such work.
+Rechecking after every authority turn preserves the before-every-interaction doom guarantee even
+when that turn discovers a failure. Caller impact `NONE` uses one ordinary pass where impact blocks
+fall through. Partial resolution has no complete-batch guarantee and likewise uses one pass at the
 caller's exact impact. Per-source budgets, cleanup, source-first batching, value containment, and
 fail-before-mutation apply throughout the loop.
 
 ## Aggregate attempt model
 
-Core wraps each backend result as:
+Core wraps each runtime result as:
 
 ```python
 @dataclass(frozen=True, slots=True)
 class SourcePreviewAttempt:
     source: str
     identifier: str | None
-    answer: PreviewAnswer
-    detail: PreviewDetail
+    result: BackendPreview
+
+
+@dataclass(frozen=True, slots=True)
+class ResolutionPreview:
+    name: str
+    result: BackendPreview
+    source: str | None
+    identifier: str | None
+    attempts: tuple[SourcePreviewAttempt, ...]
 ```
 
-`ResolutionPreview` owns the secret name, aggregate answer, selected or limiting source and
-identifier, plus ordered attempts. It is value-free and has a redacted, field-bounded
-representation.
+Both types are value-free and have field-bounded representations. The aggregate result is computed
+as follows:
 
-Aggregation preserves resolution precedence:
+1. Missing and blocked attempts fall through. Remember the first blocked attempt for exhaustion.
+2. The first indeterminate attempt pins aggregate uncertainty; continue for diagnostics and stop on
+   a later failed attempt.
+3. Available stops traversal. It becomes aggregate available only when no earlier indeterminate
+   exists; otherwise the aggregate stays indeterminate and points at that earlier limiting source.
+4. Failed stops traversal. It becomes aggregate failed only when no earlier indeterminate exists;
+   otherwise the aggregate stays indeterminate and ordered attempts retain the failure.
+5. Exhaustion with an earlier indeterminate is indeterminate. Otherwise, it is blocked when a block
+   was retained, missing when at least one lookup ran and every attempt ordinarily missed, and
+   `blocked/no-candidate` when no candidate lookup ran.
 
-1. `not-applicable`, `soft-miss`, impact-limited, TTY-limited, and not-ready rows fall through.
-2. A hard `no` stops traversal; an earlier `maybe` keeps the aggregate uncertain.
-3. A `yes` becomes aggregate `yes` only when no earlier `maybe` exists.
-4. Once an earlier `maybe` exists, later attempts may improve diagnostics but cannot erase the
-   aggregate `maybe`.
-5. Exhaustion with no success or uncertainty is aggregate `no`.
-
-At `ALLOW`, rule 4 is unreachable and the result is definitive.
+At `ALLOW`, steps involving indeterminate are unreachable for a conforming backend. The aggregate is
+therefore a definitive disposition, although blocked and failed remain legal.
 
 ## Error and hint projection
 
@@ -375,8 +469,9 @@ Expected backend conditions are results. The synchronous driver uses this exact 
 - `UserAbort` and `concurrent.futures.CancelledError`, both `Exception` subclasses, are re-raised;
 - every `BaseException` that is not an `Exception` propagates naturally, including
   `KeyboardInterrupt`, `SystemExit`, `GeneratorExit`, and `asyncio.CancelledError`;
-- every other `Exception` becomes core-owned `unexpected` for every request in that source turn; its
-  text, traceback, and partial values do not enter the result.
+- every other `Exception` becomes core-owned `PreviewFailed(UNEXPECTED)` or
+  `BackendFailed(UNEXPECTED)` for every request in that source turn; its text, traceback, and
+  partial values do not enter the result.
 
 The source context's `__exit__` receives the original exception information and runs before a
 protected exception is re-raised. Cleanup failure is warned through the existing value-free path and
@@ -384,15 +479,15 @@ never replaces the primary exception. If `__enter__` fails after partial local a
 backend must clean that partial acquisition before re-raising. The contract is synchronous; adding
 another concurrency runtime or cancellation class requires an explicit contract update.
 
-Backend results have no remediation. Core owns an exhaustive `PreviewDetail` to hint mapping at each
-operator surface. Adding a detail requires updating that mapping and the machine-output projection.
-A hint may include a known command flag; a backend may not.
+Backends provide no remediation. Core owns exhaustive reason-to-hint mappings at each operator
+surface. Adding a reason requires updating the relevant mapping and machine-output projection. A
+hint may include a known command flag; a backend may not.
 
 `SecretClientFailure`, `SecretClientRemediation`, and `SecretClientTimeout` are removed from the
-backend contract. Expected client conditions use `BackendBlocked`; core derives existing resolution
-category and remediation fields from its detail. Boundary-budget expiry is also a core-constructed
-`deadline-exceeded` block. Existing machine remediation fields remain derived until a separately
-reviewed schema change removes them.
+backend contract. Expected client conditions use exact variants. Core derives existing resolution
+category and remediation fields from the tag and reason. Boundary-budget expiry is a
+core-constructed `failed/deadline-exceeded` result. Existing machine remediation fields remain
+derived until a separately reviewed schema change removes them.
 
 ## Conformance and leak checks
 
@@ -400,14 +495,17 @@ Contract registration and runtime tests cover:
 
 - exact required class operations and attributes;
 - exact impact and terminal types at public boundaries;
-- complete, exact-key preview maps;
-- legal answer/detail pairs;
-- maximum-impact rejection of `maybe`;
-- no free-form or generic metadata fields;
+- complete, exact-key preview and resolution maps;
+- exact result variants and backend-returnable reason subsets;
+- maximum-impact rejection of `PreviewIndeterminate`;
+- `ALLOW` resolution rejection of `BackendBlocked(OPERATOR_IMPACT_LIMITED)` without a repeated
+  frontier;
+- no free-form or generic metadata fields and no backend-selected flow instruction;
 - no stdout, stderr, native exception text, or sentinel value in result objects and `repr`;
 - prompt broker absence under disallowed impact or missing TTY;
 - no provider or broker call during construction or context entry;
-- bounded provider work and cleanup on success, failure, timeout, and interruption;
+- bounded provider work and cleanup on success, missing, failure, timeout, and interruption;
+- ordinary missing fallthrough and failed hard-stop across source precedence;
 - parity between preview and resolve classification for the same fake-provider result.
 
 Tests assert structured fields and behavioral effects, not authored prose wording.

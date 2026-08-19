@@ -16,6 +16,10 @@ reference path Agentworks uses. A backend-owned read followed by immediate disca
 truthful probe. The safe abstraction is consequently a value-free return type and a strict boundary,
 not a claim that no plaintext ever exists inside provider code.
 
+The same documentation defines reference syntax and `op read` usage but does not promise a stable,
+machine-readable error taxonomy for absent versus invalid targets. Agentworks therefore cannot turn
+arbitrary not-found prose into ordinary absence safely.
+
 ## Findings and design consequences
 
 ### A TTY describes a stream, not the operator
@@ -61,12 +65,15 @@ existence-only operation with equivalent addressing and authentication behavior.
 Design consequences:
 
 - A definitive OnePassword preview may need to perform the real bounded read.
-- The backend must convert the native result directly into a closed preview answer and discard the
+- The backend must convert the native result directly into a closed preview variant and discard the
   value before returning.
 - A core adapter around a value-returning legacy backend is not equivalent, because plaintext has
   already crossed the backend contract boundary.
 - Preview and resolution should share one private acquisition and failure-classification path so
   they do not disagree about provider behavior.
+- Locally invalid reference structure should fail configuration validation. Ambiguous provider
+  item/field not-found text should remain a hard failed result unless sanitized evidence from the
+  supported `op` version establishes a narrower ordinary-absence token.
 
 Sources:
 
@@ -84,7 +91,7 @@ Design consequences:
 
 - Extend the source-client boundary instead of adding provider awareness to core.
 - Reuse the existing timeout and failure normalization for preview.
-- Remove the redundant backend remediation selection. A closed failure detail is enough for core to
+- Remove the redundant backend remediation selection. A closed failure reason is enough for core to
   choose a command-specific hint.
 - Preserve sentinel-based leak tests across values, exceptions, representations, logs, and machine
   output.
@@ -94,6 +101,26 @@ Sources:
 - `cli/agentworks/plugins/onepassword/backend.py` at baseline `c01263d0`
 - `cli/agentworks/capabilities/secret_backend/client.py` at baseline `c01263d0`
 - `cli/agentworks/secrets/outcomes.py` at baseline `c01263d0`
+
+### Source fallback requires absence and failure to be different types
+
+Agentworks source order is a precedence rule, not merely a list of equivalent replicas. A valid
+lookup that finds no target is normal evidence that the next source may apply. An invalid mapping,
+authentication failure, timeout, or provider outage instead says the configured higher-precedence
+source could not be evaluated correctly. Treating both as one negative result would either disable
+useful fallback or silently hide broken configuration.
+
+Design consequences:
+
+- Ordinary absence is an exact missing variant and falls through.
+- Execution or authority limitations are blocked or indeterminate, not absence.
+- Mapping and provider failures are exact failed variants and hard-stop by default.
+- Backends classify semantic outcomes, while core owns the one exhaustive flow table. A backend does
+  not select fallback or attach a halt flag.
+- A future outage-fallback feature would need explicit core/source policy rather than an implicit
+  exception to this contract.
+
+Source: current Agentworks source precedence and failure handling at baseline `c01263d0`
 
 ### Preflight is already a consumer of preview
 
@@ -105,8 +132,9 @@ interactive source makes preflight fail.
 Design consequences:
 
 - Preview cannot be designed only for `secret describe`; preflight semantics must change with it.
-- Preflight remains an impossibility screen. It requests non-disruptive work, rejects a definitive
-  `no`, and accepts `maybe` rather than converting uncertainty into a false failure.
+- Preflight remains an impossibility screen. It requests non-disruptive work, rejects missing,
+  blocked, or failed, and accepts indeterminate rather than converting uncertainty into a false
+  failure.
 - The later value-bearing resolution boundary remains authoritative and must still run before
   consuming mutations.
 
@@ -140,8 +168,8 @@ Sources:
   authentication mode, and invocation.
 - **Separate preview and probe methods:** creates two answers that can drift. One method with an
   impact allowance makes the backend own the best available answer.
-- **Requested certainty or `allow_maybe` input:** duplicates operator impact as a second policy
-  dimension. Callers interpret the result instead.
+- **Requested certainty or `allow_indeterminate` input:** duplicates operator impact as a second
+  policy dimension. Callers interpret the result instead.
 - **Core-side resolve and discard:** violates the intended value boundary even if the CLI never
   renders the value.
 - **Provider remediation or free-form messages:** unnecessary authority and a potential secret or

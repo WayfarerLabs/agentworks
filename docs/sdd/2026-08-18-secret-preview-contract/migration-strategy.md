@@ -1,6 +1,7 @@
 # Migration strategy: atomic secret-backend contract rewrite
 
 - Snapshot: 2026-08-18
+- Amended: 2026-08-19
 - Code baseline: `origin/main` at `c01263d0`
 - Governing design: [FRD](./frd.md) and [HLA](./hla.md)
 
@@ -14,6 +15,10 @@ There are no external secret-backend plugins. The operator therefore ruled that 
 implementations change atomically, with no adapter or deprecation track. The secret-backend
 descriptor and every implementation reset their registration sentinel from `2` to `1` in that same
 change. No persisted-data migration is required because the sentinel is registration-only.
+
+The rewritten result model is also atomic. It does not map every negative condition to one flag.
+Ordinary missing data falls through, execution blocks fall through with evidence, and mapping or
+provider failure hard-stops the configured chain.
 
 ## Current-state inventory
 
@@ -42,16 +47,17 @@ These counts are migration guards, not line estimates. Recount after rebase befo
 
 The atomic rewrite makes these changes:
 
-| Before                                | After                                                |
-| ------------------------------------- | ---------------------------------------------------- |
-| `interactive: bool`                   | removed; method receives exact `OperatorImpact`      |
-| `would_attempt(...) -> bool`          | removed                                              |
-| `describe_lookup(...) -> str \| None` | structured static `LookupDescription`                |
-| no client preview                     | batch `preview(...) -> Mapping[str, BackendPreview]` |
-| no-op, impact-blind `prepare`         | removed                                              |
-| factory lacks intent                  | factory receives exact impact and terminal fact      |
-| value-map `resolve`                   | exact resolved-or-blocked map with impact and TTY    |
-| backend-selected failure remediation  | core derives guidance from a closed detail           |
+| Before                                | After                                                           |
+| ------------------------------------- | --------------------------------------------------------------- |
+| `interactive: bool`                   | removed; method receives exact `OperatorImpact`                 |
+| `would_attempt(...) -> bool`          | removed                                                         |
+| `describe_lookup(...) -> str \| None` | structured static `LookupDescription`                           |
+| no client preview                     | batch `preview(...) -> Mapping[str, BackendPreview]` tagged sum |
+| no-op, impact-blind `prepare`         | removed                                                         |
+| factory lacks intent                  | factory receives exact impact and terminal fact                 |
+| value-map `resolve`                   | resolved, missing, blocked, or failed tagged sum                |
+| one negative/failure channel          | missing fallthrough, blocked fallthrough, failed hard-stop      |
+| backend-selected remediation          | core derives guidance from closed tag and reason                |
 
 The descriptor's required operations and attributes, registration diagnostics, author example, and
 conformance tests update in the same commit as the base contract. The descriptor and all three
@@ -64,34 +70,39 @@ An unmodified old-shape backend exposes only two relevant facts: a static `inter
 a value-returning `resolve`. Neither can satisfy the rewritten contract:
 
 - the static flag cannot answer whether this invocation will require operator action;
-- calling `resolve` for a definitive preview returns plaintext to the adapter's core-side caller;
-- returning `maybe` for every old-shape backend violates the maximum-impact guarantee;
-- returning a synthetic `no` can disagree with actual resolution and break preflight truthfulness.
+- calling `resolve` for preview returns plaintext to the adapter's core-side caller;
+- returning indeterminate for every old-shape backend violates the maximum-impact guarantee;
+- returning synthetic missing conflates absence with provider failure and can silently select a
+  lower-precedence source;
+- old exceptions do not supply the exact missing, blocked, and failed sum required by core.
 
 Locating an adapter in a capability package does not change the authority boundary. If old backend
 code returned plaintext through its prior client contract, preview containment was not achieved.
 
 ## Additive-first sequence inside the PR
 
-1. Add closed impact, terminal, lookup-description, preview-answer, preview-detail, and actual
-   resolution block types plus exact validators. Do not repoint callers yet.
-2. Add private acquisition helpers and rewritten client methods to all three in-tree backends while
-   their current methods still drive runtime.
-3. Switch the descriptor, base class, both source drivers, conformance checks, exports, and every
-   implementation to the rewritten contract atomically, including the exact sentinel reset from `2`
-   to `1`, removal of `prepare`, and intent delivery before client construction and context entry.
-4. Repoint static inspection from `would_attempt` to structured lookup descriptions.
-5. Replace pure preview with bounded source-client preview, ordered tri-state aggregation, and a
-   lazy per-command preflight memo.
-6. Repoint preflight, describe, verify, and doctor to their fixed preview semantics.
-7. Replace `InteractionPolicy` with `OperatorImpact` across all published operation boundaries and
+1. Add closed impact, terminal, lookup-description, preview result, actual-resolution result, and
+   reason types plus exact validators. Do not repoint callers yet.
+2. Add private acquisition and normalization helpers to all three in-tree backends while their
+   current methods still drive runtime. Pin valid absence versus invalid mapping at this seam.
+3. Add final preview and resolution methods to the backends behind focused tests, including local
+   value discard and missing/blocked/failed classification.
+4. Switch the descriptor, base class, both source drivers, conformance checks, exports, and every
+   implementation to the rewritten contract atomically. Reset the exact sentinel from `2` to `1`,
+   remove `prepare`, and deliver intent before client construction and context entry.
+5. Repoint static inspection from `would_attempt` to structured lookup descriptions.
+6. Replace pure preview with bounded source-client preview, precedence-aware tagged aggregation, and
+   a lazy per-command preflight memo. Represent zero runtime candidates as aggregate
+   `blocked/no-candidate`, not as a lookup miss.
+7. Repoint preflight, describe, verify, and doctor to their fixed preview semantics.
+8. Replace `InteractionPolicy` with `OperatorImpact` across all published operation boundaries and
    move ordinary CLI derivation off TTY state.
-8. Remove residual static interactive skips, wire exact terminal facts and broker construction, and
+9. Remove residual static interactive skips, wire exact terminal facts and broker construction, and
    preserve fail-before-mutation through iterative no-impact closure, before-every-`ALLOW` viability
-   checks, and backend-owned impact blocks.
-9. Delete old-shape types, compatibility scaffolding, stale comments, and redundant backend
-   remediation selection.
-10. Update permanent docs, schema, samples, completions, and machine-output references, then run the
+   checks, and backend-owned semantic results.
+10. Delete old-shape types, compatibility scaffolding, stale comments, and redundant backend
+    remediation selection.
+11. Update permanent docs, schema, samples, completions, and machine-output references, then run the
     full validation and live-test matrix.
 
 Intermediate commits are review checkpoints on a draft branch. None is a separately supported
@@ -149,8 +160,15 @@ class OnePasswordClient:
 
 The client decides whether the next `op read` fits `impact`. When allowed, preview reads and
 discards inside the client. Actual resolution returns an exact map whose entries are redacted
-`BackendResolved` value blocks or closed `BackendBlocked` details. TTY is still passed as an
+`BackendResolved`, `BackendMissing`, `BackendBlocked`, or `BackendFailed` variants. TTY remains an
 execution fact but does not gate either OnePassword method.
+
+An invalid provider reference returns `PreviewFailed(INVALID_MAPPING)` or
+`BackendFailed(INVALID_MAPPING)` and hard-stops in core. A provider outcome returns missing only
+when its normalizer can establish ordinary absence. Because `op read` has a flat failure exit and no
+documented stable error taxonomy, ambiguous item/field not-found text remains failed/invalid-mapping
+unless sanitized evidence for the supported version proves a narrower absence marker. The backend
+does not return a halt boolean; the variant determines fixed core flow.
 
 ## Config and schema migration
 
@@ -179,8 +197,9 @@ same implementation commit. No persisted state or database migration is required
 - `secret verify` retains its existing flag but switches from core resolution to backend preview.
 - `secret describe --output json` preserves the existing version-1 `category`, `source`,
   `identifier`, `skipped_not_ready`, and `source_mappings[].would_attempt` meanings. It adds one
-  optional nested preview object containing answer, detail, and ordered attempts. The command
-  reference documents the legacy compatibility projection and new null rules before the PR is ready.
+  optional nested preview object containing tagged `status`, conditional `reason`, and ordered
+  attempts. The command reference documents legacy compatibility and new null or absence rules
+  before the PR is ready.
 
 ## Rollback
 
@@ -191,31 +210,40 @@ starts from the rewritten contract.
 
 ## Risks and safeguards
 
-| Risk                                                              | Safeguard                                                                        |
-| ----------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Preview leaks a fetched value                                     | value-free type, backend-local discard, sentinel scans, redacted representations |
-| Preview and resolve classify the same provider result differently | one private acquisition and normalization seam per backend, parity tests         |
-| Backend returns `maybe` too early                                 | behavioral tests prove permitted probes run; maximum-impact runtime rejection    |
-| Missing TTY is mistaken for refusal or absence                    | dedicated closed detail and cross-product tests                                  |
-| Later source hides earlier uncertainty                            | precedence-aware aggregation tests with earlier `maybe`                          |
-| Preflight starts disruptive work                                  | fixed zero-impact intent and no certainty override                               |
-| Repeated references repeat provider reads during preflight        | lazy command-scoped memo with node-order tests                                   |
-| Client setup runs before learning authority                       | pass exact intent into factory; entry/provider call observation tests            |
-| Removing static flags weakens complete-batch doom                 | no-impact closure and viability check before every `ALLOW` source turn           |
-| Ordinary non-TTY command hangs on prompt                          | terminal fact checked before broker/read, no broker without TTY                  |
-| Ordinary non-TTY command wrongly blocks app approval              | impact derived from global mode, not TTY                                         |
-| Source config promises too much biometric detection               | setting names app authentication as a whole and docs explain provider opacity    |
-| Old-shape compatibility weakens the security boundary             | atomic rewrite of all in-tree implementations; no adapter                        |
-| Plugin text reaches diagnostics                                   | closed details only; unexpected text discarded inside boundary                   |
+| Risk                                                         | Safeguard                                                                        |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| Preview leaks a fetched value                                | value-free type, backend-local discard, sentinel scans, redacted representations |
+| Preview and resolve classify provider outcomes differently   | one private acquisition and normalization seam per backend, parity tests         |
+| Backend returns indeterminate too early                      | behavioral tests prove permitted probes run; maximum-impact runtime rejection    |
+| `ALLOW` resolution returns an impact block and repeats work  | exact impact/result validation converts the whole turn to protocol failure       |
+| Maximum impact is mistaken for guaranteed provider success   | explicit blocked/failed variants at every impact, caller tests                   |
+| Ordinary absence is conflated with invalid mapping or outage | separate missing and failed variants plus provider-normalization fixtures        |
+| No candidate is mislabeled as a checked miss                 | aggregate blocked/no-candidate with empty runtime attempts                       |
+| A failed higher source is hidden by fallback                 | core-owned failed hard-stop and precedence tests                                 |
+| Missing TTY is mistaken for absence or failure               | dedicated blocked reason and cross-product tests                                 |
+| Later source hides earlier uncertainty                       | precedence-aware aggregation with earlier indeterminate                          |
+| Preflight starts disruptive work                             | fixed zero-impact intent and no certainty override                               |
+| Repeated references repeat provider reads during preflight   | lazy command-scoped memo with node-order tests                                   |
+| Client setup runs before learning authority                  | pass exact intent into factory; entry/provider call observation tests            |
+| Removing static flags weakens complete-batch doom            | no-impact closure and viability check before every `ALLOW` source turn           |
+| Ordinary non-TTY command hangs on prompt                     | terminal fact checked before broker/read, no broker without TTY                  |
+| Ordinary non-TTY command wrongly blocks app approval         | impact derived from global mode, not TTY                                         |
+| Source config promises too much biometric detection          | setting names app authentication as a whole and docs explain provider opacity    |
+| Old-shape compatibility weakens the security boundary        | atomic rewrite of all in-tree implementations; no adapter                        |
+| Plugin text reaches diagnostics                              | closed tags/reasons only; native text discarded inside boundary                  |
 
 ## Completion conditions
 
 - No production or test reference to `InteractionPolicy`, backend `interactive`, client `prepare`,
   or `would_attempt` remains except migration documentation and the derived JSON v1 compatibility
   key.
+- No legacy preview answer/detail pair or generic blocked-result shape remains.
 - The secret-backend descriptor and every registered backend declare `contract_version = 1`; no
   production secret-backend declaration retains `2`.
+- Missing, blocked, and failed have distinct tests, flow, operator output, and machine output.
 - The secret-backend and general plugin-authoring READMEs contain the rewritten contract and a
-  complete author example.
+  complete author example. The secret-backend README is self-contained and specifies exact variants,
+  reason ownership, flow, impact and terminal rules, lifecycle constraints, value containment, and
+  conformance requirements without relying on this SDD.
 - Schema, completions, guide, and command-reference changes match observable behavior.
 - Full repository gates and the approved live-test charter pass before the PR becomes ready.
