@@ -33,8 +33,10 @@
 - [x] Run artifact lint, spelling, link, lockfile, Rulesync, and manual typography checks.
       (2026-08-18: all passed locally; the lockfile gate is rerun against the committed diff before
       handoff.)
-- [ ] Obtain a private `agentworks-reviewer` pass and resolve material findings before public
-      handoff.
+- [x] Obtain a private `agentworks-reviewer` pass and resolve material findings before public
+      handoff. (2026-08-18: JSON v1, exact resolution flow, pre-lifecycle authority, batch doom,
+      memoization, sequencing, and collateral findings resolved; final focused pass had no
+      findings.)
 - [ ] Commit the artifact set with the session trailer, push the feature branch, open one draft PR,
       and apply `saga:next-steps` and `review-requested`.
 - [ ] Request and collect the three named artifact perspectives: saga lead contract review, Muntz
