@@ -288,18 +288,12 @@ effort: typed per-secret outcomes, explicit failure categories, policy-aware int
 requirements, timeouts and cleanup, and bounded-lifetime source clients. The simple case must not
 get more verbose.
 
-**Interaction channels (operator ruling, 2026-08-18, from the onboarding-run field evidence):** the
-single "interactive" signal conflated two orthogonal things and is split. Consent (may resolution
-block on a human?) is policy: allowed by default, refused only under `--non-interactive`, and
-TTY-ness no longer feeds it. Ability (can this process conduct a terminal prompt?) is a per-source
-fact probed at the boundary. Backends declare an interaction channel on the secret-backend contract
-(`none`, `terminal`, `out-of-band`): terminal-channel sources without a usable terminal are skipped
-into fall-through rather than refusing the resolution; out-of-band sources need consent only,
-because the operator configuring an approval-prompting source is the consent, the source timeout
-bounds the wait, and `--non-interactive` is the explicit fast-fail. A generalized
-`--allow-interaction` flag was built, reviewed, and rejected before shipping: it let callers
-override the wrong proxy instead of removing it. `secret verify --allow-interaction` rides one
-release as a deprecated no-op. Shipped as PR #608.
+**Non-TTY secret resolution (open problem, 2026-08-18, from the onboarding-run field evidence):**
+an operator-approved secret source is unusable from a non-TTY context, which pushes agents toward
+the plaintext environment-export bypass the named-secret system exists to prevent. Two solution
+attempts (a generalized `--allow-interaction` flag, then an interaction-channel split shipped as PR
+#608) were abandoned unmerged by operator direction; the problem restarts from its statement alone
+in `task-2026-08-18-non-tty-secret-resolution.md`, with no solution shape carried over.
 
 **Workload-gated config issues (operator ruling, 2026-08-18, same evidence):** config problems are
 classified by the fact, not by the commands that tolerate them. A workload-gated issue is one that
