@@ -55,13 +55,15 @@ so the items run in four groups rather than all at once:
    extraction does not rebase cleanly under later deletions of what it extracted.
 
 The sweep's decision inventory cuts the work by **shape** rather than by domain: the mechanical
-`match=` narrowing first, then guide and migration topics, then report lines and hints (the
-judgment-heavy batch), then schema, manifests, capabilities and platforms, then authored-artifact
-form policing, plus one for the source-guard family that `hla.md` now settles. Batching by domain
-instead would put the lowest-judgment change into the same review as the sweep's riskiest deletions.
-[sweep-inventory.md](sweep-inventory.md) is the single source for the row counts, the per-group
-split and the PR topology, all of which it re-derives at HEAD; they are deliberately not restated
-here, because two copies of a count is how they drifted before.
+`match=` narrowing first, then report lines and hints (the judgment-heavy batch), then schema,
+manifests, capabilities and platforms, then authored-artifact form policing, plus one for the
+source-guard family that `hla.md` now settles. A guide-and-migration batch was part of that cut
+until the guide rework deleted its whole estate; the inventory records it as settled-map history
+with every row dead. Batching by domain instead would put the lowest-judgment change into the same
+review as the sweep's riskiest deletions. [sweep-inventory.md](sweep-inventory.md) is the single
+source for the row counts, the per-group split and the PR topology, all of which it re-derives at
+HEAD; they are deliberately not restated here, because two copies of a count is how they drifted
+before.
 
 **Website work is deferred** until #486 merges (operator ruling 8). It lands as two PRs rather than
 one (effort lead, 2026-08-16): the website items themselves (W1, W4, W5, W6), and the sweep's
