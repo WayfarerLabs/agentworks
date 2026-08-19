@@ -72,9 +72,9 @@ caller policy.
   versus fallthrough semantics, and first-source-wins behavior. Earlier uncertainty must not be
   hidden by a later source.
 - R13. The secret-backend contract and every in-tree implementation are rewritten atomically. There
-  is no compatibility adapter, deprecation track, or parallel old/new runtime. The contract remains
-  in its current 1.0 generation rather than treating this pre-external-plugin rewrite as a new
-  compatibility version.
+  is no compatibility adapter, deprecation track, or parallel old/new runtime. The descriptor and
+  every implementation declare `contract_version = 1`; this pre-external-plugin rewrite establishes
+  that value as the sole supported secret-backend contract version.
 - R14. Human and machine-facing diagnostics distinguish `maybe`, missing TTY, operator-impact
   limits, provider failures, and ordinary absence without exposing provider text or secret data.
 - R15. Permanent backend-authoring, operator, CLI, JSON, completion, sample-config, and guide
@@ -130,4 +130,5 @@ caller policy.
 - Backend remediation and free-form failure prose are unnecessary in the initial contract. Core can
   derive a hint from a closed detail.
 - There are no external secret-backend plugins. Rewrite the contract and all implementations in one
-  atomic change, with contract versions remaining 1.0.
+  atomic change and reset the secret-backend descriptor and implementations from the current
+  internal sentinel `2` to `1`.

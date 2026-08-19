@@ -196,8 +196,9 @@ lookup description structured, and extends the source client with preview and im
 resolution.
 
 There are no external secret-backend plugins, so no adapter, deprecation window, or parallel runtime
-is useful. The contract remains in its current 1.0 generation. The implementation's existing
-internal conformance sentinel is not bumped merely to sequence unpublished shapes.
+is useful. The descriptor and all three implementations reset their exact registration sentinel from
+`2` to `1` atomically. That reset deliberately re-baselines the only supported contract before an
+external backend ecosystem exists; it does not change any other capability kind's version.
 
 ## Delivery architecture
 

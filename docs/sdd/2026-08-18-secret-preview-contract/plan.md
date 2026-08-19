@@ -42,7 +42,7 @@
 - [ ] Apply no more than two pre-authorized artifact feedback/fix iterations, rerunning artifact
       gates and recording review dispositions on the PR after each round.
 - [ ] Confirm the design remains within the accepted FRD and that review has not introduced an
-      unnecessary compatibility track or contract-version bump.
+      unnecessary compatibility track or a secret-backend version other than `1`.
 
 ### Artifact definition of done
 
@@ -79,8 +79,9 @@
 - [ ] Extend the source-client protocol with impact-aware prepare, preview, and resolution methods.
 - [ ] Remove backend-selected remediation from the client failure contract and derive existing
       resolution remediation in core.
-- [ ] Update the `SecretBackend` ABC, descriptor, and all implementations atomically, preserving the
-      existing contract-version sentinel while removing `interactive` and `would_attempt`.
+- [ ] Update the `SecretBackend` ABC, descriptor, and all implementations atomically, resetting the
+      exact secret-backend contract sentinel from `2` to `1` while removing `interactive` and
+      `would_attempt`.
 - [ ] Update registration and runtime conformance checks for method shapes, exact result maps, legal
       answer/detail pairs, and the maximum-impact no-`maybe` guarantee.
 - [ ] Update root exports and the permanent backend-authoring README with a complete rewritten
@@ -220,8 +221,8 @@
 ## Final definition of done
 
 - Every acceptance criterion in the FRD is satisfied.
-- The rewritten contract is the sole runtime and documented secret-backend contract, with no version
-  bump or compatibility branch.
+- The rewritten contract is the sole runtime and documented secret-backend contract. Its descriptor
+  and implementations declare version `1`, with no compatibility branch.
 - Ordinary non-TTY commands can use permitted out-of-band secret providers, prompt remains TTY-safe,
   and global `--non-interactive` remains explicit and effective.
 - Preview answers are best-effort within impact, tri-state at lower impact, definitive at maximum

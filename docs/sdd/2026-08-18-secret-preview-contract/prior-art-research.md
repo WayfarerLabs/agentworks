@@ -112,6 +112,26 @@ Design consequences:
 
 Source: current Agentworks orchestration and preview modules at baseline `c01263d0`
 
+### The secret-backend version is registration-only
+
+The original constructed-singleton contract declared version `1`. The August 8 class-based rewrite
+changed the descriptor and all three in-tree implementations to `2`. At the current baseline that
+integer is read only by exact registration conformance; it is not stored in config, manifests,
+resource graph data, or machine output. No external secret-backend implementation exists.
+
+Design consequences:
+
+- The new atomic rewrite can reset the descriptor, implementations, author documentation, and tests
+  to `1` without a persisted-data migration or compatibility branch.
+- The reset is an intentional re-baseline of a shipped internal-only extension point, not a claim
+  that the historical version-1 and version-2 shapes never existed.
+- Versions of other capability kinds remain independent and unchanged.
+
+Sources:
+
+- `cli/agentworks/capabilities/secret_backend/kinds.py` and conformance code at baseline `c01263d0`
+- Git history for `c10c7bb7` (`feat(secrets): define class-based backend contract`)
+
 ## Refuted or not adopted
 
 - **TTY as interaction policy:** valid only for stdin access and disproved by out-of-band app

@@ -11,9 +11,9 @@ additive-first inside the feature branch but atomic at merge: all in-tree backen
 resolution, caller policy plumbing, conformance tests, and permanent documentation move together.
 
 There are no external secret-backend plugins. The operator therefore ruled that the contract and all
-implementations change atomically, with no adapter or deprecation track and with contract versions
-remaining in the 1.0 generation. The implementation's existing internal conformance sentinel is
-preserved rather than used to sequence unpublished shapes.
+implementations change atomically, with no adapter or deprecation track. The secret-backend
+descriptor and every implementation reset their registration sentinel from `2` to `1` in that same
+change. No persisted-data migration is required because the sentinel is registration-only.
 
 ## Current-state inventory
 
@@ -23,6 +23,7 @@ At the dated baseline:
 | ----------------------- | ------------------------------------------------------------------------------- |
 | Backend contract        | one exact in-tree shape, with no external implementations                       |
 | Backend implementations | 3: core env-var, core prompt, system-plugin OnePassword                         |
+| Contract sentinel       | exact integer `2`, used only by registration conformance                        |
 | Static classification   | required `interactive: bool` on every backend                                   |
 | Static applicability    | required pure `would_attempt` method                                            |
 | Runtime client          | `prepare` plus value-bearing `resolve`; no preview method                       |
@@ -52,8 +53,9 @@ The atomic rewrite makes these changes:
 | backend-selected failure remediation  | core derives guidance from a closed detail           |
 
 The descriptor's required operations and attributes, registration diagnostics, author example, and
-conformance tests update in the same commit as the base contract. The existing internal version
-sentinel stays unchanged.
+conformance tests update in the same commit as the base contract. The descriptor and all three
+implementations declare `contract_version = 1`; secret-backend version `2` has no compatibility
+branch. Versions for vm-platform, git-credential-provider, and harness-integration are unaffected.
 
 ## Why an old-shape adapter is rejected
 
@@ -75,7 +77,7 @@ code returned plaintext through its prior client contract, preview containment w
 2. Add private acquisition helpers and rewritten client methods to all three in-tree backends while
    their current methods still drive runtime.
 3. Switch the descriptor, base class, conformance checks, exports, and every implementation to the
-   rewritten contract atomically without changing the existing version sentinel.
+   rewritten contract atomically, including the exact sentinel reset from `2` to `1`.
 4. Repoint static inspection from `would_attempt` to structured lookup descriptions.
 5. Replace pure preview with bounded source-client preview and ordered tri-state aggregation.
 6. Repoint preflight, describe, verify, and doctor to their fixed preview semantics.
@@ -113,7 +115,7 @@ authentication from a service account.
 
 ```python
 class OnePasswordBackend(SecretBackend):
-    contract_version = EXISTING_CONTRACT_VERSION
+    contract_version = 1
 
     @classmethod
     def describe_lookup(cls, secret_name, mapping) -> LookupDescription:
@@ -189,7 +191,8 @@ starts from the rewritten contract.
 
 - No production or test reference to `InteractionPolicy`, backend `interactive`, or `would_attempt`
   remains except migration documentation.
-- All registered backends declare the same unchanged contract-version sentinel.
+- The secret-backend descriptor and every registered backend declare `contract_version = 1`; no
+  production secret-backend declaration retains `2`.
 - The public backend README contains a complete rewritten author example.
 - Schema, completions, guide, and command-reference changes match observable behavior.
 - Full repository gates and the approved live-test charter pass before the PR becomes ready.
