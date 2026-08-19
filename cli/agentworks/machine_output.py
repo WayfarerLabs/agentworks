@@ -96,20 +96,29 @@ def write_json_envelope(command: MachineOutputCommand, data: JsonObject, stream:
     """Write one JSON v1 document directly to a byte stream.
 
     Callers pass stdout's binary buffer, never the presentation output handler,
-    so terminal formatting cannot enter a machine-readable response.  That
-    buffer is not always a buffered writer: under ``python -u`` or
-    ``PYTHONUNBUFFERED`` it is a raw ``FileIO``, whose ``write`` can deliver
-    only part of a large document to a non-blocking pipe and report the short
-    count rather than raising.  Writing until the document is out is what keeps
-    a machine consumer from receiving truncated JSON at exit code 0; a stream
-    that stops making progress raises instead.
+    so terminal formatting cannot enter a machine-readable response.  The
+    write goes through ``write_all``, whose docstring explains why a single
+    ``write`` call is not enough.
     """
-    document = encode_json_envelope(command, data)
+    write_all(encode_json_envelope(command, data), stream)
+
+
+def write_all(payload: bytes, stream: BinaryIO) -> None:
+    """Write every byte of ``payload``, or raise.
+
+    stdout's binary buffer is not always a buffered writer: under
+    ``python -u`` or ``PYTHONUNBUFFERED`` it is a raw ``FileIO``, whose
+    ``write`` can deliver only part of a large payload to a non-blocking
+    pipe and report the short count rather than raising. Looping until the
+    payload is out is what keeps a consumer from receiving a truncated
+    document or capture at exit code 0; a stream that stops making
+    progress raises instead.
+    """
     offset = 0
-    while offset < len(document):
-        written = stream.write(document[offset:])
+    while offset < len(payload):
+        written = stream.write(payload[offset:])
         if written is None or written <= 0:
-            raise OSError("JSON output stream made no progress")
+            raise OSError("output stream made no progress")
         offset += written
 
 

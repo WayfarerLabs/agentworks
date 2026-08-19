@@ -11,6 +11,7 @@ from agentworks.errors import (
     BrokenStateError,
     StateError,
 )
+from agentworks.machine_output import write_all
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -94,7 +95,7 @@ def _write_raw_capture(captured: str) -> None:
     """
     buffer = getattr(sys.stdout, "buffer", None)
     if buffer is not None:
-        buffer.write(captured.encode("utf-8"))
+        write_all(captured.encode("utf-8"), buffer)
         buffer.flush()
     else:
         sys.stdout.write(captured)

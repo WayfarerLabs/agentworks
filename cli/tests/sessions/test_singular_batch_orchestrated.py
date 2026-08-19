@@ -651,6 +651,60 @@ def test_session_logs_writes_exact_utf8_bytes_on_a_legacy_console(
     assert raw.getvalue() != b"result=?\n"
 
 
+def test_session_logs_writes_the_whole_capture_through_a_short_writing_pipe(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Under ``python -u`` stdout's buffer is a raw ``FileIO`` whose
+    ``write`` can accept only part of a large capture against a
+    non-blocking pipe and report the short count instead of raising.
+    The raw boundary must loop until every byte is out (the
+    ``write_all`` contract shared with the machine-output writer), or a
+    redirected ``session logs`` silently truncates at exit code 0."""
+    import sys
+
+    from agentworks.db import SessionStatus
+
+    class _ShortWritePipe:
+        """A stdout stand-in whose buffer accepts a few bytes per call."""
+
+        def __init__(self) -> None:
+            self.raw = bytearray()
+
+        @property
+        def buffer(self):  # noqa: ANN202
+            return self
+
+        def write(self, data: bytes) -> int:
+            accepted = min(7, len(data))
+            self.raw.extend(data[:accepted])
+            return accepted
+
+        def flush(self) -> None:
+            pass
+
+    config = make_config()
+    _seed_singular(db)
+    _reachable(monkeypatch, True)
+    monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, *, target, db: session)
+    monkeypatch.setattr(
+        session_manager,
+        "check_session_status",
+        lambda session, *, target: SessionStatus.OK,
+    )
+    payload = ("line=雪\n" * 500)[:-1] + "\n"
+    monkeypatch.setattr("agentworks.sessions.tmux.capture_output", lambda *a, **k: payload)
+
+    pipe = _ShortWritePipe()
+    monkeypatch.setattr(sys, "stdout", pipe)
+
+    session_manager.session_logs(db, config, name="s1", interaction=InteractionPolicy.REFUSE)
+
+    assert bytes(pipe.raw) == payload.encode("utf-8")
+
+
 def test_describe_session_holds_across_the_probe(
     db: Database,
     make_config,  # noqa: ANN001
