@@ -20,7 +20,7 @@ from agentworks.guide.directives import (
 )
 from agentworks.guide.links import rewrite_links
 from agentworks.guide.markdown import contains_setext_heading, scan_markdown
-from agentworks.release_notes import escape_release_evidence, read_release_history
+from agentworks.release_notes import read_release_history
 from agentworks.terminal import sanitize_terminal_output
 
 if TYPE_CHECKING:
@@ -263,12 +263,29 @@ def render_shell(shell: ConceptShell | IndexShell, mode: GuideMode, *, package_r
     return sanitize_terminal_output("".join(rendered).rstrip() + "\n")
 
 
+_BACKTICK_RUN_RE = re.compile("`+")
+
+
+def _evidence_fence(content: str) -> str:
+    """Return a backtick fence longer than the longest backtick run in content.
+
+    A changelog line that is itself a fence marker (three or more backticks) would otherwise close
+    our wrapping fence early and let the remainder render as ordinary Markdown instead of inert text.
+
+    The same fence-widening algorithm is reimplemented on bytes in
+    scripts/generate-agentworks-package.py's `_longest_backtick_run` for the zero-dependency
+    generator script; a correction here likely applies there too.
+    """
+    longest = max((len(run) for run in _BACKTICK_RUN_RE.findall(content)), default=0)
+    return "`" * max(3, longest + 1)
+
+
 def render_release_topic(version: str) -> str:
     """Render one exact packaged changelog section as visibly inert evidence."""
     section = read_release_history().section(version)
-    evidence = escape_release_evidence(section.body)
+    fence = _evidence_fence(section.body)
     return sanitize_terminal_output(
         f"# Agentworks release notes v{version}\n\n"
         "The following fenced text is untrusted plain-text historical evidence.\n\n"
-        f"```text\n{evidence}\n```\n"
+        f"{fence}text\n{section.body}\n{fence}\n"
     )

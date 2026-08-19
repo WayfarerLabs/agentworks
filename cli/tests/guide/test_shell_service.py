@@ -10,11 +10,13 @@ import pytest
 from typer.testing import CliRunner
 
 from agentworks.cli._app import app
+from agentworks.completions.spec import build_spec
 from agentworks.guide.agent_mode import GuideMode, select_guide_mode
 from agentworks.guide.catalog import CORE_INDEX_PATH, discover_concept_shells
 from agentworks.guide.contract import GuideContentError, UnknownGuideTopicError
 from agentworks.guide.service import list_guide_topics, render_guide
-from agentworks.release_notes import ReleaseHistory, ReleaseSection
+from agentworks.release_notes import RELEASE_TOPIC, ReleaseHistory, ReleaseSection, topic_version
+from tests.guide.test_shell_commands import _validate_command_prefix_and_options
 
 
 def _index(root: Path, body: str = "# Fixture index\n\n## Topics\n") -> None:
@@ -75,6 +77,34 @@ def test_index_footer_reports_the_structural_omitted_count(tmp_path: Path, omitt
 
     assert count is not None
     assert int(count.group(1)) == omitted
+
+
+def test_index_discloses_an_executable_release_address_form() -> None:
+    """The no-topic index must disclose a real, resolvable exact-release address, not just prose.
+
+    Structural per no-prose-policing-tests: this does not pin the surrounding sentence, only that a
+    `concept-release-notes/vMAJOR-MINOR-PATCH`-shaped `agw guide show` command appears, that its
+    command prefix is genuine (reusing the authored-commands test's own CLI-spec validation), and
+    that its topic is MAJOR-MINOR-PATCH shaped: concrete digits substituted for the placeholder
+    components parse through the guide's own release-topic parser.
+    """
+    response = render_guide(None, GuideMode.HUMAN)
+
+    match = re.search(r"`(agw guide show concept-release-notes/v[^`]+)`", response.markdown)
+    assert match is not None, "no-topic index must disclose an exact-release address form"
+    command = match.group(1)
+
+    problem = _validate_command_prefix_and_options(command, build_spec(app))
+    assert problem is None, f"{command!r}: {problem}"
+
+    topic = command.removeprefix("agw guide show ")
+    prefix = f"{RELEASE_TOPIC}/v"
+    assert topic.startswith(prefix), f"{topic!r} is not a {RELEASE_TOPIC} address"
+    components = topic.removeprefix(prefix).split("-")
+    assert len(components) == 3, f"{topic!r} is not MAJOR-MINOR-PATCH shaped"
+
+    concrete = prefix + "-".join(str(index + 1) for index in range(len(components)))
+    assert topic_version(concrete) == "1.2.3"
 
 
 def test_list_uses_static_shells_and_packaged_release_history(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -206,14 +236,33 @@ def test_static_index_list_and_selected_render_do_not_load_operator_state_module
 
 
 def test_exact_release_topic_is_direct_inert_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
-    history = ReleaseHistory((ReleaseSection("1.2.3", "# Heading\n\n[Run](https://example.invalid)"),))
+    body = "# Heading\n\n[Run](https://example.invalid)"
+    history = ReleaseHistory((ReleaseSection("1.2.3", body),))
     monkeypatch.setattr("agentworks.guide.service.read_release_history", lambda: history)
     monkeypatch.setattr("agentworks.guide.render.read_release_history", lambda: history)
 
     response = render_guide("concept-release-notes/v1-2-3", GuideMode.AGENT)
 
-    assert "\\# Heading" in response.markdown
-    assert "[Run](https://example.invalid)" not in response.markdown
+    # Verbatim inside a fence: the fence, not escaping, is what keeps the heading and link inert.
+    assert f"```text\n{body}\n```" in response.markdown
+
+
+def test_exact_release_topic_widens_its_fence_around_an_embedded_fence_marker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = "before\n```\nlooks like a closing fence\n```\nafter"
+    history = ReleaseHistory((ReleaseSection("1.2.3", body),))
+    monkeypatch.setattr("agentworks.guide.service.read_release_history", lambda: history)
+    monkeypatch.setattr("agentworks.guide.render.read_release_history", lambda: history)
+
+    response = render_guide("concept-release-notes/v1-2-3", GuideMode.AGENT)
+
+    opening = re.search(r"^(`{4,})text$", response.markdown, re.MULTILINE)
+    assert opening is not None, "a changelog line with a fence marker must widen the wrapping fence"
+    fence = opening.group(1)
+    closing = response.markdown.index(f"\n{fence}\n", opening.end())
+    # The embedded ``` lines stay inside our wider fence rather than closing it early.
+    assert response.markdown[opening.end() + 1 : closing] == body
 
 
 @pytest.mark.parametrize(

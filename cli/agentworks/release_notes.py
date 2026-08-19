@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import html
 import re
 from dataclasses import dataclass
 from datetime import date
@@ -27,7 +26,6 @@ _TOPIC_RE = re.compile(
     rf"(?P<minor>{_VERSION_COMPONENT})-(?P<patch>{_VERSION_COMPONENT})$"
 )
 _EXPRESSION_MARKERS = ("{{", "}}", "${", "<%", "%>", "{%", "%}")
-_MARKDOWN_PUNCTUATION_RE = re.compile(r"([\\`*_{}\[\]()<>#!|+\-.])")
 
 
 class ReleaseNotesError(ValidationError):
@@ -159,10 +157,3 @@ def read_release_history() -> ReleaseHistory:
     except OSError:
         raise ReleaseNotesError("packaged release history is unavailable") from None
     return parse_release_history(data)
-
-
-def escape_release_evidence(value: str) -> str:
-    """Make untrusted release prose visibly plain text with inert links and markup."""
-    escaped = html.escape(value, quote=False)
-    escaped = _MARKDOWN_PUNCTUATION_RE.sub(r"\\\1", escaped)
-    return escaped.replace("://", "&#58;//")

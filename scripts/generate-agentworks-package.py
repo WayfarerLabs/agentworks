@@ -238,6 +238,9 @@ def _skill(metadata: Metadata, body: bytes) -> bytes:
 
 
 def _longest_backtick_run(body: bytes) -> int:
+    # The installed CLI reimplements this on str for release-note evidence in
+    # cli/agentworks/guide/render.py's `_evidence_fence` (bytes here, kept dependency-free; str
+    # there, inside the installed runtime); a correction here likely applies there too.
     longest = 0
     current = 0
     for byte in body:
