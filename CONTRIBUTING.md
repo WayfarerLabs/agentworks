@@ -54,7 +54,7 @@ Source files in `.rulesync/` are the canonical input; never edit generated outpu
 Significant development efforts follow the SDD workflow. See [docs/sdd/](docs/sdd/) for existing
 specs and the `sdd` skill (`.rulesync/skills/sdd/SKILL.md`) for the full workflow description.
 
-Once an SDD's `locked.md` lands on `main`, its feature directory is locked. CI enforces this via
+Once an SDD's `locked.md` lands on `main`, its spec directory is locked. CI enforces this via
 `./scripts/check-locked-sdds.sh` (run on every PR and push to `main`): the only changes it permits
 under a locked directory are updating `locked.md` itself or deleting the directory in full down to
 the `locked.md` tombstone. Introducing `locked.md` in the same PR as the final SDD edits is allowed;

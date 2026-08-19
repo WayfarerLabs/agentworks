@@ -11,16 +11,16 @@ of the project.
 
 Note that it is ok to skip SDD for small, simple changes.
 
-## Feature Directory
+## Spec Directory
 
 The specs and related artifacts for each development effort are stored in a subdir of the
-`/docs/sdd` directory called the "feature directory". The feature directory name should start with
-`<YYYY>-<MM>-<DD>-` (representing the start date) to easily identify the feature age and order of
+`/docs/sdd` directory called the "spec directory". The spec directory name should start with
+`<YYYY>-<MM>-<DD>-` (representing the start date) to easily identify the spec age and order of
 creation.
 
 ## Artifacts
 
-Within the feature directory, we store the following artifacts:
+Within the spec directory, we store the following artifacts:
 
 - `frd.md` (Functional Requirements Document): A markdown file that contains the functional
   specification for the development effort. This should be focused on the functional requirements
@@ -39,7 +39,7 @@ Within the feature directory, we store the following artifacts:
 
 Most efforts will involve one or more "low-level design" (LLD) documents that provide more detailed
 technical specifications for specific components, algorithms, interfaces, etc. These should be
-stored in the feature directory with descriptive names (e.g. `something-lld.md`). As a general rule,
+stored in the spec directory with descriptive names (e.g. `something-lld.md`). As a general rule,
 the plan should include generating any missing low-level design documents as part of the work, and
 they should be linked to from the plan.
 
@@ -63,7 +63,7 @@ Two additional artifact types come up often enough to call out by name:
   example for one representative case, and a risks-and-safeguards section.
 
 Additional artifacts related to the development effort (e.g. UI concepts, API specifications, data
-models, diagrams, etc.) may be stored in the feature directory as needed.
+models, diagrams, etc.) may be stored in the spec directory as needed.
 
 ## Artifact Mutability
 
@@ -125,7 +125,7 @@ a file delivered into an effort whose artifacts are none of yours is a message, 
 channel below.
 
 One sanctioned transport channel does exist: new-file message passing. Adding a NEW file to another
-SDD's feature directory as a message is fine (a saga delivering seed notes into an adopted child's
+SDD's spec directory as a message is fine (a saga delivering seed notes into an adopted child's
 directory is the standing example); the restriction is on modifying existing artifacts you do not
 own. Name new message files `message-<YYYY>-<MM>-<DD>-<topic>.md`. A sender never overwrites an
 existing message file, because overwriting is an edit to another effort's artifact and can destroy a
@@ -166,11 +166,11 @@ covers it:
 
 - **Primary: the sender notifies the operator.** A sender whose message lands late tells the
   operator, carrying the message commit's sha, so the recipient gets nudged.
-- **Backstop: the recipient looks.** Recipients on long-running branches glance at their feature
+- **Backstop: the recipient looks.** Recipients on long-running branches glance at their spec
   directory on `origin/main` at natural checkpoints, so a mid-flight message still lands when the
   notification never arrives.
 
-Messages MUST NOT be delivered into a locked feature directory. Once `locked.md` is on `main`, the
+Messages MUST NOT be delivered into a locked spec directory. Once `locked.md` is on `main`, the
 lockfile CI rejects every change under that directory except a `locked.md` update or a full wipe
 (see [Lockfile](#lockfile)), so the message simply cannot merge. When the recipient is locked there
 is no live effort to receive anything: send the message to the operator instead, and let the
@@ -178,11 +178,10 @@ operator decide whether it warrants reopening the topic elsewhere.
 
 ## Lockfile
 
-When work on the SDD is done, a `locked.md` file should be created in the feature directory. This
-file should have a date and summarize the final state of everything. Once a lockfile is created, the
-SDD artifacts are considered "locked" and should not be modified except in exceptional
-circumstances. If changes are needed, the lockfile should be updated with a date and summary of the
-changes.
+When work on the SDD is done, a `locked.md` file should be created in the spec directory. This file
+should have a date and summarize the final state of everything. Once a lockfile is created, the SDD
+artifacts are considered "locked" and should not be modified except in exceptional circumstances. If
+changes are needed, the lockfile should be updated with a date and summary of the changes.
 
 **The lock takes effect when the SDD lands on `main`, not when `locked.md` is first written.** The
 lockfile is created as part of closeout, which normally happens on the feature branch _before_ it
@@ -196,7 +195,7 @@ A locked SDD is immutable but not permanent. See [Deleting Stale SDDs](#deleting
 post-lock lifecycle.
 
 CI enforces this rule via `./scripts/check-locked-sdds.sh` (run on every PR and push to `main`).
-Once a feature directory's `locked.md` is present on `main`, the check fails any change under that
+Once a spec directory's `locked.md` is present on `main`, the check fails any change under that
 directory except two: updating `locked.md` itself, or deleting the whole directory down to the
 `locked.md` tombstone (a full wipe, not a partial deletion). It compares against the merge-base with
 `main`, so a PR that introduces `locked.md` alongside the final SDD edits is fine; only a lockfile
@@ -217,8 +216,8 @@ project's contributors and operators rely on day-to-day. That is the load-bearin
 change made under this skill.
 
 SDDs are time-bounded artifacts that document a single development effort. They live in
-`docs/sdd/<YYYY>-<MM>-<DD>-<feature>/` and are not guaranteed to be present in the repo after the
-work is completed. **Treat SDD paths as ephemeral.**
+`docs/sdd/<YYYY>-<MM>-<DD>-<slug>/` and are not guaranteed to be present in the repo after the work
+is completed. **Treat SDD paths as ephemeral.**
 
 This has three implications:
 
@@ -258,7 +257,7 @@ vendor-specific codes, domain jargon, and so on) that doesn't yet appear in any 
 doc, scope the cspell additions to the SDD rather than adding them to the root `.cspell.json`. When
 the SDD eventually goes away, its vocabulary goes with it.
 
-Drop a `.cspell.json` in the SDD's feature directory that imports the root config:
+Drop a `.cspell.json` in the SDD's spec directory that imports the root config:
 
 <!-- cspell:ignore mkdocs linkml foobar -->
 
@@ -340,7 +339,7 @@ The settled rules for the species:
   plays plan.md's role, whose completed checkboxes are immutable per the standard rule. A saga SDD
   has no frd.md, hla.md, or plan.md of its own; those files live in the child directories. The saga
   locks when current state and target state agree and every child is locked.
-- Every PR belonging to a saga carries a `saga:<name>` label, where the name is the saga's feature
+- Every PR belonging to a saga carries a `saga:<name>` label, where the name is the saga's spec
   directory without its date prefix (`saga:next-steps`). Sagas can run concurrently, so the label is
   what lets a saga lead's watch enumerate its own surface rather than infer it. That surface is
   everything the lead seeds and reviews, which is wider than the children that gate the lock. The
@@ -378,9 +377,9 @@ The settled rules for the species:
 
 Work driven via SDD should be done in one or more feature branches. The general pattern is:
 
-1. Create an initial feature branch. This should generally relate to the naming of the feature
+1. Create an initial feature branch. This should generally relate to the naming of the spec
    directory, although additional info (e.g. phase) is allowed.
-2. Create the SDD feature directory and artifacts in this branch.
+2. Create the SDD spec directory and artifacts in this branch.
 3. If pre-implementation review is needed, publish a draft PR to allow others to review and provide
    feedback on the SDD artifacts. Draft is the right state here because there is no merge intent
    yet: the PR is a pure review vehicle while the artifacts churn. See [PR Review](#pr-review) for
@@ -391,8 +390,8 @@ Work driven via SDD should be done in one or more feature branches. The general 
 6. If additional work remains per the specs, it should be done in additional feature branches,
    tracking the work via the existing plan files. Keep the artifacts the effort owns current as the
    architecture, plan, or design changes; a requirements change is a request to the FRD's owner.
-7. Alternatively, if future work superseded unfinished work in an existing SDD feature directory,
-   that future work should update the existing SDD specs to indicate that the remaining work is
+7. Alternatively, if future work superseded unfinished work in an existing SDD spec directory, that
+   future work should update the existing SDD specs to indicate that the remaining work is
    superseded.
 
 ## Choosing the PR vehicle
