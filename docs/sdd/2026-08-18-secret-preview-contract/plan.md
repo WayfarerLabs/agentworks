@@ -46,8 +46,8 @@
       findings before public handoff. (2026-08-19: corrected no-candidate truthfulness,
       maximum-impact actual-resolution validation, aggregate-only preflight, doctor status mapping,
       and fail-closed OnePassword evidence requirements; focused re-review had no findings.)
-- [ ] Commit the artifact set with the session trailer, push the feature branch, open one draft PR,
-      and apply `saga:next-steps` and `review-requested`.
+- [x] Commit the artifact set with the session trailer, push the feature branch, open one draft PR,
+      and apply `saga:next-steps` and `review-requested`. (2026-08-19: draft PR #619.)
 - [ ] Request and collect the three named artifact perspectives: saga lead contract review, Muntz
       complexity review, and integration tester testability review.
 - [ ] Apply no more than two pre-authorized artifact feedback/fix iterations, rerunning artifact
