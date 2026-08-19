@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import io
+import sys
+
 import click
 import typer
 
@@ -9,6 +12,31 @@ from agentworks.cli._app import _seed_debug_from_pre_callback, debug_enabled
 from agentworks.cli._errors import echo_hint, record_unhandled_error
 from agentworks.cli._typer_output import TyperHandler
 from agentworks.path_rendering import format_host_path
+
+
+def _reconfigure_std_streams() -> None:
+    """Make console writes crash-free and machine-readable on every platform.
+
+    Windows consoles commonly report a legacy codepage (cp1252, IBM437), so
+    any output character outside it (for example U+26A0, release-please's
+    breaking-changes marker in packaged release notes) makes the write raise
+    UnicodeEncodeError. Keep each stream's encoding, so PYTHONUTF8 and
+    PYTHONIOENCODING overrides stay honored, and degrade unencodable
+    characters to a replacement instead of crashing, matching the
+    errors="replace" convention already used for subprocess and log I/O.
+
+    stdout additionally gets bare-LF newlines: machine-readable listings are
+    iterated by shells and agents, and Windows text-mode CRLF rides a stray
+    carriage return into the consumer's next argument. stderr keeps platform
+    newline translation; it is human-facing only.
+
+    The isinstance guard skips StringIO-like stand-ins without reconfigure()
+    that tests and embedders install.
+    """
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(errors="replace", newline="\n")
+    if isinstance(sys.stderr, io.TextIOWrapper):
+        sys.stderr.reconfigure(errors="replace")
 
 
 def main() -> None:
@@ -33,6 +61,7 @@ def main() -> None:
     )
     from agentworks.output import error, set_handler
 
+    _reconfigure_std_streams()
     set_handler(TyperHandler())
 
     # -- Run app ---------------------------------------------------------------
