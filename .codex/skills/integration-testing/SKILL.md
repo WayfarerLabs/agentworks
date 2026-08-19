@@ -60,10 +60,12 @@ A PR validation run is a fixed sequence, not a menu to pick from; scale its dept
    locally-renamed copy of it), confirm it is not stale against its base, and check for merge
    conflicts with `main` before doing any further work.
 3. **Gates, on real exit codes.** From the `cli/` directory (via `uv run`): ruff (lint and format),
-   mypy, and pytest with CI's selection (`pytest tests/ -m 'not integration'`; integration-marked
-   tests belong to the live stage below, not this gate). From the repo root:
-   `scripts/lint-files.sh`, `scripts/check-locked-sdds.sh`, `scripts/rulesync-upgen.sh --check`, and
-   the website gates CI requires on every PR: the Python website tests
+   mypy, pytest with CI's selection (`pytest tests/ -m 'not integration'`; integration-marked tests
+   belong to the live stage below, not this gate), and CI's typer-isolation grep (business logic
+   must not import typer; the `python-checks` job in `.github/workflows/ci.yml` carries the exact
+   command and allowlist). From the repo root: `scripts/lint-files.sh`,
+   `scripts/check-locked-sdds.sh`, `scripts/rulesync-upgen.sh --check`, and the website gates CI
+   requires on every PR: the Python website tests
    (`python3 -m unittest discover -s website/tests -p 'test_*.py'`), the Node website tests
    (`node --test website/tests/*.test.mjs`), and the deterministic double-build diff
    (`website/build.py` run twice per site base and diffed). Report the exit code each gate actually
