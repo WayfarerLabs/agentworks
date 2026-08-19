@@ -9,15 +9,18 @@ evidence (`../2026-08-04-next-steps/message-2026-08-18-guide-tire-kick.md`), and
 checkpoint is the right place to resolve it: once `locked.md` binds, this channel closes, so the
 integration lane correctly held the lock on it. Three parts.
 
-1. **Decide the per-topic agent-mode capability.** The tire-kick measured agent mode as nearly a
-   no-op outside the index: of the topics compared, only `concept-onboarding` differed, so the
-   fencing machinery, its mode plumbing, and the `--agent`/`--human` surface currently buy one
-   topic's worth of delta. That is drift, not a decision. Note the corrected-guide-model ruling
-   (operator, 2026-08-16, in the saga's `target-state.md`) already anticipated "a dozen or so"
-   journey hints of the vm-platform kind, so the prior direction leans toward writing more
-   agent-only context rather than retiring the capability; but the closeout may also record the
-   capability as deliberately thin with the hints arriving as their features land. Either is a
-   decision; record which, dated, in your artifacts.
+1. **Carry the dozen-hint requirement through the lock.** The corrected-guide-model ruling
+   (operator, 2026-08-16, in the saga's `target-state.md`) is binding, not a lean: the operator
+   expects roughly a dozen journey hints of the vm-platform kind developed by this effort, and the
+   later Markdown-shell ruling explicitly preserves that model. Today's accurate inventory is
+   agent-only content in `_index.md`, `assistant-agent.md` (including the load-bearing
+   data-versus-direction boundary), and `onboarding.md`; the hint catalog the ruling expects does
+   not exist yet. The closeout therefore has two honest shapes: develop the hints before lock, or
+   record the outstanding requirement explicitly with a named successor owner (the saga ledger will
+   carry it as an open obligation, not silently absorb it) and route that proposed deferral to the
+   operator for authenticated disposition before `locked.md` lands. What the closeout may not do is
+   record the capability as deliberately thin, because that would retire a settled requirement
+   without the operator's say.
 2. **Address or accept the mode heuristic's redirecting-human case.** A human running
    `agw guide > notes.md` or piping into a pager gets agent-targeted content because non-TTY falls
    back to agent mode. Low stakes while the delta stays small (and it stays small under either
