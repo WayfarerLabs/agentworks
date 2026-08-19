@@ -23,9 +23,9 @@ integration lane correctly held the lock on it. Three parts.
    without the operator's say.
 2. **Address or accept the mode heuristic's redirecting-human case.** A human running
    `agw guide > notes.md` or piping into a pager gets agent-targeted content because non-TTY falls
-   back to agent mode. Low stakes while the delta stays small (and it stays small under either
-   branch of decision 1 for most topics); if you accept it, record the acceptance and its rationale
-   rather than leaving it as an unexamined default.
+   back to agent mode. Low stakes today, and the stakes rise as the hint catalog item 1 carries
+   grows the agent-only delta; if you accept the default, record the acceptance and its rationale
+   rather than leaving it unexamined.
 3. **Give the do-not-regress charter a durable home.** The tire-kick verified three properties worth
    pinning past this SDD's eventual deletion to its tombstone: zero command drift across topics (the
    structural test validating authored command paths against the live CLI spec, landed with PR #593
