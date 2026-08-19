@@ -210,6 +210,34 @@ def test_the_whole_set_uncomments_as_one_file(tmp_path: Path) -> None:
 # --- --write ----------------------------------------------------------
 
 
+def test_cli_write_tolerates_missing_ssh_keys(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The CLI command only needs ``config.source_path`` to locate the
+    resources directory; it never reads the operator's SSH key files, so
+    a config whose only defect is a nonexistent key path must not block
+    ``--write`` (the sample config's placeholder, before
+    ``agw config init`` writes a real one)."""
+    from typer.testing import CliRunner
+
+    from agentworks.cli import app
+
+    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", tmp_path / "config.toml")
+    (tmp_path / "config.toml").write_text(
+        f"""\
+[operator]
+ssh_public_key = "{(tmp_path / "id.pub").as_posix()}"
+ssh_private_key = "{(tmp_path / "id").as_posix()}"
+"""
+    )
+    assert not (tmp_path / "id.pub").exists()
+    assert not (tmp_path / "id").exists()
+
+    result = CliRunner().invoke(app, ["resource", "sample", "secret", "--write", "s.yaml"])
+
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "resources" / "s.yaml").exists()
+
+
 def test_write_sample_creates_and_appends(tmp_path: Path) -> None:
     resources = tmp_path / "resources"
     path, outcome = write_sample(resources, "kinds/secret.yaml", "secret")

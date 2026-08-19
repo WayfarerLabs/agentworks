@@ -108,7 +108,32 @@ correct and specific and said nothing about what to do about it.
 """
 
 
-def _load_operator(data: dict[str, object], issues: list[str]) -> OperatorConfig:
+def _load_operator(
+    data: dict[str, object],
+    issues: list[str],
+    *,
+    workload_gated_issues_fatal: bool = True,
+) -> OperatorConfig:
+    """Load ``[operator]``.
+
+    A workload-gated issue is a config problem that only matters once
+    something provisions or interacts with a workload: creating a VM,
+    connecting to one, or otherwise using the operator's SSH identity.
+    Key-file existence is exactly that kind of fact, a filesystem
+    condition rather than a config-shape one, so it is not the same kind
+    of problem as a malformed section or an unknown key. Today's only
+    workload-gated check is the three file-existence checks below
+    (primary public/private key, extra public keys); nothing else in
+    this section is workload-gated.
+
+    ``workload_gated_issues_fatal`` (default True) makes those checks a
+    hard ``ConfigError``, because most callers reach a VM or provision
+    one, where a stale or absent key is a real failure regardless of
+    when it is discovered. A caller whose code path never reads the
+    operator's SSH key files, i.e. never connects to or provisions a
+    workload, passes False: the missing file becomes a soft entry on
+    ``issues`` instead, alongside the section's other soft issues.
+    """
     raw = data.get("operator")
     if not isinstance(raw, dict):
         raise ConfigError("[operator] section is required")
@@ -122,9 +147,15 @@ def _load_operator(data: dict[str, object], issues: list[str]) -> OperatorConfig
     # an absolute path, so rendering it back home-relative also happens to
     # quote the setting closer to the way they wrote it in config.toml.
     if not pub.exists():
-        raise ConfigError(f"operator.ssh_public_key does not exist: {format_host_path(pub)}", hint=_SSH_KEY_HINT)
+        message = f"operator.ssh_public_key does not exist: {format_host_path(pub)}"
+        if workload_gated_issues_fatal:
+            raise ConfigError(message, hint=_SSH_KEY_HINT)
+        issues.append(message)
     if not priv.exists():
-        raise ConfigError(f"operator.ssh_private_key does not exist: {format_host_path(priv)}", hint=_SSH_KEY_HINT)
+        message = f"operator.ssh_private_key does not exist: {format_host_path(priv)}"
+        if workload_gated_issues_fatal:
+            raise ConfigError(message, hint=_SSH_KEY_HINT)
+        issues.append(message)
 
     ssh_config = Path.home() / ".ssh" / "config"
     if "ssh_config" in raw:
@@ -134,7 +165,10 @@ def _load_operator(data: dict[str, object], issues: list[str]) -> OperatorConfig
     for entry in raw.get("extra_ssh_public_keys", []):
         p = _expand(str(entry))
         if not p.exists():
-            raise ConfigError(f"operator.extra_ssh_public_keys: file does not exist: {format_host_path(p)}")
+            message = f"operator.extra_ssh_public_keys: file does not exist: {format_host_path(p)}"
+            if workload_gated_issues_fatal:
+                raise ConfigError(message)
+            issues.append(message)
         extra_keys.append(p)
 
     # Extra sources allowed through the transient cloud SSH firewall

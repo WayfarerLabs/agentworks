@@ -225,6 +225,33 @@ def test_description_populated_for_operator_and_auto_resources(tmp_path: Path) -
 # -- CLI surface -----------------------------------------------------------
 
 
+def test_missing_ssh_keys_do_not_block_resource_list(tmp_path: Path, monkeypatch) -> None:
+    """A config whose only defect is a nonexistent operator SSH key path
+    (the sample config's placeholder, before ``agw config init`` writes a
+    real one) must not stop `resource list` from listing resources: it
+    needs no operator identity."""
+    from typer.testing import CliRunner
+
+    from agentworks.cli import app
+
+    cfg_file = tmp_path / "config.toml"
+    cfg_file.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{(tmp_path / "id.pub").as_posix()}"
+        ssh_private_key = "{(tmp_path / "id").as_posix()}"
+        """)
+    )
+    assert not (tmp_path / "id.pub").exists()
+    assert not (tmp_path / "id").exists()
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
+
+    result = CliRunner().invoke(app, ["resource", "list"])
+
+    assert result.exit_code == 0, result.output
+    assert "KIND" in result.output and "NAME" in result.output
+
+
 def test_cli_names_only_emits_kind_slash_name_per_line(tmp_path: Path, monkeypatch) -> None:
     """``agw resource list --names-only`` is the source for shell
     completion; the line format is ``<kind>:<name>``. Completion

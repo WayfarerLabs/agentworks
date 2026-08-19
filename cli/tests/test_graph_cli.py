@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from textwrap import dedent
 
 import pytest
 from typer.testing import CliRunner
@@ -19,6 +20,7 @@ from agentworks.resources.graph_query import (
     GraphQuery,
     GraphResult,
 )
+from tests.conftest import ManifestDoc, write_manifests
 
 
 def _result(
@@ -81,7 +83,7 @@ def test_graph_show_wires_one_query_with_closed_parsed_inputs(
     )
 
     assert result.exit_code == 0, result.output
-    assert calls[0] == ("config", {"warn_issues": True})
+    assert calls[0] == ("config", {"warn_issues": True, "workload_gated_issues_fatal": False})
     assert calls[1] == ("registry", {"warn": True, "probe_host_readiness": False})
     query_call = calls[2]
     assert query_call[0:5] == (
@@ -129,6 +131,39 @@ def test_graph_show_json_projects_the_same_result(monkeypatch: pytest.MonkeyPatc
         }
     ]
     assert document["data"]["edges"] == []
+
+
+def test_missing_ssh_keys_do_not_block_graph_show(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A config whose only defect is a nonexistent operator SSH key path
+    (the sample config's placeholder, before ``agw config init`` writes a
+    real one) must not stop `graph show` from querying resource
+    relationships: it needs no operator identity (host readiness probing
+    is off, and no platform preflight touches ``config.operator``)."""
+    from agentworks import config
+
+    write_manifests(tmp_path, ManifestDoc("secret", "npm-token", description="npm registry token"))
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{(tmp_path / "id.pub").as_posix()}"
+        ssh_private_key = "{(tmp_path / "id").as_posix()}"
+
+        [secret_config]
+        sources = ["env-var"]
+        """)
+    )
+    assert not (tmp_path / "id.pub").exists()
+    assert not (tmp_path / "id").exists()
+    monkeypatch.setattr(config, "CONFIG_PATH", config_path)
+
+    result = CliRunner().invoke(app, ["graph", "show", "secret/npm-token"])
+
+    assert result.exit_code == 0, result.output
+    assert "secret/npm-token" in result.output
 
 
 @pytest.mark.parametrize(

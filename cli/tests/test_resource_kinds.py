@@ -65,6 +65,33 @@ def test_names_only_needs_no_config(tmp_path: Path, monkeypatch) -> None:
     assert "harness" not in lines
 
 
+def test_missing_ssh_keys_do_not_block_kind_listing(tmp_path: Path, monkeypatch) -> None:
+    """A config whose only defect is a nonexistent operator SSH key path
+    (the sample config's placeholder, before ``agw config init`` writes a
+    real one) must not stop `resource kinds` from listing the installed
+    vocabulary: it needs no operator identity."""
+    from typer.testing import CliRunner
+
+    from agentworks.cli import app
+
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{(tmp_path / "id.pub").as_posix()}"
+        ssh_private_key = "{(tmp_path / "id").as_posix()}"
+        """)
+    )
+    assert not (tmp_path / "id.pub").exists()
+    assert not (tmp_path / "id").exists()
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+
+    result = CliRunner().invoke(app, ["resource", "kinds"])
+
+    assert result.exit_code == 0, result.output
+    assert "KIND" in result.output
+
+
 def test_table_shows_categories_and_counts(tmp_path: Path, monkeypatch) -> None:
     from typer.testing import CliRunner
 

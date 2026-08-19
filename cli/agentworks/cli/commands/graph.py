@@ -77,7 +77,9 @@ def show(
     identity = parse_resource_identity(focus)
     depth_limit = parse_graph_depth(depth)
     graph_direction = GraphDirection(direction)
-    config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
+    # Never reads the operator's SSH key files; see load_config's
+    # workload_gated_issues_fatal doc.
+    config = load_config(warn_issues=output_format is OutputFormat.HUMAN, workload_gated_issues_fatal=False)
     registry = load_request_registry(
         config,
         warn=output_format is OutputFormat.HUMAN,
