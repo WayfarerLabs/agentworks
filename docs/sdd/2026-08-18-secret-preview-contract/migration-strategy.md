@@ -2,7 +2,7 @@
 
 - Snapshot: 2026-08-18
 - Amended: 2026-08-19
-- Code baseline: `origin/main` at `c01263d0`
+- Code baseline: `origin/main` at `667793ee`
 - Governing design: [FRD](./frd.md) and [HLA](./hla.md)
 
 ## Executive summary
@@ -22,7 +22,8 @@ provider failure hard-stops the configured chain.
 
 ## Current-state inventory
 
-At the dated baseline:
+At the refreshed baseline (runtime secret semantics are unchanged from the original `c01263d0`
+research snapshot):
 
 | Surface                 | Current state                                                                   |
 | ----------------------- | ------------------------------------------------------------------------------- |

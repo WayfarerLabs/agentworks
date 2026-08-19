@@ -28,6 +28,8 @@
 
 - [x] Verify the feature branch is based on current `origin/main` and record the implementation
       baseline in the migration artifact. (2026-08-18: baseline `c01263d0`.)
+- [x] Refresh the branch and implementation baseline before public artifact handoff. (2026-08-19:
+      rebased onto `667793ee`; intervening changes did not alter runtime secret semantics.)
 - [x] Complete FRD, prior-art research, HLA, preview-contract LLD, operator-surfaces LLD, migration
       strategy, and this tracked plan. (2026-08-18.)
 - [x] Run artifact lint, spelling, link, lockfile, Rulesync, and manual typography checks.
@@ -41,9 +43,9 @@
       impact-limited indeterminate, execution blocked, and hard-stop failed are distinct.
       (2026-08-19.)
 - [x] Rerun the private artifact gate after the tagged-result amendment and resolve material
-      findings before public handoff. (2026-08-19: corrected no-candidate truthfulness, maximum-impact
-      actual-resolution validation, aggregate-only preflight, doctor status mapping, and fail-closed
-      OnePassword evidence requirements; focused re-review had no findings.)
+      findings before public handoff. (2026-08-19: corrected no-candidate truthfulness,
+      maximum-impact actual-resolution validation, aggregate-only preflight, doctor status mapping,
+      and fail-closed OnePassword evidence requirements; focused re-review had no findings.)
 - [ ] Commit the artifact set with the session trailer, push the feature branch, open one draft PR,
       and apply `saga:next-steps` and `review-requested`.
 - [ ] Request and collect the three named artifact perspectives: saga lead contract review, Muntz
