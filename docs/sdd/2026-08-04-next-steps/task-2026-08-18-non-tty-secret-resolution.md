@@ -20,11 +20,13 @@ A real agentic onboarding run on 0.14.0, from an agent's shell with no TTY:
   `refused-interaction/interaction-refused; source=personal-op; remediation=allow-interaction`.
 - The named remediation, `allow-interaction`, exists only on `agw secret verify`. The failing
   command has no way to proceed through the configured source.
-- The agent completed the run by exporting the secret's plaintext into a process environment
-  variable (`AW_SECRET_...="$(op read ...)" agw vm create dev1`), routing around the operator's
-  configured chain. That workaround is the thing the named-secret system exists to prevent, and it
-  is the workaround an agent will reach for every time, which makes this a security-posture problem
-  rather than an ergonomics one.
+- The agent completed the run by resolving the value itself (`op read`) and handing it in through
+  the env-var source (`AW_SECRET_...="$(op read ...)" agw vm create dev1`). The env-var source is
+  itself a supported named-secret workflow (ADR 0013); the defect is that the workaround routes
+  around the operator-selected source and its approval path, hand-carrying a value the configured
+  chain was supposed to deliver. It is the workaround an agent will reach for every time the
+  configured source is unreachable, which makes this a security-posture problem rather than an
+  ergonomics one.
 
 ## The conflation at the root
 
@@ -52,7 +54,8 @@ the context that needs it most.
   on any human.
 - Failure diagnostics tell the truth: whatever gates a source names a remediation that actually
   exists on the failing command.
-- The plaintext environment-export bypass loses its motivation.
+- Hand-carrying a value around the operator-selected source loses its motivation: the configured
+  chain is reachable wherever the operator's approval can actually happen.
 
 ## Constraints
 

@@ -1,7 +1,7 @@
 # Child SDDs
 
 - Status: Active ledger
-- Last updated: 2026-08-16
+- Last updated: 2026-08-19
 
 This is the saga's tracking document, the analog of an ordinary SDD's `plan.md`. Completed
 checkboxes are immutable records, per the standard rule. The saga SDD locks when every entry here is
@@ -378,6 +378,68 @@ coordinates with the pending resource-CLI grammar decision.
       the shared machine-output writer (full unsafe-category escaping, fixing the class for every
       machine-output command), with live acceptance and all lanes passed at the final head.
       Additive; no 0.14 gate was minted
+
+### Field evidence intake: real-world 0.14.0 runs (2026-08-18)
+
+Two unsolicited field reports from assistant agents on the operator's workstations arrived through
+the message channel and merged as `message-2026-08-18-agentic-onboarding-run.md` (PR #601, a full
+plan-A onboarding run to a running session) and `message-2026-08-18-guide-tire-kick.md` (PR #602, an
+adversarial pass at the guide surface on Windows). The saga lead triaged both at the operator's
+direction; the fixable findings were dispatched as PRs the same day, and the rest are routing items
+tracked by the open boxes below until each has a delivered recipient-side artifact.
+
+- [x] Fixes dispatched as PRs: #604 (missing SSH key files become a workload-gated config issue;
+      nine read-only and diagnostic commands tolerate them, doctor now reaches its own key checks),
+      #605 (entrypoint stream hardening: legacy-codepage consoles never crash on Unicode, stdout is
+      LF for machine consumers, session-log payloads write verbatim UTF-8 bytes), #606 (guide index
+      discloses the versioned release-topic address; changelog evidence rendered fence-safe instead
+      of inertly escaped), #607 (`agw --version`, `agent list` on the shared table renderer with a
+      granted-implicitly legend, truthful `secret describe` fall-through summary, onepassword
+      timeout guidance naming the pending-approval cause)
+- [x] The non-TTY secret-resolution finding produced two solution attempts, both abandoned unmerged
+      by operator direction (a generalized `--allow-interaction` flag, stopped in review; the
+      interaction-channel split, PR #608, closed): the operator did not like the solution. The
+      problem restarts from its statement alone, `task-2026-08-18-non-tty-secret-resolution.md`,
+      deliberately carrying no solution shape
+- [ ] Non-TTY secret resolution becomes a new child SDD adopted into this saga (operator direction,
+      2026-08-19): the problem statement (PR #611) is its seed, a fresh effort designs from it with
+      no shape carried over from the abandoned attempts, and its own ledger section opens when that
+      SDD seeds
+- [x] Issue #603 filed: move SSH key-file existence from config-load to use time; the workload-gated
+      parameter is the bridge and retires when that lands
+- [x] Fix rounds closed and all four fix PRs merged (2026-08-19): every lane finding on the
+      dispatched PRs was answered at exact heads. #607 merged (its final round reshaped the timeout
+      guidance into a closed core-owned identifier after the tester proved hostile backend text
+      could reach rendered output; backends now select prose, never author it). #604 grew to ten
+      commands when the tester found `resource edit` still walled (the fix-it path, broken in
+      exactly the fresh-init state). #605 gained two rounds on the raw session-log boundary:
+      verbatim UTF-8 bytes (no legacy-codepage aliasing) and a shared write-until-done contract (no
+      silent truncation on non-blocking pipes). #606 made the index disclosure load-bearing (a
+      structural test validating the disclosed address against the live CLI spec and the real
+      version parser) and the LLD staleness flag became an operator-directed message to the
+      onboarding lead, PR #614. With that, the intake's only outstanding fix-class item is non-TTY
+      secret resolution; the routing boxes below stay open until each has a delivered recipient-side
+      artifact
+- [ ] Routed to the wave-2 discovery surfaces: an agent cannot state a mutation's infrastructure
+      effect before making it (effective spec after `inherits` composition and platform defaults
+      appears in no CLI surface; first revealed by provisioning). Pairs with schema emission;
+      `vm create --dry-run` is the alternative shape
+- [ ] Routed to the onboarding child as one decision item: agent mode is nearly a no-op outside the
+      index (one topic differs; either more agent-only context is worth writing or the per-topic
+      capability is speculative), the non-TTY mode heuristic hands agent content to redirecting
+      humans, and no reliable Codex harness signature exists (verified against Codex docs and
+      source: sandbox variables are conditional; explicit `agw guide --agent` stays the sanctioned
+      path). The tire-kick's verified do-not-regress list (command drift zero, tight topic lookup
+      boundary, posture content that changes behavior) is that child's regression charter
+- [ ] Flagged to the onboarding lead (ownership): `guide-contract-lld.md` still says release
+      evidence is "escaped inert evidence" and lists only `CLAUDECODE=1` in mode precedence; both
+      went stale with #606 and the signature verdict. Escalated to an operator-directed message (PR
+      #614, merged 2026-08-19, so the direction is delivered) after the tester found the stale
+      contract could cause a later round to restore the escaping; checks off when the onboarding
+      lead records the fence-containment contract
+- [ ] Small follow-ups, unowned: `vm list` still uses the legacy hand-rolled table layout with the
+      same overrun class #607 fixed for `agent list`; transport decode replaces truly malformed
+      remote bytes before the session-log boundary (pre-existing, narrower than the fidelity fix)
 
 ### Not yet spawned
 
