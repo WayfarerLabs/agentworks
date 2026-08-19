@@ -398,8 +398,8 @@ direction; every actionable finding was dispatched the same day.
 - [x] The non-TTY secret-resolution finding produced two solution attempts, both abandoned unmerged
       by operator direction (a generalized `--allow-interaction` flag, stopped in review; the
       interaction-channel split, PR #608, closed): the operator did not like the solution. The
-      problem restarts from its statement alone,
-      `task-2026-08-18-non-tty-secret-resolution.md`, deliberately carrying no solution shape
+      problem restarts from its statement alone, `task-2026-08-18-non-tty-secret-resolution.md`,
+      deliberately carrying no solution shape
 - [x] Issue #603 filed: move SSH key-file existence from config-load to use time; the workload-gated
       parameter is the bridge and retires when that lands
 - [ ] Routed to the wave-2 discovery surfaces: an agent cannot state a mutation's infrastructure

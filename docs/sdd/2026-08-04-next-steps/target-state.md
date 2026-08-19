@@ -288,12 +288,12 @@ effort: typed per-secret outcomes, explicit failure categories, policy-aware int
 requirements, timeouts and cleanup, and bounded-lifetime source clients. The simple case must not
 get more verbose.
 
-**Non-TTY secret resolution (open problem, 2026-08-18, from the onboarding-run field evidence):**
-an operator-approved secret source is unusable from a non-TTY context, which pushes agents toward
-the plaintext environment-export bypass the named-secret system exists to prevent. Two solution
-attempts (a generalized `--allow-interaction` flag, then an interaction-channel split shipped as PR
-#608) were abandoned unmerged by operator direction; the problem restarts from its statement alone
-in `task-2026-08-18-non-tty-secret-resolution.md`, with no solution shape carried over.
+**Non-TTY secret resolution (open problem, 2026-08-18, from the onboarding-run field evidence):** an
+operator-approved secret source is unusable from a non-TTY context, which pushes agents toward the
+plaintext environment-export bypass the named-secret system exists to prevent. Two solution attempts
+(a generalized `--allow-interaction` flag, then an interaction-channel split shipped as PR #608)
+were abandoned unmerged by operator direction; the problem restarts from its statement alone in
+`task-2026-08-18-non-tty-secret-resolution.md`, with no solution shape carried over.
 
 **Workload-gated config issues (operator ruling, 2026-08-18, same evidence):** config problems are
 classified by the fact, not by the commands that tolerate them. A workload-gated issue is one that
