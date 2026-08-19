@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.14.1](https://github.com/WayfarerLabs/agentworks/compare/v0.14.0...v0.14.1) (2026-08-19)
+
+
+### Features
+
+* **cli:** add eager --version flag to the root command ([16e8275](https://github.com/WayfarerLabs/agentworks/commit/16e82757fa6ba3b0e27790e2088b083c7302cc9e))
+* **secrets:** name the likely cause of a onepassword timeout ([29f8828](https://github.com/WayfarerLabs/agentworks/commit/29f882836f3072b20a78d1769201fd7991f03c30))
+
+
+### Bug Fixes
+
+* **cli:** crash-free console output on legacy Windows codepages, LF machine output ([e247c42](https://github.com/WayfarerLabs/agentworks/commit/e247c429db1f4e3346b82de5eaabce077f179a44))
+* **cli:** extend read-only config tolerance to graph show, address review ([a6b9df0](https://github.com/WayfarerLabs/agentworks/commit/a6b9df077478a8726bbadb372977dca21ebba807))
+* **cli:** keep console output crash-free on legacy Windows codepages ([b92e87f](https://github.com/WayfarerLabs/agentworks/commit/b92e87fb2ef0a2daa86ea9eb6ca10b8f000152d9))
+* **cli:** keep the agent list implicit-grant legend consistent with what renders ([d99f598](https://github.com/WayfarerLabs/agentworks/commit/d99f5985bbe1aa162952a373b740f698aaca16f5))
+* **cli:** let resource kinds/list tolerate a missing operator SSH key ([0fb70d3](https://github.com/WayfarerLabs/agentworks/commit/0fb70d3746dee983b602cec0236c81acbaedf5d1))
+* **cli:** let resource show tolerate a missing operator SSH key ([7ea28a9](https://github.com/WayfarerLabs/agentworks/commit/7ea28a91f02127e6d88f35ae3fe5998a8959e6bf))
+* **cli:** onboarding ergonomics quick wins from the 0.14.0 field run ([05db55f](https://github.com/WayfarerLabs/agentworks/commit/05db55f0f1d44622ad7adebaf7b0fc8837eda546))
+* **cli:** render agent list with the shared table formatter, explain the * marker ([f7a0d9e](https://github.com/WayfarerLabs/agentworks/commit/f7a0d9e0414c78c5de0648c1277181cf8b2c66d3))
+* **cli:** resource edit tolerates workload-gated config issues ([e14a0f7](https://github.com/WayfarerLabs/agentworks/commit/e14a0f7f616ebe98125a10509b9a4f646b15d49c))
+* **config:** read-only inspection commands tolerate missing SSH key files ([c01263d](https://github.com/WayfarerLabs/agentworks/commit/c01263d0c3685ea8af8096e37ce8056dfce6c9e5))
+* **guide:** cross-reference the fence-widening duplicate, fix index verb ([0088129](https://github.com/WayfarerLabs/agentworks/commit/00881294ee6d1af355bba5a2b30ffef264d232c2))
+* **guide:** disclose release-topic addresses in the index, fence-safe evidence ([a613afc](https://github.com/WayfarerLabs/agentworks/commit/a613afca3985366d8cb7bcbd77f6ce30d2231b36))
+* **guide:** disclose the release-notes address form from the index ([c4e6e0f](https://github.com/WayfarerLabs/agentworks/commit/c4e6e0f9bc14d2de30fe17ace615bf4d43865411))
+* **guide:** render release evidence fence-safe instead of markdown-escaped ([ac3e784](https://github.com/WayfarerLabs/agentworks/commit/ac3e784b298a09f6d1dbff9437da2facc92bb1b2))
+* **secrets:** close the timeout guidance channel to a core-owned identifier set ([a67705d](https://github.com/WayfarerLabs/agentworks/commit/a67705d9f3d2b38111c6735cc19c37677f00eee3))
+* **secrets:** make the describe resolution-preview summary conditional ([6ddcf48](https://github.com/WayfarerLabs/agentworks/commit/6ddcf481b19aed181180a316ffe8a54b9c350481))
+* **secrets:** make the describe resolution-preview summary name the fall-through chain ([b517374](https://github.com/WayfarerLabs/agentworks/commit/b517374868bd9d7ae0de24fbda4963403a6a262e))
+* **sessions:** write raw session-log capture as exact UTF-8 bytes ([97d22c5](https://github.com/WayfarerLabs/agentworks/commit/97d22c5fb12655a6fb5291df7c27f6d812a4453d))
+* **sessions:** write the whole raw capture, not one write's worth ([da272ae](https://github.com/WayfarerLabs/agentworks/commit/da272ae6c7d50adeb7353012145a8a3eac546699))
+
+
+### Documentation
+
+* **cli:** add --version to the Global Options table ([cb94aa2](https://github.com/WayfarerLabs/agentworks/commit/cb94aa2cf0dc47e057d16150293e998f2dd5561b))
+
+
+### Miscellaneous Chores
+
+* **release:** cut the field-evidence fixes as patch release 0.14.1 ([48bcebf](https://github.com/WayfarerLabs/agentworks/commit/48bcebf70f3278c9dbebbb9344803f64f3870842))
+
 ## [0.14.0](https://github.com/WayfarerLabs/agentworks/compare/v0.13.0...v0.14.0) (2026-08-18)
 
 
