@@ -100,22 +100,42 @@ class SecretClientFailure(Exception):
         return f"SecretClientFailure(kind={self.kind.value!r}, remediation={self.remediation.value!r})"
 
 
+class TimeoutGuidance(StrEnum):
+    """A closed set of backend-selectable timeout causes.
+
+    A backend never supplies its own guidance text: it selects a member of
+    this enum, and core (``secrets.outcomes.format_remediation``) owns the
+    fixed prose each member maps to. This is what keeps the channel
+    value-free even though ``SecretClientTimeout`` is raised from plugin
+    code we do not type-check: a character screen on free text cannot prove
+    the text is static rather than provider output, but membership in a
+    closed, core-defined enum can be checked and enforced outright.
+    """
+
+    ONEPASSWORD_PENDING_APPROVAL = "onepassword-pending-approval"
+    """A pending approval prompt in the 1Password desktop app is a common
+    cause of a onepassword backend timeout."""
+
+
 class SecretClientTimeout(Exception):
     """A client boundary timed out after its underlying work stopped.
 
-    ``guidance`` is optional, backend-authored, and STATIC: fixed prose a
-    backend supplies about a common cause of its own timeouts. It must
-    never be built from the timed-out subprocess or process's own output;
-    this exception carries no native text at all (that boundary is what
-    keeps a timeout value-free). ``None`` when the backend has nothing
-    more specific to say than "it timed out."
+    ``guidance`` is optional: a backend selects a member of the closed
+    ``TimeoutGuidance`` set, never raw text. This exception carries no
+    native text at all (that boundary is what keeps a timeout value-free),
+    and construction itself rejects anything that is not an actual
+    ``TimeoutGuidance`` member, so a plugin cannot forge one by passing a
+    plain string with a matching value. ``None`` when the backend has
+    nothing more specific to say than "it timed out."
     """
 
     __slots__ = ("guidance",)
 
-    guidance: str | None
+    guidance: TimeoutGuidance | None
 
-    def __init__(self, *, guidance: str | None = None) -> None:
+    def __init__(self, *, guidance: TimeoutGuidance | None = None) -> None:
+        if guidance is not None and not isinstance(guidance, TimeoutGuidance):
+            raise ValueError("invalid secret client timeout guidance")
         super().__init__()
         self.guidance = guidance
 

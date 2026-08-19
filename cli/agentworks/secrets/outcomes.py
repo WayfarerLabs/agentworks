@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from agentworks.capabilities.secret_backend.client import TimeoutGuidance
 from agentworks.errors import (
     AgentworksError,
     ConnectivityError,
@@ -71,9 +72,10 @@ class OutcomeRule:
     identifier_allowed: bool
     remediation_target_required: bool = False
     guidance_allowed: bool = False
-    """Whether this detail may carry a backend-authored ``guidance`` string
-    (see :attr:`ResolutionOutcome.guidance`). Allowed, never required: most
-    backends have nothing more specific to add than the detail itself."""
+    """Whether this detail may carry a ``guidance`` identifier, a backend's
+    selection from a closed, core-owned set (see
+    :attr:`ResolutionOutcome.guidance`). Allowed, never required: most
+    backends have nothing more specific to select than the detail itself."""
 
 
 OUTCOME_RULES: dict[ResolutionDetail, OutcomeRule] = {
@@ -183,12 +185,13 @@ class ResolutionOutcome:
     source: str | None = None
     identifier: str | None = None
     remediation_target: str | None = None
-    guidance: str | None = None
-    """Optional, backend-authored STATIC prose about a common cause of this
-    outcome (e.g. a onepassword timeout naming the desktop-app approval
-    prompt). Never built from native process output; see
-    :class:`agentworks.capabilities.secret_backend.client.SecretClientTimeout`.
-    """
+    guidance: TimeoutGuidance | None = None
+    """Optional identifier a backend selected from the closed
+    :class:`~agentworks.capabilities.secret_backend.client.TimeoutGuidance`
+    set (e.g. a onepassword timeout naming the desktop-app approval
+    prompt). Never free text: :func:`format_remediation` is what maps the
+    identifier to core-owned prose, so a backend can never put its own
+    words on screen."""
 
     def __post_init__(self) -> None:
         rule = OUTCOME_RULES[self.detail]
@@ -202,14 +205,14 @@ class ResolutionOutcome:
             raise ValueError("invalid resolution outcome remediation target presence")
         if not rule.guidance_allowed and self.guidance is not None:
             raise ValueError("this resolution outcome detail forbids guidance")
+        if self.guidance is not None and not isinstance(self.guidance, TimeoutGuidance):
+            raise ValueError("invalid resolution outcome guidance")
         if not _safe_diagnostic_text(self.name):
             raise ValueError("invalid resolution outcome name")
         if self.source is not None and not _safe_diagnostic_text(self.source):
             raise ValueError("invalid resolution outcome source")
         if self.identifier is not None and not _safe_diagnostic_text(self.identifier):
             raise ValueError("invalid resolution outcome identifier")
-        if self.guidance is not None and not _safe_diagnostic_text(self.guidance):
-            raise ValueError("invalid resolution outcome guidance")
 
 
 def _escape_plugin_target(target: str) -> str:
@@ -245,19 +248,34 @@ def _escape_plugin_target(target: str) -> str:
     return "".join(escaped)
 
 
+_TIMEOUT_GUIDANCE_TEXT: dict[TimeoutGuidance, str] = {
+    TimeoutGuidance.ONEPASSWORD_PENDING_APPROVAL: (
+        "a pending approval prompt in the 1Password desktop app is a common "
+        "cause; approve or dismiss it and retry. `op whoami` can report signed "
+        "out even when desktop-app integration still works, so it is not a "
+        "reliable way to rule this out"
+    ),
+}
+"""The only place ``TimeoutGuidance`` maps to rendered prose. Core owns both
+the identifier set and this text; a backend selects a member and never
+supplies wording of its own, so nothing a plugin controls reaches this
+dict's values."""
+
+
 def format_remediation(outcome: ResolutionOutcome) -> str:
     """Render one bounded remediation without provider-supplied text.
 
-    ``guidance``, where present, is appended in parentheses. It is always
-    fixed, backend-authored prose (never provider output), so it carries no
-    more risk than the remediation label itself.
+    ``guidance``, where present, is a closed-set identifier: it is looked
+    up in ``_TIMEOUT_GUIDANCE_TEXT`` and the resulting fixed, core-owned
+    text is appended in parentheses. A backend never contributes its own
+    wording here.
     """
     if outcome.remediation is ResolutionRemediation.ENABLE_PLUGIN:
         assert outcome.remediation_target is not None
         return f"enable plugin `{_escape_plugin_target(outcome.remediation_target)}`"
     base = outcome.remediation.value
     if outcome.guidance is not None:
-        return f"{base} ({outcome.guidance})"
+        return f"{base} ({_TIMEOUT_GUIDANCE_TEXT[outcome.guidance]})"
     return base
 
 

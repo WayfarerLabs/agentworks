@@ -17,6 +17,7 @@ from agentworks.capabilities.secret_backend.client import (
     SecretClientTimeout,
     SecretLookupRequest,
     SecretSourceClient,
+    TimeoutGuidance,
 )
 from agentworks.errors import ConfigError, StateError, UserAbort
 from agentworks.schema import AgwModel, RefOwner
@@ -396,7 +397,7 @@ def _outcome(
     source: str | None = None,
     identifier: str | None = None,
     remediation_target: str | None = None,
-    guidance: str | None = None,
+    guidance: TimeoutGuidance | None = None,
 ) -> ResolutionOutcome:
     rule = OUTCOME_RULES[detail]
     return ResolutionOutcome(
@@ -564,7 +565,7 @@ def resolve_batch(
         broker = interaction_broker if source.backend_class.name == "prompt" else None
         failure_kind: SecretClientFailureKind | None = None
         timed_out = False
-        timeout_guidance: str | None = None
+        timeout_guidance: TimeoutGuidance | None = None
         unexpected = False
         timeout = source.backend_class.external_operation_timeout(source.config)
         # Empty rather than unbound, so a failure branch that ever stopped

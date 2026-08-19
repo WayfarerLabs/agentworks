@@ -20,6 +20,7 @@ from agentworks.capabilities.secret_backend.client import (
     SecretClientTimeout,
     SecretLookupRequest,
     SecretSourceClient,
+    TimeoutGuidance,
 )
 from agentworks.errors import ExternalError, SecretUnavailableError, StateError
 from agentworks.naming import MAX_FREEFORM_NAME_LENGTH, validate_name
@@ -33,6 +34,7 @@ from agentworks.secrets.outcomes import (
     ResolutionDetail,
     ResolutionOutcome,
     ResolutionRemediation,
+    format_outcome,
     format_remediation,
 )
 from agentworks.secrets.policy import InteractionPolicy
@@ -351,12 +353,16 @@ def test_source_failures_are_value_free_and_batch_attributed(
 
 
 def test_timeout_guidance_flows_through_to_the_outcome_and_remediation() -> None:
-    """A backend-authored, fixed guidance string on ``SecretClientTimeout``
-    reaches the outcome's ``guidance`` field and ``format_remediation``'s
-    rendered text: the channel the onepassword backend uses to name a
-    pending desktop-app approval prompt as a likely timeout cause without
-    ever touching native process output."""
-    _Backend.failure = SecretClientTimeout(guidance="a fixed cause, spelled out here")
+    """A backend-selected ``TimeoutGuidance`` identifier on
+    ``SecretClientTimeout`` reaches the outcome's ``guidance`` field and
+    ``format_remediation``'s rendered text: the channel the onepassword
+    backend uses to name a pending desktop-app approval prompt as a likely
+    timeout cause. The expected text is looked up from the same core-owned
+    mapping the renderer uses, never duplicated as a literal in this test,
+    so a future wording change does not require touching this file."""
+    from agentworks.secrets.outcomes import _TIMEOUT_GUIDANCE_TEXT
+
+    _Backend.failure = SecretClientTimeout(guidance=TimeoutGuidance.ONEPASSWORD_PENDING_APPROVAL)
     batch = resolve_batch(
         [SecretDecl(name="token", description="token")],
         [_source()],
@@ -366,8 +372,9 @@ def test_timeout_guidance_flows_through_to_the_outcome_and_remediation() -> None
 
     outcome = batch.outcomes[0]
     assert outcome.detail is ResolutionDetail.DEADLINE_EXCEEDED
-    assert outcome.guidance == "a fixed cause, spelled out here"
-    assert format_remediation(outcome) == "increase-timeout (a fixed cause, spelled out here)"
+    assert outcome.guidance is TimeoutGuidance.ONEPASSWORD_PENDING_APPROVAL
+    expected_text = _TIMEOUT_GUIDANCE_TEXT[TimeoutGuidance.ONEPASSWORD_PENDING_APPROVAL]
+    assert format_remediation(outcome) == f"increase-timeout ({expected_text})"
 
 
 def test_timeout_without_guidance_renders_the_bare_remediation() -> None:
@@ -384,6 +391,68 @@ def test_timeout_without_guidance_renders_the_bare_remediation() -> None:
     outcome = batch.outcomes[0]
     assert outcome.guidance is None
     assert format_remediation(outcome) == "increase-timeout"
+
+
+class _HostileClient:
+    """A client that tries to raise ``SecretClientTimeout`` with forged
+    guidance text, simulating a hostile or buggy backend attempting to put
+    its own words (here, a stand-in for leaked provider output) on
+    screen."""
+
+    def prepare(self, requests: tuple[SecretLookupRequest, ...], *, remaining_time: RemainingTime) -> None:
+        return None
+
+    def resolve(
+        self,
+        requests: tuple[SecretLookupRequest, ...],
+        *,
+        remaining_time: RemainingTime,
+    ) -> dict[str, str]:
+        raise SecretClientTimeout(guidance="provider-stderr: secret=TOPSECRET")  # type: ignore[arg-type]
+
+
+class _HostileContext(AbstractContextManager[SecretSourceClient]):
+    def __enter__(self) -> SecretSourceClient:
+        return _HostileClient()
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+
+class _HostileBackend(_Backend):
+    @classmethod
+    def create_client(
+        cls,
+        *,
+        source_name: str,
+        config: AgwModel,
+        interaction_broker: InteractionBroker | None,
+        remaining_time: RemainingTime,
+    ) -> AbstractContextManager[SecretSourceClient]:
+        return _HostileContext()
+
+
+def test_hostile_backend_forged_guidance_never_reaches_rendered_output() -> None:
+    """A backend that tries to raise ``SecretClientTimeout`` with forged
+    guidance text cannot even construct the exception: ``TimeoutGuidance``
+    membership is enforced at construction, so the forged text can never
+    reach a rendered outcome. The construction failure is itself a
+    first-party bug in the backend, which the resolution loop's existing
+    boundary already turns into a per-secret UNEXPECTED outcome rather than
+    crashing the batch; that outcome carries no guidance and no trace of
+    the forged text at all."""
+    batch = resolve_batch(
+        [SecretDecl(name="token", description="token")],
+        [_source(backend_class=_HostileBackend)],
+        policy=_policy(),
+        interaction_broker=None,
+    )
+
+    outcome = batch.outcomes[0]
+    assert outcome.detail is ResolutionDetail.UNEXPECTED
+    assert outcome.guidance is None
+    assert "TOPSECRET" not in repr(batch.outcomes)
+    assert "TOPSECRET" not in format_outcome(outcome)
 
 
 def test_not_ready_source_constructs_nothing() -> None:
@@ -530,7 +599,33 @@ def test_guidance_is_rejected_outside_the_allowed_detail() -> None:
             detail=ResolutionDetail.SOFT_MISS,
             remediation=ResolutionRemediation.CONFIGURE_SOURCE,
             source="source",
-            guidance="not allowed here",
+            guidance="not allowed here",  # type: ignore[arg-type]
+        )
+
+
+def test_forged_timeout_guidance_is_rejected_at_construction() -> None:
+    """A hostile or buggy backend cannot smuggle arbitrary text through the
+    guidance channel by constructing ``SecretClientTimeout`` directly:
+    only an actual ``TimeoutGuidance`` member is accepted, never a bare
+    string, even one crafted to match a real member's own value."""
+    with pytest.raises(ValueError, match="guidance"):
+        SecretClientTimeout(guidance="onepassword-pending-approval")  # type: ignore[arg-type]
+
+
+def test_forged_timeout_guidance_never_reaches_a_resolution_outcome() -> None:
+    """Defense in depth: even a ``ResolutionOutcome`` built directly
+    (bypassing ``SecretClientTimeout``'s own construction check entirely)
+    rejects a guidance value that is not an actual ``TimeoutGuidance``
+    member, mirroring how ``guidance_allowed`` already rejects a detail
+    that forbids guidance outright."""
+    with pytest.raises(ValueError, match="guidance"):
+        ResolutionOutcome(
+            name="token",
+            category=ResolutionCategory.TIMEOUT,
+            detail=ResolutionDetail.DEADLINE_EXCEEDED,
+            remediation=ResolutionRemediation.INCREASE_TIMEOUT,
+            source="source",
+            guidance="onepassword-pending-approval",  # type: ignore[arg-type]
         )
 
 
