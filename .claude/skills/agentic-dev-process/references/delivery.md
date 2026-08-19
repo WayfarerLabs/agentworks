@@ -38,6 +38,9 @@ A handoff is exactly:
    initial PR body serves as the first comment.
 3. A machine-visible signal: ready for merge intent, or `review-requested` for a checkpoint.
 
+Private quality-loop reviews never appear as PR state; when their outcome is load-bearing, the
+evidence lives in the handoff comment or the plan.
+
 Before changing a handed-off ready head, return the PR to draft. Reapply ready only after the whole
 round is pushed and described. Between handoffs, the head is private workspace and PR-level
 consumers review neither arbitrary pushes nor unfinished work. A consumer that sees an unexplained

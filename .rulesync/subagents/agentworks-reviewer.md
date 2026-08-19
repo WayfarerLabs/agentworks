@@ -383,11 +383,12 @@ most visibly the `manager/` packages under `cli/agentworks/<domain>/`, and inclu
   `NotFoundError`, `AlreadyExistsError`, `ValidationError`, `StateError` (with `BrokenStateError`
   for unrecoverable states that need `--force`), `AuthorizationError`, `ConnectivityError`,
   `ExternalError` (with `ProvisioningError` and `BackupError` for the specific external-failure
-  flavors), `ConfigError`, `UserAbort`. The entity dimension (vm, workspace, agent, session,
-  console, etc.) is carried as the `entity_kind` / `entity_name` attributes on the exception, not as
-  the type. The optional `hint` attribute provides a remediation suggestion the CLI renders on a
-  second line. The message describes the problem in the service layer's vocabulary; the CLI renders
-  it.
+  flavors), `ConfigError`, `UserAbort`, among others; `agentworks.errors` is the complete list, so
+  judge a new kind against that module rather than this sample. The entity dimension (vm, workspace,
+  agent, session, console, etc.) is carried as the `entity_kind` / `entity_name` attributes on the
+  exception, not as the type. The optional `hint` attribute provides a remediation suggestion the
+  CLI renders on a second line. The message describes the problem in the service layer's vocabulary;
+  the CLI renders it.
 - Produces user-facing output and feedback through the `agentworks.output` module, never through
   `typer.echo`, `print`, or by formatting strings into return values.
 - Must not import `typer`. This is enforced by a CI check (`.github/workflows/ci.yml`), which

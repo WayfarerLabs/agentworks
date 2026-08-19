@@ -63,6 +63,6 @@ To verify the committed shared-target output is up to date without regenerating,
 
 ## Reference
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and the
+See [CONTRIBUTING.md](../../../CONTRIBUTING.md) for setup instructions and the
 [Rulesync documentation](https://rulesync.dyoshikawa.com/) for full details on rules, skills,
 subagents, targets, sources, and other features.

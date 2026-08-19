@@ -9,11 +9,11 @@ description: >-
 ---
 # Agentworks Test Environment
 
-This is the generic, id-free PROCESS for running live agentworks integration tests: how to structure
-a run, the tester-agent pattern, budgets, the safety/cleanup discipline, and the durable lessons
+This is the generic, id-free WHERE of live agentworks integration testing: the environment's
+structure, the tester-agent pattern, budgets, the safety/cleanup discipline, and the durable lessons
 learned running it. It has no host-specific values baked in; any clone or harness can use it as-is.
-The `agentworks-tester` subagent defines HOW to test; this skill defines the WHERE-shaped
-scaffolding around that: the environment's structure, its limits, and its safety protocol. Sections
+The `integration-testing` skill is the paired HOW (the validation methodology this skill defers to;
+load the two together), and the `agentworks-tester` subagent carries the hands-on method. Sections
 marked "inject" are what an invoking session copies into a tester agent's prompt.
 
 ## Operator parameters
@@ -39,13 +39,12 @@ the mechanism itself and stay as written.
   `<vm-host-alias>-<remote-user>` (user `<remote-user>`, over Tailscale). limactl lives at
   `/opt/homebrew/bin` (found via login shell; plain `ssh host cmd` does not see it). lima >= 2.2.0.
   No passwordless sudo there, by design.
-- SHARED HOST: the real risk is RESOURCE EXHAUSTION, not cross-user tampering (the host owner's
-  correction 2026-08-02). `<remote-lima-host>` also runs the host owner's own production Lima VMs,
-  but under a DIFFERENT user (`<host-owner>`). Lima is user-scoped, so as `<remote-user>` you
-  literally cannot see or touch the host owner's instances; the hazard is starving the host
-  (CPU/mem/disk; OS X has no good quota). So the `<vm-host-alias>` discipline is purely BUDGET:
-  respect the VM-count/size cap below and always tear down. Note `pgrep | head` there can truncate
-  away your own processes.
+- SHARED HOST: the real risk is RESOURCE EXHAUSTION, not cross-user tampering. `<remote-lima-host>`
+  also runs the host owner's own production Lima VMs, but under a DIFFERENT user (`<host-owner>`).
+  Lima is user-scoped, so as `<remote-user>` you literally cannot see or touch the host owner's
+  instances; the hazard is starving the host (CPU/mem/disk; OS X has no good quota). So the
+  `<vm-host-alias>` discipline is purely BUDGET: respect the VM-count/size cap below and always tear
+  down. Note `pgrep | head` there can truncate away your own processes.
 - Secrets: env-var backend; `AW_SECRET_TAILSCALE_AUTH_KEY` is exported in the session environment
   and resolves the `tailscale-auth-key` secret used at vm create.
 - vm-site `azure` (layer-2, agentworks-managed): platform `azure-vm`, needs the `azure` system
@@ -60,11 +59,11 @@ the mechanism itself and stay as written.
   region `<azure-region>` (quota) for the VM; the RG's own region (`<azure-rg-region>`) can differ
   from the VM's. Authorized to switch RGs on quota problems.
 - AZURE RG CAUTION: `<azure-resource-group>` is the host owner's PERSONAL, SHARED resource group
-  (used for test VMs "for now", 2026-07-31). Strict `<system-slug>-` naming; delete only by exact VM
-  name; NEVER bulk-operate, `az group delete`, or touch any resource you did not create. Azure VMs
-  cost money while they exist, so always delete after a run and verify residue-clean at the ARM
-  layer (list RG resources by the `<system-slug>-<name>` prefix), not just via `agw vm list`.
-  Orphaned disk/NIC/public-IP after a VM delete is a known azure hazard to check for.
+  (used for test VMs for now). Strict `<system-slug>-` naming; delete only by exact VM name; NEVER
+  bulk-operate, `az group delete`, or touch any resource you did not create. Azure VMs cost money
+  while they exist, so always delete after a run and verify residue-clean at the ARM layer (list RG
+  resources by the `<system-slug>-<name>` prefix), not just via `agw vm list`. Orphaned
+  disk/NIC/public-IP after a VM delete is a known azure hazard to check for.
 - vm-site `ec2` (layer-2, agentworks-managed AWS EC2): platform `aws-ec2` (the name to use in the
   site's `spec.platform.name`), needs the `aws` system plugin enabled. PURE boto3, NO aws-cli needed
   (its install-command manifest is deferred as #342), so residue checks use a boto3 snippet, not a
@@ -111,13 +110,12 @@ otherwise; the slug does global namespacing. Anything under `<system-slug>-*` on
 ## Standing process (invoking session's job)
 
 - Every main bump or PR test includes a **code-quality pass**: run the `agentworks-reviewer` agent
-  over the new delta (post-merge range or PR branch) alongside the live retest (operator ruling,
-  2026-07-26).
+  over the new delta (post-merge range or PR branch) alongside the live retest.
 - Charters explicitly AUTHORIZE authoring scratch resources: when a surface can't be exercised
   through standing inventory (e.g. a secret-backed env template for `env show --resolve`), the
   tester should CREATE a prefixed scratch resource, test against it, and delete it, not report the
   gap as untestable. `agw-state` snapshots cover all of ~/.config/agentworks including resources/,
-  so scratch definitions are fully rollback-safe. (The operator's ruling 2026-07-30.)
+  so scratch definitions are fully rollback-safe.
 
 ## Operational lessons
 

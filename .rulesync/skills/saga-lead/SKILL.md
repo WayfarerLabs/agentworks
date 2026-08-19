@@ -61,7 +61,9 @@ This protocol layers on top of the effort's own process, never in place of it: t
 private quality loop before first handoff, and a child-effort PR that arrives without it goes back
 to the effort rather than being reviewed harder here. The effort states in its PR description that
 those rounds ran and were absorbed; when silent, ask before invoking the send-back. The lead's own
-seeding PRs are direct changes and receive the ordinary private quality loop before opening.
+seeding PRs are direct changes and receive the ordinary private quality loop before opening. A
+lead-owned PR is otherwise an ordinary PR: it receives its PR-level review from a lane independent
+of the lead's private loop, and the operator merges it like any other.
 
 Scale depth to the PR's size and blast radius; a subsystem receives the full protocol. For
 substantive PRs, launch parallel passes in isolated worktrees at the PR head. The reviewer of record
@@ -75,8 +77,8 @@ mutations. The four passes:
    with file:line evidence, plus plan-checkbox honesty sampling. Require an explicit SATISFIED list
    so silence is not ambiguous.
 2. **Fresh-eyes generic**: the diff read cold for correctness, robustness, and security, with no
-   house checklist. Require findings to be confirmed by execution where practical, and a closing
-   list of highest residual-risk areas.
+   house checklist, so by definition not the `agentworks-reviewer` persona. Require findings to be
+   confirmed by execution where practical, and a closing list of highest residual-risk areas.
 3. **Test quality and gate honesty**: run every gate and report exact results; assess new tests for
    tautology and vacuity; and mutation-test every claimed safety property (neuter the enforcement
    and see what fails). A safety claim whose mutation survives the suite is a finding at blocker

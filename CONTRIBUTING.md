@@ -107,22 +107,8 @@ or add a word.
 
 ### Editing rulesync sources
 
-Files under `.rulesync/` are markdown; they get linted by markdownlint-cli2 and prettier just like
-the rest of the repo. Rulesync's _generated_ output (the committed shared-target output under
-`.github/`, `.claude/`, `.codex/`, and the root `CLAUDE.md` / `AGENTS.md`) is deliberately excluded
-from the linters via each tool's config; otherwise the linters and rulesync would fight (prettier
-reformats a file, next `rulesync generate` overwrites it, repeat).
-
-**Lint before you regenerate.** Prettier may reformat the source, and running it after regeneration
-leaves the generated output out of sync with the prettified source, so CI's drift check will fail.
-The right order is:
-
-1. Edit the `.rulesync/` source.
-2. `./scripts/lint-files.sh --fix` prettifies the source (and the rest of the repo).
-3. `./scripts/rulesync-upgen.sh` regenerates the committed output for all shared targets. Your
-   `rulesync.local.jsonc` targets can be anything; upgen always refreshes the shared output
-   regardless.
-4. Commit both the source and the generated files.
-
-To verify the committed shared-target output is up to date without regenerating, use
-`./scripts/rulesync-upgen.sh --check`. CI invokes the same script.
+The `rulesync-for-ai-codev` skill (`.rulesync/skills/rulesync-for-ai-codev/SKILL.md`) owns the edit
+workflow; follow its "Making changes" section. The short version, because the order matters: lint
+first (`./scripts/lint-files.sh --fix`), then regenerate (`./scripts/rulesync-upgen.sh`), then
+commit source and generated files together. Regenerating before linting leaves the generated output
+behind the prettified source, which fails CI's drift check (`./scripts/rulesync-upgen.sh --check`).

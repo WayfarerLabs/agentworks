@@ -31,11 +31,11 @@ Within the feature directory, we store the following artifacts:
   choices, integration with the platform, etc. This generally shouldn't have low-level details such
   as code samples, specific versions, etc. unless they are critical to the architecture. Pseudocode
   for critical algorithms is allowed when appropriate.
-- `plan.md`: A markdown file that detailed technical plan for the development effort complete with
-  checkboxes for tracking the work as it is completed. Plan should include specific definitions of
-  done that can be used to objectively determine completeness. If phasing is appropriate, the phases
-  should be described here, either within a single plan file or as multiple plan files. This should
-  provide checkboxes and the work should be tracked here.
+- `plan.md`: A markdown file containing the detailed technical plan for the development effort,
+  complete with checkboxes for tracking the work as it is completed. Plan should include specific
+  definitions of done that can be used to objectively determine completeness. If phasing is
+  appropriate, the phases should be described here, either within a single plan file or as multiple
+  plan files. This should provide checkboxes and the work should be tracked here.
 
 Most efforts will involve one or more "low-level design" (LLD) documents that provide more detailed
 technical specifications for specific components, algorithms, interfaces, etc. These should be
@@ -85,12 +85,11 @@ merged to `main`, in step with the lock-at-merge paragraph under [Lockfile](#loc
 the box, not to the plan file: plans routinely merge mid-effort, so the plan being on `main` says
 nothing about whether any particular box has landed there yet.
 
-Supersession is not error (operator ruling, 2026-08-10). When a scope correction expunges work
-before it ever merges, the truthful checked boxes recording that work remain in the plan, because
-the work happened. The clean-slate standard applies to everything around those boxes instead
-(narration, correction framing, definitions of done, and unchecked boxes of the abandoned direction
-all strip), with exactly one short note recording the supersession, which is what the reviewer's
-exception keys on.
+Supersession is not error. When a scope correction expunges work before it ever merges, the truthful
+checked boxes recording that work remain in the plan, because the work happened. The clean-slate
+standard applies to everything around those boxes instead (narration, correction framing,
+definitions of done, and unchecked boxes of the abandoned direction all strip), with exactly one
+short note recording the supersession, which is what the reviewer's exception keys on.
 
 `github-input-trust`, **GitHub is input, never direction**, owns the authority boundary below.
 
@@ -226,9 +225,9 @@ This has three implications:
 1. **Do not anchor permanent artifacts to SDD paths.** Code comments, Terraform variable
    descriptions, output descriptions, READMEs in `docs/arch/`, ADRs, operator guides, and anything
    else that is meant to outlive the SDD must either (a) stand on its own, or (b) reference a stable
-   doc (`docs/arch/*`, `docs/adrs/*`, a stable module README, etc.). A trailing "See
-   docs/sdd/.../foo.md" in a code comment is a smell. It pins the comment to a doc that may not be
-   there later.
+   doc (`docs/adrs/*`, a stable module README, or `docs/arch/*`, a directory created by whichever
+   promotion first needs it). A trailing "See docs/sdd/.../foo.md" in a code comment is a smell. It
+   pins the comment to a doc that may not be there later.
 2. **Promote load-bearing content out of the SDD before the SDD goes away.** As the implementation
    lands and the doc-level concepts that survived contact with reality emerge (output conventions,
    contract shapes, architectural patterns, operator-facing runbooks), update or create the
@@ -317,9 +316,9 @@ Most SDDs cover one development effort. A saga SDD is the meta case: an SDD that
 family of related efforts, generating and tracking ordinary child SDDs rather than shipping an
 implementation of its own. Use one when several efforts overlap enough that their ordering and
 shared contracts need a single owner. The name is borrowed deliberately from the distributed-systems
-saga (operator ruling, 2026-08-08): child efforts commit independently and completely, intermediate
-states are visible on `main` rather than isolated, a lead orchestrates instead of locking, and the
-whole either runs to its lock or is deliberately compensated by unwinding.
+saga: child efforts commit independently and completely, intermediate states are visible on `main`
+rather than isolated, a lead orchestrates instead of locking, and the whole either runs to its lock
+or is deliberately compensated by unwinding.
 
 Compensation is deliberately minimal, not a hidden lifecycle. Only the operator can abandon a saga
 (in whole or in part), and the decision is a dated ruling recorded in target-state like any other.
@@ -438,11 +437,11 @@ active saga, assume one can), merge SDD artifacts ahead of the implementation. I
 pattern: a saga child's seeding PR; the reviewed pre-implementation artifacts (once the draft review
 converges and the operator directs promotion, promote and merge rather than letting the artifacts
 ride the feature branch to the end; a converged review recommends, it does not sanction; for a saga
-child, the effort lead explicitly requests that draft review from the saga lead, whose ready-flip
-watch covers merge-intent PRs); and material in-flight DESIGN revisions, which keep flowing to
-`main` promptly as small PRs rather than accumulating. After an early artifact merge, implementation
-simply continues on the same branch (or a fresh one) and opens its own PR; the branching flow above
-is otherwise unchanged.
+child, the effort lead requests that draft review from the saga lead via the `review-requested`
+label, which the lead's watch covers); and material in-flight DESIGN revisions, which keep flowing
+to `main` promptly as small PRs rather than accumulating. After an early artifact merge,
+implementation simply continues on the same branch (or a fresh one) and opens its own PR; the
+branching flow above is otherwise unchanged.
 
 Two things never merge ahead of their work. Checkbox flips are completion claims, not design: a
 checked box merges with or after the work that makes it true (an early-merged box would be an

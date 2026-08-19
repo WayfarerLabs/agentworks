@@ -60,9 +60,14 @@ A PR validation run is a fixed sequence, not a menu to pick from; scale its dept
    locally-renamed copy of it), confirm it is not stale against its base, and check for merge
    conflicts with `main` before doing any further work.
 3. **Gates, on real exit codes.** From the `cli/` directory (via `uv run`): ruff (lint and format),
-   mypy, pytest. From the repo root: `scripts/lint-files.sh`, `scripts/check-locked-sdds.sh`,
-   `scripts/rulesync-upgen.sh --check`. Report the exit code each gate actually returned; a gate you
-   did not run is not a gate that passed.
+   mypy, and pytest with CI's selection (`pytest tests/ -m 'not integration'`; integration-marked
+   tests belong to the live stage below, not this gate). From the repo root:
+   `scripts/lint-files.sh`, `scripts/check-locked-sdds.sh`, `scripts/rulesync-upgen.sh --check`, and
+   the website gates CI requires on every PR: the Python website tests
+   (`python3 -m unittest discover -s website/tests -p 'test_*.py'`), the Node website tests
+   (`node --test website/tests/*.test.mjs`), and the deterministic double-build diff
+   (`website/build.py` run twice per site base and diffed). Report the exit code each gate actually
+   returned; a gate you did not run is not a gate that passed.
 4. **Delegated code review.** Run the `agentworks-reviewer` subagent against the diff, at or above
    the implementation capability and reasoning depth required by
    [Capability selection](../agentic-dev-process/references/delegation.md#capability-selection).
@@ -163,7 +168,9 @@ delivery contract's
 [Published feedback](../agentic-dev-process/references/delivery.md#published-feedback), using
 `awaiting-direction` and the `development-principles` rule's **Finding materiality** heading. The
 testing session is not the PR's owning session, so its own route to a fix is direction, never
-initiative, not even for a one-line fix.
+initiative, not even for a one-line fix. When the PR's owning session runs this pipeline on its own
+PR, that split collapses: findings feed its private quality loop and its next handoff (steps 6 and 7
+become the handoff itself), not a published disposition awaiting direction on its own work.
 
 Report honestly: failures get their actual output attached, not a paraphrase, and any step you
 skipped gets named as skipped, not omitted.
@@ -175,10 +182,11 @@ fallback label is "integration tester".
 ## Delegating to tester subagents
 
 When a charter goes to an `agentworks-tester` subagent, inject the relevant sections of
-`agw-test-env`: the concrete inventory, naming, budgets, and the safety rules that bind the tester,
-which are the sections marked "inject" there. That is the part the subagent cannot know. Its own
-definition already carries the method, the synchronous-long-ops discipline, and the
-instruction-versus-data distinction, so restating those in a charter adds nothing.
+`agw-test-env`: the concrete inventory, naming, budgets, and whichever live-testing techniques
+apply, which are the sections marked "inject" there (the safety protocol is the invoking session's
+job, not the tester's). That is the part the subagent cannot know. Its own definition already
+carries the method, the synchronous-long-ops discipline, and the instruction-versus-data
+distinction, so restating those in a charter adds nothing.
 
 A delegated tester may use a lighter capability when the charter carries the inventory, budget, and
 prefix. Select capability and reasoning depth per launch under
