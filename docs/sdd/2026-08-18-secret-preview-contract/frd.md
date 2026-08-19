@@ -6,6 +6,7 @@
 - Seed problem: `task-2026-08-18-non-tty-secret-resolution.md`
 - Requirements owner: operator
 - Effort lead: `agw-ns-secrets`
+- Acting role: operator-authorized effort lead
 
 ## Purpose
 

@@ -48,8 +48,9 @@ The atomic rewrite makes these changes:
 | `would_attempt(...) -> bool`          | removed                                              |
 | `describe_lookup(...) -> str \| None` | structured static `LookupDescription`                |
 | no client preview                     | batch `preview(...) -> Mapping[str, BackendPreview]` |
-| impact-blind `prepare`                | preparation receives impact and terminal fact        |
-| impact-blind `resolve`                | resolution receives exact impact                     |
+| no-op, impact-blind `prepare`         | removed                                              |
+| factory lacks intent                  | factory receives exact impact and terminal fact      |
+| value-map `resolve`                   | exact resolved-or-blocked map with impact and TTY    |
 | backend-selected failure remediation  | core derives guidance from a closed detail           |
 
 The descriptor's required operations and attributes, registration diagnostics, author example, and
@@ -72,19 +73,22 @@ code returned plaintext through its prior client contract, preview containment w
 
 ## Additive-first sequence inside the PR
 
-1. Add closed impact, terminal, lookup-description, preview-answer, and preview-detail types plus
-   exact validators. Do not repoint callers yet.
+1. Add closed impact, terminal, lookup-description, preview-answer, preview-detail, and actual
+   resolution block types plus exact validators. Do not repoint callers yet.
 2. Add private acquisition helpers and rewritten client methods to all three in-tree backends while
    their current methods still drive runtime.
-3. Switch the descriptor, base class, conformance checks, exports, and every implementation to the
-   rewritten contract atomically, including the exact sentinel reset from `2` to `1`.
+3. Switch the descriptor, base class, both source drivers, conformance checks, exports, and every
+   implementation to the rewritten contract atomically, including the exact sentinel reset from `2`
+   to `1`, removal of `prepare`, and intent delivery before client construction and context entry.
 4. Repoint static inspection from `would_attempt` to structured lookup descriptions.
-5. Replace pure preview with bounded source-client preview and ordered tri-state aggregation.
+5. Replace pure preview with bounded source-client preview, ordered tri-state aggregation, and a
+   lazy per-command preflight memo.
 6. Repoint preflight, describe, verify, and doctor to their fixed preview semantics.
 7. Replace `InteractionPolicy` with `OperatorImpact` across all published operation boundaries and
    move ordinary CLI derivation off TTY state.
-8. Repoint actual resolution to backend-owned impact gating, remove the static interactive skip, and
-   preserve fail-before-mutation behavior.
+8. Remove residual static interactive skips, wire exact terminal facts and broker construction, and
+   preserve fail-before-mutation through iterative no-impact closure, before-every-`ALLOW` viability
+   checks, and backend-owned impact blocks.
 9. Delete old-shape types, compatibility scaffolding, stale comments, and redundant backend
    remediation selection.
 10. Update permanent docs, schema, samples, completions, and machine-output references, then run the
@@ -121,18 +125,32 @@ class OnePasswordBackend(SecretBackend):
     def describe_lookup(cls, secret_name, mapping) -> LookupDescription:
         ...
 
-
-class OnePasswordClient:
-    def preview(self, requests, *, impact, terminal, remaining_time):
+    @classmethod
+    def create_client(
+        cls,
+        *,
+        source_name,
+        config,
+        impact,
+        terminal,
+        interaction_broker,
+        remaining_time,
+    ) -> AbstractContextManager[SecretSourceClient]:
         ...
 
-    def resolve(self, requests, *, impact, remaining_time):
+
+class OnePasswordClient:
+    def preview(self, requests, *, impact, terminal, remaining_time) -> Mapping[str, BackendPreview]:
+        ...
+
+    def resolve(self, requests, *, impact, terminal, remaining_time) -> Mapping[str, BackendResolution]:
         ...
 ```
 
 The client decides whether the next `op read` fits `impact`. When allowed, preview reads and
-discards inside the client. Actual resolution returns the value through the existing private batch.
-TTY does not gate either OnePassword method.
+discards inside the client. Actual resolution returns an exact map whose entries are redacted
+`BackendResolved` value blocks or closed `BackendBlocked` details. TTY is still passed as an
+execution fact but does not gate either OnePassword method.
 
 ## Config and schema migration
 
@@ -159,10 +177,10 @@ same implementation commit. No persisted state or database migration is required
   impact; global `--non-interactive` remains the control.
 - `secret describe` adds `--allow-interaction`.
 - `secret verify` retains its existing flag but switches from core resolution to backend preview.
-- `secret describe --output json` replaces the old preview category fields with answer, detail, and
-  ordered attempts under the existing version-1 additive/breaking policy documented for that
-  command. The command reference must state the exact compatibility consequence before the PR is
-  ready.
+- `secret describe --output json` preserves the existing version-1 `category`, `source`,
+  `identifier`, `skipped_not_ready`, and `source_mappings[].would_attempt` meanings. It adds one
+  optional nested preview object containing answer, detail, and ordered attempts. The command
+  reference documents the legacy compatibility projection and new null rules before the PR is ready.
 
 ## Rollback
 
@@ -181,6 +199,9 @@ starts from the rewritten contract.
 | Missing TTY is mistaken for refusal or absence                    | dedicated closed detail and cross-product tests                                  |
 | Later source hides earlier uncertainty                            | precedence-aware aggregation tests with earlier `maybe`                          |
 | Preflight starts disruptive work                                  | fixed zero-impact intent and no certainty override                               |
+| Repeated references repeat provider reads during preflight        | lazy command-scoped memo with node-order tests                                   |
+| Client setup runs before learning authority                       | pass exact intent into factory; entry/provider call observation tests            |
+| Removing static flags weakens complete-batch doom                 | no-impact closure and viability check before every `ALLOW` source turn           |
 | Ordinary non-TTY command hangs on prompt                          | terminal fact checked before broker/read, no broker without TTY                  |
 | Ordinary non-TTY command wrongly blocks app approval              | impact derived from global mode, not TTY                                         |
 | Source config promises too much biometric detection               | setting names app authentication as a whole and docs explain provider opacity    |
@@ -189,10 +210,12 @@ starts from the rewritten contract.
 
 ## Completion conditions
 
-- No production or test reference to `InteractionPolicy`, backend `interactive`, or `would_attempt`
-  remains except migration documentation.
+- No production or test reference to `InteractionPolicy`, backend `interactive`, client `prepare`,
+  or `would_attempt` remains except migration documentation and the derived JSON v1 compatibility
+  key.
 - The secret-backend descriptor and every registered backend declare `contract_version = 1`; no
   production secret-backend declaration retains `2`.
-- The public backend README contains a complete rewritten author example.
+- The secret-backend and general plugin-authoring READMEs contain the rewritten contract and a
+  complete author example.
 - Schema, completions, guide, and command-reference changes match observable behavior.
 - Full repository gates and the approved live-test charter pass before the PR becomes ready.

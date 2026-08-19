@@ -92,12 +92,18 @@ The operation-bounded `SecretSourceClient` gains one batch `preview` method. It 
 requests, the exact operator-impact allowance, terminal availability, and the shrinking source-turn
 budget. It returns one closed result per request and no other payload.
 
+Core passes the same exact impact and terminal fact into `create_client` before backend factory or
+context-entry code can run. Construction remains resource-free, context entry is provider-I/O-free,
+and the selected method owns provider work. The old `prepare` hook is removed because every in-tree
+implementation currently makes it a no-op. This leaves no pre-policy setup phase and one typed
+result surface per operation.
+
 Backends share their private acquisition path between preview and resolve:
 
 - preview acquires and validates enough to answer, constructs a value-free result, and discards any
   value before returning;
-- resolution acquires through the same provider logic and returns the value through the private
-  resolution batch;
+- resolution acquires through the same provider logic and returns either one redacted value-bearing
+  block or one closed value-free block per request through the private resolution batch;
 - native text is classified inside the backend for both paths.
 
 At `OperatorImpact.ALLOW`, runtime contract enforcement rejects `maybe` as a backend protocol
@@ -106,9 +112,11 @@ violation. Expected inability is represented as typed `no`, not raised as an opa
 ### Chain aggregation
 
 Core walks ready, active sources in precedence order. Static non-candidates and soft negative
-answers fall through. Hard provider failures stop the known path. An earlier `maybe` remains
-load-bearing because that source might win or fail before a later source is reached; a later answer
-must not erase it.
+answers fall through. Operator-impact and missing-TTY blocks also fall through, while hard provider,
+timeout, malformed-value, protocol, and unexpected failures stop the known path. An earlier `maybe`
+remains load-bearing because that source might win or fail before a later source is reached; a later
+answer must not erase it. The preview-contract LLD defines the exhaustive detail-to-flow table for
+both preview and actual resolution.
 
 At maximum impact no backend can return `maybe`, so aggregation is definitive. At zero impact,
 aggregation returns:
@@ -119,6 +127,19 @@ aggregation returns:
 
 The aggregate retains ordered per-source attempts so human and JSON surfaces can explain the answer
 without provider prose.
+
+Operation preflight memoizes previews once per secret and command. It populates the memo lazily in
+node order, so duplicate references cannot repeat provider work while the established first-failing
+node order remains unchanged. Actual resolution never reuses a preview result.
+
+Complete actual resolution under caller authority `ALLOW` preserves batch doom through iterative
+backend-owned gating. Core closes every reachable actual-resolution path at `NONE` and stops each
+unresolved secret at its first impact block. If the batch remains viable, it runs exactly one
+source-batched `ALLOW` turn, advances that turn's fallthrough frontiers at `NONE`, and checks
+viability again before another `ALLOW` turn. A known failure therefore dooms pending secrets before
+every later operator-impacting action. Values acquired at `NONE` remain in the private resolution
+batch; no preview result is promoted to authority. Caller impact `NONE` and partial resolution use
+one pass at their exact impact.
 
 ### Core diagnostics
 
@@ -182,6 +203,8 @@ the backend, and converts native failure text to closed details.
 - Provider stdout and stderr remain backend-local. Native exceptions do not cross the boundary.
 - Backend code receives operator impact explicitly and receives no prompt broker when actual prompt
   authority or terminal capability is absent.
+- Backend factory and context entry receive that intent before they run; provider and prompt work is
+  confined to the selected client method.
 - Per-source config may classify only that backend's known actions. It does not rewrite core answer
   semantics or TTY facts.
 - Preview results and representations are sentinel-tested for value leakage.

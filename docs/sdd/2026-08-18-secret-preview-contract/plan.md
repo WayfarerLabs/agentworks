@@ -67,40 +67,32 @@
 | R10          | operator-surfaces LLD caller table                   | phases 3 and 5 caller and exit-status tests            |
 | R11          | operator-surfaces LLD policy derivation              | phase 4 CLI-root and propagation sweep                 |
 | R12          | HLA and preview LLD chain aggregation                | phase 3 precedence matrix                              |
-| R13          | migration strategy atomic rewrite                    | phases 1 and 2 conformance and residual sweeps         |
+| R13          | migration strategy atomic rewrite                    | phases 2 and 3 conformance and residual sweeps         |
 | R14          | operator-surfaces LLD human and JSON contracts       | phases 5 and 6 structured-output checks                |
 | R15          | operator-surfaces LLD permanent collateral inventory | phase 5 docs, schema, and completion gates             |
 
-## Phase 1: Rewritten contract foundation
+## Phase 1: Contract types and validation scaffolding
 
 - [ ] Add `OperatorImpact`, exact validation, `TerminalAvailability`, lookup-description, preview
       answer/detail, backend preview, and aggregate attempt types.
-- [ ] Add constructor invariants, safe representations, and exhaustive closed-detail rules.
-- [ ] Extend the source-client protocol with impact-aware prepare, preview, and resolution methods.
-- [ ] Remove backend-selected remediation from the client failure contract and derive existing
-      resolution remediation in core.
-- [ ] Update the `SecretBackend` ABC, descriptor, and all implementations atomically, resetting the
-      exact secret-backend contract sentinel from `2` to `1` while removing `interactive` and
-      `would_attempt`.
-- [ ] Update registration and runtime conformance checks for method shapes, exact result maps, legal
-      answer/detail pairs, and the maximum-impact no-`maybe` guarantee.
-- [ ] Update root exports and the permanent backend-authoring README with a complete rewritten
-      example.
+- [ ] Add the redacted value-bearing actual-resolution block and closed value-free block.
+- [ ] Add constructor invariants, exact-map validators, safe representations, exhaustive
+      detail-to-flow rules, and maximum-impact no-`maybe` enforcement.
+- [ ] Add focused tests for adversarial values, provider text, malformed maps, illegal detail
+      combinations, partial values, and safe representations without changing the live descriptor.
 
 ### Phase 1 definition of done
 
-- Every in-tree backend implements the final contract without a core-side value-returning preview
-  adapter.
-- Invalid plugin shapes and invalid runtime preview results fail closed with value-free diagnostics.
-- Contract tests include adversarial values, provider text, malformed maps, and maximum-impact
-  `maybe` rejection.
+- The final closed types and validators can be exercised independently of a backend.
+- Invalid result shapes fail closed before any value can be copied or rendered.
+- The existing version-2 descriptor remains the sole runtime contract until the atomic cutover.
 
 ## Phase 2: Backend vertical slices
 
 - [ ] Refactor env-var acquisition so preview validates and discards locally while resolution uses
-      the same private path.
+      the same private path, behind the current runtime contract.
 - [ ] Implement prompt terminal-first preview and resolution behavior; prove no broker call or stdin
-      read occurs without both authority and TTY.
+      read occurs without both authority and terminal capability.
 - [ ] Add the OnePassword app-authentication impact config and generated schema representation.
 - [ ] Infer known unattended OnePassword modes where provider facts make that safe; apply the
       conservative source setting otherwise.
@@ -108,24 +100,40 @@
       validation, and native-failure classification while returning different boundary types.
 - [ ] Add fake-provider tests for success, hard mapping, auth, connectivity, external failure,
       timeout, interruption, source config, and sentinel containment.
+- [ ] Prove factory construction and context entry perform no provider or broker work before the
+      selected method receives the exact impact and terminal facts.
 
 ### Phase 2 definition of done
 
-- All three in-tree backends return their best permitted preview answer and never return `maybe` at
-  maximum impact.
-- OnePassword runs from a non-TTY process when impact permits it, while prompt never reads without a
-  TTY.
+- All three in-tree backends have private acquisition and final-result seams ready for one atomic
+  contract cutover, while legacy public methods still drive runtime.
+- Focused final-seam tests prove OnePassword can run from a non-TTY process when impact permits it,
+  while prompt never reads without a TTY.
 - Preview and resolution parity tests cover every shared provider classification.
 
-## Phase 3: Core preview and preflight
+## Phase 3: Atomic contract cutover and core orchestration
 
+- [ ] Remove the no-op client `prepare` method and extend `create_client`, `preview`, and `resolve`
+      with exact impact and terminal inputs before any backend lifecycle hook runs.
+- [ ] Update the `SecretBackend` ABC, descriptor, root exports, and all implementations atomically,
+      resetting the exact secret-backend contract sentinel from `2` to `1` while removing
+      `interactive` and `would_attempt`.
+- [ ] Remove backend-selected failure/remediation exceptions, return exact resolution blocks, and
+      derive existing resolution categories and remediation in core.
+- [ ] Update registration and runtime conformance for method shapes, exact result maps, legal
+      answer/detail pairs, construction/entry authority, and maximum-impact no-`maybe` behavior.
+- [ ] Update both backend-authoring READMEs with a complete rewritten example and conformance rules.
 - [ ] Replace `_lookup_projection` and `would_attempt` use with structured static lookup
       descriptions.
 - [ ] Implement operation-bounded batch preview over active sources with the existing source-turn
       budget and cleanup discipline.
-- [ ] Implement precedence-aware tri-state aggregation and ordered attempt retention.
+- [ ] Implement precedence-aware tri-state aggregation, exact preview and actual-resolution
+      fallthrough, hard-stop behavior, ordered attempt retention, and iterative no-impact closure
+      plus before-every-`ALLOW` complete-batch doom checks.
 - [ ] Make preflight preview impact fixed at `NONE`, accept `yes` and `maybe`, and reject definitive
       `no` with structured context.
+- [ ] Add a lazy command-scoped preflight memo keyed by secret name and prove repeated references
+      cause one preview without changing first-failing node or reference order.
 - [ ] Prove actual value-bearing resolution still completes before each command's first external
       mutation even when preflight returned `maybe`.
 - [ ] Update doctor to consume non-disruptive preview and represent uncertainty without treating it
@@ -134,17 +142,18 @@
 ### Phase 3 definition of done
 
 - Earlier uncertainty cannot be hidden by later source success or failure.
+- Every in-tree backend implements the sole version-1 contract without a core-side value-returning
+  preview adapter or legacy runtime branch.
 - Missing mapping and definitively exhausted chains still fail preflight.
-- Preflight never authorizes operator impact and never substitutes for resolution.
+- Preflight never authorizes operator impact, repeats a secret probe, or substitutes for resolution.
 
-## Phase 4: Impact-aware actual resolution
+## Phase 4: Policy propagation and operation boundaries
 
 - [ ] Replace `InteractionPolicy` with exact `OperatorImpact` across production and test call sites,
       preserving early validation and explicit forwarding.
 - [ ] Derive ordinary CLI impact only from global `--non-interactive`, never TTY.
-- [ ] Remove core's static interactive-source skip and pass impact to source clients.
-- [ ] Add closed client block handling for operator-impact limits and missing terminal capability,
-      preserving source fallthrough and batch-doom behavior.
+- [ ] Remove every remaining static interactive-source skip and pass impact and terminal facts from
+      service roots to the cut-over source clients.
 - [ ] Construct prompt brokers only when impact and terminal capability permit; leave out-of-band
       backends independent of the broker.
 - [ ] Sweep all resolving commands and service entry points for exact policy propagation and
@@ -166,9 +175,11 @@
 - [ ] Reimplement `secret verify` on backend preview, preserving refusal-by-default, name
       deduplication, stable ordering, full-table rendering, and exit status.
 - [ ] Update `secret list` to use structured static mapping disposition without provider I/O.
-- [ ] Update `secret describe` JSON fields and the machine-output compatibility reference.
-- [ ] Update CLI README, secrets README, backend README, resources guide, relevant guide topics,
-      sample config, schema snapshots, and generated completions in lockstep.
+- [ ] Add the optional nested `secret describe` preview JSON projection while preserving every JSON
+      v1 field, type, enum meaning, and collection order; update the machine-output reference.
+- [ ] Update CLI README, secrets README, both backend and general plugin-authoring READMEs,
+      resources guide, relevant guide topics, sample config, schema snapshots, and generated
+      completions in lockstep.
 - [ ] Remove stale claims that preview is pure, doctor never performs a provider read, or TTY grants
       general interaction consent.
 

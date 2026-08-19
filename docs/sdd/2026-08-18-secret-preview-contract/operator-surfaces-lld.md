@@ -45,6 +45,15 @@ Its semantics change as follows:
 - A `maybe` does not claim resolution will work. The operation's later resolution pass remains
   mandatory and completes before the first consuming mutation.
 
+`preflight_all` owns one lazy command-scoped preview memo. Its key is the secret name because active
+sources, validated config, fixed `NONE` impact, and terminal availability are immutable for that
+command. Immediately before each node's preflight, core batches only that node's as-yet unseen
+secret names, stores the resulting value-free previews, then evaluates the node's references in
+their existing order. A repeated secret reuses its stored preview and cannot cause a second provider
+read, audit event, or timeout budget. Lazy population preserves the current node failure order and
+does not probe secrets belonging only to nodes that will never be reached. The later authoritative
+resolution never reuses preview data or a discarded value.
+
 This preserves preflight's current responsibility for missing mappings and definitively unavailable
 chains without forcing operator interaction just to predict a command.
 
@@ -57,12 +66,17 @@ static backend `interactive` flag.
 - `ALLOW` permits out-of-band provider approval even with no TTY.
 - `NONE` prevents a backend from starting an action it classifies as operator impact.
 - Prompt receives a broker only when `ALLOW` and terminal availability are both true.
-- A backend refusal or missing TTY becomes a typed value-free resolution outcome and may fall
-  through according to existing source semantics.
+- Operator-impact and missing-TTY blocks are typed, value-free outcomes and fall through to later
+  sources. Soft misses, static non-candidates, readiness failures, and disabled plugins also fall
+  through; provider, timeout, malformed-value, protocol, and unexpected failures hard-stop that
+  request. The preview-contract LLD's exhaustive table governs both paths.
 
 Complete resolution remains fail-before-mutation. The no-interaction doom check also remains: a
-known failure in another required secret prevents authorized operator-impact work that cannot make
-the batch complete.
+caller that authorizes `ALLOW` first drives actual resolution at `NONE` until each secret resolves,
+definitively fails, or stops at its first impact block. Core then permits one source-batched `ALLOW`
+turn, advances its fallthrough frontiers at `NONE`, and repeats the viability check before every
+later `ALLOW` turn. This is authoritative actual resolution, not preview reuse, and a failure
+learned from one authorized turn prevents operator work at every still-pending source.
 
 ## `agw secret describe`
 
@@ -160,31 +174,43 @@ cause instead of suggesting a nonexistent local flag.
 
 ## JSON contract
 
-`secret describe --output json` keeps envelope schema version 1 and changes its value-free
-resolution object in the same release as the implementation. The proposed shape is:
+`secret describe --output json` keeps envelope schema version 1, so every existing field retains its
+meaning and type. `source_mappings[].would_attempt` remains as a compatibility projection and is
+derived from `LookupDisposition.CANDIDATE`; it does not keep the removed backend method alive. The
+existing `resolution.category`, `source`, `identifier`, and `skipped_not_ready` fields remain the
+same static readiness-and-applicability projection. A new optional `preview` member carries the
+provider-aware result:
 
 ```json
 {
   "resolution": {
-    "answer": "maybe",
+    "category": "attemptable",
     "source": "personal-op",
     "identifier": "op://vault/item/field",
-    "detail": "operator-impact-limited",
-    "attempts": [
-      {
-        "source": "personal-op",
-        "identifier": "op://vault/item/field",
-        "answer": "maybe",
-        "detail": "operator-impact-limited"
-      }
-    ]
+    "skipped_not_ready": [],
+    "preview": {
+      "answer": "maybe",
+      "source": "personal-op",
+      "identifier": "op://vault/item/field",
+      "detail": "operator-impact-limited",
+      "attempts": [
+        {
+          "source": "personal-op",
+          "identifier": "op://vault/item/field",
+          "answer": "maybe",
+          "detail": "operator-impact-limited"
+        }
+      ]
+    }
   }
 }
 ```
 
-No value, backend message, native error, or generic metadata is added. `source` and `identifier`
-identify the selected or limiting attempt and may be null when the chain has none. Attempts retain
-active-source order. The machine-output reference documents compatibility and exact null rules.
+No value, backend message, native error, or generic metadata is added. Within `preview`, `source`
+and `identifier` identify the selected or limiting attempt and may be null when the chain has none.
+Attempts retain active-source order. The machine-output reference documents both the legacy
+projection and new exact null rules. Consumers that know only JSON v1 continue to read the old
+fields unchanged and ignore the optional member.
 
 ## Completion and command grammar
 
@@ -199,6 +225,7 @@ active-source order. The machine-output reference documents compatibility and ex
 Implementation updates, in the same PR:
 
 - `cli/agentworks/capabilities/secret_backend/README.md` for the rewritten contract;
+- `cli/agentworks/plugins/README.md` for general plugin conformance and the rewritten method set;
 - `cli/agentworks/secrets/README.md` for impact, preview, and resolution behavior;
 - `cli/README.md`, `docs/guides/resources.md`, and relevant guide topics;
 - CLI command reference and machine-output reference;
