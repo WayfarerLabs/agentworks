@@ -443,7 +443,7 @@ tracked by the open boxes below until each has a delivered recipient-side artifa
 
 ### Child SDD (enabling wave 4): 2026-08-19-instance-model
 
-- [x] Seeded (FRD, 2026-08-19, this seed PR; operator direction 2026-08-19 combining the database
+- [x] Seeded (FRD, PR #621, 2026-08-19; operator direction 2026-08-19 combining the database
       evaluation with a light repository layer, instance applied-state, CLI instance-spec overlays,
       and resolved-spec surfaces into one phased push). The store contract is the wave-4
       applied-state dependency; the resolved-spec surfaces discharge the routed effective-spec field
