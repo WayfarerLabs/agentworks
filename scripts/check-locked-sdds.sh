@@ -3,13 +3,13 @@
 # ============================================================================
 # check-locked-sdds.sh: enforce SDD lockfile immutability.
 #
-# Per the `sdd` skill, once an SDD's `locked.md` lands on `main` the feature
+# Per the `sdd` skill, once an SDD's `locked.md` lands on `main` the spec
 # directory is locked: its artifacts must not be added to or modified. The two
 # carve-outs the skill allows are enforced here:
 #
 #   1. `locked.md` itself may be modified (to record a dated post-lock update).
 #   2. The whole SDD may be deleted down to a tombstone: every artifact under
-#      the feature dir is removed, leaving only `locked.md` behind. A *partial*
+#      the spec dir is removed, leaving only `locked.md` behind. A *partial*
 #      deletion (removing some artifacts but keeping others) is NOT allowed.
 #
 # The lock takes effect only when `locked.md` is present at the comparison base
@@ -101,9 +101,9 @@ MERGE_BASE=$(git merge-base "$BASE" HEAD) || {
 # but this keeps the diff and ls-tree outputs consistent regardless).
 GIT=(git -c core.quotepath=false)
 
-# --- Collect changed SDD feature directories ---
+# --- Collect changed SDD spec directories ---
 
-# Feature dirs are docs/sdd/<dir>/... ; a bare docs/sdd/<file> has no feature
+# Spec dirs are docs/sdd/<dir>/... ; a bare docs/sdd/<file> has no spec
 # dir and is ignored (the sed only prints paths with a component after <dir>).
 # Read into an array with a while-loop rather than `mapfile` so the script
 # runs on bash 3.2 (stock macOS) as well as the bash 5 CI uses.
@@ -121,7 +121,7 @@ if [[ ${#changed_dirs[@]} -eq 0 ]]; then
     exit 0
 fi
 
-# --- Evaluate each changed feature directory ---
+# --- Evaluate each changed spec directory ---
 
 VIOLATIONS=""
 add_violation() {
@@ -177,7 +177,7 @@ for dir in "${changed_dirs[@]}"; do
             [[ -z "$base_file" ]] && continue
             [[ "$base_file" == "$dir/$LOCKFILE" ]] && continue
             if ! grep -Fxq "$base_file" <<<"$deleted_nonlock"; then
-                add_violation "$dir: partial deletion of a locked SDD. Delete the entire feature directory (keeping $LOCKFILE) or nothing; '$base_file' is still present."
+                add_violation "$dir: partial deletion of a locked SDD. Delete the entire spec directory (keeping $LOCKFILE) or nothing; '$base_file' is still present."
             fi
         done < <("${GIT[@]}" ls-tree -r --name-only "$MERGE_BASE" -- "$dir/")
     fi
