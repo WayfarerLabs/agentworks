@@ -1,12 +1,14 @@
 # Current State
 
 - Snapshot date: 2026-08-19, post-0.14.0 (update at wave boundaries)
-- Baseline: Agentworks 0.14.0, released 2026-08-18 and live on PyPI (see `phasing.md`'s release map
-  for the cut's trail). The release carries everything the previous baseline enumerated (the phase 1
-  TOML sunset, the 0.14 expired-compat removals, declarative-schema phase 2 through the descriptor,
-  the guide through its grammar-native shape, wave 3 secret sources, the operational JSON output
-  contract, the assistance flow with the README bootstrap) plus the CLI grammar rewrite, the
-  resource-show child, and the 0.14.0 field-evidence fixes (PRs #604 through #607, post-release)
+- Baseline: released Agentworks 0.14.0 (2026-08-18, live on PyPI; see `phasing.md`'s release map for
+  the cut's trail) plus post-release `main`. The release itself carries everything the previous
+  baseline enumerated (the phase 1 TOML sunset, the 0.14 expired-compat removals, declarative-schema
+  phase 2 through the descriptor, the guide through its grammar-native shape, wave 3 secret sources,
+  the operational JSON output contract, the assistance flow with the README bootstrap) plus the CLI
+  grammar rewrite and the resource-show child. The 0.14.0 field-evidence fixes (PRs #604 through
+  #607) merged after the tag and are on `main` only: an installed 0.14.0 does not have them, and
+  they ship with the next release
 
 This document records where the system actually is, verified by code reconnaissance rather than
 assumed from the perspectives. It is the ground truth the phasing rests on; when a wave lands,
