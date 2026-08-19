@@ -1,11 +1,12 @@
 # Current State
 
-- Snapshot date: 2026-08-13, post-assistance (update at wave boundaries)
-- Baseline: Agentworks 0.13.0 plus the phase 1 TOML sunset (PR #316), the 0.14 expired-compat
-  removals (PR #406), declarative-schema phase 2 through the descriptor (PR #414), the onboarding
-  guide first slice (PR #428), wave 3 secret sources (PR #453), the operational JSON output contract
-  (PR #462), and the always-available assistance flow with the README bootstrap (PR #480); the
-  0.14.0 release itself is pending per the `phasing.md` release mapping
+- Snapshot date: 2026-08-19, post-0.14.0 (update at wave boundaries)
+- Baseline: Agentworks 0.14.0, released 2026-08-18 and live on PyPI (see `phasing.md`'s release map
+  for the cut's trail). The release carries everything the previous baseline enumerated (the phase 1
+  TOML sunset, the 0.14 expired-compat removals, declarative-schema phase 2 through the descriptor,
+  the guide through its grammar-native shape, wave 3 secret sources, the operational JSON output
+  contract, the assistance flow with the README bootstrap) plus the CLI grammar rewrite, the
+  resource-show child, and the 0.14.0 field-evidence fixes (PRs #604 through #607, post-release)
 
 This document records where the system actually is, verified by code reconnaissance rather than
 assumed from the perspectives. It is the ground truth the phasing rests on; when a wave lands,
@@ -63,9 +64,9 @@ and hint carry identical text in both formats, so JSON inherits the human transc
 non-migrating by authorized behavior: a scalar schema gate plus `Database(read_only=True)` behind a
 12-line local context manager, failing closed on malformed schema state. Guide actions consume
 doctor JSON directly. The assistance phase shipped with PR #480 (2026-08-13), including the
-generated README bootstrap block, which pins version 0.14.0 or newer and so resolves for operators
-when the release ships. Remaining onboarding phases (wave 2 adoption, closeout) proceed per that
-effort's per-phase PR plan.
+generated README bootstrap block, which pins version 0.14.0 or newer and resolves against the
+released 0.14.0. Remaining onboarding phases (wave 2 adoption, closeout) proceed per that effort's
+per-phase PR plan.
 
 ## Deprecation removal targets
 

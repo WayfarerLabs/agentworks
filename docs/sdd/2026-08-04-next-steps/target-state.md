@@ -289,13 +289,16 @@ requirements, timeouts and cleanup, and bounded-lifetime source clients. The sim
 get more verbose.
 
 **Non-TTY secret resolution (open problem, 2026-08-18, from the onboarding-run field evidence):** an
-operator-approved secret source is unusable from a non-TTY context, which pushes agents toward the
-plaintext environment-export bypass the named-secret system exists to prevent. Two solution attempts
-(a generalized `--allow-interaction` flag, then an interaction-channel split shipped as PR #608)
-were abandoned unmerged by operator direction; the problem restarts from its statement alone in
-`task-2026-08-18-non-tty-secret-resolution.md`, with no solution shape carried over. The restart
-runs as a new child SDD adopted into this saga (operator direction, 2026-08-19), seeded by that
-problem statement.
+operator-approved, ready secret source is unreachable from a non-TTY caller: the field run's agent
+could not resolve through the configured 1Password source and completed the run by resolving the
+value itself with `op read` and handing it in through the env-var source, routing around the
+configured source and its approval flow. (The env-var source itself is a supported named-secret
+workflow per ADR 0013; the problem is the unreachable configured source, not the mechanism the
+workaround used.) Two solution attempts (a generalized `--allow-interaction` flag, then an
+interaction-channel split attempted as PR #608) were abandoned unmerged by operator direction; the
+problem restarts from its statement alone in `task-2026-08-18-non-tty-secret-resolution.md`, with no
+solution shape carried over. The restart runs as a new child SDD adopted into this saga (operator
+direction, 2026-08-19), seeded by that problem statement.
 
 **Workload-gated config issues (operator ruling, 2026-08-18, same evidence):** config problems are
 classified by the fact, not by the commands that tolerate them. A workload-gated issue is one that

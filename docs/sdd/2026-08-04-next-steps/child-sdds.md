@@ -385,7 +385,8 @@ Two unsolicited field reports from assistant agents on the operator's workstatio
 the message channel and merged as `message-2026-08-18-agentic-onboarding-run.md` (PR #601, a full
 plan-A onboarding run to a running session) and `message-2026-08-18-guide-tire-kick.md` (PR #602, an
 adversarial pass at the guide surface on Windows). The saga lead triaged both at the operator's
-direction; every actionable finding was dispatched the same day.
+direction; the fixable findings were dispatched as PRs the same day, and the rest are routing items
+tracked by the open boxes below until each has a delivered recipient-side artifact.
 
 - [x] Fixes dispatched as PRs: #604 (missing SSH key files become a workload-gated config issue;
       nine read-only and diagnostic commands tolerate them, doctor now reaches its own key checks),
@@ -406,17 +407,19 @@ direction; every actionable finding was dispatched the same day.
       SDD seeds
 - [x] Issue #603 filed: move SSH key-file existence from config-load to use time; the workload-gated
       parameter is the bridge and retires when that lands
-- [x] Fix rounds closed (2026-08-19): every lane finding on the dispatched PRs was answered at exact
-      heads. #607 merged (its final round reshaped the timeout guidance into a closed core-owned
-      identifier after the tester proved hostile backend text could reach rendered output; backends
-      now select prose, never author it). #604 grew to ten commands when the tester found
-      `resource edit` still walled (the fix-it path, broken in exactly the fresh-init state). #605
-      gained two rounds on the raw session-log boundary: verbatim UTF-8 bytes (no legacy-codepage
-      aliasing) and a shared write-until-done contract (no silent truncation on non-blocking pipes).
-      #606 made the index disclosure load-bearing (a structural test validating the disclosed
-      address against the live CLI spec and the real version parser) and the LLD staleness flag
-      became an operator-directed message to the onboarding lead, PR #614. With that, the intake's
-      only outstanding substantive item is non-TTY secret resolution
+- [x] Fix rounds closed and all four fix PRs merged (2026-08-19): every lane finding on the
+      dispatched PRs was answered at exact heads. #607 merged (its final round reshaped the timeout
+      guidance into a closed core-owned identifier after the tester proved hostile backend text
+      could reach rendered output; backends now select prose, never author it). #604 grew to ten
+      commands when the tester found `resource edit` still walled (the fix-it path, broken in
+      exactly the fresh-init state). #605 gained two rounds on the raw session-log boundary:
+      verbatim UTF-8 bytes (no legacy-codepage aliasing) and a shared write-until-done contract (no
+      silent truncation on non-blocking pipes). #606 made the index disclosure load-bearing (a
+      structural test validating the disclosed address against the live CLI spec and the real
+      version parser) and the LLD staleness flag became an operator-directed message to the
+      onboarding lead, PR #614. With that, the intake's only outstanding fix-class item is non-TTY
+      secret resolution; the routing boxes below stay open until each has a delivered recipient-side
+      artifact
 - [ ] Routed to the wave-2 discovery surfaces: an agent cannot state a mutation's infrastructure
       effect before making it (effective spec after `inherits` composition and platform defaults
       appears in no CLI surface; first revealed by provisioning). Pairs with schema emission;
@@ -431,8 +434,9 @@ direction; every actionable finding was dispatched the same day.
 - [ ] Flagged to the onboarding lead (ownership): `guide-contract-lld.md` still says release
       evidence is "escaped inert evidence" and lists only `CLAUDECODE=1` in mode precedence; both
       went stale with #606 and the signature verdict. Escalated to an operator-directed message (PR
-      #614) after the tester found the stale contract could cause a later round to restore the
-      escaping; checks off when the onboarding lead records the fence-containment contract
+      #614, merged 2026-08-19, so the direction is delivered) after the tester found the stale
+      contract could cause a later round to restore the escaping; checks off when the onboarding
+      lead records the fence-containment contract
 - [ ] Small follow-ups, unowned: `vm list` still uses the legacy hand-rolled table layout with the
       same overrun class #607 fixed for `agent list`; transport decode replaces truly malformed
       remote bytes before the session-log boundary (pre-existing, narrower than the fidelity fix)
