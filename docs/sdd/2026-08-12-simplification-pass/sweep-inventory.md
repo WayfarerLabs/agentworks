@@ -7,7 +7,8 @@ thing the pass exists to remove. Where a keep row's justification is durable, it
 site, not here. Nothing else in the repository should link to this file.
 
 It is step one of the sweep work item in [plan.md](plan.md). It decides nothing else: no deletion
-lands with it. The deletions follow as the six PRs the groups below are cut for.
+lands with it. The deletions follow as the PRs the groups below are cut for: nine when the map
+settled, eight after the 2026-08-19 re-baseline emptied group 2.
 
 ## Basis
 
@@ -125,27 +126,37 @@ no-judgment mechanical change into the same review as the sweep's riskiest delet
 
 ## Totals
 
-**1,152 rows: 563 delete, 225 convert, 364 keep**, plus 25 rows held for R4 in the deferred block
-below, which are not part of the executable set.
+Every number in this section was counted off the row markup at the re-baseline's final tree, not
+carried forward. Two figures matter and they are different: the LEDGER is every row this map has
+ever held, and the EXECUTABLE SET is what a restart of the sweep actually owns after the dead rows
+and the re-scope subtraction come out.
 
-The only site count derived exactly is group 1's, because it was scanned mechanically rather than
-read: 663 `match=` sites under `cli/tests` and 51 `assertRaisesRegex` sites under `website/tests`,
-714 in all. The other groups were read rather than scanned, and one row there covers an assertion
-group of one to a dozen lines, so no site total is claimed for them. Do not add these numbers to the
-absorbed survey's: that survey counted test FUNCTIONS.
+**Executable set: 984 rows, 478 delete, 191 convert, 315 keep**, over five groups. Group 2 has none
+left.
 
-| Group                                            | Rows | delete | convert | keep |
-| ------------------------------------------------ | ---: | -----: | ------: | ---: |
-| 1. Mechanical `match=` narrowing                 |  204 |    168 |       3 |   33 |
-| 2. Guide and migration topics                    |   50 |     33 |       3 |   14 |
-| 3. Report lines and hints (four sub-batches)     |  372 |    175 |     103 |   94 |
-| 4. Schema, manifests, capabilities and platforms |  250 |     57 |      91 |  102 |
-| 5. Authored-artifact form policing               |  213 |    105 |      13 |   95 |
-| 6. Source guards                                 |   63 |     25 |      12 |   26 |
+**Ledger: 1,192 rows**, which is the executable 984 plus 67 `[dead]`, 116 `[subtracted]`, and 25
+held for R4 in the deferred block.
+
+| Group                                            | Live | delete | convert | keep | Dead | Subtracted | Ledger |
+| ------------------------------------------------ | ---: | -----: | ------: | ---: | ---: | ---------: | -----: |
+| 1. Mechanical `match=` narrowing                 |  182 |    148 |       7 |   27 |    2 |         24 |    208 |
+| 2. Guide and migration topics                    |    0 |      0 |       0 |    0 |   50 |          0 |     50 |
+| 3. Report lines and hints (four sub-batches)     |  322 |    158 |      88 |   76 |    1 |         59 |    382 |
+| 4. Schema, manifests, capabilities and platforms |  228 |     52 |      81 |   95 |    6 |         16 |    250 |
+| 5. Authored-artifact form policing               |  200 |     95 |      11 |   94 |    7 |          7 |    214 |
+| 6. Source guards                                 |   52 |     25 |       4 |   23 |    1 |         10 |     63 |
+| Deferred (held for R4, not executable)           |   25 |     23 |       2 |    0 |    0 |          0 |     25 |
+
+Group 1's site counts are derived exactly, because that estate is scanned rather than read: 664
+`match=` sites under `cli/tests` at HEAD, all of them claimed by a group-1 row, and 37 of the
+suite's 49 `assertRaisesRegex` sites under `website/tests` (the other twelve are
+`test_site_templates.py`'s, held for R4 as L-402). The other groups were read rather than scanned,
+and one row there covers an assertion group of one to a dozen lines, so no site total is claimed for
+them. Do not add these numbers to the absorbed survey's: that survey counted test FUNCTIONS.
 
 One row is one test or one contiguous assertion group, so a file that mixes wholly-policing tests
 with prose assertions riding inside legitimate ones appears several times. Group 1's mechanical
-batch is the one exception and says so where it starts: those 153 rows are one per FILE, because 557
+batch is the one exception and says so where it starts: those 152 rows are one per FILE, because 551
 sites there share a single shape, a single disposition, and a single justification.
 
 This file is long for the repository's 500-line guidance, deliberately. It is a ledger, it is
@@ -308,7 +319,7 @@ nothing to hand over.
 
 | Group    | Subtracted | To secrets-preview | To instance-model | Live rows left |
 | -------- | ---------: | -----------------: | ----------------: | -------------: |
-| Group 1  |         24 |                 15 |                 9 |            179 |
+| Group 1  |         24 |                 15 |                 9 |            182 |
 | Group 2  |          0 |                  0 |                 0 |              0 |
 | Group 3  |         59 |                 28 |                31 |            322 |
 | Group 4  |         16 |                 14 |                 2 |            228 |
@@ -390,11 +401,16 @@ needs re-cutting for the restart, which is a sequencing decision and not this ma
 
 ## Group 1: mechanical `match=` narrowing
 
-204 rows: 168 delete, 3 convert, 33 keep. The group splits in three. The 28 rows immediately below
-are the sites the taxonomy does NOT decide mechanically; the 23 `G1-K` rows after them are the sites
-whose matched text varies with the test's input; the 153 rows in the mechanical batch last are one
-per file and share one justification. A reviewer who reads the first two tables has read all the
-judgment in this PR.
+182 live rows: 148 delete, 7 convert, 27 keep, out of a ledger of 208 (two `[dead]`, 24
+`[subtracted]`). The group splits in three. The 33 rows immediately below are the sites the taxonomy
+does NOT decide mechanically; the 23 `G1-K` rows after them are the sites whose matched text varies
+with the test's input; the 152 rows in the mechanical batch last are one per file and share one
+justification. A reviewer who reads the first two tables has read all the judgment in this PR.
+
+**This group is no longer the no-judgment batch its name promises.** The callee-side raise screen
+found that four in five of the sites it can resolve are multi-raise-path, so the mechanical batch's
+deletions rest on `hla.md` case 2's fallback rather than its case 1. The edit is the same and the
+review is not.
 
 **Corrected 2026-08-16, during execution.** The re-check that produced the `G1-K` rows found 30
 input-varying sites. There are 43, plus two of the same shape in unittest's spelling. It had missed
@@ -446,9 +462,9 @@ way rather than asserted from reading.
 
 ### Sites the re-check pulled out of the mechanical batch
 
-43 of the 600 `match=` sites this section ranges over match a string that VARIES with the test's
+43 of the 594 `match=` sites this section ranges over match a string that VARIES with the test's
 input (an f-string over a field name, a parametrize variable, an interpolated production constant).
-Those probe that the diagnostic tracks the input, which is behavior, so they keep. The remaining 557
+Those probe that the diagnostic tracks the input, which is behavior, so they keep. The remaining 551
 match a fixed literal in a single-input test, where the only failure mode is a rewording. Two
 `assertRaisesRegex` sites of the same shape sit in L-403's range and keep with them, at G1-K23.
 
@@ -483,7 +499,7 @@ two `assertRaisesRegex` sites the second re-check added, as the group header exp
 
 ### The mechanical batch
 
-555 `match=` sites over 152 files, one row per file. Every one is `delete`, and the justification is
+551 `match=` sites over 152 files, one row per file. Every one is `delete`, and the justification is
 shared rather than restated 152 times: the matched string is a fixed literal that varies with
 nothing, and it is prose this repository authors, which no case in the taxonomy licenses. The
 `raises` stays; only the `match=` argument goes.
@@ -659,7 +675,10 @@ executor owes it the screen per row before the edit lands.
 
 ## Group 2: guide and migration topics
 
-50 rows: 33 delete, 3 convert, 14 keep.
+0 live rows, out of a ledger of 50: every row in this group is `[dead]`, because `4ac084cd` deleted
+the whole guide-test estate it was written against. **There is no group 2 PR to cut.** The rows stay
+for the R4 reassessment to audit, and the six guide test files that replaced the deleted ones carry
+no in-scope site; see the completeness re-scan.
 
 | id    | file:line                                             | shape                                                                        | disposition | justification                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | ----- | ----------------------------------------------------- | ---------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -716,17 +735,25 @@ executor owes it the screen per row before the edit lands.
 
 ## Group 3: report lines and hints
 
-372 rows: 175 delete, 103 convert, 94 keep. **This group lands as four PRs, not one** (effort lead,
-2026-08-16): 378 rows is too much for one review round, and the batch is the judgment-heavy one, so
-the cut is by subsystem INSIDE the single shape. That keeps the kind of judgment uniform within a
-round while making each round readable. Rows carry their file path, which is what assigns them.
+322 live rows: 158 delete, 88 convert, 76 keep, out of a ledger of 382 (one `[dead]`, 59
+`[subtracted]`). **This group lands as four PRs, not one** (effort lead, 2026-08-16): it is too much
+for one review round and it is the judgment-heavy batch, so the cut is by subsystem INSIDE the
+single shape. That keeps the kind of judgment uniform within a round while making each round
+readable. Rows carry their file path, which is what assigns them.
 
-| Sub-batch | Scope                                                                                                                                                                                                             | Rows | delete | convert | keep |
-| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---: | -----: | ------: | ---: |
-| 3a        | Consoles, sessions and secrets (`sessions/`, `secrets/`, `transports/`, the `test_consoles_*`, `test_session*`, `test_secret*`, `test_tmux*`, harness-integration roots)                                          |   90 |     50 |      14 |   26 |
-| 3b        | VMs and platforms (`vms/`, `plugins/`, the `test_aws_*`, `test_azure_*`, `test_wsl2_*`, `test_vm_*`, bootstrap and cloud-init roots)                                                                              |  125 |     99 |      16 |   10 |
-| 3c        | Workspaces and agents (`workspaces/`, `agents/`, `test_agents.py`)                                                                                                                                                |   25 |     16 |       7 |    2 |
-| 3d        | Database, doctor, git credentials and the core CLI surfaces (50 files, the largest being `test_database_migration_safety.py`, `test_git_credential_scoping.py`, `test_error_wrapper.py`, the four `test_doctor*`) |  138 |     60 |      33 |   45 |
+**Corrected 2026-08-19 (map re-baseline).** The sub-batch table below never reconciled with the
+group: it summed to 378 rows against a stated 372, and its per-disposition columns summed to 225
+deletes where the group holds 158. Sub-batch membership is now DERIVED from each row's file path
+rather than tallied by hand, on the stated scopes below, so the four rows sum to the group by
+construction. Both a live and a ledger column are given, because the re-scope subtraction lands
+almost entirely in 3a and 3d.
+
+| Sub-batch | Scope                                                                                                                                                                                                                                                                                           | Live | delete | convert | keep | Ledger |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---: | -----: | ------: | ---: | -----: |
+| 3a        | Consoles, sessions and secrets: `cli/tests/sessions/`, `cli/tests/secrets/`, `cli/tests/transports/`, `orchestration/test_secrets.py`, and the `test_consoles_*`, `test_console_*`, `test_session*`, `test_secret*`, `test_tmux*`, `test_claude_code_*`, `test_codex_*` and `test_grok_*` roots |   71 |     36 |      20 |   15 |     94 |
+| 3b        | VMs and platforms: `cli/tests/vms/`, `cli/tests/plugins/`, and the `test_aws_*`, `test_azure_*`, `test_wsl2_*`, `test_vm_*`, `test_lima*`, `test_proxmox*`, bootstrap and cloud-init roots                                                                                                      |  121 |     77 |      32 |   12 |    121 |
+| 3c        | Workspaces and agents: `cli/tests/workspaces/`, `cli/tests/agents/`, `test_agents.py`                                                                                                                                                                                                           |   25 |     12 |       7 |    6 |     25 |
+| 3d        | Everything else in the group: database, doctor, git credentials and the core CLI surfaces                                                                                                                                                                                                       |  105 |     33 |      29 |   43 |    142 |
 
 3c is small enough to ride with 3a as one round if three PRs suits the review cadence better; the
 other three are each a full round on their own.
@@ -1118,7 +1145,8 @@ other three are each a full round on their own.
 
 ## Group 4: schema, manifests, capabilities and platforms
 
-250 rows: 57 delete, 91 convert, 102 keep.
+228 live rows: 52 delete, 81 convert, 95 keep, out of a ledger of 250 (six `[dead]`, 16
+`[subtracted]`).
 
 | id     | file:line                                                                                                                                                                                                                                                                                                                                        | shape                                                                              | disposition | justification                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1375,7 +1403,8 @@ other three are each a full round on their own.
 
 ## Group 5: authored-artifact form policing
 
-213 rows: 105 delete, 13 convert, 95 keep.
+200 live rows: 95 delete, 11 convert, 94 keep, out of a ledger of 214 (seven `[dead]`, seven
+`[subtracted]`).
 
 | id     | file:line                                                                                                                                | shape                                                                                    | disposition | justification                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ------ | ---------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1596,7 +1625,8 @@ other three are each a full round on their own.
 
 ## Group 6: source guards
 
-63 rows: 25 delete, 12 convert, 26 keep.
+52 live rows: 25 delete, 4 convert, 23 keep, out of a ledger of 63 (one `[dead]`, ten
+`[subtracted]`).
 
 | id     | file:line                                                           | shape                                                                                                                                   | disposition | justification                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | ------ | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -1682,42 +1712,50 @@ not change the deferral, which is why it was left for whoever takes W2.
 
 Two rows beyond the operator's 22 are held with them, and this is the lead's extension rather than
 the ruling: **F-030 and F-039 are converts**, and rewriting two tests in a file that R4 may delete
-wholesale is work R4 may discard. **L-402 is group 1's**, covering the 14 `assertRaisesRegex` sites
+wholesale is work R4 may discard. **L-402 is group 1's**, covering the 12 `assertRaisesRegex` sites
 in this same file; most of those regexes sit inside tests that are now deferred, so the row cannot
 be executed independently of them. Reverse either if you would rather they rode with their groups.
 
-| id    | file:line                                     | shape                                          | disposition | justification                                                                                                                                                                                                                                                                                                                                                                                                  |
-| ----- | --------------------------------------------- | ---------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| F-025 | website/tests/test_site_templates.py:7-11     | token-set pin (second copy)                    | delete      | Asserts each template's token set equals `site_validation.TEMPLATE_TOKENS`, a production constant. Verified by execution: a token with no substitution fails the build outright (`index.html: missing substitutions for required tokens: ['{{HOME_IDENTITY}}']`), so the agreement is enforced by building, not by this restatement.                                                                           |
-| F-026 | website/tests/test_site_templates.py:13-28    | mutate-one-string-assert-raises                | delete      | Six template mutations proving `_validate_template` rejects unknown, missing, duplicate, foreign, and brace-like tokens. The templates live in this tree and are validated on every build; this only proves the guard fires, and the guard's own half of `site_validation.py` is the deferred W2 deletion candidate.                                                                                           |
-| F-028 | website/tests/test_site_templates.py:42-71    | mutate-one-string-assert-raises                | delete      | Ten mutations moving content tokens into `<script>`, `<style>`, and containers nobody reviewed. Adversarial tampering with an in-tree template: anything that can make this edit can delete this test.                                                                                                                                                                                                         |
-| F-029 | website/tests/test_site_templates.py:73-97    | mutate-one-string-assert-raises                | delete      | Ten mutations renaming onboarding ids, classes, and the module src. Pins the template's spelling through the validator; the onboarding structure that matters is asserted on the built page (F-007, F-008).                                                                                                                                                                                                    |
-| F-030 | website/tests/test_site_templates.py:99-105   | mutate-one-string-assert-raises                | convert     | The property is real: a service link's visible label must match the destination it points at, and swapping them is a plausible copy-paste error with a user-visible consequence. Replacement: on the built page, assert the anchor whose text is "GitHub" carries `REPOSITORY_URL` and the one whose text is "PyPI" carries `PYPI_URL`. Structural, on output, no production change.                           |
-| F-031 | website/tests/test_site_templates.py:107-152  | mutate-one-string-assert-raises                | delete      | Ten-plus mutations per shell template renaming CSS classes and reordering landmarks. Pinning the spelling of our own class names is the exact target of the amended `no-prose-policing-tests` rule.                                                                                                                                                                                                            |
-| F-032 | website/tests/test_site_templates.py:154-169  | mutate-one-string-assert-raises                | delete      | Proves the validator rejects an eyebrow paragraph above a detail-page `h1`. A house style rule enforced by a test; review owns it.                                                                                                                                                                                                                                                                             |
-| F-033 | website/tests/test_site_templates.py:171-194  | mutate-one-string-assert-raises                | delete      | Verified by execution: with `_validate_template` stubbed, injecting `<h1>Template title</h1>` before the content token is still caught by `test_long_form_pages_are_complete_semantic_source_projections` (F-012), which compares the rendered blocks against the source. The observational twin exists.                                                                                                       |
-| F-034 | website/tests/test_site_templates.py:196-247  | mutate-one-string-assert-raises                | delete      | Twelve mutations per template hiding service CTAs via `hidden`, inline style, injected `<style>`, and extra icons. Defends an in-tree template against deliberate concealment; that guarantee cannot be held by a test living beside the template.                                                                                                                                                             |
-| F-035 | website/tests/test_site_templates.py:249-287  | mutate-one-string-assert-raises                | delete      | Six mutations sourcing reviewed shell text from hidden or `<template>` descendants. Same adversarial shape as F-034.                                                                                                                                                                                                                                                                                           |
-| F-036 | website/tests/test_site_templates.py:289-308  | verbatim pin (SVG path data)                   | delete      | Pins the exact `d` attribute of each service icon and six mutations around it. Authored artwork; a wrong icon is a review finding, not a test finding.                                                                                                                                                                                                                                                         |
-| F-037 | website/tests/test_site_templates.py:310-357  | mutate-one-string-assert-raises                | delete      | Rocket-image inventory mutations (extra, unclassified, misplaced). The built-page assertions at test_site_documents.py:410-413 and :451-454 already hold the placement and `alt` facts that ship.                                                                                                                                                                                                              |
-| F-038 | website/tests/test_site_templates.py:359-366  | mutate-one-string-assert-raises                | delete      | One mutation moving the scene SVG out of its section. In-tree template tampering.                                                                                                                                                                                                                                                                                                                              |
-| F-039 | website/tests/test_site_templates.py:368-378  | mutate-one-string-assert-raises                | convert     | The property is a real a11y invariant (three accessible names must be non-blank), and blanking a label is a plausible edit. Replacement: assert on the built Lander page that `#lander-game`, `#lander-start`, and the scene `<title>` have non-blank text; test_lander_404.py:259-260 already asserts two of the three on the template, so this is one added assertion moved to output. No production change. |
-| F-040 | website/tests/test_site_templates.py:380-402  | verbatim pin (SVG coordinates)                 | delete      | Pins literal path coordinates (`M312 457.21999999999997H498`) and battery-bar geometry through the validator. Authored artwork geometry; and the real agreement (the static SVG matches what the model renders) is held by derivation parity in the `.mjs` suite (F-131, F-137).                                                                                                                               |
-| F-041 | website/tests/test_site_templates.py:404-447  | mutate-one-string-assert-raises                | delete      | Verified by execution: with `_validate_template` stubbed, a non-relative `/manifesto/#...` link fails at `_validate_local_references` ("local reference is outside site base") and an aliased duplicate fails there too. The link-integrity half of the validator, which W2 says stays, is the guard.                                                                                                          |
-| F-042 | website/tests/test_site_templates.py:449-460  | mutate-one-string-assert-raises                | delete      | Verified by execution: with the validator stubbed, removing `{{LANDER_GAME}}` fails `test_lander_and_404_share_one_byte_identical_game_subtree` (F-016).                                                                                                                                                                                                                                                       |
-| F-043 | website/tests/test_site_templates.py:462-487  | mutate-one-string-assert-raises                | delete      | Five mutations around the footer game link. The built-page assertions at test_site_documents.py:458-466 hold the same accessible-name and destination facts, and lander-phase4m.test.mjs:247-255 holds them a third time.                                                                                                                                                                                      |
-| F-044 | website/tests/test_site_templates.py:489-512  | mutate-one-string-assert-raises                | delete      | Title and canonical-link mutations. The canonical URL per page is asserted on the built output at test_site_documents.py:363-364; the empty-title case is a review concern.                                                                                                                                                                                                                                    |
-| F-045 | website/tests/test_site_templates.py:514-535  | verbatim pin + mutations                       | delete      | Pins the exact favicon `<link>` markup and five mutations of it. Authored markup spelling.                                                                                                                                                                                                                                                                                                                     |
-| F-046 | website/tests/test_site_templates.py:537-562  | mutate-one-string-assert-raises + verbatim pin | delete      | CSP and description mutations on two templates, plus `policies == [CSP, CSP]`, a third copy of the policy string. The built-page CSP check (F-002) covers all five pages, and the description-presence fact is held at test_site_documents.py:365.                                                                                                                                                             |
-| F-047 | website/tests/test_site_templates.py:564-586  | mutate-one-string-assert-raises                | delete      | Proves the validator's own parser is not fooled by duplicate HTML attributes. Guarding the guard against a bypass nobody is attempting; the same shape appears at test_site_build.py:201-217 (F-060).                                                                                                                                                                                                          |
-| F-048 | website/tests/test_site_templates.py:588-599  | phrase canary                                  | delete      | Injects an email address into the security template and expects rejection. The production `github_only_reporting` contract still runs on every build and is exercised on its real input at test_site_content.py:332-350 (F-092); this template-side copy adds a second canary for the same rule.                                                                                                               |
-| F-049 | website/tests/test_site_templates.py:601-629  | mutate-one-string-assert-raises                | delete      | Long-form token context mutations, the manifesto/security twin of F-028.                                                                                                                                                                                                                                                                                                                                       |
-| L-402 | `website/tests/test_site_templates.py:39-624` | 14 `assertRaisesRegex` sites                   | delete      | Same, over the template validator's authored refusals (`"brace-like token syntax"`, `"reviewed literals"`). Note the interaction: 22 of this file's 25 tests are group 5 delete rows, so most of these regexes disappear with their tests rather than needing a separate edit.                                                                                                                                 |
+| id    | file:line                                                                             | shape                                          | disposition | justification                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ----- | ------------------------------------------------------------------------------------- | ---------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F-025 | website/tests/test_site_templates.py:7-11                                             | token-set pin (second copy)                    | delete      | Asserts each template's token set equals `site_validation.TEMPLATE_TOKENS`, a production constant. Verified by execution: a token with no substitution fails the build outright (`index.html: missing substitutions for required tokens: ['{{HOME_IDENTITY}}']`), so the agreement is enforced by building, not by this restatement.                                                                                                                                                                                                                                                                  |
+| F-026 | website/tests/test_site_templates.py:13-28                                            | mutate-one-string-assert-raises                | delete      | Six template mutations proving `_validate_template` rejects unknown, missing, duplicate, foreign, and brace-like tokens. The templates live in this tree and are validated on every build; this only proves the guard fires, and the guard's own half of `site_validation.py` is the deferred W2 deletion candidate.                                                                                                                                                                                                                                                                                  |
+| F-028 | website/tests/test_site_templates.py:42-71                                            | mutate-one-string-assert-raises                | delete      | Ten mutations moving content tokens into `<script>`, `<style>`, and containers nobody reviewed. Adversarial tampering with an in-tree template: anything that can make this edit can delete this test.                                                                                                                                                                                                                                                                                                                                                                                                |
+| F-029 | website/tests/test_site_templates.py:73-97                                            | mutate-one-string-assert-raises                | delete      | Ten mutations renaming onboarding ids, classes, and the module src. Pins the template's spelling through the validator; the onboarding structure that matters is asserted on the built page (F-007, F-008).                                                                                                                                                                                                                                                                                                                                                                                           |
+| F-030 | website/tests/test_site_templates.py:99-105                                           | mutate-one-string-assert-raises                | convert     | The property is real: a service link's visible label must match the destination it points at, and swapping them is a plausible copy-paste error with a user-visible consequence. Replacement: on the built page, assert the anchor whose text is "GitHub" carries `REPOSITORY_URL` and the one whose text is "PyPI" carries `PYPI_URL`. Structural, on output, no production change.                                                                                                                                                                                                                  |
+| F-031 | website/tests/test_site_templates.py:107-152                                          | mutate-one-string-assert-raises                | delete      | Ten-plus mutations per shell template renaming CSS classes and reordering landmarks. Pinning the spelling of our own class names is the exact target of the amended `no-prose-policing-tests` rule.                                                                                                                                                                                                                                                                                                                                                                                                   |
+| F-032 | website/tests/test_site_templates.py:154-169                                          | mutate-one-string-assert-raises                | delete      | Proves the validator rejects an eyebrow paragraph above a detail-page `h1`. A house style rule enforced by a test; review owns it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| F-033 | website/tests/test_site_templates.py:171-194                                          | mutate-one-string-assert-raises                | delete      | Verified by execution: with `_validate_template` stubbed, injecting `<h1>Template title</h1>` before the content token is still caught by `test_long_form_pages_are_complete_semantic_source_projections` (F-012), which compares the rendered blocks against the source. The observational twin exists.                                                                                                                                                                                                                                                                                              |
+| F-034 | website/tests/test_site_templates.py:196-247                                          | mutate-one-string-assert-raises                | delete      | Twelve mutations per template hiding service CTAs via `hidden`, inline style, injected `<style>`, and extra icons. Defends an in-tree template against deliberate concealment; that guarantee cannot be held by a test living beside the template.                                                                                                                                                                                                                                                                                                                                                    |
+| F-035 | website/tests/test_site_templates.py:249-287                                          | mutate-one-string-assert-raises                | delete      | Six mutations sourcing reviewed shell text from hidden or `<template>` descendants. Same adversarial shape as F-034.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| F-036 | website/tests/test_site_templates.py:289-308                                          | verbatim pin (SVG path data)                   | delete      | Pins the exact `d` attribute of each service icon and six mutations around it. Authored artwork; a wrong icon is a review finding, not a test finding.                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| F-037 | website/tests/test_site_templates.py:310-357                                          | mutate-one-string-assert-raises                | delete      | Rocket-image inventory mutations (extra, unclassified, misplaced). The built-page assertions at test_site_documents.py:410-413 and :451-454 already hold the placement and `alt` facts that ship.                                                                                                                                                                                                                                                                                                                                                                                                     |
+| F-038 | website/tests/test_site_templates.py:359-366                                          | mutate-one-string-assert-raises                | delete      | One mutation moving the scene SVG out of its section. In-tree template tampering.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| F-039 | website/tests/test_site_templates.py:368-378                                          | mutate-one-string-assert-raises                | convert     | The property is a real a11y invariant (three accessible names must be non-blank), and blanking a label is a plausible edit. Replacement: assert on the built Lander page that `#lander-game`, `#lander-start`, and the scene `<title>` have non-blank text; test_lander_404.py:259-260 already asserts two of the three on the template, so this is one added assertion moved to output. No production change.                                                                                                                                                                                        |
+| F-040 | website/tests/test_site_templates.py:380-402                                          | verbatim pin (SVG coordinates)                 | delete      | Pins literal path coordinates (`M312 457.21999999999997H498`) and battery-bar geometry through the validator. Authored artwork geometry; and the real agreement (the static SVG matches what the model renders) is held by derivation parity in the `.mjs` suite (F-131, F-137).                                                                                                                                                                                                                                                                                                                      |
+| F-041 | website/tests/test_site_templates.py:404-447                                          | mutate-one-string-assert-raises                | delete      | Verified by execution: with `_validate_template` stubbed, a non-relative `/manifesto/#...` link fails at `_validate_local_references` ("local reference is outside site base") and an aliased duplicate fails there too. The link-integrity half of the validator, which W2 says stays, is the guard.                                                                                                                                                                                                                                                                                                 |
+| F-042 | website/tests/test_site_templates.py:449-460                                          | mutate-one-string-assert-raises                | delete      | Verified by execution: with the validator stubbed, removing `{{LANDER_GAME}}` fails `test_lander_and_404_share_one_byte_identical_game_subtree` (F-016).                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| F-043 | website/tests/test_site_templates.py:462-487                                          | mutate-one-string-assert-raises                | delete      | Five mutations around the footer game link. The built-page assertions at test_site_documents.py:458-466 hold the same accessible-name and destination facts, and lander-phase4m.test.mjs:247-255 holds them a third time.                                                                                                                                                                                                                                                                                                                                                                             |
+| F-044 | website/tests/test_site_templates.py:489-512                                          | mutate-one-string-assert-raises                | delete      | Title and canonical-link mutations. The canonical URL per page is asserted on the built output at test_site_documents.py:363-364; the empty-title case is a review concern.                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| F-045 | website/tests/test_site_templates.py:514-535                                          | verbatim pin + mutations                       | delete      | Pins the exact favicon `<link>` markup and five mutations of it. Authored markup spelling.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| F-046 | website/tests/test_site_templates.py:537-562                                          | mutate-one-string-assert-raises + verbatim pin | delete      | CSP and description mutations on two templates, plus `policies == [CSP, CSP]`, a third copy of the policy string. The built-page CSP check (F-002) covers all five pages, and the description-presence fact is held at test_site_documents.py:365.                                                                                                                                                                                                                                                                                                                                                    |
+| F-047 | website/tests/test_site_templates.py:564-586                                          | mutate-one-string-assert-raises                | delete      | Proves the validator's own parser is not fooled by duplicate HTML attributes. Guarding the guard against a bypass nobody is attempting; the same shape appears at test_site_build.py:201-217 (F-060).                                                                                                                                                                                                                                                                                                                                                                                                 |
+| F-048 | website/tests/test_site_templates.py:588-599                                          | phrase canary                                  | delete      | Injects an email address into the security template and expects rejection. The production `github_only_reporting` contract still runs on every build and is exercised on its real input at test_site_content.py:332-350 (F-092); this template-side copy adds a second canary for the same rule.                                                                                                                                                                                                                                                                                                      |
+| F-049 | website/tests/test_site_templates.py:601-629                                          | mutate-one-string-assert-raises                | delete      | Long-form token context mutations, the manifesto/security twin of F-028.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| L-402 | `website/tests/test_site_templates.py:44,118,181,203,320,499,524,547,573,598,611,638` | 12 `assertRaisesRegex` sites                   | delete      | Same, over the template validator's authored refusals (`"brace-like token syntax"`, `"reviewed literals"`). Note the interaction: 22 of this file's 25 tests are group 5 delete rows, so most of these regexes disappear with their tests rather than needing a separate edit. **Corrected 2026-08-19 (map re-baseline).** Re-derived at HEAD as an explicit site list: the file changed after this map's basis and one of its 14 sites was already narrowed to a bare `assertRaises` by unrelated work, leaving 12. The old `:39-624` range would also have swept whatever the file grew in between. |
 
 ## Stack topology and recipe verification
 
-Recorded for the executors of the nine PRs. Like the rest of this file it dies when the sweep
+Recorded for the executors of the sweep's PRs. Like the rest of this file it dies when the sweep
 closes.
+
+**Stale as of the 2026-08-19 re-baseline, and left standing on purpose.** Everything in this section
+was measured over the groups as they were: nine PRs, group 2 among them, and no re-scope
+subtraction. Group 2 now has no live row and 116 rows moved to two other efforts, so the overlap
+matrix, the topology and the leaf count all want re-deriving. Re-cutting them is a sequencing
+decision for whoever restarts the sweep, and guessing at it here would replace one stale answer with
+another. What the section is still good for is its method and its three findings about which groups
+are hubs.
 
 ### File overlap, measured
 
@@ -1827,24 +1865,23 @@ which looks identical to a recipe that does not work.
 
 ## Sequencing between the groups
 
-Four constraints bind the order the six PRs land in, beyond the plan's existing ordering against the
-`phase7` item, the contained cli items, and P5.
+Four constraints bind the order the sweep's PRs land in, beyond the plan's existing ordering against
+the `phase7` item, the contained cli items, and P5.
 
 1. **Group 1 lands first, and no other group may lean on it.** A `match=` is a fallback that is
    about to be deleted. Where a row in group 3 or group 4 justified deleting a prose assertion by
    pointing at the `match=` on the same `raises`, that justification expires the moment group 1
    lands. Those rows were re-read and now cite the surviving `raises` type or a structural sibling
    instead. Hold any new row to the same rule.
-2. **Group 2 sits downstream of the guide work item.** Several group 2 deletes are justified by
-   `cli/tests/guide/test_contract_catalog.py` already enforcing the same rule structurally, and that
-   file is on the exclusion list because the guide item owns it. If that item deletes the checks
-   these rows lean on, the rows lose their backing.
+2. **Group 2 sits downstream of the guide work item.** Resolved rather than binding: the guide item
+   landed as `4ac084cd` and deleted the whole estate, so every group 2 row is `[dead]` and there is
+   no group 2 PR to order.
 3. **Group 5 carries the W2 question**, which is an ordering decision rather than something this
    inventory can settle. See the open questions.
-4. **Group 3 is too big for one PR at 377 rows.** It is the judgment-heavy batch and the largest by
-   a wide margin. The natural cut is by subsystem inside the one shape (consoles and sessions;
-   workspaces and agents; vms and platforms; the rest), which keeps the review's judgment uniform
-   while making each round reviewable.
+4. **Group 3 is too big for one PR at 322 live rows.** It is the judgment-heavy batch and the
+   largest by a wide margin. The natural cut is by subsystem inside the one shape (consoles and
+   sessions; workspaces and agents; vms and platforms; the rest), which keeps the review's judgment
+   uniform while making each round reviewable.
 
 ## Overlaps found
 
@@ -1931,9 +1968,10 @@ recorded once in [hla.md](hla.md)'s doctrine 2, beside the `match=` taxonomy:
    with the rows.
 
 **Applying the rubric to every delete row, and then verifying every convert recipe, moved the
-dispositions substantially.** The final split is 564 delete, 225 convert, 357 keep across 1,146
-executable rows. The rows that moved are the coverage this sweep would otherwise have destroyed
-quietly, and each says which behavior it is the only probe for.
+dispositions substantially.** The split that came out of that pass was 564 delete, 225 convert, 357
+keep across 1,146 executable rows; the Totals section carries the current figures, which the
+2026-08-19 re-baseline re-derived. The rows that moved are the coverage this sweep would otherwise
+have destroyed quietly, and each says which behavior it is the only probe for.
 
 ### Ruled by the effort lead, 2026-08-16
 
@@ -2009,10 +2047,13 @@ than fixed, because those artifacts belong to the effort lead.
 - **C10's `test_capability_shape.py:21-32` anchor is stale.** Those lines are a helper and a
   `parametrize` opening at HEAD, and every message assertion in that file is a `match=` site, so the
   finding resolves into group 1 rather than into its own rows.
-- **`hla.md`'s "696 sites" for `match=` is 664 at HEAD** (663 under `cli/tests`, none under
-  `website/tests`), after the wave 1 landings. The website suite instead carries 51
-  `assertRaisesRegex` sites, which are the same taxonomy and which a `match=`-keyed scan misses
-  entirely; they are rowed into group 1 here.
+- **`hla.md`'s "696 sites" for `match=` is 664 at HEAD**, all under `cli/tests` and none under
+  `website/tests`, after the wave 1 landings and the one site the Grok Build integration added. The
+  website suite instead carries 49 `assertRaisesRegex` sites, not the 51 `hla.md` records: they are
+  the same taxonomy, a `match=`-keyed scan misses them entirely, and they are rowed into group 1
+  here. `hla.md` also omits nine further regex-family sites in that suite, one `assertRegex` and
+  eight `assertNotRegex`, which the completeness re-scan enumerates and which group 5 rows already
+  cover.
 - **The absorbed purge FRD's R4 item 2 is already satisfied and needs no production change.**
   `agentworks.schema.errors._problems` exposes `path`, `unknown_field`, `alternatives` and
   `union_path`, and `cli/tests/schema/test_errors.py` already imports and asserts on it. That is why
