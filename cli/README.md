@@ -115,6 +115,7 @@ agw console delete my-console              # Extra shells are lost but sessions 
 
 | Flag                | Description                                                                                                                                 |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--version`         | Print the installed CLI version and exit (equivalent to `agw version`)                                                                      |
 | `--non-interactive` | Disable all interactive prompts                                                                                                             |
 | `--debug`           | Print the full traceback on unhandled errors, and show the Azure SDK's own log lines that are otherwise suppressed (also via `AGW_DEBUG=1`) |
 | `--no-deprecations` | Silence the ambient per-command deprecation banner (`agw doctor` always reports deprecation health)                                         |

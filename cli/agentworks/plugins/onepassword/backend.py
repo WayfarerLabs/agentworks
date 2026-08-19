@@ -48,6 +48,7 @@ from agentworks.capabilities.secret_backend.client import (
     SecretClientTimeout,
     SecretLookupRequest,
     SecretSourceClient,
+    TimeoutGuidance,
 )
 from agentworks.errors import ConfigError
 from agentworks.schema import AgwModel, AgwRootModel, NonEmptyStr
@@ -142,7 +143,12 @@ def _raise_client_failure(kind: SecretClientFailureKind) -> NoReturn:
 
 
 def _raise_client_timeout() -> NoReturn:
-    raise SecretClientTimeout from None
+    # The backend selects a closed-set identifier, never wording of its
+    # own: core (secrets.outcomes.format_remediation) owns the fixed prose
+    # this maps to, naming a pending desktop-app approval prompt as a
+    # common cause and the adjacent `op whoami` trap ("not signed in" even
+    # when reads work), per field evidence.
+    raise SecretClientTimeout(guidance=TimeoutGuidance.ONEPASSWORD_PENDING_APPROVAL) from None
 
 
 def _check_op_uri(uri: str) -> str:

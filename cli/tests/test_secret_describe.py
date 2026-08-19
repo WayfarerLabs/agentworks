@@ -258,6 +258,24 @@ def test_source_mapping_respects_opt_out(tmp_path: Path) -> None:
 # -- Resolution preview section --------------------------------------------
 
 
+def _assert_conditional_fallthrough_order(preview_section: str, winner: str, rest: list[str]) -> None:
+    """Structural check for the summary's fall-through framing: the later
+    sources must appear ONLY after a conditional marker that follows the
+    winner, never as a bare continuation, since the preview reads no
+    values and only the winner is anything close to a fact. This pins the
+    conditional relationship (order plus subordination to a condition),
+    not the sentence's wording, per no-prose-policing-tests.
+    """
+    winner_pos = preview_section.index(winner)
+    conditional_pos = preview_section.index("if", winner_pos)
+    assert conditional_pos > winner_pos, "the fall-through chain must be subordinated to a conditional marker"
+    cursor = conditional_pos
+    for name in rest:
+        pos = preview_section.index(name, cursor)
+        assert pos > cursor, f"{name!r} must appear in order after the conditional marker"
+        cursor = pos
+
+
 def test_resolution_preview_picks_env_var_when_var_is_set(tmp_path: Path, monkeypatch) -> None:
     """Env-var first in the chain; the var is actually set. Preview
     reports env-var. This is the case where the operator's shell already
@@ -384,6 +402,49 @@ def test_render_shows_not_ready_annotation_and_skip(
     assert ("onepassword (onepassword, declared): op://Vault/api/field (not ready: op CLI not installed)") in out
     assert "skipped onepassword: not ready: op CLI not installed" in out
     assert "would attempt via prompt" in out
+
+
+def test_resolution_preview_summary_names_full_fallthrough_chain(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch
+) -> None:
+    """Three active, ready sources: the summary names all three, not just
+    the winner. The preview picks its winner by mapping applicability alone
+    (no value is ever read), so naming only the winner reads as more
+    certain than it is when a later source in the chain is what actually
+    resolves at runtime (field evidence: sources = ["env-var", "personal-op",
+    "prompt"], env var unset, summary read "would attempt via env-var" and
+    was taken as the final answer even though the chain kept going)."""
+    from agentworks.secrets.inspect import render_secret_description
+
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/op")
+    cfg = _write_cfg(
+        tmp_path,
+        settings="""
+        [plugins]
+        system = ["onepassword"]
+
+        [secret_config]
+        sources = ["env-var", "personal-op", "prompt"]
+        """,
+        manifests=[
+            ManifestDoc("secret-source", "personal-op", {"backend": {"name": "onepassword"}}),
+            ManifestDoc(
+                "secret",
+                "api-key",
+                {"backend_mappings": {"personal-op": "op://Vault/api/field"}},
+                description="API key",
+            ),
+        ],
+    )
+    monkeypatch.delenv("AW_SECRET_API_KEY", raising=False)
+    config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
+    desc = describe_secret(config, registry, "api-key")
+    render_secret_description(desc)
+
+    out = capsys.readouterr().out
+    preview_section = out.split("Resolution preview:", 1)[1]
+    _assert_conditional_fallthrough_order(preview_section, "env-var", ["personal-op", "prompt"])
 
 
 def test_interactive_optimism_preview_unchanged_under_readiness(tmp_path: Path, monkeypatch) -> None:
@@ -515,9 +576,13 @@ def test_render_emits_header_usages_mappings_preview(
     assert "Backend mappings:" in out
     assert "env-var (env-var, synthesized default): AW_SECRET_API_KEY" in out
     assert "prompt (prompt, synthesized default): (prompt at resolution time)" in out
-    # Resolution preview
+    # Resolution preview: names the winner and, since prompt is also active
+    # and reachable, the fall-through chain conditioned behind it
+    # (structural check on the preview section only, not the connecting
+    # prose).
     assert "Resolution preview:" in out
-    assert "would attempt via env-var" in out
+    preview_section = out.split("Resolution preview:", 1)[1]
+    _assert_conditional_fallthrough_order(preview_section, "env-var", ["prompt"])
 
 
 # -- Used-by (Phase 3c dynamic dimension) -----------------------------------

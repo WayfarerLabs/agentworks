@@ -105,6 +105,9 @@ def test_zero_remaining_time_never_spawns(monkeypatch: pytest.MonkeyPatch) -> No
         context.__exit__(None, None, None)
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
+    # The backend attaches its fixed timeout guidance on every path that
+    # raises SecretClientTimeout, not just the subprocess-timeout one.
+    assert caught.value.guidance is not None
 
 
 def test_subprocess_timeout_translates_without_native_cause(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -121,6 +124,9 @@ def test_subprocess_timeout_translates_without_native_cause(monkeypatch: pytest.
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
     assert "sentinel" not in repr(caught.value)
+    # The no-leak assertion above must not pass vacuously: confirm the
+    # exception actually carries the (fixed, non-native) guidance text.
+    assert caught.value.guidance is not None
 
 
 @pytest.mark.parametrize(

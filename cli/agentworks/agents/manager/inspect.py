@@ -141,7 +141,16 @@ def agent_listing(
 
 
 def render_agent_listing(listing: AgentListing, *, names_only: bool = False) -> None:
-    """Render agent list facts with the legacy human layout."""
+    """Render agent list facts with the shared table formatter.
+
+    Emits a trailing legend line for the ``*`` marker (see below) only when
+    a rendered row actually shows one. The GRANTS cell is truncated to
+    ``MAX_GRANTS_DISPLAY`` before it enters the table (rather than relying
+    on the table's own cap to do it), and the legend condition is read off
+    those same rendered lines, never off the pre-truncation grant data: a
+    marker on a late workspace in a long list can fall outside the cap, and
+    when it does, the legend must not print either.
+    """
     agents = listing.agents
 
     if names_only:
@@ -153,21 +162,34 @@ def render_agent_listing(listing: AgentListing, *, names_only: bool = False) -> 
         output.info("No agents found.")
         return
 
-    names = [output.truncate(agent.name, _NAME_CELL_WIDTH) for agent in agents]
-    name_w = max(len("NAME"), *(len(name) for name in names))
-
-    header = f"{'NAME':<{name_w}} {'VM':<15} {'TEMPLATE':<12} {'WORKSPACE GRANTS'}"
-    output.info(header)
-    output.info("-" * len(header))
-    for agent, name in zip(agents, names, strict=True):
+    headers = ["NAME", "VM", "TEMPLATE", "WORKSPACE GRANTS"]
+    rows: list[tuple[str, str, str, str]] = []
+    for agent in agents:
+        name = output.truncate(agent.name, _NAME_CELL_WIDTH)
         if agent.grant_all:
             grants = "--ALL--"
         elif not agent.grants:
             grants = "(none)"
         else:
+            # Only a PURELY implicit grant gets the marker; a grant that is
+            # also explicit already reads as intentional.
             parts = [f"{grant.workspace_name}{'*' if grant.grant_type == 'implicit' else ''}" for grant in agent.grants]
             grants = output.truncate(", ".join(parts), MAX_GRANTS_DISPLAY)
-        output.info(f"{name:<{name_w}} {agent.vm_name:<15} {agent.template or '-':<12} {grants}")
+        rows.append((name, agent.vm_name, agent.template or "-", grants))
+
+    # render_table takes one scalar cap for every column. It must cover the
+    # largest per-column cap this view actually needs (NAME's
+    # _NAME_CELL_WIDTH and GRANTS' MAX_GRANTS_DISPLAY, both already applied
+    # above), or it would re-truncate an already-truncated cell below its
+    # intended width.
+    table_cap = max(_NAME_CELL_WIDTH, MAX_GRANTS_DISPLAY)
+    lines = output.render_table(headers, rows, max_col_width=table_cap)
+    for line in lines:
+        output.info(line)
+
+    data_lines = lines[2:]  # header, rule, then one line per agent
+    if any("*" in line for line in data_lines):
+        output.info("* granted implicitly")
 
 
 def list_agents(

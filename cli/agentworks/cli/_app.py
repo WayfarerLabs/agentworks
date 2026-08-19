@@ -82,6 +82,22 @@ def _mirror_debug_to_env() -> None:
         os.environ["AGW_DEBUG"] = "1"
 
 
+def _print_version_and_exit(value: bool) -> None:
+    """Eager callback for ``--version``: print the version and exit before
+    any other option or subcommand parsing runs.
+
+    Mirrors the ``agw version`` subcommand (kept for discoverability and for
+    scripts that already call it), so both surfaces stay in lockstep by
+    sharing ``resolve_version``.
+    """
+    if not value:
+        return
+    from agentworks.version import resolve_version
+
+    typer.echo(resolve_version())
+    raise typer.Exit(0)
+
+
 def _seed_debug_from_pre_callback() -> None:
     """Set ``_debug`` from sys.argv / AGW_DEBUG *before* Click parses anything.
 
@@ -105,6 +121,15 @@ def _seed_debug_from_pre_callback() -> None:
 
 @app.callback()
 def _global_options(
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            help="Print the installed agentworks CLI version and exit",
+            callback=_print_version_and_exit,
+            is_eager=True,
+        ),
+    ] = False,
     non_interactive: Annotated[
         bool,
         typer.Option("--non-interactive", help="Disable interactive prompts"),
