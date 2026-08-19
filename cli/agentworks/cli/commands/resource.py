@@ -329,7 +329,9 @@ def resource_edit(
     from agentworks.schema import location_text
     from agentworks.source_location import SourceLocation
 
-    config = load_config()
+    # Never reads the operator's SSH key files; see load_config's
+    # workload_gated_issues_fatal doc.
+    config = load_config(workload_gated_issues_fatal=False)
     try:
         registry = load_request_registry(config)
         path, line = edit_location(registry, kind, name)

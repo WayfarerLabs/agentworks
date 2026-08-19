@@ -146,6 +146,47 @@ def test_cli_edit_launches_editor_on_manifest(tmp_path: Path, monkeypatch) -> No
     assert "secrets.yaml:1" in result.output
 
 
+def test_missing_ssh_keys_do_not_block_resource_edit(tmp_path: Path, monkeypatch) -> None:
+    """A config whose only defect is a nonexistent operator SSH key path
+    must not stop `resource edit` from opening a manifest: it only locates
+    and launches, and the fresh-init state is exactly when the operator
+    needs the fix-it path."""
+    from typer.testing import CliRunner
+
+    from agentworks.cli import app
+
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{(tmp_path / "id.pub").as_posix()}"
+        ssh_private_key = "{(tmp_path / "id").as_posix()}"
+        """)
+    )
+    assert not (tmp_path / "id.pub").exists()
+    assert not (tmp_path / "id").exists()
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "secrets.yaml").write_text(
+        dedent("""\
+        apiVersion: agentworks/v1
+        kind: secret
+        metadata:
+          name: edit-probe
+          description: edit probe
+        spec: {}
+        """)
+    )
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+    monkeypatch.setenv("EDITOR", "test-editor")
+    calls: list[list[str]] = []
+    monkeypatch.setattr("subprocess.call", lambda argv: calls.append(argv) or 0)
+
+    result = CliRunner().invoke(app, ["resource", "edit", "secret/edit-probe"])
+    assert result.exit_code == 0, result.output
+    assert calls == [["test-editor", str(resources / "secrets.yaml")]]
+
+
 def test_cli_edit_names_the_manifest_home_relative(tmp_path: Path, monkeypatch) -> None:
     """The "Editing" line frames its path like every manifest error does.
 
