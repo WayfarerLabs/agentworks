@@ -54,7 +54,10 @@ the assessment shows are already painful; migrating every existing call site is 
 only if the assessment shows it is cheap, otherwise the boundary is recorded and the remainder is
 follow-up work with an owner. Schema migrations follow the existing migration mechanics; the
 safer-migrations posture (pre-migration notice, backup, restore) applies to any schema change that
-touches operator state.
+touches operator state. This effort owns the test-estate trim for the surfaces it rewrites (the
+simplification sweep's re-scope, operator direction 2026-08-19, recorded in that effort's
+`message-2026-08-19-sweep-rescope.md`): a rewrite here leaves its area's tests trimmed to the
+sweep's standard, and the plan carries that as definition-of-done, not follow-up.
 
 ### R3: Instance state, the applied record
 
