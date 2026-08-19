@@ -173,9 +173,7 @@ def render_agent_listing(listing: AgentListing, *, names_only: bool = False) -> 
         else:
             # Only a PURELY implicit grant gets the marker; a grant that is
             # also explicit already reads as intentional.
-            parts = [
-                f"{grant.workspace_name}{'*' if grant.grant_type == 'implicit' else ''}" for grant in agent.grants
-            ]
+            parts = [f"{grant.workspace_name}{'*' if grant.grant_type == 'implicit' else ''}" for grant in agent.grants]
             grants = output.truncate(", ".join(parts), MAX_GRANTS_DISPLAY)
         rows.append((name, agent.vm_name, agent.template or "-", grants))
 
