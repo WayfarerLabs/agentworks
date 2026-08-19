@@ -746,16 +746,21 @@ document, with its GitHub URL retained only as a source link.
 
 ## Phase 5: representative acceptance and closeout
 
-- [ ] Run one provider-backed journey from an exact reviewed candidate wheel through the no-topic
-      guide index and `agw guide show concept-onboarding` to a verified VM and started session.
-      Label the candidate substitution rather than claiming the not-yet-published stable bootstrap
-      was exercised. After publication, run one bounded canonical-prompt smoke that installs the
-      exact stable release, verifies it, and reaches the guide index. Use generated-package parity
-      and focused clean-install probes for native wrappers rather than repeating the provider
-      journey three times. Done when: evidence records the exact versions, provider resources,
-      observed results, cleanup, and any operator intervention. This evidence does not replace the
-      saga's release-PR, publication, or final custom-domain gates.
-- [ ] Confirm permanent guide, assistance, JSON, and contribution documentation is self-sufficient;
+The operator's 2026-08-18 closeout ruling accepts the completed published-release onboarding journey
+as the representative provider-backed path. Publication overtook the planned candidate-wheel run, so
+closeout records the substitution honestly rather than manufacturing candidate evidence after the
+boundary had ceased to exist.
+
+- [x] Record the completed `agentworks-cli` 0.14.0 first-time journey from `agw guide --agent`
+      through clean doctor output, a Lima VM, workspace, Agentworks-managed agent, and running
+      session as the operator-approved replacement for the pre-publication candidate journey. Name
+      the observed resources, intervention, and retained-state disposition without claiming a
+      candidate artifact or teardown that did not occur.
+- [x] Run one bounded isolated canonical-prompt smoke that installs the current stable release,
+      verifies its exact version, and reaches the agent-mode guide index. Use generated-package
+      parity for the README, website, Claude Code, and Codex wrappers rather than repeating the live
+      path for each projection.
+- [x] Confirm permanent guide, assistance, JSON, and contribution documentation is self-sufficient;
       no current behavior relies on this SDD. Promote only missing current facts, not design
       history.
 - [ ] Run final applicable gates and the required project, integration, and saga reviews.

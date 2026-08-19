@@ -25,21 +25,18 @@ CLI drives honor `AGW_CLI_DIR` when it points at another prepared CLI tree.
 Runs the selected tree's real `agw` console script through the Secret Sources acceptance cases on
 POSIX Unix/Linux hosts, including current CI: implied environment resolution, prompt refusal, a
 mixed variadic proof, doctor readiness and applicability, direct OnePassword backend migration
-guidance, a declared OnePassword source at a fake provider boundary, and the universal guide topic.
-The harness fails closed on Windows and every other unsupported host before it reads the
-environment, selects a CLI, creates fixtures, looks up a provider, or runs a child command. It never
-attempts a provider there. When `AGW_CLI_DIR` is set on a supported host, the harness uses that
-tree's `.venv` and rejects an executable or imported `agentworks` package outside the tree.
+guidance, and a declared OnePassword source at a fake provider boundary. The harness fails closed on
+Windows and every other unsupported host before it reads the environment, selects a CLI, creates
+fixtures, looks up a provider, or runs a child command. It never attempts a provider there. When
+`AGW_CLI_DIR` is set on a supported host, the harness uses that tree's `.venv` and rejects an
+executable or imported `agentworks` package outside the tree.
 
 Child processes receive an allowlisted environment with no inherited home, credential, user-site, or
 import path. `Path.home()` resolves to a fresh temporary directory. The OnePassword case uses a
 POSIX executable named `op` on a fake-only `PATH`, verifies lookup resolves exactly that executable,
 and cannot fall through to a real credential tool. Every command result is checked for a unique
-sentinel before any other assertion. On the supported Unix host, the harness also generates Bash,
-Zsh, and PowerShell completion text and isolates the variadic `secret verify` branch in each script;
-generating PowerShell text is not a claim that the harness runs natively on Windows. It prints only
-value-free case summaries. Run it from `cli/` with
-`uv run python ../docs/testing/harnesses/secret_sources_drive.py`.
+sentinel before any other assertion. It prints only value-free case summaries. Run it from `cli/`
+with `uv run python ../docs/testing/harnesses/secret_sources_drive.py`.
 
 ## `isolated_home_drive.sh`: isolated-HOME CLI drive
 

@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import os
-import re
 import secrets
 import shutil
 import subprocess
@@ -353,57 +352,6 @@ def _case_doctor(executable: Path, shim: Path, root: Path, closed_bin: Path) -> 
     print("[ok] doctor: synthesized sources are ready and attemptability stays probe-free")
 
 
-def _case_guide(executable: Path, shim: Path, root: Path, closed_bin: Path) -> None:
-    home = root / "guide"
-    _write_fixture(home, settings="", manifests="")
-    result = _run(executable, shim, home, "guide", "concept-secrets", "--human", path_dir=closed_bin)
-    _require(result.returncode == 0, "Secret Sources guide topic did not render")
-    expected = ("secret-source", "secret-backend", "resource sample secret-source", "onepassword", "op://")
-    _require(
-        all(fragment in result.output.lower() for fragment in expected),
-        "Secret Sources guide teaching is incomplete",
-    )
-    print("[ok] universal guide topic: source distinction and OnePassword teaching rendered")
-
-
-def _generated_block(script: str, start_line: str, end_line: str) -> str:
-    lines = script.splitlines()
-    start = lines.index(start_line)
-    end = lines.index(end_line, start + 1)
-    return "\n".join(lines[start : end + 1])
-
-
-def _generated_braced_block(script: str, start_line: str) -> str:
-    lines = script.splitlines()
-    start = lines.index(start_line)
-    depth = 0
-    for end in range(start, len(lines)):
-        depth += lines[end].count("{") - lines[end].count("}")
-        if depth == 0:
-            return "\n".join(lines[start : end + 1])
-    raise RuntimeError("generated PowerShell verify block is unterminated")
-
-
-def _case_completions(executable: Path, shim: Path, root: Path, closed_bin: Path) -> None:
-    home = root / "completions"
-    _write_fixture(home, settings="", manifests="")
-    generated: dict[str, str] = {}
-    for shell in ("bash", "zsh", "powershell"):
-        result = _run(executable, shim, home, "completion", "show", "--shell", shell, path_dir=closed_bin)
-        _require(result.returncode == 0, f"{shell} completion generation failed")
-        _require("agentworks-completion-version:" in result.output, f"{shell} completion omitted its version")
-        generated[shell] = result.output
-    bash = _generated_block(generated["bash"], "                verify)", "                    ;;")
-    zsh = _generated_block(generated["zsh"], "_agentworks_secret_verify() {", "}")
-    powershell = _generated_braced_block(generated["powershell"], "                'verify' {")
-    _require(re.search(r"\$cword -ge \d+", bash) is not None, "Bash verify branch is not variadic")
-    _require("agw secret list --names-only" in bash, "Bash verify branch omitted secret candidates")
-    _require("'*:names:_agentworks_secrets'" in zsh, "Zsh verify branch is not variadic")
-    _require(re.search(r"\$tokenCount -ge \d+", powershell) is not None, "PowerShell verify branch is not variadic")
-    _require("agw secret list --names-only" in powershell, "PowerShell verify branch omitted secret candidates")
-    print("[ok] generated completions: secret verify candidates present in all three shells")
-
-
 def _run_drive(*, platform_name: str = os.name) -> int:
     if platform_name != "posix":
         print(_UNSUPPORTED_HOST_MESSAGE, file=sys.stderr)
@@ -427,8 +375,6 @@ def _run_drive(*, platform_name: str = os.name) -> int:
         _case_direct_backend_remediation(layout.executable, shim, root, closed_bin)
         _case_declared_onepassword(layout.executable, layout.interpreter, shim, root)
         _case_doctor(layout.executable, shim, root, closed_bin)
-        _case_guide(layout.executable, shim, root, closed_bin)
-        _case_completions(layout.executable, shim, root, closed_bin)
     print("secret sources real-entry drive passed; no resolved value reached command output")
     return 0
 

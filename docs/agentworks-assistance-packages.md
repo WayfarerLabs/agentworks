@@ -65,10 +65,11 @@ directories. Their restricted frontmatter supplies the discovery description and
 bounded `index-order` for the concise index. Shells may contain ordinary Markdown, agent-only
 fences, and bounded exact-section imports from packaged Markdown. Both control forms use exact
 standalone column-zero comment lines between top-level Markdown blocks; comments inside lists, block
-quotes, or code remain ordinary Markdown. Imports preserve relative links and images by rewriting
-them to canonical repository URLs. The guide does not execute operations, load configuration,
-inspect the registry or database, resolve secrets, or access the network. Invalid topic syntax,
-unknown topics, and structurally invalid requested content remain errors.
+quotes, or code remain ordinary Markdown. Relative links and images in shell bodies and imported
+sections are rewritten to canonical repository URLs, relative to the document containing them. The
+guide does not execute operations, load configuration, inspect the registry or database, resolve
+secrets, or access the network. Invalid topic syntax, unknown topics, and structurally invalid
+requested content remain errors.
 
 Discovery validates the complete installed shell catalog for every index, list, show, and completion
 request. An unrelated malformed shell or duplicate global topic prevents every one of those paths
@@ -99,6 +100,6 @@ python3 scripts/generate-agentworks-package.py --check
 ```
 
 The generator writes changed files atomically, validates the exact package inventory, and updates
-only the marked README region. Keep the package at `1.0.0` until its first compatible CLI release.
-After the package ships, a change to an installed generated artifact requires a package version bump
+only the marked README region. Keep the package at `1.0.0` until the assistance package itself first
+ships. After it ships, a change to an installed generated artifact requires a package version bump
 in `metadata.json`; the package version is independent of the CLI version.
