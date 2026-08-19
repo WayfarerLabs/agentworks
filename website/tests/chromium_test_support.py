@@ -13,7 +13,6 @@ import sys
 import tempfile
 import time
 import urllib.parse
-import urllib.request
 from pathlib import Path
 from typing import Callable
 
@@ -23,9 +22,11 @@ DEVTOOLS_STARTUP_TIMEOUT = 20.0
 class DevToolsConnection:
     """Minimal bounded WebSocket client for one Chromium page target."""
 
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, *, timeout: float = 10.0) -> None:
         parsed = urllib.parse.urlsplit(url)
-        self.socket = socket.create_connection((parsed.hostname or "127.0.0.1", parsed.port or 80), timeout=10)
+        self.socket = socket.create_connection(
+            (parsed.hostname or "127.0.0.1", parsed.port or 80), timeout=timeout
+        )
         key = base64.b64encode(os.urandom(16)).decode("ascii")
         target = parsed.path + (f"?{parsed.query}" if parsed.query else "")
         request = (
@@ -129,7 +130,12 @@ class DevToolsConnection:
         return result["result"].get("value")
 
 
-def devtools_target(profile_path: Path, process: subprocess.Popen[bytes]) -> str:
+def devtools_target(
+    profile_path: Path,
+    process: subprocess.Popen[bytes],
+    *,
+    connection_factory: Callable[..., DevToolsConnection] = DevToolsConnection,
+) -> str:
     port_path = profile_path / "DevToolsActivePort"
     last_error: BaseException | None = None
     deadline = time.monotonic() + DEVTOOLS_STARTUP_TIMEOUT
@@ -141,26 +147,33 @@ def devtools_target(profile_path: Path, process: subprocess.Popen[bytes]) -> str
             raise AssertionError("Chromium exited before opening its DevTools endpoint")
         try:
             lines = port_path.read_text(encoding="utf-8").splitlines()
-            if not lines:
-                raise ValueError("Chromium published an empty DevTools port file")
+            if len(lines) < 2 or not all(lines[:2]):
+                raise ValueError("Chromium published an incomplete DevTools port file")
             port = int(lines[0])
-            with urllib.request.urlopen(
-                f"http://127.0.0.1:{port}/json/list", timeout=min(0.25, remaining)
-            ) as response:
-                targets = json.load(response)
+            browser_path = lines[1]
+            if not 0 < port < 65536 or not browser_path.startswith("/"):
+                raise ValueError("Chromium published an invalid DevTools endpoint")
+            connection = connection_factory(
+                f"ws://127.0.0.1:{port}{browser_path}", timeout=min(0.25, remaining)
+            )
+            try:
+                result = connection.call("Target.getTargets")
+            finally:
+                connection.close()
+            targets = result.get("targetInfos")
             if isinstance(targets, list):
-                target = next(
+                target_id = next(
                     (
-                        item.get("webSocketDebuggerUrl")
+                        item.get("targetId")
                         for item in targets
                         if isinstance(item, dict) and item.get("type") == "page"
                     ),
                     None,
                 )
-                if isinstance(target, str):
-                    return target
+                if isinstance(target_id, str):
+                    return f"ws://127.0.0.1:{port}/devtools/page/{target_id}"
             raise ValueError("Chromium did not publish a page target")
-        except (OSError, ValueError, json.JSONDecodeError) as error:
+        except (OSError, ValueError) as error:
             last_error = error
         remaining = deadline - time.monotonic()
         if remaining > 0:
