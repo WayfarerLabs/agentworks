@@ -47,6 +47,12 @@ operator-facing walkthrough for the release.
 
 ## Worked example (S5 rename)
 
+**Historical.** The footer shape below predates the parser-safe convention and is exactly the shape
+Release Please truncated in the generated 0.14.0 release PR; both affected entries shipped repaired
+in 0.14.0's `cli/CHANGELOG.md`. `CONTRIBUTING.md`'s Conventional Commits section now states the
+current, parser-safe convention (one paragraph, no blank lines or indented code blocks, before/after
+examples inline); follow that, not the shape below.
+
 Footer shape the convention requires:
 
 ```text
