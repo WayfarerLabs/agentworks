@@ -767,8 +767,10 @@ boundary had ceased to exist.
       disposition of the superseded dozen-hint expectation, route the non-TTY mode heuristic and
       release-topic namespace as bounded guide follow-ups, name the permanent regression owners, and
       identify `2026-08-18-secret-preview-contract` as the successor secret-preview effort.
-- [ ] Run final applicable gates and the required project, integration, and saga reviews.
-- [ ] Create `locked.md` with the final state and date, then hand off the always-green closeout PR
+- [x] Run final applicable gates and the required pre-ready project, saga, and complexity reviews.
+      Preserve the earlier integration acceptance baseline; hand off the exact closeout head as
+      ready so the integration tester can perform the final ready-PR review.
+- [x] Create `locked.md` with the final state and date, then hand off the always-green closeout PR
       with commit and test evidence.
 
 Definition of done: FRD R6 and R7 and acceptance criteria 9 and 10 hold, the implementation is
