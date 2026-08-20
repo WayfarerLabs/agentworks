@@ -302,6 +302,7 @@ suite passed 11 of 11 tests, and the complete website suite passed 155 of 155 te
 - Failure evidence: main CI run `32398998705`, Website job `96522438657`
 - Hosted validation: PR run `32408120451`, Website job `96551941760`
 - Follow-up evidence: PR run `32408474123`, Website job `96553080383`
+- Timing-gate source: `65506d068f34edfdd5bbce4470110c2427d1a734`
 - Outcome: startup retry passed locally and hosted; timing-gate correction pending hosted validation
 
 The cited main job exposed the remaining external-process boundary. Chromium remained alive but
