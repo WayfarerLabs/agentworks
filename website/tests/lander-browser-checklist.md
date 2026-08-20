@@ -300,7 +300,8 @@ suite passed 11 of 11 tests, and the complete website suite passed 155 of 155 te
 - Date: 2026-08-20
 - Harness source: `2d0dcd63a5253324420f541206b0bfca8d812c26`
 - Failure evidence: main CI run `32398998705`, Website job `96522438657`
-- Outcome: local PASS; hosted validation pending
+- Hosted validation: PR run `32408120451`, Website job `96551941760`
+- Outcome: local and hosted PASS
 
 The cited main job exposed the remaining external-process boundary. Chromium remained alive but
 never created `DevToolsActivePort` during the full 20-second wait, so neither HTTP nor WebSocket
