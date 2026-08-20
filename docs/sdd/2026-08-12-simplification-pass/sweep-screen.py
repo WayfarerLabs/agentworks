@@ -17,8 +17,12 @@ take on trust:
   asserted type from more than one path, and whether a structural handle tells
   the targeted raise apart. `hla.md`'s case 1 holds only where it cannot.
 
-Run from the repository root with Python 3.12 or newer (3.11 cannot parse the
-PEP 701 f-strings two test files use, and fails silently on them):
+Run from the repository root with Python 3.12 or newer, which the script
+enforces rather than documents: 3.11 cannot parse the PEP 701 f-strings two
+estate files use, and a file that fails to parse contributes no sites, so it can
+never be reported unowned and the one guarantee here degrades into a smaller
+estate that still looks complete. Any unparsed file is fatal for the same
+reason.
 
     python3 docs/sdd/2026-08-12-simplification-pass/sweep-screen.py estate
     python3 docs/sdd/2026-08-12-simplification-pass/sweep-screen.py attribute
@@ -67,12 +71,18 @@ def git_files(*roots: str) -> list[str]:
     return [f for f in out.split() if f.endswith(".py")]
 
 
-def parse(path: str) -> ast.Module | None:
+def parse(path: str) -> ast.Module:
+    """Parse one first-party file, or stop.
+
+    Skipping an unparsed file would silently shrink the estate: its sites would
+    not exist to be reported unowned, so the "every site is claimed by exactly
+    one row" check would pass over a file nobody had looked at. There is no
+    honest partial answer here, so this raises rather than returning None.
+    """
     try:
         return ast.parse(Path(path).read_text(encoding="utf-8"), path)
     except (SyntaxError, OSError) as exc:
-        print(f"unparsed: {path}: {exc}", file=sys.stderr)
-        return None
+        raise SystemExit(f"{path}: cannot parse ({exc}); the estate would be short by this file")
 
 
 def exc_name(node: ast.AST | None) -> str | None:
@@ -120,8 +130,6 @@ class Site:
 def sites_in(path: str) -> list[Site]:
     """`match=` and `assertRaisesRegex`-family sites in one test module."""
     tree = parse(path)
-    if tree is None:
-        return []
     found: list[Site] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -166,8 +174,12 @@ class Row:
     def claims(self, site: Site) -> bool:
         if self.path != site.path:
             return False
+        # A row addressing a whole file rather than lines: L-101a and L-101b
+        # split one file's guards by pattern, and RB-012 names a file to say it
+        # needs no rows. The mechanical batch used to be addressed this way and
+        # is not any more; every one of its rows now lists its own sites.
         if not self.exact and not self.ranges:
-            return True  # a whole-file row, as the mechanical batch uses
+            return True
         return site.line in self.exact or any(lo <= site.line <= hi for lo, hi in self.ranges)
 
 
@@ -227,7 +239,8 @@ def split_cells(line: str) -> list[str]:
             current.append(body[index])
             index += 1
     cells.append("".join(current).strip())
-    return [c for c in cells[1:] if c or True][: len(cells)]
+    # The leading pipe opens the row, so the first split is always empty.
+    return cells[1:]
 
 
 def attribute() -> None:
@@ -372,10 +385,8 @@ class World:
         for path in git_files(PROD_ROOT):
             self._add(path, importable=True)
 
-    def _add(self, path: str, *, importable: bool) -> Module | None:
+    def _add(self, path: str, *, importable: bool) -> Module:
         tree = parse(path)
-        if tree is None:
-            return None
         name = path[len("cli/") :] if path.startswith(f"{PROD_ROOT}/") else path
         name = name[:-3].removesuffix("/__init__").replace("/", ".")
         module = Module(path=path, name=name)
@@ -426,10 +437,7 @@ def subclass_closure() -> dict[str, set[str]]:
     """Exception name -> itself plus every first-party name deriving from it."""
     parents: dict[str, list[str]] = {}
     for path in git_files(PROD_ROOT, TEST_ROOT):
-        tree = parse(path)
-        if tree is None:
-            continue
-        for node in ast.walk(tree):
+        for node in ast.walk(parse(path)):
             if isinstance(node, ast.ClassDef):
                 parents[node.name] = [b for b in (exc_name(base) for base in node.bases) if b]
     closure: dict[str, set[str]] = defaultdict(set)
@@ -452,10 +460,7 @@ def raise_facts(world: World) -> dict[tuple[str, int], dict[str, str | None]]:
     """(path, line) -> the message template and handle kwargs of each raise."""
     facts: dict[tuple[str, int], dict[str, str | None]] = {}
     for path in list(world.by_path):
-        tree = parse(path)
-        if tree is None:
-            continue
-        for node in ast.walk(tree):
+        for node in ast.walk(parse(path)):
             if not isinstance(node, ast.Raise) or not isinstance(node.exc, ast.Call):
                 continue
             call = node.exc
@@ -506,10 +511,7 @@ def selects(needle: str, message: str | None) -> bool:
 
 def raises_sites(path: str):
     """Each `pytest.raises(..., match=)` in a module, with the calls in its body."""
-    tree = parse(path)
-    if tree is None:
-        return
-    for node in ast.walk(tree):
+    for node in ast.walk(parse(path)):
         if not isinstance(node, (ast.With, ast.AsyncWith)):
             continue
         for item in node.items:
@@ -578,7 +580,18 @@ def screen() -> None:
     print(f"# total\t{sum(verdicts.values())}", file=sys.stderr)
 
 
+#: Below this, `ast.parse` rejects the PEP 701 f-strings two estate files use.
+#: Those files would then be skipped rather than counted, and a short estate
+#: reports the same "every site is claimed" as a complete one, so this is a
+#: refusal rather than a warning.
+MIN_PYTHON = (3, 12)
+
+
 def main() -> None:
+    if sys.version_info < MIN_PYTHON:
+        running = ".".join(str(n) for n in sys.version_info[:3])
+        want = ".".join(str(n) for n in MIN_PYTHON)
+        raise SystemExit(f"needs Python {want} or newer to parse the whole estate; this is {running}")
     if not Path(INVENTORY).exists():
         raise SystemExit("run this from the repository root")
     command = sys.argv[1] if len(sys.argv) > 1 else "screen"
