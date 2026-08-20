@@ -140,7 +140,7 @@ Run over all 664 `pytest.raises(..., match=)` sites under `cli/tests` at `426ccc
 
 `sweep-screen.py screen` prints this partition one site per line, with the targeted raise and the
 handle values behind each verdict, so a later executor regenerates it rather than trusting the
-table. The six converts and the thirteen `[1-raise]` rows are the only verdicts carried on rows; the
+table. The six converts and the twelve `[1-raise]` rows are the only verdicts carried on rows; the
 other 645 sites live in the script's output, which is why the script is committed beside this file.
 
 **199 of the 251 sites the screen could resolve, four in five, are multi-raise-path.** That is the
@@ -259,17 +259,18 @@ G1-013 into G1-K19, and G1-062 into G1-C02.
 
 ### The estate, re-measured at HEAD
 
-| Estate                                           | At the basis | At HEAD | What moved                                                                                |
-| ------------------------------------------------ | -----------: | ------: | ----------------------------------------------------------------------------------------- |
-| `pytest.raises(..., match=)` under `cli/tests`   |          663 |     664 | The Grok Build integration (`703fb625`, 2026-08-17) added one site, rowed below as RB-011 |
-| `assertRaisesRegex` under `website/tests`        |           51 |      49 | `test_site_templates.py` lost two to an unrelated `assertRaises` narrowing                |
-| Test files under `cli/tests` and `website/tests` |          n/a |     362 | A guide rework (`4ac084cd`) deleted fifteen files and added six                           |
+| Estate                                           | At the basis | At HEAD | What moved                                                                                 |
+| ------------------------------------------------ | -----------: | ------: | ------------------------------------------------------------------------------------------ |
+| `pytest.raises(..., match=)` under `cli/tests`   |          663 |     664 | The Grok Build integration (`703fb625`, 2026-08-17) added one site, rowed below as RB-011  |
+| `assertRaisesRegex` under `website/tests`        |           51 |      49 | `test_site_templates.py` lost two to an unrelated `assertRaises` narrowing                 |
+| Test files under `cli/tests` and `website/tests` |          n/a |     362 | A guide rework deleted fifteen files at `4ac084cd` and added four, with two more following |
 
 Two site families in `website/tests` sit in the same suite and were never part of the 51: one
 `assertRegex` (`test_site_build.py:530`) and eight `assertNotRegex` (five in `test_lander_404.py`,
 three in `test_lander_phase4j.py`). All nine already fall inside group 5 rows (F-070, F-098 to
-F-104, F-116 to F-121), so they are mapped; only the headline count in `hla.md` omits them. That
-count is the effort lead's to correct and is flagged below.
+F-104, F-116 to F-121), so they are mapped; only the headline count in `hla.md` omitted them.
+`hla.md` now records all nine, along with both corrected site counts, under the effort lead's
+authorization; the corrections section below marks those bullets applied.
 
 ### Dead rows
 
@@ -610,7 +611,7 @@ through G1-C04 and converts; everywhere else this batch is `hla.md` case 2's fal
 its case 1, which R2.4 resolves to the same deletion with the branch coverage going too. **Stated
 plainly, because it is what this batch now costs: after the edit, a same-type failure raised from a
 different path in the same operation will satisfy these tests.** Rows carrying `[1-raise]` are the
-thirteen the screen verified as genuinely single-path; the rest of the batch is unscreened and the
+twelve the screen verified as genuinely single-path; the rest of the batch is unscreened and the
 executor owes it the screen per row before the edit lands.
 
 | id     | file:line                                                                                                     | shape                                                                                                                       | disposition |
@@ -666,6 +667,7 @@ executor owes it the screen per row before the edit lands.
 | G1-051 | `cli/tests/resources/test_template_kinds.py:194`                                                              | 1 `match=` site(s) over ConfigError                                                                                         | delete      |
 | G1-052 | `cli/tests/resources/test_vm_template_kind.py:72,89`                                                          | 2 `match=` site(s) over ConfigError                                                                                         | delete      |
 | G1-053 | `cli/tests/schema/test_shorthand.py:49,64,127,136,166,192,259,317`                                            | 8 `match=` site(s) over StateError, ValueError                                                                              | delete      |
+| G1-156 | `cli/tests/secrets/test_resolution_lifecycle.py:595,611,621`                                                  | **[subtracted: secrets-preview]** 3 `match=` site(s) over ValueError                                                        | delete      |
 | G1-054 | `cli/tests/secrets/test_resolver_seed.py:79,120`                                                              | **[subtracted: secrets-preview]** 2 `match=` site(s) over StateError                                                        | delete      |
 | G1-055 | `cli/tests/secrets/test_sources.py:405,558,624`                                                               | **[subtracted: secrets-preview]** 3 `match=` site(s) over ConfigError, ValidationError                                      | delete      |
 | G1-056 | `cli/tests/sessions/test_console_attach_orchestrated.py:237`                                                  | 1 `match=` site(s) over StateError                                                                                          | delete      |
@@ -767,7 +769,6 @@ executor owes it the screen per row before the edit lands.
 | G1-153 | `cli/tests/vms/test_vm_site_kind.py:119,125,153,160,186,205,369`                                              | 7 `match=` site(s) over ConfigError                                                                                         | delete      |
 | G1-154 | `cli/tests/workspaces/test_create_orchestrated.py:195,263`                                                    | 2 `match=` site(s) over ExternalError, NotFoundError                                                                        | delete      |
 | G1-155 | `cli/tests/workspaces/test_lifecycle_orchestrated.py:1117,1145,1185,1247,1268,1325,1418,1488,1629,1635`       | 10 `match=` site(s) over AlreadyExistsError, ExternalError, NotFoundError, SSHError, StateError, UserAbort, ValidationError | delete      |
-| G1-156 | `cli/tests/secrets/test_resolution_lifecycle.py:595,611,621`                                                  | **[subtracted: secrets-preview]** 3 `match=` site(s) over ValueError                                                        | delete      |
 
 ## Group 2: guide and migration topics
 
@@ -1867,10 +1868,11 @@ Four facts it established, three of which do not depend on the counts that went 
    independent and never need to stack.
 3. **Group 6 is not independent**, which was the standing guess: it shared files with both group 5
    and group 1. Group 3c was the closest thing to independent, overlapping group 1 alone.
-4. **Group 4 carries the rework risk.** It holds 81 of the 191 live converts, more than every other
-   group combined, which is why the old stack put it at the top with only leaves above it. Whatever
-   order the re-cut chooses, nothing should be built on group 4 that a rework of its converts would
-   drag with it.
+4. **Group 4 carries the rework risk.** Group 3 holds more converts in total, 88 against group 4's
+   81, but group 3 lands as four PRs and its largest sub-batch carries 32, so **group 4 is the
+   largest single PR by converts** and the likeliest to need rework. That is why the old stack put
+   it at the top with only leaves above it. Whatever order the re-cut chooses, nothing should be
+   built on group 4 that a rework of its converts would drag with it.
 
 ### Recipe verification
 
@@ -2098,12 +2100,14 @@ Each was ruled for the family rather than the row, and the rows now carry the ru
    number.
 
    The concern behind the eight is real and larger than the tag, and the scan behind that claim is
-   stated here so it can be re-run rather than believed. Over the justification cell of every row,
-   count the rows containing any of the literal strings `already covers`, `already asserts`,
-   `covered by` or `observational twin`, and not containing `[unverified]`, `verified` or
-   `by execution`. That returns **18 rows**. Loosening the phrase set changes the answer, which is
-   the point: the population is a judgment about wording, not a measurement, and whether it wants
-   tagging, executing, or leaving is the effort lead's call and is not decided here.
+   stated here so it can be re-run rather than believed. Count the rows whose JUSTIFICATION cell
+   contains any of the literal strings `already covers`, `already asserts`, `covered by` or
+   `observational twin`, excluding any row that carries `verified` or `by execution` in that same
+   cell OR the `[unverified]` marker in its SHAPE cell. That returns **18 rows**. Reading the
+   justification cell alone for the exclusion answers 20, because the four `[unverified]` rows carry
+   their marker in column 3. Loosening the phrase set changes the answer too, which is the point:
+   the population is a judgment about wording, not a measurement, and whether it wants tagging,
+   executing, or leaving is the effort lead's call and is not decided here.
 
 ## Corrections to lead-owned artifacts
 
