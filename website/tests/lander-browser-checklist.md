@@ -295,6 +295,27 @@ authored wording. The exact formerly failing Phase 4J description test passed 50
 real-Chromium executions; the complete Phase 4J module passed 7 of 7 tests, the shared lifecycle
 suite passed 11 of 11 tests, and the complete website suite passed 155 of 155 tests.
 
+#### Main startup-retry follow-up
+
+- Date: 2026-08-20
+- Harness source: `5c6abc23587afc061e62d07d4b7d3a0ac91d6568`
+- Failure evidence: main CI run `32398998705`, Website job `96522438657`
+- Outcome: local PASS; hosted validation pending
+
+The cited main job exposed the remaining external-process boundary. Chromium remained alive but
+never created `DevToolsActivePort` during the full 20-second wait, so neither HTTP nor WebSocket
+target discovery could begin. One wedged browser process still failed the complete job.
+
+All six real-Chromium harness entry points now use one shared acquisition path. The existing
+20-second startup budget is split across two fresh attempts. If the first browser does not become
+responsive within 10 seconds, the harness terminates it, removes its isolated profile, and starts
+one fresh browser for the remaining attempt. A deterministic mutation proves the failed process and
+profile are cleaned before the second connection is accepted; non-startup exceptions still preserve
+their original identity rather than being retried. The exact formerly failing Phase 4J description
+test passed 50 consecutive real-Chromium executions, the focused real-Chromium corpus passed 11 of
+11 tests, the lifecycle and responsive-browser suites passed 28 of 28 tests, and the complete
+website suite passed 156 of 156 tests.
+
 ### Historical route-proof automated execution record
 
 - Date: 2026-08-10
