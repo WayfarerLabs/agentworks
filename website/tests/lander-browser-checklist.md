@@ -298,7 +298,7 @@ suite passed 11 of 11 tests, and the complete website suite passed 155 of 155 te
 #### Main startup-retry follow-up
 
 - Date: 2026-08-20
-- Harness source: `b53d301c134d14edcb2535cf2b2e6a95fced117a`
+- Harness source: `2d0dcd63a5253324420f541206b0bfca8d812c26`
 - Failure evidence: main CI run `32398998705`, Website job `96522438657`
 - Outcome: local PASS; hosted validation pending
 
@@ -309,13 +309,14 @@ target discovery could begin. One wedged browser process still failed the comple
 All six real-Chromium harness entry points now use one shared acquisition path. The existing
 20-second startup budget is split across two fresh attempts. If the first browser does not become
 responsive within 10 seconds, the harness terminates it, removes its isolated profile, and starts
-one fresh browser for the remaining attempt. Each attempt's single deadline includes discovery and
-the retained page connection. A deterministic mutation proves the failed process and profile are
+one fresh browser for the remaining attempt. Each attempt's single deadline includes process
+startup, target discovery, and the page handshake; the retained session then restores the ordinary
+10-second CDP operation timeout. A deterministic mutation proves the failed process and profile are
 cleaned before the second connection is accepted; non-startup exceptions still preserve their
 original identity rather than being retried. The exact formerly failing Phase 4J description test
 passed 50 consecutive real-Chromium executions, the focused real-Chromium corpus passed 11 of 11
-tests, the lifecycle and responsive-browser suites passed 29 of 29 tests, and the complete website
-suite passed 157 of 157 tests.
+tests, the focused acquisition/lifecycle/document corpus passed 37 of 37 tests, and the complete
+website suite passed 158 of 158 tests.
 
 ### Historical route-proof automated execution record
 
