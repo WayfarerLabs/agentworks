@@ -30,27 +30,18 @@ re-baseline touched them, so a line number elsewhere may still be a `c686cd6d` a
 ### Reading this file mechanically
 
 Several passes have counted this file and disagreed, always on how it was parsed rather than on what
-it says. This is what an auditor needs to know before splitting a row.
-
-**Rows are the lines starting with `|` whose first cell is a row id.** Ids come in five shapes:
-`L-###` and `A-###` through `F-###` from the original read, `G1-###` for the mechanical batch,
-`G1-K##` and `G1-C##` for the two sets pulled out of it, `RB-###` for the rows the 2026-08-19
-re-baseline added, and a handful of suffixed splits (`B-046a`, `D-127a`, `L-101b`) where one row
-became two. Header cells that look like ids (`Sub-batch`, `File`, `Reason`, `Verdict`, `Recipe`) are
-not rows.
-
-**Split cells on unescaped pipes only.** A `\|` inside a code span is content; a naive split turns
-one row into three and silently invents rows.
+it says. **[sweep-screen.py](sweep-screen.py)'s `rows()` is the reference implementation of the
+grammar**, so count with it rather than re-deriving one: it reads the id shapes, splits cells on
+unescaped pipes only, and tracks the group by `##` heading alone. Two facts a reader still needs.
 
 **Column 1 is the id, column 2 the file and lines, column 3 the shape, column 4 the disposition, and
 column 5 the justification.** The mechanical batch has no column 5, so it is four columns wide.
 Every row state lives in column 3 as a bold marker, so an audit is "split the row, read column 1 and
 column 3" with no heading state to track and no prose to read.
 
-**Two things in column 2 carry no meaning.** Backticks around the path are decoration, not a signal,
-even though at this revision they happen to fall on the rows recent work touched. And three rows
-(D-154, D-157, F-128) name further files by bare basename after a leading directory, so a scan that
-only matches full paths under-counts what is rowed by sixteen files.
+**Two things in column 2 carry no meaning.** Backticks around the path are decoration, not a signal.
+And three rows (D-154, D-157, F-128) name further files by bare basename after a leading directory,
+so a scan that only matches full paths under-counts what is rowed by sixteen files.
 
 ## How a row was decided
 
@@ -79,11 +70,23 @@ tree, the threat model is accidental regression, never adversarial tampering: wh
 thing under test can edit the test beside it. That is the correction W1 arrived at after four
 rounds, and it is why no row here is justified as proving that nobody can subvert something.
 
+### Two screens every delete row runs first
+
+The mechanical batch's shared justification makes two claims about each site: that the raised type
+discriminates the branch, and that the matched string is prose this repository authors. Each has its
+own screen below, both are **mandatory for every group's delete rows** and not only group 1's, and
+each has been shown false for a real population here. They ask different questions and neither sees
+the other's class: the callee screen asks about raise paths, the injected-marker screen asks who
+wrote the string.
+
+Where either screen is silent, the row is not screened. Both are run by
+[sweep-screen.py](sweep-screen.py) and neither can decide a site whose callee the resolver cannot
+reach; for those, the third method below applies.
+
 ### The callee-side raise screen
 
 **Every delete row that drops a `match=` or an `assertRaisesRegex` runs this screen first, and the
-row records the result.** It is mandatory for the groups that have not executed yet, not only for
-group 1, because the premise it tests is one no group checked.
+row records the result.**
 
 `hla.md` case 1 says to delete the `match=` where "the raised type already discriminates". That is a
 claim about the CALLEE, and the settled map established it from the caller: a test function raising
@@ -126,6 +129,14 @@ multi-raise-path with one. The 199 multi-raise-path sites do NOT need re-screeni
 is the disposition the screen already gave them. Anywhere else in this file that talks about what
 the executor still owes means this number.
 
+**Owing the screen on an unresolved site means reading the called code by hand and recording the
+answer on the row, not re-running the script.** Re-running it returns "unresolved" again, by
+construction: the resolver already told you it cannot reach that callee. The hand answer is the same
+question the script asks. Open the operation the test calls, find every `raise` of the asserted type
+it can reach, and if there is more than one, say on the row whether a handle tells the targeted one
+apart. The seven sites the mutation screen below turned into named rows were all in this bucket,
+which is what that debt looks like when it is paid.
+
 #### What it found in group 1
 
 Run over all 664 `pytest.raises(..., match=)` sites under `cli/tests` at `426cccae`.
@@ -154,6 +165,43 @@ Six sites over four files have a handle and convert; they are G1-C01 to G1-C04 b
 rows verified single-raise-path across every site they claim and carry `[1-raise]`. The 532
 unsettled sites are the executor's, per row, before the edit lands.
 
+### The injected-marker screen
+
+**Every delete row runs this one too.** It tests the mechanical batch's other claim, that the
+matched string is prose this repository authors, and the callee screen cannot see this class at all:
+it asks about raise paths, this asks who wrote the string.
+
+Where a test injects a failure and then matches on the string it injected, the `match=` is not
+pinning anything authored. It is the proof that the INJECTED failure is the one observed, which is
+the whole content of the assertion. L-004, L-008, L-009 and L-010 keep for exactly that reason, and
+the screen finds the rest of that family rather than leaving it to whoever reads a row closely.
+
+The rule, which `sweep-screen.py injected` implements: a site qualifies when its needle appears in a
+string its own module hands to an exception constructor AND appears in no string production emits.
+Both halves matter. Without the first it is not a marker. Without the second the test may be quoting
+a shipped sentence through a fake, which is the shape the batch correctly deletes: two sites in
+`test_activation.py` match `"manually stopped"`, which reads like a marker and is a copy of
+`vms/nodes.py:243`, so they stay deleted. Comments and docstrings are excluded from the production
+side, because a phrase a docstring discusses is not one the code says.
+
+**It found 30 live sites over 19 files in the mechanical batch, all of them keeps**, rowed as G1-I01
+to G1-I19 below, plus one that the mutation screen had already taken (G1-M07) and eleven inside rows
+already subtracted, named in the subtraction hand-off. Verdict: on those 30 sites the batch's shared
+justification was not a judgment call that went the wrong way, it was a false statement of fact.
+
+### The mutation screen, for what neither of the above reaches
+
+Both screens above are static, and 532 sites are beyond the resolver. For a site an executor cannot
+decide by reading, the question has an empirical answer: **break the behavior the test is named for,
+and see whether the test still fails once the `match=` is gone.** Fail with the assertion and pass
+without it means the assertion is the only probe, and the row keeps.
+
+This is not a screen to run over hundreds of sites; it is what to do with the handful a reading
+leaves genuinely uncertain. Seven sites were decided this way on 2026-08-19 and are rowed as G1-M01
+to G1-M07, and the result is why the method is recorded rather than the sites alone: **five of the
+seven keep and two do not**, and no reading of the rows predicted which. The batch justification
+would have deleted all seven.
+
 ## Groups
 
 The rows are batched by **shape**, not by domain, so each group can land as one PR and a review
@@ -176,15 +224,15 @@ carried forward. Two figures matter and they are different: the LEDGER is every 
 ever held, and the EXECUTABLE SET is what a restart of the sweep actually owns after the dead rows
 and the re-scope subtraction come out.
 
-**Executable set: 984 rows, 478 delete, 191 convert, 315 keep**, over five groups. Group 2 has none
-left.
+**Executable set: 1,006 rows, 476 delete, 191 convert, 339 keep**, over five groups. Group 2 has
+none left.
 
-**Ledger: 1,193 rows**, which is the executable 984 plus 67 `[dead]`, 117 `[subtracted]`, and 25
+**Ledger: 1,215 rows**, which is the executable 1,006 plus 67 `[dead]`, 117 `[subtracted]`, and 25
 `[deferred]`.
 
 | Group                                            | Live | delete | convert | keep | Dead | Subtracted | Ledger |
 | ------------------------------------------------ | ---: | -----: | ------: | ---: | ---: | ---------: | -----: |
-| 1. Mechanical `match=` narrowing                 |  182 |    148 |       7 |   27 |    2 |         25 |    209 |
+| 1. Mechanical `match=` narrowing                 |  204 |    146 |       7 |   51 |    2 |         25 |    231 |
 | 2. Guide and migration topics                    |    0 |      0 |       0 |    0 |   50 |          0 |     50 |
 | 3. Report lines and hints (four sub-batches)     |  322 |    158 |      88 |   76 |    1 |         59 |    382 |
 | 4. Schema, manifests, capabilities and platforms |  228 |     52 |      81 |   95 |    6 |         16 |    250 |
@@ -192,13 +240,15 @@ left.
 | 6. Source guards                                 |   52 |     25 |       4 |   23 |    1 |         10 |     63 |
 | Deferred (`[deferred]`, held for R4)             |   25 |     23 |       2 |    0 |    0 |          0 |     25 |
 
-Group 1's site counts are derived exactly, because that estate is scanned rather than read. **All
-664 `match=` sites under `cli/tests` at HEAD are claimed by exactly one group-1 row**, which
-`sweep-screen.py attribute` checks: it reports zero sites claimed by no row and zero claimed by more
-than one. Of the suite's 49 `assertRaisesRegex` sites under `website/tests`, group 1 claims 37 and
-the deferred L-402 claims the other twelve. The other groups were read rather than scanned, and one
-row there covers an assertion group of one to a dozen lines, so no site total is claimed for them.
-Do not add these numbers to the absorbed survey's: that survey counted test FUNCTIONS.
+Group 1's site counts are derived exactly, because that estate is scanned rather than read.
+`sweep-screen.py estate` is where the 664 comes from, one site per line, and it is what to re-run
+when the tree moves; `sweep-screen.py attribute` is what checks the claim below against the rows.
+**All 664 `match=` sites under `cli/tests` at HEAD are claimed by exactly one group-1 row**, and
+`attribute` reports zero sites claimed by no row and zero claimed by more than one. Of the suite's
+49 `assertRaisesRegex` sites under `website/tests`, group 1 claims 37 and the deferred L-402 claims
+the other twelve. The other groups were read rather than scanned, and one row there covers an
+assertion group of one to a dozen lines, so no site total is claimed for them. Do not add these
+numbers to the absorbed survey's: that survey counted test FUNCTIONS.
 
 **Corrected 2026-08-19 by the fix round.** The claim above was false when first made: rows accounted
 for 640 of the 664. Three files were re-derived (`test_resolution_lifecycle.py`, whose five cited
@@ -214,9 +264,14 @@ asserted.
 One row is one test or one contiguous assertion group, so a file that mixes wholly-policing tests
 with prose assertions riding inside legitimate ones appears several times. Group 1's mechanical
 batch is the one exception and says so where it starts: those rows are one per FILE, because the
-sites they carry share a single shape, a single disposition, and a single justification. Live, that
-is **552 sites over 152 files**; the ledger holds 153 rows and 554 sites, the difference being
-G1-008's two sites in a file `4ac084cd` deleted.
+sites they carry share a single shape, a single disposition, and a single justification.
+
+**File counts, ledger and executable, because they differ by enough to mis-size a PR.** The
+mechanical batch's ledger is 149 rows over 149 files and 517 sites. Its EXECUTABLE half, once the
+dead and subtracted rows come out, is **131 rows over 131 files and 454 sites**: eighteen of those
+files now belong to the secrets-preview and instance-model efforts, so an executor sizing the PR
+from the ledger figure would open eighteen files that are not the sweep's to touch. Group 1 as a
+whole is 231 rows over 163 files on the ledger and **204 rows over 144 files executable**.
 
 This file is long for the repository's 500-line guidance, deliberately. It is a ledger, it is
 temporary, and one row per line is what makes it checkable against a diff.
@@ -251,11 +306,14 @@ Two annotate a row that stays in it:
 - **`[unverified]`**: the row's disposition turns on a coverage claim that was reasoned rather than
   executed, and its justification names which claim.
 
-Ids say where a row came from. `RB-` marks the twelve rows the 2026-08-19 re-baseline added and
-`G1-C` the four its callee screen pulled out of the mechanical batch. `G1-K17` through `G1-K23` are
-the seven the 2026-08-16 harvest added, which is why the `RB-`/`G1-C` rule does not cover them. Two
-rows were removed rather than marked, both because every site they claimed moved to another row:
-G1-013 into G1-K19, and G1-062 into G1-C02.
+Ids say where a row came from. `RB-` marks the twelve rows the 2026-08-19 re-baseline added, and
+`G1-C`, `G1-M` and `G1-I` the rows its three screens pulled out of the mechanical batch (the callee
+screen, the mutation screen and the injected-marker screen respectively). `G1-K17` through `G1-K23`
+are the seven the 2026-08-16 harvest added, which is why those rules do not cover them.
+
+Six rows were removed rather than marked, each because every site it claimed moved to another row:
+G1-013 into G1-K19, G1-062 into G1-C02, and G1-099, G1-123, G1-135 and G1-140 into the
+injected-marker rows, those four files having held nothing but injected markers.
 
 ### The estate, re-measured at HEAD
 
@@ -325,10 +383,10 @@ none: it asserts only argv (`--session-id`, `--resume`) and persisted state.
 **Sixty-nine test files at HEAD carry no row**, measured this way so a second auditor lands on the
 same number: take every `git ls-files` path under `cli/tests` and `website/tests` whose basename
 starts with `test_` and ends `.py`, or which ends `.test.mjs` (362 files); a file counts as rowed if
-any row's file cell names it, resolving a bare basename against the leading directory in the same
-cell and expanding a `*` glob, and dead and subtracted rows count as rowed. Skipping the basename
-resolution answers 82 instead of 69, because D-154, D-157 and F-128 between them name sixteen files
-that way.
+any row's file cell names it, resolving a bare basename against the NEAREST PRECEDING directory in
+the same cell and expanding a `*` glob, and dead and subtracted rows count as rowed. Skipping the
+basename resolution answers 82 instead of 69, because D-154, D-157 and F-128 between them name
+sixteen files that way.
 
 Of the sixty-nine, fifty-four have zero derivable in-scope operands: no `match=`, no
 `assertRaisesRegex` family member, and no multi-word string literal in an assertion operand
@@ -439,6 +497,16 @@ The subtracted rows, by group and owner:
 Each row below is a file the owning effort inherits, with what the sweep had decided for it. This is
 the hand-off the re-scope message asks each effort's definition of done to absorb.
 
+**One finding rides with the hand-off rather than being rediscovered on the other side.** The
+injected-marker screen finds eleven sites inside subtracted DELETE rows whose matched text is a
+marker the test wrote, not prose we ship: nine `api-key` sites across the three
+`test_secrets_eager_resolve_*` files (G1-106, G1-107, G1-108) going to secrets-preview, and two
+`boom` and `snapshot unavailable` sites in `test_database_migration_safety.py` (G1-084) going to
+instance-model. By the same rule that keeps G1-I01 to G1-I19 those eleven keep, so the delete
+disposition their rows carry is wrong on its own terms. Two further injected sites in these estates
+sit in L-010, which already keeps them for this reason. The owning efforts inherit the correction
+with the rows; `sweep-screen.py injected` reproduces it.
+
 **To `2026-08-18-secret-preview-contract`:**
 
 | File                                                        | Rows | delete | convert | keep |
@@ -484,7 +552,7 @@ needs re-cutting for the restart, which is a sequencing decision and not this ma
 
 ## Group 1: mechanical `match=` narrowing
 
-182 live rows: 148 delete, 7 convert, 27 keep, out of a ledger of 209 (two `[dead]`, 25
+204 live rows: 146 delete, 7 convert, 51 keep, out of a ledger of 231 (two `[dead]`, 25
 `[subtracted]`). The group splits in three. The 33 rows immediately below are the sites the taxonomy
 does NOT decide mechanically; the 23 `G1-K` rows after them are the sites whose matched text varies
 with the test's input; the 152 rows in the mechanical batch last are one per file and share one
@@ -492,8 +560,16 @@ justification. A reviewer who reads the first two tables has read all the judgme
 
 **This group is no longer the no-judgment batch its name promises.** The callee-side raise screen
 found that four in five of the sites it can resolve are multi-raise-path, so the mechanical batch's
-deletions rest on `hla.md` case 2's fallback rather than its case 1. The edit is the same and the
-review is not.
+deletions rest on `hla.md` case 2's fallback rather than its case 1. The injected-marker screen then
+found 30 sites where the batch's other claim was false outright. The edit is the same and the review
+is not.
+
+**Operator disposition, 2026-08-19: group 1 executes as TWO PRs.** The mechanical batch goes at
+mechanical speed as one, and the judgment rows go as the other with their own review depth: G1-C01
+to G1-C04, G1-M01 to G1-M07, G1-I01 to G1-I19, and group 1's remaining converts and keeps, which are
+the rows whose evidence a reviewer has to read rather than scan. The split follows the screens: what
+is left in the mechanical batch after three screens have taken their sites out is the part that
+genuinely needs no judgment.
 
 **Corrected 2026-08-16, during execution.** The re-check that produced the `G1-K` rows found 30
 input-varying sites. There are 43, plus two of the same shape in unittest's spelling. It had missed
@@ -542,15 +618,22 @@ way rather than asserted from reading.
 | G1-C02 | `cli/tests/test_agents.py:50,62`                                                                         | two same-type refusals the callee raises from several paths                                                                            | convert     | **Callee-side raise screen, 2026-08-19,** re-derived by `sweep-screen.py screen`. The grant path's empty-request refusal is `cli/agentworks/agents/grants.py:75` and the revoke path's is `:142`, both `ValidationError` with `entity_kind="agent"`, and both operations also reach `cli/agentworks/naming.py:136` and `:139`, which raise the same type for a malformed name with no `entity_kind` at all. Three reachable raises per site, so the type does not discriminate and the handle does. Assert `caught.value.entity_kind == "agent"` in place of each sentence. This row is the whole of its file's group 1 content, so no mechanical row remains for it. No production change.                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | G1-C03 | `cli/tests/test_env_show.py:124`                                                                         | one of two same-type refusals in one call                                                                                              | convert     | **Callee-side raise screen, 2026-08-19,** re-derived by `sweep-screen.py screen`. `show_env` reaches nine `ValidationError` raises: six in `cli/agentworks/env/show.py` (`:190`, `:202`, `:213`, `:224`, `:239`, `:245`), the two name-rule raises in `cli/agentworks/naming.py`, and one in `cli/agentworks/secrets/line_safety.py:38`. The targeted one, `show.py:245`, is the only one carrying `entity_kind="VM"`, so assert that instead of `"VM 'nope' not found"`. The file's other site, `:116`, keeps its delete under case 2's fallback: it targets `show.py:190`, and `:239` carries no `entity_kind` either, so nothing tells the two apart and the branch coverage goes with the assertion (R2.4). No production change.                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | G1-C04 | `cli/tests/workspaces/test_lifecycle_orchestrated.py:1345`                                               | one of two same-type refusals in one call                                                                                              | convert     | **Callee-side raise screen, 2026-08-19,** re-derived by `sweep-screen.py screen`. The repair path reaches exactly two `NotFoundError` raises, `cli/agentworks/workspaces/manager/repair.py:91` for the missing workspace and `:99` for the missing VM behind it. Only `:91` carries `entity_kind="workspace"`, so assert that rather than `"workspace 'ghost' not found"`. Without it a regression that loses the VM instead of the workspace passes this test. The file's other ten sites stay with G1-155. No production change.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| G1-M01 | `cli/tests/orchestration/test_activation.py:171`                                                         | scoping refusal, one of two same-type raises                                                                                           | keep        | **Mutation-proved 2026-08-19.** `ScopedSecrets.get` raises `StateError` twice: the undeclared-name refusal at `cli/agentworks/orchestration/secrets.py:238` and the declared-but-unresolved one at `:248`. Bypassing the refusal (`if False:` at `:237`) leaves the second raise standing, so the bare `raises` still passes and only the `match=` fails. Measured: `test_gate_reader_is_scoped_to_declared_gate_secrets` fails with the assertion as shipped and PASSES once the mechanical row's edit lands. Under the rubric this is the only probe for a behavior that can regress, so it keeps.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| G1-M02 | `cli/tests/orchestration/test_activation.py:241`                                                         | declaration refusal, single raise path                                                                                                 | delete      | **Mutation-proved 2026-08-19, and the disposition stands.** This site targets a different class from G1-M01: `activation.py:177`, the lazy gate-and-repair reader, which has exactly one `raise StateError`. Bypassing its declaration check (`if True:` at `:174`) is caught by `test_auto_start_reader_refuses_undeclared_names` with the `match=` and without it, so the assertion adds nothing the raised type does not already carry. Recorded rather than left in the batch because the four sites around it went the other way and a reader will ask.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| G1-M03 | `cli/tests/vms/test_add_git_credential_orchestrated.py:361`                                              | scoping refusal inside a monkeypatched runup                                                                                           | delete      | **Mutation-proved 2026-08-19, and the disposition stands.** Same `ScopedSecrets` mutation as G1-M01. `test_nodes_receive_only_their_declared_secrets` still fails after the `match=` goes, because the same test also asserts the token it DID receive, which the mutation changes. The row survives on that sibling assertion, not on the wording.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| G1-M04 | `cli/tests/vms/test_add_git_credential_orchestrated.py:432`                                              | scoping refusal inside a monkeypatched status probe                                                                                    | keep        | **Mutation-proved 2026-08-19.** Same mutation, opposite result: `test_stopped_vm_gate_resolves_once_and_seeds_the_boundary` fails as shipped and passes after the edit. Nothing else in it distinguishes the scoping refusal from the unresolved-name one.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| G1-M05 | `cli/tests/vms/test_shell_exec_orchestrated.py:633`                                                      | scoping refusal on the platform-transport context                                                                                      | keep        | **Mutation-proved 2026-08-19.** `test_shell_platform_transport_hands_a_secret_bearing_ctx` fails as shipped and passes after the edit. This is the site whose `match=` carries the longest needle of the family (`not declared by this node`), and the length is not why it keeps: the second raise at `secrets.py:248` is what makes the type non-discriminating.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| G1-M06 | `cli/tests/vms/test_sites_dispatch.py:125`                                                               | scoping refusal on a bare run context                                                                                                  | keep        | **Mutation-proved 2026-08-19.** `test_ops_read_the_token_through_the_context` fails as shipped and passes after the edit. Its neighbor at `:123` is a `ConfigError` on a different arm and is unaffected; only this line probes the scoping contract.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| G1-M07 | `cli/tests/vms/test_lima_remote_create_interrupt.py:750`                                                 | injected marker distinguishing two same-type failures                                                                                  | keep        | **Mutation-proved 2026-08-19, and an injected-marker site as well.** Both `SSHError("original failure")` and `SSHError("cleanup broke")` are strings this test writes, so the `match=` is what proves the ORIGINAL failure propagated rather than the cleanup one, which is the property the test is named for. Making the cleanup re-raise over the original (`raise` after the warn at `cli/agentworks/capabilities/vm_platform/lima.py:659`) leaves all 16 tests in the file passing once the assertion goes; with it, `test_cleanup_failure_warns_and_does_not_mask_the_original` fails. `test_wsl2_create_interrupt.py:226` is the same property on the WSL2 platform and keeps as G1-I20.                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 ### Sites the re-check pulled out of the mechanical batch
 
-43 of the 595 live `match=` sites this section ranges over match a string that VARIES with the
-test's input (an f-string over a field name, a parametrize variable, an interpolated production
-constant). Those probe that the diagnostic tracks the input, which is behavior, so they keep. The
-remaining 552 match a fixed literal in a single-input test, where the only failure mode is a
-rewording. Two `assertRaisesRegex` sites of the same shape sit in L-403's range and keep with them,
-at G1-K23.
+43 of the `match=` sites in this group match a string that VARIES with the test's input (an f-string
+over a field name, a parametrize variable, an interpolated production constant). Those probe that
+the diagnostic tracks the input, which is behavior, so they keep. Two `assertRaisesRegex` sites of
+the same shape sit in L-403's range and keep with them, at G1-K23. What is left after this section,
+the mutation screen's and the injected-marker screen's takes out is the mechanical batch, whose
+sites match a fixed literal in a single-input test.
 
 **One reason serves every row here, so it is stated once rather than 23 times.** These are not fixed
 phrasing: the matched text varies with the case, so each assertion fails when the diagnostic stops
@@ -587,13 +670,58 @@ two `assertRaisesRegex` sites the second re-check added, as the group header exp
 | G1-K22 | `cli/tests/vms/test_platform_config_contract.py:130,145,164,182,227`     | `match=` varying with the test's input                                   | keep        | **Second re-check, 2026-08-16.** Three interpolated loops (`:130` azure's three location keys, `:145` the service-principal identifiers, `:182` gcp's `project_id`/`zone`) and two parametrized tables (`:164`, `:227`) over seven and eight malformed-credential cases. This is the file L-026 covers, and L-026's finding stands for its remaining fourteen: `entity_kind` is identical on all of them. These five are the sites where the matched text is not identical, so the parameter still discriminates where the handle cannot.                                                            |
 | G1-K23 | `website/tests/test_site_content.py:270,329`                             | `assertRaisesRegex` varying with the input                               | keep        | **Second re-check, 2026-08-16.** The same shape in unittest's spelling, inside the range L-403 used to carry. `:270` takes `reason` from a five-case table of document-structure defects; `:329` is `rf"HOME_IDENTITY README.md .*{reason}"` over three, and additionally names the contract and source path. `ContractError` is shared by every case in both. **Corrected 2026-08-19 (map re-baseline).** Lines re-derived at HEAD from `:221,280`.                                                                                                                                                 |
 
+### Sites the injected-marker screen pulled out of the mechanical batch
+
+30 further sites over 19 files match a string the test file itself wrote and handed to an exception
+constructor. For those the mechanical batch's shared justification is false in the way that decides
+the row: the matched text is not prose this repository authors, it is a marker, and the assertion is
+the proof that the INJECTED failure is the one observed. That is word for word why L-004, L-008,
+L-009 and L-010 already keep; the screen finds the rest of that family instead of leaving it to
+whoever happens to read a row closely.
+
+`sweep-screen.py injected` derives them: a site qualifies when its needle appears in a string its
+own module passes to an exception constructor AND appears in no string production emits. Both halves
+matter. Without the first it is not a marker; without the second the test may be quoting a shipped
+sentence through a fake, which is what the batch deletes. Comments and docstrings are excluded from
+the production side, because a phrase discussed in a docstring is not a phrase the code says: two
+production docstrings mention "original failure" and no production message contains it, which is the
+difference between keeping G1-M07 and deleting it.
+
+Thirteen further injected-marker sites sit in already-subtracted rows and are not rowed here. Eleven
+of those carry a delete disposition that this rule makes wrong, and the subtraction section's
+hand-off names them so the owning effort inherits the correction rather than rediscovering it. The
+other two are already keeps (L-010), which is the screen agreeing with a row that was read closely
+enough the first time.
+
+| id     | file:line                                                              | shape                   | disposition | justification                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ------ | ---------------------------------------------------------------------- | ----------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| G1-I01 | `cli/tests/orchestration/test_activation.py:149`                       | 1 injected-marker site  | keep        | The matched text is a marker this test file writes and hands to an exception constructor (`boom`), and it appears in no string production emits, so the assertion is proof that the INJECTED failure is the one observed. That is the reason L-004 and L-008 through L-010 already keep, and it makes the mechanical batch's shared justification false here: the matched string is not prose this repository authors. Pulled out of G1-018.                                                                                    |
+| G1-I02 | `cli/tests/orchestration/test_readiness.py:119`                        | 1 injected-marker site  | keep        | The matched text is a marker this test file writes and hands to an exception constructor (`{}: not a rejection`), and it appears in no string production emits, so the assertion is proof that the INJECTED failure is the one observed. That is the reason L-004 and L-008 through L-010 already keep, and it makes the mechanical batch's shared justification false here: the matched string is not prose this repository authors. Pulled out of G1-019.                                                                     |
+| G1-I03 | `cli/tests/plugins/gcp/test_compute.py:246`                            | 1 injected-marker site  | keep        | The matched text is a marker this test file writes and hands to an exception constructor (`provider bug`), and it appears in no string production emits, so the assertion is proof that the INJECTED failure is the one observed. That is the reason L-004 and L-008 through L-010 already keep, and it makes the mechanical batch's shared justification false here: the matched string is not prose this repository authors. Pulled out of G1-023.                                                                            |
+| G1-I04 | `cli/tests/plugins/test_plugin_framework.py:818`                       | 1 injected-marker site  | keep        | The matched text is a marker this test file writes and hands to an exception constructor (`boom`), and it appears in no string production emits, so the assertion is proof that the INJECTED failure is the one observed. That is the reason L-004 and L-008 through L-010 already keep, and it makes the mechanical batch's shared justification false here: the matched string is not prose this repository authors. Pulled out of G1-031.                                                                                    |
+| G1-I05 | `cli/tests/plugins/test_proxmox_create_interrupt.py:652`               | 1 injected-marker site  | keep        | The matched text is a marker this test file writes and hands to an exception constructor (`cluster unreachable`), and it appears in no string production emits, so the assertion is proof that the INJECTED failure is the one observed. That is the reason L-004 and L-008 through L-010 already keep, and it makes the mechanical batch's shared justification false here: the matched string is not prose this repository authors. Pulled out of G1-034.                                                                     |
+| G1-I06 | `cli/tests/sessions/test_create_resume_orchestrated.py:440`            | 1 injected-marker site  | keep        | The matched text is a marker this test file writes and hands to an exception constructor (`tmux exploded`), and it appears in no string production emits, so the assertion is proof that the INJECTED failure is the one observed. That is the reason L-004 and L-008 through L-010 already keep, and it makes the mechanical batch's shared justification false here: the matched string is not prose this repository authors. Pulled out of G1-057.                                                                           |
+| G1-I07 | `cli/tests/test_azure_create_interrupt.py:395,424`                     | 2 injected-marker sites | keep        | The matched text is a marker this test file writes and hands to an exception constructor (`nic exploded`, `wait exploded`), and it appears in no string production emits, so the assertion is proof that the INJECTED failure is the one observed. That is the reason L-004 and L-008 through L-010 already keep, and it makes the mechanical batch's shared justification false here: the matched string is not prose this repository authors. Pulled out of G1-067.                                                           |
+| G1-I08 | `cli/tests/test_azure_nsg_exposure.py:459`                             | 1 injected-marker site  | keep        | The matched text is a marker this test file writes and hands to an exception constructor (`kaboom`), and it appears in no string production emits, so the assertion is proof that the INJECTED failure is the one observed. That is the reason L-004 and L-008 through L-010 already keep, and it makes the mechanical batch's shared justification false here: the matched string is not prose this repository authors. Pulled out of G1-070.                                                                                  |
+| G1-I09 | `cli/tests/test_operational_json_boundaries.py:604`                    | 1 injected-marker site  | keep        | The matched text is a marker this test file writes and hands to an exception constructor (`operator declined`), and it appears in no string production emits, so the assertion is proof that the INJECTED failure is the one observed. That is the reason L-004 and L-008 through L-010 already keep, and it makes the mechanical batch's shared justification false here: the matched string is not prose this repository authors. Pulled out of G1-099.                                                                       |
+| G1-I10 | `cli/tests/test_session_create_ephemeral_prompts.py:83,196,292`        | 3 injected-marker sites | keep        | The matched text is a marker this test file writes and hands to an exception constructor (`stop after agent realize`, `stop after mode-prompt gate`, `stop after workspace realize`), and it appears in no string production emits, so the assertion is proof that the INJECTED failure is the one observed. That is the reason L-004 and L-008 through L-010 already keep, and it makes the mechanical batch's shared justification false here: the matched string is not prose this repository authors. Pulled out of G1-113. |
+| G1-I11 | `cli/tests/test_session_create_ephemeral_rollback.py:313,346`          | 2 injected-marker sites | keep        | The matched text is a marker this test file writes and hands to an exception constructor (`simulated session-internal failure`, `stop after agent realize`), and it appears in no string production emits, so the assertion is proof that the INJECTED failure is the one observed. That is the reason L-004 and L-008 through L-010 already keep, and it makes the mechanical batch's shared justification false here: the matched string is not prose this repository authors. Pulled out of G1-114.                          |
+| G1-I12 | `cli/tests/test_session_create_ephemeral_vm_anchor.py:265,359,468,514` | 4 injected-marker sites | keep        | The matched text is a marker this test file writes and hands to an exception constructor (`stop after VM resolution`, `stop after agent realize`, `stop after anchor check`), and it appears in no string production emits, so the assertion is proof that the INJECTED failure is the one observed. That is the reason L-004 and L-008 through L-010 already keep, and it makes the mechanical batch's shared justification false here: the matched string is not prose this repository authors. Pulled out of G1-115.         |
+| G1-I13 | `cli/tests/test_vm_shell_platform.py:490`                              | 1 injected-marker site  | keep        | The matched text is a marker this test file writes and hands to an exception constructor (`simulated post-open failure`), and it appears in no string production emits, so the assertion is proof that the INJECTED failure is the one observed. That is the reason L-004 and L-008 through L-010 already keep, and it makes the mechanical batch's shared justification false here: the matched string is not prose this repository authors. Pulled out of G1-123.                                                             |
+| G1-I14 | `cli/tests/test_wsl2_create_interrupt.py:170,226`                      | 2 injected-marker sites | keep        | The matched text is a marker this test file writes and hands to an exception constructor (`apt exploded`, `original failure`), and it appears in no string production emits, so the assertion is proof that the INJECTED failure is the one observed. That is the reason L-004 and L-008 through L-010 already keep, and it makes the mechanical batch's shared justification false here: the matched string is not prose this repository authors. Pulled out of G1-125.                                                        |
+| G1-I15 | `cli/tests/test_wsl2_keepalive.py:100`                                 | 1 injected-marker site  | keep        | The matched text is a marker this test file writes and hands to an exception constructor (`boom`), and it appears in no string production emits, so the assertion is proof that the INJECTED failure is the one observed. That is the reason L-004 and L-008 through L-010 already keep, and it makes the mechanical batch's shared justification false here: the matched string is not prose this repository authors. Pulled out of G1-126.                                                                                    |
+| G1-I16 | `cli/tests/vms/test_bootstrap_vm_hooks.py:134,155`                     | 2 injected-marker sites | keep        | The matched text is a marker this test file writes and hands to an exception constructor (`phase a exploded`), and it appears in no string production emits, so the assertion is proof that the INJECTED failure is the one observed. That is the reason L-004 and L-008 through L-010 already keep, and it makes the mechanical batch's shared justification false here: the matched string is not prose this repository authors. Pulled out of G1-135.                                                                        |
+| G1-I17 | `cli/tests/vms/test_create_reinit_orchestrated.py:450,520,563`         | 3 injected-marker sites | keep        | The matched text is a marker this test file writes and hands to an exception constructor (`backend exploded`, `bootstrap exploded`, `init exploded`), and it appears in no string production emits, so the assertion is proof that the INJECTED failure is the one observed. That is the reason L-004 and L-008 through L-010 already keep, and it makes the mechanical batch's shared justification false here: the matched string is not prose this repository authors. Pulled out of G1-136.                                 |
+| G1-I18 | `cli/tests/vms/test_create_vm_dispatch.py:428`                         | 1 injected-marker site  | keep        | The matched text is a marker this test file writes and hands to an exception constructor (`halt after binding`), and it appears in no string production emits, so the assertion is proof that the INJECTED failure is the one observed. That is the reason L-004 and L-008 through L-010 already keep, and it makes the mechanical batch's shared justification false here: the matched string is not prose this repository authors. Pulled out of G1-137.                                                                      |
+| G1-I19 | `cli/tests/vms/test_lima_create_interrupt.py:245`                      | 1 injected-marker site  | keep        | The matched text is a marker this test file writes and hands to an exception constructor (`provision exploded`), and it appears in no string production emits, so the assertion is proof that the INJECTED failure is the one observed. That is the reason L-004 and L-008 through L-010 already keep, and it makes the mechanical batch's shared justification false here: the matched string is not prose this repository authors. Pulled out of G1-140.                                                                      |
+
 ### The mechanical batch
 
-552 live `match=` sites over 152 files, one row per file, out of a ledger of 554 over 153 (G1-008's
-file is gone). Every one is `delete`, and the justification is shared rather than restated 152
-times: the matched string is a fixed literal that varies with nothing, and it is prose this
-repository authors, which no case in the taxonomy licenses. The `raises` stays; only the `match=`
-argument goes.
+454 live `match=` sites over 131 files, one row per file, out of a ledger of 517 over 149. The gap
+is the dead and subtracted rows, and it is the number to size a PR from. Every one is `delete`, and
+the justification is shared rather than restated 152 times: the matched string is a fixed literal
+that varies with nothing, and it is prose this repository authors, which no case in the taxonomy
+licenses. The `raises` stays; only the `match=` argument goes.
 
 Each row's file cell lists the sites that row owns, generated from the estate at HEAD minus the
 sites the judgment and keep rows above claim. Read it as the row's claim; there is no range to
@@ -632,22 +760,22 @@ executor owes it the screen per row before the edit lands.
 | G1-015 | `cli/tests/manifests/test_samples.py:107,487`                                                                 | 2 `match=` site(s) over ValidationError                                                                                     | delete      |
 | G1-016 | `cli/tests/manifests/test_spec_model.py:189`                                                                  | **[1-raise]** 1 `match=` site(s) over ValidationError                                                                       | delete      |
 | G1-017 | `cli/tests/manifests/test_spec_templates.py:164,215`                                                          | 2 `match=` site(s) over ConfigError, StateError                                                                             | delete      |
-| G1-018 | `cli/tests/orchestration/test_activation.py:130,149,156,171,241`                                              | 5 `match=` site(s) over RuntimeError, StateError                                                                            | delete      |
-| G1-019 | `cli/tests/orchestration/test_readiness.py:60,119,183`                                                        | 3 `match=` site(s) over ConfigError, RuntimeError                                                                           | delete      |
+| G1-018 | `cli/tests/orchestration/test_activation.py:130,156`                                                          | 2 `match=` site(s) over StateError                                                                                          | delete      |
+| G1-019 | `cli/tests/orchestration/test_readiness.py:60,183`                                                            | 2 `match=` site(s) over ConfigError                                                                                         | delete      |
 | G1-020 | `cli/tests/orchestration/test_secrets.py:437,481,498,504,515,588`                                             | **[subtracted: secrets-preview]** 6 `match=` site(s) over ConfigError, StateError                                           | delete      |
 | G1-021 | `cli/tests/orchestration/test_walk.py:91,98,109,121,126`                                                      | 5 `match=` site(s) over StateError                                                                                          | delete      |
 | G1-022 | `cli/tests/plugins/gcp/test_bootstrap.py:31`                                                                  | **[1-raise]** 1 `match=` site(s) over ConfigError                                                                           | delete      |
-| G1-023 | `cli/tests/plugins/gcp/test_compute.py:213,246,259,332,338,375`                                               | 6 `match=` site(s) over AlreadyExistsError, ConfigError, GCEError, RuntimeError                                             | delete      |
+| G1-023 | `cli/tests/plugins/gcp/test_compute.py:213,259,332,338,375`                                                   | 5 `match=` site(s) over AlreadyExistsError, ConfigError, GCEError                                                           | delete      |
 | G1-024 | `cli/tests/plugins/gcp/test_config.py:185`                                                                    | **[1-raise]** 1 `match=` site(s) over ConfigError                                                                           | delete      |
 | G1-025 | `cli/tests/plugins/gcp/test_instance.py:170,279`                                                              | 2 `match=` site(s) over AlreadyExistsError, GCEOperationError                                                               | delete      |
 | G1-026 | `cli/tests/plugins/gcp/test_network.py:147,178,197,212,225,241,276,369,548,565,587,629`                       | 12 `match=` site(s) over AlreadyExistsError, ConfigError, GCEOperationError                                                 | delete      |
 | G1-027 | `cli/tests/plugins/gcp/test_platform.py:696,828,868,914`                                                      | 4 `match=` site(s) over ConfigError, GCEOperationError, StateError                                                          | delete      |
 | G1-028 | `cli/tests/plugins/test_enablement_producer.py:275,344,393,451,491`                                           | 5 `match=` site(s) over ConfigError, StateError                                                                             | delete      |
 | G1-029 | `cli/tests/plugins/test_gcp.py:111,139`                                                                       | **[1-raise]** 2 `match=` site(s) over StateError                                                                            | delete      |
-| G1-031 | `cli/tests/plugins/test_plugin_framework.py:114,123,132,141,391,410,516,818`                                  | 8 `match=` site(s) over PluginError, RuntimeError                                                                           | delete      |
+| G1-031 | `cli/tests/plugins/test_plugin_framework.py:114,123,132,141,391,410,516`                                      | 7 `match=` site(s) over PluginError                                                                                         | delete      |
 | G1-032 | `cli/tests/plugins/test_proxmox_api.py:143,150,157`                                                           | 3 `match=` site(s) over ProxmoxAPIError                                                                                     | delete      |
 | G1-033 | `cli/tests/plugins/test_proxmox_bootstrap_staging.py:158,179,211`                                             | 3 `match=` site(s) over ProvisioningError                                                                                   | delete      |
-| G1-034 | `cli/tests/plugins/test_proxmox_create_interrupt.py:381,652`                                                  | 2 `match=` site(s) over ProvisioningError, ProxmoxAPIError                                                                  | delete      |
+| G1-034 | `cli/tests/plugins/test_proxmox_create_interrupt.py:381`                                                      | 1 `match=` site(s) over ProvisioningError                                                                                   | delete      |
 | G1-035 | `cli/tests/plugins/test_publish.py:225,299,349`                                                               | 3 `match=` site(s) over ConfigError, StateError                                                                             | delete      |
 | G1-036 | `cli/tests/resources/test_admin_template_plurified.py:152`                                                    | 1 `match=` site(s) over ConfigError                                                                                         | delete      |
 | G1-037 | `cli/tests/resources/test_cycle_detection.py:69,78`                                                           | 2 `match=` site(s) over ConfigError                                                                                         | delete      |
@@ -671,7 +799,7 @@ executor owes it the screen per row before the edit lands.
 | G1-054 | `cli/tests/secrets/test_resolver_seed.py:79,120`                                                              | **[subtracted: secrets-preview]** 2 `match=` site(s) over StateError                                                        | delete      |
 | G1-055 | `cli/tests/secrets/test_sources.py:405,558,624`                                                               | **[subtracted: secrets-preview]** 3 `match=` site(s) over ConfigError, ValidationError                                      | delete      |
 | G1-056 | `cli/tests/sessions/test_console_attach_orchestrated.py:237`                                                  | 1 `match=` site(s) over StateError                                                                                          | delete      |
-| G1-057 | `cli/tests/sessions/test_create_resume_orchestrated.py:219,440,821`                                           | 3 `match=` site(s) over RuntimeError, StateError                                                                            | delete      |
+| G1-057 | `cli/tests/sessions/test_create_resume_orchestrated.py:219,821`                                               | 2 `match=` site(s) over StateError                                                                                          | delete      |
 | G1-058 | `cli/tests/sessions/test_effective_config_validation.py:115`                                                  | 1 `match=` site(s) over ConfigError                                                                                         | delete      |
 | G1-059 | `cli/tests/sessions/test_session_nodes.py:140,183,201,223,780,793,809,823`                                    | 8 `match=` site(s) over StateError                                                                                          | delete      |
 | G1-060 | `cli/tests/sessions/test_session_template_surface.py:149,176`                                                 | 2 `match=` site(s) over ConfigError                                                                                         | delete      |
@@ -680,10 +808,10 @@ executor owes it the screen per row before the edit lands.
 | G1-064 | `cli/tests/test_aws_credentials.py:185`                                                                       | 1 `match=` site(s) over ConfigError                                                                                         | delete      |
 | G1-065 | `cli/tests/test_aws_ec2_ops.py:188,228,242,259,286,580`                                                       | 6 `match=` site(s) over ConfigError, EC2Error, StateError                                                                   | delete      |
 | G1-066 | `cli/tests/test_aws_instance_type_selection.py:99`                                                            | 1 `match=` site(s) over ConfigError                                                                                         | delete      |
-| G1-067 | `cli/tests/test_azure_create_interrupt.py:297,330,352,395,424`                                                | 5 `match=` site(s) over AzureError                                                                                          | delete      |
+| G1-067 | `cli/tests/test_azure_create_interrupt.py:297,330,352`                                                        | 3 `match=` site(s) over AzureError                                                                                          | delete      |
 | G1-068 | `cli/tests/test_azure_credentials.py:452,462`                                                                 | 2 `match=` site(s) over AzureError, ConfigError                                                                             | delete      |
 | G1-069 | `cli/tests/test_azure_delete_verify.py:140,152,160,176`                                                       | 4 `match=` site(s) over AzureError                                                                                          | delete      |
-| G1-070 | `cli/tests/test_azure_nsg_exposure.py:223,459`                                                                | 2 `match=` site(s) over ConfigError, RuntimeError                                                                           | delete      |
+| G1-070 | `cli/tests/test_azure_nsg_exposure.py:223`                                                                    | 1 `match=` site(s) over ConfigError                                                                                         | delete      |
 | G1-071 | `cli/tests/test_azure_vm_size_selection.py:126,130`                                                           | 2 `match=` site(s) over ConfigError                                                                                         | delete      |
 | G1-072 | `cli/tests/test_capability_base.py:51`                                                                        | 1 `match=` site(s) over ConfigError                                                                                         | delete      |
 | G1-073 | `cli/tests/test_capability_config_contract.py:83,108,136,157,166,206,255,268,384,402,440`                     | 11 `match=` site(s) over ConfigError                                                                                        | delete      |
@@ -712,7 +840,6 @@ executor owes it the screen per row before the edit lands.
 | G1-096 | `cli/tests/test_install_commands.py:46,86`                                                                    | 2 `match=` site(s) over ConfigError                                                                                         | delete      |
 | G1-097 | `cli/tests/test_name_filter_validation.py:101,107,113,121,144,161,181,187,193`                                | 9 `match=` site(s) over NotFoundError                                                                                       | delete      |
 | G1-098 | `cli/tests/test_operation_scope.py:41,60,65,98,134,175`                                                       | 6 `match=` site(s) over StateError                                                                                          | delete      |
-| G1-099 | `cli/tests/test_operational_json_boundaries.py:604`                                                           | 1 `match=` site(s) over UserAbort                                                                                           | delete      |
 | G1-100 | `cli/tests/test_resource_edit.py:84,93,101`                                                                   | 3 `match=` site(s) over ValidationError                                                                                     | delete      |
 | G1-101 | `cli/tests/test_resource_list.py:128`                                                                         | **[1-raise]** 1 `match=` site(s) over NotFoundError                                                                         | delete      |
 | G1-102 | `cli/tests/test_run_context.py:49`                                                                            | 1 `match=` site(s) over ConfigError                                                                                         | delete      |
@@ -726,9 +853,9 @@ executor owes it the screen per row before the edit lands.
 | G1-110 | `cli/tests/test_secrets_prompt.py:84`                                                                         | **[subtracted: secrets-preview]** 1 `match=` site(s) over StateError                                                        | delete      |
 | G1-111 | `cli/tests/test_secrets_resolver.py:153,161,174`                                                              | **[subtracted: secrets-preview]** 3 `match=` site(s) over StateError                                                        | delete      |
 | G1-112 | `cli/tests/test_session_create_ephemeral_prompt_filtering.py:58,102,139,175,219,268`                          | 6 `match=` site(s) over RuntimeError, ValidationError                                                                       | delete      |
-| G1-113 | `cli/tests/test_session_create_ephemeral_prompts.py:83,107,130,159,196,227,252,292`                           | 8 `match=` site(s) over RuntimeError, ValidationError                                                                       | delete      |
-| G1-114 | `cli/tests/test_session_create_ephemeral_rollback.py:313,346,378`                                             | 3 `match=` site(s) over RuntimeError, ValidationError                                                                       | delete      |
-| G1-115 | `cli/tests/test_session_create_ephemeral_vm_anchor.py:193,216,265,290,311,359,379,398,417,437,468,514,540`    | 13 `match=` site(s) over AlreadyExistsError, NotFoundError, RuntimeError, ValidationError                                   | delete      |
+| G1-113 | `cli/tests/test_session_create_ephemeral_prompts.py:107,130,159,227,252`                                      | 5 `match=` site(s) over RuntimeError, ValidationError                                                                       | delete      |
+| G1-114 | `cli/tests/test_session_create_ephemeral_rollback.py:378`                                                     | 1 `match=` site(s) over ValidationError                                                                                     | delete      |
+| G1-115 | `cli/tests/test_session_create_ephemeral_vm_anchor.py:193,216,290,311,379,398,417,437,540`                    | 9 `match=` site(s) over AlreadyExistsError, NotFoundError, ValidationError                                                  | delete      |
 | G1-116 | `cli/tests/test_session_liveness.py:223`                                                                      | 1 `match=` site(s) over StateError                                                                                          | delete      |
 | G1-117 | `cli/tests/test_session_transport.py:263`                                                                     | 1 `match=` site(s) over StateError                                                                                          | delete      |
 | G1-118 | `cli/tests/test_sessions_tmux_create.py:441,480,495`                                                          | 3 `match=` site(s) over StateError                                                                                          | delete      |
@@ -736,31 +863,28 @@ executor owes it the screen per row before the edit lands.
 | G1-120 | `cli/tests/test_templates.py:106`                                                                             | 1 `match=` site(s) over NotFoundError                                                                                       | delete      |
 | G1-121 | `cli/tests/test_topics.py:37`                                                                                 | 1 `match=` site(s) over StateError                                                                                          | delete      |
 | G1-122 | `cli/tests/test_traversal.py:176`                                                                             | 1 `match=` site(s) over ValueError                                                                                          | delete      |
-| G1-123 | `cli/tests/test_vm_shell_platform.py:490`                                                                     | 1 `match=` site(s) over RuntimeError                                                                                        | delete      |
 | G1-124 | `cli/tests/test_workspace_rooted_shells.py:138,166,260,352,384,473,493`                                       | 7 `match=` site(s) over AuthorizationError, NotFoundError, ValidationError                                                  | delete      |
-| G1-125 | `cli/tests/test_wsl2_create_interrupt.py:170,226,244`                                                         | 3 `match=` site(s) over RuntimeError, StateError                                                                            | delete      |
-| G1-126 | `cli/tests/test_wsl2_keepalive.py:100,145,261`                                                                | 3 `match=` site(s) over RuntimeError                                                                                        | delete      |
+| G1-125 | `cli/tests/test_wsl2_create_interrupt.py:244`                                                                 | 1 `match=` site(s) over StateError                                                                                          | delete      |
+| G1-126 | `cli/tests/test_wsl2_keepalive.py:145,261`                                                                    | 2 `match=` site(s) over RuntimeError                                                                                        | delete      |
 | G1-127 | `cli/tests/test_wsl2_paths.py:26`                                                                             | **[1-raise]** 1 `match=` site(s) over RuntimeError                                                                          | delete      |
 | G1-128 | `cli/tests/transports/test_factories.py:98,236`                                                               | 2 `match=` site(s) over StateError                                                                                          | delete      |
 | G1-129 | `cli/tests/transports/test_lima.py:56,120`                                                                    | 2 `match=` site(s) over SSHError                                                                                            | delete      |
 | G1-130 | `cli/tests/transports/test_ssh.py:96,233`                                                                     | 2 `match=` site(s) over SSHError                                                                                            | delete      |
 | G1-131 | `cli/tests/transports/test_wsl2.py:66,148`                                                                    | 2 `match=` site(s) over SSHError                                                                                            | delete      |
-| G1-132 | `cli/tests/vms/test_add_git_credential_orchestrated.py:189,257,361,432,476`                                   | 5 `match=` site(s) over StateError, TokenRejectedError, ValidationError                                                     | delete      |
+| G1-132 | `cli/tests/vms/test_add_git_credential_orchestrated.py:189,257,476`                                           | 3 `match=` site(s) over StateError, TokenRejectedError, ValidationError                                                     | delete      |
 | G1-133 | `cli/tests/vms/test_backup_vm.py:32`                                                                          | 1 `match=` site(s) over StateError                                                                                          | delete      |
 | G1-134 | `cli/tests/vms/test_bootstrap_file_lifecycle.py:239`                                                          | 1 `match=` site(s) over SSHError                                                                                            | delete      |
-| G1-135 | `cli/tests/vms/test_bootstrap_vm_hooks.py:134,155`                                                            | 2 `match=` site(s) over RuntimeError                                                                                        | delete      |
-| G1-136 | `cli/tests/vms/test_create_reinit_orchestrated.py:450,520,563,861,885`                                        | 5 `match=` site(s) over ExternalError, NotFoundError, ProvisioningError, StateError                                         | delete      |
-| G1-137 | `cli/tests/vms/test_create_vm_dispatch.py:233,428`                                                            | 2 `match=` site(s) over ProvisioningError, StateError                                                                       | delete      |
+| G1-136 | `cli/tests/vms/test_create_reinit_orchestrated.py:861,885`                                                    | 2 `match=` site(s) over NotFoundError, StateError                                                                           | delete      |
+| G1-137 | `cli/tests/vms/test_create_vm_dispatch.py:233`                                                                | 1 `match=` site(s) over StateError                                                                                          | delete      |
 | G1-138 | `cli/tests/vms/test_ensure_tailscale_wording.py:138`                                                          | 1 `match=` site(s) over StateError                                                                                          | delete      |
 | G1-139 | `cli/tests/vms/test_legacy_site_sections.py:43,52`                                                            | 2 `match=` site(s) over ConfigError                                                                                         | delete      |
-| G1-140 | `cli/tests/vms/test_lima_create_interrupt.py:245`                                                             | 1 `match=` site(s) over SSHError                                                                                            | delete      |
-| G1-141 | `cli/tests/vms/test_lima_remote_create_interrupt.py:750,768`                                                  | 2 `match=` site(s) over SSHError, StateError                                                                                | delete      |
+| G1-141 | `cli/tests/vms/test_lima_remote_create_interrupt.py:768`                                                      | 1 `match=` site(s) over StateError                                                                                          | delete      |
 | G1-142 | `cli/tests/vms/test_platform_config_contract.py:119,192,199,233,241,248`                                      | 6 `match=` site(s) over ConfigError                                                                                         | delete      |
 | G1-143 | `cli/tests/vms/test_platform_runup.py:77,107,292,331,389`                                                     | 5 `match=` site(s) over ConfigError, TokenRejectedError                                                                     | delete      |
 | G1-144 | `cli/tests/vms/test_platform_support.py:211,227,239,250,265`                                                  | 5 `match=` site(s) over ConfigError, StateError, ValidationError                                                            | delete      |
 | G1-145 | `cli/tests/vms/test_remaining_commands_orchestrated.py:233,255`                                               | 2 `match=` site(s) over SecretUnavailableError, StateError                                                                  | delete      |
-| G1-146 | `cli/tests/vms/test_shell_exec_orchestrated.py:330,420,461,560,633`                                           | 5 `match=` site(s) over StateError, ValidationError                                                                         | delete      |
-| G1-147 | `cli/tests/vms/test_sites_dispatch.py:69,123,125,208,222,245`                                                 | 6 `match=` site(s) over ConfigError, StateError, ValidationError                                                            | delete      |
+| G1-146 | `cli/tests/vms/test_shell_exec_orchestrated.py:330,420,461,560`                                               | 4 `match=` site(s) over StateError, ValidationError                                                                         | delete      |
+| G1-147 | `cli/tests/vms/test_sites_dispatch.py:69,123,208,222,245`                                                     | 5 `match=` site(s) over ConfigError, StateError, ValidationError                                                            | delete      |
 | G1-148 | `cli/tests/vms/test_system_slug.py:35`                                                                        | 1 `match=` site(s) over ValidationError                                                                                     | delete      |
 | G1-149 | `cli/tests/vms/test_tailscale_stdin_join.py:126,139,190`                                                      | 3 `match=` site(s) over ProvisioningError                                                                                   | delete      |
 | G1-150 | `cli/tests/vms/test_verify_connection.py:118`                                                                 | **[1-raise]** 1 `match=` site(s) over NotFoundError                                                                         | delete      |
@@ -833,10 +957,16 @@ no in-scope site; see the completeness re-scan.
 ## Group 3: report lines and hints
 
 322 live rows: 158 delete, 88 convert, 76 keep, out of a ledger of 382 (one `[dead]`, 59
-`[subtracted]`). **This group lands as four PRs, not one** (effort lead, 2026-08-16): it is too much
-for one review round and it is the judgment-heavy batch, so the cut is by subsystem INSIDE the
-single shape. That keeps the kind of judgment uniform within a round while making each round
-readable. Rows carry their file path, which is what assigns them.
+`[subtracted]`). This is the largest convert population in the map.
+
+**Precondition, operator disposition 2026-08-19: the recipe verification is re-run before this group
+executes.** Its recipes were verified in the #573 round, four of them carry a recorded trap, and 22
+sites in those four have never been sampled. Re-running the verification is what discharges that,
+and it happens before the conversions land rather than after. **This group lands as four PRs, not
+one** (effort lead, 2026-08-16): it is too much for one review round and it is the judgment-heavy
+batch, so the cut is by subsystem INSIDE the single shape. That keeps the kind of judgment uniform
+within a round while making each round readable. Rows carry their file path, which is what assigns
+them.
 
 **Corrected 2026-08-19 (map re-baseline).** The sub-batch table below never reconciled with the
 group: it summed to 378 rows against a stated 372, and its per-disposition columns summed to 225
@@ -1243,7 +1373,10 @@ other three are each a full round on their own.
 ## Group 4: schema, manifests, capabilities and platforms
 
 228 live rows: 52 delete, 81 convert, 95 keep, out of a ledger of 250 (six `[dead]`, 16
-`[subtracted]`).
+`[subtracted]`). Once group 3 splits into its sub-batches this is the largest single PR by converts.
+
+**Precondition, operator disposition 2026-08-19: the recipe verification is re-run before this group
+executes**, on the same terms as group 3's.
 
 | id     | file:line                                                                                                                                                                                                                                                                                                                                        | shape                                                                              | disposition | justification                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -1305,7 +1438,7 @@ other three are each a full round on their own.
 | D-003  | cli/tests/schema/test_errors.py:142-147                                                                                                                                                                                                                                                                                                          | whole-rendered-line pins                                                           | delete      | "must be a string" / "is required" are authored normalizations of a pydantic error type; the path halves are unremarkable and are re-asserted by the path-rendering section. Nothing structural is lost.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | D-004  | cli/tests/schema/test_errors.py:150-160                                                                                                                                                                                                                                                                                                          | whole-rendered-line pin                                                            | convert     | Rubric re-check, 2026-08-16. **Verified by execution**: with `_missing_union_block` stubbed to return `None`, exactly ONE assertion fails across the full 7,424-test suite, this one. Replace with a tags-derived-from-`SiteLike` cross-check. No production change.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | D-005  | cli/tests/schema/test_errors.py:163-166                                                                                                                                                                                                                                                                                                          | whole-rendered-line pin                                                            | delete      | Same shape as D-004 for a misspelled tag. The registry itself is proven non-empty by D-006's cross-check, which survives.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| D-006  | `cli/tests/schema/test_errors.py:184`                                                                                                                                                                                                                                                                                                            | two spelled literals plus a line-to-line equality                                  | delete      | **Corrected 2026-08-19 (map re-baseline).** The range read `:169-187` while the prose kept the non-vacuity guard and also listed `:186` for deletion, and `:186` IS that guard. Drop `:184` alone, the spelled `absent == [...]` literal. Keep `:186` (`"'lima', 'proxmox'" in misspelled[0]`), which the comment at `:185` names as the non-vacuity guard, and `:187` (`absent[0].endswith(misspelled[0].split("; ", 1)[1])`), which pins no wording at all: it says one union answers with one list, which is the invariant and the thing that can regress.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| D-006  | `cli/tests/schema/test_errors.py:184`                                                                                                                                                                                                                                                                                                            | two spelled literals plus a line-to-line equality                                  | delete      | **Corrected 2026-08-19 (map re-baseline).** The range read `:169-187` while the prose kept the non-vacuity guard and also listed `:186` for deletion, and `:186` IS that guard. Drop `:184` alone, the spelled `absent == [...]` literal. Keep `:186` (`"'lima', 'proxmox'" in misspelled[0]`), which the comment at `:185` names as the non-vacuity guard, and `:187` (`absent[0].endswith(misspelled[0].split("; ", 1)[1])`), which pins no wording at all: it says one union answers with one list, which is the invariant and the thing that can regress. **The kept line's own disposition is DEFERRED, and recorded rather than left silent:** the 2026-08-19 charter covered the contradiction between this row's range and its prose, not the question of whether `:186` should itself convert. It pins `'lima', 'proxmox'`, which is value identity on the fixture's own registered arms, so deriving it from that registry instead is a real option and nobody has ruled on it. The row keeps `:186` as it stands until someone does.                                                  |
 | D-007  | `cli/tests/schema/test_errors.py:215,216`                                                                                                                                                                                                                                                                                                        | pyyaml-derived assertions plus two spelled literals                                | delete      | **Corrected 2026-08-19 (map re-baseline).** Range narrowed from `:190-216` to the two lines it actually drops, because the range swept up the three the justification keeps. Drop `:215` (`"quote it to name one"`) and `:216` (`"registered: 'lima', 'proxmox'"`), which are authored sentence fragments. Keep `:211-212`, whose spellings derive from `yaml.constructor.SafeConstructor.bool_values`, an upstream table and the sanctioned external exception, and `:214` (`repr(str(written)) not in line`), a guard against a Python repr reaching an operator rather than a wording pin.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | D-008  | cli/tests/schema/test_errors.py:226-235                                                                                                                                                                                                                                                                                                          | full-message equality, one-error framing                                           | convert     | The invariant is decode's single-line framing (`<location>: <owner>.<path>:` plus a trailing space), not the normalized message; assert the framing prefix and let the message tail go. No production change: the prefix is composed from `SourceLocation` and `RefOwner`, both already constructed in the test.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | D-009  | cli/tests/schema/test_errors.py:238-248                                                                                                                                                                                                                                                                                                          | full-message equality, synthesized sentinel                                        | convert     | Real invariant (a synthesized location must render no navigable path). Replace the spelled message with the derived equality `str(_raised(..., location=synthesized())) == str(_raised(..., location=None))`, which states the property exactly and pins no wording.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
@@ -1848,9 +1981,12 @@ closes.
 
 **The stack topology was re-cut out of this section on 2026-08-19 rather than re-derived.** It was
 measured over nine groups with no re-scope subtraction, and both premises are gone, so its numbers
-described a sweep that no longer exists. Choosing the new order is a sequencing decision for whoever
-restarts the sweep; what survives below is the measurement method and the findings that outlive the
-counts.
+described a sweep that no longer exists. What survives below is the measurement method and the
+findings that outlive the counts.
+
+**Operator disposition, 2026-08-19: the re-cut happens at the restart, not in the PR that re-derived
+this map.** The restart owns choosing the order, and it inherits the method here plus the group-1
+split the group 1 header records.
 
 ### What the overlap measurement found
 
@@ -1882,8 +2018,7 @@ passes but never bites is the failure this effort has hit repeatedly, so the sec
 that counts.
 
 **55 distinct recipes. The nine listed below did not hold as recorded; the other 46 verified.** Zero
-required a production change, so R2.2 is clean throughout. Nine convert rows became deletes as a
-result, and fourteen kept their conversion with a corrected recipe or a recorded trap.
+required a production change, so R2.2 is clean throughout.
 
 **Corrected 2026-08-19 (map re-baseline).** This paragraph read "44 verified as recorded, 11 did not
 hold" over a list of nine, so the three figures could not all be right. The list is the evidence and
@@ -1891,11 +2026,10 @@ the counts now follow it. Re-running the verification to decide whether 55 or 9 
 was outside the re-baseline's reach, so if two further failures existed they are unrecorded and
 their rows carry the verified recipe.
 
-**The sentence below it is un-re-derived and marked as such.** "Nine convert rows became deletes,
-and fourteen kept their conversion" does not reconcile with the nine failed recipes, which name 16
-rows between them, 8 of which are deletes at HEAD. Deciding which population the two figures counted
-needs the verification's own record, which this file does not carry. Treat the row dispositions as
-authoritative and these two figures as history.
+A second sentence here used to add that nine convert rows became deletes and fourteen kept their
+conversion. It is gone rather than footnoted: it did not reconcile with the nine failed recipes,
+which name sixteen rows between them, and no record this file carries says which population it
+counted. The row dispositions are authoritative.
 
 The nine that did not hold:
 
@@ -1910,6 +2044,15 @@ The nine that did not hold:
 | Assert the a11y attributes                               | F-007, F-093        | Same: enforced unconditionally at build time. Both justifications were factually wrong                                                                                                                       | Withdrawn; both are `delete`                                                                                                       |
 | Derive the SVG fragment contract                         | F-101               | Same                                                                                                                                                                                                         | Withdrawn; `delete`                                                                                                                |
 | Consolidate the runtime-surface scan                     | F-018, F-098        | The consolidation drops `.html` coverage, and deleting the canaries removes the only non-vacuity guard (a typo'd pattern made the scan pass green)                                                           | Convert only if the merged scan keeps `.html` and one canary; otherwise both are deletes                                           |
+
+**The four trap-carrying recipes owe 22 sites a screening, and that debt is still open.** It was
+recorded in the #573 round as a gating condition on the PRs carrying those conversions rather than
+something that round closed, and the re-baseline neither closed it nor carried it forward until now.
+It is NOT superseded by the callee-side raise screen: that screen asks whether a delete row's raised
+type discriminates, and this asks whether a convert row's replacement actually bites at every site
+the recipe covers. Different question, different rows, both open. Treat it exactly as the 532-site
+screen debt above: per-site, owed by the PR that carries the conversion, and paid by sampling the
+unsampled sites rather than by re-reading the recipe.
 
 Four verified recipes carry a trap, each of which was silently vacuous on the first attempt. These
 are recorded on their rows because a reviewer cannot see them in the diff:
@@ -2089,8 +2232,12 @@ Each was ruled for the family rather than the row, and the rows now carry the ru
    interface?** If they are, one pin is a real contract check rather than a naming restatement.
 3. **Rows that were reasoned rather than executed** and whose disposition turns on a coverage claim:
    four, each carrying `[unverified]` in its shape cell, and named here so the count is checkable
-   against the markers rather than asserted: C-005, C-025, C-094, C-108. The deletion PR should
-   execute them rather than inherit them.
+   against the markers rather than asserted: C-005, C-025, C-094, C-108.
+
+   **Operator disposition, 2026-08-19: left to their execution PRs, with the `[unverified]` tag as
+   the gate.** The eighteen rows the coverage-claim scan below returns are not tagged and are not
+   gated; the four that carry the marker are, and the PR that carries each one executes its claim
+   before the edit lands.
 
    **Corrected 2026-08-19.** This item read "eight in total" from the inventory's first revision
    onward while five rows ever carried the tag, and no three further rows are recoverable: none of

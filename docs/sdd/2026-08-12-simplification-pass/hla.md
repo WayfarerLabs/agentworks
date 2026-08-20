@@ -106,11 +106,9 @@ where the prose arrives from outside the repository, so a `match=` against a pro
 upstream tool's error text is the one surviving form; every message this repository writes is
 authored prose, error messages included.
 
-**Corrected 2026-08-16** (sweep inventory, verified at HEAD). Two numbers here were wrong. The count
-was 696, the wave 1 landings having taken the rest. And this taxonomy is keyed on a pytest spelling
-the website suite does not use: `website/tests` is `unittest` and carries `assertRaisesRegex` sites,
-which are the same three cases and which a `match=`-keyed scan misses entirely. Read every rule
-above as governing both spellings.
+This taxonomy is keyed on a pytest spelling the website suite does not use: `website/tests` is
+`unittest` and carries `assertRaisesRegex` sites, which are the same three cases and which a
+`match=`-keyed scan misses entirely. Read every rule above as governing both spellings.
 
 **Corrected 2026-08-19** (map re-baseline, derived from the AST at HEAD by the inventory's
 `sweep-screen.py`). Both counts moved again. `match=` under `cli/tests` is **664**, not the 663 this

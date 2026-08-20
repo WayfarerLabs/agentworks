@@ -156,6 +156,89 @@ def estate() -> list[Site]:
 
 
 # ---------------------------------------------------------------------------
+# The injected-marker screen
+# ---------------------------------------------------------------------------
+
+EXCEPTION_NAME = re.compile(r"(?:Error|Exception|Interrupt|Abort|Failure)$")
+
+
+def injected_markers(path: str) -> list[str]:
+    """Every string a test module hands to an exception constructor.
+
+    These are markers the test wrote, not prose the repository ships, so a
+    `match=` against one proves the injected failure is the one observed
+    rather than pinning anything authored.
+    """
+    out: list[str] = []
+    for node in ast.walk(parse(path)):
+        if not isinstance(node, ast.Call) or not node.args:
+            continue
+        fn = node.func
+        name = fn.attr if isinstance(fn, ast.Attribute) else (fn.id if isinstance(fn, ast.Name) else "")
+        if EXCEPTION_NAME.search(name):
+            text = template(node.args[0])
+            if text:
+                out.append(text)
+    return out
+
+
+def shipped_strings() -> str:
+    """Every string literal production can emit, joined for substring tests.
+
+    Comments and docstrings are excluded deliberately. The question this
+    answers is whether a needle pins prose the code SAYS, and a phrase that
+    appears only in a comment about the behavior is not that: the Lima
+    cleanup-masking site matches `"original failure"`, which two production
+    docstrings discuss and no production message contains.
+    """
+    parts: list[str] = []
+    for path in git_files(PROD_ROOT):
+        tree = parse(path)
+        docstrings = {
+            id(node.body[0].value)
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.body
+            and isinstance(node.body[0], ast.Expr)
+            and isinstance(node.body[0].value, ast.Constant)
+            and isinstance(node.body[0].value.value, str)
+        }
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings:
+                parts.append(node.value)
+            elif isinstance(node, ast.JoinedStr):
+                parts.extend(v.value for v in node.values if isinstance(v, ast.Constant) and isinstance(v.value, str))
+    return "\n".join(parts)
+
+
+def injected() -> None:
+    """Report every `match=` site whose needle is a marker its own test wrote.
+
+    A needle that ALSO appears in production is excluded, however it reaches
+    the test: a fake copying a shipped sentence, or a test-side
+    `AssertionError` guard that happens to quote one, is pinning our prose
+    through a longer route, which is what the batch deletes. What survives is
+    a phrase that exists nowhere but the test, so the assertion can only be
+    proof that the injected failure is the observed one.
+    """
+    shipped = shipped_strings()
+    hits = 0
+    print("site\tneedle\tinjected-string")
+    for path in git_files(TEST_ROOT):
+        markers = injected_markers(path)
+        if not markers:
+            continue
+        for site in sites_in(path):
+            if site.needle == "<expr>" or site.needle in shipped:
+                continue
+            source = next((m for m in markers if site.needle in m), None)
+            if source is not None:
+                hits += 1
+                print(f"{path}:{site.line}\t{site.needle}\t{source}")
+    print(f"\n# injected-marker sites: {hits}", file=sys.stderr)
+
+
+# ---------------------------------------------------------------------------
 # Attribution against the inventory's rows
 # ---------------------------------------------------------------------------
 
@@ -183,29 +266,39 @@ class Row:
         return site.line in self.exact or any(lo <= site.line <= hi for lo, hi in self.ranges)
 
 
+#: A row id, as the inventory's own reading instructions describe it: an
+#: original-read prefix, the mechanical batch's, one of the pulled-out blocks,
+#: or the re-baseline's, optionally with the letter suffix a split row carries.
+#: Header cells that look like ids (`Sub-batch`, `File`, `Recipe`) fail this by
+#: construction, which is why the parser needs no list of them.
+ROW_ID = re.compile(r"(?:[A-F]|L|RB|G1)-[A-Z]?\d{1,3}[a-z]?$")
+
+
 def rows() -> list[Row]:
     """Every row, with the file and line spans it addresses and the group it
     sits in.
 
-    A row's cells are split on unescaped pipes only: `\\|` inside a code span
-    is content, and a naive split silently turns one row into three.
+    This is the reference implementation of the grammar the inventory's
+    "reading this file mechanically" section describes, and the reason that
+    section is three sentences rather than a specification. Two details are
+    where every hand-rolled parser has gone wrong: cells split on UNESCAPED
+    pipes only, because `\\|` inside a code span is content and a naive split
+    turns one row into three; and only a `##` heading changes the group, since
+    the pulled-out blocks are `###` subsections of the group they belong to.
     """
     out: list[Row] = []
     group = ""
     for line in Path(INVENTORY).read_text(encoding="utf-8").splitlines():
         if line.startswith("#"):
+            level = len(line) - len(line.lstrip("#"))
             heading = line.lstrip("# ").strip()
-            if heading.startswith("Group "):
+            if level <= 2:
                 group = heading.split(":")[0]
-            elif heading.startswith("Deferred"):
-                group = "Deferred"
-            elif not heading.startswith(("Sites the re-check", "The mechanical batch")):
-                group = heading
             continue
         if not line.startswith("|"):
             continue
         cells = split_cells(line)
-        if len(cells) < 3 or not re.fullmatch(r"[A-Z][A-Za-z0-9-]*", cells[0]):
+        if len(cells) < 3 or not ROW_ID.fullmatch(cells[0]):
             continue
         target = cells[1].replace("`", "")
         match = PATH_RE.search(target)
@@ -600,10 +693,12 @@ def main() -> None:
             print(f"{site}\t{site.kind}\t{site.needle}")
     elif command == "attribute":
         attribute()
+    elif command == "injected":
+        injected()
     elif command == "screen":
         screen()
     else:
-        raise SystemExit(f"unknown command {command!r}; try estate, attribute or screen")
+        raise SystemExit(f"unknown command {command!r}; try estate, attribute, injected or screen")
 
 
 if __name__ == "__main__":
