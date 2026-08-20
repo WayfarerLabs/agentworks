@@ -137,7 +137,7 @@ def browser_phase4l_contract(
     output: Path,
     *,
     chromium_path: str | None = None,
-    connection_factory: Callable[[str], DevToolsConnection] = DevToolsConnection,
+    connection_factory: Callable[..., DevToolsConnection] = DevToolsConnection,
     popen_factory: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
     target_factory: Callable[[Path, subprocess.Popen[bytes]], str] = devtools_target,
     tempdir_factory: Callable[[], tempfile.TemporaryDirectory[str]] = tempfile.TemporaryDirectory,
@@ -261,7 +261,7 @@ class Phase4LBrowserTests(RepositoryFixture):
             browser_phase4l_contract(
                 output,
                 chromium_path="chromium-test",
-                connection_factory=lambda url: connection,
+                connection_factory=lambda url, **kwargs: connection,
                 popen_factory=lambda *args, **kwargs: process,
                 target_factory=lambda profile, owned: "ws://phase4l.invalid",
                 tempdir_factory=profile_factory,

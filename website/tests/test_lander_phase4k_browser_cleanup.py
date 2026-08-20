@@ -257,23 +257,32 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
         ]
         profile_queue = list(profiles)
         connection = _ProbeConnection(ready=True)
+        connection_timeouts: list[float] = []
         target_calls = 0
 
         def target(path: Path, process: _FakeProcess) -> str:
             nonlocal target_calls
             self.assertEqual(path, Path(profiles[target_calls].name))
             self.assertIs(process, processes[target_calls])
+            if target_calls == 1:
+                self.assertTrue(processes[0].terminated)
+                self.assertTrue(profiles[0].cleaned)
             target_calls += 1
             if target_calls == 1:
                 raise AssertionError("first Chromium startup remained unresponsive")
             return "ws://chromium.test"
+
+        def connect(url: str, *, timeout: float) -> _ProbeConnection:
+            del url
+            connection_timeouts.append(timeout)
+            return connection
 
         result = chromium_support.browser_json_probe(
             "chromium-test",
             "http://127.0.0.1:8000/lander/",
             960,
             "#result",
-            connection_factory=lambda url: connection,
+            connection_factory=connect,
             popen_factory=lambda *args, **kwargs: process_queue.pop(0),
             target_factory=target,
             tempdir_factory=lambda: profile_queue.pop(0),
@@ -282,9 +291,67 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
 
         self.assertEqual(result, {"ready": True})
         self.assertEqual(target_calls, 2)
+        self.assertEqual(len(connection_timeouts), 1)
+        self.assertGreater(connection_timeouts[0], 0)
+        self.assertLessEqual(connection_timeouts[0], 1)
         self.assertTrue(connection.closed)
         self.assertTrue(all(process.terminated for process in processes))
         self.assertTrue(all(profile.cleaned for profile in profiles))
+
+    def test_acquire_chromium_bounds_and_retries_a_stalled_page_connection(self) -> None:
+        elapsed = 0.0
+        processes = [_FakeProcess(), _FakeProcess()]
+        process_queue = list(processes)
+        profiles = [
+            _ProbeProfile(name="/tmp/chromium-page-profile-1"),
+            _ProbeProfile(name="/tmp/chromium-page-profile-2"),
+        ]
+        profile_queue = list(profiles)
+        connection = _ProbeConnection(ready=True)
+        target_calls = 0
+        connection_timeouts: list[float] = []
+
+        def target(path: Path, process: _FakeProcess) -> str:
+            nonlocal elapsed, target_calls
+            self.assertEqual(path, Path(profiles[target_calls].name))
+            self.assertIs(process, processes[target_calls])
+            if target_calls == 0:
+                elapsed += 9.75
+            else:
+                self.assertTrue(processes[0].terminated)
+                self.assertTrue(profiles[0].cleaned)
+            target_calls += 1
+            return "ws://chromium.test"
+
+        def connect(url: str, *, timeout: float) -> _ProbeConnection:
+            nonlocal elapsed
+            del url
+            connection_timeouts.append(timeout)
+            if len(connection_timeouts) == 1:
+                elapsed += timeout
+                raise TimeoutError
+            return connection
+
+        with mock.patch.object(chromium_support.time, "monotonic", side_effect=lambda: elapsed):
+            profile, process, acquired = chromium_support.acquire_chromium(
+                "chromium-test",
+                connection_factory=connect,
+                popen_factory=lambda *args, **kwargs: process_queue.pop(0),
+                target_factory=target,
+                tempdir_factory=lambda: profile_queue.pop(0),
+                sleep=lambda seconds: None,
+            )
+
+        self.assertIs(acquired, connection)
+        self.assertIs(process, processes[1])
+        self.assertIs(profile, profiles[1])
+        self.assertEqual(target_calls, 2)
+        self.assertAlmostEqual(connection_timeouts[0], 0.25)
+        self.assertEqual(connection_timeouts[1], 1)
+        self.assertEqual(elapsed, 10)
+        acquired.close()
+        chromium_support.stop_process(process)
+        chromium_support.cleanup_profile(profile)
 
     def test_json_probe_owns_browser_and_retries_profile_cleanup(self) -> None:
         process = _FakeProcess()
@@ -295,7 +362,7 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
             "http://127.0.0.1:8000/lander/",
             960,
             "#result",
-            connection_factory=lambda url: connection,
+            connection_factory=lambda url, **kwargs: connection,
             popen_factory=lambda *args, **kwargs: process,
             target_factory=lambda path, owned: "ws://chromium.test",
             tempdir_factory=lambda: profile,
@@ -320,7 +387,7 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
                 "http://127.0.0.1:8000/lander/",
                 960,
                 "#result",
-                connection_factory=lambda url: connection,
+                connection_factory=lambda url, **kwargs: connection,
                 popen_factory=lambda *args, **kwargs: process,
                 target_factory=lambda path, owned: "ws://chromium.test",
                 tempdir_factory=lambda: profile,
@@ -406,8 +473,8 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
 
         connection_sentinel = RuntimeError()
 
-        def fail_connection(url: str) -> None:
-            del url
+        def fail_connection(url: str, **kwargs: object) -> None:
+            del url, kwargs
             raise connection_sentinel
 
         with self.assertRaises(RuntimeError) as caught:
@@ -432,7 +499,7 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
         ):
             phase4k_browser.browser_phase4k_contract(
                 self.output,
-                connection_factory=lambda url: connection,
+                connection_factory=lambda url, **kwargs: connection,
                 popen_factory=lambda *args, **kwargs: process,
                 tempdir_factory=self.profile_factory,
                 target_factory=lambda profile, owned: "ws://phase4k.invalid",

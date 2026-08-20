@@ -255,7 +255,7 @@ def _departure_witness(connection: DevToolsConnection, authority: str) -> dict[s
 def browser_phase4k_contract(
     output: Path,
     *,
-    connection_factory: Callable[[str], DevToolsConnection] = DevToolsConnection,
+    connection_factory: Callable[..., DevToolsConnection] = DevToolsConnection,
     popen_factory: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
     server_factory: Callable[..., ThreadingHTTPServer] = ThreadingHTTPServer,
     tempdir_factory: Callable[[], tempfile.TemporaryDirectory[str]] = tempfile.TemporaryDirectory,

@@ -215,7 +215,7 @@ def acquire_chromium(
     *,
     extra_arguments: tuple[str, ...] = (),
     hide_scrollbars: bool = False,
-    connection_factory: Callable[[str], DevToolsConnection] = DevToolsConnection,
+    connection_factory: Callable[..., DevToolsConnection] = DevToolsConnection,
     popen_factory: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
     target_factory: Callable[[Path, subprocess.Popen[bytes]], str] = devtools_target,
     tempdir_factory: Callable[[], tempfile.TemporaryDirectory[str]] = tempfile.TemporaryDirectory,
@@ -227,6 +227,7 @@ def acquire_chromium(
     for attempt in range(DEVTOOLS_STARTUP_ATTEMPTS):
         profile = tempdir_factory()
         process: subprocess.Popen[bytes] | None = None
+        attempt_deadline = time.monotonic() + DEVTOOLS_STARTUP_TIMEOUT / DEVTOOLS_STARTUP_ATTEMPTS
         try:
             command = [
                 chromium,
@@ -248,7 +249,10 @@ def acquire_chromium(
                 env={**os.environ, "HOME": profile.name},
             )
             target = target_factory(Path(profile.name), process)
-            return profile, process, connection_factory(target)
+            remaining = attempt_deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("Chromium used its startup attempt before opening the page target")
+            return profile, process, connection_factory(target, timeout=min(1.0, remaining))
         except BaseException as error:
             try:
                 if process is not None:
@@ -273,7 +277,7 @@ def browser_json_probe(
     *,
     reduced_motion: bool = False,
     screenshot_path: Path | None = None,
-    connection_factory: Callable[[str], DevToolsConnection] = DevToolsConnection,
+    connection_factory: Callable[..., DevToolsConnection] = DevToolsConnection,
     popen_factory: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
     target_factory: Callable[[Path, subprocess.Popen[bytes]], str] = devtools_target,
     tempdir_factory: Callable[[], tempfile.TemporaryDirectory[str]] = tempfile.TemporaryDirectory,
