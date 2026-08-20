@@ -9,7 +9,13 @@ from html.parser import HTMLParser
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable
 
-from chromium_test_support import DevToolsConnection, cleanup_profile, devtools_target
+from chromium_test_support import (
+    DevToolsConnection,
+    acquire_chromium,
+    cleanup_profile,
+    devtools_target,
+    stop_process,
+)
 from site_test_support import *  # noqa: F403
 
 
@@ -240,28 +246,18 @@ document.querySelector("#result").textContent = JSON.stringify({
     server = ThreadingHTTPServer(("127.0.0.1", 0), partial(QuietHandler, directory=str(output)))
     thread = threading.Thread(target=server.serve_forever, daemon=True, name="site-geometry-browser-server")
     thread.start()
-    profile = tempfile.TemporaryDirectory()
+    profile: tempfile.TemporaryDirectory[str] | None = None
     process: subprocess.Popen[bytes] | None = None
     connection: DevToolsConnection | None = None
     try:
         port = server.server_address[1]
-        process = popen_factory(
-            (
-                chromium,
-                "--headless",
-                "--disable-gpu",
-                "--no-sandbox",
-                "--no-first-run",
-                "--no-default-browser-check",
-                "--remote-allow-origins=*",
-                "--remote-debugging-port=0",
-                f"--user-data-dir={profile.name}",
-                "about:blank",
-            ),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+        profile, process, connection = acquire_chromium(
+            chromium,
+            connection_factory=connection_factory,
+            popen_factory=popen_factory,
+            target_factory=target_factory,
+            sleep=sleep,
         )
-        connection = connection_factory(target_factory(Path(profile.name), process))
         for domain in ("Runtime", "Page"):
             connection.call(f"{domain}.enable")
         connection.call(
@@ -297,18 +293,13 @@ document.querySelector("#result").textContent = JSON.stringify({
 
         if connection is not None:
             cleanup(connection.close)
-        if process is not None and process.poll() is None:
-            cleanup(process.terminate)
-            if process.poll() is None:
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    cleanup(process.kill)
-                    cleanup(lambda: process.wait(timeout=5))
+        if process is not None:
+            cleanup(lambda: stop_process(process))
         cleanup(server.shutdown)
         cleanup(server.server_close)
         cleanup(lambda: thread.join(timeout=5))
-        cleanup(lambda: cleanup_profile(profile))
+        if profile is not None:
+            cleanup(lambda: cleanup_profile(profile))
         if active_error is None and cleanup_errors:
             raise cleanup_errors[0]
 

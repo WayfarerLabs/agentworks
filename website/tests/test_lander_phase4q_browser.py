@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import os
 import shutil
 import struct
 import subprocess
@@ -16,7 +15,7 @@ from http.server import ThreadingHTTPServer
 from math import ceil
 from pathlib import Path
 
-from chromium_test_support import DevToolsConnection, cleanup_profile, devtools_target
+from chromium_test_support import DevToolsConnection, acquire_chromium, cleanup_profile, stop_process
 from lander_chromium_phase4k import _QuietHandler
 from site_test_support import RepositoryFixture
 
@@ -327,7 +326,7 @@ def browser_phase4q_contract(
     source = page.read_text(encoding="utf-8")
     server = ThreadingHTTPServer(("127.0.0.1", 0), partial(_QuietHandler, directory=str(output)))
     thread = threading.Thread(target=server.serve_forever, daemon=True, name="phase4q-browser-server")
-    profile = tempfile.TemporaryDirectory()
+    profile: tempfile.TemporaryDirectory[str] | None = None
     process: subprocess.Popen[bytes] | None = None
     connection: DevToolsConnection | None = None
     try:
@@ -337,16 +336,9 @@ def browser_phase4q_contract(
             encoding="utf-8",
         )
         thread.start()
-        process = subprocess.Popen(
-            (
-                chromium, "--headless", "--disable-gpu", "--no-sandbox", "--no-first-run",
-                "--no-default-browser-check", "--remote-allow-origins=*", "--remote-debugging-port=0",
-                f"--user-data-dir={profile.name}", *chromium_arguments, "about:blank",
-            ),
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            env={**os.environ, "HOME": profile.name},
+        profile, process, connection = acquire_chromium(
+            chromium, extra_arguments=chromium_arguments
         )
-        connection = DevToolsConnection(devtools_target(Path(profile.name), process))
         for domain in ("Runtime", "Page"):
             connection.call(f"{domain}.enable")
         connection.call("Emulation.setCPUThrottlingRate", {"rate": cpu_throttling_rate})
@@ -438,19 +430,15 @@ def browser_phase4q_contract(
         if connection is not None:
             connection.close()
         if process is not None:
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
+            stop_process(process)
         server.shutdown()
         server.server_close()
         if thread.is_alive():
             thread.join(timeout=5)
         page.write_text(source, encoding="utf-8")
         probe_path.unlink(missing_ok=True)
-        cleanup_profile(profile)
+        if profile is not None:
+            cleanup_profile(profile)
 
 
 class Phase4QBrowserTests(RepositoryFixture):

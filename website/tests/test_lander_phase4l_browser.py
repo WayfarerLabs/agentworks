@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 import tempfile
@@ -14,7 +13,13 @@ from functools import partial
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-from chromium_test_support import DevToolsConnection, cleanup_profile, devtools_target
+from chromium_test_support import (
+    DevToolsConnection,
+    acquire_chromium,
+    cleanup_profile,
+    devtools_target,
+    stop_process,
+)
 from lander_chromium_phase4k import _button_names, _QuietHandler, dispatch_key
 from site_test_support import RepositoryFixture, mock, snapshot
 from test_lander_phase4k_browser_cleanup import _FakeProcess, _NullRootRaceConnection
@@ -148,7 +153,7 @@ def browser_phase4l_contract(
     source = page.read_text(encoding="utf-8")
     server = ThreadingHTTPServer(("127.0.0.1", 0), partial(_QuietHandler, directory=str(output)))
     thread = threading.Thread(target=server.serve_forever, daemon=True, name="phase4l-browser-server")
-    profile = tempdir_factory()
+    profile: tempfile.TemporaryDirectory[str] | None = None
     process: subprocess.Popen[bytes] | None = None
     connection: DevToolsConnection | None = None
     try:
@@ -158,24 +163,13 @@ def browser_phase4l_contract(
             encoding="utf-8",
         )
         thread.start()
-        process = popen_factory(
-            (
-                chromium,
-                "--headless",
-                "--disable-gpu",
-                "--no-sandbox",
-                "--no-first-run",
-                "--no-default-browser-check",
-                "--remote-allow-origins=*",
-                "--remote-debugging-port=0",
-                f"--user-data-dir={profile.name}",
-                "about:blank",
-            ),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            env={**os.environ, "HOME": profile.name},
+        profile, process, connection = acquire_chromium(
+            chromium,
+            connection_factory=connection_factory,
+            popen_factory=popen_factory,
+            target_factory=target_factory,
+            tempdir_factory=tempdir_factory,
         )
-        connection = connection_factory(target_factory(Path(profile.name), process))
         for domain in ("Runtime", "Page", "Accessibility"):
             connection.call(f"{domain}.enable")
         connection.call(
@@ -236,19 +230,15 @@ def browser_phase4l_contract(
         if connection is not None:
             connection.close()
         if process is not None:
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
+            stop_process(process)
         server.shutdown()
         server.server_close()
         if thread.is_alive():
             thread.join(timeout=5)
         page.write_text(source, encoding="utf-8")
         probe_path.unlink(missing_ok=True)
-        cleanup_profile(profile)
+        if profile is not None:
+            cleanup_profile(profile)
 
 
 class Phase4LBrowserTests(RepositoryFixture):

@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Callable
 
 DEVTOOLS_STARTUP_TIMEOUT = 20.0
+DEVTOOLS_STARTUP_ATTEMPTS = 2
 
 
 class DevToolsConnection:
@@ -138,7 +139,7 @@ def devtools_target(
 ) -> str:
     port_path = profile_path / "DevToolsActivePort"
     last_error: BaseException | None = None
-    deadline = time.monotonic() + DEVTOOLS_STARTUP_TIMEOUT
+    deadline = time.monotonic() + DEVTOOLS_STARTUP_TIMEOUT / DEVTOOLS_STARTUP_ATTEMPTS
     while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -181,6 +182,19 @@ def devtools_target(
     raise AssertionError("Chromium did not publish its DevTools endpoint") from last_error
 
 
+def stop_process(process: subprocess.Popen[bytes]) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    if process.poll() is not None:
+        return
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
+
+
 def cleanup_profile(
     profile: tempfile.TemporaryDirectory[str],
     *,
@@ -194,6 +208,61 @@ def cleanup_profile(
             if attempt == 39:
                 raise
             sleep(0.025)
+
+
+def acquire_chromium(
+    chromium: str,
+    *,
+    extra_arguments: tuple[str, ...] = (),
+    hide_scrollbars: bool = False,
+    connection_factory: Callable[[str], DevToolsConnection] = DevToolsConnection,
+    popen_factory: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
+    target_factory: Callable[[Path, subprocess.Popen[bytes]], str] = devtools_target,
+    tempdir_factory: Callable[[], tempfile.TemporaryDirectory[str]] = tempfile.TemporaryDirectory,
+    sleep: Callable[[float], None] = time.sleep,
+) -> tuple[tempfile.TemporaryDirectory[str], subprocess.Popen[bytes], DevToolsConnection]:
+    """Acquire one responsive browser, retrying a wedged external startup once."""
+
+    last_error: BaseException | None = None
+    for attempt in range(DEVTOOLS_STARTUP_ATTEMPTS):
+        profile = tempdir_factory()
+        process: subprocess.Popen[bytes] | None = None
+        try:
+            command = [
+                chromium,
+                "--headless",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--remote-allow-origins=*",
+                "--remote-debugging-port=0",
+                f"--user-data-dir={profile.name}",
+            ]
+            if hide_scrollbars:
+                command.insert(4, "--hide-scrollbars")
+            process = popen_factory(
+                (*command, *extra_arguments, "about:blank"),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env={**os.environ, "HOME": profile.name},
+            )
+            target = target_factory(Path(profile.name), process)
+            return profile, process, connection_factory(target)
+        except BaseException as error:
+            try:
+                if process is not None:
+                    stop_process(process)
+            finally:
+                cleanup_profile(profile, sleep=sleep)
+            if not isinstance(error, (AssertionError, ConnectionError, OSError)):
+                raise
+            last_error = error
+            if attempt + 1 == DEVTOOLS_STARTUP_ATTEMPTS:
+                raise AssertionError(
+                    f"Chromium failed to start after {DEVTOOLS_STARTUP_ATTEMPTS} fresh attempts"
+                ) from last_error
+    raise AssertionError("Chromium startup attempts were not executed") from last_error
 
 
 def browser_json_probe(
@@ -214,25 +283,15 @@ def browser_json_probe(
     process: subprocess.Popen[bytes] | None = None
     connection: DevToolsConnection | None = None
     try:
-        profile = tempdir_factory()
-        process = popen_factory(
-            (
-                chromium,
-                "--headless",
-                "--disable-gpu",
-                "--no-sandbox",
-                "--hide-scrollbars",
-                "--no-first-run",
-                "--no-default-browser-check",
-                "--remote-allow-origins=*",
-                "--remote-debugging-port=0",
-                f"--user-data-dir={profile.name}",
-                "about:blank",
-            ),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+        profile, process, connection = acquire_chromium(
+            chromium,
+            hide_scrollbars=True,
+            connection_factory=connection_factory,
+            popen_factory=popen_factory,
+            target_factory=target_factory,
+            tempdir_factory=tempdir_factory,
+            sleep=sleep,
         )
-        connection = connection_factory(target_factory(Path(profile.name), process))
         for domain in ("Runtime", "Page"):
             connection.call(f"{domain}.enable")
         connection.call(
@@ -282,14 +341,8 @@ def browser_json_probe(
 
         if connection is not None:
             cleanup(connection.close)
-        if process is not None and process.poll() is None:
-            cleanup(process.terminate)
-            if process.poll() is None:
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    cleanup(process.kill)
-                    cleanup(lambda: process.wait(timeout=5))
+        if process is not None:
+            cleanup(lambda: stop_process(process))
         if profile is not None:
             cleanup(lambda: cleanup_profile(profile, sleep=sleep))
         if active_error is None and cleanup_errors:

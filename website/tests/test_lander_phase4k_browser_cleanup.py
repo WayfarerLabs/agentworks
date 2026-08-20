@@ -72,9 +72,13 @@ class _NullRootRaceConnection:
 
 
 class _ProbeProfile:
-    name = "/tmp/chromium-probe-profile"
-
-    def __init__(self, *, cleanup_failures: int = 0) -> None:
+    def __init__(
+        self,
+        *,
+        name: str = "/tmp/chromium-probe-profile",
+        cleanup_failures: int = 0,
+    ) -> None:
+        self.name = name
         self.cleaned = False
         self.cleanup_failures = cleanup_failures
         self.cleanup_calls = 0
@@ -222,7 +226,7 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
 
         self.assertLessEqual(elapsed, chromium_support.DEVTOOLS_STARTUP_TIMEOUT)
 
-    def test_devtools_target_allows_the_full_slow_startup_window(self) -> None:
+    def test_devtools_target_bounds_each_fresh_startup_attempt(self) -> None:
         process = _FakeProcess()
         elapsed = 0.0
 
@@ -238,7 +242,49 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
             ):
                 chromium_support.devtools_target(Path(directory), process)
 
-        self.assertEqual(elapsed, chromium_support.DEVTOOLS_STARTUP_TIMEOUT)
+        self.assertEqual(
+            elapsed,
+            chromium_support.DEVTOOLS_STARTUP_TIMEOUT
+            / chromium_support.DEVTOOLS_STARTUP_ATTEMPTS,
+        )
+
+    def test_json_probe_retries_one_fresh_browser_after_startup_failure(self) -> None:
+        processes = [_FakeProcess(), _FakeProcess()]
+        process_queue = list(processes)
+        profiles = [
+            _ProbeProfile(name="/tmp/chromium-probe-profile-1"),
+            _ProbeProfile(name="/tmp/chromium-probe-profile-2"),
+        ]
+        profile_queue = list(profiles)
+        connection = _ProbeConnection(ready=True)
+        target_calls = 0
+
+        def target(path: Path, process: _FakeProcess) -> str:
+            nonlocal target_calls
+            self.assertEqual(path, Path(profiles[target_calls].name))
+            self.assertIs(process, processes[target_calls])
+            target_calls += 1
+            if target_calls == 1:
+                raise AssertionError("first Chromium startup remained unresponsive")
+            return "ws://chromium.test"
+
+        result = chromium_support.browser_json_probe(
+            "chromium-test",
+            "http://127.0.0.1:8000/lander/",
+            960,
+            "#result",
+            connection_factory=lambda url: connection,
+            popen_factory=lambda *args, **kwargs: process_queue.pop(0),
+            target_factory=target,
+            tempdir_factory=lambda: profile_queue.pop(0),
+            sleep=lambda seconds: None,
+        )
+
+        self.assertEqual(result, {"ready": True})
+        self.assertEqual(target_calls, 2)
+        self.assertTrue(connection.closed)
+        self.assertTrue(all(process.terminated for process in processes))
+        self.assertTrue(all(profile.cleaned for profile in profiles))
 
     def test_json_probe_owns_browser_and_retries_profile_cleanup(self) -> None:
         process = _FakeProcess()

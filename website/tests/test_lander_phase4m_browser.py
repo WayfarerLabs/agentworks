@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 import tempfile
@@ -13,7 +12,7 @@ from functools import partial
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-from chromium_test_support import DevToolsConnection, cleanup_profile, devtools_target
+from chromium_test_support import DevToolsConnection, acquire_chromium, cleanup_profile, stop_process
 from lander_chromium_phase4k import _QuietHandler
 from site_test_support import RepositoryFixture
 
@@ -88,7 +87,7 @@ def browser_phase4m_contract(output: Path) -> dict[str, object]:
     source = page.read_text(encoding="utf-8")
     server = ThreadingHTTPServer(("127.0.0.1", 0), partial(_QuietHandler, directory=str(output)))
     thread = threading.Thread(target=server.serve_forever, daemon=True, name="phase4m-browser-server")
-    profile = tempfile.TemporaryDirectory()
+    profile: tempfile.TemporaryDirectory[str] | None = None
     process: subprocess.Popen[bytes] | None = None
     connection: DevToolsConnection | None = None
     try:
@@ -98,24 +97,7 @@ def browser_phase4m_contract(output: Path) -> dict[str, object]:
             encoding="utf-8",
         )
         thread.start()
-        process = subprocess.Popen(
-            (
-                chromium,
-                "--headless",
-                "--disable-gpu",
-                "--no-sandbox",
-                "--no-first-run",
-                "--no-default-browser-check",
-                "--remote-allow-origins=*",
-                "--remote-debugging-port=0",
-                f"--user-data-dir={profile.name}",
-                "about:blank",
-            ),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            env={**os.environ, "HOME": profile.name},
-        )
-        connection = DevToolsConnection(devtools_target(Path(profile.name), process))
+        profile, process, connection = acquire_chromium(chromium)
         for domain in ("Runtime", "Page"):
             connection.call(f"{domain}.enable")
         loaded_url = f"http://127.0.0.1:{server.server_address[1]}/lander/"
@@ -130,19 +112,15 @@ def browser_phase4m_contract(output: Path) -> dict[str, object]:
         if connection is not None:
             connection.close()
         if process is not None:
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
+            stop_process(process)
         server.shutdown()
         server.server_close()
         if thread.is_alive():
             thread.join(timeout=5)
         page.write_text(source, encoding="utf-8")
         probe_path.unlink(missing_ok=True)
-        cleanup_profile(profile)
+        if profile is not None:
+            cleanup_profile(profile)
 
 
 class Phase4MBrowserTests(RepositoryFixture):
