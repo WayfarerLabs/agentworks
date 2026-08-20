@@ -7,8 +7,8 @@
   phase 2 through the descriptor, the guide through its grammar-native shape, wave 3 secret sources,
   the operational JSON output contract, the assistance flow with the README bootstrap) plus the CLI
   grammar rewrite and the resource-show child. The 0.14.0 field-evidence fixes (PRs #604 through
-  #607) merged after the tag and are on `main` only: an installed 0.14.0 does not have them, and
-  they ship with the next release
+  #607) shipped as patch release 0.14.1 (2026-08-19, live on PyPI; the `Release-As` override
+  reframed release-please's minor bump, PR #617)
 
 This document records where the system actually is, verified by code reconnaissance rather than
 assumed from the perspectives. It is the ground truth the phasing rests on; when a wave lands,

@@ -171,6 +171,11 @@ off whenever bandwidth allows, on its own merits and its own schedule.
   ref (the first tag-time run's fingerprint guard failed closed in a shallow checkout; the
   re-dispatch against tag `v0.14.0` published with the `release` environment's tag-only policy
   temporarily bridged for the one run and verified restored). `agentworks-cli` 0.14.0 is live.
+  **0.14.1 shipped 2026-08-19**: the field-evidence fixes (PRs #604 through #607) cut as a patch via
+  the `Release-As: 0.14.1` override (PR #617, reframing the minor bump two small feat commits would
+  have forced), release PR #610 merged, and the workflow published first-try; the tester's
+  post-merge pass verified reproducible builds and agreeing version surfaces on the exact release
+  head.
 
 - **Later:** remaining waves map to releases as they prove out; no need to pin numbers now.
 
