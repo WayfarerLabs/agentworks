@@ -186,7 +186,7 @@ class ChromiumAcquisitionTests(unittest.TestCase):
                     Path(directory), process, connection_factory=stall
                 )
 
-        self.assertLessEqual(elapsed, chromium_support.DEVTOOLS_STARTUP_TIMEOUT)
+        self.assertLessEqual(elapsed, chromium_support.DEVTOOLS_STARTUP_ATTEMPT_TIMEOUT)
 
     def test_devtools_target_bounds_each_fresh_startup_attempt(self) -> None:
         process = _FakeProcess()
@@ -208,9 +208,43 @@ class ChromiumAcquisitionTests(unittest.TestCase):
 
         self.assertEqual(
             elapsed,
-            chromium_support.DEVTOOLS_STARTUP_TIMEOUT
-            / chromium_support.DEVTOOLS_STARTUP_ATTEMPTS,
+            chromium_support.DEVTOOLS_STARTUP_ATTEMPT_TIMEOUT,
         )
+
+    def test_acquire_chromium_exhausts_two_fresh_attempts_and_cleans_both(self) -> None:
+        processes = [_FakeProcess(), _FakeProcess()]
+        process_queue = list(processes)
+        profiles = [
+            _ProbeProfile(name="/tmp/chromium-exhausted-profile-1"),
+            _ProbeProfile(name="/tmp/chromium-exhausted-profile-2"),
+        ]
+        profile_queue = list(profiles)
+        failures = [AssertionError(), OSError()]
+        target_calls = 0
+
+        def target(path: Path, process: _FakeProcess, *, timeout: float) -> str:
+            nonlocal target_calls
+            self.assertEqual(path, Path(profiles[target_calls].name))
+            self.assertIs(process, processes[target_calls])
+            self.assertGreater(timeout, 0)
+            self.assertLessEqual(timeout, chromium_support.DEVTOOLS_STARTUP_ATTEMPT_TIMEOUT)
+            failure = failures[target_calls]
+            target_calls += 1
+            raise failure
+
+        with self.assertRaises(AssertionError) as captured:
+            chromium_support.acquire_chromium(
+                "chromium-test",
+                popen_factory=lambda *args, **kwargs: process_queue.pop(0),
+                target_factory=target,
+                tempdir_factory=lambda: profile_queue.pop(0),
+                sleep=lambda seconds: None,
+            )
+
+        self.assertEqual(target_calls, chromium_support.DEVTOOLS_STARTUP_ATTEMPTS)
+        self.assertIs(captured.exception.__cause__, failures[-1])
+        self.assertTrue(all(process.terminated for process in processes))
+        self.assertTrue(all(profile.cleaned for profile in profiles))
 
     def test_json_probe_retries_one_fresh_browser_after_startup_failure(self) -> None:
         processes = [_FakeProcess(), _FakeProcess()]
@@ -260,7 +294,12 @@ class ChromiumAcquisitionTests(unittest.TestCase):
         self.assertEqual(result, {"ready": True})
         self.assertEqual(target_calls, 2)
         self.assertEqual(len(target_timeouts), 2)
-        self.assertTrue(all(0 < timeout <= 10 for timeout in target_timeouts))
+        self.assertTrue(
+            all(
+                0 < timeout <= chromium_support.DEVTOOLS_STARTUP_ATTEMPT_TIMEOUT
+                for timeout in target_timeouts
+            )
+        )
         self.assertEqual(len(connection_timeouts), 1)
         self.assertGreater(connection_timeouts[0][0], 0)
         self.assertLessEqual(connection_timeouts[0][0], 1)
@@ -291,7 +330,7 @@ class ChromiumAcquisitionTests(unittest.TestCase):
             self.assertEqual(path, Path(profiles[target_calls].name))
             self.assertIs(process, processes[target_calls])
             if target_calls == 0:
-                elapsed += 9.75
+                elapsed += 19.75
             else:
                 self.assertTrue(processes[0].terminated)
                 self.assertTrue(profiles[0].cleaned)
@@ -325,11 +364,11 @@ class ChromiumAcquisitionTests(unittest.TestCase):
         self.assertIs(process, processes[1])
         self.assertIs(profile, profiles[1])
         self.assertEqual(target_calls, 2)
-        self.assertEqual(target_timeouts, [10, 10])
+        self.assertEqual(target_timeouts, [20, 20])
         self.assertAlmostEqual(connection_timeouts[0][0], 0.25)
         self.assertEqual(connection_timeouts[1][0], 1)
         self.assertEqual([operation for _, operation in connection_timeouts], [10, 10])
-        self.assertEqual(elapsed, 10)
+        self.assertEqual(elapsed, 20)
         acquired.close()
         chromium_support.stop_process(process)
         chromium_support.cleanup_profile(profile)

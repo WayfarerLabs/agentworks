@@ -310,17 +310,19 @@ The cited main job exposed the remaining external-process boundary. Chromium rem
 never created `DevToolsActivePort` during the full 20-second wait, so neither HTTP nor WebSocket
 target discovery could begin. One wedged browser process still failed the complete job.
 
-All six real-Chromium harness entry points now use one shared acquisition path. The existing
-20-second startup budget is split across two fresh attempts. If the first browser does not become
-responsive within 10 seconds, the harness terminates it, removes its isolated profile, and starts
-one fresh browser for the remaining attempt. Each attempt's single deadline includes process
-startup, target discovery, and the page handshake; the retained session then restores the ordinary
-10-second CDP operation timeout. A deterministic mutation proves the failed process and profile are
-cleaned before the second connection is accepted; non-startup exceptions still preserve their
-original identity rather than being retried. The exact formerly failing Phase 4J description test
-passed 50 consecutive real-Chromium executions, the focused real-Chromium corpus passed 11 of 11
-tests, the focused acquisition/lifecycle/document corpus passed 37 of 37 tests, and the complete
-website suite passed 158 of 158 tests.
+All six real-Chromium harness entry points now use one shared acquisition path. Each of the two
+fresh attempts retains the established 20-second startup allowance. If the first browser does not
+become responsive, the harness terminates it, removes its isolated profile, and starts one fresh
+browser. Each attempt's single deadline includes process startup, target discovery, and the page
+handshake; cleanup completes before another attempt and is deliberately outside that acquisition
+deadline. The retained session then restores the ordinary 10-second CDP operation timeout.
+Deterministic mutations prove both the recovery and exhausted paths: failed processes and profiles
+are cleaned before retry or return, no third attempt occurs, and the final failure retains its
+underlying cause. Non-startup exceptions still preserve their original identity rather than being
+retried. The exact formerly failing Phase 4J description test passed 50 consecutive real-Chromium
+executions, the focused real-Chromium corpus passed 11 of 11 tests, the focused
+acquisition/lifecycle/document corpus passed 38 of 38 tests, and the complete website suite passed
+159 of 159 tests.
 
 The docs-only follow-up run started Chromium successfully but exposed a separate brittle timing
 gate: seed 11 generation p95 stayed below its 25 ms contract while one wall-clock sample reached

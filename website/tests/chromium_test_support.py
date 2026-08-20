@@ -16,7 +16,7 @@ import urllib.parse
 from pathlib import Path
 from typing import Callable
 
-DEVTOOLS_STARTUP_TIMEOUT = 20.0
+DEVTOOLS_STARTUP_ATTEMPT_TIMEOUT = 20.0
 DEVTOOLS_STARTUP_ATTEMPTS = 2
 
 
@@ -143,7 +143,7 @@ def devtools_target(
     process: subprocess.Popen[bytes],
     *,
     connection_factory: Callable[..., DevToolsConnection] = DevToolsConnection,
-    timeout: float = DEVTOOLS_STARTUP_TIMEOUT / DEVTOOLS_STARTUP_ATTEMPTS,
+    timeout: float = DEVTOOLS_STARTUP_ATTEMPT_TIMEOUT,
 ) -> str:
     port_path = profile_path / "DevToolsActivePort"
     last_error: BaseException | None = None
@@ -206,6 +206,7 @@ def stop_process(process: subprocess.Popen[bytes]) -> None:
         process.wait(timeout=5)
     except subprocess.TimeoutExpired:
         process.kill()
+        # Do not start another browser while an unreaped predecessor can retain its profile.
         process.wait(timeout=5)
 
 
@@ -241,7 +242,7 @@ def acquire_chromium(
     for attempt in range(DEVTOOLS_STARTUP_ATTEMPTS):
         profile = tempdir_factory()
         process: subprocess.Popen[bytes] | None = None
-        attempt_deadline = time.monotonic() + DEVTOOLS_STARTUP_TIMEOUT / DEVTOOLS_STARTUP_ATTEMPTS
+        attempt_deadline = time.monotonic() + DEVTOOLS_STARTUP_ATTEMPT_TIMEOUT
         try:
             command = [
                 chromium,
