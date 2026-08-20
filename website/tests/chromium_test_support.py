@@ -23,7 +23,13 @@ DEVTOOLS_STARTUP_ATTEMPTS = 2
 class DevToolsConnection:
     """Minimal bounded WebSocket client for one Chromium page target."""
 
-    def __init__(self, url: str, *, timeout: float = 10.0) -> None:
+    def __init__(
+        self,
+        url: str,
+        *,
+        timeout: float = 10.0,
+        operation_timeout: float | None = None,
+    ) -> None:
         parsed = urllib.parse.urlsplit(url)
         self.socket = socket.create_connection(
             (parsed.hostname or "127.0.0.1", parsed.port or 80), timeout=timeout
@@ -55,6 +61,7 @@ class DevToolsConnection:
         except BaseException:
             self.socket.close()
             raise
+        self.socket.settimeout(timeout if operation_timeout is None else operation_timeout)
         self.identifier = 0
 
     def close(self) -> None:
@@ -136,10 +143,11 @@ def devtools_target(
     process: subprocess.Popen[bytes],
     *,
     connection_factory: Callable[..., DevToolsConnection] = DevToolsConnection,
+    timeout: float = DEVTOOLS_STARTUP_TIMEOUT / DEVTOOLS_STARTUP_ATTEMPTS,
 ) -> str:
     port_path = profile_path / "DevToolsActivePort"
     last_error: BaseException | None = None
-    deadline = time.monotonic() + DEVTOOLS_STARTUP_TIMEOUT / DEVTOOLS_STARTUP_ATTEMPTS
+    deadline = time.monotonic() + timeout
     while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -154,8 +162,14 @@ def devtools_target(
             browser_path = lines[1]
             if not 0 < port < 65536 or not browser_path.startswith("/"):
                 raise ValueError("Chromium published an invalid DevTools endpoint")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("Chromium used its discovery attempt before target inspection")
+            connection_timeout = min(0.25, remaining)
             connection = connection_factory(
-                f"ws://127.0.0.1:{port}{browser_path}", timeout=min(0.25, remaining)
+                f"ws://127.0.0.1:{port}{browser_path}",
+                timeout=connection_timeout,
+                operation_timeout=connection_timeout,
             )
             try:
                 result = connection.call("Target.getTargets")
@@ -217,7 +231,7 @@ def acquire_chromium(
     hide_scrollbars: bool = False,
     connection_factory: Callable[..., DevToolsConnection] = DevToolsConnection,
     popen_factory: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
-    target_factory: Callable[[Path, subprocess.Popen[bytes]], str] = devtools_target,
+    target_factory: Callable[..., str] = devtools_target,
     tempdir_factory: Callable[[], tempfile.TemporaryDirectory[str]] = tempfile.TemporaryDirectory,
     sleep: Callable[[float], None] = time.sleep,
 ) -> tuple[tempfile.TemporaryDirectory[str], subprocess.Popen[bytes], DevToolsConnection]:
@@ -248,11 +262,18 @@ def acquire_chromium(
                 stderr=subprocess.DEVNULL,
                 env={**os.environ, "HOME": profile.name},
             )
-            target = target_factory(Path(profile.name), process)
+            remaining = attempt_deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("Chromium used its startup attempt before discovery")
+            target = target_factory(Path(profile.name), process, timeout=remaining)
             remaining = attempt_deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError("Chromium used its startup attempt before opening the page target")
-            return profile, process, connection_factory(target, timeout=min(1.0, remaining))
+            return profile, process, connection_factory(
+                target,
+                timeout=min(1.0, remaining),
+                operation_timeout=10.0,
+            )
         except BaseException as error:
             try:
                 if process is not None:
@@ -279,7 +300,7 @@ def browser_json_probe(
     screenshot_path: Path | None = None,
     connection_factory: Callable[..., DevToolsConnection] = DevToolsConnection,
     popen_factory: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
-    target_factory: Callable[[Path, subprocess.Popen[bytes]], str] = devtools_target,
+    target_factory: Callable[..., str] = devtools_target,
     tempdir_factory: Callable[[], tempfile.TemporaryDirectory[str]] = tempfile.TemporaryDirectory,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, object]:

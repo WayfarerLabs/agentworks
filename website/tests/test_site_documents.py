@@ -209,7 +209,7 @@ def browser_geometry(
     chromium_path: str | None = None,
     connection_factory: Callable[..., DevToolsConnection] = DevToolsConnection,
     popen_factory: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
-    target_factory: Callable[[Path, subprocess.Popen[bytes]], str] = devtools_target,
+    target_factory: Callable[..., str] = devtools_target,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, object]:
     chromium = chromium_path or next(
@@ -686,7 +686,7 @@ class GeneratedDocumentTests(RepositoryFixture):
             chromium_path="chromium-test",
             connection_factory=lambda url, **kwargs: connection,
             popen_factory=spawn,
-            target_factory=lambda profile, owned: "ws://chromium.test",
+            target_factory=lambda profile, owned, **kwargs: "ws://chromium.test",
         )
 
         command = spawn.call_args.args[0]
@@ -749,7 +749,7 @@ class GeneratedDocumentTests(RepositoryFixture):
                 chromium_path="chromium-test",
                 connection_factory=lambda url, **kwargs: connection,
                 popen_factory=lambda *args, **kwargs: process,
-                target_factory=lambda profile, owned: "ws://chromium.test",
+                target_factory=lambda profile, owned, **kwargs: "ws://chromium.test",
                 sleep=lambda seconds: None,
             )
 
@@ -800,7 +800,7 @@ class GeneratedDocumentTests(RepositoryFixture):
                 chromium_path="chromium-test",
                 connection_factory=lambda url, **kwargs: FailingConnection(),
                 popen_factory=lambda *args, **kwargs: process,
-                target_factory=lambda profile, owned: "ws://chromium.test",
+                target_factory=lambda profile, owned, **kwargs: "ws://chromium.test",
             )
 
         with self.assertRaises(RuntimeError) as caught:

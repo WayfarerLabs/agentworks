@@ -259,7 +259,7 @@ def browser_phase4k_contract(
     popen_factory: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
     server_factory: Callable[..., ThreadingHTTPServer] = ThreadingHTTPServer,
     tempdir_factory: Callable[[], tempfile.TemporaryDirectory[str]] = tempfile.TemporaryDirectory,
-    target_factory: Callable[[Path, subprocess.Popen[bytes]], str] = devtools_target,
+    target_factory: Callable[..., str] = devtools_target,
     probe_source_factory: Callable[[], str] = _probe_source,
     chromium_path: str | None = None,
 ) -> dict[str, object]:
