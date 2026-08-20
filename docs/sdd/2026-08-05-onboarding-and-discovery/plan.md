@@ -763,6 +763,10 @@ boundary had ceased to exist.
 - [x] Confirm permanent guide, assistance, JSON, and contribution documentation is self-sufficient;
       no current behavior relies on this SDD. Promote only missing current facts, not design
       history.
+- [x] Consume the saga's final agent-mode and regression-charter message. Record the operator's
+      disposition of the superseded dozen-hint expectation, route the non-TTY mode heuristic and
+      release-topic namespace as bounded guide follow-ups, name the permanent regression owners, and
+      identify `2026-08-18-secret-preview-contract` as the successor secret-preview effort.
 - [ ] Run final applicable gates and the required project, integration, and saga reviews.
 - [ ] Create `locked.md` with the final state and date, then hand off the always-green closeout PR
       with commit and test evidence.

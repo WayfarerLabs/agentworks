@@ -73,3 +73,42 @@ The pre-saga-review checkpoint passed:
   integration review: PASS with no findings and verified temporary-root cleanup.
 
 The final saga review and lock checkpoint remain separate plan steps.
+
+## Final agent-mode and regression dispositions
+
+The operator's 2026-08-20 disposition accepts the current sparse agent-only model as the destination
+and supersedes the older expectation of roughly a dozen journey hints. General assistant posture
+stays in `concept-assistant-agent`; `_index.md` and `concept-onboarding` retain only the local
+context that currently earns a mode distinction. The closeout does not add speculative hints to
+satisfy a historical count.
+
+The implicit non-TTY agent-mode fallback remains an explicit follow-up decision for the next-steps
+saga rather than an unexamined closeout default. The same bounded guide follow-up owns the requested
+rename of exact release evidence from the `concept-release-notes/...` namespace to a root
+`release-notes-...` topic. Neither follow-up changes the behavior accepted here.
+
+The tire-kick regression charter has these durable owners:
+
+- authored guide command paths are checked against the live CLI specification by
+  `cli/tests/guide/test_shell_commands.py`, with the index's exact-release address checked by
+  `cli/tests/guide/test_shell_service.py`;
+- strict topic syntax, unknown-topic behavior, reserved `_index` ownership, traversal rejection, and
+  atomic catalog validation are owned by `cli/tests/guide/test_shell_catalog.py` and
+  `cli/tests/guide/test_shell_service.py`; and
+- behavior-shaping posture remains reviewed prose, not wording-pinned tests:
+  `concept-assistant-agent` owns data-versus-direction, `concept-secrets` owns explicit authority
+  before interactive secret work, and `concept-reporting-bugs` owns the redacted-draft-stays-local
+  boundary. The in-flight `2026-08-18-secret-preview-contract` SDD owns the successor value-free
+  secret-preview and non-TTY resolution contract; its implementation must update permanent secret
+  guidance with the behavior it ships.
+
+The final pre-lock round added the missing invalid-versus-unknown topic lookup assertion and passed:
+
+- the focused guide service suite: 24 passed;
+- the full non-integration CLI suite: 7,287 passed and 2 environment-gated skips;
+- Ruff lint and format plus strict mypy across 694 source files;
+- 155 Python and 103 Node website tests plus byte-identical repeated builds at both site bases;
+- Typer isolation, assistance package generation, Rulesync drift, SDD lock, file lint, and diff
+  checks; and
+- independent project review with no findings after preserving the saga message as its required
+  one-file commit.

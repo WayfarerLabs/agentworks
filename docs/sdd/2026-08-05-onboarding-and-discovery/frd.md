@@ -1,6 +1,6 @@
 # FRD: Agentworks Assistance, Discovery, and Management
 
-- Status: Active, shell-backed index and grammar correction
+- Status: Complete; lock binds when PR #615 lands
 - Start date: 2026-08-05
 - Saga: `docs/sdd/2026-08-04-next-steps`
 
@@ -24,6 +24,13 @@ The operator's 2026-08-17 bootstrap-current-release ruling replaces the constrai
 range with `uv tool install --upgrade agentworks-cli`. The metadata minimum remains a compatibility
 floor rather than an installation constraint. The unreleased assistance package remains at its
 initial version, `1.0.0`; ordinary package-version bumps begin after that package first ships.
+
+The operator's 2026-08-18 closeout ruling, delivered through the authenticated operator session,
+accepts the completed published-0.14.0 onboarding journey in place of the overtaken candidate-wheel
+run. The operator's 2026-08-20 closeout disposition confirms that the current sparse agent-only
+content is intentional and supersedes the earlier expectation of roughly a dozen journey hints.
+General posture remains centralized in `concept-assistant-agent`; other topics add agent-only
+context only where it earns its place.
 
 ## Summary
 
