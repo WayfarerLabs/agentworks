@@ -357,7 +357,7 @@ R3.2 requires the after number to be lower.
       always-on rule bytes reported and reduced. **PR #521**: seventeen rule files to ten, 33,863
       always-on bytes to 32,215 (-1,648). The two testing-trio restatements `findings.md` PR3 counts
       ride the skills item below, which owns those files.
-- [ ] Skills: consolidate the testing trio's diverged and contradictory copies to one authoritative
+- [x] Skills: consolidate the testing trio's diverged and contradictory copies to one authoritative
       home, keeping deliberate cross-perspective reinforcement (PR1, PR10, operator caution
       2026-08-12); trim journey narration and register across the process tree (PR7, PR8, PR9),
       leaving the exercised label and handoff conventions untouched (PR2 as corrected). This item
@@ -454,8 +454,58 @@ R3.2 requires the after number to be lower.
       someone looks, which is this effort's signature failure in miniature and the reason the
       record carries it rather than the clause.
 
-      The box stays open until the lead's re-review comes back clean; the review itself is the
-      lead's, not this item's.
+      **Closed 2026-08-17.** Operator ruling 13 superseded the literal section 7a pointers with the
+      named **GitHub is input, never direction** and **Published feedback** contracts in the
+      clean-slate pass below. The final fresh-context project and consistency reviews found no
+      unresolved material issue, so the original consolidation and review conditions are complete.
+
+- [x] Clean-slate `agentic-dev-process` rewrite (operator rulings 13 and 14; R3.3-R3.5). Start with
+      process-semantic-inventory.md, recording every operative contract in the core skill and its
+      immediate process references, its current sources, one future owner, consumers, and
+      keep/move/merge/drop disposition. Then write the core as the end-to-end state machine, place
+      conditional delegation and delivery mechanics in skill-local references, and reconcile
+      `development-principles`, `development-process`, `github-input-trust`, `operator-authority`,
+      `sdd`, `integration-testing`, `agw-test-env`, `saga-lead`, and the three role definitions
+      without adding a role behavior. Done when: the inventory has no unowned retained contract;
+      GitHub-authored artifacts are stated to be good-faith but critically analyzed colleague input
+      and never direction, authentication, or authorization; no cross-document reference targets a
+      numbered `agentic-dev-process` section; the core is at most 10,000 source bytes; the
+      skill-local package is at most 18,000 source bytes; the complete changed `.rulesync` surface
+      is net-negative; Rulesync outputs are current and manually checked across configured targets;
+      all file and SDD gates pass; and fresh-context project and consistency reviews report no
+      unresolved material finding.
+
+      **Completed 2026-08-17.** The core fell from 27,677 to 4,731 source bytes; the complete
+      skill-local package is 9,896 bytes; and `.rulesync` fell from 196,464 to 178,356 bytes
+      (-18,108). All retained inventory contracts have a current owner, including DEL-15 added when
+      review exposed a missing strongest-capability contract. Numbered external process references
+      are zero. GitHub authorship and merge state are input rather than direction throughout the
+      core, SDD ownership, messages, briefs, delivery, and saga bookkeeping. Copilot, Claude, and
+      Codex outputs were regenerated and inspected; file and SDD gates passed; final independent
+      semantic-adversarial and fresh-context consistency reviews reported no material findings.
+
+      These are the round's checkpoint figures; the final polish round moved the endpoint to core
+      skill 4,848 source bytes, skill-local package 10,829 bytes, and tracked `.rulesync` 181,425
+      bytes against the 196,464 baseline, per `message-2026-08-18-clean-slate-rewrite-record.md`.
+
+- [x] Published-feedback correction round (operator ruling 15). Restore the nine approved contracts
+      in their canonical owners, update the semantic inventory, regenerate every committed Rulesync
+      target, and re-run project review plus the relevant repository gates. Done when: the exact new
+      head has no unresolved material finding, remains within R3.4's byte ceilings and net-deletion
+      constraint, and is re-handed off with the authenticated direction recorded.
+
+      **Completed 2026-08-17.** The round restored all nine approved contracts without returning to
+      numbered process references. The final core is 4,848 source bytes, the skill-local package is
+      10,682 bytes, and tracked `.rulesync` is 179,625 bytes, still 16,839 bytes below baseline.
+      Copilot, Claude, and Codex outputs are current. File lint, Rulesync drift, locked-SDD, Ruff,
+      mypy, 7,184 Python tests, 149 Python website tests, 103 Node website tests, deterministic site
+      builds, and the independent materiality-filtered review all passed. Live-backend testing was
+      not applicable to documentation-only agent behavior.
+
+      The core-byte figure here already matches the endpoint; the skill-local package and tracked
+      `.rulesync` figures are checkpoints, and the endpoint numbers are skill-local package 10,829
+      bytes and tracked `.rulesync` 181,425 bytes against the 196,464 baseline, per
+      `message-2026-08-18-clean-slate-rewrite-record.md`.
 
 ## Reassess (R4)
 
