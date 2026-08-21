@@ -25,6 +25,7 @@ from agentworks.capabilities.secret_backend import (
     LookupDisposition,
     OperatorImpact,
     PreviewAvailable,
+    PreviewFailed,
     PreviewIndeterminate,
     PreviewIntent,
     ResolutionIntent,
@@ -222,13 +223,24 @@ def test_blocked_source_falls_through_and_is_retained_on_exhaustion() -> None:
     assert outcome.reason is BlockReason.TTY_UNAVAILABLE
 
 
-def test_preview_uses_later_definitive_result_and_retains_attempt_evidence() -> None:
+@pytest.mark.parametrize(
+    ("definitive", "status"),
+    [
+        (PreviewAvailable(), PreviewStatus.AVAILABLE),
+        (PreviewFailed(FailureReason.LOOKUP_REJECTED), PreviewStatus.FAILED),
+    ],
+    ids=("available", "failed"),
+)
+def test_preview_uses_later_definitive_result_and_retains_attempt_evidence(
+    definitive: BackendPreview,
+    status: PreviewStatus,
+) -> None:
     class First(_Client):
         preview_results = {"a": PreviewIndeterminate(IndeterminateReason.OPERATOR_IMPACT_LIMITED)}
         calls = []
 
     class Second(_Client):
-        preview_results = {"a": PreviewAvailable()}
+        preview_results = {"a": definitive}
         calls = []
 
     preview = preview_batch(
@@ -238,7 +250,7 @@ def test_preview_uses_later_definitive_result_and_retains_attempt_evidence() -> 
         tty_access=TtyInteractionAccess.UNAVAILABLE,
         interaction_broker=None,
     )["a"]
-    assert preview.status is PreviewStatus.AVAILABLE
+    assert preview.status is status
     assert [attempt.source for attempt in preview.attempts] == ["first", "second"]
 
 

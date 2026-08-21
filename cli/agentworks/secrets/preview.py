@@ -195,7 +195,7 @@ def preview_hint(preview: ResolutionPreview, *, interaction_opt_in: bool) -> str
     if reason == BlockReason.BACKEND_PLUGIN_DISABLED.value:
         return "enable the configured secret-backend plugin"
     if reason == "no-candidate":
-        return "configure an applicable active source mapping"
+        return "configure an active source with an applicable mapping"
     if isinstance(preview.result, PreviewFailed):
         return {
             FailureReason.INVALID_MAPPING: "check the configured secret mapping",
@@ -213,31 +213,27 @@ def preview_hint(preview: ResolutionPreview, *, interaction_opt_in: bool) -> str
 
 def _aggregate(name: str, attempts: list[SourcePreviewAttempt]) -> ResolutionPreview:
     """Collapse an exhausted attempt chain using the fixed precedence."""
-    indeterminate = next((attempt for attempt in attempts if isinstance(attempt.result, PreviewIndeterminate)), None)
-    if indeterminate is not None:
-        return ResolutionPreview(
-            name=name,
-            result=indeterminate.result,
-            source=indeterminate.source,
-            identifier=indeterminate.identifier,
-            attempts=tuple(attempts),
+    selected = next((attempt for attempt in attempts if isinstance(attempt.result, PreviewIndeterminate)), None)
+    if selected is None:
+        selected = next(
+            (
+                attempt
+                for attempt in attempts
+                if isinstance(attempt.result, PreviewBlocked)
+                and attempt.result.reason in {BlockReason.TTY_UNAVAILABLE, BlockReason.TTY_INTERACTION_DISABLED}
+            ),
+            None,
         )
-    blocked = next((attempt for attempt in attempts if isinstance(attempt.result, PreviewBlocked)), None)
-    if blocked is not None:
+    if selected is None:
+        selected = next((attempt for attempt in attempts if isinstance(attempt.result, PreviewMissing)), None)
+    if selected is None:
+        selected = next((attempt for attempt in attempts if isinstance(attempt.result, PreviewBlocked)), None)
+    if selected is not None:
         return ResolutionPreview(
             name=name,
-            result=blocked.result,
-            source=blocked.source,
-            identifier=blocked.identifier,
-            attempts=tuple(attempts),
-        )
-    if attempts:
-        first = attempts[0]
-        return ResolutionPreview(
-            name=name,
-            result=PreviewMissing(),
-            source=first.source,
-            identifier=first.identifier,
+            result=selected.result,
+            source=selected.source,
+            identifier=selected.identifier,
             attempts=tuple(attempts),
         )
     return ResolutionPreview(

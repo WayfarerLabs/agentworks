@@ -93,6 +93,37 @@ def test_a_non_callable_factory_hits_the_generic_operation_check_first() -> None
     assert "required secret-backend operations: create_client" in _reason(create_client=None)
 
 
+class MissingContractVersionBackend(SecretBackend):
+    name = "phase3-fixture"
+    description = "omits the required contract version"
+    config_model = GoodConfig
+    mapping_model = GoodMapping
+    supports_tty_interaction = False
+
+    @classmethod
+    def backend_readiness(cls) -> Readiness:
+        return Readiness.ready()
+
+    @classmethod
+    def describe_lookup(cls, secret_name: str, mapping: BaseModel | None) -> LookupDescription:
+        return LookupDescription(LookupDisposition.NOT_APPLICABLE, None)
+
+    @classmethod
+    def create_client(
+        cls,
+        *,
+        config: AgwModel,
+        intent: SecretClientIntent,
+        tty_access: TtyInteractionAccess,
+        interaction_broker: InteractionBroker | None,
+    ) -> AbstractContextManager[SecretSourceClient]:
+        raise NotImplementedError
+
+
+def test_a_concrete_backend_without_a_declared_contract_version_is_rejected() -> None:
+    assert conformance_error(DESCRIPTOR, MissingContractVersionBackend) is not None
+
+
 class MissingTtySupportBackend(SecretBackend):
     name = "phase3-fixture"
     description = "omits one required class fact"

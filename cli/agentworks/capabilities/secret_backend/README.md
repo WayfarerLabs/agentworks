@@ -136,10 +136,11 @@ For each secret, source precedence is fixed:
 - failed hard-stops that secret and prevents a lower-precedence lookup; and
 - indeterminate falls through only in preview, retaining ordered evidence.
 
-When preview exhausts the chain, earlier indeterminate outranks blocked, which outranks missing. A
-later available or failed result is the aggregate and keeps the earlier attempts as evidence. When
-actual resolution exhausts the chain, a TTY block outranks ordinary missing, which outranks a core
-source block. Core performs one source-first pass and does not reuse preview as resolution.
+When preview exhausts the chain, the first indeterminate outranks the first TTY block, which
+outranks the first ordinary missing result, which outranks the first core source block. A later
+available or failed result is the aggregate and keeps the earlier attempts as evidence. When actual
+resolution exhausts the chain, a TTY block outranks ordinary missing, which outranks a core source
+block. Core performs one source-first pass and does not reuse preview as resolution.
 
 ## Lifecycle and exception boundary
 
@@ -292,6 +293,9 @@ with the exact names, parameter kinds, and requiredness above. `create_client` h
 keyword-only arguments after `cls`. Registration also checks the nominal base, exact version,
 constructibility, exact boolean TTY capability, and both model surfaces. Runtime validation owns
 returned map shapes and values.
+
+`SecretBackend` declares the `contract_version` type but supplies no value. Every concrete backend
+declares exact value `1`; registration rejects an implementation that omits or changes it.
 
 The declarable source resource and mapping host are framework-owned. Implementations target this
 single version-1 contract and do not invent a parallel source, certainty, remediation, or preview

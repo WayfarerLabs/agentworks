@@ -478,6 +478,16 @@ Which of the four you actually need follows from what your resources reference, 
 local path needs no `[plugins]` entry at all; "System plugins" in the
 [resources guide](resources.md) has the mapping.
 
+## `--non-interactive` now controls TTY interaction only
+
+The global `--non-interactive` flag now means only: do not use the TTY for interactions, even when
+one is present. It no longer controls color or other presentation. It does not suppress biometric
+prompts, desktop app approval, browser or device flows, or other provider work outside the terminal,
+and that work may wait until the configured source timeout. The flag is not a general unattended
+fail-fast mode. For a truly unattended path, use an environment-variable source or provider
+authentication known to be unattended, such as a supported 1Password service-account or Connect
+configuration, and set an appropriate source timeout.
+
 ## Secret source precedence key
 
 The source precedence setting is renamed from `[secret_config].backends` to

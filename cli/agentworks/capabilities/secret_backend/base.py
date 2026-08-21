@@ -34,7 +34,7 @@ class SecretBackend(Capability):
     """
 
     owner_kind: ClassVar[str] = "secret-source"
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int]
     config_model: ClassVar[type[AgwModel]]
     mapping_model: ClassVar[type[AgwRootModel[Any]]]
     supports_tty_interaction: ClassVar[bool]
