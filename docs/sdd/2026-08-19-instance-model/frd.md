@@ -10,8 +10,9 @@
   evaluation with a light repository layer, instance state (the fully resolved and applied config
   recorded per instance), instance-level spec overlays via the CLI, and CLI surfaces showing fully
   resolved specs for templates and live instances. One SDD carrying all four, phased, is the
-  sanctioned shape; the effort lead may propose a split only if the assessment phase surfaces a
-  reason the operator accepts.
+  sanctioned shape. The effort lead may propose a split if the R1 assessment or the design work
+  itself surfaces a reason the operator accepts; R4 is the likeliest candidate, since its near-term
+  consumer is the thinnest, and the R1 database assessment cannot by itself speak to that.
 - **Operator lean (2026-08-08, reaffirmed 2026-08-19): assessment first, and "something in that
   direction, not full ORM."** The database work begins by describing what exists and what hurts, and
   the repository layer is judged by the queries the other three workstreams actually need, never by
@@ -31,10 +32,14 @@ settling the store's contract unblocks it. Field evidence from the 0.14.0 onboar
 (`../2026-08-04-next-steps/message-2026-08-18-agentic-onboarding-run.md`) showed an agent cannot
 state a mutation's infrastructure effect before making it, because the effective spec after
 `inherits` composition and platform defaults appears in no CLI surface; that finding is routed in
-the saga ledger and this effort discharges it. The operator's key-change finding (2026-08-18:
-editing the configured SSH identity silently orphans provisioned VMs) is the motivating example for
-applied state: drift between declared and applied identity must become a detectable fact rather than
-a silent hazard.
+the saga ledger and this effort discharges it. The operator raised a second motivating case
+(2026-08-18) and the saga lead verified it at HEAD rather than relying on the report: VM
+provisioning writes `config.operator.ssh_public_key` into the instance's `authorized_keys`
+(`cli/agentworks/vms/initializer/ssh_keys.py`), while every later connection presents
+`config.operator.ssh_private_key` (`cli/agentworks/transports/__init__.py`). Editing the configured
+identity therefore leaves already-provisioned VMs holding the old public key while the transport
+offers the new private one, and nothing reports the mismatch until a connection fails. Applied state
+is what makes that drift a detectable fact instead of a silent hazard.
 
 ## Requirements
 
@@ -43,8 +48,8 @@ a silent hazard.
 An assessment artifact describing the current persistence estate as it actually is: every table, who
 reads and writes it, the query shapes in use, the concurrency and migration story, and the concrete
 pain points (with `file:line` evidence, not impressions). The assessment names what the other three
-workstreams need from storage and recommends the smallest repository shape that serves them. It is
-reviewed before any storage code changes.
+workstreams need from storage and recommends the smallest repository shape that serves them. The
+saga lead reviews it before any storage code changes.
 
 ### R2: A light repository layer, sized by its consumers
 
@@ -66,31 +71,46 @@ sessions, workspaces, and agents without redesign), the system records the fully
 configuration that was actually applied: the effective spec after the whole inheritance stack and
 platform defaults, as of the provisioning or reinit that applied it, with enough provenance to say
 when and by what operation. The record is the store the wave-2 ruling named, designed once for its
-three consumers (instance specs, integration applied-state, artifact ownership); this effort ships
-the first consumer and must document the contract the other two build on. Applied state is readable
-through R5's surfaces and comparable against the currently declared spec; drift is a reportable fact
-(doctor is the natural reporter). Remediation of drift (rotation, re-apply) is out of scope; making
-it visible is in scope.
+three consumers (instance specs, integration applied-state, artifact ownership). This effort ships
+the first consumer and documents the contract wave 4's integration applied-state builds on, in a
+permanent home beside the store's implementation rather than inside this effort's SDD, since a later
+wave must read a live doc and not spelunk a locked one. Artifact ownership (wave 6) has no stated
+requirements anywhere yet, so the obligation there is only that the design must not preclude it: a
+checkable constraint, never a deliverable, and the effort lead must not invent schema for it.
+Applied state is readable through R5's surfaces and comparable against the currently declared spec;
+drift is a reportable fact (doctor is the natural reporter). Remediation of drift (rotation,
+re-apply) is out of scope; making it visible is in scope.
 
 ### R4: Instance spec overlays via the CLI
 
 An operator can attach a final configuration layer to a specific instance, applied after the
 template chain, through a CLI verb (and correspondingly visible in the declarative model). The
-overlay participates in the general layer-stack merge (the open door), never a bespoke instance-only
-merge; the resolved result is what R3 records on apply and R5 shows on demand. Validation matches
-template validation: an overlay that would produce an invalid effective spec fails at declaration
-time with the same error quality templates get. The parked instance-required-fields idea (template
-fields flaggable as must-set-at-instance) is input for the effort lead to price during design; it
-ships only if it falls out naturally.
+overlay participates in the general layer-stack merge that wave 2's open door anticipated, never a
+bespoke instance-only merge. Price this honestly: that general merge does not exist at HEAD.
+`cli/agentworks/resources/inheritance.py` orders the template chain only, and the field-by-field
+merge is implemented separately for each kind (vms, agents, workspaces, sessions), so participating
+in a general merge means first unifying those implementations. If that generalization proves too
+large for this effort, say so and route it rather than quietly adding a fifth per-kind merge; the
+resolved result is what R3 records on apply and R5 shows on demand. Validation matches template
+validation: an overlay that would produce an invalid effective spec fails at declaration time with
+the same error quality templates get. One adjacent idea, recorded here so it is inheritable rather
+than remembered: a template field could be marked as one an instance must set, so the template
+declares the requirement and the overlay satisfies it. That is input to price during design, not a
+requirement; it ships only if it falls out naturally.
 
 ### R5: Resolved-spec surfaces
 
-The CLI can show the fully resolved spec for a template (what an instance created from it would get,
-after inheritance and platform defaults, with each value's source marked: declared, inherited,
-defaulted, overlaid) and for a live instance (both its current declared resolution and its applied
-record per R3, with drift highlighted). The natural home is `resource show` per the focused-superset
-ruling on that command; the effort lead proposes the exact surface in design. Machine output follows
-the JSON v1 discipline: existing fields preserved, additions optional and tagged.
+The CLI can show the fully resolved spec for a template (what an instance created from it would get
+after the inheritance chain resolves, with each value's source marked: declared, inherited,
+defaulted, overlaid). Note for the effort lead, verified at HEAD: there is no separate
+platform-defaults layer. Hardware defaults live once, on the resolved template
+(`cli/agentworks/vms/templates.py`), and `cli/agentworks/capabilities/vm_platform/base.py` records
+why a platform-side default was deliberately eliminated (a second declaration of the same value is
+free to drift from the first). Do not reintroduce one; "defaulted" means the resolved template's own
+default and for a live instance (both its current declared resolution and its applied record per R3,
+with drift highlighted). The natural home is `resource show` per the focused-superset ruling on that
+command; the effort lead proposes the exact surface in design. Machine output follows the JSON v1
+discipline: existing fields preserved, additions optional and tagged.
 
 ## Acceptance
 
@@ -98,6 +118,8 @@ the JSON v1 discipline: existing fields preserved, additions optional and tagged
   document is reviewed by the saga lead before implementation of R3 lands).
 - The onboarding field finding is discharged: an agent can state, before `vm create` mutates
   anything, the effective CPUs, memory, disk, and swap the instance will get, via a CLI surface.
+  Today no command shows them: `agw resource show vm-template/NAME` renders the declared row only,
+  so the resolved values first appear in provisioning output.
 - The key-change hazard is visible: after an operator edits the configured identity, a doctor run or
   an R5 surface names the drift against each affected instance's applied record.
 - The simple case does not get more verbose: an operator who never writes an overlay sees no new

@@ -420,10 +420,11 @@ tracked by the open boxes below until each has a delivered recipient-side artifa
       onboarding lead, PR #614. With that, the intake's only outstanding fix-class item is non-TTY
       secret resolution; the routing boxes below stay open until each has a delivered recipient-side
       artifact
-- [ ] Routed to the wave-2 discovery surfaces: an agent cannot state a mutation's infrastructure
-      effect before making it (effective spec after `inherits` composition and platform defaults
-      appears in no CLI surface; first revealed by provisioning). Pairs with schema emission;
-      `vm create --dry-run` is the alternative shape
+- [ ] Routed to the wave-2 discovery surfaces, and now owned by the `2026-08-19-instance-model`
+      child as its R5: an agent cannot state a mutation's infrastructure effect before making it
+      (effective spec after `inherits` composition and platform defaults appears in no CLI surface;
+      first revealed by provisioning). Pairs with schema emission; `vm create --dry-run` is the
+      alternative shape
 - [ ] Routed to the onboarding child as one decision item: agent mode is nearly a no-op outside the
       index (one topic differs; either more agent-only context is worth writing or the per-topic
       capability is speculative), the non-TTY mode heuristic hands agent content to redirecting
