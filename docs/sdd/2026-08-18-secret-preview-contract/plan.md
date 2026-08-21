@@ -409,6 +409,10 @@
 - [x] Rebase or merge current `origin/main` as appropriate, rerun affected gates, and confirm the PR
       diff contains no unrelated user work. (2026-08-21: rebased onto `d83bfa71`; file, SDD lock,
       Rulesync, and diff gates passed; the complete diff is scoped to this child effort.)
+- [x] Refresh the baseline again before the revised ready signal. (2026-08-21: rebased onto
+      `3912ee65`; intervening changes touched only the parent saga and instance-model SDD seed;
+      range-diff preserved all 26 child-effort patches, and file, SDD lock, Rulesync, and diff gates
+      passed.)
 - [x] Reconcile every FRD acceptance criterion against code, tests, docs, and the evidence available
       before formal integration. (2026-08-21: code and non-live evidence cover the closed contract,
       source flow, TTY policy, provider classification, operator surfaces, and value containment;
