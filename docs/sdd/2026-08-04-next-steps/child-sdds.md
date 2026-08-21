@@ -128,7 +128,7 @@ locked.
       head
 - [x] Remaining phases complete (wave 2 adoption, closeout). The README bootstrap shipped with the
       assistance phase (PR #480), satisfying the bootstraps gate
-- [x] Closeout accepted and **locked** (PR #615, merged 2026-08-20; `locked.md` binds at merge). The
+- [x] Closeout accepted and **locked** (PR #615, merged 2026-08-21; `locked.md` binds at merge). The
       round consumed both delivered messages: the guide contract relaxed to fence containment
       (evidence renders verbatim inside a fence widened past every backtick run, cross-referenced
       with the packaging generator), and the agent-mode item resolved by routing the deferral to the
@@ -278,7 +278,7 @@ item shrinks to a verification sweep.
       area's trim-to-standard as definition-of-done rather than leaving it to trail behind. The
       disjoint groups proceed on their own merits, and the R4 reassessment inherits the re-scope as
       the dated answer to its scope question
-- [ ] Corrective inventory landed (PRs #625 and #626, stacked, both awaiting merge): three lanes
+- [ ] Corrective inventory prepared in PRs #625 and #626 (stacked, both awaiting merge): three lanes
       independently re-derived the rebuilt map (1,215 rows, the 664-site estate owned once with none
       unowned or double-owned, and the 117-row subtraction reconciling in both directions), the
       post-#573 charter items are discharged, and a screen script that dies with the SDD now backs
