@@ -86,13 +86,21 @@ was actually provisioned with, so preflight can check it and fail cleanly when i
 unreadable, or no longer the identity the instance trusts. Take this as R3's first vertical slice
 rather than a later item: it exercises the whole arc (recorded at apply time, read at use time,
 mismatch reported) on one concrete field with a consumer that exists today, and it answers the
-hazard in the Why-now section directly. Record both the identity reference and the public key's
-fingerprint. The reference catches a config edit pointing elsewhere and supports the
-existence-and-readability check; the fingerprint catches regeneration at the same path, where the
-reference is unchanged but every provisioned instance still trusts the old public key, which is the
-quieter and more damaging case. A public-key fingerprint is not a secret, so persisting it costs
-nothing in exposure. Failing cleanly means naming what the instance trusts against what the config
-now presents, and what the operator can do about it; it does not mean re-applying anything.
+hazard in the Why-now section directly. Record the fingerprint of the identity the transport will
+actually present, derived from the private key at the use boundary, not read from the configured
+public key file. That distinction is the whole safety property: the transport authenticates with
+`operator.ssh_private_key`, while today's config and doctor checks only test that the public and
+private files each exist and are readable, independently of each other. So a private key replaced at
+the same path leaves a path reference unchanged, leaves a public-key file unchanged, and still
+breaks the next connection. Only a fingerprint derived from the private key can catch it. The
+configured reference stays worth recording as diagnostic context (it names what the operator pointed
+at, which helps the message say something useful), but it is not the check. A public key fingerprint
+is not a secret, so persisting it costs nothing in exposure.
+
+Where the identity cannot be derived (an encrypted key, or one held by an agent), preflight says it
+cannot verify rather than implying a match: an unverifiable check reported as a pass is worse than
+no check. Failing cleanly means naming what the instance trusts against what the config now
+presents, and what the operator can do about it; it does not mean re-applying anything.
 
 ### R4: Instance spec overlays via the CLI
 
