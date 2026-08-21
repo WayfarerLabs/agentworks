@@ -81,6 +81,19 @@ Applied state is readable through R5's surfaces and comparable against the curre
 drift is a reportable fact (doctor is the natural reporter). Remediation of drift (rotation,
 re-apply) is out of scope; making it visible is in scope.
 
+**The proving slice (operator direction, 2026-08-21):** record the operator SSH identity an instance
+was actually provisioned with, so preflight can check it and fail cleanly when it is missing,
+unreadable, or no longer the identity the instance trusts. Take this as R3's first vertical slice
+rather than a later item: it exercises the whole arc (recorded at apply time, read at use time,
+mismatch reported) on one concrete field with a consumer that exists today, and it answers the
+hazard in the Why-now section directly. Record both the identity reference and the public key's
+fingerprint. The reference catches a config edit pointing elsewhere and supports the
+existence-and-readability check; the fingerprint catches regeneration at the same path, where the
+reference is unchanged but every provisioned instance still trusts the old public key, which is the
+quieter and more damaging case. A public-key fingerprint is not a secret, so persisting it costs
+nothing in exposure. Failing cleanly means naming what the instance trusts against what the config
+now presents, and what the operator can do about it; it does not mean re-applying anything.
+
 ### R4: Instance spec overlays via the CLI
 
 An operator can attach a final configuration layer to a specific instance, applied after the
