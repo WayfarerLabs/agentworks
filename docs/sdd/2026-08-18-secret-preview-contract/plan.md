@@ -1,6 +1,6 @@
 # Plan: Value-free secret resolution preview
 
-- Status: Draft for review
+- Status: Implementation complete; formal integration validation pending
 - Date: 2026-08-18
 - Amended: 2026-08-21
 - Requirements: [FRD](./frd.md)
@@ -21,8 +21,10 @@
 - The effort stops for operator direction if review requires a requirements change or another result
   outside the agreed scope. Old-shape compatibility is not part of this effort: the operator
   authorized an atomic rewrite because no external backends exist.
-- The same PR becomes ready only after implementation, full gates, independent code review, live
-  integration disposition, permanent collateral, and closeout are complete.
+- The PR remains draft through implementation and its private quality loop. A complete, green,
+  independently reviewed implementation transitions to ready to trigger the separately operated
+  integration pipeline. Any subsequent change returns it to draft before a new exact-head handoff;
+  it is ready to merge only after integration disposition and closeout are complete.
 - The effort lead does not merge its own PR.
 
 ## Phase 0: Artifact checkpoint
@@ -112,21 +114,21 @@
 
 ## Phase 1: Contract types and validation scaffolding
 
-- [ ] Add preview-only `OperatorImpact`, exact `TtyInteractionPolicy` and `TtyInteractionAccess`,
+- [x] Add preview-only `OperatorImpact`, exact `TtyInteractionPolicy` and `TtyInteractionAccess`,
       exact `supports_tty_interaction`, tagged client intent, lookup-description, closed reason
       enums, tagged preview results, and aggregate attempt types.
-- [ ] Add the redacted resolved, missing, blocked, and failed actual-resolution variants.
-- [ ] Add constructor invariants, exact-map validators, safe representations, exhaustive
+- [x] Add the redacted resolved, missing, blocked, and failed actual-resolution variants.
+- [x] Add constructor invariants, exact-map validators, safe representations, exhaustive
       variant-to-flow rules, backend-returnable reason subsets, and maximum-impact no-indeterminate
       enforcement.
-- [ ] Make no-candidate a dedicated aggregate-only variant and revalidate backend-produced secret,
+- [x] Make no-candidate a dedicated aggregate-only variant and revalidate backend-produced secret,
       source, and identifier text at every core wrapper boundary, including hostile control and
       format characters.
-- [ ] Reject preview-only results and reasons from actual resolution, and reject
+- [x] Reject preview-only results and reasons from actual resolution, and reject
       `PreviewIndeterminate` under maximum preview impact as a backend protocol failure.
-- [ ] Add focused tests for adversarial values, provider text, malformed maps, invalid variants or
+- [x] Add focused tests for adversarial values, provider text, malformed maps, invalid variants or
       reasons, partial values, and safe representations without changing the live descriptor.
-- [ ] Replace the legacy runtime resolution category/detail/remediation enums with the same final
+- [x] Replace the legacy runtime resolution category/detail/remediation enums with the same final
       resolved, missing, blocked, and failed vocabulary used by the new source results; retain old
       fields only where a frozen machine schema requires a derived projection.
 
@@ -138,30 +140,30 @@
 
 ## Phase 2: Backend vertical slices
 
-- [ ] Set exact TTY-broker capability on every backend: prompt `True`, env-var and OnePassword
+- [x] Set exact TTY-broker capability on every backend: prompt `True`, env-var and OnePassword
       `False`; prove the latter two receive no broker in any intent or TTY state.
-- [ ] Refactor env-var acquisition so preview validates and discards locally while resolution uses
+- [x] Refactor env-var acquisition so preview validates and discards locally while resolution uses
       the same private path, behind the current runtime contract.
-- [ ] Implement prompt TTY-first preview and resolution behavior; prove no broker call or stdin read
+- [x] Implement prompt TTY-first preview and resolution behavior; prove no broker call or stdin read
       occurs unless TTY use is allowed and usable input is present.
-- [ ] Add the OnePassword app-authentication impact config and generated schema representation.
-- [ ] Infer known unattended OnePassword modes where provider facts make that safe; apply the
+- [x] Add the OnePassword app-authentication impact config and generated schema representation.
+- [x] Infer known unattended OnePassword modes where provider facts make that safe; apply the
       conservative source setting otherwise.
-- [ ] Refactor the bounded `op read` path so preview and resolution share timeout, cleanup, value
+- [x] Refactor the bounded `op read` path so preview and resolution share timeout, cleanup, value
       validation, and native-failure classification while returning different boundary types.
-- [ ] Add fake-provider tests for success, invalid mapping, auth, connectivity, external failure,
+- [x] Add fake-provider tests for success, invalid mapping, auth, connectivity, external failure,
       timeout, interruption, source config, and sentinel containment.
-- [ ] Add backend-specific decision-table tests proving each in-tree backend exhausts every
+- [x] Add backend-specific decision-table tests proving each in-tree backend exhausts every
       permitted route before returning indeterminate; generic conformance validates shape and
       maximum-impact behavior without pretending to know arbitrary provider internals.
-- [ ] Prove generic valid absence returns missing and falls through, while invalid mapping,
+- [x] Prove generic valid absence returns missing and falls through, while invalid mapping,
       lookup-rejected, and provider failures return failed and hard-stop.
-- [ ] Apply the explicit OnePassword evidence fork: with authorized conclusive evidence, record the
+- [x] Apply the explicit OnePassword evidence fork: with authorized conclusive evidence, record the
       exact supported `op` version and sanitized narrow absence token, add its fixture, and
       reproduce it live; without that evidence, implement no OnePassword missing token, keep
       item/field markers failed/lookup-rejected, and keep unknown text failed/external. Fake output
       is never evidence.
-- [ ] Prove factory construction and context entry perform no provider or broker work before the
+- [x] Prove factory construction and context entry perform no provider or broker work before the
       selected method acts through a client constructed with tagged operation intent and exact TTY
       access.
 
@@ -175,58 +177,58 @@
 
 ## Phase 3: Atomic contract cutover and core orchestration
 
-- [ ] Remove the no-op client `prepare` method and `external_operation_timeout`; extend
+- [x] Remove the no-op client `prepare` method and `external_operation_timeout`; extend
       `create_client` with tagged preview-or-resolution intent, exact TTY access, broker, and
       remaining-time inputs before any backend lifecycle hook runs. Keep policy out of
       `preview(requests)` and `resolve(requests)` because it is fixed at construction.
-- [ ] Update the `SecretBackend` ABC, descriptor, root exports, and all implementations atomically,
+- [x] Update the `SecretBackend` ABC, descriptor, root exports, and all implementations atomically,
       resetting the exact secret-backend contract sentinel from `2` to `1` while removing
       `interactive`, adding exact `supports_tty_interaction`, and removing `would_attempt`.
-- [ ] Remove backend-selected failure/remediation exceptions, return exact resolution blocks, and
+- [x] Remove backend-selected failure/remediation exceptions, return exact resolution blocks, and
       derive exception class and guidance directly from the final tag, reason, and backend identity
       in core. Preserve the 1Password pending-approval timeout hint without a backend hint channel.
-- [ ] Update registration and runtime conformance for method shapes, exact result maps, legal result
+- [x] Update registration and runtime conformance for method shapes, exact result maps, legal result
       variants and reasons, construction/entry intent, actual-resolution impact absence, and
       maximum-preview-impact no-indeterminate behavior. Reject TTY blocks from backends that declare
       no TTY support.
-- [ ] Update both backend-authoring READMEs with a complete rewritten example and conformance rules.
-- [ ] Make `cli/agentworks/capabilities/secret_backend/README.md` the self-contained permanent
+- [x] Update both backend-authoring READMEs with a complete rewritten example and conformance rules.
+- [x] Make `cli/agentworks/capabilities/secret_backend/README.md` the self-contained permanent
       contract authority for exact variants, reason ownership, core flow, preview impact, TTY broker
       capability and access rules, lifecycle constraints, the exact TTY-only meaning of
       `--non-interactive`, value containment, and conformance; it must not rely on this SDD.
-- [ ] Run a named manual README contract gate covering exact version-1 signatures, every variant and
+- [x] Run a named manual README contract gate covering exact version-1 signatures, every variant and
       legal reason owner, one normative core-flow section, impact/TTY matrix, broker-capability
       rules, lifecycle and exception boundaries, exact-map and maximum-impact constraints, value
       containment, and a complete conforming example. Prove it has no SDD links and behaviorally
       test the example shape without asserting authored prose.
-- [ ] Replace `_lookup_projection` and `would_attempt` use with structured static lookup
+- [x] Replace `_lookup_projection` and `would_attempt` use with structured static lookup
       descriptions.
-- [ ] Replace both legacy policy-free and operation-policy preview helpers with one impact-explicit,
+- [x] Replace both legacy policy-free and operation-policy preview helpers with one impact-explicit,
       TTY-access-explicit preview batch boundary; leave static inspection on `describe_lookup` only.
-- [ ] Implement operation-bounded batch preview over active sources with the existing source-turn
+- [x] Implement operation-bounded batch preview over active sources with the existing source-turn
       budget and cleanup discipline.
-- [ ] Implement current-impact preview aggregation with ordinary-missing and execution-block
+- [x] Implement current-impact preview aggregation with ordinary-missing and execution-block
       fallthrough, failed hard-stop, and ordered earlier-indeterminate evidence.
-- [ ] Implement actual resolution as one bounded source-first pass with one batch per ready source,
+- [x] Implement actual resolution as one bounded source-first pass with one batch per ready source,
       ordinary-missing and TTY-block fallthrough, failed hard-stop, and no preview reuse.
-- [ ] Add event-ledger tests for source-first batching, higher-source failure preventing lower
+- [x] Add event-ledger tests for source-first batching, higher-source failure preventing lower
       provider invocation, earlier-indeterminate/later-available or failed preview aggregation,
       adversarial maximum-impact indeterminate becoming failed/backend-protocol, and actual
       resolution never receiving impact policy.
-- [ ] Emit aggregate blocked/no-candidate with no runtime attempts when no candidate lookup ran;
+- [x] Emit aggregate blocked/no-candidate with no runtime attempts when no candidate lookup ran;
       never synthesize missing for that condition.
-- [ ] Make preflight preview impact fixed at `NONE`, accept available and indeterminate, reject
+- [x] Make preflight preview impact fixed at `NONE`, accept available and indeterminate, reject
       missing and blocked, and reject failed unless an earlier higher-precedence attempt is
       indeterminate.
-- [ ] Add a lazy command-scoped preflight memo keyed by secret name and prove repeated references
+- [x] Add a lazy command-scoped preflight memo keyed by secret name and prove repeated references
       cause one preview without changing first-failing node or reference order.
-- [ ] Add an eager-full-union mutation test proving a secret referenced only by an unreachable later
+- [x] Add an eager-full-union mutation test proving a secret referenced only by an unreachable later
       node causes zero preview calls, provider reads, and audit events.
-- [ ] Prove actual value-bearing resolution still completes before each command's first external
+- [x] Prove actual value-bearing resolution still completes before each command's first external
       mutation even when preflight returned indeterminate.
-- [ ] Update doctor to consume non-disruptive preview and represent uncertainty without treating it
+- [x] Update doctor to consume non-disruptive preview and represent uncertainty without treating it
       as backend readiness failure.
-- [ ] Pin doctor's exact aggregate mapping: available is `OK`; missing, indeterminate, and blocked
+- [x] Pin doctor's exact aggregate mapping: available is `OK`; missing, indeterminate, and blocked
       are `WARN`; failed is `FAIL`. Add optional closed `secret_preview` on secret JSON checks and
       cover all five statuses, counts, exit behavior, earlier-indeterminate/later-available, and
       earlier-indeterminate/later-failed.
@@ -244,22 +246,22 @@
 
 ## Phase 4: Policy propagation and operation boundaries
 
-- [ ] Rename broad `InteractionPolicy` to exact `TtyInteractionPolicy` across production and test
+- [x] Rename broad `InteractionPolicy` to exact `TtyInteractionPolicy` across production and test
       call sites, preserving early validation and explicit forwarding.
-- [ ] Keep the 100-plus-file policy rename in one mechanical commit so review can separate it from
+- [x] Keep the 100-plus-file policy rename in one mechanical commit so review can separate it from
       the behavioral contract changes.
-- [ ] Define global `--non-interactive` everywhere as "do not use the TTY for interactions, even if
+- [x] Define global `--non-interactive` everywhere as "do not use the TTY for interactions, even if
       one is present" and derive only `TtyInteractionPolicy.REFUSE` from it.
-- [ ] Add the flag/physical-TTY cross product at the CLI and service seams: the flag yields
+- [x] Add the flag/physical-TTY cross product at the CLI and service seams: the flag yields
       `DISABLED` regardless of attachment; otherwise usable input yields `AVAILABLE` and absent
       input yields `UNAVAILABLE`.
-- [ ] Remove every remaining static interactive-source skip and pass preview impact only for
+- [x] Remove every remaining static interactive-source skip and pass preview impact only for
       preview, tagged operation intent for every client, and exact TTY access from service roots.
-- [ ] Construct prompt brokers only when TTY access is available; leave out-of-band backends
+- [x] Construct prompt brokers only when TTY access is available; leave out-of-band backends
       independent of the broker and global flag through exact `supports_tty_interaction`.
-- [ ] Remove global-flag color and presentation gating. Preserve color decisions based on output
+- [x] Remove global-flag color and presentation gating. Preserve color decisions based on output
       stream capability and existing presentation controls, with parity tests on the same stream.
-- [ ] Sweep all resolving commands and service entry points for exact policy propagation and
+- [x] Sweep all resolving commands and service entry points for exact policy propagation and
       fail-before-mutation ordering.
 
 ### Phase 4 definition of done
@@ -274,31 +276,31 @@
 
 ## Phase 5: Operator surfaces and collateral
 
-- [ ] Add `secret describe --allow-interaction`, help, introspection, and completions; permit it
+- [x] Add `secret describe --allow-interaction`, help, introspection, and completions; permit it
       with global `--non-interactive` because preview impact and TTY use are orthogonal.
-- [ ] Render default describe tagged results and closed reasons; prove maximum-impact results
+- [x] Render default describe tagged results and closed reasons; prove maximum-impact results
       contain no indeterminate status.
-- [ ] Reimplement `secret verify` on backend preview, preserving refusal-by-default, name
+- [x] Reimplement `secret verify` on backend preview, preserving refusal-by-default, name
       deduplication, stable ordering, full-table rendering, and exit status.
-- [ ] Update `secret list` to use structured static mapping disposition without provider I/O.
-- [ ] Add the optional nested `secret describe` preview JSON projection while preserving every JSON
+- [x] Update `secret list` to use structured static mapping disposition without provider I/O.
+- [x] Add the optional nested `secret describe` preview JSON projection while preserving every JSON
       v1 field, type, enum meaning, and collection order; update `cli/command-reference.md`.
-- [ ] Preserve `secret list --output json`'s `secrets[].sources[].would_attempt` and describe's
+- [x] Preserve `secret list --output json`'s `secrets[].sources[].would_attempt` and describe's
       `source_mappings[].would_attempt` as structured-disposition compatibility projections.
-- [ ] Update CLI README, secrets README, both backend and general plugin-authoring READMEs,
+- [x] Update CLI README, secrets README, both backend and general plugin-authoring READMEs,
       resources guide, relevant guide topics, sample config, schema snapshots, and generated
       completions in lockstep.
-- [ ] Update `cli/agentworks/secrets/guide-content/secrets.md` so its consent paragraph covers both
+- [x] Update `cli/agentworks/secrets/guide-content/secrets.md` so its consent paragraph covers both
       impact-bearing describe and verify; update `docs/adrs/0013-cli-side-secret-injection.md` so
       its expected workflow uses the configured source instead of teaching `op run`/env-var
       hand-carrying.
-- [ ] Update the exact stale CLI README teaching around current non-TTY policy and retired
+- [x] Update the exact stale CLI README teaching around current non-TTY policy and retired
       `would attempt` vocabulary, plus secret describe's static fallthrough wording.
-- [ ] Remove stale claims that preview is pure, doctor never performs a provider read, or TTY grants
+- [x] Remove stale claims that preview is pure, doctor never performs a provider read, or TTY grants
       general interaction consent.
-- [ ] Update every global flag help/reference surface to state the exact TTY-only meaning and remove
+- [x] Update every global flag help/reference surface to state the exact TTY-only meaning and remove
       claims that the flag itself selects plain or colorless output.
-- [ ] Trim the secret-backend and secrets test estates to the simplification sweep standard as part
+- [x] Trim the secret-backend and secrets test estates to the simplification sweep standard as part
       of this rewrite, deleting worthless tests rather than assigning them to a later cleanup.
 
 ### Phase 5 definition of done
@@ -312,10 +314,15 @@
 
 ## Phase 6: Validation, review, and live testing
 
-- [ ] Run focused unit and integration tests after each vertical slice.
-- [ ] Run the repository's required Python lint, format, type, non-live test, SDD lock, docs,
-      schema, Rulesync, website, and deterministic-build gates.
-- [ ] Run manual em-dash, double-dash punctuation, value-leak, and stale-vocabulary scans.
+- [x] Run focused unit and integration tests after each vertical slice. (2026-08-21: final
+      adversarial correction gate passed 401 tests.)
+- [x] Run the repository's required Python lint, format, type, non-live test, SDD lock, docs,
+      schema, Rulesync, website, and deterministic-build gates. (2026-08-21: final implementation
+      head passed 7,209 non-live tests with one skip; Ruff, Mypy, file lint, lock, Rulesync,
+      generated-package, website, and both deterministic-build variants passed.)
+- [x] Run manual em-dash, double-dash punctuation, value-leak, and stale-vocabulary scans.
+      (2026-08-21: final implementation scans passed; the remaining string assertion covers a
+      provider-supplied containment sentinel rather than authored prose.)
 - [ ] Obtain a private `agentworks-reviewer` pass on the complete diff and resolve material
       findings.
 - [ ] Request fresh-eyes review after the last material implementation change.
@@ -357,14 +364,18 @@
 
 ## Phase 7: Closeout and ready-for-merge handoff
 
-- [ ] Reconcile every FRD acceptance criterion against code, tests, docs, and live evidence.
-- [ ] Update this plan truthfully without changing any completed checkbox that has merged to main.
-- [ ] Create `locked.md` with the final implementation summary, design deltas, validation evidence,
-      review disposition, and remaining known limitations.
 - [ ] Rebase or merge current `origin/main` as appropriate, rerun affected gates, and confirm the PR
       diff contains no unrelated user work.
-- [ ] Remove draft status only when the complete diff is intended to merge as-is and apply the
-      repository's ready-for-merge review signal.
+- [ ] Reconcile every FRD acceptance criterion against code, tests, docs, and the evidence available
+      before formal integration.
+- [ ] Update this plan truthfully without changing any completed checkbox that has merged to main.
+- [ ] Remove draft status when the complete, green, independently reviewed implementation is
+      intended to merge as-is; that transition requests the separately operated integration run.
+- [ ] After integration disposition, return the PR to draft before any closeout mutation, then
+      create `locked.md` with the final implementation summary, design deltas, validation evidence,
+      review disposition, and remaining known limitations.
+- [ ] Reapply the ready signal for the exact closeout head; the integration pipeline may cite the
+      preceding live run when the runtime diff is byte-identical.
 - [ ] Hand the ready PR to the operator with the atomic-rewrite ruling, review rounds, gate results,
       live-test evidence, and any residual risk. Do not merge it.
 
