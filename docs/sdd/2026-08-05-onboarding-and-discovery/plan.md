@@ -775,3 +775,22 @@ boundary had ceased to exist.
 
 Definition of done: FRD R6 and R7 and acceptance criteria 9 and 10 hold, the implementation is
 represented accurately in permanent artifacts, and the effort is ready to lock.
+
+The ready-PR integration review found two final closeout omissions and one adjacent maintained
+harness defect while confirming that the lock does not bind before merge. The operator authorized
+this bounded correction round on 2026-08-21.
+
+## Phase 5 correction: integration closeout findings
+
+- [x] Send a second one-file saga message carrying the Codex-on-TTY mode case and authenticated
+      provenance of the sparse-agent and release-topic rulings; align the child FRD, evidence, and
+      lock record without overwriting the original message.
+- [x] Restore concise 1Password source guidance directly in `concept-secrets`, record why the guide
+      and completion harness cases remain deleted, and repair the stale `extract_references` call in
+      the adjacent maintained recorder drive without adding prose assertions.
+- [ ] Run the affected real drives, focused/full/static gates, and independent project review, then
+      re-hand off the exact green head as ready for integration re-review.
+
+Definition of done: both follow-up gaps have durable homes, permanent secret guidance names the
+shipping optional backend, the maintained recorder drive runs cleanly, no prose-policing test
+returns, and PR #615 is ready on an exact green head.

@@ -22,13 +22,10 @@ See docs/testing/harnesses/README.md for the maintenance contract.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from pydantic import BaseModel
 
-from agentworks.schema import RefOwner, extract_references
-
-OWNER = RefOwner(kind="example", name="recorder-drive")
+from agentworks.schema import extract_references
 
 
 class _LeafModel(BaseModel):
@@ -71,7 +68,7 @@ def run(cases: list[Case]) -> int:
     violations = 0
     for case in cases:
         try:
-            refs = extract_references(case.model, case.blob, OWNER)
+            refs = extract_references(case.model, case.blob)
         except Exception as exc:  # noqa: BLE001 - recording, not handling
             violations += 1
             print(f"[VIOLATION] {case.label}: raised {type(exc).__name__}: {exc}")

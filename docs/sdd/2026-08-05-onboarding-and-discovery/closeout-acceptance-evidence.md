@@ -66,7 +66,7 @@ The pre-saga-review checkpoint passed:
 - mypy: 694 source files clean;
 - website: 155 Python tests and 103 Node tests, with byte-identical repeated builds at both site
   bases;
-- maintained Secret Sources real-entry drive: all 6 remaining cases, plus 5 harness tests;
+- maintained Secret Sources real-entry drive: all 6 retained behavior cases, plus 5 harness tests;
 - assistance package generation, Rulesync drift, SDD lock checks, file lint, Typer isolation, and
   diff checks; and
 - independent project review: clean after permanent-documentation corrections; independent
@@ -76,16 +76,28 @@ The final saga review and lock checkpoint remain separate plan steps.
 
 ## Final agent-mode and regression dispositions
 
-The operator's 2026-08-20 disposition accepts the current sparse agent-only model as the destination
-and supersedes the older expectation of roughly a dozen journey hints. General assistant posture
-stays in `concept-assistant-agent`; `_index.md` and `concept-onboarding` retain only the local
-context that currently earns a mode distinction. The closeout does not add speculative hints to
-satisfy a historical count.
+The operator's authenticated 2026-08-20 disposition accepts the current sparse agent-only model as
+the destination and explicitly supersedes the next-steps target state's older expectation of roughly
+a dozen journey hints. General assistant posture stays in `concept-assistant-agent`; `_index.md` and
+`concept-onboarding` retain only the local context that currently earns a mode distinction. The
+closeout does not add speculative hints to satisfy a historical count.
 
-The implicit non-TTY agent-mode fallback remains an explicit follow-up decision for the next-steps
-saga rather than an unexamined closeout default. The same bounded guide follow-up owns the requested
-rename of exact release evidence from the `concept-release-notes/...` namespace to a root
-`release-notes-...` topic. Neither follow-up changes the behavior accepted here.
+The combined implicit-mode boundary remains an explicit follow-up decision for the next-steps saga
+rather than an unexamined closeout default: non-TTY output currently selects agent mode, while Codex
+has no registered guide signature and therefore receives human mode on a TTY after bootstrap unless
+it passes `--agent` again. The operator separately requested the rename of exact release evidence
+from the `concept-release-notes/...` namespace to a root `release-notes-...` topic through the
+authenticated session. Neither follow-up changes the behavior accepted here. A second one-file
+message carries these clarifications without overwriting the original saga transport record.
+
+The Secret Sources drive intentionally dropped two obsolete cases. `_case_guide` asserted fragments
+of first-party prose and therefore conflicted with the repository's no-prose-policing rule; the
+missing concise 1Password source guidance is restored directly in `concept-secrets` without a phrase
+test. `_case_completions` pinned an obsolete generated-script shape; maintained structural and
+runtime backend coverage lives in `cli/tests/test_completions.py`. Integration validation also found
+that the adjacent maintained `recorder_drive.py` still passed the removed owner argument to
+`extract_references`; this closeout repairs that stale call and runs its six-case never-raises
+drive.
 
 The tire-kick regression charter has these durable owners:
 
@@ -102,11 +114,15 @@ The tire-kick regression charter has these durable owners:
   secret-preview and non-TTY resolution contract; its implementation must update permanent secret
   guidance with the behavior it ships.
 
-The final pre-lock round added the missing invalid-versus-unknown topic lookup assertion and passed:
+The final pre-lock rounds added the missing invalid-versus-unknown topic lookup assertion, disposed
+the ready-PR integration findings, and passed:
 
 - the focused guide service suite: 24 passed;
-- the full non-integration CLI suite: 7,287 passed and 2 environment-gated skips;
-- Ruff lint and format plus strict mypy across 694 source files;
+- the focused guide and Secret Sources harness suite: 143 passed;
+- the full non-integration CLI suite: 7,288 passed and 1 environment-gated skip;
+- the Secret Sources real-entry drive: 6 of 6 retained behavior cases, and the recorder real-code
+  drive: 6 of 6 never-raises cases;
+- Ruff lint and format plus strict mypy across 695 source files;
 - 155 Python and 103 Node website tests plus byte-identical repeated builds at both site bases;
 - Typer isolation, assistance package generation, Rulesync drift, SDD lock, file lint, and diff
   checks; and

@@ -1,6 +1,6 @@
 # Agentworks assistance and discovery: locked
 
-**Locked:** 2026-08-20
+**Locked:** 2026-08-21
 
 This effort is complete in PR #615. The lock takes effect when that PR lands on `main`; until then,
 this file records the final closeout state of the branch.
@@ -32,20 +32,21 @@ A separate isolated smoke installed the stable CLI with the canonical prompt com
 version 0.14.0, reached the agent-mode guide index, and removed its entire temporary root. Generated
 parity covers the repository README, website, Claude Code, and Codex projections.
 
-The final pre-lock tree passed 7,287 non-integration tests with 2 environment-gated skips; Ruff,
-formatting, and strict mypy across 694 source files; 155 Python and 103 Node website tests plus
-deterministic builds; Typer isolation; package generation; Rulesync drift; locked-SDD validation;
-file lint; and diff checks. Project review of the final disposition delta was clean. Earlier exact
-checkpoint project, integration, Muntz, saga, and CI reviews established the acceptance baseline;
-their two final routing findings are consumed in this lock round. The exact closeout head also
-received a clean Muntz lock verdict. Per the repository review sequence, this completed pre-ready
-record is handed off as ready so the integration tester can inspect the final PR.
+The final pre-lock tree passed 7,288 non-integration tests with 1 environment-gated skip; Ruff,
+formatting, and strict mypy across 695 source files; the six-case Secret Sources and recorder real
+drives; 155 Python and 103 Node website tests plus deterministic builds; Typer isolation; package
+generation; Rulesync drift; locked-SDD validation; file lint; and diff checks. Project review of the
+final disposition delta was clean. Earlier exact checkpoint project, integration, Muntz, saga, and
+CI reviews established the acceptance baseline; their final routing findings are consumed in this
+lock round. Per the repository review sequence, this completed pre-ready record is handed off as
+ready so the integration tester can inspect the final PR.
 
 ## Agent-mode and regression disposition
 
-The operator accepts the sparse agent-only model as the destination and supersedes the earlier
-expectation of roughly a dozen journey hints. General posture lives in `concept-assistant-agent`;
-other concepts add local agent-only context only when it earns its place.
+The operator's authenticated 2026-08-20 disposition accepts the sparse agent-only model as the
+destination and explicitly supersedes the next-steps target state's earlier expectation of roughly a
+dozen journey hints. General posture lives in `concept-assistant-agent`; other concepts add local
+agent-only context only when it earns its place.
 
 The durable regression owners are the live-CLI command validator in
 `cli/tests/guide/test_shell_commands.py`, the structural catalog and lookup coverage in
@@ -61,9 +62,10 @@ Current operator and assistant behavior lives in `packaging/agentworks/agent-onb
 own discovery, composition, rendering, and topic lookup. Nothing in this SDD directory is required
 to use or maintain the shipped feature.
 
-The next-steps saga received one closeout message that carries two bounded guide follow-ups: decide
-whether implicit non-TTY agent mode should remain, and move exact release evidence from the
-`concept-release-notes/...` namespace to root `release-notes-...` topics. The separate in-flight
+The next-steps saga received two one-file closeout messages carrying the bounded guide follow-ups.
+The mode decision includes both the implicit non-TTY agent fallback and the current Codex-on-TTY
+human fallback after bootstrap. The operator separately requested moving exact release evidence from
+the `concept-release-notes/...` namespace to root `release-notes-...` topics. The separate in-flight
 `2026-08-18-secret-preview-contract` SDD owns the successor value-free preview and non-TTY secret
 resolution contract. Those efforts update their permanent collateral with whatever behavior they
 ship; they do not keep this SDD open.
