@@ -1,6 +1,6 @@
 # Plan: Value-free secret resolution preview
 
-- Status: Implementation complete; formal integration validation pending
+- Status: Implementation reviewed and green; formal integration validation pending
 - Date: 2026-08-18
 - Amended: 2026-08-21
 - Requirements: [FRD](./frd.md)
@@ -326,9 +326,13 @@
 - [x] Run manual em-dash, double-dash punctuation, value-leak, and stale-vocabulary scans.
       (2026-08-21: final implementation scans passed; the remaining string assertion covers a
       provider-supplied containment sentinel rather than authored prose.)
-- [ ] Obtain a private `agentworks-reviewer` pass on the complete diff and resolve material
-      findings.
-- [ ] Request fresh-eyes review after the last material implementation change.
+- [x] Obtain a private `agentworks-reviewer` pass on the complete diff and resolve material
+      findings. (2026-08-21: three bounded correction rounds closed lifecycle, timeout, TTY-access,
+      exact-map, static-description, cleanup, documentation, and test-quality findings; final exact
+      head `1a97e58b` was clean.)
+- [x] Request fresh-eyes review after the last material implementation change. (2026-08-21: the
+      final pass independently reproduced protected-exit and cleanup precedence and reported exact
+      head `1a97e58b` clean.)
 - [ ] Request the separately operated `agentworks-tester` with the approved environment inventory,
       naming prefix, resource budget, and scoped charter; the effort lead does not duplicate its
       integration run.
@@ -370,8 +374,10 @@
 - [x] Rebase or merge current `origin/main` as appropriate, rerun affected gates, and confirm the PR
       diff contains no unrelated user work. (2026-08-21: rebased onto `d83bfa71`; file, SDD lock,
       Rulesync, and diff gates passed; the complete diff is scoped to this child effort.)
-- [ ] Reconcile every FRD acceptance criterion against code, tests, docs, and the evidence available
-      before formal integration.
+- [x] Reconcile every FRD acceptance criterion against code, tests, docs, and the evidence available
+      before formal integration. (2026-08-21: code and non-live evidence cover the closed contract,
+      source flow, TTY policy, provider classification, operator surfaces, and value containment;
+      AC1, AC3, and the live portion of AC10 remain assigned to formal integration.)
 - [ ] Update this plan truthfully without changing any completed checkbox that has merged to main.
 - [ ] Remove draft status when the complete, green, independently reviewed implementation is
       intended to merge as-is; that transition requests the separately operated integration run.
