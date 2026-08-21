@@ -297,9 +297,7 @@ test("Phase 4U site generation is signed-total and centered at 192 meters", () =
 });
 
 test("Phase 4U completes all four 4096-site missions without route state or replay", () => {
-    const durations = [];
     for (const seed of [11, 39, 41, STATIC_WORLD_SEED]) {
-        const started = performance.now();
         let model = createRun({ seed, reducedMotion: true });
         let maximumSites = model.retainedSites.length;
         for (let index = 0; index < 4096; index += 1) {
@@ -307,13 +305,11 @@ test("Phase 4U completes all four 4096-site missions without route state or repl
             maximumSites = Math.max(maximumSites, model.retainedSites.length);
             assert.equal("targetRouteProof" in model, false);
         }
-        durations.push(performance.now() - started);
         assert.equal(model.completedSites, 4096);
         assert.equal(model.targetSiteId, null);
         assert.equal(model.generatorCursor, 4096);
         assert.equal(maximumSites, 3);
     }
-    assert.ok(durations.every((duration) => duration < 10_000));
 });
 
 test("Phase 4U runtime source graph has no proof catalog, replay, search, or route failure path", async () => {

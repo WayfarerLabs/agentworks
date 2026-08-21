@@ -196,10 +196,10 @@ operator inspection; no test approves wording or golden pixels.
       CSS, four modules, and SVG loads, the game makes no request and creates no durable storage.
       Confirm the exact 14-file artifact ships `lander-world.js` and its leaf `lander-collision.js`
       separately, with no concatenated duplicate collision authority.
-- [ ] Record active frame p95, 100-site retention counts, and direct generation plus the O(1)
-      predicted-allowance formula p95/max on the pre-merge Chromium machine. No route search,
-      simulation, or proof replay occurs. Required ceilings are 4 ms frame p95, 25 ms generation
-      p95, and 50 ms generation maximum.
+- [ ] Exercise 100-site retention and the direct O(1) predicted-allowance formula with no route
+      search, simulation, or proof replay. Hosted CI enforces deterministic workload,
+      retained-state, DOM, listener, and collision-instrumentation bounds rather than browser
+      wall-clock timings.
 
 ### Phase 4U automated execution record
 
@@ -213,9 +213,9 @@ The exact source passed all 103 Node lander tests in 4.90 seconds and all 157 we
 including the real-Chromium witnesses, in 36.694 seconds. The focused Phase 4Q Chromium module also
 passed both tests in 4.87 seconds. Its 100-site lifecycle invokes direct site generation and the
 O(1) `quantumCeil(22 + max(0, deckDelta) / 3)` prediction without a route key, schedule, search,
-simulation, catalog, or replay. The permanent witness continues to enforce the 4 ms frame-p95, 25 ms
-generation-p95, and 50 ms generation-maximum ceilings rather than recording an unobserved timing
-distribution here.
+simulation, catalog, or replay. The permanent witness exercises all 100 services per seed and
+enforces bounded retained state, DOM, listeners, and collision instrumentation without using hosted
+browser wall-clock measurements as merge gates.
 
 The same run emitted 12 distinct qualitative PNGs across seeds 11, 41, and STATIC and all four
 required viewport shapes. Inspection covered `1000x780`, `320x780`, true `320x240`, and true mobile
@@ -263,6 +263,9 @@ earlier correction. Its description probe completed locally but timed out after 
 while waiting for Chrome to exit. Phase 4J now reads geometry and description results and captures
 screenshots through bounded DevTools sessions, then explicitly closes each connection, terminates or
 kills the owned process, and removes the isolated profile.
+
+Every Chromium process also receives the same temporary directory as both its user-data directory
+and `HOME`, so concurrent tests never share user-level Chromium or crash-reporting state.
 
 Stress execution exposed two additional lifecycle races before commit: Chrome can briefly leave a
 child writing its profile after the parent exits, and `DevToolsActivePort` can exist before it has

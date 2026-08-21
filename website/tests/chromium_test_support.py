@@ -231,6 +231,7 @@ def browser_json_probe(
             ),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            env={**os.environ, "HOME": profile.name},
         )
         connection = connection_factory(target_factory(Path(profile.name), process))
         for domain in ("Runtime", "Page"):

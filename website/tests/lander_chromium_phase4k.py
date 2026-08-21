@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -289,7 +290,8 @@ def browser_phase4k_contract(
             chromium, "--headless", "--disable-gpu", "--no-sandbox", "--no-first-run",
             "--no-default-browser-check", "--remote-allow-origins=*", "--remote-debugging-port=0",
             f"--user-data-dir={profile.name}", "about:blank",
-        ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            env={**os.environ, "HOME": profile.name})
         target = target_factory(Path(profile.name), process)
         connection = connection_factory(target)
         for domain in ("Runtime", "Page", "Accessibility"):

@@ -1,6 +1,7 @@
 # ruff: noqa: F405
 
 import json
+import os
 import sys
 import threading
 import time
@@ -260,6 +261,7 @@ document.querySelector("#result").textContent = JSON.stringify({
             ),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            env={**os.environ, "HOME": profile.name},
         )
         connection = connection_factory(target_factory(Path(profile.name), process))
         for domain in ("Runtime", "Page"):
@@ -701,6 +703,13 @@ class GeneratedDocumentTests(RepositoryFixture):
         command = spawn.call_args.args[0]
         self.assertIn("--remote-debugging-port=0", command)
         self.assertEqual(command[-1], "about:blank")
+        profile_argument = next(
+            argument for argument in command if argument.startswith("--user-data-dir=")
+        )
+        self.assertEqual(
+            spawn.call_args.kwargs["env"]["HOME"],
+            profile_argument.removeprefix("--user-data-dir="),
+        )
         self.assertEqual(result["display"], "block")
         self.assertTrue(connection.closed)
         self.assertTrue(process.terminated)

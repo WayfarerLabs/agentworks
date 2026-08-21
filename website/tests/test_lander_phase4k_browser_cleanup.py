@@ -244,13 +244,14 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
         process = _FakeProcess()
         connection = _ProbeConnection(ready=True)
         profile = _ProbeProfile(cleanup_failures=1)
+        spawn = mock.Mock(return_value=process)
         result = chromium_support.browser_json_probe(
             "chromium-test",
             "http://127.0.0.1:8000/lander/",
             960,
             "#result",
             connection_factory=lambda url: connection,
-            popen_factory=lambda *args, **kwargs: process,
+            popen_factory=spawn,
             target_factory=lambda path, owned: "ws://chromium.test",
             tempdir_factory=lambda: profile,
             sleep=lambda seconds: None,
@@ -263,6 +264,7 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
         self.assertEqual(process.waits, 1)
         self.assertTrue(profile.cleaned)
         self.assertEqual(profile.cleanup_calls, 2)
+        self.assertEqual(spawn.call_args.kwargs["env"]["HOME"], profile.name)
 
     def test_json_probe_bounds_readiness_and_kills_a_stuck_browser(self) -> None:
         process = _FakeProcess(stuck=True)
@@ -333,9 +335,11 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
 
     def test_acquisition_and_connection_failures_terminate_the_owned_browser(self) -> None:
         processes: list[_FakeProcess] = []
+        environments: list[dict[str, str]] = []
 
         def spawn(*args: object, **kwargs: object) -> _FakeProcess:
-            del args, kwargs
+            del args
+            environments.append(kwargs["env"])
             process = _FakeProcess()
             processes.append(process)
             return process
@@ -375,6 +379,10 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
             )
         self.assertIs(caught.exception, connection_sentinel)
         self.assertTrue(processes[-1].terminated)
+        self.assertEqual(
+            [Path(environment["HOME"]) for environment in environments],
+            self.profile_paths,
+        )
         self.assert_harness_clean()
 
     def test_null_root_navigation_race_times_out_without_evaluation_or_cleanup_failure(self) -> None:
