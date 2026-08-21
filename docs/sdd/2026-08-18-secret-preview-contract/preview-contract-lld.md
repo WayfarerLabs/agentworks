@@ -38,6 +38,7 @@ class BlockReason(StrEnum):
     BACKEND_PLUGIN_DISABLED = "backend-plugin-disabled"
     NO_ACTIVE_SOURCE = "no-active-source"
     NO_ATTEMPTABLE_SOURCE = "no-attemptable-source"
+    BATCH_DOOMED = "batch-doomed-before-interaction"
 
 
 class FailureReason(StrEnum):
@@ -60,10 +61,10 @@ string coercion.
 
 The reason enums are core-owned and closed. Backend code selects a permitted member but cannot
 extend the set. `source-not-ready`, `backend-plugin-disabled`, `no-active-source`,
-`no-attemptable-source`, `backend-protocol`, and `unexpected` are core-constructed only.
-No-candidate is a separate aggregate preview variant, not a block reason a backend or source attempt
-can construct. `operator-impact-limited` exists only as preview uncertainty; actual resolution has
-no operator-impact allowance or corresponding reason.
+`no-attemptable-source`, `batch-doomed-before-interaction`, `backend-protocol`, and `unexpected` are
+core-constructed only. No-candidate is a separate aggregate preview variant, not a block reason a
+backend or source attempt can construct. `operator-impact-limited` exists only as preview
+uncertainty; actual resolution has no operator-impact allowance or corresponding reason.
 
 Blocked-reason placement is exact:
 
@@ -75,8 +76,9 @@ Blocked-reason placement is exact:
 | core-owned final actual-resolution outcome         | any `BlockReason`, subject to the exhaustion rules below |
 | aggregate preview with no candidate lookup attempt | structural `AggregateNoCandidate`; never a `BlockReason` |
 
-`no-active-source` and `no-attemptable-source` are legal only on core-owned final actual-resolution
-outcomes. They are rejected in every backend map and every preview source attempt.
+`no-active-source`, `no-attemptable-source`, and `batch-doomed-before-interaction` are legal only on
+core-owned final actual-resolution outcomes. They are rejected in every backend map and every
+preview source attempt.
 
 There is no common catch-all detail enum. The tagged result determines which reason type, if any, is
 legal.
@@ -336,6 +338,7 @@ detail or remediation fields:
 | ------------------------------------------------------------------------------------------- | --------------------------------------------------- |
 | no active source exists                                                                     | `blocked/no-active-source`                          |
 | active sources exist but traversal retains no TTY, missing, not-ready, or disabled evidence | `blocked/no-attemptable-source`                     |
+| a complete batch cannot succeed, so another requested name is not attempted                 | `blocked/batch-doomed-before-interaction`           |
 | attempted chain exhausts with a TTY block                                                   | `blocked/<first retained TTY block>`                |
 | attempted chain has no TTY block and includes an ordinary miss                              | `missing`                                           |
 | attempted chain has no TTY block or ordinary miss but has a not-ready/disabled block        | `blocked/<first retained block reason by priority>` |
@@ -466,6 +469,7 @@ unexpected exceptions; a client constructs the remaining attempts.
 | backend plugin disabled               | core blocked attempt; continue                                       | core block; continue                                    |
 | no active source                      | aggregate blocked/no-candidate; no source attempt                    | blocked/no-active-source                                |
 | no attemptable source                 | aggregate blocked/no-candidate; no source attempt                    | blocked/no-attemptable-source                           |
+| complete batch already cannot succeed | not applicable                                                       | stop before another provider turn; core batch-doomed    |
 | missing                               | continue silently                                                    | continue silently                                       |
 | indeterminate                         | continue; retain precedence evidence                                 | impossible                                              |
 | blocked / TTY unavailable or disabled | continue; retain exhaustion evidence                                 | continue without broker or stdin access                 |
@@ -493,6 +497,16 @@ closes the source before continuing. It never performs a zero-impact resolution 
 preview result, retries at broader authority, or serializes provider work into one-request impact
 turns. TTY blocks fall through exactly like other execution blocks. Complete resolution still
 finishes before the consuming operation's first external mutation.
+
+Complete operation resolution also preserves the pre-existing fail-before-interaction invariant
+without recreating an operator-impact policy. Before each later provider source turn, core uses only
+static lookup description, folded readiness, disabled-plugin state, and exact TTY access to ask
+whether every still-unresolved requested name has a viable remaining candidate. A hard-failed name
+also makes the complete batch terminal. When the batch cannot succeed, core opens no later client,
+marks other unresolved names `blocked/batch-doomed-before-interaction`, and returns the complete
+value-free outcome set. The explicit partial-reveal path continues resolving independent names. This
+is a core completion-scope rule; no completion flag, impact classification, or doom prediction
+crosses the backend factory boundary.
 
 ## Aggregate attempt model
 
@@ -597,6 +611,8 @@ Contract registration and runtime tests cover:
 - ordinary missing fallthrough and failed hard-stop across source precedence;
 - mixed preview and actual-resolution exhaustion in which indeterminate is preview-only, TTY blocks
   outrank ordinary missing, and ordinary missing outranks not-ready and disabled-source blocks;
+- complete-batch doom after a hard failure or exhausted static viability, proving no later client,
+  provider, broker, or prompt call, plus partial reveal continuing independent resolution;
 - no-active-source and no-attemptable-source only as the final fallbacks after all retained
   per-source exhaustion evidence;
 - final blocked-reason projection through the existing exception hierarchy and frozen machine

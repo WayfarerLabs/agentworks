@@ -218,6 +218,9 @@ same implementation commit. No persisted state or database migration is required
   optional nested preview object containing tagged `status`, conditional `reason`, and ordered
   attempts. The command reference documents legacy compatibility and new null or absence rules
   before the PR is ready.
+- The frozen static `category` vocabulary retains `refused-interaction` for JSON v1 compatibility
+  even though the new TTY-only policy and provider-aware nested preview no longer select that legacy
+  projection in current command flow.
 - `secret list --output json` preserves its existing version-1 `secrets[].sources[].would_attempt`
   field, deriving it from structured lookup disposition.
 - Doctor preserves every existing JSON v1 check field and adds optional `secret_preview` only for

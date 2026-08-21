@@ -1,6 +1,6 @@
 # Plan: Value-free secret resolution preview
 
-- Status: Green and independently reviewed; publication pending
+- Status: Feedback/fix round 2 scoped from formal integration
 - Date: 2026-08-18
 - Amended: 2026-08-21
 - Requirements: [FRD](./frd.md)
@@ -229,6 +229,10 @@
       (Implemented in `e679ac38`.)
 - [x] Implement actual resolution as one bounded source-first pass with one batch per ready source,
       ordinary-missing and TTY-block fallthrough, failed hard-stop, and no preview reuse.
+- [ ] Restore complete-batch fail-before-interaction without restoring actual-resolution impact:
+      recheck static remaining viability before later provider turns, stop after any hard terminal
+      result, emit the core-only `batch-doomed-before-interaction` block for skipped unresolved
+      names, and keep explicit partial reveal independent.
 - [x] Add event-ledger tests for source-first batching, higher-source failure preventing lower
       provider invocation, earlier-indeterminate/later-available or failed preview aggregation,
       adversarial maximum-impact indeterminate becoming failed/backend-protocol, and actual
@@ -324,6 +328,10 @@
       authentication alternatives. (Implemented in `e679ac38`.)
 - [x] Trim the secret-backend and secrets test estates to the simplification sweep standard as part
       of this rewrite, deleting worthless tests rather than assigning them to a later cleanup.
+- [ ] Close the formal integration collateral and coverage findings: stabilize doctor checks by
+      structured secret identity, document doctor `secret_preview`, correct orchestration's stale
+      pure-preview claim, retain the frozen JSON v1 `refused-interaction` vocabulary, and add
+      compact renderer, verify exit-status, and real CLI prompt-broker coverage.
 
 ### Phase 5 definition of done
 
@@ -356,6 +364,8 @@
 - [x] Correct the round-1 exact-head documentation findings: keep the new exhaustion precedence in
       the effort-owned design rather than the accepted FRD, reconcile the numbered LLD algorithm,
       and preserve the earlier completed plan checkbox verbatim.
+- [ ] Run the complete implementation and repository gates after formal-integration feedback/fix
+      round 2, then obtain clean reviewer-of-record and fresh-eyes dispositions on the exact head.
 - [x] Obtain a private `agentworks-reviewer` pass on the complete diff and resolve material
       findings. (2026-08-21: three bounded correction rounds closed lifecycle, timeout, TTY-access,
       exact-map, static-description, cleanup, documentation, and test-quality findings; final exact

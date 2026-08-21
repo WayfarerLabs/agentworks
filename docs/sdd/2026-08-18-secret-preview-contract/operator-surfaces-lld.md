@@ -86,6 +86,9 @@ because of a static backend `interactive` flag.
 - `BackendFailed` hard-stops the current secret's source chain; core does not warn and continue.
 - Static non-candidates, source readiness, and disabled plugins retain their core-owned fallback
   behavior.
+- A complete batch that is already terminal stops before another provider turn and gives every
+  skipped unresolved name the core-only `blocked/batch-doomed-before-interaction` result. The
+  explicit partial-reveal path continues resolving independent names.
 
 This contract does not add a generic outage-fallback mode. If one is later justified, it must be an
 explicit core/source policy with separately reviewed precedence and warning semantics. A backend
@@ -94,6 +97,10 @@ does not decide whether its own failure may be ignored.
 Complete resolution remains fail-before-mutation and becomes one source-first pass. Each ready
 source receives its unresolved candidate batch once. There is no zero-impact resolution phase,
 authority frontier, one-request interaction staging, or preview reuse.
+
+Batch doom is a completion invariant, not an operator-impact gate: core derives it from hard results
+and static remaining viability, never asks a backend whether an action might affect the operator,
+and does not pass completion policy into a backend client.
 
 ## `agw secret describe`
 
