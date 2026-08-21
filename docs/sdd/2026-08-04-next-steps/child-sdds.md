@@ -444,10 +444,11 @@ tracked by the open boxes below until each has a delivered recipient-side artifa
       onboarding lead, PR #614. With that, the intake's only outstanding fix-class item is non-TTY
       secret resolution; the routing boxes below stay open until each has a delivered recipient-side
       artifact
-- [ ] Routed to the wave-2 discovery surfaces: an agent cannot state a mutation's infrastructure
-      effect before making it (effective spec after `inherits` composition and platform defaults
-      appears in no CLI surface; first revealed by provisioning). Pairs with schema emission;
-      `vm create --dry-run` is the alternative shape
+- [ ] Routed to the wave-2 discovery surfaces, and now owned by the `2026-08-19-instance-model`
+      child as its R5: an agent cannot state a mutation's infrastructure effect before making it
+      (effective spec after `inherits` composition and platform defaults appears in no CLI surface;
+      first revealed by provisioning). Pairs with schema emission; `vm create --dry-run` is the
+      alternative shape
 - [ ] Routed to the onboarding child as one decision item: agent mode is nearly a no-op outside the
       index (one topic differs; either more agent-only context is worth writing or the per-topic
       capability is speculative), the non-TTY mode heuristic hands agent content to redirecting
@@ -465,14 +466,29 @@ tracked by the open boxes below until each has a delivered recipient-side artifa
       same overrun class #607 fixed for `agent list`; transport decode replaces truly malformed
       remote bytes before the session-log boundary (pre-existing, narrower than the fidelity fix)
 
+### Child SDD (enabling wave 4): 2026-08-19-instance-model
+
+- [x] Seeded (FRD, PR #621, 2026-08-19; operator direction 2026-08-19 combining the database
+      evaluation with a light repository layer, instance applied-state, CLI instance-spec overlays,
+      and resolved-spec surfaces into one phased push). The store contract is the wave-4
+      applied-state dependency; the resolved-spec surfaces discharge the routed effective-spec field
+      finding, and applied state makes the operator's key-change hazard (2026-08-18) a detectable
+      fact
+- [ ] Picked up by an effort lead (assessment phase first, per the FRD's rulings)
+- [ ] Store contract reviewed by the saga lead (gates wave 4's applied-state slice)
+- [ ] Implementation phases per the effort's plan
+- [ ] Locked
+
 ### Not yet spawned
 
 Planned children, seeded when their prerequisites land (see `phasing.md`):
 
-- Wave 4: harness scope framework. Seed material on record: the capability config shape note
-  (`message-2026-08-16-capability-config-shape.md`, merged PR #562 with the integration tester's
-  factual corrections incorporated as a recipient's note per operator direction), carrying the
-  `config_at(level)` shape sketch, the three preserved `base.py` constraints, the
+- Wave 4: harness scope framework. Its applied-state slice waits on the 2026-08-19-instance-model
+  child's store contract (see that child's section); the pipeline, per-scope init methods, and
+  vertical-integration work have no such dependency. Seed material on record: the capability config
+  shape note (`message-2026-08-16-capability-config-shape.md`, merged PR #562 with the integration
+  tester's factual corrections incorporated as a recipient's note per operator direction), carrying
+  the `config_at(level)` shape sketch, the three preserved `base.py` constraints, the
   who-constructs-versus-who-calls-in caution, and the pre-design call-site discovery walk. The
   capability-API reevaluation is chartered into this wave's seed, not scheduled sooner
 - Wave 5: session observability phase 1

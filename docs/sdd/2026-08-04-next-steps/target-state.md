@@ -316,6 +316,15 @@ one `load_config` parameter says whether it is fatal (default) or warn-only, and
 diagnostic commands pass warn-only. No severity taxonomy is built until a second class member
 exists. Shipped as PR #604; the use-time refactor that retires the parameter is issue #603.
 
+**Instance model and its storage (operator rulings, 2026-08-08 and 2026-08-19):** the database
+evaluation, a light repository layer, instance applied-state, CLI instance-spec overlays, and
+resolved-spec surfaces are one push rather than four, since they are one data-model arc from
+declared spec through overlay and resolution to what was actually applied. The storage work is
+assessment-first, and the repository layer is "something in that direction, not full ORM": its shape
+is judged by the queries its consumers actually make, never by generality. Seeded as the
+`2026-08-19-instance-model` child, which walks through the four open doors above rather than
+reopening them; its store contract is what wave 4's applied-state slice depends on.
+
 ### Harness scopes (destination 4)
 
 One registered integration identity with per-scope participation (operator simplification,
