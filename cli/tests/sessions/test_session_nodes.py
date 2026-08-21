@@ -12,7 +12,7 @@ import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.capabilities.harness_integration import HarnessIntegration
-from agentworks.errors import StateError
+from agentworks.errors import ConfigError, StateError
 from agentworks.schema import AgwModel, NonEmptyStr, SecretRef
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.nodes import pending_session_node
@@ -454,12 +454,15 @@ def test_sweep_predicts_a_harness_integration_config_secret_with_owner_usage_fra
     session = _scanner_session(db, monkeypatch)
     scope = OperationScope(level=ScopeLevel.SESSION, vm="box", workspace="ws1", session="s1", admin=True)
 
-    preflight_all(
-        [session],
-        RunContext(config=config, operation_scope=scope),
-        registry=registry,
-        interaction=TtyInteractionPolicy.REFUSE,
-    )
+    with pytest.raises(ConfigError) as caught:
+        preflight_all(
+            [session],
+            RunContext(config=config, operation_scope=scope),
+            registry=registry,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+    assert "session/s1" in str(caught.value)
+    assert "scanner API key" in str(caught.value)
 
 
 def test_sweep_passes_a_resolvable_harness_integration_config_secret(

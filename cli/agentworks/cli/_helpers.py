@@ -24,10 +24,10 @@ if TYPE_CHECKING:
 
 
 def ordinary_interaction_policy() -> TtyInteractionPolicy:
-    """Derive ordinary-operation interaction authority at a CLI root."""
+    """Derive ordinary-operation TTY authority at a CLI root."""
     from agentworks import output
 
-    return TtyInteractionPolicy.ALLOW if output.is_interactive() else TtyInteractionPolicy.REFUSE
+    return TtyInteractionPolicy.REFUSE if output.non_interactive() else TtyInteractionPolicy.ALLOW
 
 
 def get_db() -> Database:

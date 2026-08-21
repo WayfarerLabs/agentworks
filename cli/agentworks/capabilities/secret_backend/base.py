@@ -14,8 +14,11 @@ if TYPE_CHECKING:
 
     from agentworks.capabilities.secret_backend.client import (
         InteractionBroker,
+        LookupDescription,
         RemainingTime,
+        SecretClientIntent,
         SecretSourceClient,
+        TtyInteractionAccess,
     )
     from agentworks.resources.graph import Readiness
     from agentworks.schema import AgwModel, AgwRootModel
@@ -32,9 +35,10 @@ class SecretBackend(Capability):
     """
 
     owner_kind: ClassVar[str] = "secret-source"
+    contract_version: ClassVar[int] = 1
     config_model: ClassVar[type[AgwModel]]
     mapping_model: ClassVar[type[AgwRootModel[Any]]]
-    interactive: ClassVar[bool]
+    supports_tty_interaction: ClassVar[bool]
 
     @classmethod
     @abstractmethod
@@ -43,18 +47,8 @@ class SecretBackend(Capability):
 
     @classmethod
     @abstractmethod
-    def would_attempt(cls, secret_name: str, *, mapping_present: bool) -> bool:
-        """Whether this backend could attempt one lookup, without I/O."""
-
-    @classmethod
-    @abstractmethod
-    def describe_lookup(cls, secret_name: str, mapping: BaseModel | None) -> str | None:
-        """Return a safe, value-free identifier for one validated lookup."""
-
-    @classmethod
-    def external_operation_timeout(cls, config: AgwModel) -> float | None:
-        """The source-turn timeout for non-human blocking work, if any."""
-        return None
+    def describe_lookup(cls, secret_name: str, mapping: BaseModel | None) -> LookupDescription:
+        """Return the structured, no-I/O projection for one lookup."""
 
     @classmethod
     @abstractmethod
@@ -63,6 +57,8 @@ class SecretBackend(Capability):
         *,
         source_name: str,
         config: AgwModel,
+        intent: SecretClientIntent,
+        tty_access: TtyInteractionAccess,
         interaction_broker: InteractionBroker | None,
         remaining_time: RemainingTime,
     ) -> AbstractContextManager[SecretSourceClient]:

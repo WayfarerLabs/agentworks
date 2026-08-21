@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.config import load_config
+from agentworks.errors import ConfigError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from tests.conftest import ManifestDoc, write_cfg
 
@@ -110,11 +111,11 @@ def test_boundary_uses_custom_tailscale_secret_name(
     assert _resolve_tailscale_key(config, registry, vm_tmpl) == "tskey-custom"
 
 
-def test_template_preflight_predicts_env_source_without_probing_key(
+def test_template_preflight_detects_an_ordinary_env_miss(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An env source is attemptable without reading its current value."""
+    """Zero-impact preview reads and discards the value, so absence is definitive."""
     cfg = _write_cfg(
         tmp_path,
         settings="""
@@ -133,12 +134,13 @@ def test_template_preflight_predicts_env_source_without_probing_key(
 
     registry = build_registry(config)
     vm_tmpl = resolve_template(registry, "default")
-    preflight_all(
-        [vm_template_node(vm_tmpl)],
-        RunContext(config=config),
-        registry=registry,
-        interaction=TtyInteractionPolicy.REFUSE,
-    )
+    with pytest.raises(ConfigError, match="cannot pass preflight"):
+        preflight_all(
+            [vm_template_node(vm_tmpl)],
+            RunContext(config=config),
+            registry=registry,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
 
 
 def test_join_tailscale_signature_requires_auth_key_kwarg() -> None:

@@ -8,10 +8,12 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.bootstrap import build_registry
+from agentworks.capabilities.secret_backend import BlockReason
 from agentworks.config import load_config
 from agentworks.doctor import Status, _check_config, _check_secrets, checks_for_resource
 from agentworks.errors import ConfigError
 from agentworks.resources.access import ResourceIdentity
+from agentworks.secrets.preview import PreviewStatus
 from tests.conftest import ManifestDoc, write_manifests
 
 if TYPE_CHECKING:
@@ -134,8 +136,12 @@ def test_auto_declared_secrets_are_reported(tmp_path: Path, monkeypatch: pytest.
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config, build_registry(config))
     assert g.name == "Secrets"
-    statuses = [(c.name, c.status, c.message) for c in g.checks]
-    assert statuses == [("Secret 'tailscale-auth-key' (auto)", Status.OK, "would attempt via env-var")], statuses
+    (check,) = g.checks
+    assert check.name == "Secret 'tailscale-auth-key' (auto)"
+    assert check.status is Status.WARN
+    assert check.secret_preview is not None
+    assert check.secret_preview.status is PreviewStatus.BLOCKED
+    assert check.secret_preview.reason == BlockReason.TTY_UNAVAILABLE.value
 
 
 def test_secret_resolves_via_env_var_when_set(
@@ -156,11 +162,11 @@ def test_secret_resolves_via_env_var_when_set(
     )
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config, build_registry(config))
-    msgs = [(c.status, c.name, c.message) for c in g.checks]
-    assert any(
-        status == Status.OK and "shared" in name and "would attempt via env-var" in (msg or "")
-        for status, name, msg in msgs
-    ), msgs
+    shared = next(check for check in g.checks if check.name == "Secret 'shared'")
+    assert shared.status is Status.OK
+    assert shared.secret_preview is not None
+    assert shared.secret_preview.status is PreviewStatus.AVAILABLE
+    assert shared.secret_preview.source == "env-var"
 
 
 def test_doctor_accepts_mapping_keyed_by_differently_named_declared_source(
@@ -189,7 +195,9 @@ def test_doctor_accepts_mapping_keyed_by_differently_named_declared_source(
 
     shared = next(check for check in group.checks if check.name == "Secret 'shared'")
     assert shared.status is Status.OK
-    assert shared.message == "would attempt via work-env"
+    assert shared.secret_preview is not None
+    assert shared.secret_preview.status is PreviewStatus.AVAILABLE
+    assert shared.secret_preview.source == "work-env"
 
 
 def test_secret_resolves_via_prompt_when_env_var_unset(
@@ -210,10 +218,11 @@ def test_secret_resolves_via_prompt_when_env_var_unset(
     )
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config, build_registry(config))
-    oks = [c for c in g.checks if c.status == Status.OK]
-    assert any("shared" in c.name and "would attempt via env-var" in (c.message or "") for c in oks), [
-        (c.name, c.message) for c in oks
-    ]
+    shared = next(check for check in g.checks if check.name == "Secret 'shared'")
+    assert shared.status is Status.WARN
+    assert shared.secret_preview is not None
+    assert shared.secret_preview.status is PreviewStatus.BLOCKED
+    assert shared.secret_preview.reason == BlockReason.TTY_UNAVAILABLE.value
 
 
 def test_secret_not_available_when_env_var_unset_and_prompt_opted_out(
@@ -243,8 +252,9 @@ def test_secret_not_available_when_env_var_unset_and_prompt_opted_out(
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config, build_registry(config))
     row = next(c for c in g.checks if "opted-out" in c.name)
-    assert row.status is Status.OK
-    assert row.message == "would attempt via env-var"
+    assert row.status is Status.WARN
+    assert row.secret_preview is not None
+    assert row.secret_preview.status is PreviewStatus.MISSING
 
 
 # ---------------------------------------------------------------------------
@@ -335,11 +345,11 @@ def test_check_secrets_flags_a_not_ready_only_source(tmp_path: Path, monkeypatch
     )
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config, build_registry(config))
-    warns = [c for c in g.checks if c.status == Status.WARN]
-    assert any(
-        "op-only" in c.name and "not ready" in (c.message or "") and "op CLI not installed" in (c.message or "")
-        for c in warns
-    ), [(c.name, c.message) for c in warns]
+    op_only = next(check for check in g.checks if check.name == "Secret 'op-only'")
+    assert op_only.status is Status.WARN
+    assert op_only.secret_preview is not None
+    assert op_only.secret_preview.status is PreviewStatus.BLOCKED
+    assert op_only.secret_preview.reason == BlockReason.SOURCE_NOT_READY.value
 
 
 def test_r9_3_manifest_malformed_block_surfaces_under_resource_registry(
@@ -632,8 +642,10 @@ def test_prompt_only_site_secret_still_renders_on_its_own_secret_row(
 
     g = _check_secrets(config, registry)
     row = next(c for c in g.checks if "az-sp" in c.name)
-    assert row.status is Status.OK
-    assert "would attempt via env-var" in (row.message or "")
+    assert row.status is Status.WARN
+    assert row.secret_preview is not None
+    assert row.secret_preview.status is PreviewStatus.BLOCKED
+    assert row.secret_preview.reason == BlockReason.TTY_UNAVAILABLE.value
 
 
 # The #310 regression pair (``test_config_load_validation_error_yields_fail_row_not_abort``

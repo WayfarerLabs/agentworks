@@ -1,21 +1,15 @@
-"""The orchestrator's secret path: union, central prediction, scoped
-delivery.
+"""The orchestrator's secret path: union, central preview, scoped delivery.
 
 Replaces the per-instance bound resolver's orchestration-shaped jobs:
 the union of a command's secrets comes from the plan's
 declared ``secret_refs`` (not construct-time registration), and
-resolvability prediction is computed centrally over declarations (not
+resolution preview is computed centrally over declarations (not
 by each instance, and not by the nodes that declare them either).
-Prediction is :func:`~agentworks.secrets.resolve.preview_resolution`
-applied per declaration (a prompt backend is reported without probing;
-probing would BE the prompt), with the caller gating the interactive
-answer on ``output.is_interactive()`` so a prompt-only secret fails
-fast under ``--non-interactive`` rather than at resolve end (issue
-#202). Doctor's all-resources sweep and a command's preflight sweep are
-two callers of the same computation, which is why the prediction helper
-takes declarations, not a walk.
+Preflight uses provider-aware preview at zero operator impact. A backend
+therefore goes as far as it can without operator action and can return an
+indeterminate result when that limit prevents a definitive answer.
 
-WHO predicts is load-bearing, not incidental. Resolvability is a
+WHO previews is load-bearing, not incidental. Resolvability is a
 property of the operation's runtime world, so the OPERATION asks: the
 preflight sweep (:func:`~agentworks.orchestration.readiness
 .preflight_all`) runs :func:`require_predicted_refs` per node. A node
@@ -42,11 +36,11 @@ from agentworks.errors import StateError
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
+    from agentworks.capabilities.secret_backend import TtyInteractionAccess
     from agentworks.config import Config
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
     from agentworks.secrets.base import SecretDecl
-    from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.secrets.preview import ResolutionPreview
     from agentworks.secrets.resolve import ActiveSource
 
@@ -96,27 +90,22 @@ def predict_resolution(
     decls: Iterable[SecretDecl],
     sources: Sequence[ActiveSource],
     *,
-    interaction: TtyInteractionPolicy,
+    tty_access: TtyInteractionAccess,
 ) -> dict[str, ResolutionPreview]:
-    """Pure applicability prediction over declared references.
+    """Preview declared references once at the fixed preflight impact."""
+    from agentworks.capabilities.secret_backend import OperatorImpact, TtyInteractionAccess
+    from agentworks.secrets.preview import preview_batch
 
-    Each value-free result names the first ready source that would attempt
-    the declaration under this operation's exact interaction policy. It
-    never reads a value or opens a source client; the resolution boundary
-    remains authoritative for presence and provider failures. Doctor uses
-    the inspection variant, which reports interactive applicability without
-    an operation policy.
-
-    Checks its own ``interaction`` rather than relying on the per-declaration
-    call below to do it: with no declarations, that call never happens and
-    this returns successfully having checked nothing. That is the same reach
-    the entry-point rule beside ``require_exact_tty_interaction_policy`` names.
-    """
-    from agentworks.secrets.policy import require_exact_tty_interaction_policy
-    from agentworks.secrets.preview import preview_operation_resolution
-
-    require_exact_tty_interaction_policy(interaction)
-    return {decl.name: preview_operation_resolution(decl, sources, interaction=interaction) for decl in decls}
+    if type(tty_access) is not TtyInteractionAccess:
+        raise StateError("tty_access must be an exact TtyInteractionAccess")
+    declarations = tuple(decls)
+    return preview_batch(
+        declarations,
+        sources,
+        impact=OperatorImpact.NONE,
+        tty_access=tty_access,
+        interaction_broker=None,
+    )
 
 
 def require_declared_refs(owner: str, refs: Iterable[ResourceReference], registry: Registry) -> None:
@@ -169,9 +158,11 @@ def require_predicted_refs(
     config: Config | None,
     registry: Registry,
     *,
-    interaction: TtyInteractionPolicy,
+    tty_access: TtyInteractionAccess,
+    preview_memo: dict[str, ResolutionPreview] | None = None,
+    sources: Sequence[ActiveSource] | None = None,
 ) -> None:
-    """Pure impossibility screen over one node's declared config secrets.
+    """Value-free, no-impact screen over one node's declared config secrets.
 
     Invoked by the preflight sweep
     (:func:`~agentworks.orchestration.readiness.preflight_all`), once
@@ -188,8 +179,9 @@ def require_predicted_refs(
     display of the instance whose config named the secret, so the error
     keeps the owner/usage framing the per-instance prediction produced.
     """
+    from agentworks.capabilities.secret_backend import PreviewIndeterminate
     from agentworks.errors import ConfigError
-    from agentworks.secrets.preview import PreviewCategory
+    from agentworks.secrets.preview import PreviewStatus
     from agentworks.secrets.resolve import active_sources
 
     refs = tuple(refs)
@@ -200,18 +192,27 @@ def require_predicted_refs(
             f"{owner}: cannot predict declared secret resolvability "
             f"without config on the context (assembled for inspection?)"
         )
-    predictions = predict_resolution(
-        secret_declarations((ref.name for ref in refs), registry),
-        active_sources(config, registry),
-        interaction=interaction,
-    )
+    memo = {} if preview_memo is None else preview_memo
+    missing_names = tuple(dict.fromkeys(ref.name for ref in refs if ref.name not in memo))
+    if missing_names:
+        predictions = predict_resolution(
+            secret_declarations(missing_names, registry),
+            active_sources(config, registry) if sources is None else sources,
+            tty_access=tty_access,
+        )
+        memo.update(predictions)
     for ref in refs:
-        prediction = predictions[ref.name]
-        if prediction.category is not PreviewCategory.ATTEMPTABLE:
+        prediction = memo[ref.name]
+        acceptable_failure = prediction.status is PreviewStatus.FAILED and any(
+            isinstance(attempt.result, PreviewIndeterminate) for attempt in prediction.attempts[:-1]
+        )
+        if prediction.status not in {PreviewStatus.AVAILABLE, PreviewStatus.INDETERMINATE} and not acceptable_failure:
             raise ConfigError(
-                f"{owner}: secret '{ref.name}' ({ref.usage}) is not attemptable by any active source",
+                f"{owner}: secret '{ref.name}' ({ref.usage}) cannot pass preflight",
                 hint=(
-                    f"preview category: {prediction.category.value}. Run `agw secret describe {ref.name}` for details."
+                    f"preview status: {prediction.status.value}"
+                    f"{f'/{prediction.reason}' if prediction.reason is not None else ''}. "
+                    f"Run `agw secret describe {ref.name}` for details."
                 ),
             )
 

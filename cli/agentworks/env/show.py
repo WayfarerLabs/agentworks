@@ -404,7 +404,7 @@ def _reveal_values(
         return {}, {}
     from agentworks.resources.access import secret_decls
     from agentworks.secrets import SecretDecl
-    from agentworks.secrets.outcomes import ResolutionCategory
+    from agentworks.secrets.outcomes import ResolutionStatus
     from agentworks.secrets.resolve import active_sources, resolve_partial_for_reveal
 
     decls = secret_decls(registry)
@@ -424,7 +424,7 @@ def _reveal_values(
     errors = {
         outcome.name: format_outcome(outcome)
         for outcome in result.outcomes
-        if outcome.category is not ResolutionCategory.RESOLVED
+        if outcome.status is not ResolutionStatus.RESOLVED
     }
     from agentworks.secrets.line_safety import (
         LineOrientedSecretUse,

@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.secrets.preview import ResolutionPreview
 
     from .node import Node, Readiness
 
@@ -69,15 +70,28 @@ def preflight_all(
     ``registry`` is what prediction reads declarations from; every
     caller builds its nodes from one already.
     """
+    import sys
+
     from agentworks.orchestration.secrets import require_predicted_refs
+    from agentworks.secrets.policy import tty_interaction_access
+    from agentworks.secrets.resolve import active_sources
+
+    tty_access = tty_interaction_access(interaction, terminal_input_usable=sys.stdin.isatty())
+    sources = None
+    preview_memo: dict[str, ResolutionPreview] = {}
 
     for node in nodes:
+        refs = tuple(node.config_secret_refs())
+        if refs and ctx.config is not None and sources is None:
+            sources = active_sources(ctx.config, registry)
         require_predicted_refs(
             node.key,
-            node.config_secret_refs(),
+            refs,
             ctx.config,
             registry,
-            interaction=interaction,
+            tty_access=tty_access,
+            preview_memo=preview_memo,
+            sources=sources,
         )
         node.preflight(ctx)
 

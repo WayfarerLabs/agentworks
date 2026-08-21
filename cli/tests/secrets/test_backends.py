@@ -79,12 +79,15 @@ def test_direct_backend_name_in_chain_gets_source_rewrite(tmp_path: Path) -> Non
     assert "kind: secret-source" in (caught.value.hint or "")
 
 
-def test_would_attempt_is_pure_class_policy() -> None:
+def test_describe_lookup_is_structured_static_policy() -> None:
+    from agentworks.capabilities.secret_backend import LookupDisposition
     from agentworks.capabilities.secret_backend.env_var import EnvVarBackend
     from agentworks.capabilities.secret_backend.prompt import PromptBackend
-    from agentworks.plugins.onepassword.backend import OnePasswordBackend
+    from agentworks.plugins.onepassword.backend import OnePasswordBackend, OnePasswordMapping
 
-    assert EnvVarBackend.would_attempt("s1", mapping_present=False) is True
-    assert PromptBackend.would_attempt("s1", mapping_present=False) is True
-    assert OnePasswordBackend.would_attempt("s1", mapping_present=False) is False
-    assert OnePasswordBackend.would_attempt("s1", mapping_present=True) is True
+    assert EnvVarBackend.describe_lookup("s1", None).disposition is LookupDisposition.CANDIDATE
+    assert PromptBackend.describe_lookup("s1", None).disposition is LookupDisposition.CANDIDATE
+    assert OnePasswordBackend.describe_lookup("s1", None).disposition is LookupDisposition.NOT_APPLICABLE
+    described = OnePasswordBackend.describe_lookup("s1", OnePasswordMapping("op://Work/item/field"))
+    assert described.disposition is LookupDisposition.CANDIDATE
+    assert described.identifier == "op://Work/item/field"

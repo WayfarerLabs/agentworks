@@ -1,13 +1,13 @@
-"""Value-free secret resolution outcomes and operation error projection."""
+"""Value-free actual-resolution outcomes and operation error projection."""
 
 from __future__ import annotations
 
-import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from agentworks.capabilities.secret_backend.client import TimeoutGuidance
+from agentworks.capabilities.secret_backend import BlockReason, FailureReason
+from agentworks.capabilities.secret_backend.client import safe_identity
 from agentworks.errors import (
     AgentworksError,
     ConnectivityError,
@@ -21,292 +21,168 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 
-class ResolutionCategory(StrEnum):
+class ResolutionStatus(StrEnum):
+    """Wire-safe final actual-resolution statuses."""
+
     RESOLVED = "resolved"
-    UNAVAILABLE = "unavailable"
-    REFUSED_INTERACTION = "refused-interaction"
-    TIMEOUT = "timeout"
-    RESOLUTION_FAILURE = "resolution-failure"
-
-
-class ResolutionDetail(StrEnum):
-    RESOLVED = "resolved"
-    NO_ACTIVE_SOURCE = "no-active-source"
-    NO_ATTEMPTABLE_SOURCE = "no-attemptable-source"
-    SOURCE_NOT_READY = "source-not-ready"
-    SOURCE_BACKEND_PLUGIN_DISABLED = "source-backend-plugin-disabled"
-    SOFT_MISS = "soft-miss"
-    INTERACTION_REFUSED = "interaction-refused"
-    BATCH_DOOMED = "batch-doomed-before-interaction"
-    DEADLINE_EXCEEDED = "deadline-exceeded"
-    HARD_MAPPING = "hard-mapping"
-    AUTHENTICATION = "authentication"
-    CONNECTIVITY = "connectivity"
-    EXTERNAL = "external"
-    MALFORMED_VALUE = "malformed-value"
-    BACKEND_PROTOCOL = "backend-protocol"
-    UNEXPECTED = "unexpected"
-
-
-class ResolutionRemediation(StrEnum):
-    NONE = "none"
-    CONFIGURE_SOURCE = "configure-source"
-    ENABLE_SOURCE = "enable-source"
-    ENABLE_PLUGIN = "enable-plugin"
-    ALLOW_INTERACTION = "allow-interaction"
-    RESOLVE_BLOCKING_SECRETS = "resolve-blocking-secrets"
-    CHECK_MAPPING = "check-mapping"
-    SIGN_IN = "sign-in"
-    CHECK_CONNECTIVITY = "check-connectivity"
-    INCREASE_TIMEOUT = "increase-timeout"
-    REMOVE_CONTROL_CHARACTERS = "remove-control-characters"
-    RETRY = "retry"
-    REPORT_BACKEND = "report-backend"
+    MISSING = "missing"
+    BLOCKED = "blocked"
+    FAILED = "failed"
 
 
 @dataclass(frozen=True, slots=True)
-class OutcomeRule:
-    category: ResolutionCategory
-    remediation: ResolutionRemediation
-    source_required: bool
-    identifier_allowed: bool
-    remediation_target_required: bool = False
-    guidance_allowed: bool = False
-    """Whether this detail may carry a ``guidance`` identifier, a backend's
-    selection from a closed, core-owned set (see
-    :attr:`ResolutionOutcome.guidance`). Allowed, never required: most
-    backends have nothing more specific to select than the detail itself."""
+class ResolutionResolved:
+    """The private batch holds the corresponding value."""
 
 
-OUTCOME_RULES: dict[ResolutionDetail, OutcomeRule] = {
-    ResolutionDetail.RESOLVED: OutcomeRule(ResolutionCategory.RESOLVED, ResolutionRemediation.NONE, True, True),
-    ResolutionDetail.NO_ACTIVE_SOURCE: (
-        OutcomeRule(ResolutionCategory.UNAVAILABLE, ResolutionRemediation.CONFIGURE_SOURCE, False, False)
-    ),
-    ResolutionDetail.NO_ATTEMPTABLE_SOURCE: (
-        OutcomeRule(ResolutionCategory.UNAVAILABLE, ResolutionRemediation.CONFIGURE_SOURCE, False, False)
-    ),
-    ResolutionDetail.SOURCE_NOT_READY: (
-        OutcomeRule(ResolutionCategory.UNAVAILABLE, ResolutionRemediation.ENABLE_SOURCE, True, True)
-    ),
-    ResolutionDetail.SOURCE_BACKEND_PLUGIN_DISABLED: (
-        OutcomeRule(
-            ResolutionCategory.UNAVAILABLE,
-            ResolutionRemediation.ENABLE_PLUGIN,
-            True,
-            True,
-            remediation_target_required=True,
-        )
-    ),
-    ResolutionDetail.SOFT_MISS: (
-        OutcomeRule(ResolutionCategory.UNAVAILABLE, ResolutionRemediation.CONFIGURE_SOURCE, True, True)
-    ),
-    ResolutionDetail.INTERACTION_REFUSED: (
-        OutcomeRule(ResolutionCategory.REFUSED_INTERACTION, ResolutionRemediation.ALLOW_INTERACTION, True, True)
-    ),
-    ResolutionDetail.BATCH_DOOMED: (
-        OutcomeRule(ResolutionCategory.UNAVAILABLE, ResolutionRemediation.RESOLVE_BLOCKING_SECRETS, False, False)
-    ),
-    ResolutionDetail.DEADLINE_EXCEEDED: (
-        OutcomeRule(
-            ResolutionCategory.TIMEOUT,
-            ResolutionRemediation.INCREASE_TIMEOUT,
-            True,
-            True,
-            guidance_allowed=True,
-        )
-    ),
-    ResolutionDetail.HARD_MAPPING: (
-        OutcomeRule(ResolutionCategory.RESOLUTION_FAILURE, ResolutionRemediation.CHECK_MAPPING, True, True)
-    ),
-    ResolutionDetail.AUTHENTICATION: (
-        OutcomeRule(ResolutionCategory.RESOLUTION_FAILURE, ResolutionRemediation.SIGN_IN, True, True)
-    ),
-    ResolutionDetail.CONNECTIVITY: (
-        OutcomeRule(ResolutionCategory.RESOLUTION_FAILURE, ResolutionRemediation.CHECK_CONNECTIVITY, True, True)
-    ),
-    ResolutionDetail.EXTERNAL: (
-        OutcomeRule(ResolutionCategory.RESOLUTION_FAILURE, ResolutionRemediation.RETRY, True, True)
-    ),
-    ResolutionDetail.MALFORMED_VALUE: (
-        OutcomeRule(
-            ResolutionCategory.RESOLUTION_FAILURE,
-            ResolutionRemediation.REMOVE_CONTROL_CHARACTERS,
-            True,
-            True,
-        )
-    ),
-    ResolutionDetail.BACKEND_PROTOCOL: (
-        OutcomeRule(ResolutionCategory.RESOLUTION_FAILURE, ResolutionRemediation.REPORT_BACKEND, True, False)
-    ),
-    ResolutionDetail.UNEXPECTED: (
-        OutcomeRule(ResolutionCategory.RESOLUTION_FAILURE, ResolutionRemediation.REPORT_BACKEND, True, True)
-    ),
-}
+@dataclass(frozen=True, slots=True)
+class ResolutionMissing:
+    """Every reachable candidate ordinarily missed."""
 
 
-_UNSAFE_DIAGNOSTIC_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
+@dataclass(frozen=True, slots=True)
+class ResolutionBlocked:
+    """The source chain exhausted under an execution limitation."""
+
+    reason: BlockReason
+
+    def __post_init__(self) -> None:
+        if type(self.reason) is not BlockReason:
+            raise ValueError("invalid resolution block reason")
 
 
-def _safe_diagnostic_text(value: str) -> bool:
-    """Reject text that can alter or forge a rendered diagnostic line.
+@dataclass(frozen=True, slots=True)
+class ResolutionFailed:
+    """A configured lookup or provider operation hard-failed."""
 
-    Boundary: operator-authored input rendered as text. This screens three
-    fields, and each is operator-written and reaches no validator that
-    guarantees it newline-free. (It is not the row's whole threat model:
-    ``remediation_target`` is PLUGIN-written and is handled by escaping at
-    the render sink instead, below.)
+    reason: FailureReason
 
-    - a secret NAME reaches no naming validator at all, because ``secret``
-      auto-declares any name a config reference uses (``secrets.kinds``);
-    - a lookup IDENTIFIER is the operator's own mapping value verbatim;
-    - a SOURCE name does pass ``validate_name`` at manifest decode, and that
-      is not sufficient: ``NAME_RE`` anchors with ``$`` and is applied with
-      ``re.match``, and ``$`` matches before a trailing newline, so
-      ``"envvar\\n"`` validates cleanly. Rendering that source splits one
-      row into two and the remainder becomes a forged line. Issue #542
-      tracks the root cause; fixing it there tightens validation for every
-      resource kind, so it is not a change this guard waits on.
+    def __post_init__(self) -> None:
+        if type(self.reason) is not FailureReason:
+            raise ValueError("invalid resolution failure reason")
 
-    A validator upstream is a reason to check less carefully here only when
-    it actually rejects what this rejects.
-    """
-    return all(unicodedata.category(char) not in _UNSAFE_DIAGNOSTIC_CATEGORIES for char in value)
+
+type ResolutionResult = ResolutionResolved | ResolutionMissing | ResolutionBlocked | ResolutionFailed
 
 
 @dataclass(frozen=True, slots=True)
 class ResolutionOutcome:
-    """One stable diagnostic row that never carries a resolved value."""
+    """One stable, value-free final result with core-owned identity."""
 
     name: str
-    category: ResolutionCategory
-    detail: ResolutionDetail
-    remediation: ResolutionRemediation
+    result: ResolutionResult
     source: str | None = None
     identifier: str | None = None
-    remediation_target: str | None = None
-    guidance: TimeoutGuidance | None = None
-    """Optional identifier a backend selected from the closed
-    :class:`~agentworks.capabilities.secret_backend.client.TimeoutGuidance`
-    set (e.g. a onepassword timeout naming the desktop-app approval
-    prompt). Never free text: :func:`format_remediation` is what maps the
-    identifier to core-owned prose, so a backend can never put its own
-    words on screen."""
+    backend: str | None = None
 
     def __post_init__(self) -> None:
-        rule = OUTCOME_RULES[self.detail]
-        if self.category is not rule.category or self.remediation is not rule.remediation:
-            raise ValueError("invalid resolution outcome category or remediation")
-        if (self.source is not None) is not rule.source_required:
-            raise ValueError("this resolution outcome detail disagrees about carrying a source")
-        if not rule.identifier_allowed and self.identifier is not None:
-            raise ValueError("this resolution outcome detail forbids an identifier")
-        if (self.remediation_target is not None) is not rule.remediation_target_required:
-            raise ValueError("invalid resolution outcome remediation target presence")
-        if not rule.guidance_allowed and self.guidance is not None:
-            raise ValueError("this resolution outcome detail forbids guidance")
-        if self.guidance is not None and not isinstance(self.guidance, TimeoutGuidance):
-            raise ValueError("invalid resolution outcome guidance")
-        if not _safe_diagnostic_text(self.name):
-            raise ValueError("invalid resolution outcome name")
-        if self.source is not None and not _safe_diagnostic_text(self.source):
-            raise ValueError("invalid resolution outcome source")
-        if self.identifier is not None and not _safe_diagnostic_text(self.identifier):
-            raise ValueError("invalid resolution outcome identifier")
+        safe_identity(self.name)
+        if type(self.result) not in {
+            ResolutionResolved,
+            ResolutionMissing,
+            ResolutionBlocked,
+            ResolutionFailed,
+        }:
+            raise ValueError("invalid resolution result")
+        if self.source is not None:
+            safe_identity(self.source)
+        if self.identifier is not None:
+            safe_identity(self.identifier)
+        if self.backend is not None:
+            safe_identity(self.backend)
+        if isinstance(self.result, (ResolutionResolved, ResolutionMissing, ResolutionFailed)) and self.source is None:
+            raise ValueError("this resolution result requires a source")
+        if isinstance(self.result, ResolutionBlocked):
+            structural = self.result.reason in {BlockReason.NO_ACTIVE_SOURCE, BlockReason.NO_ATTEMPTABLE_SOURCE}
+            if structural is (self.source is not None):
+                raise ValueError("resolution block reason disagrees with source identity")
+
+    @property
+    def status(self) -> ResolutionStatus:
+        return {
+            ResolutionResolved: ResolutionStatus.RESOLVED,
+            ResolutionMissing: ResolutionStatus.MISSING,
+            ResolutionBlocked: ResolutionStatus.BLOCKED,
+            ResolutionFailed: ResolutionStatus.FAILED,
+        }[type(self.result)]
+
+    @property
+    def reason(self) -> BlockReason | FailureReason | None:
+        if isinstance(self.result, (ResolutionBlocked, ResolutionFailed)):
+            return self.result.reason
+        return None
 
 
-def _escape_plugin_target(target: str) -> str:
-    """Render a plugin name as ASCII, escaping everything else.
-
-    Boundary: a capability class registered from outside our type checking.
-    A plugin names itself, and ``register_plugin`` only requires that name
-    to be non-empty and '/'-free, so the remediation line escapes rather
-    than trusts it.
-
-    Escaping works here because the name arrives as its own field, so this
-    escapes exactly it. That is not the only route a plugin name takes to a
-    rendered line: ``plugins/enablement.py`` builds one into a
-    ``DisabledMark.reason``, which ``secrets/sources.py`` concatenates into a
-    source's ``Readiness.reason``, which reaches an operator at
-    ``secrets/inspect.py:541`` and ``doctor.py:772`` and as a JSON field at
-    ``secrets/inspect.py:370`` (safe there, since the encoder escapes). By
-    then the name is inside our own prose and no sink can escape it alone, so
-    ``SkippedSource`` screens that text instead. Issue #545 tracks escaping it
-    upstream, where it is still a separate token.
-    """
-    escaped: list[str] = []
-    for char in target:
-        codepoint = ord(char)
-        if char.isascii() and (char.isalnum() or char in "._-"):
-            escaped.append(char)
-        elif codepoint <= 0xFF:
-            escaped.append(f"\\x{codepoint:02x}")
-        elif codepoint <= 0xFFFF:
-            escaped.append(f"\\u{codepoint:04x}")
-        else:
-            escaped.append(f"\\U{codepoint:08x}")
-    return "".join(escaped)
+def _safe_diagnostic_text(value: str) -> bool:
+    """Return whether text is safe as a retained diagnostic identity."""
+    try:
+        safe_identity(value)
+    except ValueError:
+        return False
+    return True
 
 
-_TIMEOUT_GUIDANCE_TEXT: dict[TimeoutGuidance, str] = {
-    TimeoutGuidance.ONEPASSWORD_PENDING_APPROVAL: (
-        "a pending approval prompt in the 1Password desktop app is a common "
-        "cause; approve or dismiss it and retry. `op whoami` can report signed "
-        "out even when desktop-app integration still works, so it is not a "
-        "reliable way to rule this out"
-    ),
+_FAILURE_HINTS: dict[FailureReason, str] = {
+    FailureReason.INVALID_MAPPING: "check the configured secret mapping",
+    FailureReason.LOOKUP_REJECTED: "check that the provider reference identifies a valid target",
+    FailureReason.AUTHENTICATION: "authenticate the configured secret provider and retry",
+    FailureReason.CONNECTIVITY: "check connectivity to the configured secret provider",
+    FailureReason.DEADLINE_EXCEEDED: "increase the source timeout or complete pending provider approval",
+    FailureReason.EXTERNAL: "retry after checking the configured secret provider",
+    FailureReason.MALFORMED_VALUE: "remove NUL characters from the provider value",
+    FailureReason.BACKEND_PROTOCOL: "report the secret backend protocol violation",
+    FailureReason.UNEXPECTED: "report the unexpected secret backend failure",
 }
-"""The only place ``TimeoutGuidance`` maps to rendered prose. Core owns both
-the identifier set and this text; a backend selects a member and never
-supplies wording of its own, so nothing a plugin controls reaches this
-dict's values."""
 
 
-def format_remediation(outcome: ResolutionOutcome) -> str:
-    """Render one bounded remediation without provider-supplied text.
-
-    ``guidance``, where present, is a closed-set identifier: it is looked
-    up in ``_TIMEOUT_GUIDANCE_TEXT`` and the resulting fixed, core-owned
-    text is appended in parentheses. A backend never contributes its own
-    wording here.
-    """
-    if outcome.remediation is ResolutionRemediation.ENABLE_PLUGIN:
-        assert outcome.remediation_target is not None
-        return f"enable plugin `{_escape_plugin_target(outcome.remediation_target)}`"
-    base = outcome.remediation.value
-    if outcome.guidance is not None:
-        return f"{base} ({_TIMEOUT_GUIDANCE_TEXT[outcome.guidance]})"
-    return base
+def format_hint(outcome: ResolutionOutcome) -> str:
+    """Render core-owned guidance from a closed final result."""
+    result = outcome.result
+    if isinstance(result, ResolutionFailed):
+        hint = _FAILURE_HINTS[result.reason]
+        if result.reason is FailureReason.DEADLINE_EXCEEDED and outcome.backend == "onepassword":
+            return (
+                f"{hint}; a pending approval in the 1Password desktop app is a common cause. "
+                "`op whoami` is not a reliable exclusion test for app integration"
+            )
+        return hint
+    if isinstance(result, ResolutionMissing):
+        return "configure the secret in this source or a later source"
+    assert isinstance(result, ResolutionBlocked)
+    return {
+        BlockReason.TTY_UNAVAILABLE: "run with usable terminal input or configure a non-TTY source",
+        BlockReason.TTY_INTERACTION_DISABLED: (
+            "global `--non-interactive` disabled terminal input; remove it or configure a non-TTY source"
+        ),
+        BlockReason.SOURCE_NOT_READY: "make the configured source ready and retry",
+        BlockReason.BACKEND_PLUGIN_DISABLED: "enable the configured secret-backend plugin",
+        BlockReason.NO_ACTIVE_SOURCE: "configure an active secret source",
+        BlockReason.NO_ATTEMPTABLE_SOURCE: "configure an applicable secret mapping or source",
+    }[result.reason]
 
 
 def format_outcome(outcome: ResolutionOutcome) -> str:
-    """Render the stable value-free diagnostic fields for one outcome."""
+    """Render stable value-free fields for one final outcome."""
+    reason = outcome.reason.value if outcome.reason is not None else "none"
     return (
-        f"{outcome.category.value}/{outcome.detail.value}; "
-        f"source={outcome.source or 'none'}; identifier={outcome.identifier or 'none'}; "
-        f"remediation={format_remediation(outcome)}"
+        f"{outcome.status.value}/{reason}; source={outcome.source or 'none'}; "
+        f"identifier={outcome.identifier or 'none'}; hint={format_hint(outcome)}"
     )
 
 
 def complete_resolution_error(outcomes: Sequence[ResolutionOutcome]) -> AgentworksError:
     """Map an incomplete value-free batch to the operation error taxonomy."""
-    failed = tuple(outcome for outcome in outcomes if outcome.category is not ResolutionCategory.RESOLVED)
+    failed = tuple(outcome for outcome in outcomes if outcome.status is not ResolutionStatus.RESOLVED)
     if not failed:
-        raise StateError("complete_resolution_error requires at least one non-resolved outcome") from None
+        raise StateError("complete_resolution_error requires an incomplete batch") from None
     first = failed[0]
-    if first.detail is ResolutionDetail.HARD_MAPPING:
-        error_type: type[AgentworksError] = SecretMappingError
-    elif first.detail is ResolutionDetail.CONNECTIVITY:
-        error_type = ConnectivityError
-    elif first.detail in {
-        ResolutionDetail.AUTHENTICATION,
-        ResolutionDetail.DEADLINE_EXCEEDED,
-        ResolutionDetail.EXTERNAL,
-        ResolutionDetail.MALFORMED_VALUE,
-        ResolutionDetail.BACKEND_PROTOCOL,
-        ResolutionDetail.UNEXPECTED,
-    }:
-        error_type = ExternalError
+    if isinstance(first.result, ResolutionFailed):
+        if first.result.reason in {FailureReason.INVALID_MAPPING, FailureReason.LOOKUP_REJECTED}:
+            error_type: type[AgentworksError] = SecretMappingError
+        elif first.result.reason is FailureReason.CONNECTIVITY:
+            error_type = ConnectivityError
+        else:
+            error_type = ExternalError
     else:
         error_type = SecretUnavailableError
     names = ", ".join(outcome.name for outcome in failed)

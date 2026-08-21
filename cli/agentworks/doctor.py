@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from agentworks.machine_output import JsonObject
     from agentworks.resources.registry import Registry
     from agentworks.secrets.base import SecretDecl
+    from agentworks.secrets.preview import ResolutionPreview
     from agentworks.secrets.resolve import ActiveSource
     from agentworks.secrets.sources import SecretSourceDecl, SourceProvenance
     from agentworks.vms.admin import AdminConfig
@@ -44,6 +45,7 @@ class HealthCheck:
     """Optional remediation text. Rendered on a separate line by the
     CLI surface so the operator sees actionable next steps without
     cramming everything into one parenthetical."""
+    secret_preview: ResolutionPreview | None = None
 
 
 @dataclass
@@ -171,12 +173,17 @@ def health_report_data(report: HealthReport) -> JsonObject:
 
 def health_check_data(check: HealthCheck) -> JsonObject:
     """Serialize the same check facts rendered to humans."""
-    return {
+    data: JsonObject = {
         "name": check.name,
         "status": check.status.value,
         "message": check.message,
         "hint": check.hint,
     }
+    if check.secret_preview is not None:
+        from agentworks.secrets.preview import preview_data
+
+        data["secret_preview"] = preview_data(check.secret_preview)
+    return data
 
 
 def _stored_readiness_check(
@@ -244,21 +251,38 @@ def _secret_check(
     sources: tuple[ActiveSource, ...],
 ) -> HealthCheck:
     """Build one value-free secret resolution preview row."""
-    from agentworks.secrets.preview import PreviewCategory, preview_resolution
+    import sys
+
+    from agentworks.capabilities.secret_backend import OperatorImpact
+    from agentworks.secrets.policy import TtyInteractionPolicy, tty_interaction_access
+    from agentworks.secrets.preview import PreviewStatus, preview_batch, preview_hint
 
     auto = getattr(decl.origin, "variant", None) == "auto-declared"
     label = f"Secret {name!r} (auto)" if auto else f"Secret {name!r}"
-    preview = preview_resolution(decl, sources)
-    if preview.category is PreviewCategory.ATTEMPTABLE:
-        return HealthCheck(label, Status.OK, f"would attempt via {preview.source}")
-    if preview.skipped_not_ready:
-        skipped = "; ".join(f"{source.source} ({source.reason})" for source in preview.skipped_not_ready)
-        return HealthCheck(
-            label,
-            Status.WARN,
-            f"not attemptable through any active source; not ready: {skipped}",
-        )
-    return HealthCheck(label, Status.WARN, "not attemptable through any active source")
+    from agentworks import output
+
+    tty_policy = TtyInteractionPolicy.REFUSE if output.non_interactive() else TtyInteractionPolicy.ALLOW
+    tty_access = tty_interaction_access(tty_policy, terminal_input_usable=sys.stdin.isatty())
+    preview = preview_batch(
+        [decl],
+        sources,
+        impact=OperatorImpact.NONE,
+        tty_access=tty_access,
+        interaction_broker=None,
+    )[decl.name]
+    status = (
+        Status.OK
+        if preview.status is PreviewStatus.AVAILABLE
+        else (Status.FAIL if preview.status is PreviewStatus.FAILED else Status.WARN)
+    )
+    reason = f"/{preview.reason}" if preview.reason is not None else ""
+    return HealthCheck(
+        label,
+        status,
+        f"{preview.status.value}{reason}; source={preview.source or 'none'}",
+        hint=preview_hint(preview, interaction_opt_in=False),
+        secret_preview=preview,
+    )
 
 
 def _admin_dotfiles_check(admin: AdminConfig) -> HealthCheck | None:

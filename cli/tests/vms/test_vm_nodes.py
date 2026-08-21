@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from agentworks.db import VMStatus
-from agentworks.errors import StateError, ValidationError
+from agentworks.errors import ConfigError, StateError, ValidationError
 from agentworks.orchestration.activation import activation_gate, ensure_active
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
@@ -610,10 +610,11 @@ def test_template_node_declares_the_key_and_the_sweep_predicts_it(
     preflight_all([node], ctx, registry=registry, interaction=TtyInteractionPolicy.REFUSE)  # resolvable: no error
 
     monkeypatch.delenv("AW_SECRET_TAILSCALE_AUTH_KEY")
-    # Prediction reports source attemptability, not a quiet lookup of the
-    # current value, so the env-var source remains usable without probing it.
+    # Provider-aware preview checks the environment without returning its
+    # value, so an ordinary miss fails preflight before mutation.
     node.preflight(ctx)
-    preflight_all([node], ctx, registry=registry, interaction=TtyInteractionPolicy.REFUSE)
+    with pytest.raises(ConfigError, match="cannot pass preflight"):
+        preflight_all([node], ctx, registry=registry, interaction=TtyInteractionPolicy.REFUSE)
 
 
 # -- the vm-site node's own preflight ----------------------------------------

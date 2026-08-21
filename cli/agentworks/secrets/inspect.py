@@ -5,16 +5,18 @@
 ``agw secret describe <name>``. Both follow the same "build structured
 view, render via ``agentworks.output``" pattern.
 
-Neither command prompts the operator nor resolves a secret value for
-display; both consume the pure active-source projection.
+List consumes only the static active-source projection. Describe also runs a
+value-free preview under the caller's explicit operator-impact allowance.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.capabilities.secret_backend import OperatorImpact, TtyInteractionAccess
 from agentworks.errors import StateError
 from agentworks.machine_output import (
     JsonObject,
@@ -26,7 +28,7 @@ from agentworks.machine_output import (
 from agentworks.resources.inspect import used_by_for
 from agentworks.resources.render import format_origin_line, format_reference_entry
 from agentworks.secrets.kinds import SECRET_KIND_NAME
-from agentworks.secrets.preview import PreviewCategory, ResolutionPreview, preview_resolution
+from agentworks.secrets.preview import ResolutionPreview, preview_batch, preview_data, preview_hint
 from agentworks.secrets.sources import SourceProvenance, source_provenance
 
 if TYPE_CHECKING:
@@ -43,7 +45,7 @@ class SecretSourceCell:
     """One (secret, source) cell in the list table."""
 
     source: str
-    would_attempt: bool
+    candidate: bool
     """False = this source's backend won't attempt this secret (mapping=false
     or no default convention and no explicit mapping). True = it will try."""
     identifier: str | None
@@ -52,9 +54,9 @@ class SecretSourceCell:
     prompt always attempts but doesn't know what to look up until run time."""
     not_ready_reason: str | None
     """The source node's stored readiness reason (off the graph), or None when
-    the source is ready. Orthogonal to ``would_attempt`` (readiness is host
-    usability; would-attempt is a pure (secret, mapping) function): a source
-    whose backend would attempt can still be not-ready, so the grid shows
+    the source is ready. Orthogonal to ``candidate`` (readiness is host
+    usability; applicability comes from the structured lookup description): a source
+    whose backend has a candidate lookup can still be not-ready, so the grid shows
     ``not ready: <reason>`` and it wins over the identifier (R9.7)."""
 
 
@@ -101,7 +103,7 @@ def secret_table_data(table: SecretTable) -> JsonObject:
                 "sources": [
                     {
                         "source": cell.source,
-                        "would_attempt": cell.would_attempt,
+                        "would_attempt": cell.candidate,
                         "identifier": cell.identifier,
                         "not_ready_reason": cell.not_ready_reason,
                     }
@@ -151,15 +153,15 @@ def build_secret_table(config: Config, registry: Registry) -> SecretTable:
         cells: list[SecretSourceCell] = []
         for source in sources:
             try:
-                request, identifier = _lookup_projection(decl, source)
+                request, description = _lookup_projection(decl, source)
             except _BackendProtocolError:
                 raise StateError(f"secret source {source.name!r} violated the preview contract") from None
-            would_attempt = request is not None
+            candidate = request is not None
             cells.append(
                 SecretSourceCell(
                     source=source.name,
-                    would_attempt=would_attempt,
-                    identifier=identifier,
+                    candidate=candidate,
+                    identifier=description.identifier,
                     not_ready_reason=source.readiness.reason,
                 )
             )
@@ -203,13 +205,13 @@ def render_secret_table(table: SecretTable) -> None:
     in chain order. Cell semantics, per R9.7 (never the overloaded
     ``enabled`` / ``disabled`` literals):
 
-    - ``won't attempt`` when ``would_attempt`` is False (a ``false`` opt-out,
+    - ``won't attempt`` when ``candidate`` is False (a ``false`` opt-out,
       or a mapping-required backend with no mapping);
     - ``not ready: <reason>`` when the source is not-ready on this host (wins
       over the identifier: it cannot run here, R9.7);
     - the explicit identifier (``AW_SECRET_X``, ``op://...``) when the source's
-      backend would attempt, the source is ready, and it has a static lookup key;
-    - ``would attempt`` when it would attempt and is ready but has no static
+      backend has a candidate lookup, the source is ready, and it has a static lookup key;
+    - ``candidate`` when it has a candidate lookup and is ready but has no static
       key (e.g. ``prompt``).
     """
     if not table.rows:
@@ -242,7 +244,7 @@ def render_secret_table(table: SecretTable) -> None:
         # DETAIL view (secret describe) keeps the full name.
         cells: list[str] = [output.truncate(row.name, _NAME_CELL_WIDTH), row.description]
         for cell in row.cells:
-            if not cell.would_attempt:
+            if not cell.candidate:
                 # Opted out for THIS secret (readiness is moot: it would not
                 # attempt regardless of whether the host tool is present).
                 cells.append("won't attempt")
@@ -256,7 +258,7 @@ def render_secret_table(table: SecretTable) -> None:
                 # DETAIL view keeps the full identifier.
                 cells.append(output.truncate(cell.identifier, _SOURCE_CELL_WIDTH))
             else:
-                cells.append("would attempt")
+                cells.append("candidate")
         rendered.append(tuple(cells))
 
     headers = ("NAME", "DESCRIPTION", *table.sources)
@@ -283,7 +285,7 @@ class SourceMapping:
 
     - ``source``: the configured source name.
     - ``backend``: the backend name (``"env-var"``, ``"prompt"``, ...).
-    - ``would_attempt``: True if the backend would try this secret at
+    - ``candidate``: True if the backend has an applicable lookup for this secret at
       resolution time. False = explicit opt-out via
       ``backend_mappings.<source> = false``, or the selected backend has no
       default convention for this secret and no operator override.
@@ -296,12 +298,35 @@ class SourceMapping:
     source: str
     backend: str
     provenance: SourceProvenance
-    would_attempt: bool
+    candidate: bool
     identifier: str | None
     not_ready_reason: str | None
     """The source node's stored readiness reason, or None when ready. The
     mapping is still shown when not-ready (the config is real; it just cannot
     run here now), annotated ``(not ready: <reason>)`` (R9.1)."""
+
+
+class StaticResolutionCategory(StrEnum):
+    """Frozen JSON v1 applicability projection."""
+
+    ATTEMPTABLE = "attemptable"
+    UNAVAILABLE = "unavailable"
+
+
+@dataclass(frozen=True, slots=True)
+class SkippedSource:
+    source: str
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class StaticResolution:
+    """The no-I/O JSON v1 readiness and applicability projection."""
+
+    category: StaticResolutionCategory
+    source: str | None
+    identifier: str | None
+    skipped_not_ready: tuple[SkippedSource, ...]
 
 
 @dataclass(frozen=True)
@@ -332,7 +357,8 @@ class SecretDescription:
     references: tuple[ReferenceEntry, ...]
     used_by: tuple[InstanceRef, ...] | None
     source_mappings: tuple[SourceMapping, ...]
-    resolution: ResolutionPreview
+    resolution: StaticResolution
+    preview: ResolutionPreview
 
 
 def secret_description_data(description: SecretDescription) -> JsonObject:
@@ -357,7 +383,7 @@ def secret_description_data(description: SecretDescription) -> JsonObject:
                     "source": mapping.source,
                     "backend": mapping.backend,
                     "provenance": mapping.provenance.value,
-                    "would_attempt": mapping.would_attempt,
+                    "would_attempt": mapping.candidate,
                     "identifier": mapping.identifier,
                     "not_ready_reason": mapping.not_ready_reason,
                 }
@@ -371,6 +397,7 @@ def secret_description_data(description: SecretDescription) -> JsonObject:
                     {"source": skipped.source, "reason": skipped.reason}
                     for skipped in description.resolution.skipped_not_ready
                 ],
+                "preview": preview_data(description.preview),
             },
         },
     }
@@ -381,10 +408,14 @@ def describe_secret(
     registry: Registry,
     name: str,
     db: Database | None = None,
+    *,
+    impact: OperatorImpact,
+    tty_access: TtyInteractionAccess,
 ) -> SecretDescription:
     """Build a ``SecretDescription`` for one secret in the registry.
 
-    No prompting and no resolution for display. Raises
+    Preview never returns a value. It may perform provider work within the
+    selected impact and TTY access. Raises
     ``NotFoundError`` if ``name`` isn't a
     published secret -- typed at the service layer so CLI / future
     web/API clients all see the same error shape (per the project's
@@ -425,7 +456,7 @@ def describe_secret(
     mappings: list[SourceMapping] = []
     for source in sources:
         try:
-            request, identifier = _lookup_projection(decl, source)
+            request, lookup = _lookup_projection(decl, source)
         except _BackendProtocolError:
             raise StateError(f"secret source {source.name!r} violated the preview contract") from None
         mappings.append(
@@ -433,12 +464,42 @@ def describe_secret(
                 source=source.name,
                 backend=source.backend_class.name,
                 provenance=source_provenance(source.source),
-                would_attempt=request is not None,
-                identifier=identifier,
+                candidate=request is not None,
+                identifier=lookup.identifier,
                 not_ready_reason=source.readiness.reason,
             )
         )
-    resolution = preview_resolution(decl, sources)
+    skipped = tuple(
+        SkippedSource(source=mapping.source, reason=mapping.not_ready_reason or "not ready")
+        for mapping in mappings
+        if mapping.candidate and mapping.not_ready_reason is not None
+    )
+    candidate = next(
+        (mapping for mapping in mappings if mapping.candidate and mapping.not_ready_reason is None),
+        None,
+    )
+    resolution = StaticResolution(
+        category=(
+            StaticResolutionCategory.ATTEMPTABLE if candidate is not None else StaticResolutionCategory.UNAVAILABLE
+        ),
+        source=None if candidate is None else candidate.source,
+        identifier=None if candidate is None else candidate.identifier,
+        skipped_not_ready=skipped,
+    )
+    from agentworks.secrets.resolve import OutputInteractionBroker
+
+    broker = (
+        OutputInteractionBroker([decl])
+        if impact is OperatorImpact.ALLOW and tty_access is TtyInteractionAccess.AVAILABLE
+        else None
+    )
+    preview = preview_batch(
+        [decl],
+        sources,
+        impact=impact,
+        tty_access=tty_access,
+        interaction_broker=broker,
+    )[decl.name]
 
     return SecretDescription(
         name=name,
@@ -450,6 +511,7 @@ def describe_secret(
         used_by=used_by_for(db, registry, SECRET_KIND_NAME, decl),
         source_mappings=tuple(mappings),
         resolution=resolution,
+        preview=preview,
     )
 
 
@@ -520,40 +582,32 @@ def render_secret_description(desc: SecretDescription) -> None:
             SourceProvenance.DECLARED: "declared",
         }
         for mapping in desc.source_mappings:
-            if not mapping.would_attempt:
+            if not mapping.candidate:
                 status = "won't attempt"
             elif mapping.identifier is not None:
                 status = mapping.identifier
             else:
                 status = "(prompt at resolution time)"
-            # A would-attempt source that cannot run here keeps its mapping
+            # A candidate source that cannot run here keeps its mapping
             # shown (the config is real) but is flagged not-ready (R9.1).
-            if mapping.would_attempt and mapping.not_ready_reason is not None:
+            if mapping.candidate and mapping.not_ready_reason is not None:
                 status += f" (not ready: {mapping.not_ready_reason})"
             output.detail(f"- {mapping.source} ({mapping.backend}, {provenance_labels[mapping.provenance]}): {status}")
 
     # --- Resolution preview ---
     output.info("")
     output.info("Resolution preview:")
-    # The honest offline layer first: sources the walk skips because they are
-    # not-ready here (R9.6), then the optimistic would-resolve verdict under it.
-    for skipped in desc.resolution.skipped_not_ready:
-        output.detail(f"- skipped {skipped.source}: not ready: {skipped.reason}")
-    if desc.resolution.category is not PreviewCategory.ATTEMPTABLE:
-        output.detail("not attemptable through any active source")
-    else:
-        # Name the winner, then the rest of the still-active chain UNDER AN
-        # EXPLICIT CONDITION: a source can "win" the preview by mapping
-        # applicability alone (no value is ever read), and at runtime
-        # resolution stops at the first source that actually resolves, so
-        # the later sources are not a guaranteed fall-through, only what
-        # would be tried next if the winner does not pan out.
-        chain = [m.source for m in desc.source_mappings if m.would_attempt and m.not_ready_reason is None]
-        fallthrough = chain[1:]
-        if fallthrough:
-            output.detail(
-                f"would attempt via {desc.resolution.source}; if that does not resolve, "
-                f"next in order: {', '.join(fallthrough)}"
-            )
-        else:
-            output.detail(f"would attempt via {desc.resolution.source}")
+    output.detail(
+        f"{desc.preview.status.value}"
+        f"{f'/{desc.preview.reason}' if desc.preview.reason is not None else ''}; "
+        f"source={desc.preview.source or 'none'}; identifier={desc.preview.identifier or 'none'}"
+    )
+    output.detail(f"Hint: {preview_hint(desc.preview, interaction_opt_in=True)}")
+    for attempt in desc.preview.attempts:
+        from agentworks.secrets.preview import attempt_reason, attempt_status
+
+        reason = attempt_reason(attempt)
+        suffix = f"/{reason}" if reason is not None else ""
+        output.detail(
+            f"- {attempt.source}: {attempt_status(attempt).value}{suffix}; identifier={attempt.identifier or 'none'}"
+        )

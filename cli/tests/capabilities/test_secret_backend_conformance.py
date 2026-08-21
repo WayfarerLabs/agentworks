@@ -15,9 +15,13 @@ from agentworks.capabilities.conformance import conformance_error
 from agentworks.capabilities.descriptor import descriptor_for
 from agentworks.capabilities.secret_backend import (
     InteractionBroker,
+    LookupDescription,
+    LookupDisposition,
     RemainingTime,
     SecretBackend,
+    SecretClientIntent,
     SecretSourceClient,
+    TtyInteractionAccess,
 )
 from agentworks.resources.graph import Readiness
 from agentworks.schema import AgwModel, AgwRootModel, ResourceRef, SecretRef, model_is_complete
@@ -51,7 +55,7 @@ def _reason(**changes: object) -> str:
     return reason
 
 
-def test_a_nominal_concrete_version_two_backend_conforms() -> None:
+def test_a_nominal_concrete_version_one_backend_conforms() -> None:
     assert conformance_error(DESCRIPTOR, _backend()) is None
 
 
@@ -67,10 +71,10 @@ def test_an_abstract_backend_is_rejected_as_not_constructible() -> None:
     class AbstractBackend(SecretBackend):
         name = "abstract"
         description = "still abstract"
-        contract_version = 2
+        contract_version = 1
         config_model = GoodConfig
         mapping_model = GoodMapping
-        interactive = False
+        supports_tty_interaction = False
 
     reason = conformance_error(DESCRIPTOR, AbstractBackend)
     assert reason is not None
@@ -82,10 +86,10 @@ def test_a_non_callable_factory_hits_the_generic_operation_check_first() -> None
     assert "required secret-backend operations: create_client" in _reason(create_client=None)
 
 
-class MissingInteractiveBackend(SecretBackend):
+class MissingTtySupportBackend(SecretBackend):
     name = "phase3-fixture"
     description = "omits one required class fact"
-    contract_version = 2
+    contract_version = 1
     config_model = GoodConfig
     mapping_model = GoodMapping
 
@@ -94,12 +98,8 @@ class MissingInteractiveBackend(SecretBackend):
         return Readiness.ready()
 
     @classmethod
-    def would_attempt(cls, secret_name: str, *, mapping_present: bool) -> bool:
-        return False
-
-    @classmethod
-    def describe_lookup(cls, secret_name: str, mapping: BaseModel | None) -> str | None:
-        return None
+    def describe_lookup(cls, secret_name: str, mapping: BaseModel | None) -> LookupDescription:
+        return LookupDescription(LookupDisposition.NOT_APPLICABLE, None)
 
     @classmethod
     def create_client(
@@ -107,6 +107,8 @@ class MissingInteractiveBackend(SecretBackend):
         *,
         source_name: str,
         config: AgwModel,
+        intent: SecretClientIntent,
+        tty_access: TtyInteractionAccess,
         interaction_broker: InteractionBroker | None,
         remaining_time: RemainingTime,
     ) -> AbstractContextManager[SecretSourceClient]:
@@ -114,14 +116,16 @@ class MissingInteractiveBackend(SecretBackend):
 
 
 def test_a_missing_required_class_attribute_is_rejected() -> None:
-    assert conformance_error(DESCRIPTOR, MissingInteractiveBackend) == (
-        "it is missing the required secret-backend attributes: interactive"
+    assert conformance_error(DESCRIPTOR, MissingTtySupportBackend) == (
+        "it is missing the required secret-backend attributes: supports_tty_interaction"
     )
 
 
 @pytest.mark.parametrize("value", [0, 1, "yes", None], ids=("zero", "one", "string", "none"))
-def test_interactive_must_be_exactly_bool(value: object) -> None:
-    assert _reason(interactive=value) == f"its interactive class attribute is {value!r}, not a bool"
+def test_supports_tty_interaction_must_be_exactly_bool(value: object) -> None:
+    assert _reason(supports_tty_interaction=value) == (
+        f"its supports_tty_interaction class attribute is {value!r}, not a bool"
+    )
 
 
 class UntaggedConfig(AgwModel):
@@ -160,7 +164,7 @@ class MisplacedMappingMarker(AgwModel):
             {"mapping_model": AgwRootModel[MisplacedMappingMarker]},
             "mapping_model declares a reference marker nothing can honor",
         ),
-        ({"contract_version": 1}, "declares contract_version 1"),
+        ({"contract_version": 2}, "declares contract_version 2"),
     ],
     ids=(
         "missing-source-model",
@@ -344,25 +348,15 @@ def _valid_readiness(cls) -> Readiness:
     return Readiness.ready()
 
 
-def _valid_would_attempt(cls, secret_name: str, *, mapping_present: bool) -> bool:
-    return mapping_present
-
-
-def _valid_describe_lookup(cls, secret_name: str, mapping: BaseModel | None) -> str | None:
-    return None
-
-
-def _valid_external_timeout(cls, config: AgwModel) -> float | None:
-    return None
+def _valid_describe_lookup(cls, secret_name: str, mapping: BaseModel | None) -> LookupDescription:
+    return LookupDescription(LookupDisposition.NOT_APPLICABLE, None)
 
 
 @pytest.mark.parametrize(
     ("operation", "implementation"),
     [
         ("backend_readiness", _valid_readiness),
-        ("would_attempt", _valid_would_attempt),
         ("describe_lookup", _valid_describe_lookup),
-        ("external_operation_timeout", _valid_external_timeout),
     ],
 )
 def test_source_contract_operations_must_be_classmethods(operation: str, implementation: Callable[..., object]) -> None:
@@ -373,61 +367,19 @@ def _readiness_with_extra(cls, extra: str) -> Readiness:
     return Readiness.ready()
 
 
-def _would_attempt_with_positional_mapping(cls, secret_name: str, mapping_present: bool) -> bool:
-    return mapping_present
-
-
-def _would_attempt_with_default(cls, secret_name: str, *, mapping_present: bool = False) -> bool:
-    return mapping_present
-
-
-def _describe_with_wrong_name(cls, name: str, mapping: BaseModel | None) -> str | None:
-    return None
-
-
-def _timeout_with_wrong_name(cls, source_config: AgwModel) -> float | None:
-    return None
-
-
-def _timeout_with_keyword_only_config(cls, *, config: AgwModel) -> float | None:
-    return None
-
-
-def _timeout_with_default(cls, config: AgwModel | None = None) -> float | None:
-    return None
+def _describe_with_wrong_name(cls, name: str, mapping: BaseModel | None) -> LookupDescription:
+    return LookupDescription(LookupDisposition.NOT_APPLICABLE, None)
 
 
 @pytest.mark.parametrize(
     ("operation", "implementation", "expected"),
     [
         ("backend_readiness", _readiness_with_extra, "must declare 0 parameters after cls (got 1)"),
-        ("would_attempt", _would_attempt_with_positional_mapping, "parameter 'mapping_present' must be keyword-only"),
-        ("would_attempt", _would_attempt_with_default, "parameter 'mapping_present' must not have a default"),
         ("describe_lookup", _describe_with_wrong_name, "parameter 1 must be named 'secret_name'"),
-        (
-            "external_operation_timeout",
-            _timeout_with_wrong_name,
-            "parameter 1 must be named 'config'",
-        ),
-        (
-            "external_operation_timeout",
-            _timeout_with_keyword_only_config,
-            "parameter 'config' must be positional-or-keyword",
-        ),
-        (
-            "external_operation_timeout",
-            _timeout_with_default,
-            "parameter 'config' must not have a default",
-        ),
     ],
     ids=(
         "readiness-count",
-        "would-attempt-kind",
-        "would-attempt-default",
         "describe-name",
-        "timeout-name",
-        "timeout-kind",
-        "timeout-default",
     ),
 )
 def test_source_contract_operation_exact_signature_rejection_matrix(
@@ -439,24 +391,6 @@ def test_source_contract_operation_exact_signature_rejection_matrix(
     assert expected in reason
 
 
-def test_external_timeout_staticmethod_is_rejected() -> None:
-    assert _reason(external_operation_timeout=staticmethod(_valid_external_timeout)) == (
-        "its external_operation_timeout must be declared as @classmethod"
-    )
-
-
-def test_external_timeout_is_never_invoked_during_conformance() -> None:
-    calls = 0
-
-    def timeout(cls, config: AgwModel) -> float | None:
-        nonlocal calls
-        calls += 1
-        raise AssertionError("registration must not invoke the timeout declaration")
-
-    assert conformance_error(DESCRIPTOR, _backend(external_operation_timeout=classmethod(timeout))) is None
-    assert calls == 0
-
-
 Factory = Callable[..., AbstractContextManager[SecretSourceClient]]
 
 
@@ -465,6 +399,8 @@ def _valid_factory(
     *,
     source_name: str,
     config: AgwModel,
+    intent: SecretClientIntent,
+    tty_access: TtyInteractionAccess,
     interaction_broker: InteractionBroker | None,
     remaining_time: RemainingTime,
 ) -> AbstractContextManager[SecretSourceClient]:
@@ -476,6 +412,8 @@ def _alternate_binding_name(
     *,
     source_name: str,
     config: AgwModel,
+    intent: SecretClientIntent,
+    tty_access: TtyInteractionAccess,
     interaction_broker: InteractionBroker | None,
     remaining_time: RemainingTime,
 ) -> AbstractContextManager[SecretSourceClient]:
@@ -488,6 +426,8 @@ def _positional_only_binding(
     *,
     source_name: str,
     config: AgwModel,
+    intent: SecretClientIntent,
+    tty_access: TtyInteractionAccess,
     interaction_broker: InteractionBroker | None,
     remaining_time: RemainingTime,
 ) -> AbstractContextManager[SecretSourceClient]:
@@ -499,6 +439,8 @@ def _defaulted_binding(
     *,
     source_name: str,
     config: AgwModel,
+    intent: SecretClientIntent,
+    tty_access: TtyInteractionAccess,
     interaction_broker: InteractionBroker | None,
     remaining_time: RemainingTime,
 ) -> AbstractContextManager[SecretSourceClient]:
@@ -510,6 +452,8 @@ def _too_few(
     *,
     source_name: str,
     config: AgwModel,
+    intent: SecretClientIntent,
+    tty_access: TtyInteractionAccess,
     interaction_broker: InteractionBroker | None,
 ) -> AbstractContextManager[SecretSourceClient]:
     raise NotImplementedError
@@ -520,6 +464,8 @@ def _too_many(
     *,
     source_name: str,
     config: AgwModel,
+    intent: SecretClientIntent,
+    tty_access: TtyInteractionAccess,
     interaction_broker: InteractionBroker | None,
     remaining_time: RemainingTime,
     extra: object,
@@ -532,6 +478,8 @@ def _wrong_parameter_name(
     *,
     source: str,
     config: AgwModel,
+    intent: SecretClientIntent,
+    tty_access: TtyInteractionAccess,
     interaction_broker: InteractionBroker | None,
     remaining_time: RemainingTime,
 ) -> AbstractContextManager[SecretSourceClient]:
@@ -543,6 +491,8 @@ def _positional_parameter(
     source_name: str,
     *,
     config: AgwModel,
+    intent: SecretClientIntent,
+    tty_access: TtyInteractionAccess,
     interaction_broker: InteractionBroker | None,
     remaining_time: RemainingTime,
 ) -> AbstractContextManager[SecretSourceClient]:
@@ -554,6 +504,8 @@ def _defaulted_parameter(
     *,
     source_name: str = "default",
     config: AgwModel,
+    intent: SecretClientIntent,
+    tty_access: TtyInteractionAccess,
     interaction_broker: InteractionBroker | None,
     remaining_time: RemainingTime,
 ) -> AbstractContextManager[SecretSourceClient]:
@@ -580,8 +532,8 @@ def _bound(factory: Factory, binding: str) -> object:
         (_positional_only_binding, "class", "parameter 'cls' must be positional-or-keyword"),
         (_defaulted_binding, "class", "parameter 'cls' must not have a default"),
         (_zero_parameter_factory, "class", "must declare a 'cls' binding parameter"),
-        (_too_few, "class", "must declare 4 parameters after cls (got 3)"),
-        (_too_many, "class", "must declare 4 parameters after cls (got 5)"),
+        (_too_few, "class", "must declare 6 parameters after cls (got 5)"),
+        (_too_many, "class", "must declare 6 parameters after cls (got 7)"),
         (_wrong_parameter_name, "class", "parameter 1 must be named 'source_name'"),
         (_positional_parameter, "class", "parameter 'source_name' must be keyword-only"),
         (_defaulted_parameter, "class", "parameter 'source_name' must not have a default"),

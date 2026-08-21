@@ -295,10 +295,10 @@ is carried by the implementation.
 The references the core extracts are sourceless. The consuming resource attaches itself as the
 source when it emits them, in its `dependencies()` at finalize ("whoever hosts the config that names
 the secret emits the reference"). The framework consumes those references two ways: statically, they
-feed the registry's reference graph and doctor's resolvability prediction; at runtime, their
-_values_ are fetched only by the framework's one batched resolve pass as soon as preflight passes
-(described under ops), and delivered through the context. References are never value-resolved at
-command entry.
+feed the registry's reference graph; during preflight and doctor, core runs value-free, no-impact
+provider preview; at runtime, their _values_ are fetched only by the framework's one batched resolve
+pass as soon as preflight passes (described under ops), and delivered through the context.
+References are never value-resolved at command entry.
 
 #### Stage 2: Construct
 
@@ -322,19 +322,18 @@ for all of them; runtime context passes per call for all of them.
 #### Stage 3: Preflight
 
 Preflight answers "will the real work probably succeed?" on an already-constructed,
-already-config-valid instance (config validity is construct's job, not preflight's), using only what
-is knowable _before_ any secret is resolved. Its aim is to spend the operator's prompt only on ops
-that can actually run. What it checks toward that is the author's call; the list below is the common
-toolkit, not a checklist, and a capability with nothing cheap to catch before the prompt has a
-trivial (empty) preflight. Its defining property is that it is **read-only and side-effect-free**:
+already-config-valid instance (config validity is construct's job, not preflight's), without
+returning secret values. Its aim is to spend operator effort only on ops that can actually run. What
+it checks toward that is the author's call; the list below is the common toolkit, not a checklist,
+and a capability with nothing cheap to catch has a trivial preflight. Its defining property is that
+it is **read-only and side-effect-free**:
 
-- **Secret resolvability is predicted without prompting** at this stage, but centrally, not by the
-  instance or its holding node: the operation's preflight sweep (`preflight_all`) predicts over each
-  node's declared references (`orchestration.secrets`), so a declaration with no ready, permitted
-  source that would attempt it is fatal and knowable here, without prompting for the others, and
-  neither the instance nor the node touches the secret machinery. Value checks defer to the op,
-  uniformly. (An earlier draft let preflight read-and-verify "non-interactively resolvable" values;
-  that was ruled out: it forks readiness on where a secret happens to come from.)
+- **Secret availability is previewed with no operator impact** at this stage, centrally rather than
+  by the instance or its holding node. The operation's sweep (`preflight_all`) previews each node's
+  declared references through configured sources and memoizes the value-free result for the command.
+  A backend may read and safely discard a provider value if it can do so with no operator action. It
+  cannot prompt or return a value. Definitively missing, blocked, or failed previews stop preflight;
+  an indeterminate result defers the answer to actual resolution.
 - It checks the rest of the world that needs **no credentials**: required tools present on the
   target, an unauthenticated endpoint reachable.
 - It does **not** create or mutate anything.
@@ -342,14 +341,11 @@ trivial (empty) preflight. Its defining property is that it is **read-only and s
   only be confirmed by mutating is allowed to fail later in the op, with its own clear error. The
   line: _if verifying it requires a side effect, it is not preflight's job._
 
-**The ceiling is structural, and low; that is fine.** Preflight runs before the resolve pass, so it
-never holds resolved secret values, and any check that needs one (an authenticated API read, a
-credential probe) is out of its reach by design. Do not bend it past that ceiling: partial
-workarounds (resolving "just the env-var-backed" secrets, probing one credential source but not the
-interactive one) make readiness depend on where a secret happens to come from, which is complexity
-without a principled line. Preflight does what unresolved-secret, read-only checks can do;
-everything past the ceiling fails at the op, and the op's own typed, actionable error handling is
-the other half of the contract: invest there, not in stretching preflight.
+**The ceiling is structural.** Preflight never holds a resolved secret value and never authorizes
+operator impact. Secret backends own the safest probe they can perform under that ceiling and may
+fetch and discard a value internally. An indeterminate preview is expected when a backend cannot
+establish presence without operator action; actual resolution remains a separate, value-bearing pass
+with no preview-impact input.
 
 The read-only property is load-bearing, not stylistic. It is exactly what lets `doctor` reuse
 `preflight` for its per-resource health rows (doctor could never call a method that mutates), and
@@ -358,9 +354,11 @@ resources or starting expiry clocks. It is also what lets preflight run _before_
 the cheap fatal checks (a missing mapping, a missing tool, an unreachable API) are caught without
 spending the operator's time on a prompt for an op that was never going to run.
 
-**Doctor runs preflight, not runup.** Doctor is passive and non-interactive, so it never prompts or
-performs authenticated checks. Each secret instead has a non-probing source attempt/readiness row,
-alongside the source and backend status groups.
+**Doctor runs preflight, not runup.** Doctor requests the same no-impact secret preview and never
+prompts or returns a secret value. A backend may perform an authenticated provider read and discard
+the result if its configured classification says that requires no operator action. Each secret has
+an `available`, `missing`, `indeterminate`, `blocked`, or `failed` preview row alongside source and
+backend status groups.
 
 When does it run? Every command runs preflight on all the resources it will use before doing
 anything real: before any mutation, and before any secret prompt. That is what lets the cheap fatal

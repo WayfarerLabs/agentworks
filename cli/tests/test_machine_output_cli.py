@@ -11,6 +11,7 @@ import pytest
 from click.testing import Result
 from typer.testing import CliRunner
 
+from agentworks.capabilities.secret_backend import PreviewAvailable
 from agentworks.cli import app
 from agentworks.doctor import HealthGroup, HealthReport
 from agentworks.origin import Origin
@@ -21,8 +22,10 @@ from agentworks.secrets.inspect import (
     SecretSourceCell,
     SecretTable,
     SourceMapping,
+    StaticResolution,
+    StaticResolutionCategory,
 )
-from agentworks.secrets.preview import PreviewCategory, ResolutionPreview, SkippedSource
+from agentworks.secrets.preview import ResolutionPreview, SourcePreviewAttempt
 from agentworks.secrets.sources import SourceProvenance
 
 
@@ -575,12 +578,18 @@ def test_secret_describe_json_preserves_nulls_and_source_order(monkeypatch) -> N
             SourceMapping("work-op", "onepassword", SourceProvenance.DECLARED, True, "op://Work/token", None),
             SourceMapping("prompt-fallback", "prompt", SourceProvenance.DECLARED, True, None, "source unavailable"),
         ),
-        resolution=ResolutionPreview(
-            name="token",
-            category=PreviewCategory.ATTEMPTABLE,
+        resolution=StaticResolution(
+            category=StaticResolutionCategory.ATTEMPTABLE,
             source="work-op",
             identifier="op://Work/token",
-            skipped_not_ready=(SkippedSource("prompt-fallback", "source unavailable"),),
+            skipped_not_ready=(),
+        ),
+        preview=ResolutionPreview(
+            name="token",
+            result=PreviewAvailable(),
+            source="work-op",
+            identifier="op://Work/token",
+            attempts=(SourcePreviewAttempt("work-op", "op://Work/token", PreviewAvailable()),),
         ),
     )
     monkeypatch.setattr(config, "load_config", lambda **_kwargs: object())

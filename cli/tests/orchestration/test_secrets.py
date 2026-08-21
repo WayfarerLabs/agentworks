@@ -1,589 +1,127 @@
-"""The orchestrator's secret helpers: union, central prediction, and
-scoped delivery.
-
-Prediction fakes are source-shaped duck types, same as
-``tests/test_secrets_resolve.py``: the helpers only speak the
-``ActiveSource`` surface.
-"""
+"""Operation-owned secret preview and scoped delivery."""
 
 from __future__ import annotations
 
-from contextlib import AbstractContextManager
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
+from agentworks.capabilities.secret_backend import (
+    FailureReason,
+    IndeterminateReason,
+    OperatorImpact,
+    PreviewAvailable,
+    PreviewFailed,
+    PreviewIndeterminate,
+    PreviewMissing,
+    TtyInteractionAccess,
+)
 from agentworks.errors import ConfigError, StateError
-from agentworks.naming import MAX_FREEFORM_NAME_LENGTH, validate_name
+from agentworks.orchestration.node import Node as OrchestrationNode
 from agentworks.orchestration.secrets import (
     ScopedSecrets,
     predict_resolution,
     require_predicted_refs,
-    secret_declarations,
     secret_union,
 )
-from agentworks.resources.graph import Readiness
-from agentworks.resources.reference import ResourceReference, SecretReference
-from agentworks.schema import AgwModel, AgwRootModel, CapabilityBlock
-from agentworks.secrets.base import SecretDecl
-from agentworks.secrets.policy import TtyInteractionPolicy
-from agentworks.secrets.preview import PreviewCategory, SkippedSource
-from agentworks.secrets.sources import SecretSourceDecl
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
-    from agentworks.capabilities.base import RunContext
-    from agentworks.config import Config
-    from agentworks.resources.registry import Registry
-    from agentworks.secrets.resolve import ActiveSource
+from agentworks.resources.reference import ResourceReference
+from agentworks.secrets import SecretDecl
+from agentworks.secrets.preview import ResolutionPreview, SourcePreviewAttempt
 
 
-@dataclass
-class _N:
-    key: str
-    _secret_refs: tuple[str, ...] = ()
-
-    def deps(self) -> tuple[_N, ...]:
-        return ()
-
-    def secret_refs(self) -> tuple[str, ...]:
-        return self._secret_refs
-
-    def config_secret_refs(self) -> tuple[ResourceReference, ...]:
-        return ()
-
-    def preflight(self, ctx: RunContext) -> None: ...
-
-    def runup(self, ctx: RunContext) -> None: ...
-
-
-# -- secret_union ------------------------------------------------------------
-
-
-def test_union_dedups_in_first_encounter_order() -> None:
-    nodes = [
-        _N("vm-template/default", ("tailscale-auth-key",)),
-        _N("vm-site/px", ("proxmox-token",)),
-        _N("git-credential/gh", ("git-token-gh", "proxmox-token")),
-        _N("vm/box"),
-    ]
-    assert secret_union(nodes) == (
-        "tailscale-auth-key",
-        "proxmox-token",
-        "git-token-gh",
+def _preview(name: str, result: object, *attempt_results: object) -> ResolutionPreview:
+    attempts = tuple(
+        SourcePreviewAttempt("fixture", f"id:{name}", attempt)  # type: ignore[arg-type]
+        for attempt in (attempt_results or (result,))
+    )
+    return ResolutionPreview(
+        name,
+        result,  # type: ignore[arg-type]
+        "fixture",
+        f"id:{name}",
+        attempts,
     )
 
 
-def test_union_of_secretless_nodes_is_empty() -> None:
-    assert secret_union([_N("vm/box")]) == ()
-
-
-# -- secret_declarations -----------------------------------------------------
-
-
-class _FakeRegistry:
-    """Duck-typed ``Registry.lookup`` over a fixed decl set."""
-
-    def __init__(self, decls: dict[str, SecretDecl]) -> None:
-        self._decls = decls
-        self.lookups: list[tuple[str, str]] = []
-
-    def lookup(self, kind: str, name: str) -> SecretDecl:
-        self.lookups.append((kind, name))
-        return self._decls[name]
-
-
-def test_declarations_come_from_the_registry() -> None:
-    declared = SecretDecl(
-        name="proxmox-token",
-        description="the API token",
-        backend_mappings={"env-var": "PVE_TOKEN"},
-    )
-    registry = cast("Registry", _FakeRegistry({"proxmox-token": declared}))
-    (out,) = secret_declarations(["proxmox-token"], registry)
-    assert out is declared
-
-
-def test_unknown_name_falls_back_to_a_bare_declaration() -> None:
-    """Parity with ``Resolver.register_name``: an empty registry must
-    keep the source chain callable for well-known names."""
-    registry = cast("Registry", _FakeRegistry({}))
-    (out,) = secret_declarations(["tailscale-auth-key"], registry)
-    assert out == SecretDecl(name="tailscale-auth-key", description="")
-
-
-# -- predict_resolution ------------------------------------------------------
-
-
-class _FakeSource:
-    """State captured by a final ActiveSource-shaped prediction fixture."""
-
-    def __init__(
-        self,
-        name: str,
-        values: dict[str, str] | None = None,
-        interactive: bool = False,
-        not_ready_reason: str | None = None,
-    ) -> None:
-        self.name = name
-        self.interactive = interactive
-        self._values = values or {}
-        self.resolve_calls: list[list[str]] = []
-        # ActiveSource carries its stored readiness verdict; preview_resolution
-        # skips a not-ready source (R9.6). Ready by default.
-        self.readiness = Readiness.ready() if not_ready_reason is None else Readiness.blocked(not_ready_reason)
-
-
-class _PredictionConfig(AgwModel):
-    name: Literal["prediction"]
-
-
-class _PredictionMapping(AgwRootModel[str]):
-    pass
-
-
-class _PredictionClient:
-    def __init__(self, state: _FakeSource) -> None:
-        self._state = state
-
-    def prepare(self, requests: tuple[object, ...], *, remaining_time: object) -> None:
-        return None
-
-    def resolve(self, requests: tuple[object, ...], *, remaining_time: object) -> dict[str, str]:
-        names = [cast("Any", request).name for request in requests]
-        self._state.resolve_calls.append(names)
-        return {name: self._state._values[name] for name in names if name in self._state._values}
-
-
-class _PredictionContext(AbstractContextManager[Any]):
-    def __init__(self, state: _FakeSource) -> None:
-        self._state = state
-
-    def __enter__(self) -> _PredictionClient:
-        return _PredictionClient(self._state)
-
-    def __exit__(self, *args: object) -> None:
-        return None
-
-
-def _decl(name: str, **kw: object) -> SecretDecl:
-    return SecretDecl(name=name, description="", **kw)  # type: ignore[arg-type]
-
-
-def _sources(*source_states: _FakeSource) -> list[ActiveSource]:
-    from agentworks.capabilities.secret_backend import SecretBackend
-    from agentworks.capabilities.secret_backend.client import InteractionBroker, RemainingTime, SecretSourceClient
-    from agentworks.secrets.resolve import ActiveSource
-
-    sources: list[ActiveSource] = []
-    for state in source_states:
-
-        class _PredictionBackend(SecretBackend):
-            _state: ClassVar[_FakeSource] = state
-            contract_version: ClassVar[int] = 2
-            config_model: ClassVar[type[AgwModel]] = _PredictionConfig
-            mapping_model: ClassVar[type[AgwRootModel[Any]]] = _PredictionMapping
-            name: ClassVar[str] = "prediction"
-            description: ClassVar[str] = "prediction fixture"
-            prose = None
-            interactive: ClassVar[bool] = state.interactive
-
-            @classmethod
-            def backend_readiness(cls) -> Readiness:
-                return Readiness.ready()
-
-            @classmethod
-            def would_attempt(cls, secret_name: str, *, mapping_present: bool) -> bool:
-                return True
-
-            @classmethod
-            def describe_lookup(cls, secret_name: str, mapping: object) -> str:
-                return f"<{cls._state.name}>"
-
-            @classmethod
-            def create_client(
-                cls,
-                *,
-                source_name: str,
-                config: AgwModel,
-                interaction_broker: InteractionBroker | None,
-                remaining_time: RemainingTime,
-            ) -> AbstractContextManager[SecretSourceClient]:
-                return cast("AbstractContextManager[SecretSourceClient]", _PredictionContext(cls._state))
-
-        sources.append(
-            ActiveSource(
-                source=SecretSourceDecl(name=state.name, backend=CapabilityBlock.of("prediction")),
-                backend_class=_PredictionBackend,
-                config=_PredictionConfig(name="prediction"),
-                readiness=state.readiness,
-            )
-        )
-    return sources
-
-
-def test_prediction_reports_the_first_attemptable_source() -> None:
-    sources = _sources(
-        _FakeSource("env-var"),  # attempts but produces nothing
-        _FakeSource("op", values={"a": "1"}),
-    )
-    preview = predict_resolution([_decl("a")], sources, interaction=TtyInteractionPolicy.REFUSE)["a"]
-    assert preview.category is PreviewCategory.ATTEMPTABLE
-    assert preview.source == "env-var"
-    assert sources[0].source.name == "env-var"
-
-
-def test_prediction_skips_a_not_ready_source() -> None:
-    """R9.6/R9.7 lockstep: a not-ready source is skipped by the predictor even
-    though it WOULD produce a value, so it never names a source resolution will
-    skip; the chain falls through to the next ready source."""
-    sources = _sources(
-        _FakeSource("op", values={"a": "1"}, not_ready_reason="op CLI not installed"),
-        _FakeSource("env-var", values={"a": "2"}),
-    )
-    preview = predict_resolution([_decl("a")], sources, interaction=TtyInteractionPolicy.REFUSE)["a"]
-    assert preview.category is PreviewCategory.ATTEMPTABLE
-    assert preview.source == "env-var"
-    assert preview.skipped_not_ready == (SkippedSource(source="op", reason="op CLI not installed"),)
-
-
-def test_prediction_none_when_nothing_would_resolve() -> None:
-    preview = predict_resolution([], _sources(_FakeSource("env-var")), interaction=TtyInteractionPolicy.REFUSE)
-    assert preview == {}
-
-
-def test_interactive_source_predicted_resolvable_when_interactive(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A prompt source reports resolvable without probing (probing would BE
-    the prompt) WHEN interactive input is available this run."""
-    from agentworks import output
-
-    monkeypatch.setattr(output, "is_interactive", lambda: True)
-    prompt = _FakeSource("prompt", interactive=True)
-    preview = predict_resolution([_decl("a")], _sources(prompt), interaction=TtyInteractionPolicy.ALLOW)["a"]
-    assert preview.category is PreviewCategory.ATTEMPTABLE
-    assert preview.source == "prompt"
-    assert prompt.resolve_calls == []
-
-
-def test_interactive_source_predicted_unresolvable_when_non_interactive(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Under --non-interactive / no TTY the prompt source's backend no-ops
-    at resolve time, so preflight prediction must call a prompt-only secret
-    unresolvable and fail fast (issue #202), still without probing."""
-    from agentworks import output
-
-    monkeypatch.setattr(output, "is_interactive", lambda: False)
-    prompt = _FakeSource("prompt", interactive=True)
-    preview = predict_resolution([_decl("a")], _sources(prompt), interaction=TtyInteractionPolicy.REFUSE)["a"]
-    assert preview.category is PreviewCategory.REFUSED_INTERACTION
-    assert preview.source == "prompt"
-    assert prompt.resolve_calls == []
-
-
-def test_prediction_respects_source_opt_out() -> None:
-    prompt = _FakeSource("prompt", interactive=True)
-    decl = _decl("a", backend_mappings={"prompt": False})
-    preview = predict_resolution([decl], _sources(prompt), interaction=TtyInteractionPolicy.REFUSE)["a"]
-    assert preview.category is PreviewCategory.UNAVAILABLE
-
-
-def test_preview_rows_reject_a_source_name_validate_name_accepts() -> None:
-    """The same decode hole ``ResolutionOutcome`` guards against reaches the two
-    preview rows, which render on the same surfaces (``secret describe``,
-    ``doctor``). ``validate_name`` accepts a trailing newline (issue #542), so
-    each row screens the source name itself."""
-    from agentworks.secrets.preview import PreviewCategory, ResolutionPreview, SkippedSource
-
-    forged = "envvar\n"
-    validate_name(forged, max_length=MAX_FREEFORM_NAME_LENGTH)
-    with pytest.raises(ValueError):
-        SkippedSource(source=forged, reason="not ready")
-    with pytest.raises(ValueError):
-        ResolutionPreview(
-            name="token",
-            category=PreviewCategory.ATTEMPTABLE,
-            source=forged,
-            identifier=None,
-            skipped_not_ready=(),
-        )
-
-
-def test_a_plugin_name_cannot_split_a_skipped_source_row() -> None:
-    """A plugin names itself, and registration vets that name's shape, never its
-    content: ``registration.py`` rejects only an empty or '/'-bearing name. The
-    name then reaches a rendered line through ``Readiness.reason``, which
-    ``sources.py`` builds by concatenating it into our own prose, so no render
-    sink can escape it alone the way ``remediation_target`` is escaped.
-
-    Driven through the real concatenation rather than a hand-built row: if issue
-    #545 lands and the name is escaped upstream, this stops raising and fails
-    here, which is the signal to revisit the screen rather than a silent pass.
-    """
-    from agentworks.capabilities.secret_backend.env_var import EnvVarBackend
-    from agentworks.resources.graph import DependencyState, Enablement
-    from agentworks.secrets.preview import SkippedSource
-
-    forged = "onepassword\nSecret: token = leaked-value"
-    decl = SecretSourceDecl(name="op", backend=CapabilityBlock.of("env-var"))
-    deps = {
-        ("secret-backend", "env-var"): DependencyState(
-            enablement=Enablement.disabled,
-            readiness=None,
-            impl=EnvVarBackend,
-            # Exactly what plugins/enablement.py builds for a disabled plugin row.
-            disabled_reason=f"enable plugin `{forged}`",
-        )
-    }
-    readiness = decl.not_ready(deps)
-    assert readiness.reason is not None
-    with pytest.raises(ValueError):
-        SkippedSource(source="op", reason=readiness.reason)
-
-
-def test_prediction_rejects_a_non_enum_policy_with_nothing_to_predict() -> None:
-    """A caller-supplied ``"refuse"`` is equal to the enum but not identical to it.
-
-    With no declarations the per-declaration preview below never runs, so this
-    entry point's own check is the only rejection there will ever be. Without
-    it the call returns an empty prediction and the operation proceeds on an
-    interaction policy nothing ever validated.
-    """
-    with pytest.raises(StateError):
-        predict_resolution([], _sources(_FakeSource("env-var")), interaction="refuse")  # type: ignore[arg-type]
-
-
-def test_operation_preview_rejects_a_non_enum_policy_before_walking_any_source() -> None:
-    """``_preview`` compares ``interaction`` by identity, so a plain ``"refuse"``
-    reports attemptable where the operation would refuse. Preview builds no
-    policy, so the constructor's totality never covers this call."""
-    from agentworks.secrets.preview import preview_operation_resolution
-
-    prompt = _FakeSource("prompt", interactive=True)
-    with pytest.raises(StateError):
-        preview_operation_resolution(_decl("a"), _sources(prompt), interaction="refuse")  # type: ignore[arg-type]
-    assert prompt.resolve_calls == []
-
-
-def test_prediction_covers_every_declaration() -> None:
-    sources = _sources(_FakeSource("env-var", values={"a": "1"}))
-    predictions = predict_resolution([_decl("a"), _decl("b")], sources, interaction=TtyInteractionPolicy.REFUSE)
-    assert tuple(predictions) == ("a", "b")
-    assert all(preview.category is PreviewCategory.ATTEMPTABLE for preview in predictions.values())
-
-
-# -- require_predicted_refs --------------------------------------------------
-
-
-def _px_ref() -> SecretReference:
-    return SecretReference(
-        name="proxmox-token",
+def _ref(name: str) -> ResourceReference:
+    return ResourceReference(
+        name=name,
         kind="secret",
-        usage="the Proxmox API token",
-        source=("vm-site", "px"),
+        usage="test credential",
+        source=("fixture", "owner"),
     )
 
 
-def _env_only_setup(tmp_path: Path) -> tuple[Config, Registry]:
-    """A real config and registry with the env-var source alone, so
-    predictions are driven by the environment (the node suites'
-    not-resolvable shape)."""
-    from agentworks.bootstrap import build_registry
-    from tests.orchestrated_fixtures import write_operator_config
+def test_predict_resolution_always_uses_zero_operator_impact(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
 
-    config = write_operator_config(tmp_path, '[secret_config]\nsources = ["env-var"]\n')
-    return config, build_registry(config)
+    def preview_batch(decls: tuple[SecretDecl, ...], sources: object, **kwargs: object) -> dict[str, ResolutionPreview]:
+        captured.update(kwargs)
+        return {decl.name: _preview(decl.name, PreviewAvailable()) for decl in decls}
 
-
-def _env_and_prompt_setup(tmp_path: Path) -> tuple[Config, Registry]:
-    """A real config whose chain is env-var THEN prompt, so an unset env
-    var falls through to the interactive prompt source."""
-    from agentworks.bootstrap import build_registry
-    from tests.orchestrated_fixtures import write_operator_config
-
-    config = write_operator_config(tmp_path, '[secret_config]\nsources = ["env-var", "prompt"]\n')
-    return config, build_registry(config)
-
-
-def test_require_predicted_refs_prompt_only_passes_when_interactive(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """env-var unset, prompt in the chain, interactive input available:
-    the ref is predicted resolvable (via prompt), so preflight passes and
-    the value check defers to resolve time."""
-    from agentworks import output
-
-    config, registry = _env_and_prompt_setup(tmp_path)
-    monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN", raising=False)
-    monkeypatch.setattr(output, "is_interactive", lambda: True)
-    require_predicted_refs("vm-site/px", (_px_ref(),), config, registry, interaction=TtyInteractionPolicy.ALLOW)
-
-
-def test_require_predicted_refs_prompt_only_fails_fast_when_non_interactive(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Same setup under --non-interactive: prompt cannot resolve, so
-    preflight prediction fails fast (issue #202) instead of deferring to a
-    harmless resolve-end failure."""
-    from agentworks import output
-
-    config, registry = _px_site_setup(tmp_path, '"prompt"')
-    monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN", raising=False)
-    monkeypatch.setattr(output, "is_interactive", lambda: False)
-    with pytest.raises(ConfigError, match="not attemptable by any active source"):
-        require_predicted_refs("vm-site/px", (_px_ref(),), config, registry, interaction=TtyInteractionPolicy.REFUSE)
-
-
-def test_require_predicted_refs_passes_when_resolvable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    config, registry = _env_only_setup(tmp_path)
-    monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "tok")
-    require_predicted_refs("vm-site/px", (_px_ref(),), config, registry, interaction=TtyInteractionPolicy.REFUSE)
-
-
-def test_require_predicted_refs_refuses_with_owner_usage_framing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The per-instance error shape, preserved VERBATIM through
-    centralization (the retired base-preflight prediction's framing):
-    owner display, secret name, declared usage, and the describe
-    hint."""
-    config, registry = _px_site_setup(tmp_path, '"prompt"')
-    monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN", raising=False)
-    with pytest.raises(ConfigError) as exc:
-        require_predicted_refs("vm-site/px", (_px_ref(),), config, registry, interaction=TtyInteractionPolicy.REFUSE)
-    assert str(exc.value) == (
-        "vm-site/px: secret 'proxmox-token' (the Proxmox API token) is not attemptable by any active source"
+    monkeypatch.setattr("agentworks.secrets.preview.preview_batch", preview_batch)
+    predictions = predict_resolution(
+        [SecretDecl(name="token", description="token")],
+        (),
+        tty_access=TtyInteractionAccess.DISABLED,
     )
-    assert exc.value.hint == (
-        "preview category: refused-interaction. Run `agw secret describe proxmox-token` for details."
+    assert predictions["token"].result == PreviewAvailable()
+    assert captured["impact"] is OperatorImpact.NONE
+    assert captured["tty_access"] is TtyInteractionAccess.DISABLED
+
+
+@pytest.mark.parametrize(
+    "preview",
+    [
+        _preview("token", PreviewAvailable()),
+        _preview("token", PreviewIndeterminate(IndeterminateReason.OPERATOR_IMPACT_LIMITED)),
+        _preview(
+            "token",
+            PreviewFailed(FailureReason.AUTHENTICATION),
+            PreviewIndeterminate(IndeterminateReason.OPERATOR_IMPACT_LIMITED),
+            PreviewFailed(FailureReason.AUTHENTICATION),
+        ),
+    ],
+)
+def test_preflight_accepts_available_indeterminate_and_later_failure_after_uncertainty(
+    preview: ResolutionPreview,
+) -> None:
+    require_predicted_refs(
+        "fixture/owner",
+        [_ref("token")],
+        SimpleNamespace(),  # type: ignore[arg-type]
+        SimpleNamespace(),  # type: ignore[arg-type]
+        tty_access=TtyInteractionAccess.DISABLED,
+        preview_memo={"token": preview},
+        sources=(),
     )
 
 
-def test_require_predicted_refs_empty_refs_is_a_no_op() -> None:
-    """The early return: with nothing declared, neither the config nor
-    the registry is touched (the cast object would explode on any
-    lookup), so a secret-free node's preflight costs nothing here."""
-    require_predicted_refs("vm/box", (), None, cast("Registry", object()), interaction=TtyInteractionPolicy.REFUSE)
+def test_preflight_rejects_definitive_missing() -> None:
+    with pytest.raises(ConfigError, match="cannot pass preflight"):
+        require_predicted_refs(
+            "fixture/owner",
+            [_ref("token")],
+            SimpleNamespace(),  # type: ignore[arg-type]
+            SimpleNamespace(),  # type: ignore[arg-type]
+            tty_access=TtyInteractionAccess.UNAVAILABLE,
+            preview_memo={"token": _preview("token", PreviewMissing())},
+            sources=(),
+        )
 
 
-def test_require_predicted_refs_without_config_is_loud(
-    tmp_path: Path,
-) -> None:
-    """A config-less context reaching a secret-declaring node's
-    prediction is an inspection-shaped caller bug, refused with a typed
-    error rather than a crash (the old cannot-preflight-without-a-
-    resolver guard's successor)."""
-    _config, registry = _env_only_setup(tmp_path)
-    with pytest.raises(ConfigError, match="without config on the context") as exc:
-        require_predicted_refs("vm-site/px", (_px_ref(),), None, registry, interaction=TtyInteractionPolicy.REFUSE)
-    assert str(exc.value).startswith("vm-site/px: ")
+def test_secret_union_is_stable_and_scoped_delivery_is_enforced() -> None:
+    class Node:
+        def __init__(self, *names: str) -> None:
+            self._names = names
 
+        def secret_refs(self) -> tuple[str, ...]:
+            return self._names
 
-# -- ScopedSecrets -----------------------------------------------------------
-
-
-def test_scoped_reader_serves_declared_names() -> None:
-    reader = ScopedSecrets({"git-token-gh": "tok"}, ("git-token-gh",))
-    assert reader.get("git-token-gh") == "tok"
-
-
-def test_scoped_reader_refuses_undeclared_names() -> None:
-    """A node reads ONLY the secrets it declared: the declare/receive
-    contract, enforced at delivery."""
-    reader = ScopedSecrets({"git-token-gh": "tok", "proxmox-token": "other"}, ("git-token-gh",))
-    with pytest.raises(StateError, match="not declared"):
-        reader.get("proxmox-token")
-
-
-def test_scoped_reader_is_loud_on_unresolved_declared_names() -> None:
-    reader = ScopedSecrets({}, ("git-token-gh",))
-    with pytest.raises(StateError, match="not resolved"):
-        reader.get("git-token-gh")
-
-
-def test_scoped_reader_satisfies_the_secret_reader_protocol() -> None:
-    """It drops into ``RunContext(secrets=...)``, so ``ctx.secret``
-    delivery is scoped without any context change."""
-    from agentworks.capabilities.base import RunContext as Ctx
-
-    ctx = Ctx(secrets=ScopedSecrets({"a": "1"}, ("a",)))
-    assert ctx.secret("a") == "1"
-    with pytest.raises(StateError, match="not declared"):
-        ctx.secret("b")
-
-
-def _px_site_setup(tmp_path: Path, source_names: str = '"env-var"') -> tuple[Config, Registry]:
-    """A real config DECLARING the proxmox site, so its ``proxmox-token``
-    reference is auto-declared into the registry at finalize. The
-    prediction helpers above do not need this (they are handed a
-    reference directly); intactness does, because it asks the registry."""
-    from agentworks.bootstrap import build_registry
-    from tests.orchestrated_fixtures import PLUGINS_ENABLED, proxmox_site, write_operator_config
-
-    config = write_operator_config(
-        tmp_path,
-        PLUGINS_ENABLED + f"[secret_config]\nsources = [{source_names}]\n",
-        manifests=[proxmox_site()],
-    )
-    return config, build_registry(config)
-
-
-# -- require_declared_refs (reference intactness) ----------------------------
-
-
-def test_require_declared_refs_passes_for_a_declared_secret(tmp_path: Path) -> None:
-    """The normal case: a referenced secret is auto-declared at finalize,
-    so its row exists and intactness holds."""
-    from agentworks.orchestration.secrets import require_declared_refs
-
-    _config, registry = _px_site_setup(tmp_path)
-    require_declared_refs("vm-site/proxmox", (_px_ref(),), registry)
-
-
-def test_require_declared_refs_refuses_a_dangling_reference(tmp_path: Path) -> None:
-    """A reference naming no registry row is a typed error, not a
-    ``KeyError`` and not a silently synthesized bare declaration.
-
-    This is the half of the old node preflight that STAYS the node's
-    concern: whether the node's own declarations and the registry agree
-    is registry consistency. It starts no source attempt and asks nothing
-    about how the secret would get a value."""
-    from agentworks.orchestration.secrets import require_declared_refs
-
-    _config, registry = _px_site_setup(tmp_path)
-    dangling = SecretReference(
-        name="never-declared",
-        kind="secret",
-        usage="the Proxmox API token",
-        source=("vm-site", "px"),
-    )
-    with pytest.raises(ConfigError) as exc:
-        require_declared_refs("vm-site/px", (dangling,), registry)
-    assert "vm-site/px" in str(exc.value)
-    assert "never-declared" in str(exc.value)
-    assert "the Proxmox API token" in str(exc.value)
-
-
-def test_require_declared_refs_says_nothing_about_resolvability(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The load-bearing separation: a declared secret that NOTHING can
-    resolve still passes intactness. Resolvability is the operation's
-    question, asked by the preflight sweep; a node asking it would make
-    every resource that names a secret carry a verdict about the
-    operator's source chain."""
-    from agentworks import output
-    from agentworks.orchestration.secrets import require_declared_refs
-
-    config, registry = _px_site_setup(tmp_path, '"prompt"')
-    monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN", raising=False)
-    monkeypatch.setattr(output, "is_interactive", lambda: False)
-
-    require_declared_refs("vm-site/px", (_px_ref(),), registry)  # no raise
-    # ... while the prediction the SWEEP runs over the same reference does refuse.
-    with pytest.raises(ConfigError, match="not attemptable"):
-        require_predicted_refs("vm-site/px", (_px_ref(),), config, registry, interaction=TtyInteractionPolicy.REFUSE)
+    nodes = cast("list[OrchestrationNode]", [Node("b", "a"), Node("a", "c")])
+    assert secret_union(nodes) == ("b", "a", "c")
+    scoped = ScopedSecrets({"a": "value-a", "b": "value-b"}, ["a"])
+    assert scoped.get("a") == "value-a"
+    with pytest.raises(StateError):
+        scoped.get("b")

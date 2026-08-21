@@ -198,20 +198,21 @@ def _case_implied_env(executable: Path, shim: Path, root: Path, closed_bin: Path
         extra_env={"AW_SECRET_IMPLIED_ENV": _SENTINEL},
     )
     _require(result.returncode == 0, "implied environment verification did not succeed")
-    _require("resolved" in result.output, "implied environment outcome was not resolved")
+    _require("available" in result.output, "implied environment preview was not available")
     _require("env-var" in result.output, "implied environment outcome omitted its source")
     _require("AW_SECRET_IMPLIED_ENV" in result.output, "implied environment outcome omitted its identifier")
-    print("[ok] implied env-var resolution: value-free resolved outcome")
+    print("[ok] implied env-var preview: value-free available outcome")
 
 
 def _case_prompt_refusal(executable: Path, shim: Path, root: Path, closed_bin: Path) -> None:
     home = root / "prompt-refusal"
     _write_fixture(home, settings='[secret_config]\nsources = ["prompt"]', manifests=_secret_manifest("prompt-only"))
     result = _run(executable, shim, home, "secret", "verify", "prompt-only", path_dir=closed_bin)
-    _require(result.returncode == 1, "prompt refusal did not return the aggregate failure exit")
-    _require("refused-interaction" in result.output, "prompt refusal outcome was not typed")
-    _require("prompt" in result.output, "prompt refusal outcome omitted its source")
-    print("[ok] prompt refusal: no prompt and value-free refused-interaction outcome")
+    _require(result.returncode == 1, "prompt block did not return the aggregate failure exit")
+    _require("blocked" in result.output, "prompt block outcome was not typed")
+    _require("tty-unavailable" in result.output, "prompt block omitted the exact TTY fact")
+    _require("prompt" in result.output, "prompt block outcome omitted its source")
+    print("[ok] prompt block: no prompt and value-free tty-unavailable outcome")
 
 
 def _case_variadic_mixed(executable: Path, shim: Path, root: Path, closed_bin: Path) -> None:
@@ -231,8 +232,8 @@ def _case_variadic_mixed(executable: Path, shim: Path, root: Path, closed_bin: P
     )
     _require(result.returncode == 1, "mixed variadic verification did not aggregate failure")
     _require("implied-env" in result.output and "missing-env" in result.output, "variadic output omitted a name")
-    _require("resolved" in result.output and "unavailable" in result.output, "mixed outcomes were not preserved")
-    print("[ok] variadic verify: mixed resolved and unavailable outcomes, aggregate exit 1")
+    _require("available" in result.output and "missing" in result.output, "mixed outcomes were not preserved")
+    print("[ok] variadic verify: mixed available and missing outcomes, aggregate exit 1")
 
 
 def _case_direct_backend_remediation(executable: Path, shim: Path, root: Path, closed_bin: Path) -> None:
@@ -307,6 +308,7 @@ spec:
         executable,
         shim,
         home,
+        "--non-interactive",
         "secret",
         "verify",
         "op-token",
@@ -319,9 +321,9 @@ spec:
     )
     _require(result.returncode == 0, "declared OnePassword verification did not succeed")
     _require(marker.read_text() == "invoked", "declared OnePassword did not use the fake provider boundary")
-    _require("resolved" in result.output and "work-op" in result.output, "OnePassword outcome omitted source status")
+    _require("available" in result.output and "work-op" in result.output, "OnePassword outcome omitted source status")
     _require("op://Work/item/password" in result.output, "OnePassword outcome omitted its safe identifier")
-    print("[ok] declared onepassword source: fake provider boundary invoked, value remained private")
+    print("[ok] declared onepassword source: non-TTY fake provider invoked, value remained private")
 
 
 def _case_doctor(executable: Path, shim: Path, root: Path, closed_bin: Path) -> None:
@@ -345,11 +347,11 @@ def _case_doctor(executable: Path, shim: Path, root: Path, closed_bin: Path) -> 
     expected = (
         "env-var: backend env-var; active; enabled; synthesized default; ready",
         "prompt: backend prompt; active; enabled; synthesized default; ready",
-        "Secret 'implied-env': would attempt via env-var",
-        "Secret 'prompt-only': would attempt via prompt",
+        "Secret 'implied-env': available; source=env-var",
+        "Secret 'prompt-only': blocked/tty-unavailable; source=prompt",
     )
     _require(all(fragment in result.output for fragment in expected), "doctor omitted synthesized source evidence")
-    print("[ok] doctor: synthesized sources are ready and attemptability stays probe-free")
+    print("[ok] doctor: synthesized sources are ready and provider preview stays value-free")
 
 
 def _run_drive(*, platform_name: str = os.name) -> int:

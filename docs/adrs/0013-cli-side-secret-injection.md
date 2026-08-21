@@ -41,10 +41,10 @@ CLI-injection model that strongly outweigh this benefit.
 ## Decision
 
 Agentworks injects secret values into VM shells from the **CLI side at command time**. The CLI
-process resolves secret values from operator-side sources (env var, then prompt) and hands them to
-the SSH layer as a single coalesced `-o SetEnv="K1=V1" "K2=V2" ...` argument per ADR 0014; the
-remote sshd places them in the spawned shell's environment before exec, so values never persist on
-the VM. No VM-side storage of secret material, no VM-side broker process.
+process resolves secret values from the configured operator-side source chain and hands them to the
+SSH layer as a single coalesced `-o SetEnv="K1=V1" "K2=V2" ...` argument per ADR 0014; the remote
+sshd places them in the spawned shell's environment before exec, so values never persist on the VM.
+No VM-side storage of secret material, no VM-side broker process.
 
 (This ADR was originally drafted around a CLI-composed `build_export_block` prelude. Phase 3 of the
 SDD pivoted to SSH SetEnv, which is documented in ADR 0014; the trust-anchor analysis below is
@@ -100,10 +100,10 @@ site.
    shells (`session resume`, `console add-shell`, `agent exec`, `vm exec`, etc.) didn't need them.
    With CLI injection, every such command needs the secret available through the active source
    chain. (`session attach` is unaffected: it joins the existing tmux server's captured env, no
-   re-resolution.) In practice operators wrap their shell with `op run --` or equivalent so
-   credentials are present any time `agw` runs, but it is a real cost. The CLI process handles
-   secret material more often, on the (presumed-trusted) operator workstation rather than the
-   (less-trusted) VM. Net acceptable for agentworks's use case, but worth naming.
+   re-resolution.) Operators configure a suitable `secret-source`, including a vault-backed source
+   when appropriate, so credentials are available whenever `agw` runs. This is a real cost: the CLI
+   process handles secret material more often, on the presumed-trusted operator workstation rather
+   than the less-trusted VM. Net acceptable for agentworks's use case, but worth naming.
 
 2. **SSH command line exposure window.** The `export KEY=val && cmd` prelude appears on the SSH
    command line, which is briefly visible via `ps` to any process that can read it during the start
@@ -121,17 +121,17 @@ site.
    arguments. The isolation gains over the file model come from per-session process separation
    (positive #2) and from non-persistence (positive #1), not from any magic about env vars.
 
-4. **Resolver and prompting complexity moves into the CLI.** The CLI gains a `SecretResolver`, an
-   eager-prompting orchestration step, a static-vs-dynamic-filter analysis for computing the
-   candidate secret set, and a non-interactive failure mode. This is real complexity, but it lives
-   on the workstation side of the trust boundary where it can be covered by ordinary unit tests and
-   operator UX work. The alternative (broker) would have put comparable complexity on the VM side,
-   where it would be harder to audit and harder to update.
+4. **Resolver and source-orchestration complexity moves into the CLI.** The CLI computes the
+   candidate secret set, resolves it through configured sources, and enforces terminal-interaction
+   policy at the workstation boundary. This is real complexity, but it lives on the workstation side
+   of the trust boundary where ordinary tests and operator UX can cover it. The alternative (broker)
+   would have put comparable complexity on the VM side, where it would be harder to audit and
+   update.
 
 5. **Cold-start cost.** Each command that opens a shell does a fresh resolve. Repeated commands in
    the same shell session re-resolve. The in-process resolver cache amortizes within a single
-   command, but not across commands. Mitigated entirely by env-var-backed resolution (no prompt if
-   `AW_SECRET_*` is set), which is the expected operator workflow.
+   command, but not across commands. Configure an unattended source, such as `env-var` or a
+   supported unattended provider authentication mode, when that cost must not involve an operator.
 
 ### Neutral / not a tiebreaker
 

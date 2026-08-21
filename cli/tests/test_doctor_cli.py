@@ -159,14 +159,13 @@ class TestDoctorPlainFallback:
         out = _run_doctor(capsys)
         assert _ANSI_RE.search(out) is None
 
-    def test_non_interactive_forces_byte_plain_even_on_a_tty(
+    def test_non_interactive_does_not_change_tty_presentation(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-        monkeypatch.delenv("NO_COLOR", raising=False)
+        _tty(monkeypatch)
         output.set_non_interactive(True)
         try:
             out = _run_doctor(capsys)
         finally:
             output.set_non_interactive(False)
-        assert _ANSI_RE.search(out) is None
+        assert _ANSI_RE.search(out) is not None

@@ -408,8 +408,8 @@ Configuration:
   [ok]   Config is valid
 
 Secrets:
-  [ok]   Secret 'gh-pat' (auto): would attempt via env-var
-  [ok]   Secret 'npm-token': would attempt via env-var
+  [ok]   Secret 'gh-pat' (auto): available; source=env-var
+  [ok]   Secret 'npm-token': available; source=env-var
 
 Results: 18 ok, 11 info, 0 warn, 0 fail
 ```

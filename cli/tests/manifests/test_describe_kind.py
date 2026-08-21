@@ -148,10 +148,6 @@ def test_secret_source_kind_describes_the_backend_union_and_override_provenance(
 
     assert text.startswith("Secret sources (secret-source, resource kind)")
     assert "operator declaration with either name replaces that built-in row" in text
-    backend = _field_entry(text, "backend")
-    assert "env-var: resolves from AW_SECRET_<NAME> environment variables" in backend
-    assert "prompt: prompts interactively at resolution time" in backend
-    assert "onepassword: resolves via the 1Password CLI" in backend
     assert "`agw resource sample secret-source`" in text
 
 
@@ -180,6 +176,7 @@ def test_secret_backend_describes_its_source_config() -> None:
     assert "name  (one of: onepassword, required)" in text
     assert "account  (string or null, optional, min length 1)" in text
     assert "timeout  (number, optional, default 30.0, gt 0)" in text
+    assert "app_authentication_impact  (one of: operator-action, none, optional, default operator-action)" in text
 
 
 def test_tag_only_secret_backend_source_config_is_a_table() -> None:

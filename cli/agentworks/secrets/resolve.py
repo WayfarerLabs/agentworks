@@ -2,34 +2,55 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import time
 from contextlib import AbstractContextManager, suppress
 from dataclasses import dataclass
-from enum import StrEnum
-from typing import TYPE_CHECKING, Literal, Self
+from typing import TYPE_CHECKING, Literal, Self, cast
 
 from agentworks import output
 from agentworks.capabilities.secret_backend.client import (
+    BackendBlocked,
+    BackendFailed,
+    BackendMissing,
+    BackendPreview,
+    BackendResolution,
+    BackendResolved,
+    BlockReason,
+    FailureReason,
     InteractionBroker,
-    RemainingTime,
-    SecretClientFailure,
-    SecretClientFailureKind,
-    SecretClientTimeout,
+    LookupDescription,
+    LookupDisposition,
+    OperatorImpact,
+    PreviewAvailable,
+    PreviewBlocked,
+    PreviewFailed,
+    PreviewIndeterminate,
+    PreviewIntent,
+    PreviewMissing,
+    ResolutionIntent,
+    SecretClientIntent,
     SecretLookupRequest,
     SecretSourceClient,
-    TimeoutGuidance,
+    TtyInteractionAccess,
+    safe_identity,
 )
 from agentworks.errors import ConfigError, StateError, UserAbort
 from agentworks.schema import AgwModel, RefOwner
 from agentworks.secrets.outcomes import (
-    OUTCOME_RULES,
-    ResolutionCategory,
-    ResolutionDetail,
+    ResolutionBlocked,
+    ResolutionFailed,
+    ResolutionMissing,
     ResolutionOutcome,
-    _safe_diagnostic_text,
+    ResolutionResolved,
+    ResolutionStatus,
     complete_resolution_error,
 )
-from agentworks.secrets.policy import TtyInteractionPolicy, require_exact_tty_interaction_policy
+from agentworks.secrets.policy import (
+    TtyInteractionPolicy,
+    require_exact_tty_interaction_policy,
+    tty_interaction_access,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -56,16 +77,6 @@ class ActiveSource:
     disabled_backend_plugin: str | None = None
 
     def __post_init__(self) -> None:
-        # Examined and kept, as this object's own cross-field invariant rather
-        # than as input validation: three fields are assembled here from three
-        # separate lookups, and nothing in their types says they agree.
-        #
-        # The config half is stronger than the backends act on. ``onepassword``
-        # still re-checks its config model and raises (``backend.py:312,325``),
-        # and given this invariant those two branches are unreachable on the
-        # only path that constructs an ``ActiveSource``. That makes them
-        # candidates for this effort, not evidence for it; they are another
-        # file and another lane.
         if self.source.backend.name != self.backend_class.name:
             raise StateError(
                 f"secret-source/{self.source.name} selects {self.source.backend.name!r}, "
@@ -78,68 +89,20 @@ class ActiveSource:
     def name(self) -> str:
         return self.source.name
 
-    @property
-    def interactive(self) -> bool:
-        return self.backend_class.interactive
-
     def mapping_for(self, secret: SecretDecl) -> tuple[bool, MappingValue | None]:
         """Return mapping presence separately from its JSON-native value."""
         if self.name not in secret.backend_mappings:
             return False, None
         return True, secret.backend_mappings[self.name]
 
-    def would_attempt(self, secret: SecretDecl) -> bool:
-        mapping_present, mapping = self.mapping_for(secret)
-        if mapping_present and mapping is False:
-            return False
-        return self.backend_class.would_attempt(secret.name, mapping_present=mapping_present)
-
-    def describe_lookup(self, secret: SecretDecl) -> str | None:
-        request, identifier = _lookup_projection(secret, self)
-        return None if request is None else identifier
-
-
-class CompletionPolicy(StrEnum):
-    COMPLETE = "complete"
-    PARTIAL = "partial"
-
-
-@dataclass(frozen=True, slots=True)
-class ResolutionPolicy:
-    """The two authorities one resolution pass runs under.
-
-    ``interaction`` is the boundary. It arrives from callers our type checker
-    does not see, through the published service surface, and this constructor
-    is the totality half of the check the note above
-    ``require_exact_tty_interaction_policy`` describes.
-
-    ``completion`` is not a boundary, and is checked anyway. Every value
-    comes from a first-party literal and no published function takes it as a
-    parameter, but ``resolve_batch`` compares both fields by identity, so a
-    plain ``"complete"`` would silently take the partial branch and prompt
-    through a batch that was already doomed. One object, one rule, for the
-    cost of a ``type()`` comparison.
-    """
-
-    interaction: TtyInteractionPolicy
-    completion: CompletionPolicy
-
-    def __post_init__(self) -> None:
-        require_exact_tty_interaction_policy(self.interaction)
-        if type(self.completion) is not CompletionPolicy:
-            raise StateError("completion must be an exact CompletionPolicy") from None
+    def describe_lookup(self, secret: SecretDecl) -> LookupDescription:
+        """Return this source's validated static lookup projection."""
+        _request, description = _lookup_projection(secret, self)
+        return description
 
 
 class ResolutionBatch:
-    """A private value-bearing batch whose representation is always redacted.
-
-    The two constructor checks are this object's own cross-field invariant,
-    not input validation: a batch holds exactly one outcome per requested
-    name, and holds a value for exactly the names whose outcome resolved.
-    :meth:`complete_or_raise` hands out values on the strength of the
-    outcomes, so a batch where the two disagree would hand out the wrong
-    ones.
-    """
+    """A private value-bearing batch whose representation is redacted."""
 
     __slots__ = ("_outcomes", "_values")
 
@@ -153,9 +116,7 @@ class ResolutionBatch:
         if len(names) != len(set(names)):
             raise ValueError("resolution outcome names must be unique")
         copied_values = dict(values)
-        resolved_names = {
-            outcome.name for outcome in copied_outcomes if outcome.category is ResolutionCategory.RESOLVED
-        }
+        resolved_names = {outcome.name for outcome in copied_outcomes if outcome.status is ResolutionStatus.RESOLVED}
         if set(copied_values) != resolved_names:
             raise ValueError("resolution values must match resolved outcomes exactly")
         self._outcomes = copied_outcomes
@@ -166,7 +127,7 @@ class ResolutionBatch:
         return self._outcomes
 
     def complete_or_raise(self) -> dict[str, str]:
-        if all(outcome.category is ResolutionCategory.RESOLVED for outcome in self._outcomes):
+        if all(outcome.status is ResolutionStatus.RESOLVED for outcome in self._outcomes):
             return dict(self._values)
         raise complete_resolution_error(self._outcomes) from None
 
@@ -180,13 +141,13 @@ class ResolutionBatch:
 
 @dataclass(slots=True)
 class _Evidence:
-    refused: list[tuple[str, str | None]]
-    soft_missed: list[tuple[str, str | None]]
-    not_ready: list[tuple[str, str | None, str | None]]
+    tty_blocks: list[tuple[str, str | None, str, BlockReason]]
+    missing: list[tuple[str, str | None, str]]
+    source_blocks: list[tuple[str, str | None, str, BlockReason]]
 
     @classmethod
-    def empty(cls) -> _Evidence:
-        return cls(refused=[], soft_missed=[], not_ready=[])
+    def empty(cls) -> Self:
+        return cls(tty_blocks=[], missing=[], source_blocks=[])
 
 
 class _MonotonicBudget:
@@ -214,16 +175,11 @@ def _warn_cleanup_failure(source_name: str) -> None:
 
 
 class _SourceContextDriver(AbstractContextManager[SecretSourceClient]):
-    def __init__(
-        self,
-        inner: AbstractContextManager[SecretSourceClient],
-        *,
-        source_name: str,
-        remaining_time: RemainingTime,
-    ) -> None:
+    """Preserve the primary source result while always attempting cleanup."""
+
+    def __init__(self, inner: AbstractContextManager[SecretSourceClient], *, source_name: str) -> None:
         self._inner = inner
         self._source_name = source_name
-        self._remaining_time = remaining_time
 
     def __enter__(self) -> SecretSourceClient:
         return self._inner.__enter__()
@@ -234,24 +190,18 @@ class _SourceContextDriver(AbstractContextManager[SecretSourceClient]):
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> Literal[False]:
-        started = self._remaining_time()
-        failed = False
         try:
             suppressed = self._inner.__exit__(exc_type, exc, traceback)
-            failed = bool(suppressed)
         except BaseException:
-            failed = True
-        else:
-            finished = self._remaining_time()
-            if started is not None and started > 0.0 and finished == 0.0:
-                failed = True
-        if failed:
             _warn_cleanup_failure(self._source_name)
+        else:
+            if suppressed:
+                _warn_cleanup_failure(self._source_name)
         return False
 
 
 class OutputInteractionBroker:
-    """CLI-owned prompt broker exposing only named secret requests."""
+    """CLI-owned terminal prompt broker exposing only named requests."""
 
     __slots__ = ("_prompts",)
 
@@ -306,10 +256,6 @@ def active_sources(config: Config, registry: Registry) -> tuple[ActiveSource, ..
             continue
         disabled_backend_plugin: str | None = None
         if registry.graph.enablement_of("secret-backend", source.backend.name) is Enablement.disabled:
-            # ``origin.plugin`` is set only by the ``system-plugin`` variant, so it
-            # doubles as the variant test, exactly as the other disabled-row tails
-            # read it (``resources.access.ensure_reference_enabled``). No empty-string
-            # case to normalize: registration requires a non-empty plugin name.
             origin = getattr(registry.lookup("secret-backend", source.backend.name), "origin", None)
             disabled_backend_plugin = getattr(origin, "plugin", None)
         validated = validate_capability_config(
@@ -318,11 +264,6 @@ def active_sources(config: Config, registry: Registry) -> tuple[ActiveSource, ..
             owner=RefOwner(kind="secret-source", name=name),
             location=source.error_location,
         )
-        # Examined and kept, and it is a narrowing rather than a re-check:
-        # ``validate_capability_config`` is generic over kinds and returns
-        # ``BaseModel | None``, while a secret backend's config contract is
-        # ``AgwModel``. mypy cannot know the kind here, so this is the honest
-        # else-branch of a cast we would otherwise be making silently.
         if validated is None or not isinstance(validated, AgwModel):
             raise StateError(f"secret-source/{name} has no validated backend config")
         active.append(
@@ -337,26 +278,27 @@ def active_sources(config: Config, registry: Registry) -> tuple[ActiveSource, ..
     return tuple(active)
 
 
+class _BackendProtocolError(Exception):
+    """A backend boundary returned a malformed shape."""
+
+    __slots__ = ()
+
+
 def _lookup_projection(
     secret: SecretDecl,
     source: ActiveSource,
-) -> tuple[SecretLookupRequest | None, str | None]:
-    """Project one secret onto one source as a request and a safe identifier.
-
-    Boundary: operator-authored manifest input rendered as text. The
-    identifier a backend derives is the operator's own mapping value (the
-    ``env-var`` backend returns the variable name verbatim, and ``op://``
-    references likewise), and it lands in a rendered diagnostic line, so it
-    is screened once here for characters that could forge or alter that
-    line. Nothing else the backend returns is re-checked.
-    """
+) -> tuple[SecretLookupRequest | None, LookupDescription]:
+    """Project one secret onto one source as a request and description."""
     from agentworks.capabilities.config import validate_capability_mapping
 
+    try:
+        safe_identity(secret.name)
+        safe_identity(source.name)
+    except ValueError:
+        raise _BackendProtocolError from None
     mapping_present, mapping = source.mapping_for(secret)
     if mapping_present and mapping is False:
-        return None, None
-    if not source.would_attempt(secret):
-        return None, None
+        return None, LookupDescription(LookupDisposition.NOT_APPLICABLE, None)
     validated: BaseModel | None = None
     if mapping_present:
         try:
@@ -373,278 +315,279 @@ def _lookup_projection(
             ) from None
         if validated is None:
             raise StateError(f"secret-source/{source.name} mapping validation selected no backend model")
-    identifier = source.backend_class.describe_lookup(secret.name, validated)
-    if identifier is not None and not _safe_diagnostic_text(identifier):
+    try:
+        description = source.backend_class.describe_lookup(secret.name, validated)
+    except (ConfigError, ValueError):
+        raise _BackendProtocolError from None
+    if type(description) is not LookupDescription:
         raise _BackendProtocolError
-    return SecretLookupRequest(name=secret.name, mapping=validated), identifier
+    try:
+        checked = LookupDescription(description.disposition, description.identifier)
+    except ValueError:
+        raise _BackendProtocolError from None
+    if checked.disposition is LookupDisposition.NOT_APPLICABLE:
+        return None, checked
+    try:
+        request = SecretLookupRequest(name=secret.name, mapping=validated)
+    except ValueError:
+        raise _BackendProtocolError from None
+    return request, checked
 
 
-class _BackendProtocolError(Exception):
-    """A lookup identifier is unsafe to render, so this secret gets no row here.
+_BACKEND_FAILURE_REASONS = frozenset(
+    {
+        FailureReason.INVALID_MAPPING,
+        FailureReason.LOOKUP_REJECTED,
+        FailureReason.AUTHENTICATION,
+        FailureReason.CONNECTIVITY,
+        FailureReason.DEADLINE_EXCEEDED,
+        FailureReason.EXTERNAL,
+        FailureReason.MALFORMED_VALUE,
+    }
+)
+_BACKEND_BLOCK_REASONS = frozenset({BlockReason.TTY_UNAVAILABLE, BlockReason.TTY_INTERACTION_DISABLED})
 
-    Raised only by :func:`_lookup_projection`, and caught per secret so one
-    unrenderable identifier costs that secret its attempt at this source
-    rather than failing the whole batch.
-    """
 
-    __slots__ = ()
-
-
-def _outcome(
-    name: str,
-    detail: ResolutionDetail,
+def _validate_result_map(
+    requests: tuple[SecretLookupRequest, ...],
+    returned: object,
     *,
-    source: str | None = None,
-    identifier: str | None = None,
-    remediation_target: str | None = None,
-    guidance: TimeoutGuidance | None = None,
-) -> ResolutionOutcome:
-    rule = OUTCOME_RULES[detail]
-    return ResolutionOutcome(
-        name=name,
-        category=rule.category,
-        detail=detail,
-        remediation=rule.remediation,
-        source=source,
-        identifier=identifier,
-        remediation_target=remediation_target,
-        guidance=guidance,
-    )
+    preview_impact: OperatorImpact | None,
+    supports_tty_interaction: bool,
+) -> Mapping[str, BackendPreview] | Mapping[str, BackendResolution]:
+    """Validate a complete plugin result map before any value is copied."""
+    from collections.abc import Mapping
 
-
-def _collapse(name: str, evidence: _Evidence, *, sources_empty: bool) -> ResolutionOutcome:
-    if evidence.refused:
-        source, identifier = evidence.refused[0]
-        return _outcome(name, ResolutionDetail.INTERACTION_REFUSED, source=source, identifier=identifier)
-    if evidence.soft_missed:
-        source, identifier = evidence.soft_missed[0]
-        return _outcome(name, ResolutionDetail.SOFT_MISS, source=source, identifier=identifier)
-    if evidence.not_ready:
-        source, identifier, disabled_backend_plugin = evidence.not_ready[0]
-        detail = (
-            ResolutionDetail.SOURCE_BACKEND_PLUGIN_DISABLED
-            if disabled_backend_plugin is not None
-            else ResolutionDetail.SOURCE_NOT_READY
-        )
-        return _outcome(
-            name,
-            detail,
-            source=source,
-            identifier=identifier,
-            remediation_target=disabled_backend_plugin,
-        )
-    return _outcome(
-        name,
-        ResolutionDetail.NO_ACTIVE_SOURCE if sources_empty else ResolutionDetail.NO_ATTEMPTABLE_SOURCE,
-    )
-
-
-def _remaining_attemptable(
-    secret: SecretDecl,
-    sources: Sequence[ActiveSource],
-    *,
-    policy: ResolutionPolicy,
-) -> bool:
-    for source in sources:
-        if not source.readiness.is_ready:
-            continue
-        if source.interactive and policy.interaction is TtyInteractionPolicy.REFUSE:
-            continue
-        if source.would_attempt(secret):
-            return True
-    return False
-
-
-def _check_boundary(remaining_time: RemainingTime) -> None:
-    remaining = remaining_time()
-    if remaining is not None and remaining == 0.0:
-        raise SecretClientTimeout from None
+    if not isinstance(returned, Mapping):
+        raise _BackendProtocolError
+    names = {request.name for request in requests}
+    if set(returned.keys()) != names:
+        raise _BackendProtocolError
+    preview = preview_impact is not None
+    for result in returned.values():
+        if preview:
+            if type(result) not in {
+                PreviewAvailable,
+                PreviewMissing,
+                PreviewIndeterminate,
+                PreviewBlocked,
+                PreviewFailed,
+            }:
+                raise _BackendProtocolError
+            if isinstance(result, PreviewIndeterminate) and preview_impact is OperatorImpact.ALLOW:
+                raise _BackendProtocolError
+            if isinstance(result, PreviewBlocked) and (
+                result.reason not in _BACKEND_BLOCK_REASONS or not supports_tty_interaction
+            ):
+                raise _BackendProtocolError
+            if isinstance(result, PreviewFailed) and result.reason not in _BACKEND_FAILURE_REASONS:
+                raise _BackendProtocolError
+        else:
+            if type(result) not in {BackendResolved, BackendMissing, BackendBlocked, BackendFailed}:
+                raise _BackendProtocolError
+            if isinstance(result, BackendBlocked) and (
+                result.reason not in _BACKEND_BLOCK_REASONS or not supports_tty_interaction
+            ):
+                raise _BackendProtocolError
+            if isinstance(result, BackendFailed) and result.reason not in _BACKEND_FAILURE_REASONS:
+                raise _BackendProtocolError
+    return cast("Mapping[str, BackendPreview] | Mapping[str, BackendResolution]", returned)
 
 
 def _drive_source(
     source: ActiveSource,
     requests: tuple[SecretLookupRequest, ...],
     *,
-    broker: InteractionBroker | None,
-    timeout: float | None,
-) -> Mapping[str, str]:
-    budget = _MonotonicBudget.start(
-        timeout,
-        clock=time.monotonic,
-    )
+    intent: SecretClientIntent,
+    tty_access: TtyInteractionAccess,
+    interaction_broker: InteractionBroker | None,
+) -> Mapping[str, BackendPreview] | Mapping[str, BackendResolution]:
+    """Drive exactly one source method under a fresh operation client."""
+    budget = _MonotonicBudget.start(None)
     remaining = budget.remaining
-    _check_boundary(remaining)
+    supports_tty = source.backend_class.supports_tty_interaction
+    broker_allowed = (
+        supports_tty
+        and tty_access is TtyInteractionAccess.AVAILABLE
+        and (
+            isinstance(intent, ResolutionIntent)
+            or isinstance(intent, PreviewIntent)
+            and intent.impact is OperatorImpact.ALLOW
+        )
+    )
+    broker = interaction_broker if broker_allowed else None
+    if broker_allowed and broker is None:
+        raise StateError(f"secret source {source.name!r} requires a terminal interaction broker")
     context = source.backend_class.create_client(
         source_name=source.name,
         config=source.config,
+        intent=intent,
+        tty_access=tty_access,
         interaction_broker=broker,
         remaining_time=remaining,
     )
-    _check_boundary(remaining)
-    driver = _SourceContextDriver(context, source_name=source.name, remaining_time=remaining)
+    driver = _SourceContextDriver(context, source_name=source.name)
+    returned: Mapping[str, BackendPreview] | Mapping[str, BackendResolution]
+    impact: OperatorImpact | None
     with driver as client:
-        _check_boundary(remaining)
-        client.prepare(requests, remaining_time=remaining)
-        _check_boundary(remaining)
-        resolved = client.resolve(requests, remaining_time=remaining)
-        _check_boundary(remaining)
-    return resolved
+        if isinstance(intent, PreviewIntent):
+            returned = client.preview(requests)
+            impact = intent.impact
+        else:
+            returned = client.resolve(requests)
+            impact = None
+    return _validate_result_map(
+        requests,
+        returned,
+        preview_impact=impact,
+        supports_tty_interaction=supports_tty,
+    )
+
+
+def _resolution_outcome(
+    name: str,
+    result: ResolutionResolved | ResolutionMissing | ResolutionBlocked | ResolutionFailed,
+    *,
+    source: str | None = None,
+    identifier: str | None = None,
+    backend: str | None = None,
+) -> ResolutionOutcome:
+    return ResolutionOutcome(
+        name=name,
+        result=result,
+        source=source,
+        identifier=identifier,
+        backend=backend,
+    )
+
+
+def _collapse_actual(name: str, evidence: _Evidence, *, sources_empty: bool) -> ResolutionOutcome:
+    if evidence.tty_blocks:
+        source, identifier, backend, reason = evidence.tty_blocks[0]
+        return _resolution_outcome(
+            name,
+            ResolutionBlocked(reason),
+            source=source,
+            identifier=identifier,
+            backend=backend,
+        )
+    if evidence.missing:
+        source, identifier, backend = evidence.missing[0]
+        return _resolution_outcome(
+            name,
+            ResolutionMissing(),
+            source=source,
+            identifier=identifier,
+            backend=backend,
+        )
+    if evidence.source_blocks:
+        source, identifier, backend, reason = evidence.source_blocks[0]
+        return _resolution_outcome(
+            name,
+            ResolutionBlocked(reason),
+            source=source,
+            identifier=identifier,
+            backend=backend,
+        )
+    reason = BlockReason.NO_ACTIVE_SOURCE if sources_empty else BlockReason.NO_ATTEMPTABLE_SOURCE
+    return _resolution_outcome(name, ResolutionBlocked(reason))
 
 
 def resolve_batch(
     secrets: Sequence[SecretDecl],
     sources: Sequence[ActiveSource],
     *,
-    policy: ResolutionPolicy,
+    tty_access: TtyInteractionAccess,
     interaction_broker: InteractionBroker | None,
 ) -> ResolutionBatch:
-    """Resolve one deduplicated batch through lazy, bounded source turns."""
-    deduped: list[SecretDecl] = []
-    seen: set[str] = set()
-    for secret in secrets:
-        if secret.name not in seen:
-            seen.add(secret.name)
-            deduped.append(secret)
-
+    """Resolve one deduplicated batch in one bounded source-first pass."""
+    if type(tty_access) is not TtyInteractionAccess:
+        raise StateError("tty_access must be an exact TtyInteractionAccess")
+    deduped = list(dict.fromkeys(secret.name for secret in secrets))
+    declarations = {secret.name: secret for secret in secrets}
     outcomes: dict[str, ResolutionOutcome] = {}
     values: dict[str, str] = {}
-    evidence = {secret.name: _Evidence.empty() for secret in deduped}
+    evidence = {name: _Evidence.empty() for name in deduped}
 
-    for index, source in enumerate(sources):
-        missing = [secret for secret in deduped if secret.name not in outcomes]
-        if not missing:
+    for source in sources:
+        unresolved = [declarations[name] for name in deduped if name not in outcomes]
+        if not unresolved:
             break
         projected: list[tuple[SecretLookupRequest, str | None]] = []
-        for secret in missing:
+        for secret in unresolved:
             try:
-                request, identifier = _lookup_projection(secret, source)
+                request, description = _lookup_projection(secret, source)
             except _BackendProtocolError:
-                outcomes[secret.name] = _outcome(
+                outcomes[secret.name] = _resolution_outcome(
                     secret.name,
-                    ResolutionDetail.BACKEND_PROTOCOL,
+                    ResolutionFailed(FailureReason.BACKEND_PROTOCOL),
                     source=source.name,
+                    backend=source.backend_class.name,
                 )
                 continue
             if request is not None:
-                projected.append((request, identifier))
+                projected.append((request, description.identifier))
         if not projected:
             continue
-        if not source.readiness.is_ready:
-            # No reason check here: the reason is a backend's own text and this
-            # function never renders it. ``preview.py`` does render it, and keeps
-            # both its narrowing and ``SkippedSource``'s own emptiness invariant.
+        block_reason: BlockReason | None = None
+        if source.disabled_backend_plugin is not None:
+            block_reason = BlockReason.BACKEND_PLUGIN_DISABLED
+        elif not source.readiness.is_ready:
+            block_reason = BlockReason.SOURCE_NOT_READY
+        if block_reason is not None:
             for request, identifier in projected:
-                evidence[request.name].not_ready.append((source.name, identifier, source.disabled_backend_plugin))
+                evidence[request.name].source_blocks.append(
+                    (source.name, identifier, source.backend_class.name, block_reason)
+                )
             continue
-        if source.interactive and policy.interaction is TtyInteractionPolicy.REFUSE:
-            for request, identifier in projected:
-                evidence[request.name].refused.append((source.name, identifier))
-            continue
-        if source.interactive and policy.completion is CompletionPolicy.COMPLETE:
-            still_missing = [secret for secret in deduped if secret.name not in outcomes]
-            terminal_exists = any(outcome.category is not ResolutionCategory.RESOLVED for outcome in outcomes.values())
-            if not terminal_exists:
-                for secret in still_missing:
-                    if not _remaining_attemptable(secret, sources[index:], policy=policy):
-                        outcomes[secret.name] = _collapse(
-                            secret.name,
-                            evidence[secret.name],
-                            sources_empty=not sources,
-                        )
-                terminal_exists = any(secret.name in outcomes for secret in still_missing)
-            if terminal_exists:
-                for secret in still_missing:
-                    if secret.name not in outcomes:
-                        outcomes[secret.name] = _outcome(secret.name, ResolutionDetail.BATCH_DOOMED)
-                break
-        if source.backend_class.name == "prompt" and interaction_broker is None:
-            raise StateError("the prompt source requires an interaction broker")
 
         requests = tuple(request for request, _identifier in projected)
         identifiers = {request.name: identifier for request, identifier in projected}
-        broker = interaction_broker if source.backend_class.name == "prompt" else None
-        failure_kind: SecretClientFailureKind | None = None
-        timed_out = False
-        timeout_guidance: TimeoutGuidance | None = None
-        unexpected = False
-        timeout = source.backend_class.external_operation_timeout(source.config)
-        # Empty rather than unbound, so a failure branch that ever stopped
-        # short of its ``continue`` would soft-miss this source instead of
-        # attributing the previous source's values to it.
-        returned: Mapping[str, str] = {}
         try:
-            returned = _drive_source(source, requests, broker=broker, timeout=timeout)
-        except UserAbort:
+            returned = _drive_source(
+                source,
+                requests,
+                intent=ResolutionIntent(),
+                tty_access=tty_access,
+                interaction_broker=interaction_broker,
+            )
+        except (UserAbort, concurrent.futures.CancelledError):
             raise
-        except SecretClientTimeout as timeout_exc:
-            timed_out = True
-            timeout_guidance = timeout_exc.guidance
-        except SecretClientFailure as failure:
-            failure_kind = failure.kind
+        except _BackendProtocolError:
+            returned = {request.name: BackendFailed(FailureReason.BACKEND_PROTOCOL) for request in requests}
         except Exception:
-            # Boundary: an external process or service. What this contains is
-            # exactly ``_drive_source``: client construction, context entry,
-            # ``prepare``, ``resolve``, and exit, which is where a provider CLI
-            # or SDK actually runs. Anything raised there beyond the declared
-            # failure vocabulary becomes this source's per-secret ``unexpected``
-            # outcome rather than ending the command. The timeout declaration
-            # read above is deliberately outside: both implementations of that
-            # hook today return a declared config value and do no I/O, so a
-            # raise from it is a first-party bug and should surface as one. A
-            # future implementation that does I/O there belongs inside this.
-            unexpected = True
-        if timed_out or failure_kind is not None or unexpected:
-            if timed_out:
-                detail = ResolutionDetail.DEADLINE_EXCEEDED
-            elif failure_kind is not None:
-                detail = {
-                    SecretClientFailureKind.HARD_MAPPING: ResolutionDetail.HARD_MAPPING,
-                    SecretClientFailureKind.AUTHENTICATION: ResolutionDetail.AUTHENTICATION,
-                    SecretClientFailureKind.CONNECTIVITY: ResolutionDetail.CONNECTIVITY,
-                    SecretClientFailureKind.EXTERNAL: ResolutionDetail.EXTERNAL,
-                }[failure_kind]
-            else:
-                detail = ResolutionDetail.UNEXPECTED
-            for request in requests:
-                outcomes[request.name] = _outcome(
-                    request.name,
-                    detail,
-                    source=source.name,
-                    identifier=identifiers[request.name],
-                    guidance=timeout_guidance,
-                )
-            continue
+            returned = {request.name: BackendFailed(FailureReason.UNEXPECTED) for request in requests}
 
         for request in requests:
-            if request.name not in returned:
-                evidence[request.name].soft_missed.append((source.name, identifiers[request.name]))
-                continue
-            value = returned[request.name]
-            if "\0" in value:
-                outcomes[request.name] = _outcome(
-                    request.name,
-                    ResolutionDetail.MALFORMED_VALUE,
-                    source=source.name,
-                    identifier=identifiers[request.name],
+            result = cast("BackendResolution", returned[request.name])
+            identity = {
+                "source": source.name,
+                "identifier": identifiers[request.name],
+                "backend": source.backend_class.name,
+            }
+            if isinstance(result, BackendResolved):
+                values[request.name] = result.value
+                outcomes[request.name] = _resolution_outcome(request.name, ResolutionResolved(), **identity)
+            elif isinstance(result, BackendMissing):
+                evidence[request.name].missing.append(
+                    (source.name, identifiers[request.name], source.backend_class.name)
                 )
-                continue
-            values[request.name] = value
-            outcomes[request.name] = _outcome(
-                request.name,
-                ResolutionDetail.RESOLVED,
-                source=source.name,
-                identifier=identifiers[request.name],
-            )
+            elif isinstance(result, BackendBlocked):
+                evidence[request.name].tty_blocks.append(
+                    (source.name, identifiers[request.name], source.backend_class.name, result.reason)
+                )
+            else:
+                assert isinstance(result, BackendFailed)
+                outcomes[request.name] = _resolution_outcome(
+                    request.name,
+                    ResolutionFailed(result.reason),
+                    **identity,
+                )
 
-    for secret in deduped:
-        if secret.name not in outcomes:
-            outcomes[secret.name] = _collapse(
-                secret.name,
-                evidence[secret.name],
-                sources_empty=not sources,
-            )
-    ordered = tuple(outcomes[secret.name] for secret in deduped)
-    return ResolutionBatch(ordered, values)
+    for name in deduped:
+        if name not in outcomes:
+            outcomes[name] = _collapse_actual(name, evidence[name], sources_empty=not sources)
+    return ResolutionBatch(tuple(outcomes[name] for name in deduped), values)
 
 
 @dataclass(slots=True)
@@ -660,35 +603,25 @@ class PartialResolution:
     __str__ = __repr__
 
 
-def _copy_partial_values(batch: ResolutionBatch) -> dict[str, str]:
-    return dict(batch._values)
-
-
 def resolve_partial_for_reveal(
     secrets: Sequence[SecretDecl],
     sources: Sequence[ActiveSource],
     *,
     interaction: TtyInteractionPolicy,
 ) -> PartialResolution:
-    """Resolve independent values for the explicit env reveal surface.
+    """Resolve independent values for the explicit environment reveal surface."""
+    import sys
 
-    Checks its own ``interaction`` because the coverage rule beside
-    ``require_exact_tty_interaction_policy`` says every constructing function does. The
-    constructor would catch a bad value one line later here, which is exactly why the
-    rule is applied rather than judged.
-    """
     require_exact_tty_interaction_policy(interaction)
-    broker = OutputInteractionBroker(secrets) if interaction is TtyInteractionPolicy.ALLOW else None
+    tty_access = tty_interaction_access(interaction, terminal_input_usable=sys.stdin.isatty())
+    broker = OutputInteractionBroker(secrets) if tty_access is TtyInteractionAccess.AVAILABLE else None
     batch = resolve_batch(
         secrets,
         sources,
-        policy=ResolutionPolicy(interaction=interaction, completion=CompletionPolicy.PARTIAL),
+        tty_access=tty_access,
         interaction_broker=broker,
     )
-    return PartialResolution(
-        values=_copy_partial_values(batch),
-        outcomes=batch.outcomes,
-    )
+    return PartialResolution(values=dict(batch._values), outcomes=batch.outcomes)
 
 
 def validate_chain(config: Config, registry: Registry) -> None:
@@ -712,7 +645,7 @@ def validate_chain(config: Config, registry: Registry) -> None:
         raise ConfigError(
             f"unreachable secret(s): {names}",
             hint=(
-                f"active source chain: [{source_chain}]. Add an attemptable secret-source, "
+                f"active source chain: [{source_chain}]. Add a candidate secret-source, "
                 "remove a false opt-out, or remove the unused declaration."
             ),
         )

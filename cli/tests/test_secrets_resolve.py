@@ -1,255 +1,82 @@
-"""Ordered typed secret-source resolution semantics."""
+"""Core source-first resolution and provider-aware preview behavior."""
 
 from __future__ import annotations
 
-from contextlib import AbstractContextManager
-from typing import ClassVar
+from collections.abc import Mapping
+from contextlib import AbstractContextManager, nullcontext
+from typing import ClassVar, Literal, cast
 
-import pytest
+from pydantic import BaseModel
 
-from agentworks.capabilities.secret_backend.client import (
+from agentworks.capabilities.secret_backend import (
+    BackendBlocked,
+    BackendFailed,
+    BackendMissing,
+    BackendPreview,
+    BackendResolution,
+    BackendResolved,
+    BlockReason,
+    FailureReason,
+    IndeterminateReason,
     InteractionBroker,
+    LookupDescription,
+    LookupDisposition,
+    OperatorImpact,
+    PreviewAvailable,
+    PreviewIndeterminate,
     RemainingTime,
-    SecretClientFailure,
-    SecretClientFailureKind,
-    SecretClientRemediation,
+    SecretClientIntent,
+    SecretLookupRequest,
     SecretSourceClient,
+    TtyInteractionAccess,
 )
-from agentworks.capabilities.secret_backend.prompt import PromptBackend, PromptSourceConfig
+from agentworks.capabilities.secret_backend.base import SecretBackend
 from agentworks.resources.graph import Readiness
-from agentworks.schema import AgwModel, CapabilityBlock
-from agentworks.secrets import SecretDecl
-from agentworks.secrets.outcomes import ResolutionCategory, ResolutionDetail
-from agentworks.secrets.policy import TtyInteractionPolicy
-from agentworks.secrets.resolve import (
-    ActiveSource,
-    CompletionPolicy,
-    ResolutionPolicy,
-    resolve_batch,
-)
-from agentworks.secrets.sources import SecretSourceDecl
-from tests.secrets.test_resolution_lifecycle import _Backend, _source
+from agentworks.schema import AgwModel, AgwRootModel, CapabilityBlock
+from agentworks.secrets import SecretDecl, SecretSourceDecl
+from agentworks.secrets.outcomes import ResolutionFailed, ResolutionStatus
+from agentworks.secrets.preview import PreviewStatus, preview_batch
+from agentworks.secrets.resolve import ActiveSource, resolve_batch
 
 
-def _policy(*, partial: bool = False) -> ResolutionPolicy:
-    return ResolutionPolicy(
-        interaction=TtyInteractionPolicy.REFUSE,
-        completion=CompletionPolicy.PARTIAL if partial else CompletionPolicy.COMPLETE,
-    )
+class _Config(AgwModel):
+    name: Literal["fixture"]
 
 
-class _First(_Backend):
-    events: ClassVar[list[str]] = []
-    values: ClassVar[dict[str, str]] = {}
-    failure: ClassVar[BaseException | None] = None
+class _Mapping(AgwRootModel[str]):
+    pass
 
 
-class _Second(_Backend):
-    events: ClassVar[list[str]] = []
-    values: ClassVar[dict[str, str]] = {}
-    failure: ClassVar[BaseException | None] = None
+class _Client:
+    preview_results: ClassVar[dict[str, BackendPreview]] = {}
+    resolution_results: ClassVar[dict[str, BackendResolution]] = {}
+    calls: ClassVar[list[tuple[str, ...]]] = []
+
+    def preview(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendPreview]:
+        self.calls.append(tuple(request.name for request in requests))
+        return {request.name: self.preview_results[request.name] for request in requests}
+
+    def resolve(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendResolution]:
+        self.calls.append(tuple(request.name for request in requests))
+        return {request.name: self.resolution_results[request.name] for request in requests}
 
 
-def _reset() -> None:
-    for backend in (_First, _Second):
-        backend.events = []
-        backend.values = {}
-        backend.failure = None
+class _Backend(SecretBackend):
+    name = "fixture"
+    description = "fixture"
+    contract_version = 1
+    config_model: ClassVar[type[AgwModel]] = _Config
+    mapping_model = _Mapping
+    supports_tty_interaction = False
+    client_type: ClassVar[type[_Client]] = _Client
 
-
-def test_first_resolved_source_wins_and_later_source_is_lazy() -> None:
-    _reset()
-    _First.values = {"x": "first"}
-    _Second.values = {"x": "second"}
-    batch = resolve_batch(
-        [SecretDecl(name="x", description="x")],
-        [_source(name="first", backend_class=_First), _source(name="second", backend_class=_Second)],
-        policy=_policy(),
-        interaction_broker=None,
-    )
-    assert batch.complete_or_raise() == {"x": "first"}
-    assert _Second.events == []
-
-
-def test_soft_miss_falls_through_in_request_order() -> None:
-    _reset()
-    _Second.values = {"x": "second"}
-    batch = resolve_batch(
-        [SecretDecl(name="x", description="x")],
-        [_source(name="first", backend_class=_First), _source(name="second", backend_class=_Second)],
-        policy=_policy(),
-        interaction_broker=None,
-    )
-    assert batch.complete_or_raise() == {"x": "second"}
-    assert _First.events == ["factory", "enter", "prepare", "resolve", "exit"]
-    assert _Second.events == ["factory", "enter", "prepare", "resolve", "exit"]
-
-
-def test_hard_failure_halts_attempted_secret_but_unrelated_secret_continues() -> None:
-    _reset()
-    _First.failure = SecretClientFailure(
-        kind=SecretClientFailureKind.HARD_MAPPING,
-        remediation=SecretClientRemediation.CHECK_MAPPING,
-    )
-    _Second.values = {"other": "ok"}
-    mapped = SecretDecl(name="mapped", description="mapped")
-    other = SecretDecl(name="other", description="other", backend_mappings={"first": False})
-    batch = resolve_batch(
-        [mapped, other],
-        [_source(name="first", backend_class=_First), _source(name="second", backend_class=_Second)],
-        policy=_policy(partial=True),
-        interaction_broker=None,
-    )
-    assert batch.outcomes[0].detail is ResolutionDetail.HARD_MAPPING
-    assert batch.outcomes[1].category is ResolutionCategory.RESOLVED
-
-
-def test_false_opt_out_is_keyed_by_source_name() -> None:
-    _reset()
-    _First.values = {"x": "wrong"}
-    _Second.values = {"x": "right"}
-    decl = SecretDecl(name="x", description="x", backend_mappings={"first": False})
-    batch = resolve_batch(
-        [decl],
-        [_source(name="first", backend_class=_First), _source(name="second", backend_class=_Second)],
-        policy=_policy(),
-        interaction_broker=None,
-    )
-    assert batch.complete_or_raise() == {"x": "right"}
-    assert _First.events == []
-
-
-def test_client_mapping_iteration_order_cannot_reorder_outcomes() -> None:
-    _reset()
-    _First.values = {"b": "b", "a": "a"}
-    batch = resolve_batch(
-        [SecretDecl(name="a", description="a"), SecretDecl(name="b", description="b")],
-        [_source(name="first", backend_class=_First)],
-        policy=_policy(),
-        interaction_broker=None,
-    )
-    assert [outcome.name for outcome in batch.outcomes] == ["a", "b"]
-
-
-@pytest.mark.parametrize(
-    ("kind", "detail"),
-    [
-        (SecretClientFailureKind.HARD_MAPPING, ResolutionDetail.HARD_MAPPING),
-        (SecretClientFailureKind.AUTHENTICATION, ResolutionDetail.AUTHENTICATION),
-        (SecretClientFailureKind.CONNECTIVITY, ResolutionDetail.CONNECTIVITY),
-        (SecretClientFailureKind.EXTERNAL, ResolutionDetail.EXTERNAL),
-    ],
-)
-def test_every_typed_hard_failure_halts_the_attempted_secret(
-    kind: SecretClientFailureKind,
-    detail: ResolutionDetail,
-) -> None:
-    _reset()
-    remediation = {
-        SecretClientFailureKind.HARD_MAPPING: SecretClientRemediation.CHECK_MAPPING,
-        SecretClientFailureKind.AUTHENTICATION: SecretClientRemediation.SIGN_IN,
-        SecretClientFailureKind.CONNECTIVITY: SecretClientRemediation.CHECK_CONNECTIVITY,
-        SecretClientFailureKind.EXTERNAL: SecretClientRemediation.RETRY,
-    }[kind]
-    _First.failure = SecretClientFailure(kind=kind, remediation=remediation)
-    _Second.values = {"token": "must-not-fall-through"}
-    batch = resolve_batch(
-        [SecretDecl(name="token", description="token")],
-        [_source(name="first", backend_class=_First), _source(name="second", backend_class=_Second)],
-        policy=_policy(partial=True),
-        interaction_broker=None,
-    )
-    assert batch.outcomes[0].detail is detail
-    assert _Second.events == []
-
-
-def test_not_ready_source_falls_through_without_construction() -> None:
-    _reset()
-    _Second.values = {"token": "winner"}
-    batch = resolve_batch(
-        [SecretDecl(name="token", description="token")],
-        [
-            _source(name="first", backend_class=_First, ready=False),
-            _source(name="second", backend_class=_Second),
-        ],
-        policy=_policy(),
-        interaction_broker=None,
-    )
-    assert batch.complete_or_raise() == {"token": "winner"}
-    assert _First.events == []
-
-
-class _Interactive(_Second):
-    interactive: ClassVar[bool] = True
-
-
-class _NeverAttempts(_Second):
     @classmethod
-    def would_attempt(cls, secret_name: str, *, mapping_present: bool) -> bool:
-        return False
+    def backend_readiness(cls) -> Readiness:
+        return Readiness.ready()
 
-
-def test_final_evidence_precedence_is_refused_then_soft_miss_then_not_ready() -> None:
-    _reset()
-    secret = SecretDecl(name="token", description="token")
-    refused = resolve_batch(
-        [secret],
-        [
-            _source(name="first", backend_class=_First),
-            _source(name="second", backend_class=_Interactive),
-        ],
-        policy=_policy(partial=True),
-        interaction_broker=None,
-    )
-    assert refused.outcomes[0].detail is ResolutionDetail.INTERACTION_REFUSED
-    assert refused.outcomes[0].source == "second"
-
-    soft = resolve_batch(
-        [secret],
-        [
-            _source(name="first", backend_class=_First),
-            _source(name="second", backend_class=_Second, ready=False),
-        ],
-        policy=_policy(partial=True),
-        interaction_broker=None,
-    )
-    assert soft.outcomes[0].detail is ResolutionDetail.SOFT_MISS
-    assert soft.outcomes[0].source == "first"
-
-    not_ready = resolve_batch(
-        [secret],
-        [_source(name="second", backend_class=_Second, ready=False)],
-        policy=_policy(partial=True),
-        interaction_broker=None,
-    )
-    assert not_ready.outcomes[0].detail is ResolutionDetail.SOURCE_NOT_READY
-    assert not_ready.outcomes[0].source == "second"
-
-
-def test_empty_chain_and_non_attempting_chain_are_distinct() -> None:
-    secret = SecretDecl(name="token", description="token")
-    empty = resolve_batch([secret], [], policy=_policy(partial=True), interaction_broker=None)
-    inert = resolve_batch(
-        [secret],
-        [_source(name="inert", backend_class=_NeverAttempts)],
-        policy=_policy(partial=True),
-        interaction_broker=None,
-    )
-    assert empty.outcomes[0].detail is ResolutionDetail.NO_ACTIVE_SOURCE
-    assert inert.outcomes[0].detail is ResolutionDetail.NO_ATTEMPTABLE_SOURCE
-
-
-class _Broker:
-    def __init__(self) -> None:
-        self.calls: list[str] = []
-
-    def request_secret(self, name: str, /) -> str:
-        self.calls.append(name)
-        return f"prompted-{name}"
-
-
-class _PromptProbe(PromptBackend):
-    factories: ClassVar[int] = 0
+    @classmethod
+    def describe_lookup(cls, secret_name: str, mapping: BaseModel | None) -> LookupDescription:
+        return LookupDescription(LookupDisposition.CANDIDATE, f"id:{secret_name}")
 
     @classmethod
     def create_client(
@@ -257,79 +84,178 @@ class _PromptProbe(PromptBackend):
         *,
         source_name: str,
         config: AgwModel,
+        intent: SecretClientIntent,
+        tty_access: TtyInteractionAccess,
         interaction_broker: InteractionBroker | None,
         remaining_time: RemainingTime,
     ) -> AbstractContextManager[SecretSourceClient]:
-        cls.factories += 1
-        return super().create_client(
-            source_name=source_name,
-            config=config,
-            interaction_broker=interaction_broker,
-            remaining_time=remaining_time,
-        )
+        return nullcontext(cls.client_type())
 
 
-def _prompt_source() -> ActiveSource:
+def _source(
+    name: str,
+    *,
+    client_type: type[_Client],
+    ready: bool = True,
+    supports_tty: bool = False,
+) -> ActiveSource:
+    backend = cast(
+        "type[_Backend]",
+        type(
+            f"{name.title()}Backend",
+            (_Backend,),
+            {"name": name, "client_type": client_type, "supports_tty_interaction": supports_tty},
+        ),
+    )
+    config_model = cast(
+        "type[AgwModel]",
+        type(
+            f"{name.title()}Config",
+            (AgwModel,),
+            {"__annotations__": {"name": Literal[name]}},  # type: ignore[valid-type]
+        ),
+    )
+    backend.config_model = config_model
+    readiness = Readiness.ready() if ready else Readiness.blocked("not ready")
     return ActiveSource(
-        source=SecretSourceDecl(name="prompt", backend=CapabilityBlock.of("prompt")),
-        backend_class=_PromptProbe,
-        config=PromptSourceConfig(name="prompt"),
-        readiness=Readiness.ready(),
+        source=SecretSourceDecl(name=name, backend=CapabilityBlock.of(name)),
+        backend_class=backend,
+        config=config_model.model_validate({"name": name}),
+        readiness=readiness,
     )
 
 
-def test_complete_mode_dooms_before_prompt_factory_or_broker() -> None:
-    _reset()
-    _PromptProbe.factories = 0
-    broker = _Broker()
-    doomed = SecretDecl(name="doomed", description="doomed", backend_mappings={"prompt": False})
-    independent = SecretDecl(name="independent", description="independent")
+def _decl(name: str) -> SecretDecl:
+    return SecretDecl(name=name, description=name)
+
+
+def test_actual_resolution_is_one_source_first_pass_with_missing_fallthrough() -> None:
+    class First(_Client):
+        resolution_results = {"a": BackendMissing(), "b": BackendResolved("first-b")}
+        calls = []
+
+    class Second(_Client):
+        resolution_results = {"a": BackendResolved("second-a")}
+        calls = []
+
     batch = resolve_batch(
-        [doomed, independent],
-        [_source(name="first", backend_class=_First), _prompt_source()],
-        policy=ResolutionPolicy(interaction=TtyInteractionPolicy.ALLOW, completion=CompletionPolicy.COMPLETE),
-        interaction_broker=broker,
-    )
-    assert [outcome.detail for outcome in batch.outcomes] == [
-        ResolutionDetail.SOFT_MISS,
-        ResolutionDetail.BATCH_DOOMED,
-    ]
-    assert _PromptProbe.factories == 0
-    assert broker.calls == []
-
-
-def test_partial_mode_resolves_independent_secret_instead_of_dooming() -> None:
-    _reset()
-    _PromptProbe.factories = 0
-    broker = _Broker()
-    doomed = SecretDecl(name="doomed", description="doomed", backend_mappings={"prompt": False})
-    independent = SecretDecl(name="independent", description="independent")
-    batch = resolve_batch(
-        [doomed, independent],
-        [_source(name="first", backend_class=_First), _prompt_source()],
-        policy=ResolutionPolicy(interaction=TtyInteractionPolicy.ALLOW, completion=CompletionPolicy.PARTIAL),
-        interaction_broker=broker,
-    )
-    assert [outcome.detail for outcome in batch.outcomes] == [
-        ResolutionDetail.SOFT_MISS,
-        ResolutionDetail.RESOLVED,
-    ]
-    assert _PromptProbe.factories == 1
-    assert broker.calls == ["independent"]
-
-
-def test_complete_doom_applies_to_interactive_plugin_without_a_broker() -> None:
-    _reset()
-    doomed = SecretDecl(name="doomed", description="doomed", backend_mappings={"interactive": False})
-    independent = SecretDecl(name="independent", description="independent")
-    batch = resolve_batch(
-        [doomed, independent],
-        [
-            _source(name="first", backend_class=_First),
-            _source(name="interactive", backend_class=_Interactive),
-        ],
-        policy=ResolutionPolicy(interaction=TtyInteractionPolicy.ALLOW, completion=CompletionPolicy.COMPLETE),
+        [_decl("a"), _decl("b")],
+        [_source("first", client_type=First), _source("second", client_type=Second)],
+        tty_access=TtyInteractionAccess.DISABLED,
         interaction_broker=None,
     )
-    assert batch.outcomes[1].detail is ResolutionDetail.BATCH_DOOMED
-    assert _Interactive.events == []
+    assert batch.complete_or_raise() == {"a": "second-a", "b": "first-b"}
+    assert First.calls == [("a", "b")]
+    assert Second.calls == [("a",)]
+
+
+def test_backend_failure_hard_stops_that_secret_but_not_its_siblings() -> None:
+    class First(_Client):
+        resolution_results = {
+            "a": BackendFailed(FailureReason.LOOKUP_REJECTED),
+            "b": BackendMissing(),
+        }
+        calls = []
+
+    class Second(_Client):
+        resolution_results = {"b": BackendResolved("second-b")}
+        calls = []
+
+    batch = resolve_batch(
+        [_decl("a"), _decl("b")],
+        [_source("first", client_type=First), _source("second", client_type=Second)],
+        tty_access=TtyInteractionAccess.UNAVAILABLE,
+        interaction_broker=None,
+    )
+    assert isinstance(batch.outcomes[0].result, ResolutionFailed)
+    assert batch.outcomes[0].result.reason is FailureReason.LOOKUP_REJECTED
+    assert batch.outcomes[1].status is ResolutionStatus.RESOLVED
+    assert Second.calls == [("b",)]
+
+
+def test_blocked_source_falls_through_and_is_retained_on_exhaustion() -> None:
+    class Blocked(_Client):
+        resolution_results = {"a": BackendBlocked(BlockReason.TTY_UNAVAILABLE)}
+        calls = []
+
+    class Missing(_Client):
+        resolution_results = {"a": BackendMissing()}
+        calls = []
+
+    outcome = resolve_batch(
+        [_decl("a")],
+        [
+            _source("promptish", client_type=Blocked, supports_tty=True),
+            _source("missing", client_type=Missing),
+        ],
+        tty_access=TtyInteractionAccess.UNAVAILABLE,
+        interaction_broker=None,
+    ).outcomes[0]
+    assert outcome.status is ResolutionStatus.BLOCKED
+    assert outcome.reason is BlockReason.TTY_UNAVAILABLE
+
+
+def test_preview_uses_later_definitive_result_and_retains_attempt_evidence() -> None:
+    class First(_Client):
+        preview_results = {"a": PreviewIndeterminate(IndeterminateReason.OPERATOR_IMPACT_LIMITED)}
+        calls = []
+
+    class Second(_Client):
+        preview_results = {"a": PreviewAvailable()}
+        calls = []
+
+    preview = preview_batch(
+        [_decl("a")],
+        [_source("first", client_type=First), _source("second", client_type=Second)],
+        impact=OperatorImpact.NONE,
+        tty_access=TtyInteractionAccess.UNAVAILABLE,
+        interaction_broker=None,
+    )["a"]
+    assert preview.status is PreviewStatus.AVAILABLE
+    assert [attempt.source for attempt in preview.attempts] == ["first", "second"]
+
+
+def test_allow_preview_rejects_indeterminate_as_backend_protocol_failure() -> None:
+    class Client(_Client):
+        preview_results = {"a": PreviewIndeterminate(IndeterminateReason.OPERATOR_IMPACT_LIMITED)}
+
+    preview = preview_batch(
+        [_decl("a")],
+        [_source("fixture", client_type=Client)],
+        impact=OperatorImpact.ALLOW,
+        tty_access=TtyInteractionAccess.AVAILABLE,
+        interaction_broker=None,
+    )["a"]
+    assert preview.status is PreviewStatus.FAILED
+    assert preview.reason == FailureReason.BACKEND_PROTOCOL.value
+
+
+def test_exact_result_map_is_validated_before_any_value_is_copied() -> None:
+    class Incomplete(_Client):
+        def resolve(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendResolution]:
+            return {"a": BackendResolved("must-not-escape")}
+
+    batch = resolve_batch(
+        [_decl("a"), _decl("b")],
+        [_source("fixture", client_type=Incomplete)],
+        tty_access=TtyInteractionAccess.DISABLED,
+        interaction_broker=None,
+    )
+    assert [outcome.status for outcome in batch.outcomes] == [ResolutionStatus.FAILED, ResolutionStatus.FAILED]
+    assert "must-not-escape" not in repr(batch)
+
+
+def test_false_mapping_is_excluded_before_backend_call() -> None:
+    class Client(_Client):
+        resolution_results = {"a": BackendResolved("unused")}
+        calls = []
+
+    decl = SecretDecl(name="a", description="a", backend_mappings={"fixture": False})
+    outcome = resolve_batch(
+        [decl],
+        [_source("fixture", client_type=Client)],
+        tty_access=TtyInteractionAccess.AVAILABLE,
+        interaction_broker=None,
+    ).outcomes[0]
+    assert outcome.reason is BlockReason.NO_ATTEMPTABLE_SOURCE
+    assert Client.calls == []

@@ -8,13 +8,10 @@ from pathlib import Path
 import pytest
 
 from agentworks.bootstrap import build_registry
+from agentworks.capabilities.secret_backend import BlockReason, OperatorImpact, TtyInteractionAccess
 from agentworks.config import load_config
 from agentworks.plugins import SYSTEM_PLUGINS
-from agentworks.secrets.outcomes import (
-    ResolutionDetail,
-    format_outcome,
-)
-from agentworks.secrets.policy import TtyInteractionPolicy
+from agentworks.secrets.preview import PreviewStatus
 from agentworks.secrets.resolve import active_sources
 from agentworks.secrets.verification import verify_secrets
 from tests.conftest import ManifestDoc, write_cfg
@@ -54,12 +51,13 @@ def test_declared_source_accepts_string_subclass_plugin_attribution(
     (source,) = active_sources(config, registry)
 
     assert source.disabled_backend_plugin is plugin_name
-    (outcome,) = verify_secrets(
+    (preview,) = verify_secrets(
         config,
         registry,
         ["token"],
-        interaction=TtyInteractionPolicy.REFUSE,
+        impact=OperatorImpact.NONE,
+        tty_access=TtyInteractionAccess.DISABLED,
     )
-    assert outcome.detail is ResolutionDetail.SOURCE_BACKEND_PLUGIN_DISABLED
-    assert outcome.remediation_target is plugin_name
-    assert format_outcome(outcome).endswith("remediation=enable plugin `Vault.Plugin`")
+    assert preview.status is PreviewStatus.BLOCKED
+    assert preview.reason == BlockReason.BACKEND_PLUGIN_DISABLED.value
+    assert source.disabled_backend_plugin is plugin_name

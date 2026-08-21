@@ -1,20 +1,19 @@
-"""Proof-oriented secret verification services."""
+"""Proof-oriented, value-free secret verification services."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from agentworks.capabilities.secret_backend import OperatorImpact, TtyInteractionAccess
 from agentworks.errors import NotFoundError, ValidationError
 from agentworks.naming import MAX_SECRET_NAME_LENGTH, validate_name
-from agentworks.secrets.outcomes import format_remediation
-from agentworks.secrets.policy import TtyInteractionPolicy, require_exact_tty_interaction_policy
+from agentworks.secrets.preview import ResolutionPreview, preview_batch, preview_hint
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from agentworks.config import Config
     from agentworks.resources.registry import Registry
-    from agentworks.secrets.outcomes import ResolutionOutcome
 
 
 _INVALID_NAME_ERROR = (
@@ -24,28 +23,24 @@ _INVALID_NAME_ERROR = (
 )
 
 
-def render_verification(outcomes: tuple[ResolutionOutcome, ...]) -> None:
-    """Render value-free resolution outcomes in request order."""
+def render_verification(previews: tuple[ResolutionPreview, ...]) -> None:
+    """Render value-free preview outcomes in request order."""
     from agentworks import output
 
-    headers = ["NAME", "CATEGORY", "SOURCE", "IDENTIFIER", "DETAIL", "REMEDIATION"]
+    headers = ["NAME", "STATUS", "SOURCE", "IDENTIFIER", "REASON", "HINT"]
     rows = [
         [
-            outcome.name,
-            outcome.category.value,
-            outcome.source or "-",
-            outcome.identifier or "-",
-            outcome.detail.value,
-            format_remediation(outcome),
+            preview.name,
+            preview.status.value,
+            preview.source or "-",
+            preview.identifier or "-",
+            preview.reason or "-",
+            preview_hint(preview, interaction_opt_in=True),
         ]
-        for outcome in outcomes
+        for preview in previews
     ]
     max_col_width = max(len(cell) for row in [headers, *rows] for cell in row)
-    for line in output.render_table(
-        headers,
-        rows,
-        max_col_width=max_col_width,
-    ):
+    for line in output.render_table(headers, rows, max_col_width=max_col_width):
         output.info(line)
 
 
@@ -54,27 +49,23 @@ def verify_secrets(
     registry: Registry,
     names: Sequence[str],
     *,
-    interaction: TtyInteractionPolicy,
-) -> tuple[ResolutionOutcome, ...]:
-    """Resolve requested declarations once and return value-free outcomes."""
-    require_exact_tty_interaction_policy(interaction)
+    impact: OperatorImpact,
+    tty_access: TtyInteractionAccess,
+) -> tuple[ResolutionPreview, ...]:
+    """Preview requested declarations once without returning any value."""
+    if type(impact) is not OperatorImpact:
+        raise ValidationError("impact must be an exact OperatorImpact")
+    if type(tty_access) is not TtyInteractionAccess:
+        raise ValidationError("tty_access must be an exact TtyInteractionAccess")
     if not names:
         raise ValidationError("at least one secret name is required")
-    invalid_name = False
     for name in names:
         if type(name) is not str:
-            invalid_name = True
-        else:
-            try:
-                validate_name(name, max_length=MAX_SECRET_NAME_LENGTH)
-            except ValidationError:
-                invalid_name = True
-        if invalid_name:
-            del name
-            names = ()
-            break
-    if invalid_name:
-        raise ValidationError(_INVALID_NAME_ERROR) from None
+            raise ValidationError(_INVALID_NAME_ERROR) from None
+        try:
+            validate_name(name, max_length=MAX_SECRET_NAME_LENGTH)
+        except ValidationError:
+            raise ValidationError(_INVALID_NAME_ERROR) from None
 
     unique_names = tuple(dict.fromkeys(names))
     from agentworks.secrets.kinds import SECRET_KIND_NAME
@@ -90,19 +81,18 @@ def verify_secrets(
                 entity_name=name,
             ) from None
 
-    from agentworks.secrets.resolve import (
-        CompletionPolicy,
-        OutputInteractionBroker,
-        ResolutionPolicy,
-        active_sources,
-        resolve_batch,
-    )
+    from agentworks.secrets.resolve import OutputInteractionBroker, active_sources
 
-    broker = OutputInteractionBroker(declarations) if interaction is TtyInteractionPolicy.ALLOW else None
-    batch = resolve_batch(
+    broker = (
+        OutputInteractionBroker(declarations)
+        if impact is OperatorImpact.ALLOW and tty_access is TtyInteractionAccess.AVAILABLE
+        else None
+    )
+    previews = preview_batch(
         declarations,
         active_sources(config, registry),
-        policy=ResolutionPolicy(interaction=interaction, completion=CompletionPolicy.COMPLETE),
+        impact=impact,
+        tty_access=tty_access,
         interaction_broker=broker,
     )
-    return batch.outcomes
+    return tuple(previews[name] for name in unique_names)

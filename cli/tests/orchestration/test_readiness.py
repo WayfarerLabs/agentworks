@@ -144,14 +144,27 @@ def _site_graph(tmp_path: Path, chain: str) -> tuple[object, object, list[object
     return config, registry, [vm_site_node(registry, "proxmox")]
 
 
-def test_sweep_predicts_source_attemptability_without_probing_values(
+def test_sweep_requires_a_definitive_value_when_zero_impact_can_check(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An available env source is attemptable without reading its value."""
     config, registry, nodes = _site_graph(tmp_path, '"env-var"')
     monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN", raising=False)
 
-    preflight_all(nodes, RunContext(config=config), registry=registry, interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
+    with pytest.raises(ConfigError, match="cannot pass preflight"):
+        preflight_all(
+            nodes,
+            RunContext(config=config),
+            registry=registry,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )  # type: ignore[arg-type]
+
+    monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "present")
+    preflight_all(
+        nodes,
+        RunContext(config=config),
+        registry=registry,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )  # type: ignore[arg-type]
 
 
 def test_node_preflight_alone_does_not_predict(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -165,23 +178,14 @@ def test_node_preflight_alone_does_not_predict(tmp_path: Path, monkeypatch: pyte
     nodes[0].preflight(RunContext(config=config))  # type: ignore[attr-defined]
 
 
-def test_sweep_fails_fast_non_interactively_on_a_prompt_only_secret(
+def test_sweep_treats_global_tty_policy_separately_from_zero_impact_preview(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Issue #202, re-pinned at the sweep. A secret only the prompt
-    source could supply, under ``--non-interactive``: the sweep refuses
-    before any prompt or mutation rather than letting the command reach
-    a resolve-end failure. Interactive, the same graph passes and the
-    value check defers to resolve time.
-    """
-    from agentworks import output
-
     config, registry, nodes = _site_graph(tmp_path, '"prompt"')
     monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN", raising=False)
 
-    monkeypatch.setattr(output, "is_interactive", lambda: False)
-    with pytest.raises(ConfigError, match="not attemptable by any active source"):
+    with pytest.raises(ConfigError, match="cannot pass preflight"):
         preflight_all(nodes, RunContext(config=config), registry=registry, interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(output, "is_interactive", lambda: True)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     preflight_all(nodes, RunContext(config=config), registry=registry, interaction=TtyInteractionPolicy.ALLOW)  # type: ignore[arg-type]

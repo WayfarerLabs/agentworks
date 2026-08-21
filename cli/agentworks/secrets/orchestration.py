@@ -253,19 +253,18 @@ def resolve_for_command(
     decls = compute_needed_secrets(targets, registry, extra_decls=extra_decls)
     if not decls:
         return {}
-    from agentworks.secrets.resolve import (
-        CompletionPolicy,
-        OutputInteractionBroker,
-        ResolutionPolicy,
-        active_sources,
-        resolve_batch,
-    )
+    import sys
 
-    broker = OutputInteractionBroker(decls) if interaction is TtyInteractionPolicy.ALLOW else None
+    from agentworks.capabilities.secret_backend import TtyInteractionAccess
+    from agentworks.secrets.policy import tty_interaction_access
+    from agentworks.secrets.resolve import OutputInteractionBroker, active_sources, resolve_batch
+
+    tty_access = tty_interaction_access(interaction, terminal_input_usable=sys.stdin.isatty())
+    broker = OutputInteractionBroker(decls) if tty_access is TtyInteractionAccess.AVAILABLE else None
     batch = resolve_batch(
         decls,
         active_sources(config, registry),
-        policy=ResolutionPolicy(interaction=interaction, completion=CompletionPolicy.COMPLETE),
+        tty_access=tty_access,
         interaction_broker=broker,
     )
     values = batch.complete_or_raise()

@@ -120,15 +120,17 @@ failing far from the mistake. The checks:
   members.
 - **Metadata**: `name` (non-empty, `/`-free) and `description`, readable as class attributes.
 - **Attributes**: the kind's other non-operation members are present. A `secret-backend` declares
-  `interactive` as exactly `bool`, plus separate `config_model` and `mapping_model` surfaces.
+  `supports_tty_interaction` as exactly `bool`, plus separate `config_model` and `mapping_model`
+  surfaces.
 - **Constructibility**: nothing would stop the class being constructed (no unimplemented
   `@abstractmethod`). Checked structurally; the impl is never constructed to find out.
 - **Operations**: the domain operations the framework depends on are present and callable. For a
-  `secret-backend`, registration also checks the call shape of `backend_readiness`, `would_attempt`,
-  `describe_lookup`, `external_operation_timeout`, and `create_client`: each declared as a
-  `@classmethod`, with the parameter names and kinds the resolution loop calls with. Annotations are
-  not compared, because a type claim is what the type checker is for and a plugin's types are not
-  under it either way.
+  `secret-backend`, registration also checks the call shape of `backend_readiness`,
+  `describe_lookup`, and `create_client`: each declared as a `@classmethod`, with the parameter
+  names and kinds the resolution loop calls with. The factory receives tagged operation intent,
+  exact TTY access, an optional broker, and remaining time before any lifecycle hook runs.
+  Annotations are not compared, because a type claim is what the type checker is for and a plugin's
+  types are not under it either way.
 - **Config models**: the impl declares every model surface its descriptor names (see
   [Declaring config](#declaring-config)). Each extends its declared base and can be built; tagged
   config models identify their implementation. A secret backend's source config cannot reference a
@@ -140,6 +142,10 @@ failing far from the mistake. The checks:
   inherited. Exact equality, so a contract change is a hard cutover.
 
 Each failure is a `PluginError` naming the plugin, the kind, the impl, and what is missing.
+
+The complete version-1 secret-backend authoring contract, including exact result variants, reason
+ownership, core flow, lifecycle, TTY broker rules, value containment, and a conforming example,
+lives in the [secret-backend capability README](../capabilities/secret_backend/README.md).
 
 ## Declaring config
 

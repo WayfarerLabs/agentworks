@@ -1,56 +1,40 @@
-"""The ``onepassword`` secret backend: resolves values through the
-1Password ``op`` CLI (v2). A capability implementation, consumed by the
-resolution loop through the ``SecretBackend`` API.
-
-Transport is a subprocess shell-out to
-``op read --no-newline [--account <acct>] op://<vault>/<item>/<field>``
-(explicit argv, never a shell string; resolved values are never logged).
-1Password Connect and any Python SDK are deliberately out of scope: the
-backend depends only on the operator's own ``op`` read access (whether from
-``op signin`` or the 1Password app's CLI integration) and its ambient env.
-Source config carries the optional account selector and operation timeout.
-
-There is no separate sign-in pre-check: the actual ``op read`` is the only
-liveness probe. ``op whoami`` is not reliable for this, because under the
-1Password app's CLI integration it can report "not signed in" even when
-``op read`` works (the app holds auth and there is no CLI session token for
-whoami to report). A signed-out state is therefore detected from a failing
-``op read`` (see the marker classification below).
-
-The ``--account`` selection path (the flag name, and that it may precede the
-positional reference) matches 1Password CLI v2 docs. Tests deliberately use
-a closed fake-provider boundary so they neither depend on nor authenticate
-through an operator's credentials; real multi-account parsing therefore
-remains externally unexercised.
-
-Mapping is required (there is no derive-from-name convention). Each mapping
-is one native ``op://vault/item/field`` reference string; an optional
-``[section/]`` segment is allowed. Account selection belongs to source
-config, not the per-secret mapping.
-"""
+"""Resolve and preview 1Password references through the bounded ``op`` CLI."""
 
 from __future__ import annotations
 
+import os
 import subprocess
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, NoReturn
+from enum import StrEnum
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 
 from pydantic import AfterValidator, BaseModel, Field
 
 from agentworks.capabilities.secret_backend.base import SecretBackend
 from agentworks.capabilities.secret_backend.client import (
+    BackendFailed,
+    BackendPreview,
+    BackendResolution,
+    BackendResolved,
+    FailureReason,
+    IndeterminateReason,
     InteractionBroker,
+    LookupDescription,
+    LookupDisposition,
+    OperatorImpact,
+    PreviewAvailable,
+    PreviewFailed,
+    PreviewIndeterminate,
+    PreviewIntent,
     RemainingTime,
-    SecretClientFailure,
-    SecretClientFailureKind,
-    SecretClientRemediation,
-    SecretClientTimeout,
+    ResolutionIntent,
+    SecretClientIntent,
     SecretLookupRequest,
     SecretSourceClient,
-    TimeoutGuidance,
+    TtyInteractionAccess,
 )
-from agentworks.errors import ConfigError
+from agentworks.errors import ConfigError, StateError
 from agentworks.schema import AgwModel, AgwRootModel, NonEmptyStr
 from agentworks.topics import TopicProse
 
@@ -59,25 +43,9 @@ if TYPE_CHECKING:
 
     from agentworks.resources.graph import Readiness
 
-_OP_BINARY = "op"
-"""The 1Password CLI executable, resolved on PATH."""
 
-# ``op`` exposes a flat exit status: 0 on success, 1 for essentially every
-# failure (auth, missing item, transport). It does NOT give distinct exit
-# codes for "not signed in" vs "no such item", so we classify a failing
-# ``op read`` by matching stderr substrings. There is NO sign-in pre-check:
-# ``op whoami`` is not a reliable liveness probe, because under the 1Password
-# app's CLI integration it reports "not signed in" even when ``op read``
-# works, so a whoami gate would abort a working setup. Classification of a
-# failing read: signed-out markers -> authentication failure; the narrow
-# not-found markers -> hard mapping failure; anything else -> external failure
-# (the fail-safe halt). The not-found markers are deliberately NARROW and
-# item/field-specific:
-# a broad marker like "no such" would also match a Go-style transport error
-# ("dial tcp: lookup ...: no such host") and mislabel connectivity as a hard
-# mapping error with misleading remediation. Anything not matched by the
-# signed-out or not-found markers falls through to the fixed external failure
-# category. Raw stderr never leaves this boundary.
+_OP_BINARY = "op"
+
 _SIGNED_OUT_MARKERS = (
     "not currently signed in",
     "no account found",
@@ -90,22 +58,38 @@ _NOT_FOUND_MARKERS = (
     "no such item",
     "no such field",
 )
+_CONNECTIVITY_MARKERS = (
+    "connection refused",
+    "network is unreachable",
+    "temporary failure in name resolution",
+    "dial tcp",
+)
 
 
-@dataclass(frozen=True, slots=True)
+class AppAuthenticationImpact(StrEnum):
+    """How app authentication counts for zero-impact preview."""
+
+    OPERATOR_ACTION = "operator-action"
+    NONE = "none"
+
+
+@dataclass(frozen=True, slots=True, repr=False)
 class _BoundedRead:
-    """A native-result-free projection of one final-client subprocess."""
-
     value: str | None = None
-    failure: SecretClientFailureKind | None = None
-    timed_out: bool = False
+    failure: FailureReason | None = None
+
+    def __post_init__(self) -> None:
+        if (self.value is None) == (self.failure is None):
+            raise ValueError("onepassword read must carry exactly one outcome")
 
     def __repr__(self) -> str:
         return "_BoundedRead(value=<redacted>)"
 
 
 def _bounded_read(args: list[str], *, timeout: float) -> _BoundedRead:
-    """Run one bounded read and project native failures to fixed categories."""
+    """Run one bounded read and discard provider-native failure text."""
+    if timeout <= 0:
+        return _BoundedRead(failure=FailureReason.DEADLINE_EXCEEDED)
     try:
         completed = subprocess.run(  # noqa: S603 - explicit argv, no shell
             [_OP_BINARY, *args],
@@ -115,67 +99,40 @@ def _bounded_read(args: list[str], *, timeout: float) -> _BoundedRead:
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:
-        return _BoundedRead(timed_out=True)
+        return _BoundedRead(failure=FailureReason.DEADLINE_EXCEEDED)
     except OSError:
-        return _BoundedRead(failure=SecretClientFailureKind.CONNECTIVITY)
+        return _BoundedRead(failure=FailureReason.CONNECTIVITY)
 
     if completed.returncode == 0:
+        if "\0" in completed.stdout:
+            return _BoundedRead(failure=FailureReason.MALFORMED_VALUE)
         return _BoundedRead(value=completed.stdout)
 
     stderr = completed.stderr.lower()
     if any(marker in stderr for marker in _SIGNED_OUT_MARKERS):
-        failure = SecretClientFailureKind.AUTHENTICATION
+        failure = FailureReason.AUTHENTICATION
     elif any(marker in stderr for marker in _NOT_FOUND_MARKERS):
-        failure = SecretClientFailureKind.HARD_MAPPING
+        failure = FailureReason.LOOKUP_REJECTED
+    elif any(marker in stderr for marker in _CONNECTIVITY_MARKERS):
+        failure = FailureReason.CONNECTIVITY
     else:
-        failure = SecretClientFailureKind.EXTERNAL
+        failure = FailureReason.EXTERNAL
     return _BoundedRead(failure=failure)
 
 
-def _raise_client_failure(kind: SecretClientFailureKind) -> NoReturn:
-    remediation = {
-        SecretClientFailureKind.HARD_MAPPING: SecretClientRemediation.CHECK_MAPPING,
-        SecretClientFailureKind.AUTHENTICATION: SecretClientRemediation.SIGN_IN,
-        SecretClientFailureKind.CONNECTIVITY: SecretClientRemediation.CHECK_CONNECTIVITY,
-        SecretClientFailureKind.EXTERNAL: SecretClientRemediation.RETRY,
-    }[kind]
-    raise SecretClientFailure(kind=kind, remediation=remediation) from None
-
-
-def _raise_client_timeout() -> NoReturn:
-    # The backend selects a closed-set identifier, never wording of its
-    # own: core (secrets.outcomes.format_remediation) owns the fixed prose
-    # this maps to, naming a pending desktop-app approval prompt as a
-    # common cause and the adjacent `op whoami` trap ("not signed in" even
-    # when reads work), per field evidence.
-    raise SecretClientTimeout(guidance=TimeoutGuidance.ONEPASSWORD_PENDING_APPROVAL) from None
-
-
 def _check_op_uri(uri: str) -> str:
-    """Reject an ``op://`` reference that is clearly malformed. A valid
-    reference is ``op://`` followed by at least three non-empty path
-    segments (vault, item, field; an optional section segment may add a
-    fourth). Query attributes (``?attribute=otp``) are left to ``op``
-    itself."""
+    """Reject a locally malformed ``op://vault/item/field`` reference."""
     prefix = "op://"
     if not uri.startswith(prefix):
-        raise ValueError(
-            f"onepassword reference {uri!r} must start with 'op://' "
-            f"(an 'op://vault/item/field' reference, optionally with a "
-            f"section: 'op://vault/item/section/field')"
-        )
+        raise ValueError("onepassword reference must start with 'op://'")
     path = uri[len(prefix) :].split("?", 1)[0]
     segments = path.split("/")
     if len(segments) < 3 or not all(segments[:3]):
-        raise ValueError(
-            f"onepassword reference {uri!r} is malformed; expected "
-            f"'op://vault/item/field' with non-empty vault, item, and field"
-        )
+        raise ValueError("onepassword reference requires non-empty vault, item, and field segments")
     return uri
 
 
 OpUri = Annotated[NonEmptyStr, AfterValidator(_check_op_uri)]
-"""A native 1Password reference, ``op://vault/item/field``."""
 
 
 class OnePasswordSourceConfig(AgwModel):
@@ -183,82 +140,110 @@ class OnePasswordSourceConfig(AgwModel):
 
     name: Literal["onepassword"]
     account: NonEmptyStr | None = None
+    """Optional 1Password account shorthand passed to ``op read``."""
     timeout: float = Field(default=30.0, gt=0, allow_inf_nan=False)
+    """Maximum seconds for each bounded provider read."""
+    app_authentication_impact: AppAuthenticationImpact = AppAuthenticationImpact.OPERATOR_ACTION
+    """Whether app authentication counts as operator action during preview."""
 
 
 class OnePasswordMapping(AgwRootModel[OpUri]):
     """One native ``op://`` lookup address."""
 
 
-class _OnePasswordClient:
-    def __init__(self, config: OnePasswordSourceConfig) -> None:
-        self._config = config
+def _known_unattended_authentication() -> bool:
+    """Return whether ambient provider facts prove a non-app auth mode."""
+    if os.environ.get("OP_SERVICE_ACCOUNT_TOKEN"):
+        return True
+    return bool(os.environ.get("OP_CONNECT_HOST") and os.environ.get("OP_CONNECT_TOKEN"))
 
-    def prepare(
+
+class _OnePasswordClient:
+    def __init__(
         self,
-        requests: tuple[SecretLookupRequest, ...],
         *,
+        config: OnePasswordSourceConfig,
+        intent: SecretClientIntent,
         remaining_time: RemainingTime,
     ) -> None:
-        return None
+        self._config = config
+        self._intent = intent
+        self._remaining_time = remaining_time
 
-    def resolve(
-        self,
-        requests: tuple[SecretLookupRequest, ...],
-        *,
-        remaining_time: RemainingTime,
-    ) -> Mapping[str, str]:
-        resolved: dict[str, str] = {}
+    def _read(self, request: SecretLookupRequest) -> _BoundedRead:
+        mapping = request.mapping
+        if not isinstance(mapping, OnePasswordMapping):
+            return _BoundedRead(failure=FailureReason.INVALID_MAPPING)
+        args = ["read", "--no-newline"]
+        if self._config.account is not None:
+            args += ["--account", self._config.account]
+        args.append(mapping.root)
+        remaining = self._remaining_time()
+        timeout = self._config.timeout if remaining is None else min(self._config.timeout, remaining)
+        return _bounded_read(args, timeout=timeout)
+
+    def preview(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendPreview]:
+        if not isinstance(self._intent, PreviewIntent):
+            raise StateError("resolution client cannot perform preview")
+        if (
+            self._intent.impact is OperatorImpact.NONE
+            and self._config.app_authentication_impact is AppAuthenticationImpact.OPERATOR_ACTION
+            and not _known_unattended_authentication()
+        ):
+            return {
+                request.name: PreviewIndeterminate(IndeterminateReason.OPERATOR_IMPACT_LIMITED) for request in requests
+            }
+        results: dict[str, BackendPreview] = {}
         for request in requests:
-            mapping = request.mapping
-            if not isinstance(mapping, OnePasswordMapping):
-                continue
-            args = ["read", "--no-newline"]
-            if self._config.account is not None:
-                args += ["--account", self._config.account]
-            args.append(mapping.root)
-            budget_remaining = remaining_time()
-            timeout = self._config.timeout if budget_remaining is None else min(self._config.timeout, budget_remaining)
-            if timeout <= 0:
-                _raise_client_timeout()
-            read = _bounded_read(args, timeout=timeout)
-            if read.timed_out:
-                _raise_client_timeout()
-            if read.failure is not None:
-                _raise_client_failure(read.failure)
-            assert read.value is not None
-            resolved[request.name] = read.value
-        return resolved
+            read = self._read(request)
+            if read.value is not None:
+                results[request.name] = PreviewAvailable()
+            else:
+                assert read.failure is not None
+                results[request.name] = PreviewFailed(read.failure)
+        return results
+
+    def resolve(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendResolution]:
+        if not isinstance(self._intent, ResolutionIntent):
+            raise StateError("preview client cannot perform resolution")
+        results: dict[str, BackendResolution] = {}
+        for request in requests:
+            read = self._read(request)
+            if read.value is not None:
+                results[request.name] = BackendResolved(read.value)
+            else:
+                assert read.failure is not None
+                results[request.name] = BackendFailed(read.failure)
+        return results
 
 
 class _OnePasswordContext(AbstractContextManager[SecretSourceClient]):
-    def __init__(self, config: OnePasswordSourceConfig) -> None:
+    def __init__(
+        self,
+        *,
+        config: OnePasswordSourceConfig,
+        intent: SecretClientIntent,
+        remaining_time: RemainingTime,
+    ) -> None:
         self._config = config
+        self._intent = intent
+        self._remaining_time = remaining_time
 
     def __enter__(self) -> SecretSourceClient:
-        return _OnePasswordClient(self._config)
+        return _OnePasswordClient(
+            config=self._config,
+            intent=self._intent,
+            remaining_time=self._remaining_time,
+        )
 
     def __exit__(self, *args: object) -> None:
         return None
 
 
 class OnePasswordBackend(SecretBackend):
-    """Resolves secret values from 1Password via the ``op`` CLI.
+    """Resolve secret values from 1Password via ``op read``."""
 
-    Mapping-required: ``would_attempt`` is True only for a secret that
-    carries a mapping for the configured source name; unmapped secrets
-    soft-skip (fall through to the next source). There is no
-    derive-from-name convention: 1Password addressing is
-    vault/item/field, which cannot be inferred from a bare secret name.
-
-    Its final mapping is a bare ``op://`` string. A source's optional
-    account selector lives in ``OnePasswordSourceConfig``.
-
-    Native failures are reduced to fixed provider categories before they
-    leave the subprocess boundary. Raw output never reaches the typed core.
-    """
-
-    contract_version: ClassVar[int] = 2
+    contract_version: ClassVar[int] = 1
     config_model: ClassVar[type[AgwModel]] = OnePasswordSourceConfig
     mapping_model: ClassVar[type[AgwRootModel[Any]]] = OnePasswordMapping
     name: ClassVar[str] = "onepassword"
@@ -266,45 +251,19 @@ class OnePasswordBackend(SecretBackend):
     prose: ClassVar[TopicProse | None] = TopicProse(
         title="1Password",
         overview="""
-        Reads a secret's value through the `op` CLI. There is no naming convention to
-        fall back on, so a secret is resolvable here only if it declares an explicit
-        mapping under `backend_mappings.<source-name>`: the `op://vault/item/field`
-        reference 1Password's "Copy Secret Reference" produces (a
-        `.../section/field` segment is allowed too).
+        Reads a secret through the `op` CLI. Each secret needs an explicit
+        `backend_mappings.<source-name>` reference. Account selection, timeout, and
+        preview app-authentication impact belong to the source config.
 
-        The mapping is always a scalar reference. Account selection and timeout belong to
-        the configured secret source so several named sources can use this backend with
-        different accounts or budgets.
-
-        Declare a `secret-source` that selects the opt-in `onepassword` system plugin,
-        then put that source name in the active chain. The backend needs the `op` CLI on
-        this host. Resolution may trigger a biometric or re-auth prompt, so inspection
-        surfaces report it optimistically rather than probing it.
+        Actual resolution always attempts the bounded provider read. Global
+        `--non-interactive` disables terminal input only and does not suppress app,
+        biometric, browser, or device approval.
         """,
     )
-
-    # interactive = True: resolving a onepassword secret may involve
-    # operator interaction, because `op read` can trigger a biometric or
-    # re-auth prompt. That is the same property the prompt backend has (it
-    # asks the operator for the value), so onepassword carries the flag for
-    # the same reason, not as a special case.
-    #
-    # The practical effect: preview_resolution never probes this backend
-    # (probing would fire the biometric at every preflight and once per
-    # secret in `agw doctor`); it reports onepassword optimistically on
-    # would_attempt alone. A non-interactive transport that authenticates
-    # without a human (1Password Connect, a service account; not built
-    # here) would not be interactive.
-    interactive: ClassVar[bool] = True
+    supports_tty_interaction: ClassVar[bool] = False
 
     @classmethod
     def backend_readiness(cls) -> Readiness:
-        """Not-ready when the ``op`` CLI is not on PATH: a pure presence test
-        (``shutil.which``), never a store probe, biometric, or re-auth (those
-        are resolution-time interactivity, kept optimistically previewed).
-        This is the offline readiness R9.6 gives backends: a configured
-        onepassword with no ``op`` installed now shows not-ready rather than
-        only failing at first resolution."""
         import shutil
 
         from agentworks.resources.graph import Readiness
@@ -314,10 +273,10 @@ class OnePasswordBackend(SecretBackend):
         return Readiness.ready()
 
     @classmethod
-    def external_operation_timeout(cls, config: AgwModel) -> float | None:
-        if not isinstance(config, OnePasswordSourceConfig):
-            raise ConfigError("onepassword received the wrong source config model")
-        return config.timeout
+    def describe_lookup(cls, secret_name: str, mapping: BaseModel | None) -> LookupDescription:
+        if not isinstance(mapping, OnePasswordMapping):
+            return LookupDescription(LookupDisposition.NOT_APPLICABLE, None)
+        return LookupDescription(LookupDisposition.CANDIDATE, mapping.root)
 
     @classmethod
     def create_client(
@@ -325,23 +284,11 @@ class OnePasswordBackend(SecretBackend):
         *,
         source_name: str,
         config: AgwModel,
+        intent: SecretClientIntent,
+        tty_access: TtyInteractionAccess,
         interaction_broker: InteractionBroker | None,
         remaining_time: RemainingTime,
     ) -> AbstractContextManager[SecretSourceClient]:
         if not isinstance(config, OnePasswordSourceConfig):
             raise ConfigError("onepassword received the wrong source config model")
-        return _OnePasswordContext(config)
-
-    @classmethod
-    def would_attempt(cls, secret_name: str, *, mapping_present: bool) -> bool:
-        # Mapping-required: only mapped secrets are attempted. (The generic
-        # ``False`` opt-out is stripped by the resolve loop before it gets
-        # here, so ``mapping`` is either a real value or ``None``.)
-        return mapping_present
-
-    @classmethod
-    def describe_lookup(cls, secret_name: str, mapping: BaseModel | None) -> str | None:
-        # The op:// reference is an operator-authored safe identifier, never a
-        # resolved value. Account selection belongs to the source and is not
-        # repeated in every per-secret identifier.
-        return mapping.root if isinstance(mapping, OnePasswordMapping) else None
+        return _OnePasswordContext(config=config, intent=intent, remaining_time=remaining_time)

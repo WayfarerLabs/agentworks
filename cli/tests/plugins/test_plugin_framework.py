@@ -187,22 +187,19 @@ class _BackendMissingItsOperations:
     contract_version = 1
     name = "barely-a-backend"
     description = "none of the backend operations"
-    interactive = False
+    supports_tty_interaction = False
     config_model: type[AgwRootModel[Any]] = AgwRootModel[str]
 
 
-class _BackendWithoutInteractive:
+class _BackendWithoutTtySupport:
     """Another lookalike, proving plausible members do not replace nominality."""
 
     contract_version = 1
-    name = "no-interactive-backend"
-    description = "omits the interactive member"
+    name = "no-tty-support-backend"
+    description = "omits the tty support member"
     config_model: type[AgwRootModel[Any]] = AgwRootModel[str]
 
     def not_ready(self) -> Readiness:
-        raise NotImplementedError
-
-    def would_attempt(self, secret: object, mapping: object) -> bool:
         raise NotImplementedError
 
     def describe_lookup(self, secret: object, mapping: object) -> str | None:
@@ -226,14 +223,6 @@ class _BackendWithInstanceReadiness(ConformingSecretBackend):
         return Readiness.ready()
 
 
-class _BackendWithInstanceTimeout(ConformingSecretBackend):
-    name = "instance-timeout-backend"
-    description = "mistakenly binds the external timeout to an instance"
-
-    def external_operation_timeout(self, config: AgwModel) -> float | None:  # type: ignore[override]
-        return None
-
-
 class _BackendWithZeroParameterFactory(ConformingSecretBackend):
     name = "zero-parameter-factory-backend"
     description = "mistakenly declares no classmethod binding parameter"
@@ -243,10 +232,10 @@ class _BackendWithZeroParameterFactory(ConformingSecretBackend):
         raise NotImplementedError
 
 
-class _BackendWithNonBooleanInteractive(ConformingSecretBackend):
-    name = "non-boolean-interactive-backend"
+class _BackendWithNonBooleanTtySupport(ConformingSecretBackend):
+    name = "non-boolean-tty-support-backend"
     description = "mistakenly uses an integer interaction flag"
-    interactive = 1  # type: ignore[assignment]
+    supports_tty_interaction = 1  # type: ignore[assignment]
 
 
 def test_git_contract_v2_retains_public_credential_lines_hook() -> None:
@@ -330,7 +319,7 @@ class _PlatformWithAnUncallableConfigHook(ConformingVMPlatform):
         ("vm-platform", _AbstractPlatform, "it is abstract"),
         ("vm-platform", _PlatformWithoutADescription, "'description' class attribute"),
         ("secret-backend", _BackendMissingItsOperations, "does not derive from SecretBackend"),
-        ("secret-backend", _BackendWithoutInteractive, "does not derive from SecretBackend"),
+        ("secret-backend", _BackendWithoutTtySupport, "does not derive from SecretBackend"),
         ("vm-platform", _PlatformWithoutAConfigModel, "declares no config_model"),
         ("vm-platform", _PlatformWithoutAModel, "not a AgwModel subclass"),
         ("vm-platform", _PlatformWithAnUntaggedModel, "does not tag itself"),
@@ -393,21 +382,21 @@ def test_a_non_conforming_impl_is_refused_before_any_registry_write() -> None:
     assert _snapshot_registries() == before
 
 
-def test_a_mixed_valid_and_version_one_plugin_contribution_seats_nothing() -> None:
-    class VersionOneBackend(ConformingSecretBackend):
-        name = "version-one-backend"
-        description = "still implements contract version one"
-        contract_version = 1
+def test_a_mixed_valid_and_version_two_plugin_contribution_seats_nothing() -> None:
+    class VersionTwoBackend(ConformingSecretBackend):
+        name = "version-two-backend"
+        description = "declares an unsupported contract version"
+        contract_version = 2
 
     plugin = Plugin(
         name="mixed-version",
         capabilities={
             "vm-platform": (FixtureVMPlatform,),
-            "secret-backend": (VersionOneBackend,),
+            "secret-backend": (VersionTwoBackend,),
         },
     )
     before = _snapshot_registries()
-    with pytest.raises(PluginError, match="declares contract_version 1"):
+    with pytest.raises(PluginError, match="declares contract_version 2"):
         register_plugin(plugin)
     assert _snapshot_registries() == before
 
@@ -416,15 +405,16 @@ def test_a_mixed_valid_and_version_one_plugin_contribution_seats_nothing() -> No
     ("backend", "expected"),
     [
         (_BackendWithInstanceReadiness, "backend_readiness must be declared as @classmethod"),
-        (_BackendWithInstanceTimeout, "external_operation_timeout must be declared as @classmethod"),
         (_BackendWithZeroParameterFactory, "create_client must declare a 'cls' binding parameter"),
-        (_BackendWithNonBooleanInteractive, "interactive class attribute is 1, not a bool"),
+        (
+            _BackendWithNonBooleanTtySupport,
+            "supports_tty_interaction class attribute is 1, not a bool",
+        ),
     ],
     ids=(
         "instance-readiness-method",
-        "instance-timeout-method",
         "zero-parameter-classmethod",
-        "malformed-interactive",
+        "malformed-tty-support",
     ),
 )
 def test_malformed_secret_backend_registration_is_atomic(backend: type, expected: str) -> None:

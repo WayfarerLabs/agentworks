@@ -148,17 +148,17 @@ def test_style_status_returns_plain_text_under_no_color(monkeypatch: pytest.Monk
     assert TyperHandler().style_status("[ok]", StatusStyle.GOOD) == "[ok]"
 
 
-def test_style_status_returns_plain_text_under_non_interactive(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_style_status_keeps_color_under_non_interactive(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     monkeypatch.delenv("NO_COLOR", raising=False)
     output.set_non_interactive(True)
     try:
-        assert TyperHandler().style_status("[ok]", StatusStyle.GOOD) == "[ok]"
+        assert TyperHandler().style_status("[ok]", StatusStyle.GOOD) == click.style("[ok]", fg="green")
     finally:
         output.set_non_interactive(False)
 
 
-# --- Plain fallbacks: NO_COLOR, non-TTY, and --non-interactive ------------
+# --- Plain fallbacks: NO_COLOR and non-TTY --------------------------------
 
 
 def _assert_all_roles_byte_plain(capsys: pytest.CaptureFixture[str]) -> None:
@@ -193,17 +193,16 @@ def test_non_tty_stream_is_byte_plain(monkeypatch: pytest.MonkeyPatch, capsys: p
     _assert_all_roles_byte_plain(capsys)
 
 
-def test_non_interactive_forces_byte_plain_even_on_a_tty(
+def test_non_interactive_does_not_change_tty_presentation(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.delenv("NO_COLOR", raising=False)
-    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
+    _tty(monkeypatch)
     output.set_non_interactive(True)
     try:
-        _assert_all_roles_byte_plain(capsys)
+        TyperHandler().emit(Role.RESULT, "done", 0)
     finally:
         output.set_non_interactive(False)
+    assert click.style("done", fg="green", dim=True) in capsys.readouterr().out
 
 
 def test_confirm_resets_mouse_tracking_before_prompting_on_a_tty(
@@ -283,7 +282,7 @@ class TestColorGate:
         monkeypatch.setattr("agentworks.cli._typer_output.non_interactive", lambda: False)
         assert TyperHandler()._color_enabled(self._stream(is_a_tty=True)) is False
 
-    def test_non_interactive_disables_color(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_non_interactive_does_not_disable_color(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("NO_COLOR", raising=False)
         monkeypatch.setattr("agentworks.cli._typer_output.non_interactive", lambda: True)
-        assert TyperHandler()._color_enabled(self._stream(is_a_tty=True)) is False
+        assert TyperHandler()._color_enabled(self._stream(is_a_tty=True)) is True

@@ -357,8 +357,8 @@ def rekey_vm(
     # precedence (template readiness before the platform preflight).
     # ``ignore_env`` is honored by temporarily masking the env-var
     # backend for the auth-key secret (the env-var source reads
-    # ``os.environ`` at ``would_attempt`` time, so removing the var
-    # skips it cleanly across BOTH the preflight prediction and the
+    # ``os.environ`` during preview and resolution, so removing the var
+    # skips it cleanly across BOTH preflight and the
     # resolve, and the prompt backend takes over).
     registry = load_request_registry(config)
     resolver = Resolver(config, registry, interaction=interaction)

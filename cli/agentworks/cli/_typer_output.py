@@ -61,17 +61,15 @@ class TyperHandler:
     def _color_enabled(self, stream: TextIO) -> bool:
         """True iff color should be applied to output on ``stream``.
 
-        Color is emitted only when the operator has not opted out
-        (``NO_COLOR`` unset, honored by presence for any value), the
-        target stream is a real terminal, and the invocation is not
-        ``--non-interactive``. ``stream.isatty()`` is checked against the
+        Color is emitted only when ``NO_COLOR`` is absent and the target
+        stream is a real terminal. ``stream.isatty()`` is checked against the
         actual output stream (stdout for BODY/DETAIL/HEADER/RESULT,
         stderr for NOTICE/WARNING/ERROR) rather than stdin, because color
         depends on where the bytes land; see output-model-lld.md sec 9.
         When this is false, the emit branches below bypass ``click.style``
         entirely so output is byte-identical to the no-color rendering.
         """
-        return os.environ.get("NO_COLOR") is None and stream.isatty() and not non_interactive()
+        return os.environ.get("NO_COLOR") is None and stream.isatty()
 
     def emit(self, role: Role, message: str, level: int) -> None:
         # Only the styling is gated on _color_enabled; indentation,
@@ -127,9 +125,8 @@ class TyperHandler:
         # rather than output.is_interactive() because that helper
         # inspects stdin, not the stream the escape is written to (see
         # the color gate in output-model-lld.md sec 9 for the same
-        # reasoning). non_interactive() additionally suppresses the
-        # reset under --non-interactive even if stdout happens to be a
-        # TTY, keeping piped/non-interactive output byte-plain.
+        # reasoning). ``--non-interactive`` suppresses this interaction
+        # preparation escape even when the presentation stream is a TTY.
         # Guards against issue #211: a prior interactive step can leave
         # xterm mouse tracking enabled, so this prompt's plain input read
         # picks up a stray mouse-event byte sequence (the SGR/1006 form)

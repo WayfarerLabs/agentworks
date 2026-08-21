@@ -497,7 +497,7 @@ def test_session_json_status_repairs_and_no_status_are_preserved(
         *,
         interaction: TtyInteractionPolicy,
     ) -> Iterator[None]:
-        assert interaction is TtyInteractionPolicy.REFUSE
+        assert interaction is TtyInteractionPolicy.ALLOW
         nonlocal boundary_calls
         boundary_calls += 1
         yield
@@ -575,7 +575,7 @@ def test_session_describe_json_positive_and_stopped_pid_with_degraded_template(
         interaction: TtyInteractionPolicy,
     ) -> Iterator[tuple[object, object, object, object, object]]:
         del config, operation
-        assert interaction is TtyInteractionPolicy.REFUSE
+        assert interaction is TtyInteractionPolicy.ALLOW
         workspace = db.get_workspace(row.workspace_name)
         vm = db.get_vm("box")
         assert workspace is not None and vm is not None
@@ -652,7 +652,7 @@ def test_session_list_and_describe_degrade_harness_integration_without_error_tex
         interaction: TtyInteractionPolicy,
     ) -> Iterator[tuple[object, object, object, object, object]]:
         del config, operation
-        assert interaction is TtyInteractionPolicy.REFUSE
+        assert interaction is TtyInteractionPolicy.ALLOW
         workspace = db.get_workspace(row.workspace_name)
         vm = db.get_vm("box")
         assert workspace is not None and vm is not None
