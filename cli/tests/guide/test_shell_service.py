@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 
 from agentworks.cli._app import app
 from agentworks.completions.spec import build_spec
+from agentworks.errors import ValidationError
 from agentworks.guide.agent_mode import GuideMode, select_guide_mode
 from agentworks.guide.catalog import CORE_INDEX_PATH, discover_concept_shells
 from agentworks.guide.contract import GuideContentError, UnknownGuideTopicError
@@ -185,6 +186,10 @@ def test_selected_topic_resolves_after_complete_catalog_validation(tmp_path: Pat
 
     with pytest.raises(UnknownGuideTopicError):
         render_guide("concept-missing", GuideMode.HUMAN, package_root=tmp_path)
+
+    for invalid in ("../concept-known", "_index"):
+        with pytest.raises(ValidationError):
+            render_guide(invalid, GuideMode.HUMAN, package_root=tmp_path)
 
 
 @pytest.mark.parametrize("path", ["index", "list", "show", "completion"])

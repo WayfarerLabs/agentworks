@@ -55,7 +55,8 @@ An exact, column-zero include imports one heading and its body from trusted pack
 
 `heading-offset` is optional and shifts every heading in the imported section uniformly; all results
 must remain between H2 and H6. Imports are one level only. Imported directives stay inert. Relative
-links and images are rewritten to canonical repository URLs.
+links and images authored in either a shell body or an imported section are rewritten to canonical
+repository URLs, relative to the document that contains them.
 
 Controls inside code fences, quoted content, or lists are ordinary Markdown rather than directives.
 Keep topics concise, prefer command-owned `--help` for syntax details, and do not add tests that

@@ -746,21 +746,51 @@ document, with its GitHub URL retained only as a source link.
 
 ## Phase 5: representative acceptance and closeout
 
-- [ ] Run one provider-backed journey from an exact reviewed candidate wheel through the no-topic
-      guide index and `agw guide show concept-onboarding` to a verified VM and started session.
-      Label the candidate substitution rather than claiming the not-yet-published stable bootstrap
-      was exercised. After publication, run one bounded canonical-prompt smoke that installs the
-      exact stable release, verifies it, and reaches the guide index. Use generated-package parity
-      and focused clean-install probes for native wrappers rather than repeating the provider
-      journey three times. Done when: evidence records the exact versions, provider resources,
-      observed results, cleanup, and any operator intervention. This evidence does not replace the
-      saga's release-PR, publication, or final custom-domain gates.
-- [ ] Confirm permanent guide, assistance, JSON, and contribution documentation is self-sufficient;
+The operator's 2026-08-18 closeout ruling accepts the completed published-release onboarding journey
+as the representative provider-backed path. Publication overtook the planned candidate-wheel run, so
+closeout records the substitution honestly rather than manufacturing candidate evidence after the
+boundary had ceased to exist.
+
+- [x] Record the completed `agentworks-cli` 0.14.0 first-time journey from `agw guide --agent`
+      through clean doctor output, a Lima VM, workspace, Agentworks-managed agent, and running
+      session as the operator-approved replacement for the pre-publication candidate journey. Name
+      the observed resources, intervention, and retained-state disposition without claiming a
+      candidate artifact or teardown that did not occur.
+- [x] Run one bounded isolated canonical-prompt smoke that installs the current stable release,
+      verifies its exact version, and reaches the agent-mode guide index. Use generated-package
+      parity for the README, website, Claude Code, and Codex wrappers rather than repeating the live
+      path for each projection.
+- [x] Confirm permanent guide, assistance, JSON, and contribution documentation is self-sufficient;
       no current behavior relies on this SDD. Promote only missing current facts, not design
       history.
-- [ ] Run final applicable gates and the required project, integration, and saga reviews.
-- [ ] Create `locked.md` with the final state and date, then hand off the always-green closeout PR
+- [x] Consume the saga's final agent-mode and regression-charter message. Record the operator's
+      disposition of the superseded dozen-hint expectation, route the non-TTY mode heuristic and
+      release-topic namespace as bounded guide follow-ups, name the permanent regression owners, and
+      identify `2026-08-18-secret-preview-contract` as the successor secret-preview effort.
+- [x] Run final applicable gates and the required pre-ready project, saga, and complexity reviews.
+      Preserve the earlier integration acceptance baseline; hand off the exact closeout head as
+      ready so the integration tester can perform the final ready-PR review.
+- [x] Create `locked.md` with the final state and date, then hand off the always-green closeout PR
       with commit and test evidence.
 
 Definition of done: FRD R6 and R7 and acceptance criteria 9 and 10 hold, the implementation is
 represented accurately in permanent artifacts, and the effort is ready to lock.
+
+The ready-PR integration review found two final closeout omissions and one adjacent maintained
+harness defect while confirming that the lock does not bind before merge. The operator authorized
+this bounded correction round on 2026-08-21.
+
+## Phase 5 correction: integration closeout findings
+
+- [x] Send a second one-file saga message carrying the Codex-on-TTY mode case and authenticated
+      provenance of the sparse-agent and release-topic rulings; align the child FRD, evidence, and
+      lock record without overwriting the original message.
+- [x] Restore concise 1Password source guidance directly in `concept-secrets`, record why the guide
+      and completion harness cases remain deleted, and repair the stale `extract_references` call in
+      the adjacent maintained recorder drive without adding prose assertions.
+- [x] Run the affected real drives, focused/full/static gates, and independent project review, then
+      re-hand off the exact green head as ready for integration re-review.
+
+Definition of done: both follow-up gaps have durable homes, permanent secret guidance names the
+shipping optional backend, the maintained recorder drive runs cleanly, no prose-policing test
+returns, and PR #615 is ready on an exact green head.

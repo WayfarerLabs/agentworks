@@ -943,9 +943,10 @@ bounded `index-order`; the filename supplies the global `concept-*` identity. Th
 addressable concept. Shells support ordinary Markdown, agent-only fences, and bounded exact-section
 imports from packaged Markdown with static heading offsets. Fence and import comments execute only
 as standalone column-zero lines between top-level Markdown blocks; nested comments remain content.
-Relative links and images in imports are rewritten to canonical repository URLs. The root README and
-`docs/manifesto.md` are packaged as include-only sources so `concept-core-model` and
-`concept-manifesto` can reuse their canonical content.
+Relative links and images in shell bodies and imported sections are rewritten to canonical
+repository URLs, relative to the document containing them. The root README and `docs/manifesto.md`
+are packaged as include-only sources so `concept-core-model` and `concept-manifesto` can reuse their
+canonical content.
 
 Current capability and adoption questions point to `concept-onboarding`, ongoing operation points to
 `concept-management`, and temporal version-change questions point to `concept-release-notes`. Raw
@@ -1024,9 +1025,9 @@ workflow. Its static shell preserves the sequence and checkpoints while pointing
 resource schema and sample surfaces. Rendering never reads a path, runs doctor, edits configuration,
 or authorizes an agent to do so.
 
-During the unreleased 0.14 transition, `agw graph show`, `agw resource kinds`, `agw resource list`,
-`agw resource show`, `agw resource explain`, and `agw resource sample` are the available
-command-owned fact surfaces.
+For the 0.14 resource-model migration, `agw graph show`, `agw resource kinds`, `agw resource list`,
+`agw resource show`, `agw resource explain`, and `agw resource sample` are the command-owned fact
+surfaces.
 
 | Command                                                   | Description                                   |
 | --------------------------------------------------------- | --------------------------------------------- |

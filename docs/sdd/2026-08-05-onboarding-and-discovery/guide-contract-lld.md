@@ -230,10 +230,18 @@ Mode selection retains this precedence:
 2. the exact registered `CLAUDECODE=1` execution signature; and
 3. human for TTY stdout, otherwise agent.
 
+Claude Code is the only supported harness with a reliable registered session signature. No reliable
+Codex session signature exists, so the canonical Codex bootstrap explicitly invokes
+`agw guide --agent`.
+
 Exact `concept-release-notes/vMAJOR-MINOR-PATCH` topics are resolved and rendered directly from
 bounded packaged changelog sections. They use no `ReleaseNotes` block, generic topic contribution,
-or old catalog union. Their content is escaped inert evidence, performs no network work, and uses no
-shell directives. The base `concept-release-notes` guidance is an ordinary shell.
+or old catalog union. Their content renders verbatim as inert evidence inside a `text` fenced code
+block whose delimiter is longer than every consecutive backtick run in the content. Containment
+comes from the widened fence, not content escaping. The runtime mechanism in
+`cli/agentworks/guide/render.py` deliberately parallels the zero-dependency byte-level widening in
+`scripts/generate-agentworks-package.py`. Rendering performs no network work and interprets no shell
+directives. The base `concept-release-notes` guidance is an ordinary shell.
 
 ## Removed contract and code
 
