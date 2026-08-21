@@ -1,6 +1,6 @@
 # Plan: Value-free secret resolution preview
 
-- Status: Feedback/fix round 1 scoped
+- Status: Feedback/fix round 1 green; exact-head review pending
 - Date: 2026-08-18
 - Amended: 2026-08-21
 - Requirements: [FRD](./frd.md)
@@ -188,8 +188,9 @@
       remove `source_name`, `remaining_time`, `RemainingTime`, and `_MonotonicBudget`; keep source
       identity in core and the one real shrinking OnePassword timeout in source config. (Implemented
       in `da5f1e6a`.)
-- [ ] Require every concrete secret backend to declare contract version `1`; leave the abstract
-      capability annotation-only and add the missing-declaration conformance guard.
+- [x] Require every concrete secret backend to declare contract version `1`; leave the abstract
+      capability annotation-only and add the missing-declaration conformance guard. (Implemented in
+      `e679ac38`.)
 - [x] Update the `SecretBackend` ABC, descriptor, root exports, and all implementations atomically,
       resetting the exact secret-backend contract sentinel from `2` to `1` while removing
       `interactive`, adding exact `supports_tty_interaction`, and removing `would_attempt`.
@@ -200,8 +201,9 @@
       variants and reasons, construction/entry intent, actual-resolution impact absence, and
       maximum-preview-impact no-indeterminate behavior. Reject TTY blocks from backends that declare
       no TTY support.
-- [ ] Add direct preview and actual-resolution adversarial guards proving that a backend which
+- [x] Add direct preview and actual-resolution adversarial guards proving that a backend which
       declares no TTY support cannot return either TTY block reason without a protocol failure.
+      (Implemented in `e679ac38`.)
 - [x] Update both backend-authoring READMEs with a complete rewritten example and conformance rules.
 - [x] Make `cli/agentworks/capabilities/secret_backend/README.md` the self-contained permanent
       contract authority for exact variants, reason ownership, core flow, preview impact, TTY broker
@@ -220,10 +222,11 @@
       budget and cleanup discipline.
 - [x] Implement current-impact preview aggregation with ordinary-missing and execution-block
       fallthrough, failed hard-stop, and ordered earlier-indeterminate evidence.
-- [ ] Align exhausted preview diagnostics with actual resolution: first indeterminate where legal,
+- [x] Align exhausted preview diagnostics with actual resolution: first indeterminate where legal,
       then TTY block, ordinary missing, readiness or disabled-plugin block, and no-candidate; cover
       both paths with an adversarial category matrix, and make no-candidate guidance cover either an
       absent active source or an absent applicable mapping without expanding the result contract.
+      (Implemented in `e679ac38`.)
 - [x] Implement actual resolution as one bounded source-first pass with one batch per ready source,
       ordinary-missing and TTY-block fallthrough, failed hard-stop, and no preview reuse.
 - [x] Add event-ledger tests for source-first batching, higher-source failure preventing lower
@@ -315,10 +318,10 @@
       general interaction consent.
 - [x] Update every global flag help/reference surface to state the exact TTY-only meaning and remove
       claims that the flag itself selects plain or colorless output.
-- [ ] Add one explicit operator-facing behavior-change callout to the upgrade guide: the flag now
+- [x] Add one explicit operator-facing behavior-change callout to the upgrade guide: the flag now
       disables TTY use only, no longer controls presentation, does not prevent out-of-band provider
       approval or waiting, and is not an unattended fail-fast guarantee; name unattended source and
-      authentication alternatives.
+      authentication alternatives. (Implemented in `e679ac38`.)
 - [x] Trim the secret-backend and secrets test estates to the simplification sweep standard as part
       of this rewrite, deleting worthless tests rather than assigning them to a later cleanup.
 
@@ -346,6 +349,10 @@
       (2026-08-21: focused contract coverage passed 319 tests; full non-live passed 7,223 with one
       skip; Ruff, format, Mypy, file lint, lock, locked-SDD, Rulesync, generated-package, Typer
       isolation, website Python and Node, and both deterministic-build variants passed.)
+- [x] Rerun the complete implementation and repository gates after feedback/fix round 1.
+      (2026-08-21: focused coverage passed 227 tests; full non-live passed 7,239 with one skip;
+      Ruff, format, Mypy, file lint, lock, locked-SDD, Rulesync, generated-package, Typer isolation,
+      website Python and Node, and both deterministic-build variants passed.)
 - [x] Obtain a private `agentworks-reviewer` pass on the complete diff and resolve material
       findings. (2026-08-21: three bounded correction rounds closed lifecycle, timeout, TTY-access,
       exact-map, static-description, cleanup, documentation, and test-quality findings; final exact
