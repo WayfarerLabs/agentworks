@@ -263,7 +263,9 @@ def preview_batch(
     if type(tty_access) is not TtyInteractionAccess:
         raise StateError("tty_access must be an exact TtyInteractionAccess")
     names = list(dict.fromkeys(secret.name for secret in secrets))
-    declarations = {secret.name: secret for secret in secrets}
+    declarations: dict[str, SecretDecl] = {}
+    for secret in secrets:
+        declarations.setdefault(secret.name, secret)
     attempts: dict[str, list[SourcePreviewAttempt]] = {name: [] for name in names}
     completed: dict[str, ResolutionPreview] = {}
 

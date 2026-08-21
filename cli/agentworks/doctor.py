@@ -18,6 +18,7 @@ from agentworks.path_rendering import format_host_path
 from agentworks.resources.access import ResourceIdentity
 
 if TYPE_CHECKING:
+    from agentworks.capabilities.secret_backend import TtyInteractionAccess
     from agentworks.config import Config
     from agentworks.machine_output import JsonObject
     from agentworks.resources.registry import Registry
@@ -249,20 +250,15 @@ def _secret_check(
     name: str,
     decl: SecretDecl,
     sources: tuple[ActiveSource, ...],
+    *,
+    tty_access: TtyInteractionAccess,
 ) -> HealthCheck:
     """Build one value-free secret resolution preview row."""
-    import sys
-
     from agentworks.capabilities.secret_backend import OperatorImpact
-    from agentworks.secrets.policy import TtyInteractionPolicy, tty_interaction_access
     from agentworks.secrets.preview import PreviewStatus, preview_batch, preview_hint
 
     auto = getattr(decl.origin, "variant", None) == "auto-declared"
     label = f"Secret {name!r} (auto)" if auto else f"Secret {name!r}"
-    from agentworks import output
-
-    tty_policy = TtyInteractionPolicy.REFUSE if output.non_interactive() else TtyInteractionPolicy.ALLOW
-    tty_access = tty_interaction_access(tty_policy, terminal_input_usable=sys.stdin.isatty())
     preview = preview_batch(
         [decl],
         sources,
@@ -301,9 +297,14 @@ def checks_for_resource(
     config: Config,
     registry: Registry,
     identity: ResourceIdentity,
+    *,
+    tty_access: TtyInteractionAccess,
 ) -> tuple[HealthCheck, ...]:
     """Return only doctor's checks whose subject is ``identity``."""
     from agentworks.resources.access import resolve_resource
+    from agentworks.secrets.policy import require_exact_tty_interaction_access
+
+    require_exact_tty_interaction_access(tty_access)
 
     row = resolve_resource(registry, identity).resource
     check: HealthCheck | None = None
@@ -327,7 +328,12 @@ def checks_for_resource(
 
         if not isinstance(row, SecretDecl):
             raise AssertionError("secret published an unexpected row type")
-        check = _secret_check(identity.name, row, active_sources(config, registry))
+        check = _secret_check(
+            identity.name,
+            row,
+            active_sources(config, registry),
+            tty_access=tty_access,
+        )
     elif identity == ResourceIdentity("admin-template", "default"):
         from agentworks.vms.admin import AdminConfig
 
@@ -337,14 +343,22 @@ def checks_for_resource(
     return () if check is None else (check,)
 
 
-def run_checks(*, completion_version: str | None = None) -> HealthReport:
+def run_checks(
+    *,
+    tty_access: TtyInteractionAccess,
+    completion_version: str | None = None,
+) -> HealthReport:
     """Run all health checks and return structured results.
 
     Args:
+        tty_access: exact caller-supplied terminal access for secret preview.
         completion_version: current completion spec version for staleness check.
             Computed by the CLI layer and passed in to avoid coupling doctor
             to the CLI module. Omit to skip completion checks.
     """
+    from agentworks.secrets.policy import require_exact_tty_interaction_access
+
+    require_exact_tty_interaction_access(tty_access)
     report = HealthReport()
 
     # Group order is a presentation choice, decoupled from which checks
@@ -391,7 +405,7 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
     else:
         report.groups.append(_skipped_group("Secret sources", "Declared sources"))
     if config is not None and registry is not None:
-        report.groups.append(_check_secrets(config, registry))
+        report.groups.append(_check_secrets(config, registry, tty_access=tty_access))
     else:
         report.groups.append(_skipped_group("Secrets", "Declared secrets"))
     report.groups.append(_check_database())
@@ -869,8 +883,13 @@ def _check_secret_sources(config: Config, registry: Registry) -> HealthGroup:
     return group
 
 
-def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
-    """Predict each declared secret's attempt path without probing a source."""
+def _check_secrets(
+    config: Config,
+    registry: Registry,
+    *,
+    tty_access: TtyInteractionAccess,
+) -> HealthGroup:
+    """Preview each declared secret under caller-supplied TTY access."""
     from agentworks.resources.access import secret_decls
 
     g = HealthGroup("Secrets")
@@ -885,7 +904,7 @@ def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
     sources = active_sources(config, registry)
 
     for name, decl in sorted(secrets.items()):
-        g.checks.append(_secret_check(name, decl, sources))
+        g.checks.append(_secret_check(name, decl, sources, tty_access=tty_access))
 
     return g
 

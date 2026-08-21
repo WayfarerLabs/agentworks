@@ -9,6 +9,7 @@ from typing import cast
 import pytest
 from pydantic import ValidationError
 
+import agentworks.plugins.onepassword.backend as onepassword_backend
 from agentworks.capabilities.secret_backend import (
     BackendFailed,
     BackendResolved,
@@ -33,8 +34,12 @@ from agentworks.plugins.onepassword.backend import (
 )
 
 
-def _request(reference: str = "op://Work/item/password") -> SecretLookupRequest:
-    return SecretLookupRequest(name="token", mapping=OnePasswordMapping.model_validate(reference))
+def _request(
+    reference: str = "op://Work/item/password",
+    *,
+    name: str = "token",
+) -> SecretLookupRequest:
+    return SecretLookupRequest(name=name, mapping=OnePasswordMapping.model_validate(reference))
 
 
 def _client(
@@ -84,11 +89,26 @@ def test_bounded_read_repr_redacts_value() -> None:
     assert "sentinel-resolved" not in repr(bounded)
 
 
-def test_resolution_exact_argv_and_timeout_ignores_tty_policy(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[tuple[list[str], float]] = []
+def test_factory_and_context_entry_do_no_provider_work(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: pytest.fail("provider work started"))
+    context = OnePasswordBackend.create_client(
+        source_name="work",
+        config=OnePasswordSourceConfig(name="onepassword"),
+        intent=ResolutionIntent(),
+        tty_access=TtyInteractionAccess.AVAILABLE,
+        interaction_broker=None,
+        remaining_time=lambda: None,
+    )
+    client = context.__enter__()
+    context.__exit__(None, None, None)
+    assert client is not None
+
+
+def test_resolution_exact_subprocess_boundary_ignores_tty_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[list[str], dict[str, object]]] = []
 
     def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        calls.append((args, cast("float", kwargs["timeout"])))
+        calls.append((args, kwargs))
         return subprocess.CompletedProcess(args, 0, stdout="resolved", stderr="")
 
     monkeypatch.setattr(subprocess, "run", run)
@@ -103,12 +123,50 @@ def test_resolution_exact_argv_and_timeout_ignores_tty_policy(monkeypatch: pytes
     finally:
         context.__exit__(None, None, None)
     assert result == BackendResolved("resolved")
-    assert calls == [
-        (
-            ["op", "read", "--no-newline", "--account", "work.example.com", "op://Work/item/password"],
-            4.5,
-        )
-    ]
+    [(argv, kwargs)] = calls
+    assert argv == ["op", "read", "--no-newline", "--account", "work.example.com", "op://Work/item/password"]
+    assert cast("float", kwargs["timeout"]) == pytest.approx(4.5)
+    assert kwargs == {
+        "capture_output": True,
+        "text": True,
+        "check": False,
+        "stdin": subprocess.DEVNULL,
+        "timeout": kwargs["timeout"],
+    }
+
+
+@pytest.mark.parametrize(
+    "intent",
+    [PreviewIntent(OperatorImpact.ALLOW), ResolutionIntent()],
+    ids=("preview", "resolution"),
+)
+def test_configured_timeout_shrinks_across_the_whole_source_turn(
+    monkeypatch: pytest.MonkeyPatch,
+    intent: PreviewIntent | ResolutionIntent,
+) -> None:
+    clock = iter((100.0, 102.0, 105.0))
+    monkeypatch.setattr(onepassword_backend, "_MONOTONIC", lambda: next(clock))
+    timeouts: list[float] = []
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        timeouts.append(cast("float", kwargs["timeout"]))
+        assert kwargs["stdin"] == subprocess.DEVNULL
+        return subprocess.CompletedProcess(args, 0, stdout="resolved", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    context, client = _client(intent=intent, timeout=10.0, remaining=50.0)
+    requests = (
+        _request("op://Work/first/password", name="first"),
+        _request("op://Work/second/password", name="second"),
+    )
+    try:
+        if isinstance(intent, PreviewIntent):
+            client.preview(requests)
+        else:
+            client.resolve(requests)
+    finally:
+        context.__exit__(None, None, None)
+    assert timeouts == [8.0, 5.0]
 
 
 def test_zero_impact_is_indeterminate_without_provider_work(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -6,12 +6,13 @@ import json
 import unicodedata
 from pathlib import Path
 from textwrap import dedent
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 import yaml
 from typer.testing import CliRunner
 
+from agentworks.capabilities.secret_backend import TtyInteractionAccess
 from agentworks.cli import app
 from agentworks.completions.bash import generate_bash
 from agentworks.completions.powershell import generate_powershell
@@ -168,7 +169,11 @@ def test_cli_wires_warning_loaders_and_human_renderer(monkeypatch: pytest.Monkey
         "load_request_registry",
         lambda _config, **kwargs: calls.append(("registry", kwargs)) or registry,
     )
-    monkeypatch.setattr(show, "show_resource", lambda *args: calls.append(("show", *args)) or expected)
+    monkeypatch.setattr(
+        show,
+        "show_resource",
+        lambda *args, **kwargs: calls.append(("show", *args, kwargs)) or expected,
+    )
     monkeypatch.setattr(show, "render_resource_show", lambda shown: calls.append(("render", shown)))
     result = CliRunner().invoke(app, ["resource", "show", "secret/npm-token"])
 
@@ -185,6 +190,8 @@ def test_cli_wires_warning_loaders_and_human_renderer(monkeypatch: pytest.Monkey
     assert isinstance(identity, ResourceIdentity)
     assert (identity.kind, identity.name) == ("secret", "npm-token")
     assert isinstance(show_call[4], DatabaseLiveSource)
+    show_kwargs = cast("dict[str, object]", show_call[5])
+    assert show_kwargs == {"tty_access": TtyInteractionAccess.UNAVAILABLE}
 
 
 def test_cli_json_uses_resource_show_identity_and_closed_shape(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -199,7 +206,7 @@ def test_cli_json_uses_resource_show_identity_and_closed_shape(monkeypatch: pyte
         "load_request_registry",
         lambda _config, **kwargs: calls.append(("registry", kwargs)) or object(),
     )
-    monkeypatch.setattr(show, "show_resource", lambda *_args: expected)
+    monkeypatch.setattr(show, "show_resource", lambda *_args, **_kwargs: expected)
 
     result = CliRunner().invoke(
         app,
@@ -297,7 +304,11 @@ def test_cli_lookup_failure_writes_no_partial_output(monkeypatch: pytest.MonkeyP
     error = NotFoundError("missing")
     monkeypatch.setattr(config, "load_config", lambda **_kwargs: object())
     monkeypatch.setattr(bootstrap, "load_request_registry", lambda _config, **_kwargs: object())
-    monkeypatch.setattr(show, "show_resource", lambda *_args: (_ for _ in ()).throw(error))
+    monkeypatch.setattr(
+        show,
+        "show_resource",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(error),
+    )
 
     result = CliRunner().invoke(
         app,

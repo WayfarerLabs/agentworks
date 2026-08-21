@@ -153,7 +153,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #                 validation precedes every rejoin-specific action.
 # Additional sources are YAML resources. For 1Password, enable its plugin and
 # declare a source such as `work-op` with `spec.backend.name: onepassword`.
-# Put `account`, the positive `timeout` (default 30 seconds), and
+# Put `account`, the positive source-turn `timeout` (default 30 seconds), and
 # `app_authentication_impact` (`operator-action`, the default, or `none`) in
 # that backend block. Set the impact to `none` only when this site's app approval
 # policy treats it as non-disruptive. Service-account and Connect credentials are

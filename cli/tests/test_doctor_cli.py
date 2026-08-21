@@ -20,6 +20,7 @@ import pytest
 import typer
 
 from agentworks import output
+from agentworks.capabilities.secret_backend import TtyInteractionAccess
 from agentworks.cli._typer_output import TyperHandler
 from agentworks.cli.commands.doctor import doctor
 from agentworks.doctor import HealthGroup, HealthReport
@@ -89,6 +90,23 @@ def _run_doctor(capsys: pytest.CaptureFixture[str]) -> str:
         doctor()
     assert exc_info.value.exit_code == 1  # the fake report has one FAIL
     return capsys.readouterr().out
+
+
+def test_cli_threads_exact_tty_access_to_the_service(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "agentworks.cli.commands.doctor.ordinary_tty_interaction_access",
+        lambda: TtyInteractionAccess.DISABLED,
+    )
+
+    def run_checks(**kwargs: object) -> HealthReport:
+        captured.update(kwargs)
+        return _fake_report()
+
+    monkeypatch.setattr("agentworks.doctor.run_checks", run_checks)
+    with pytest.raises(typer.Exit):
+        doctor()
+    assert captured["tty_access"] is TtyInteractionAccess.DISABLED
 
 
 @pytest.mark.usefixtures("_stub_run_checks", "_typer_handler")

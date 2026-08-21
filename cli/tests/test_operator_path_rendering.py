@@ -33,6 +33,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from agentworks.capabilities.secret_backend import TtyInteractionAccess
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -115,7 +117,7 @@ def test_doctor_spells_every_path_on_one_screen_the_same_way(home: Path) -> None
     """
     from agentworks.doctor import run_checks
 
-    report = run_checks()
+    report = run_checks(tty_access=TtyInteractionAccess.UNAVAILABLE)
     rows = [c for g in report.groups for c in g.checks]
     rendered = {c.name: " ".join(filter(None, (c.message, c.hint))) for c in rows}
 
@@ -184,7 +186,7 @@ def test_doctor_names_a_missing_config_file_home_relative(home: Path) -> None:
 
     CONFIG_PATH.unlink()
 
-    report = run_checks()
+    report = run_checks(tty_access=TtyInteractionAccess.UNAVAILABLE)
     rows = {c.name: c.message or "" for g in report.groups for c in g.checks}
 
     assert "Config file" in rows, "doctor rendered no Config file row"
@@ -204,7 +206,7 @@ def test_doctor_names_an_unreadable_ssh_key_home_relative(home: Path) -> None:
 
     (home / ".ssh" / "id_ed25519.pub").chmod(0o000)
 
-    report = run_checks()
+    report = run_checks(tty_access=TtyInteractionAccess.UNAVAILABLE)
     rows = {c.name: c.message or "" for g in report.groups for c in g.checks}
 
     assert "SSH public key" in rows, "doctor rendered no SSH public key row"

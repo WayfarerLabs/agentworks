@@ -30,6 +30,15 @@ def require_exact_tty_interaction_policy(interaction: TtyInteractionPolicy) -> N
         raise StateError("interaction must be an exact TtyInteractionPolicy")
 
 
+def require_exact_tty_interaction_access(access: TtyInteractionAccess) -> None:
+    """Reject anything that is not an exact ``TtyInteractionAccess`` member.
+
+    Boundary: caller-supplied access crossing a published service surface.
+    """
+    if type(access) is not TtyInteractionAccess:
+        raise StateError("tty_access must be an exact TtyInteractionAccess")
+
+
 def tty_interaction_access(
     policy: TtyInteractionPolicy,
     *,

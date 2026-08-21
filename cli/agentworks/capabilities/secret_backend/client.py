@@ -116,7 +116,7 @@ class InteractionBroker(Protocol):
 
 
 type RemainingTime = Callable[[], float | None]
-"""A live view of the current source-turn budget."""
+"""A live view of the outer operation budget, if one is bounded."""
 
 
 @dataclass(frozen=True, slots=True)

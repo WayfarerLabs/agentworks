@@ -166,15 +166,14 @@ value-presence claim and never invokes provider preview.
 configured source instance and `backend` names its implementation. `provenance` is
 `synthesized-default`, `operator-override-of-synthesized-default`, or `declared`. `would_attempt` is
 boolean. `identifier` is null when a source has no static lookup identifier or will not attempt the
-secret. `not_ready_reason` is null when that source is ready. Resolution `category` is
-`attemptable`, `refused-interaction`, or `unavailable`; `source` and `identifier` are nullable.
-`source_mappings` retains configured source-chain ordering. References and `used_by` retain their
-service ordering. The nested provider preview is value-free. `status` is `available`, `missing`,
-`indeterminate`, `blocked`, or `failed`. `reason` is absent for available and missing, and required
-for the other statuses; aggregate `blocked/no-candidate` has null source and identifier. Attempts
-retain source-chain ordering and omit static non-candidates. The default preview permits no
-backend-classified operator impact; `--allow-interaction` permits it and guarantees that the result
-is not indeterminate.
+secret. `not_ready_reason` is null when that source is ready. Resolution `category` is `attemptable`
+or `unavailable`; `source` and `identifier` are nullable. `source_mappings` retains configured
+source-chain ordering. References and `used_by` retain their service ordering. The nested provider
+preview is value-free. `status` is `available`, `missing`, `indeterminate`, `blocked`, or `failed`.
+`reason` is absent for available and missing, and required for the other statuses; aggregate
+`blocked/no-candidate` has null source and identifier. Attempts retain source-chain ordering and
+omit static non-candidates. The default preview permits no backend-classified operator impact;
+`--allow-interaction` permits it and guarantees that the result is not indeterminate.
 
 #### VM JSON schemas
 

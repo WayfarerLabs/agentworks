@@ -59,6 +59,13 @@ def test_a_nominal_concrete_version_one_backend_conforms() -> None:
     assert conformance_error(DESCRIPTOR, _backend()) is None
 
 
+def test_capability_name_conformance_matches_the_exact_resolution_identity_boundary() -> None:
+    class StringSubclass(str):
+        pass
+
+    assert conformance_error(DESCRIPTOR, _backend(name=StringSubclass("phase3-fixture"))) is not None
+
+
 def test_a_structural_lookalike_is_rejected_before_its_members_are_considered() -> None:
     class Lookalike:
         name = "phase3-fixture"

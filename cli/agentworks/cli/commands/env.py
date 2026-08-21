@@ -7,7 +7,7 @@ from typing import Annotated
 import typer
 
 from agentworks.cli._app import app
-from agentworks.cli._helpers import get_db, ordinary_interaction_policy
+from agentworks.cli._helpers import get_db, ordinary_tty_interaction_policy
 
 env_app = typer.Typer(
     name="env",
@@ -62,7 +62,7 @@ def env_show(
     entries are redacted by default; pass --resolve to resolve them
     through the active source chain.
     """
-    interaction = ordinary_interaction_policy()
+    interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config
     from agentworks.env.show import show_env
 

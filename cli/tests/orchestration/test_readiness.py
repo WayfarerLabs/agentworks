@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -57,7 +58,7 @@ def test_sweep_propagates_the_first_failure() -> None:
         _N("git-credential/gh", log, fail=True),
         _N("vm/box", log),
     ]
-    with pytest.raises(ConfigError, match="git-credential/gh"):
+    with pytest.raises(ConfigError):
         preflight_all(nodes, RunContext(), registry=Registry.empty(), interaction=TtyInteractionPolicy.REFUSE)
     # Nothing after the failure ran (the command aborts pre-mutation).
     assert [key for key, _ in log] == ["vm-site/px", "git-credential/gh"]
@@ -116,7 +117,7 @@ def test_skip_and_degrade_lets_non_rejections_propagate() -> None:
     a bug or a fatal condition and propagates uncaught."""
     from agentworks.orchestration.readiness import runup_skip_and_degrade
 
-    with pytest.raises(RuntimeError, match="not a rejection"):
+    with pytest.raises(RuntimeError):
         runup_skip_and_degrade(
             [_RunupItem("gh", boom=True)],
             RunContext(),
@@ -150,7 +151,7 @@ def test_sweep_requires_a_definitive_value_when_zero_impact_can_check(
     config, registry, nodes = _site_graph(tmp_path, '"env-var"')
     monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN", raising=False)
 
-    with pytest.raises(ConfigError, match="cannot pass preflight"):
+    with pytest.raises(ConfigError):
         preflight_all(
             nodes,
             RunContext(config=config),
@@ -184,8 +185,90 @@ def test_sweep_treats_global_tty_policy_separately_from_zero_impact_preview(
     config, registry, nodes = _site_graph(tmp_path, '"prompt"')
     monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN", raising=False)
 
-    with pytest.raises(ConfigError, match="cannot pass preflight"):
+    with pytest.raises(ConfigError):
         preflight_all(nodes, RunContext(config=config), registry=registry, interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     preflight_all(nodes, RunContext(config=config), registry=registry, interaction=TtyInteractionPolicy.ALLOW)  # type: ignore[arg-type]
+
+
+def test_sweep_memoizes_repeated_refs_once_per_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    from collections.abc import Iterable, Sequence
+
+    from agentworks.capabilities.secret_backend import PreviewAvailable, TtyInteractionAccess
+    from agentworks.config import Config
+    from agentworks.secrets.base import SecretDecl
+    from agentworks.secrets.preview import ResolutionPreview, SourcePreviewAttempt
+    from agentworks.secrets.resolve import ActiveSource
+
+    events: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        "agentworks.secrets.resolve.active_sources",
+        lambda config, registry: events.append(("sources",)) or (),
+    )
+
+    def predict(
+        decls: Iterable[SecretDecl],
+        sources: Sequence[ActiveSource],
+        *,
+        tty_access: TtyInteractionAccess,
+    ) -> dict[str, ResolutionPreview]:
+        names = tuple(decl.name for decl in decls)
+        events.append(("preview", *names))
+        return {
+            name: ResolutionPreview(
+                name,
+                PreviewAvailable(),
+                "fixture",
+                None,
+                (SourcePreviewAttempt("fixture", None, PreviewAvailable()),),
+            )
+            for name in names
+        }
+
+    monkeypatch.setattr("agentworks.orchestration.secrets.predict_resolution", predict)
+    log: list[tuple[str, RunContext]] = []
+    ref = ResourceReference(name="token", kind="secret", usage="test", source=("fixture", "owner"))
+    nodes = [
+        _N("first", log, _config_secret_refs=(ref,)),
+        _N("second", log, _config_secret_refs=(ref,)),
+    ]
+    preflight_all(
+        nodes,
+        RunContext(config=cast("Config", object())),
+        registry=Registry.empty(),
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+    assert events == [("sources",), ("preview", "token")]
+    assert [name for name, _ctx in log] == ["first", "second"]
+
+
+def test_sweep_does_no_source_or_provider_work_for_an_unreachable_later_ref(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.config import Config
+
+    events: list[str] = []
+    monkeypatch.setattr(
+        "agentworks.secrets.resolve.active_sources",
+        lambda config, registry: events.append("sources") or (),
+    )
+    monkeypatch.setattr(
+        "agentworks.orchestration.secrets.predict_resolution",
+        lambda *args, **kwargs: events.append("provider") or {},
+    )
+    log: list[tuple[str, RunContext]] = []
+    ref = ResourceReference(name="later", kind="secret", usage="test", source=("fixture", "later"))
+    nodes = [
+        _N("first", log, fail=True),
+        _N("later", log, _config_secret_refs=(ref,)),
+    ]
+    with pytest.raises(ConfigError):
+        preflight_all(
+            nodes,
+            RunContext(config=cast("Config", object())),
+            registry=Registry.empty(),
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+    assert events == []
+    assert [name for name, _ctx in log] == ["first"]

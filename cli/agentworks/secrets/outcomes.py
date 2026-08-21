@@ -138,6 +138,8 @@ _FAILURE_HINTS: dict[FailureReason, str] = {
 def format_hint(outcome: ResolutionOutcome) -> str:
     """Render core-owned guidance from a closed final result."""
     result = outcome.result
+    if isinstance(result, ResolutionResolved):
+        return "resolved"
     if isinstance(result, ResolutionFailed):
         hint = _FAILURE_HINTS[result.reason]
         if result.reason is FailureReason.DEADLINE_EXCEEDED and outcome.backend == "onepassword":

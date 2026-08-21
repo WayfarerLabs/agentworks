@@ -346,7 +346,7 @@ def test_resolve_for_command_rejects_non_enum_policy_before_any_source_work(
     """A caller-supplied ``"refuse"`` is equal to the enum but not identical to it.
 
     Every consumer branches by identity, so without the boundary check this call would
-    take the not-refuse path and attempt the interactive sources it meant to refuse. This
+    take the not-refuse path and permit the TTY prompt it meant to refuse. This
     is the one name of the resolve family that ``agentworks.secrets`` exports, so it is
     the one most reachable from a caller our type checker never sees.
     """

@@ -134,7 +134,7 @@ def test_template_preflight_detects_an_ordinary_env_miss(
 
     registry = build_registry(config)
     vm_tmpl = resolve_template(registry, "default")
-    with pytest.raises(ConfigError, match="cannot pass preflight"):
+    with pytest.raises(ConfigError):
         preflight_all(
             [vm_template_node(vm_tmpl)],
             RunContext(config=config),

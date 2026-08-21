@@ -77,6 +77,10 @@ class ActiveSource:
     disabled_backend_plugin: str | None = None
 
     def __post_init__(self) -> None:
+        try:
+            safe_identity(self.backend_class.name)
+        except ValueError:
+            raise StateError(f"secret-source/{self.source.name} selected an unsafe backend identity") from None
         if self.source.backend.name != self.backend_class.name:
             raise StateError(
                 f"secret-source/{self.source.name} selects {self.source.backend.name!r}, "
@@ -192,7 +196,12 @@ class _SourceContextDriver(AbstractContextManager[SecretSourceClient]):
     ) -> Literal[False]:
         try:
             suppressed = self._inner.__exit__(exc_type, exc, traceback)
-        except BaseException:
+        except BaseException as cleanup_error:
+            if exc is None and (
+                isinstance(cleanup_error, (UserAbort, concurrent.futures.CancelledError))
+                or not isinstance(cleanup_error, Exception)
+            ):
+                raise
             _warn_cleanup_failure(self._source_name)
         else:
             if suppressed:
@@ -206,7 +215,9 @@ class OutputInteractionBroker:
     __slots__ = ("_prompts",)
 
     def __init__(self, secrets: Sequence[SecretDecl]) -> None:
-        self._prompts = {secret.name: (secret.description, secret.hint) for secret in secrets}
+        self._prompts: dict[str, tuple[str, str | None]] = {}
+        for secret in secrets:
+            self._prompts.setdefault(secret.name, (secret.description, secret.hint))
 
     def request_secret(self, name: str, /) -> str:
         prompt = self._prompts.get(name)
@@ -317,7 +328,9 @@ def _lookup_projection(
             raise StateError(f"secret-source/{source.name} mapping validation selected no backend model")
     try:
         description = source.backend_class.describe_lookup(secret.name, validated)
-    except (ConfigError, ValueError):
+    except (UserAbort, concurrent.futures.CancelledError):
+        raise
+    except Exception:
         raise _BackendProtocolError from None
     if type(description) is not LookupDescription:
         raise _BackendProtocolError
@@ -354,44 +367,68 @@ def _validate_result_map(
     *,
     preview_impact: OperatorImpact | None,
     supports_tty_interaction: bool,
-) -> Mapping[str, BackendPreview] | Mapping[str, BackendResolution]:
+) -> dict[str, BackendPreview] | dict[str, BackendResolution]:
     """Validate a complete plugin result map before any value is copied."""
     from collections.abc import Mapping
 
-    if not isinstance(returned, Mapping):
-        raise _BackendProtocolError
+    try:
+        if not isinstance(returned, Mapping):
+            raise _BackendProtocolError
+        snapshot = dict(returned)
+    except (UserAbort, concurrent.futures.CancelledError):
+        raise
+    except _BackendProtocolError:
+        raise
+    except Exception:
+        raise _BackendProtocolError from None
     names = {request.name for request in requests}
-    if set(returned.keys()) != names:
+    if set(snapshot) != names:
         raise _BackendProtocolError
     preview = preview_impact is not None
-    for result in returned.values():
-        if preview:
-            if type(result) not in {
-                PreviewAvailable,
-                PreviewMissing,
-                PreviewIndeterminate,
-                PreviewBlocked,
-                PreviewFailed,
-            }:
+    try:
+        for name, result in tuple(snapshot.items()):
+            normalized: BackendPreview | BackendResolution
+            if preview:
+                if type(result) is PreviewAvailable:
+                    normalized = PreviewAvailable()
+                elif type(result) is PreviewMissing:
+                    normalized = PreviewMissing()
+                elif type(result) is PreviewIndeterminate:
+                    normalized = PreviewIndeterminate(result.reason)
+                    if preview_impact is OperatorImpact.ALLOW:
+                        raise _BackendProtocolError
+                elif type(result) is PreviewBlocked:
+                    normalized = PreviewBlocked(result.reason)
+                    if result.reason not in _BACKEND_BLOCK_REASONS or not supports_tty_interaction:
+                        raise _BackendProtocolError
+                elif type(result) is PreviewFailed:
+                    normalized = PreviewFailed(result.reason)
+                    if result.reason not in _BACKEND_FAILURE_REASONS:
+                        raise _BackendProtocolError
+                else:
+                    raise _BackendProtocolError
+            elif type(result) is BackendResolved:
+                normalized = BackendResolved(result.value)
+            elif type(result) is BackendMissing:
+                normalized = BackendMissing()
+            elif type(result) is BackendBlocked:
+                normalized = BackendBlocked(result.reason)
+                if result.reason not in _BACKEND_BLOCK_REASONS or not supports_tty_interaction:
+                    raise _BackendProtocolError
+            elif type(result) is BackendFailed:
+                normalized = BackendFailed(result.reason)
+                if result.reason not in _BACKEND_FAILURE_REASONS:
+                    raise _BackendProtocolError
+            else:
                 raise _BackendProtocolError
-            if isinstance(result, PreviewIndeterminate) and preview_impact is OperatorImpact.ALLOW:
-                raise _BackendProtocolError
-            if isinstance(result, PreviewBlocked) and (
-                result.reason not in _BACKEND_BLOCK_REASONS or not supports_tty_interaction
-            ):
-                raise _BackendProtocolError
-            if isinstance(result, PreviewFailed) and result.reason not in _BACKEND_FAILURE_REASONS:
-                raise _BackendProtocolError
-        else:
-            if type(result) not in {BackendResolved, BackendMissing, BackendBlocked, BackendFailed}:
-                raise _BackendProtocolError
-            if isinstance(result, BackendBlocked) and (
-                result.reason not in _BACKEND_BLOCK_REASONS or not supports_tty_interaction
-            ):
-                raise _BackendProtocolError
-            if isinstance(result, BackendFailed) and result.reason not in _BACKEND_FAILURE_REASONS:
-                raise _BackendProtocolError
-    return cast("Mapping[str, BackendPreview] | Mapping[str, BackendResolution]", returned)
+            snapshot[name] = normalized
+    except (UserAbort, concurrent.futures.CancelledError):
+        raise
+    except _BackendProtocolError:
+        raise
+    except Exception:
+        raise _BackendProtocolError from None
+    return cast("dict[str, BackendPreview] | dict[str, BackendResolution]", snapshot)
 
 
 def _drive_source(
@@ -504,7 +541,9 @@ def resolve_batch(
     if type(tty_access) is not TtyInteractionAccess:
         raise StateError("tty_access must be an exact TtyInteractionAccess")
     deduped = list(dict.fromkeys(secret.name for secret in secrets))
-    declarations = {secret.name: secret for secret in secrets}
+    declarations: dict[str, SecretDecl] = {}
+    for secret in secrets:
+        declarations.setdefault(secret.name, secret)
     outcomes: dict[str, ResolutionOutcome] = {}
     values: dict[str, str] = {}
     evidence = {name: _Evidence.empty() for name in deduped}

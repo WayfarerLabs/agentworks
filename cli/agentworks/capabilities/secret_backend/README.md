@@ -69,8 +69,8 @@ Terminal input is a separate fact:
 - `TtyInteractionAccess.UNAVAILABLE`: policy permits it, but usable terminal input does not exist;
 - `TtyInteractionAccess.DISABLED`: global policy forbids terminal input, even if a TTY exists.
 
-Global `--non-interactive` creates `DISABLED`. That flag means only “do not use the TTY for
-interactions, even if one is present.” It does not suppress app authentication, biometrics,
+Global `--non-interactive` creates `DISABLED`. That flag means only "do not use the TTY for
+interactions, even if one is present." It does not suppress app authentication, biometrics,
 browsers, device approval, or other out-of-band provider work, and it does not change color or
 presentation.
 
@@ -146,13 +146,14 @@ source block. Core performs one source-first pass and does not reuse preview as 
 `create_client(...)` returns an unentered, resource-free context manager. Factory construction and
 context entry perform no provider operation, authentication, browser launch, biometric request,
 broker call, or stdin read. The selected `preview` or `resolve` method performs the authorized work.
-Context exit always handles cleanup. A cleanup failure emits fixed source-only warning text and does
-not mask the primary result or interruption.
+Context exit always handles cleanup. Cleanup never suppresses or masks a primary result or
+interruption. With no primary exception, user abort, cancellation, and other protected exits
+propagate; an ordinary cleanup failure emits fixed source-only warning text and returns normally.
 
 The client is operation-local and is never cached in a registry. `remaining_time()` is a live view
-of the current source-turn budget; a backend combines it with validated source configuration at each
-cancellable external boundary. The backend returns `DEADLINE_EXCEEDED` rather than exposing a
-provider timeout exception.
+of the outer operation budget; `None` means that outer budget is unbounded. A backend combines it
+with its own validated source deadline at each cancellable external boundary. The backend returns
+`DEADLINE_EXCEEDED` rather than exposing a provider timeout exception.
 
 User abort and cancellation propagate. Other backend exceptions are normalized by core to
 `UNEXPECTED`; malformed maps, illegal variants, illegal reasons, unsafe identities, and maximum-

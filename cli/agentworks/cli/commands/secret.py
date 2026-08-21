@@ -9,7 +9,7 @@ import typer
 from agentworks import output
 from agentworks.capabilities.secret_backend import OperatorImpact
 from agentworks.cli._app import app
-from agentworks.cli._helpers import get_db, ordinary_interaction_policy
+from agentworks.cli._helpers import get_db, ordinary_tty_interaction_policy
 from agentworks.machine_output import OutputFormat
 from agentworks.secrets.policy import tty_interaction_access
 
@@ -116,7 +116,7 @@ def secret_describe(
 
     impact = OperatorImpact.ALLOW if allow_interaction else OperatorImpact.NONE
     tty_access = tty_interaction_access(
-        ordinary_interaction_policy(),
+        ordinary_tty_interaction_policy(),
         terminal_input_usable=sys.stdin.isatty(),
     )
     desc = describe_secret(config, registry, name, db=db, impact=impact, tty_access=tty_access)
@@ -155,7 +155,7 @@ def secret_verify(
     registry = load_request_registry(config)
     impact = OperatorImpact.ALLOW if allow_interaction else OperatorImpact.NONE
     tty_access = tty_interaction_access(
-        ordinary_interaction_policy(),
+        ordinary_tty_interaction_policy(),
         terminal_input_usable=sys.stdin.isatty(),
     )
     outcomes = verify_secrets(config, registry, names, impact=impact, tty_access=tty_access)

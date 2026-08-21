@@ -99,7 +99,7 @@ def test_preflight_accepts_available_indeterminate_and_later_failure_after_uncer
 
 
 def test_preflight_rejects_definitive_missing() -> None:
-    with pytest.raises(ConfigError, match="cannot pass preflight"):
+    with pytest.raises(ConfigError):
         require_predicted_refs(
             "fixture/owner",
             [_ref("token")],

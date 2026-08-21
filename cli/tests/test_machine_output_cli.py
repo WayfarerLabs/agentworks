@@ -657,9 +657,10 @@ def test_malformed_config_doctor_json_and_human_share_structured_facts(
 
     def config_only_checks(
         *,
+        tty_access: object,
         completion_version: str | None = None,
     ) -> HealthReport:
-        del completion_version
+        del completion_version, tty_access
         group, _config, _registry = doctor._check_config()
         return HealthReport(groups=[group])
 

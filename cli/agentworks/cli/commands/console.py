@@ -9,7 +9,7 @@ import typer
 from agentworks.cli._app import app
 from agentworks.cli._helpers import (
     get_db,
-    ordinary_interaction_policy,
+    ordinary_tty_interaction_policy,
     parse_csv_filter,
     prompt_vm,
 )
@@ -194,7 +194,7 @@ def console_attach(
     ] = False,
 ) -> None:
     """Attach to a named console (creating its tmux state on first attach)."""
-    interaction = ordinary_interaction_policy()
+    interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config
     from agentworks.sessions.multi_console import attach_console
 
@@ -231,7 +231,7 @@ def console_add_sessions(
     ],
 ) -> None:
     """Append sessions to an existing console."""
-    interaction = ordinary_interaction_policy()
+    interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config
     from agentworks.sessions.multi_console import add_sessions
 
@@ -299,7 +299,7 @@ def console_add_shell(
     ] = False,
 ) -> None:
     """Add a shell pane to a session window in a console."""
-    interaction = ordinary_interaction_policy()
+    interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config
     from agentworks.sessions.multi_console import add_shell
 
@@ -329,7 +329,7 @@ def console_restore_session(
     `console attach --recreate`. Consoles created before pane-tagging existed
     require `attach --recreate` once to retag from scratch.
     """
-    interaction = ordinary_interaction_policy()
+    interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config
     from agentworks.sessions.multi_console import restore_session
 

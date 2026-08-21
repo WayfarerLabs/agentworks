@@ -664,7 +664,7 @@ Enable the `onepassword` plugin, add `work-op` to the chain, and map a secret wi
 `prompt` source names remain valid unchanged. A direct configured-backend reference such as
 `onepassword` breaks in 0.14; the error gives the exact source declaration and reference rewrite,
 with no compatibility row or legacy parser. When rewriting the old OnePassword mapping table, move
-its account to the source. The timeout defaults to 30 seconds.
+its account to the source. The timeout bounds the complete source turn and defaults to 30 seconds.
 
 `app_authentication_impact` is conservative by default: zero-impact preview returns indeterminate
 when app authentication may require operator action. Set it to `none` only if app authentication is
@@ -723,7 +723,7 @@ consent to a possible prompt, biometric, app, browser, device, or renewed-authen
 valid with global `--non-interactive`: preview impact permits out-of-band work while the global flag
 still disables TTY input.
 
-Global `--non-interactive` means only “do not use the TTY for interactions, even if one is present.”
+Global `--non-interactive` means only "do not use the TTY for interactions, even if one is present."
 It does not disable color or formatting and does not suppress out-of-band provider work. There is no
 general unattended fail-fast mode; app-authenticated work may raise approval and wait until the
 source timeout. Truly unattended workflows should use env-var or a provider mode known to be

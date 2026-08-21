@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentworks.capabilities.secret_backend import OperatorImpact, TtyInteractionAccess
+from agentworks.capabilities.secret_backend import OperatorImpact, ResolutionIntent, TtyInteractionAccess
 from agentworks.capabilities.secret_backend.env_var import EnvVarBackend, EnvVarSourceConfig
 from agentworks.resources.graph import Readiness
 from agentworks.schema import CapabilityBlock
@@ -31,6 +31,24 @@ def _resolve(decl: SecretDecl) -> tuple[dict[str, str], str | None]:
         interaction_broker=None,
     )
     return batch.complete_or_raise(), batch.outcomes[0].identifier
+
+
+def test_factory_and_context_entry_do_not_read_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "agentworks.capabilities.secret_backend.env_var._read",
+        lambda request: pytest.fail("environment read started"),
+    )
+    context = EnvVarBackend.create_client(
+        source_name="env-var",
+        config=EnvVarSourceConfig(name="env-var"),
+        intent=ResolutionIntent(),
+        tty_access=TtyInteractionAccess.UNAVAILABLE,
+        interaction_broker=None,
+        remaining_time=lambda: None,
+    )
+    client = context.__enter__()
+    context.__exit__(None, None, None)
+    assert client is not None
 
 
 @pytest.mark.parametrize(

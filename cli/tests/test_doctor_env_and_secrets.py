@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 from textwrap import dedent
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
 from agentworks.bootstrap import build_registry
-from agentworks.capabilities.secret_backend import BlockReason
+from agentworks.capabilities.secret_backend import BlockReason, TtyInteractionAccess
 from agentworks.config import load_config
 from agentworks.doctor import Status, _check_config, _check_secrets, checks_for_resource
-from agentworks.errors import ConfigError
+from agentworks.errors import ConfigError, StateError
 from agentworks.resources.access import ResourceIdentity
 from agentworks.secrets.preview import PreviewStatus
 from tests.conftest import ManifestDoc, write_manifests
@@ -78,13 +78,31 @@ def test_focused_checks_are_the_exact_bulk_resource_rows(tmp_path: Path) -> None
         (ResourceIdentity("vm-platform", "lima"), _check_vm_platforms(registry)),
         (ResourceIdentity("secret-backend", "env-var"), _check_secret_backends(registry)),
         (ResourceIdentity("secret-source", "env-var"), _check_secret_sources(config, registry)),
-        (ResourceIdentity("secret", "tailscale-auth-key"), _check_secrets(config, registry)),
+        (
+            ResourceIdentity("secret", "tailscale-auth-key"),
+            _check_secrets(config, registry, tty_access=TtyInteractionAccess.UNAVAILABLE),
+        ),
     )
 
     for identity, group in cases:
-        focused = checks_for_resource(config, registry, identity)
+        focused = checks_for_resource(
+            config,
+            registry,
+            identity,
+            tty_access=TtyInteractionAccess.UNAVAILABLE,
+        )
         assert len(focused) == 1
         assert focused[0] in group.checks
+
+
+def test_focused_checks_reject_non_exact_tty_access_before_resource_work() -> None:
+    with pytest.raises(StateError):
+        checks_for_resource(
+            cast("Any", object()),
+            cast("Any", object()),
+            ResourceIdentity("secret", "token"),
+            tty_access=cast("Any", "unavailable"),
+        )
 
 
 def test_focused_admin_dotfiles_matches_bulk_and_empty_source_has_no_check(
@@ -98,7 +116,15 @@ def test_focused_admin_dotfiles_matches_bulk_and_empty_source_has_no_check(
     empty_config = load_config(_write_config(empty_path), warn_issues=False)
     empty_registry = build_registry(empty_config)
     identity = ResourceIdentity("admin-template", "default")
-    assert checks_for_resource(empty_config, empty_registry, identity) == ()
+    assert (
+        checks_for_resource(
+            empty_config,
+            empty_registry,
+            identity,
+            tty_access=TtyInteractionAccess.UNAVAILABLE,
+        )
+        == ()
+    )
 
     configured_path = tmp_path / "configured"
     configured_path.mkdir()
@@ -110,7 +136,12 @@ def test_focused_admin_dotfiles_matches_bulk_and_empty_source_has_no_check(
     bulk_group, config, registry = _check_config()
     assert config is not None
     assert registry is not None
-    focused = checks_for_resource(config, registry, identity)
+    focused = checks_for_resource(
+        config,
+        registry,
+        identity,
+        tty_access=TtyInteractionAccess.UNAVAILABLE,
+    )
     assert len(focused) == 1
     assert focused[0] in bulk_group.checks
 
@@ -118,6 +149,33 @@ def test_focused_admin_dotfiles_matches_bulk_and_empty_source_has_no_check(
 # ---------------------------------------------------------------------------
 # _check_secrets
 # ---------------------------------------------------------------------------
+
+
+def test_secret_checks_use_only_explicit_tty_access(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks import output
+
+    config = load_config(_write_config(tmp_path), warn_issues=False)
+    registry = build_registry(config)
+    monkeypatch.setattr(output, "non_interactive", lambda: pytest.fail("doctor read ambient TTY policy"))
+    unavailable = _check_secrets(
+        config,
+        registry,
+        tty_access=TtyInteractionAccess.UNAVAILABLE,
+    )
+    available = _check_secrets(
+        config,
+        registry,
+        tty_access=TtyInteractionAccess.AVAILABLE,
+    )
+    unavailable_row = next(check for check in unavailable.checks if check.secret_preview is not None)
+    available_row = next(check for check in available.checks if check.secret_preview is not None)
+    assert unavailable_row.secret_preview is not None
+    assert available_row.secret_preview is not None
+    assert unavailable_row.secret_preview.status is PreviewStatus.BLOCKED
+    assert available_row.secret_preview.status is PreviewStatus.INDETERMINATE
 
 
 def test_auto_declared_secrets_are_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -134,7 +192,7 @@ def test_auto_declared_secrets_are_reported(tmp_path: Path, monkeypatch: pytest.
     monkeypatch.delenv("AW_SECRET_TAILSCALE_AUTH_KEY", raising=False)
     cfg = _write_config(tmp_path)
     config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(config, build_registry(config))
+    g = _check_secrets(config, build_registry(config), tty_access=TtyInteractionAccess.UNAVAILABLE)
     assert g.name == "Secrets"
     (check,) = g.checks
     assert check.name == "Secret 'tailscale-auth-key' (auto)"
@@ -161,7 +219,7 @@ def test_secret_resolves_via_env_var_when_set(
         manifests=[ManifestDoc("secret", "shared", description="Shared API token")],
     )
     config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(config, build_registry(config))
+    g = _check_secrets(config, build_registry(config), tty_access=TtyInteractionAccess.UNAVAILABLE)
     shared = next(check for check in g.checks if check.name == "Secret 'shared'")
     assert shared.status is Status.OK
     assert shared.secret_preview is not None
@@ -191,7 +249,7 @@ def test_doctor_accepts_mapping_keyed_by_differently_named_declared_source(
         ],
     )
     config = load_config(cfg, warn_issues=False)
-    group = _check_secrets(config, build_registry(config))
+    group = _check_secrets(config, build_registry(config), tty_access=TtyInteractionAccess.UNAVAILABLE)
 
     shared = next(check for check in group.checks if check.name == "Secret 'shared'")
     assert shared.status is Status.OK
@@ -217,7 +275,7 @@ def test_secret_resolves_via_prompt_when_env_var_unset(
         manifests=[ManifestDoc("secret", "shared", description="Shared API token")],
     )
     config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(config, build_registry(config))
+    g = _check_secrets(config, build_registry(config), tty_access=TtyInteractionAccess.UNAVAILABLE)
     shared = next(check for check in g.checks if check.name == "Secret 'shared'")
     assert shared.status is Status.WARN
     assert shared.secret_preview is not None
@@ -250,7 +308,7 @@ def test_secret_not_available_when_env_var_unset_and_prompt_opted_out(
         ],
     )
     config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(config, build_registry(config))
+    g = _check_secrets(config, build_registry(config), tty_access=TtyInteractionAccess.UNAVAILABLE)
     row = next(c for c in g.checks if "opted-out" in c.name)
     assert row.status is Status.WARN
     assert row.secret_preview is not None
@@ -305,7 +363,15 @@ def test_secret_backends_group_skips_disabled_plugin_backend(tmp_path: Path, mon
     assert by_name["prompt"].status is Status.OK
     # Disabled: skipped here, never a misleading [ok].
     assert "onepassword" not in by_name
-    assert checks_for_resource(config, registry, ResourceIdentity("secret-backend", "onepassword")) == ()
+    assert (
+        checks_for_resource(
+            config,
+            registry,
+            ResourceIdentity("secret-backend", "onepassword"),
+            tty_access=TtyInteractionAccess.UNAVAILABLE,
+        )
+        == ()
+    )
 
     # The System plugins roster IS the enablement authority: it lists the
     # disabled backend's plugin as disabled.
@@ -344,7 +410,7 @@ def test_check_secrets_flags_a_not_ready_only_source(tmp_path: Path, monkeypatch
         ],
     )
     config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(config, build_registry(config))
+    g = _check_secrets(config, build_registry(config), tty_access=TtyInteractionAccess.UNAVAILABLE)
     op_only = next(check for check in g.checks if check.name == "Secret 'op-only'")
     assert op_only.status is Status.WARN
     assert op_only.secret_preview is not None
@@ -598,7 +664,12 @@ def test_prompt_only_site_secret_leaves_the_site_row_ok(
 
     g = _check_vm_sites(config, registry)
     row = next(c for c in g.checks if c.name == "azure-dev")
-    focused = checks_for_resource(config, registry, ResourceIdentity("vm-site", "azure-dev"))
+    focused = checks_for_resource(
+        config,
+        registry,
+        ResourceIdentity("vm-site", "azure-dev"),
+        tty_access=TtyInteractionAccess.UNAVAILABLE,
+    )
     assert row.status is Status.OK, (row.status, row.message)
     assert "azure-vm" in (row.message or "")
     assert focused == (row,)
@@ -622,7 +693,12 @@ def test_focused_vm_site_preserves_bulk_preflight_exception_facts(
 
     bulk = doctor._check_vm_sites(config, registry)
     row = next(check for check in bulk.checks if check.name == "azure-dev")
-    focused = checks_for_resource(config, registry, ResourceIdentity("vm-site", "azure-dev"))
+    focused = checks_for_resource(
+        config,
+        registry,
+        ResourceIdentity("vm-site", "azure-dev"),
+        tty_access=TtyInteractionAccess.UNAVAILABLE,
+    )
 
     assert focused == (row,)
     assert row.status is Status.WARN
@@ -640,7 +716,7 @@ def test_prompt_only_site_secret_still_renders_on_its_own_secret_row(
     config = load_config(_sp_site_config(tmp_path), warn_issues=False)
     registry = build_registry(config)
 
-    g = _check_secrets(config, registry)
+    g = _check_secrets(config, registry, tty_access=TtyInteractionAccess.UNAVAILABLE)
     row = next(c for c in g.checks if "az-sp" in c.name)
     assert row.status is Status.WARN
     assert row.secret_preview is not None

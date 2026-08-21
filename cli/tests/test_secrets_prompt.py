@@ -9,6 +9,7 @@ from agentworks.capabilities.secret_backend import (
     BlockReason,
     InteractionBroker,
     OperatorImpact,
+    ResolutionIntent,
     TtyInteractionAccess,
 )
 from agentworks.capabilities.secret_backend.prompt import PromptBackend, PromptSourceConfig
@@ -41,6 +42,22 @@ def _source() -> ActiveSource:
 
 def _decl() -> SecretDecl:
     return SecretDecl(name="token", description="Token")
+
+
+def test_factory_and_context_entry_do_not_call_the_broker() -> None:
+    broker = _Broker()
+    context = PromptBackend.create_client(
+        source_name="prompt",
+        config=PromptSourceConfig(name="prompt"),
+        intent=ResolutionIntent(),
+        tty_access=TtyInteractionAccess.AVAILABLE,
+        interaction_broker=broker,
+        remaining_time=lambda: None,
+    )
+    client = context.__enter__()
+    context.__exit__(None, None, None)
+    assert client is not None
+    assert broker.names == []
 
 
 @pytest.mark.parametrize(

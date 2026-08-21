@@ -46,8 +46,7 @@ def test_construction_rejects_a_non_enum_policy(env) -> None:
     """The check every ``Resolver(...)`` site inherits, including both shared VM
     boundaries. ``TtyInteractionPolicy`` is a ``StrEnum`` and every consumer branches
     on it by identity, so a plain ``"refuse"`` is equal to the enum, fails the
-    identity test, and resolves through an interactive source in a run that meant
-    to refuse."""
+    identity test, and permits a TTY prompt in a run that meant to refuse it."""
     config, registry = env()
     with pytest.raises(StateError):
         Resolver(config, registry, interaction="refuse")  # type: ignore[arg-type]

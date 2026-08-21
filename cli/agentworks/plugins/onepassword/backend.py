@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from enum import StrEnum
@@ -45,6 +46,7 @@ if TYPE_CHECKING:
 
 
 _OP_BINARY = "op"
+_MONOTONIC = time.monotonic
 
 _SIGNED_OUT_MARKERS = (
     "not currently signed in",
@@ -96,6 +98,7 @@ def _bounded_read(args: list[str], *, timeout: float) -> _BoundedRead:
             capture_output=True,
             text=True,
             check=False,
+            stdin=subprocess.DEVNULL,
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:
@@ -142,7 +145,7 @@ class OnePasswordSourceConfig(AgwModel):
     account: NonEmptyStr | None = None
     """Optional 1Password account shorthand passed to ``op read``."""
     timeout: float = Field(default=30.0, gt=0, allow_inf_nan=False)
-    """Maximum seconds for each bounded provider read."""
+    """Maximum seconds for the complete source turn."""
     app_authentication_impact: AppAuthenticationImpact = AppAuthenticationImpact.OPERATOR_ACTION
     """Whether app authentication counts as operator action during preview."""
 
@@ -169,6 +172,7 @@ class _OnePasswordClient:
         self._config = config
         self._intent = intent
         self._remaining_time = remaining_time
+        self._deadline = _MONOTONIC() + config.timeout
 
     def _read(self, request: SecretLookupRequest) -> _BoundedRead:
         mapping = request.mapping
@@ -178,8 +182,11 @@ class _OnePasswordClient:
         if self._config.account is not None:
             args += ["--account", self._config.account]
         args.append(mapping.root)
-        remaining = self._remaining_time()
-        timeout = self._config.timeout if remaining is None else min(self._config.timeout, remaining)
+        configured_remaining = max(0.0, self._deadline - _MONOTONIC())
+        operation_remaining = self._remaining_time()
+        timeout = (
+            configured_remaining if operation_remaining is None else min(configured_remaining, operation_remaining)
+        )
         return _bounded_read(args, timeout=timeout)
 
     def preview(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendPreview]:
