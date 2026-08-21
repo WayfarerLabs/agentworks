@@ -1,7 +1,7 @@
 # Child SDDs
 
 - Status: Active ledger
-- Last updated: 2026-08-19
+- Last updated: 2026-08-21
 
 This is the saga's tracking document, the analog of an ordinary SDD's `plan.md`. Completed
 checkboxes are immutable records, per the standard rule. The saga SDD locks when every entry here is
@@ -126,10 +126,21 @@ locked.
       control in the assistant shell's agent-only fence (three lanes converged on it twice before it
       landed in full operational form with the self-reflective case). All lanes passed at the merged
       head
-- [ ] Remaining phases (wave 2 adoption, closeout) per the effort's per-phase PR plan. The README
-      bootstrap shipped with the assistance phase (PR #480), so the bootstraps gate is satisfied;
-      the generated block pins version 0.14.0 or newer and resolves when the release ships
-- [ ] Locked
+- [x] Remaining phases complete (wave 2 adoption, closeout). The README bootstrap shipped with the
+      assistance phase (PR #480), satisfying the bootstraps gate
+- [x] Closeout accepted and **locked** (PR #615, merged 2026-08-21; `locked.md` binds at merge). The
+      round consumed both delivered messages: the guide contract relaxed to fence containment
+      (evidence renders verbatim inside a fence widened past every backtick run, cross-referenced
+      with the packaging generator), and the agent-mode item resolved by routing the deferral to the
+      operator rather than recording the capability as thin. Durable owners recorded for the
+      tire-kick's three do-not-regress properties (command drift, the topic-lookup boundary with its
+      new invalid-versus-unknown assertion, and the posture content in permanent guide
+      documentation). The saga-lead review's one blocking item, naming the authenticated channel on
+      the 2026-08-20 disposition, was applied before merge
+- [ ] Routed back to this saga at the lock (the child cannot receive messages once locked): the
+      non-TTY guide mode heuristic, where a human redirecting output gets agent-targeted content,
+      and a root release-topic rename. Recorded in
+      `message-2026-08-20-onboarding-closeout-followups.md`; both need an owner
 
 ### Wave 3: 2026-08-07-secret-sources
 
@@ -260,6 +271,19 @@ item shrinks to a verification sweep.
       delete"; tag the three untagged unverified rows; correct the 31-versus-30 migration-phrase
       count; fix the D-006 row (as printed it deletes the guard it says to keep); and carry the
       22-site screening as a gating condition on the deferred conversions
+- [x] Sweep re-scoped for the restart (operator direction 2026-08-19, delivered as
+      `message-2026-08-19-sweep-rescope.md`, PR #622): surfaces with a live owner leave the map, so
+      the secret-backend and secrets estates go to the secret-preview child and the db/persistence,
+      resource show/inspect, and doctor-drift estates to the instance-model child, each owning its
+      area's trim-to-standard as definition-of-done rather than leaving it to trail behind. The
+      disjoint groups proceed on their own merits, and the R4 reassessment inherits the re-scope as
+      the dated answer to its scope question
+- [ ] Corrective inventory prepared in PRs #625 and #626 (stacked, both awaiting merge): three lanes
+      independently re-derived the rebuilt map (1,215 rows, the 664-site estate owned once with none
+      unowned or double-owned, and the 117-row subtraction reconciling in both directions), the
+      post-#573 charter items are discharged, and a screen script that dies with the SDD now backs
+      the accounting. The integration lane's order-dependent-verdict blocker was taken and fixed.
+      Group 1 unblocks at merge
 - [ ] Reassessment delivered; surviving findings proposed individually or dropped
 - [ ] Locked
 

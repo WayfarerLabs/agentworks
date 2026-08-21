@@ -1,7 +1,7 @@
 # Target State
 
 - Status: North star, accumulating settled rulings
-- Last updated: 2026-08-15
+- Last updated: 2026-08-21
 
 This document describes where Agentworks is going across this saga effort, synthesized from the
 perspectives in `inputs/`. It is the target of these waves, not a forever vision: when
@@ -171,6 +171,14 @@ journey hints of this species across the guide, developed by the onboarding effo
 one. The saga lead's placement note, advisory: a hint of this shape describes a journey across kinds
 and so belongs to the onboarding topic's agent note rather than being sprinkled per kind, which is
 how the "only when genuinely necessary" clause and a dozen journeys coexist.
+
+**Superseded (operator disposition, 2026-08-20, delivered through the onboarding session's
+authenticated channel and published by that effort's lock, PR #615):** the roughly-dozen-hints
+expectation is retired. The current sparse agent-only content is intentional: general posture stays
+centralized in `concept-assistant-agent`, and other topics add agent-only context only where a
+journey genuinely needs it. The worked example above stands as the species description for any hint
+that is written, not as a quota. The onboarding effort locked against this disposition rather than
+against the earlier expectation; a lead reading the paragraph above must read this one with it.
 
 **Ruling (operator, 2026-08-16, the simplification pass gates 0.14.0):** the pass's remaining
 deletion work, the assertion sweep's execution and the gcp fixture dedup behind it, plus the pass's
