@@ -41,7 +41,8 @@ on evidence that a configured source is broken.
   authority could change the answer. It is not failure or absence.
 - **Blocked**: an execution, authority, readiness, or applicability limitation prevents resolution
   in the current operation. A source-level block may fall through; the limiting reason is retained.
-  A chain with no candidate is aggregate `blocked/no-candidate`, never ordinary missing.
+  A chain with no candidate is the core-owned aggregate `blocked/no-candidate`, never an attempt
+  result or ordinary missing.
 - **Failed**: the configured lookup or provider operation failed. The source chain stops so a lower
   precedence source cannot hide a broken higher precedence source.
 - **Definitive disposition**: any result other than `indeterminate`. It says no broader
@@ -81,8 +82,9 @@ on evidence that a configured source is broken.
   - `blocked` falls through and preserves the reason if the chain exhausts;
   - `failed` stops the chain immediately.
 - R11. Callers own fixed preview semantics:
-  - preflight requests `OperatorImpact.NONE`, accepts `available` or `indeterminate`, and rejects
-    `missing`, `blocked`, or `failed`;
+  - preflight requests `OperatorImpact.NONE`, accepts `available` or `indeterminate`, rejects
+    `missing` or `blocked`, and rejects `failed` unless an earlier higher-precedence attempt is
+    indeterminate;
   - default inspection and doctor requests are non-disruptive and may report `indeterminate`;
   - explicit inspection or verification opt-in requests maximum impact and therefore receives no
     `indeterminate` result;
@@ -92,12 +94,15 @@ on evidence that a configured source is broken.
   `--non-interactive`. This choice is independent of whether stdin is a TTY. `secret verify` retains
   its refusal-shaped default and explicit `--allow-interaction` opt-in.
 - R13. Preview respects active-source order, source readiness, mapping applicability, hard-failure
-  versus fallthrough semantics, and first-source-wins behavior. Earlier uncertainty must not be
-  hidden by a later source. A failed configured source must not be hidden by fallback.
+  versus fallthrough semantics, and first-source-wins behavior. The aggregate reports the
+  current-impact disposition: a later success is `available`, and a later hard failure is `failed`.
+  Earlier uncertainty remains visible in ordered attempts but does not mask either disposition. A
+  failed configured source must not be hidden by fallback.
 - R14. Invalid mapping structure fails configuration validation when knowable there. A mapping that
-  passes structural validation but is rejected by its provider returns `failed/invalid-mapping` and
-  hard-stops. A lookup returns `missing` only when the backend can establish ordinary absence. An
-  ambiguous provider error fails closed and hard-stops rather than pretending to be missing.
+  passes structural validation but is rejected ambiguously by its provider returns
+  `failed/lookup-rejected` and hard-stops. A lookup returns `missing` only when the backend can
+  establish ordinary absence. An ambiguous provider error fails closed and hard-stops rather than
+  pretending to be missing.
 - R15. The secret-backend contract and every in-tree implementation are rewritten atomically. There
   is no compatibility adapter, deprecation track, or parallel old/new runtime. The descriptor and
   every implementation declare `contract_version = 1`; this pre-external-plugin rewrite establishes
@@ -109,6 +114,10 @@ on evidence that a configured source is broken.
   self-contained permanent contract authority for result variants, reason ownership, core flow,
   impact and terminal rules, lifecycle constraints, value containment, conformance, and a complete
   implementation example; it does not depend on this SDD.
+- R18. The existing JSON v1 shapes remain compatible. Both `secret describe`'s
+  `source_mappings[].would_attempt` and `secret list`'s `sources[].would_attempt` remain additive
+  compatibility projections derived from structured lookup disposition. Secret checks in doctor may
+  add an optional closed `secret_preview` object without changing existing fields.
 
 ## Acceptance criteria
 
@@ -126,12 +135,14 @@ on evidence that a configured source is broken.
 - AC6. `agw secret describe NAME --allow-interaction` and
   `agw secret verify NAME --allow-interaction` can request a maximum-impact, value-free disposition.
   Their default forms do not authorize operator impact.
-- AC7. Preflight fails for `missing`, `blocked`, or `failed` aggregate results and proceeds for
-  `available` or `indeterminate`. Resolution still completes before the consuming operation mutates
-  external state.
-- AC8. Unambiguous ordinary absence falls through to a lower source. An invalid 1Password reference
-  produces `failed/invalid-mapping`, stops the chain, and is not hidden by a lower source. Ambiguous
-  1Password not-found text also fails closed unless sanitized real-provider evidence establishes a
+- AC7. Preflight fails for `missing` or `blocked` aggregate results and proceeds for `available` or
+  `indeterminate`. It fails for `failed` unless that aggregate retains an earlier higher-precedence
+  indeterminate attempt; in that case it proceeds because greater authority could avoid reaching the
+  failure. Resolution still completes before the consuming operation mutates external state.
+- AC8. Unambiguous ordinary absence falls through to a lower source. A locally invalid 1Password
+  reference produces `failed/invalid-mapping`; an ambiguous provider rejection produces
+  `failed/lookup-rejected`. Both stop the chain and are not hidden by a lower source. Ambiguous
+  1Password not-found text remains rejected unless sanitized real-provider evidence establishes a
   narrower stable absence marker for the supported CLI version.
 - AC9. Provider authentication, connectivity, external, and deadline failures hard-stop the current
   secret's source chain by default. No generic warn-and-continue policy exists in this contract.
@@ -144,6 +155,12 @@ on evidence that a configured source is broken.
 - AC12. Existing env-var, prompt, and OnePassword source precedence remains intact; ordinary absence
   and execution blocks retain fallback, while provider and mapping failures retain or gain explicit
   hard-stop behavior.
+- AC13. In a complete resolution batch, core regains control and rechecks viability before every
+  individual impact-bearing lookup. A failure learned from one authorized lookup prevents any later
+  operator-impacting lookup for the doomed batch.
+- AC14. Core validates every backend-produced diagnostic identifier before retaining or rendering
+  it. Control, format, line-separator, and paragraph-separator characters cannot forge an output
+  row.
 
 ## Non-goals
 
@@ -177,4 +194,6 @@ on evidence that a configured source is broken.
 - Missing TTY is distinct from ordinary absence and provider failure.
 - There are no external secret-backend plugins. Rewrite the contract and all implementations in one
   atomic change and reset the secret-backend descriptor and implementations from the current
-  internal sentinel `2` to `1`.
+  internal sentinel `2` to `1`. This is authenticated operator direction from 2026-08-19: because
+  the sentinel is registration-only and no external implementation exists, `1` is deliberately
+  re-established as the sole supported pre-publication contract rather than minting `3`.

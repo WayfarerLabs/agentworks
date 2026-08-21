@@ -1,6 +1,7 @@
 # Prior art: intent-aware, value-free secret preview
 
 - Date: 2026-08-18
+- Amended: 2026-08-20
 - Scope: TTY capability, provider authentication modes, value containment, and backend-owned probes
 - Sources: current Agentworks code plus primary language and vendor documentation
 
@@ -114,7 +115,8 @@ Design consequences:
 
 - Ordinary absence is an exact missing variant and falls through.
 - Execution or authority limitations are blocked or indeterminate, not absence.
-- Mapping and provider failures are exact failed variants and hard-stop by default.
+- Invalid mapping and provider failures are exact failed variants and hard-stop by default;
+  ambiguous provider rejection uses `lookup-rejected` rather than claiming local invalidity.
 - Backends classify semantic outcomes, while core owns the one exhaustive flow table. A backend does
   not select fallback or attach a halt flag.
 - A future outage-fallback feature would need explicit core/source policy rather than an implicit
@@ -132,9 +134,10 @@ interactive source makes preflight fail.
 Design consequences:
 
 - Preview cannot be designed only for `secret describe`; preflight semantics must change with it.
-- Preflight remains an impossibility screen. It requests non-disruptive work, rejects missing,
-  blocked, or failed, and accepts indeterminate rather than converting uncertainty into a false
-  failure.
+- Preflight remains an impossibility screen. It requests non-disruptive work, rejects missing and
+  blocked, and accepts indeterminate rather than converting uncertainty into a false failure. It
+  rejects failed unless an earlier higher-precedence attempt is indeterminate, because broader
+  authority could avoid reaching that lower-source failure.
 - The later value-bearing resolution boundary remains authoritative and must still run before
   consuming mutations.
 

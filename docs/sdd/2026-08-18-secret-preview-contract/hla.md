@@ -22,8 +22,9 @@ but an invalid or failing configured source cannot be silently hidden by fallbac
 
 Actual resolution uses the same impact and classification vocabulary but remains a separate
 value-bearing operation. Preflight does not simulate full resolution. It invokes preview at zero
-operator impact and treats `indeterminate` as not disproven, then the operation performs one
-authoritative resolution before external mutation.
+operator impact and treats a higher-precedence indeterminate attempt as not disproven, even when a
+later source fails, then the operation performs one authoritative resolution before external
+mutation.
 
 ## Architectural shape
 
@@ -98,9 +99,11 @@ non-candidates remain visible in mapping output but do not become backend previe
 
 ### Source-client results
 
-The operation-bounded `SecretSourceClient` gains one batch `preview` method. It receives candidate
-requests, exact operator impact, terminal availability, and the shrinking source-turn budget. It
-returns exactly one closed tagged result per request and no other payload:
+The operation-bounded `SecretSourceClient` gains one batch `preview` method. Core supplies exact
+operator impact, terminal availability, an optional prompt broker, and the shrinking operation
+budget once, when it constructs the client. `preview` and `resolve` then receive only candidate
+requests; their authority cannot disagree with their client's construction. Each method returns
+exactly one closed tagged result per request and no other payload:
 
 - `PreviewAvailable`: a valid value exists; stop successfully;
 - `PreviewMissing`: a valid lookup established ordinary absence; fall through silently;
@@ -124,11 +127,14 @@ no remediation, provider message, arbitrary metadata, or backend-selected flow i
 
 ### Lifecycle and provider boundary
 
-Core passes the same exact impact and terminal fact into `create_client` before backend factory or
+Core passes exact impact and terminal facts into `create_client` before backend factory or
 context-entry code can run. Construction remains resource-free, context entry is provider-I/O-free,
-and the selected method owns provider work. The old `prepare` hook is removed because every in-tree
-implementation currently makes it a no-op. This leaves no pre-policy setup phase and one typed
-result surface per operation.
+and the selected method owns provider work. The old `prepare` and `external_operation_timeout` hooks
+are removed: every in-tree `prepare` is a no-op, and a timeout declaration evaluated before client
+construction would be an authority-blind backend hook. A backend validates its timeout in source
+config, enforces it inside its provider boundary together with the supplied remaining-time view, and
+returns `failed/deadline-exceeded`. This leaves no pre-policy setup phase and one typed result
+surface per operation.
 
 Backends share their private acquisition path between preview and resolve:
 
@@ -146,47 +152,54 @@ source turn to protocol failure rather than repeat an impossible higher-authorit
 
 ### Core chain disposition
 
-Core, not each backend, owns one exhaustive flow table. It walks ready, active, applicable sources
-in precedence order:
+Core, not each backend, owns one exhaustive flow table. The preview-contract LLD is its sole
+normative definition; other artifacts summarize and link to it. Core walks ready, active, applicable
+sources in precedence order:
 
 - `available` or `resolved` stops successfully;
 - `missing` falls through silently;
-- preview `indeterminate` falls through but pins higher-precedence uncertainty;
+- preview `indeterminate` falls through and remains in ordered evidence;
 - `blocked` falls through and is retained as exhaustion evidence;
 - `failed` stops the secret's chain immediately.
 
 Static non-candidates are omitted from the attempt list. Not-ready and disabled sources become
 core-owned blocked attempts when they were otherwise candidates. Structurally invalid mapping data
-fails before traversal when possible. A provider-rejected mapping is `failed/invalid-mapping`; a
-valid reference to an absent target is `missing`.
+fails before traversal when possible. An ambiguous provider rejection is `failed/lookup-rejected`; a
+valid reference to a proven absent target is `missing`.
 
-Preview aggregation retains ordered attempts and preserves precedence:
+Preview aggregation retains ordered attempts and reports the disposition achieved under the current
+impact:
 
-- `available` when a source establishes presence and no earlier indeterminate source could win;
+- `available` when a source establishes presence, including after an earlier indeterminate source;
 - `missing` when at least one candidate lookup ran and every reachable candidate ordinarily missed;
-- `indeterminate` when an earlier impact-limited source could change the result, even if a later
-  success or failure is observed;
+- `indeterminate` when traversal exhausts after an impact-limited source and no later success or
+  hard failure establishes the current-impact disposition;
 - `blocked` when no success, uncertainty, or failure exists and an execution, readiness, or
   applicability limitation remains, including `no-candidate`;
-- `failed` when a hard failure is reached before any earlier indeterminate result.
+- `failed` whenever a hard failure is reached.
 
-A later `failed` result still stops traversal. If an earlier source was indeterminate, the aggregate
-remains indeterminate while the ordered attempts retain the later failure; broader authority might
-have resolved at the earlier source before reaching it.
+A later available or failed result does not erase an earlier indeterminate attempt. That evidence is
+load-bearing only for callers such as preflight that ask whether a higher-impact authoritative pass
+could avoid the later failure; it never downgrades a current hard failure or success in inspection,
+verification, or doctor.
 
 Operation preflight memoizes previews once per secret and command. It populates the memo lazily in
-node order, so duplicate references cannot repeat provider work while the established first-failing
-node order remains unchanged. Actual resolution never reuses a preview result.
+node order, so duplicate references cannot repeat provider work, and secrets referenced only by
+unreachable later nodes cause no lookup or audit event. The established first-failing node order
+remains unchanged. Actual resolution never reuses a preview result.
 
 ### Complete-batch authority staging
 
 Complete actual resolution under caller authority `ALLOW` preserves batch doom through iterative
 backend-owned gating. Core closes every reachable actual-resolution path at `NONE` and stops each
 unresolved secret at its first `BackendBlocked(operator-impact-limited)` frontier. If the batch
-remains viable, it runs exactly one source-batched `ALLOW` turn, advances that turn's missing or
-execution-blocked frontiers at `NONE`, and checks viability again before another `ALLOW` turn. A
-known `BackendFailed` result therefore dooms pending secrets before every later operator-impacting
-action.
+remains viable, it runs exactly one single-request `ALLOW` turn, returns to no-impact closure for
+that request's fallthrough, and checks viability again before another `ALLOW` turn. A known
+`BackendFailed` result therefore dooms pending secrets before every later operator-impacting action,
+including another request at the same configured source. Multiple impact-bearing frontiers are real:
+a chain may contain both OnePassword and prompt, and different required secrets may stop at the same
+source. A fixed two-pass or opaque source batch cannot preserve precedence and regain core control
+before each next interaction.
 
 Values acquired at `NONE` remain in the private resolution batch; no preview result is promoted to
 authority. Caller impact `NONE` and partial resolution use one pass at their exact impact.
@@ -209,7 +222,7 @@ closed result.
 
 | Caller              | Preview impact  | Result treatment                                                     |
 | ------------------- | --------------- | -------------------------------------------------------------------- |
-| operation preflight | none            | accept available/indeterminate; reject missing/blocked/failed        |
+| operation preflight | none            | accept available/indeterminate; failed only with earlier uncertainty |
 | `secret describe`   | none by default | render every result; `--allow-interaction` removes indeterminate     |
 | `secret verify`     | none by default | only available succeeds; `--allow-interaction` removes indeterminate |
 | doctor secret check | none            | report indeterminate as uncertainty and failed as failure            |
@@ -251,8 +264,9 @@ When invocation is permitted, preview uses the existing bounded `op read`, disca
 the backend, and converts native outcomes to exact tags. Valid value is available. An unambiguous
 absence marker may be missing. Invalid mapping, authentication, connectivity, deadline, malformed
 value, ambiguous not-found text, or external provider error is failed. The v1 implementation keeps
-the current narrow item/field markers fail-closed as invalid mapping unless sanitized evidence from
-the supported `op` version proves a distinct ordinary-absence token.
+the current narrow item/field markers fail-closed as `lookup-rejected` unless sanitized evidence
+from the supported `op` version proves a distinct ordinary-absence token. Locally invalid reference
+syntax remains `invalid-mapping`.
 
 ## Security and authority boundaries
 
@@ -263,6 +277,8 @@ the supported `op` version proves a distinct ordinary-absence token.
   authority or terminal capability is absent.
 - Backend factory and context entry receive intent before they run; provider and prompt work is
   confined to the selected client method.
+- Core revalidates every backend-produced diagnostic identifier before storing it in an attempt or
+  aggregate. Backend authors do not define the output-safety boundary.
 - Per-source config may classify only that backend's known actions. It does not rewrite core flow,
   result semantics, or TTY facts.
 - Preview results and representations are sentinel-tested for value leakage.

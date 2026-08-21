@@ -2,6 +2,7 @@
 
 - Status: Draft for review
 - Date: 2026-08-18
+- Amended: 2026-08-20
 - Requirements: [FRD](./frd.md)
 - Architecture: [HLA](./hla.md)
 - Detailed design: [preview contract LLD](./preview-contract-lld.md) and
@@ -30,6 +31,8 @@
       baseline in the migration artifact. (2026-08-18: baseline `c01263d0`.)
 - [x] Refresh the branch and implementation baseline before public artifact handoff. (2026-08-19:
       rebased onto `667793ee`; intervening changes did not alter runtime secret semantics.)
+- [x] Refresh the branch again before revision-1 handoff. (2026-08-20: rebased onto `1d921b3a`;
+      intervening process and documentation changes did not alter runtime secret semantics.)
 - [x] Complete FRD, prior-art research, HLA, preview-contract LLD, operator-surfaces LLD, migration
       strategy, and this tracked plan. (2026-08-18.)
 - [x] Run artifact lint, spelling, link, lockfile, Rulesync, and manual typography checks.
@@ -48,12 +51,20 @@
       and fail-closed OnePassword evidence requirements; focused re-review had no findings.)
 - [x] Commit the artifact set with the session trailer, push the feature branch, open one draft PR,
       and apply `saga:next-steps` and `review-requested`. (2026-08-19: draft PR #619.)
-- [ ] Request and collect the three named artifact perspectives: saga lead contract review, Muntz
-      complexity review, and integration tester testability review.
+- [x] Request and collect the three named artifact perspectives: saga lead contract review, Muntz
+      complexity review, and integration tester testability review. (2026-08-19: all three returned
+      at exact head `74b497f5`; revision requested.)
 - [ ] Apply no more than two pre-authorized artifact feedback/fix iterations, rerunning artifact
       gates and recording review dispositions on the PR after each round.
-- [ ] Confirm the design remains within the accepted FRD and that review has not introduced an
-      unnecessary compatibility track or a secret-backend version other than `1`.
+- [x] Artifact feedback/fix iteration 1: preserve both JSON v1 applicability projections, make
+      aggregation current-impact truthful, serialize complete-batch impact calls, close lifecycle
+      and identity boundaries, simplify duplicate vocabularies, strengthen README and live-test
+      gates, and carry permanent collateral plus test-estate ownership. (2026-08-20: all accepted
+      findings applied, gates passed, and focused private re-review reported no blocking or
+      important findings.)
+- [x] Confirm the design remains within the accepted FRD and that review has not introduced an
+      unnecessary compatibility track or a secret-backend version other than `1`. (2026-08-20:
+      confirmed; the dated direct operator ruling remains authoritative.)
 
 ### Artifact definition of done
 
@@ -64,7 +75,8 @@
   hints, and the absence of free-form backend text are unambiguous across all artifacts.
 - Ordinary missing falls through, blocked retains exhaustion evidence, and failed hard-stops.
 - No-candidate exhaustion is blocked/no-candidate rather than a synthetic lookup miss.
-- Preflight's existing use of preview and its treatment of indeterminate are explicit.
+- Preflight's existing use of preview and its attempt-aware treatment of higher-precedence
+  indeterminate evidence are explicit without distorting the aggregate.
 - Reviewers report no unresolved critical or high-severity design finding.
 
 ## Requirement traceability
@@ -83,6 +95,7 @@
 | R15          | migration strategy atomic rewrite                     | phases 2 and 3 conformance and residual sweeps         |
 | R16          | operator-surfaces LLD human and JSON contracts        | phases 5 and 6 structured-output checks                |
 | R17          | operator-surfaces LLD permanent collateral inventory  | phase 5 docs, schema, and completion gates             |
+| R18          | operator-surfaces LLD JSON contract                   | phases 3, 5, and 6 frozen-field and additive checks    |
 
 ## Phase 1: Contract types and validation scaffolding
 
@@ -92,10 +105,16 @@
 - [ ] Add constructor invariants, exact-map validators, safe representations, exhaustive
       variant-to-flow rules, backend-returnable reason subsets, and maximum-impact no-indeterminate
       enforcement.
+- [ ] Make no-candidate a dedicated aggregate-only variant and revalidate backend-produced secret,
+      source, and identifier text at every core wrapper boundary, including hostile control and
+      format characters.
 - [ ] Reject `BackendBlocked(OPERATOR_IMPACT_LIMITED)` from an `ALLOW` resolution turn as a
       whole-turn backend protocol failure so an authority frontier cannot repeat.
 - [ ] Add focused tests for adversarial values, provider text, malformed maps, invalid variants or
       reasons, partial values, and safe representations without changing the live descriptor.
+- [ ] Replace the legacy runtime resolution category/detail/remediation enums with the same final
+      resolved, missing, blocked, and failed vocabulary used by the new source results; retain old
+      fields only where a frozen machine schema requires a derived projection.
 
 ### Phase 1 definition of done
 
@@ -116,13 +135,18 @@
       validation, and native-failure classification while returning different boundary types.
 - [ ] Add fake-provider tests for success, invalid mapping, auth, connectivity, external failure,
       timeout, interruption, source config, and sentinel containment.
-- [ ] Prove valid provider absence returns missing and falls through, while invalid mapping and
-      provider failures return failed and hard-stop.
-- [ ] Record sanitized real-provider evidence for the supported `op` version before classifying any
-      external token as ordinary absence. Keep ambiguous item/field not-found text fail-closed as
-      invalid mapping, and match recorded tokens narrowly in regression tests.
+- [ ] Add backend-specific decision-table tests proving each in-tree backend exhausts every
+      permitted route before returning indeterminate; generic conformance validates shape and
+      maximum-impact behavior without pretending to know arbitrary provider internals.
+- [ ] Prove generic valid absence returns missing and falls through, while invalid mapping,
+      lookup-rejected, and provider failures return failed and hard-stop.
+- [ ] Apply the explicit OnePassword evidence fork: with authorized conclusive evidence, record the
+      exact supported `op` version and sanitized narrow absence token, add its fixture, and
+      reproduce it live; without that evidence, implement no OnePassword missing token, keep
+      item/field markers failed/lookup-rejected, and keep unknown text failed/external. Fake output
+      is never evidence.
 - [ ] Prove factory construction and context entry perform no provider or broker work before the
-      selected method receives the exact impact and terminal facts.
+      selected method acts through a client constructed with exact impact and terminal facts.
 
 ### Phase 2 definition of done
 
@@ -134,13 +158,16 @@
 
 ## Phase 3: Atomic contract cutover and core orchestration
 
-- [ ] Remove the no-op client `prepare` method and extend `create_client`, `preview`, and `resolve`
-      with exact impact and terminal inputs before any backend lifecycle hook runs.
+- [ ] Remove the no-op client `prepare` method and `external_operation_timeout`; extend
+      `create_client` with exact impact, terminal, broker, and remaining-time inputs before any
+      backend lifecycle hook runs, while `preview(requests)` and `resolve(requests)` reuse that
+      fixed client authority without duplicate policy parameters.
 - [ ] Update the `SecretBackend` ABC, descriptor, root exports, and all implementations atomically,
       resetting the exact secret-backend contract sentinel from `2` to `1` while removing
       `interactive` and `would_attempt`.
 - [ ] Remove backend-selected failure/remediation exceptions, return exact resolution blocks, and
-      derive existing resolution categories and remediation in core.
+      derive exception class and guidance directly from the final tag, reason, and backend identity
+      in core. Preserve the 1Password pending-approval timeout hint without a backend hint channel.
 - [ ] Update registration and runtime conformance for method shapes, exact result maps, legal result
       variants and reasons, construction/entry authority, and maximum-impact no-indeterminate
       behavior.
@@ -148,40 +175,59 @@
 - [ ] Make `cli/agentworks/capabilities/secret_backend/README.md` the self-contained permanent
       contract authority for exact variants, reason ownership, core flow, impact and terminal rules,
       lifecycle constraints, value containment, and conformance; it must not rely on this SDD.
+- [ ] Run a named manual README contract gate covering exact version-1 signatures, every variant and
+      legal reason owner, one normative core-flow section, impact/TTY matrix, lifecycle and
+      exception boundaries, exact-map and maximum-impact constraints, value containment, and a
+      complete conforming example. Prove it has no SDD links and behaviorally test the example shape
+      without asserting authored prose.
 - [ ] Replace `_lookup_projection` and `would_attempt` use with structured static lookup
       descriptions.
+- [ ] Replace both legacy policy-free and operation-policy preview helpers with one impact-explicit,
+      terminal-explicit preview batch boundary; leave static inspection on `describe_lookup` only.
 - [ ] Implement operation-bounded batch preview over active sources with the existing source-turn
       budget and cleanup discipline.
-- [ ] Implement precedence-aware tagged aggregation, ordinary-missing and execution-block
-      fallthrough, failed hard-stop, ordered attempt retention, and iterative no-impact closure plus
-      before-every-`ALLOW` complete-batch doom checks.
+- [ ] Implement current-impact tagged aggregation, ordinary-missing and execution-block fallthrough,
+      failed hard-stop, ordered earlier-indeterminate evidence, and iterative no-impact closure plus
+      a viability check before every single-request `ALLOW` complete-batch turn.
+- [ ] Add event-ledger tests for no-impact closure, single-request authority turns, intra-source and
+      post-turn failure preventing every later impact action, higher-source failure preventing lower
+      provider invocation, earlier-indeterminate/later-available or failed aggregation, and
+      adversarial maximum-impact indeterminate becoming failed/backend-protocol.
 - [ ] Emit aggregate blocked/no-candidate with no runtime attempts when no candidate lookup ran;
       never synthesize missing for that condition.
-- [ ] Make preflight preview impact fixed at `NONE`, accept available and indeterminate, and reject
-      missing, blocked, or failed with structured context.
+- [ ] Make preflight preview impact fixed at `NONE`, accept available and indeterminate, reject
+      missing and blocked, and reject failed unless an earlier higher-precedence attempt is
+      indeterminate.
 - [ ] Add a lazy command-scoped preflight memo keyed by secret name and prove repeated references
       cause one preview without changing first-failing node or reference order.
+- [ ] Add an eager-full-union mutation test proving a secret referenced only by an unreachable later
+      node causes zero preview calls, provider reads, and audit events.
 - [ ] Prove actual value-bearing resolution still completes before each command's first external
       mutation even when preflight returned indeterminate.
 - [ ] Update doctor to consume non-disruptive preview and represent uncertainty without treating it
       as backend readiness failure.
 - [ ] Pin doctor's exact aggregate mapping: available is `OK`; missing, indeterminate, and blocked
-      are `WARN`; failed is `FAIL`. Cover counts, JSON status, and exit behavior, including an
-      earlier indeterminate followed by a retained failure.
+      are `WARN`; failed is `FAIL`. Add optional closed `secret_preview` on secret JSON checks and
+      cover all five statuses, counts, exit behavior, earlier-indeterminate/later-available, and
+      earlier-indeterminate/later-failed.
 
 ### Phase 3 definition of done
 
-- Earlier indeterminate precedence cannot be hidden by later source success or failure.
-- A failed configured source cannot be hidden by a lower-precedence source.
+- A later current-impact success or hard failure is the aggregate; every earlier indeterminate
+  attempt remains visible as ordered precedence evidence.
+- A failed configured source cannot be hidden by a lower-precedence source or downgraded in doctor.
 - Every in-tree backend implements the sole version-1 contract without a core-side value-returning
   preview adapter or legacy runtime branch.
-- Missing mappings, blocked chains, and failed chains fail preflight.
+- Missing mappings and blocked chains fail preflight. Failed chains fail unless an earlier
+  higher-precedence attempt is indeterminate.
 - Preflight never authorizes operator impact, repeats a secret probe, or substitutes for resolution.
 
 ## Phase 4: Policy propagation and operation boundaries
 
 - [ ] Replace `InteractionPolicy` with exact `OperatorImpact` across production and test call sites,
       preserving early validation and explicit forwarding.
+- [ ] Keep the 100-plus-file policy rename in one mechanical commit so review can separate it from
+      the behavioral contract changes.
 - [ ] Derive ordinary CLI impact only from global `--non-interactive`, never TTY.
 - [ ] Remove every remaining static interactive-source skip and pass impact and terminal facts from
       service roots to the cut-over source clients.
@@ -207,12 +253,22 @@
       deduplication, stable ordering, full-table rendering, and exit status.
 - [ ] Update `secret list` to use structured static mapping disposition without provider I/O.
 - [ ] Add the optional nested `secret describe` preview JSON projection while preserving every JSON
-      v1 field, type, enum meaning, and collection order; update the machine-output reference.
+      v1 field, type, enum meaning, and collection order; update `cli/command-reference.md`.
+- [ ] Preserve `secret list --output json`'s `secrets[].sources[].would_attempt` and describe's
+      `source_mappings[].would_attempt` as structured-disposition compatibility projections.
 - [ ] Update CLI README, secrets README, both backend and general plugin-authoring READMEs,
       resources guide, relevant guide topics, sample config, schema snapshots, and generated
       completions in lockstep.
+- [ ] Update `cli/agentworks/secrets/guide-content/secrets.md` so its consent paragraph covers both
+      impact-bearing describe and verify; update `docs/adrs/0013-cli-side-secret-injection.md` so
+      its expected workflow uses the configured source instead of teaching `op run`/env-var
+      hand-carrying.
+- [ ] Update the exact stale CLI README teaching around current non-TTY policy and retired
+      `would attempt` vocabulary, plus secret describe's static fallthrough wording.
 - [ ] Remove stale claims that preview is pure, doctor never performs a provider read, or TTY grants
       general interaction consent.
+- [ ] Trim the secret-backend and secrets test estates to the simplification sweep standard as part
+      of this rewrite, deleting worthless tests rather than assigning them to a later cleanup.
 
 ### Phase 5 definition of done
 
@@ -238,6 +294,16 @@
       seam, prompt with and without a PTY, default and opted-in describe/verify, global
       `--non-interactive`, preflight indeterminate, missing-versus-failed fallback, and human/JSON
       value containment.
+- [ ] Use isolated `HOME`, scratch manifests, and a fake-only `op` path for doctor, preflight,
+      describe, verify, aggregation, and leak campaigns. Do not traverse broad operator config or
+      run broad doctor against a real provider.
+- [ ] Exercise an ordinary resolving surface such as seeded `agw env show --vm ... --resolve` with
+      non-TTY stdin: default app-impact without the global flag invokes the fake provider; global
+      `--non-interactive` does not; known unattended or configured no-impact mode still invokes it.
+- [ ] Limit any real OnePassword exercise to one dedicated authorized reference, record provider
+      audit activity as an expected external effect, and never expose a real value. Treat
+      desktop-app approval for AC1 separately from error-token evidence; if unavailable, record it
+      untested and obtain explicit operator acceptance before readying the PR.
 - [ ] Exercise supported `op` error classification against an authorized real provider when the
       environment permits, record only sanitized value-free tokens, and retain fail-closed behavior
       plus an explicit test disposition when ordinary absence cannot be proven safely.

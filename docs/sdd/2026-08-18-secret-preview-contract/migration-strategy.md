@@ -1,8 +1,8 @@
 # Migration strategy: atomic secret-backend contract rewrite
 
 - Snapshot: 2026-08-18
-- Amended: 2026-08-19
-- Code baseline: `origin/main` at `667793ee`
+- Amended: 2026-08-20
+- Code baseline: `origin/main` at `1d921b3a`
 - Governing design: [FRD](./frd.md) and [HLA](./hla.md)
 
 ## Executive summary
@@ -48,17 +48,18 @@ These counts are migration guards, not line estimates. Recount after rebase befo
 
 The atomic rewrite makes these changes:
 
-| Before                                | After                                                           |
-| ------------------------------------- | --------------------------------------------------------------- |
-| `interactive: bool`                   | removed; method receives exact `OperatorImpact`                 |
-| `would_attempt(...) -> bool`          | removed                                                         |
-| `describe_lookup(...) -> str \| None` | structured static `LookupDescription`                           |
-| no client preview                     | batch `preview(...) -> Mapping[str, BackendPreview]` tagged sum |
-| no-op, impact-blind `prepare`         | removed                                                         |
-| factory lacks intent                  | factory receives exact impact and terminal fact                 |
-| value-map `resolve`                   | resolved, missing, blocked, or failed tagged sum                |
-| one negative/failure channel          | missing fallthrough, blocked fallthrough, failed hard-stop      |
-| backend-selected remediation          | core derives guidance from closed tag and reason                |
+| Before                                | After                                                                |
+| ------------------------------------- | -------------------------------------------------------------------- |
+| `interactive: bool`                   | removed; method receives exact `OperatorImpact`                      |
+| `would_attempt(...) -> bool`          | removed                                                              |
+| `describe_lookup(...) -> str \| None` | structured static `LookupDescription`                                |
+| no client preview                     | batch `preview(requests) -> Mapping[str, BackendPreview]` tagged sum |
+| no-op, impact-blind `prepare`         | removed                                                              |
+| pre-client timeout hook               | removed; client enforces validated config and remaining budget       |
+| factory lacks intent                  | factory receives exact impact and terminal fact                      |
+| value-map `resolve`                   | resolved, missing, blocked, or failed tagged sum                     |
+| one negative/failure channel          | missing fallthrough, blocked fallthrough, failed hard-stop           |
+| backend-selected remediation          | core derives guidance from closed tag and reason                     |
 
 The descriptor's required operations and attributes, registration diagnostics, author example, and
 conformance tests update in the same commit as the base contract. The descriptor and all three
@@ -90,7 +91,8 @@ code returned plaintext through its prior client contract, preview containment w
    value discard and missing/blocked/failed classification.
 4. Switch the descriptor, base class, both source drivers, conformance checks, exports, and every
    implementation to the rewritten contract atomically. Reset the exact sentinel from `2` to `1`,
-   remove `prepare`, and deliver intent before client construction and context entry.
+   remove `prepare` and `external_operation_timeout`, and deliver intent before client construction
+   and context entry.
 5. Repoint static inspection from `would_attempt` to structured lookup descriptions.
 6. Replace pure preview with bounded source-client preview, precedence-aware tagged aggregation, and
    a lazy per-command preflight memo. Represent zero runtime candidates as aggregate
@@ -101,10 +103,10 @@ code returned plaintext through its prior client contract, preview containment w
 9. Remove residual static interactive skips, wire exact terminal facts and broker construction, and
    preserve fail-before-mutation through iterative no-impact closure, before-every-`ALLOW` viability
    checks, and backend-owned semantic results.
-10. Delete old-shape types, compatibility scaffolding, stale comments, and redundant backend
-    remediation selection.
-11. Update permanent docs, schema, samples, completions, and machine-output references, then run the
-    full validation and live-test matrix.
+10. Delete old-shape types, compatibility scaffolding, stale comments, backend timeout/failure/
+    remediation exceptions, and the redundant runtime resolution-detail vocabulary.
+11. Update permanent docs, schema, samples, completions, and the command reference's machine-output
+    contract, then run the full validation and live-test matrix.
 
 Intermediate commits are review checkpoints on a draft branch. None is a separately supported
 repository state, and the branch does not become ready while both contract shapes or both policy
@@ -152,10 +154,10 @@ class OnePasswordBackend(SecretBackend):
 
 
 class OnePasswordClient:
-    def preview(self, requests, *, impact, terminal, remaining_time) -> Mapping[str, BackendPreview]:
+    def preview(self, requests) -> Mapping[str, BackendPreview]:
         ...
 
-    def resolve(self, requests, *, impact, terminal, remaining_time) -> Mapping[str, BackendResolution]:
+    def resolve(self, requests) -> Mapping[str, BackendResolution]:
         ...
 ```
 
@@ -164,12 +166,19 @@ discards inside the client. Actual resolution returns an exact map whose entries
 `BackendResolved`, `BackendMissing`, `BackendBlocked`, or `BackendFailed` variants. TTY remains an
 execution fact but does not gate either OnePassword method.
 
-An invalid provider reference returns `PreviewFailed(INVALID_MAPPING)` or
+An invalid local provider-reference shape returns `PreviewFailed(INVALID_MAPPING)` or
 `BackendFailed(INVALID_MAPPING)` and hard-stops in core. A provider outcome returns missing only
 when its normalizer can establish ordinary absence. Because `op read` has a flat failure exit and no
-documented stable error taxonomy, ambiguous item/field not-found text remains failed/invalid-mapping
+documented stable error taxonomy, ambiguous item/field not-found text remains failed/lookup-rejected
 unless sanitized evidence for the supported version proves a narrower absence marker. The backend
 does not return a halt boolean; the variant determines fixed core flow.
+
+Ordinary OnePassword absence has two implementation-time dispositions. If an authorized real run
+against the exact supported `op` version supplies a conclusive, sanitized narrow token, record that
+version and token, add its regression fixture, and reproduce missing fallthrough live. If it does
+not, ship no OnePassword missing token: item/field markers remain lookup-rejected and unknown text
+remains external failure. Fake provider text never substitutes for provider evidence; env-var and
+controlled contract fixtures prove generic missing fallthrough either way.
 
 ## Config and schema migration
 
@@ -201,6 +210,10 @@ same implementation commit. No persisted state or database migration is required
   optional nested preview object containing tagged `status`, conditional `reason`, and ordered
   attempts. The command reference documents legacy compatibility and new null or absence rules
   before the PR is ready.
+- `secret list --output json` preserves its existing version-1 `secrets[].sources[].would_attempt`
+  field, deriving it from structured lookup disposition.
+- Doctor preserves every existing JSON v1 check field and adds optional `secret_preview` only for
+  secret checks, using the same closed status, reason, identity, and attempt rules as describe.
 
 ## Rollback
 
@@ -222,11 +235,11 @@ starts from the rewritten contract.
 | No candidate is mislabeled as a checked miss                 | aggregate blocked/no-candidate with empty runtime attempts                       |
 | A failed higher source is hidden by fallback                 | core-owned failed hard-stop and precedence tests                                 |
 | Missing TTY is mistaken for absence or failure               | dedicated blocked reason and cross-product tests                                 |
-| Later source hides earlier uncertainty                       | precedence-aware aggregation with earlier indeterminate                          |
+| Earlier uncertainty masks current success or failure         | current-impact aggregate plus retained ordered attempt evidence                  |
 | Preflight starts disruptive work                             | fixed zero-impact intent and no certainty override                               |
 | Repeated references repeat provider reads during preflight   | lazy command-scoped memo with node-order tests                                   |
-| Client setup runs before learning authority                  | pass exact intent into factory; entry/provider call observation tests            |
-| Removing static flags weakens complete-batch doom            | no-impact closure and viability check before every `ALLOW` source turn           |
+| Client setup runs before learning authority                  | pass exact intent into factory; remove every pre-client backend hook             |
+| Removing static flags weakens complete-batch doom            | no-impact closure and viability check before each single-request `ALLOW` turn    |
 | Ordinary non-TTY command hangs on prompt                     | terminal fact checked before broker/read, no broker without TTY                  |
 | Ordinary non-TTY command wrongly blocks app approval         | impact derived from global mode, not TTY                                         |
 | Source config promises too much biometric detection          | setting names app authentication as a whole and docs explain provider opacity    |
@@ -236,9 +249,12 @@ starts from the rewritten contract.
 ## Completion conditions
 
 - No production or test reference to `InteractionPolicy`, backend `interactive`, client `prepare`,
-  or `would_attempt` remains except migration documentation and the derived JSON v1 compatibility
-  key.
+  `external_operation_timeout`, backend timeout/failure/remediation exceptions, or runtime
+  `would_attempt` remains except migration documentation and the two derived JSON v1 compatibility
+  keys.
 - No legacy preview answer/detail pair or generic blocked-result shape remains.
+- No legacy policy-free or operation-policy pure-preview helper remains; provider-aware preview has
+  one impact-explicit service boundary and static lookup description remains separate.
 - The secret-backend descriptor and every registered backend declare `contract_version = 1`; no
   production secret-backend declaration retains `2`.
 - Missing, blocked, and failed have distinct tests, flow, operator output, and machine output.
@@ -247,4 +263,8 @@ starts from the rewritten contract.
   reason ownership, flow, impact and terminal rules, lifecycle constraints, value containment, and
   conformance requirements without relying on this SDD.
 - Schema, completions, guide, and command-reference changes match observable behavior.
+- ADR 0013 and the secrets guide consent paragraph teach the configured-source path and every
+  impact-bearing inspection control without depending on this SDD.
+- The secret-backend and secrets test estates satisfy the simplification sweep's trim standard in
+  this atomic rewrite; worthless tests are removed rather than assigned to follow-up.
 - Full repository gates and the approved live-test charter pass before the PR becomes ready.

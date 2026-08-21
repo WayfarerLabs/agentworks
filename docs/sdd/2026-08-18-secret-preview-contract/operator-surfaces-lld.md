@@ -34,7 +34,7 @@ The preflight chain remains:
 preflight_all
   -> require_predicted_refs
     -> predict_resolution
-      -> preview_resolution
+      -> preview_batch
 ```
 
 Its semantics change as follows:
@@ -42,7 +42,10 @@ Its semantics change as follows:
 - `predict_resolution` has fixed preview impact `NONE`; it does not accept a certainty argument.
 - It receives terminal availability from the command execution context as a fact.
 - `require_predicted_refs` accepts aggregate `available` and `indeterminate`.
-- It rejects aggregate `missing`, `blocked`, or `failed` with the closed tag and reason, when any.
+- It rejects aggregate `missing` or `blocked` with the closed tag and reason, when any.
+- It rejects aggregate `failed` unless its ordered attempts contain an earlier higher-precedence
+  `indeterminate` attempt. In that one case broader impact could resolve before the failed source,
+  so the zero-impact result has not disproven the operation.
 - `indeterminate` does not claim resolution will work. The operation's later resolution pass remains
   mandatory and completes before the first consuming mutation.
 
@@ -56,11 +59,10 @@ does not probe secrets belonging only to nodes that will never be reached. The l
 resolution never reuses preview data or a discarded value.
 
 This preserves preflight's current responsibility for missing mappings and unavailable chains
-without forcing operator interaction just to predict a command. A configured-source failure becomes
-aggregate failed and fails preflight when no earlier indeterminate source could win. When an earlier
-source is indeterminate, a later failure stops traversal and remains in ordered attempts, but the
-aggregate stays indeterminate and passes this impossibility screen. Implementation checks the
-aggregate tag; it does not scan attempts again to impose different preflight flow.
+without forcing operator interaction just to predict a command. A configured-source failure is
+always aggregate failed, so describe, verify, and doctor report the current-impact failure.
+Preflight alone checks for an earlier indeterminate attempt because it is an impossibility screen
+for a later authoritative operation, not a current-health renderer.
 
 ## Actual operation resolution
 
@@ -82,10 +84,11 @@ does not decide whether its own failure may be ignored.
 
 Complete resolution remains fail-before-mutation. The no-interaction doom check also remains: a
 caller that authorizes `ALLOW` first drives actual resolution at `NONE` until each secret resolves,
-fails, exhausts, or stops at its first impact block. Core then permits one source-batched `ALLOW`
-turn, advances its fallthrough frontiers at `NONE`, and repeats the viability check before every
-later `ALLOW` turn. This is authoritative actual resolution, not preview reuse, and a failure
-learned from one authorized turn prevents operator work at every still-pending source.
+fails, exhausts, or stops at its first impact block. Core then permits one single-request `ALLOW`
+turn, advances that request's fallthrough frontier at `NONE`, and repeats the viability check before
+every later `ALLOW` turn. This is authoritative actual resolution, not preview reuse, and a failure
+learned from one authorized lookup prevents operator work for every still-pending request, including
+another request at the same source.
 
 ## `agw secret describe`
 
@@ -167,9 +170,10 @@ the existing `Status` enum exactly:
 | blocked           | `WARN`        | no failure                                            |
 | failed            | `FAIL`        | increments failure count and makes doctor exit code 1 |
 
-An earlier-indeterminate/later-failed chain has aggregate indeterminate, so it is `WARN` and does
-not make doctor exit 1; its diagnostic still includes the retained later failed attempt and closed
-reason. Doctor does not scan attempts again to override aggregate flow.
+An earlier-indeterminate/later-failed chain has aggregate failed, so it is `FAIL` and makes doctor
+exit 1; the ordered attempts retain both facts. An earlier-indeterminate/later-available chain is
+`OK` and likewise retains the uncertainty as attempt evidence rather than masking current
+availability.
 
 Doctor exposes no disruptive opt-in because a broad health sweep is the wrong surface for
 authorizing an unknown number of operator actions.
@@ -190,6 +194,7 @@ remediation or text. Important projections include:
 | `blocked/tty-unavailable`               | this source needs terminal input, which this process does not have   |
 | `blocked/no-candidate`                  | no active source has an applicable runtime lookup                    |
 | `failed/invalid-mapping`                | the configured provider reference is invalid                         |
+| `failed/lookup-rejected`                | the provider rejected the lookup without proving ordinary absence    |
 | `failed/authentication`                 | the permitted provider attempt could not authenticate                |
 | `failed/deadline-exceeded`              | bounded provider work did not complete                               |
 
@@ -246,9 +251,46 @@ The exact nested rules are:
 - attempts retain active-source order and omit static non-candidates;
 - no value, backend message, native error, remediation, halt flag, or generic metadata is added.
 
-The machine-output reference documents the legacy projection, new tagged union, and exact null or
-absence rules. Consumers that know only JSON v1 continue to read the old fields unchanged and ignore
-the optional member. The optional addition therefore does not redefine JSON v1.
+`secret list --output json` also keeps envelope schema version 1 and its documented
+`secrets[].sources[].would_attempt` boolean. That field is derived from
+`LookupDisposition.CANDIDATE`, just like describe's compatibility projection; removing the backend
+method does not remove or redefine either frozen field. List adds no runtime preview data.
+
+Secret checks in `agw doctor --output json` preserve the existing check fields `name`, `status`,
+`message`, and `hint`, and may add this optional closed member:
+
+```json
+{
+  "name": "Secret 'deploy-token'",
+  "status": "fail",
+  "message": "...",
+  "hint": null,
+  "secret_preview": {
+    "status": "failed",
+    "source": "personal-op",
+    "identifier": "op://vault/item/field",
+    "reason": "lookup-rejected",
+    "attempts": [
+      {
+        "source": "personal-op",
+        "identifier": "op://vault/item/field",
+        "status": "failed",
+        "reason": "lookup-rejected"
+      }
+    ]
+  }
+}
+```
+
+`secret_preview` follows the same status, conditional reason, safe identity, attempt ordering, and
+value-exclusion rules as describe's nested preview. It is present only on secret-preview checks and
+absent on every other doctor check. Doctor tests distinguish every preview status through these
+fields rather than authored `message` text, and pin counts plus exit status.
+
+The command reference is the permanent machine-output authority for these legacy projections, new
+tagged unions, and exact null or absence rules. Consumers that know only JSON v1 continue to read
+the old fields unchanged and ignore optional members. The additions therefore do not redefine JSON
+v1.
 
 ## Completion and command grammar
 
@@ -266,7 +308,12 @@ Implementation updates, in the same PR:
 - `cli/agentworks/plugins/README.md` for general plugin conformance and the rewritten method set;
 - `cli/agentworks/secrets/README.md` for impact, preview, failure, and resolution behavior;
 - `cli/README.md`, `docs/guides/resources.md`, and relevant guide topics;
-- CLI command reference and machine-output reference;
+- `cli/agentworks/secrets/guide-content/secrets.md`, including its consent paragraph, for both
+  impact-bearing describe and verify;
+- `docs/adrs/0013-cli-side-secret-injection.md` for the ordinary configured-source workflow that
+  replaces its `op run`/env-var workaround teaching;
+- `cli/command-reference.md`, the permanent machine-output reference, including both JSON v1
+  `would_attempt` compatibility projections and optional tagged objects;
 - sample source config for OnePassword impact classification;
 - generated shell completions and schema snapshots;
 - any module docstrings that still claim preview is pure, a negative status always falls through, or
@@ -289,7 +336,8 @@ The behavior suite crosses these axes:
 - source order: earlier indeterminate then later available or failed, ordinary missing then later
   available, blocked then later available, failed then otherwise-available fallback, all missing, no
   candidate;
-- output: human fields, JSON tagged structure, legacy JSON v1 fields, exit status, exception
-  category, doctor status/count/exit mapping, sentinel leak scan.
+- output: human fields, describe and doctor JSON tagged structures, both legacy JSON v1
+  `would_attempt` fields, exit status, exception category, doctor status/count/exit mapping,
+  sentinel leak scan.
 
 Tests assert structured behavior. They do not pin prose authored by Agentworks.
