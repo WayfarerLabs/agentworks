@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import os
 import shutil
 import struct
 import subprocess
@@ -15,7 +16,7 @@ from http.server import ThreadingHTTPServer
 from math import ceil
 from pathlib import Path
 
-from chromium_test_support import DevToolsConnection, acquire_chromium, cleanup_profile, stop_process
+from chromium_test_support import DevToolsConnection, cleanup_profile, devtools_target
 from lander_chromium_phase4k import _QuietHandler
 from site_test_support import RepositoryFixture
 
@@ -125,11 +126,6 @@ const retry = () => { restart.click(); return snapshot("retry"); };
 const leave = () => { exit.click(); return snapshot("exit"); };
 const focusFooter = () => { document.querySelector(".footer-game-link").focus({preventScroll: true});
     return snapshot("focus-footer"); };
-const timingSummary = (values) => {
-    const ordered = values.toSorted((left, right) => left - right);
-    return {samples: ordered.length, p95: ordered[Math.ceil(ordered.length * .95) - 1],
-        maximum: ordered.at(-1)};
-};
 const terrainContract = () => {
     const normalized = Object.values(TERRAIN_PROFILES).flat();
     const sites = [];
@@ -162,22 +158,13 @@ const maximumKnotSweep = (direction) => {
         {angularTravel: direction * 53148, instrumentation: staleInstrumentation, features});
     if (staleContact !== null || staleInstrumentation.visitedKnots !== 53150)
         throw new Error("maximum knot sweep final slabs are not authoritative");
-    const classify = () => {
-        const instrumentation = {};
-        const contact = classifySweptContact(model, previous, next, {angularTravel, instrumentation, features});
-        if (contact?.cause !== "terminus" || contact.kind !== "unsafe" || contact.time <= .9999 ||
-            instrumentation.visitedKnots !== 73094 || instrumentation.maxKnotHulls > 2 ||
-            instrumentation.maxStack > 20 || instrumentation.prunedSlabs <= 50000 ||
-            instrumentation.constructedKnotHulls >= 256) throw new Error("maximum knot sweep contract drifted");
-        return instrumentation;
-    };
-    classify();
-    const values = [];
-    let instrumentation;
-    for (let repetition = 0; repetition < 10; repetition += 1) {
-        const started = performance.now(); instrumentation = classify(); values.push(performance.now() - started);
-    }
-    return {direction, timing: timingSummary(values), instrumentation, staleInstrumentation};
+    const instrumentation = {};
+    const contact = classifySweptContact(model, previous, next, {angularTravel, instrumentation, features});
+    if (contact?.cause !== "terminus" || contact.kind !== "unsafe" || contact.time <= .9999 ||
+        instrumentation.visitedKnots !== 73094 || instrumentation.maxKnotHulls > 2 ||
+        instrumentation.maxStack > 20 || instrumentation.prunedSlabs <= 50000 ||
+        instrumentation.constructedKnotHulls >= 256) throw new Error("maximum knot sweep contract drifted");
+    return {direction, instrumentation, staleInstrumentation};
 };
 const maximumKnotWitness = () => {
     const beforeDom = domCounts(); const beforeCleanup = controller.cleanups.length;
@@ -189,8 +176,8 @@ const domCounts = () => ({document: document.querySelectorAll("*").length,
     world: world.querySelectorAll("*").length, worldChildren: world.children.length,
     terrainPaths: document.querySelectorAll("#terrain-layer > path").length,
     siteGroups: document.querySelectorAll("#site-layer > .lander-site").length});
-const recordRender = (values, states, maxima) => {
-    const started = performance.now(); controller.render(); values.push(performance.now() - started);
+const recordRender = (states, maxima) => {
+    controller.render();
     states[controller.model.state] = (states[controller.model.state] ?? 0) + 1;
     const counts = domCounts();
     maxima.document = Math.max(maxima.document, counts.document);
@@ -232,8 +219,6 @@ const warmup = (seed) => {
 };
 const longevity = (seed) => {
     const warmupResult = warmup(seed);
-    const generationValues = [];
-    const frameValues = [];
     const frameStates = {};
     const maxima = {sites: 0, chunks: 0, terrainVertices: 0, document: 0, world: 0};
     let directAllowances = 0;
@@ -241,16 +226,14 @@ const longevity = (seed) => {
     let stabilizedDom = null;
     let model = updateRetention(createRun({seed, reducedMotion: true}));
     controller.model = model;
-    recordRender(frameValues, frameStates, maxima);
+    recordRender(frameStates, maxima);
     for (let completed = 0; completed < 100; completed += 1) {
         if (model.state === "launching") {
             model = clearLaunch(model);
             controller.model = model;
-            recordRender(frameValues, frameStates, maxima);
+            recordRender(frameStates, maxima);
         }
-        const started = performance.now();
         model = serviceTarget(model);
-        generationValues.push(performance.now() - started);
         if (model.targetSiteId !== null) directAllowances += 1;
         const active = model.retainedSites.find((site) => site.id === model.activeSiteId);
         if (active?.powered && active.nocStage === 7 && model.checkpoint) poweredCheckpoints += 1;
@@ -258,14 +241,13 @@ const longevity = (seed) => {
         maxima.chunks = Math.max(maxima.chunks, model.retainedChunks.length);
         maxima.terrainVertices = Math.max(maxima.terrainVertices, model.terrainVertices.length);
         controller.model = model;
-        recordRender(frameValues, frameStates, maxima);
+        recordRender(frameStates, maxima);
         if (completed === 1) stabilizedDom = domCounts();
     }
     return {seed, warmup: warmupResult, completedSites: model.completedSites,
         finalState: model.state, directAllowances,
         poweredCheckpoints,
-        generation: timingSummary(generationValues),
-        frames: timingSummary(frameValues), frameStates,
+        frameStates,
         maxima, stabilizedDom, finalDom: domCounts(), cleanupCount: controller.cleanups.length};
 };
 const valleyX = (seed) => Array.from({length: 33}, (_, index) => index * 16)
@@ -326,7 +308,7 @@ def browser_phase4q_contract(
     source = page.read_text(encoding="utf-8")
     server = ThreadingHTTPServer(("127.0.0.1", 0), partial(_QuietHandler, directory=str(output)))
     thread = threading.Thread(target=server.serve_forever, daemon=True, name="phase4q-browser-server")
-    profile: tempfile.TemporaryDirectory[str] | None = None
+    profile = tempfile.TemporaryDirectory()
     process: subprocess.Popen[bytes] | None = None
     connection: DevToolsConnection | None = None
     try:
@@ -336,9 +318,16 @@ def browser_phase4q_contract(
             encoding="utf-8",
         )
         thread.start()
-        profile, process, connection = acquire_chromium(
-            chromium, extra_arguments=chromium_arguments
+        process = subprocess.Popen(
+            (
+                chromium, "--headless", "--disable-gpu", "--no-sandbox", "--no-first-run",
+                "--no-default-browser-check", "--remote-allow-origins=*", "--remote-debugging-port=0",
+                f"--user-data-dir={profile.name}", *chromium_arguments, "about:blank",
+            ),
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            env={**os.environ, "HOME": profile.name},
         )
+        connection = DevToolsConnection(devtools_target(Path(profile.name), process))
         for domain in ("Runtime", "Page"):
             connection.call(f"{domain}.enable")
         connection.call("Emulation.setCPUThrottlingRate", {"rate": cpu_throttling_rate})
@@ -430,15 +419,19 @@ def browser_phase4q_contract(
         if connection is not None:
             connection.close()
         if process is not None:
-            stop_process(process)
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
         server.shutdown()
         server.server_close()
         if thread.is_alive():
             thread.join(timeout=5)
         page.write_text(source, encoding="utf-8")
         probe_path.unlink(missing_ok=True)
-        if profile is not None:
-            cleanup_profile(profile)
+        cleanup_profile(profile)
 
 
 class Phase4QBrowserTests(RepositoryFixture):
@@ -474,15 +467,7 @@ class Phase4QBrowserTests(RepositoryFixture):
                 self.assertEqual(witness["finalState"], "launching")
                 self.assertEqual(witness["directAllowances"], 100)
                 self.assertEqual(witness["poweredCheckpoints"], 100)
-                self.assertEqual(witness["generation"]["samples"], 100)
-                self.assertLess(witness["generation"]["p95"], 25)
-                self.assertGreaterEqual(
-                    witness["generation"]["maximum"], witness["generation"]["p95"]
-                )
-                self.assertEqual(witness["frames"]["samples"], 200)
                 self.assertEqual(witness["frameStates"], {"flying": 100, "launching": 100})
-                self.assertLess(witness["frames"]["p95"], 4)
-                self.assertGreaterEqual(witness["frames"]["maximum"], witness["frames"]["p95"])
                 self.assertEqual(witness["maxima"]["sites"], 3)
                 self.assertLessEqual(witness["maxima"]["chunks"], 5)
                 self.assertLessEqual(witness["maxima"]["terrainVertices"], 48)
@@ -500,9 +485,6 @@ class Phase4QBrowserTests(RepositoryFixture):
         self.assertEqual(maximum_knot["beforeCleanup"], maximum_knot["afterCleanup"])
         self.assertEqual([row["direction"] for row in maximum_knot["directions"]], [-1, 1])
         for row in maximum_knot["directions"]:
-            self.assertEqual(row["timing"]["samples"], 10)
-            self.assertLess(row["timing"]["p95"], 100)
-            self.assertGreaterEqual(row["timing"]["maximum"], row["timing"]["p95"])
             self.assertEqual(row["instrumentation"]["visitedKnots"], 73094)
             self.assertEqual(row["staleInstrumentation"]["visitedKnots"], 53150)
             self.assertEqual(

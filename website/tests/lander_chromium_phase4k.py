@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -14,13 +15,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable
 
-from chromium_test_support import (
-    DevToolsConnection,
-    acquire_chromium,
-    cleanup_profile,
-    devtools_target,
-    stop_process,
-)
+from chromium_test_support import DevToolsConnection, cleanup_profile, devtools_target
 
 
 class _QuietHandler(SimpleHTTPRequestHandler):
@@ -255,11 +250,11 @@ def _departure_witness(connection: DevToolsConnection, authority: str) -> dict[s
 def browser_phase4k_contract(
     output: Path,
     *,
-    connection_factory: Callable[..., DevToolsConnection] = DevToolsConnection,
+    connection_factory: Callable[[str], DevToolsConnection] = DevToolsConnection,
     popen_factory: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
     server_factory: Callable[..., ThreadingHTTPServer] = ThreadingHTTPServer,
     tempdir_factory: Callable[[], tempfile.TemporaryDirectory[str]] = tempfile.TemporaryDirectory,
-    target_factory: Callable[..., str] = devtools_target,
+    target_factory: Callable[[Path, subprocess.Popen[bytes]], str] = devtools_target,
     probe_source_factory: Callable[[], str] = _probe_source,
     chromium_path: str | None = None,
 ) -> dict[str, object]:
@@ -290,13 +285,15 @@ def browser_phase4k_contract(
         thread = threading.Thread(target=server.serve_forever, daemon=True, name="phase4k-browser-server")
         thread.start()
         thread_started = True
-        profile, process, connection = acquire_chromium(
-            chromium,
-            connection_factory=connection_factory,
-            popen_factory=popen_factory,
-            target_factory=target_factory,
-            tempdir_factory=tempdir_factory,
-        )
+        profile = tempdir_factory()
+        process = popen_factory((
+            chromium, "--headless", "--disable-gpu", "--no-sandbox", "--no-first-run",
+            "--no-default-browser-check", "--remote-allow-origins=*", "--remote-debugging-port=0",
+            f"--user-data-dir={profile.name}", "about:blank",
+        ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            env={**os.environ, "HOME": profile.name})
+        target = target_factory(Path(profile.name), process)
+        connection = connection_factory(target)
         for domain in ("Runtime", "Page", "Accessibility"):
             connection.call(f"{domain}.enable")
         loaded_url = f"http://127.0.0.1:{server.server_address[1]}/lander/"
@@ -419,8 +416,14 @@ def browser_phase4k_contract(
 
         if connection is not None:
             cleanup(connection.close)
-        if process is not None:
-            cleanup(lambda: stop_process(process))
+        if process is not None and process.poll() is None:
+            cleanup(process.terminate)
+            if process.poll() is None:
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    cleanup(process.kill)
+                    cleanup(lambda: process.wait(timeout=5))
         if server is not None:
             if thread_started or (thread is not None and thread.is_alive()):
                 cleanup(server.shutdown)

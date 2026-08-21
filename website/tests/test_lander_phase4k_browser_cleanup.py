@@ -34,6 +34,23 @@ class _FakeProcess:
         self.alive = False
 
 
+class _HandshakeEofSocket:
+    def __init__(self) -> None:
+        self.closed = False
+        self.receive_count = 0
+
+    def sendall(self, data: bytes) -> None:
+        del data
+
+    def recv(self, length: int) -> bytes:
+        del length
+        self.receive_count += 1
+        return b""
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class _NullRootRaceConnection:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object] | None]] = []
@@ -55,13 +72,9 @@ class _NullRootRaceConnection:
 
 
 class _ProbeProfile:
-    def __init__(
-        self,
-        *,
-        name: str = "/tmp/chromium-probe-profile",
-        cleanup_failures: int = 0,
-    ) -> None:
-        self.name = name
+    name = "/tmp/chromium-probe-profile"
+
+    def __init__(self, *, cleanup_failures: int = 0) -> None:
         self.cleaned = False
         self.cleanup_failures = cleanup_failures
         self.cleanup_calls = 0
@@ -94,6 +107,20 @@ class _ProbeConnection:
         self.closed = True
 
 
+class _DiscoveryConnection:
+    def __init__(self, targets: list[dict[str, str]]) -> None:
+        self.targets = targets
+        self.closed = False
+        self.calls: list[str] = []
+
+    def call(self, method: str) -> dict[str, object]:
+        self.calls.append(method)
+        return {"targetInfos": self.targets}
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class Phase4KBrowserCleanupTests(RepositoryFixture):
     def setUp(self) -> None:
         super().setUp()
@@ -115,18 +142,117 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
             for thread in threading.enumerate()
         ))
 
+    def test_websocket_handshake_eof_fails_once_and_closes_the_socket(self) -> None:
+        eof_socket = _HandshakeEofSocket()
+        with (
+            mock.patch.object(chromium_support.socket, "create_connection", return_value=eof_socket),
+            self.assertRaises(ConnectionError),
+        ):
+            chromium_support.DevToolsConnection("ws://127.0.0.1:9222/devtools/page/1")
+        self.assertEqual(eof_socket.receive_count, 1)
+        self.assertTrue(eof_socket.closed)
+
+    def test_devtools_target_waits_for_complete_port_and_page_publication(self) -> None:
+        process = _FakeProcess()
+        connections = (
+            _DiscoveryConnection([]),
+            _DiscoveryConnection([{"type": "page", "targetId": "page-1"}]),
+        )
+        connection_calls: list[tuple[str, float]] = []
+
+        def connect(url: str, *, timeout: float) -> _DiscoveryConnection:
+            connection_calls.append((url, timeout))
+            return connections[len(connection_calls) - 1]
+
+        with tempfile.TemporaryDirectory() as directory:
+            port_path = Path(directory) / "DevToolsActivePort"
+            port_path.write_text("", encoding="utf-8")
+            sleeps = 0
+
+            def publish(seconds: float) -> None:
+                nonlocal sleeps
+                del seconds
+                sleeps += 1
+                if sleeps == 1:
+                    port_path.write_text("9222\n/devtools/browser/browser-1\n", encoding="utf-8")
+
+            with mock.patch.object(chromium_support.time, "sleep", side_effect=publish):
+                target = chromium_support.devtools_target(
+                    Path(directory), process, connection_factory=connect
+                )
+
+        self.assertEqual(target, "ws://127.0.0.1:9222/devtools/page/page-1")
+        self.assertEqual(sleeps, 2)
+        self.assertEqual(
+            [url for url, _ in connection_calls],
+            ["ws://127.0.0.1:9222/devtools/browser/browser-1"] * 2,
+        )
+        self.assertTrue(all(0 < timeout <= 0.25 for _, timeout in connection_calls))
+        self.assertEqual(
+            [connection.calls for connection in connections],
+            [["Target.getTargets"]] * 2,
+        )
+        self.assertTrue(all(connection.closed for connection in connections))
+
+    def test_devtools_target_bounds_an_accepting_but_stalled_browser_socket(self) -> None:
+        process = _FakeProcess()
+        elapsed = 0.0
+
+        def advance(seconds: float) -> None:
+            nonlocal elapsed
+            elapsed += seconds
+
+        def stall(url: str, *, timeout: float) -> None:
+            del url
+            advance(timeout)
+            raise TimeoutError
+
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "DevToolsActivePort").write_text(
+                "9222\n/devtools/browser/browser-1\n", encoding="utf-8"
+            )
+            with (
+                mock.patch.object(chromium_support.time, "monotonic", side_effect=lambda: elapsed),
+                mock.patch.object(chromium_support.time, "sleep", side_effect=advance),
+                self.assertRaises(AssertionError),
+            ):
+                chromium_support.devtools_target(
+                    Path(directory), process, connection_factory=stall
+                )
+
+        self.assertLessEqual(elapsed, chromium_support.DEVTOOLS_STARTUP_TIMEOUT)
+
+    def test_devtools_target_allows_the_full_slow_startup_window(self) -> None:
+        process = _FakeProcess()
+        elapsed = 0.0
+
+        def advance(seconds: float) -> None:
+            nonlocal elapsed
+            elapsed += seconds
+
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                mock.patch.object(chromium_support.time, "monotonic", side_effect=lambda: elapsed),
+                mock.patch.object(chromium_support.time, "sleep", side_effect=advance),
+                self.assertRaises(AssertionError),
+            ):
+                chromium_support.devtools_target(Path(directory), process)
+
+        self.assertEqual(elapsed, chromium_support.DEVTOOLS_STARTUP_TIMEOUT)
+
     def test_json_probe_owns_browser_and_retries_profile_cleanup(self) -> None:
         process = _FakeProcess()
         connection = _ProbeConnection(ready=True)
         profile = _ProbeProfile(cleanup_failures=1)
+        spawn = mock.Mock(return_value=process)
         result = chromium_support.browser_json_probe(
             "chromium-test",
             "http://127.0.0.1:8000/lander/",
             960,
             "#result",
-            connection_factory=lambda url, **kwargs: connection,
-            popen_factory=lambda *args, **kwargs: process,
-            target_factory=lambda path, owned, **kwargs: "ws://chromium.test",
+            connection_factory=lambda url: connection,
+            popen_factory=spawn,
+            target_factory=lambda path, owned: "ws://chromium.test",
             tempdir_factory=lambda: profile,
             sleep=lambda seconds: None,
         )
@@ -138,6 +264,7 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
         self.assertEqual(process.waits, 1)
         self.assertTrue(profile.cleaned)
         self.assertEqual(profile.cleanup_calls, 2)
+        self.assertEqual(spawn.call_args.kwargs["env"]["HOME"], profile.name)
 
     def test_json_probe_bounds_readiness_and_kills_a_stuck_browser(self) -> None:
         process = _FakeProcess(stuck=True)
@@ -149,9 +276,9 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
                 "http://127.0.0.1:8000/lander/",
                 960,
                 "#result",
-                connection_factory=lambda url, **kwargs: connection,
+                connection_factory=lambda url: connection,
                 popen_factory=lambda *args, **kwargs: process,
-                target_factory=lambda path, owned, **kwargs: "ws://chromium.test",
+                target_factory=lambda path, owned: "ws://chromium.test",
                 tempdir_factory=lambda: profile,
                 sleep=lambda seconds: None,
             )
@@ -208,17 +335,19 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
 
     def test_acquisition_and_connection_failures_terminate_the_owned_browser(self) -> None:
         processes: list[_FakeProcess] = []
+        environments: list[dict[str, str]] = []
 
         def spawn(*args: object, **kwargs: object) -> _FakeProcess:
-            del args, kwargs
+            del args
+            environments.append(kwargs["env"])
             process = _FakeProcess()
             processes.append(process)
             return process
 
         target_sentinel = RuntimeError()
 
-        def fail_target(profile: Path, process: object, **kwargs: object) -> str:
-            del profile, process, kwargs
+        def fail_target(profile: Path, process: object) -> str:
+            del profile, process
             raise target_sentinel
 
         with self.assertRaises(RuntimeError) as caught:
@@ -235,8 +364,8 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
 
         connection_sentinel = RuntimeError()
 
-        def fail_connection(url: str, **kwargs: object) -> None:
-            del url, kwargs
+        def fail_connection(url: str) -> None:
+            del url
             raise connection_sentinel
 
         with self.assertRaises(RuntimeError) as caught:
@@ -245,11 +374,15 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
                 connection_factory=fail_connection,
                 popen_factory=spawn,
                 tempdir_factory=self.profile_factory,
-                target_factory=lambda profile, process, **kwargs: "ws://phase4k.invalid",
+                target_factory=lambda profile, process: "ws://phase4k.invalid",
                 chromium_path="chromium-test",
             )
         self.assertIs(caught.exception, connection_sentinel)
         self.assertTrue(processes[-1].terminated)
+        self.assertEqual(
+            [Path(environment["HOME"]) for environment in environments],
+            self.profile_paths,
+        )
         self.assert_harness_clean()
 
     def test_null_root_navigation_race_times_out_without_evaluation_or_cleanup_failure(self) -> None:
@@ -261,10 +394,10 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
         ):
             phase4k_browser.browser_phase4k_contract(
                 self.output,
-                connection_factory=lambda url, **kwargs: connection,
+                connection_factory=lambda url: connection,
                 popen_factory=lambda *args, **kwargs: process,
                 tempdir_factory=self.profile_factory,
-                target_factory=lambda profile, owned, **kwargs: "ws://phase4k.invalid",
+                target_factory=lambda profile, owned: "ws://phase4k.invalid",
                 chromium_path="chromium-test",
             )
         navigation = next(params for method, params in connection.calls if method == "Page.navigate")

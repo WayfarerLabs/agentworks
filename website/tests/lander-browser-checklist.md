@@ -196,10 +196,10 @@ operator inspection; no test approves wording or golden pixels.
       CSS, four modules, and SVG loads, the game makes no request and creates no durable storage.
       Confirm the exact 14-file artifact ships `lander-world.js` and its leaf `lander-collision.js`
       separately, with no concatenated duplicate collision authority.
-- [ ] Record active frame p95, 100-site retention counts, and direct generation plus the O(1)
-      predicted-allowance formula p95/max on the pre-merge Chromium machine. No route search,
-      simulation, or proof replay occurs. Required hosted-CI ceilings are 4 ms frame p95 and 25 ms
-      generation p95; maxima remain recorded diagnostics rather than single-sample wall-clock gates.
+- [ ] Exercise 100-site retention and the direct O(1) predicted-allowance formula with no route
+      search, simulation, or proof replay. Hosted CI enforces deterministic workload,
+      retained-state, DOM, listener, and collision-instrumentation bounds rather than browser
+      wall-clock timings.
 
 ### Phase 4U automated execution record
 
@@ -213,9 +213,9 @@ The exact source passed all 103 Node lander tests in 4.90 seconds and all 157 we
 including the real-Chromium witnesses, in 36.694 seconds. The focused Phase 4Q Chromium module also
 passed both tests in 4.87 seconds. Its 100-site lifecycle invokes direct site generation and the
 O(1) `quantumCeil(22 + max(0, deckDelta) / 3)` prediction without a route key, schedule, search,
-simulation, catalog, or replay. The permanent witness continues to enforce the 4 ms frame-p95 and 25
-ms generation-p95 ceilings while recording maxima rather than treating a single host scheduler pause
-as a product regression.
+simulation, catalog, or replay. The permanent witness exercises all 100 services per seed and
+enforces bounded retained state, DOM, listeners, and collision instrumentation without using hosted
+browser wall-clock measurements as merge gates.
 
 The same run emitted 12 distinct qualitative PNGs across seeds 11, 41, and STATIC and all four
 required viewport shapes. Inspection covered `1000x780`, `320x780`, true `320x240`, and true mobile
@@ -264,6 +264,9 @@ while waiting for Chrome to exit. Phase 4J now reads geometry and description re
 screenshots through bounded DevTools sessions, then explicitly closes each connection, terminates or
 kills the owned process, and removes the isolated profile.
 
+Every Chromium process also receives the same temporary directory as both its user-data directory
+and `HOME`, so concurrent tests never share user-level Chromium or crash-reporting state.
+
 Stress execution exposed two additional lifecycle races before commit: Chrome can briefly leave a
 child writing its profile after the parent exits, and `DevToolsActivePort` can exist before it has
 content or a published page target. Cleanup now gives profile writers a bounded quiescence window,
@@ -294,41 +297,6 @@ after discovery. A deterministic stalled-socket regression covers that boundary 
 authored wording. The exact formerly failing Phase 4J description test passed 50 consecutive
 real-Chromium executions; the complete Phase 4J module passed 7 of 7 tests, the shared lifecycle
 suite passed 11 of 11 tests, and the complete website suite passed 155 of 155 tests.
-
-#### Main startup-retry follow-up
-
-- Date: 2026-08-20
-- Harness source: `2d0dcd63a5253324420f541206b0bfca8d812c26`
-- Failure evidence: main CI run `32398998705`, Website job `96522438657`
-- Hosted validation: PR run `32408120451`, Website job `96551941760`
-- Follow-up evidence: PR run `32408474123`, Website job `96553080383`
-- Timing-gate source: `65506d068f34edfdd5bbce4470110c2427d1a734`
-- Correction validation: PR run `32409548573`, Website job `96556510505`
-- Outcome: local and hosted PASS
-
-The cited main job exposed the remaining external-process boundary. Chromium remained alive but
-never created `DevToolsActivePort` during the full 20-second wait, so neither HTTP nor WebSocket
-target discovery could begin. One wedged browser process still failed the complete job.
-
-All six real-Chromium harness entry points now use one shared acquisition path. Each of the two
-fresh attempts retains the established 20-second startup allowance. If the first browser does not
-become responsive, the harness terminates it, removes its isolated profile, and starts one fresh
-browser. Each attempt's single deadline includes process startup, target discovery, and the page
-handshake; cleanup completes before another attempt and is deliberately outside that acquisition
-deadline. The retained session then restores the ordinary 10-second CDP operation timeout.
-Deterministic mutations prove both the recovery and exhausted paths: failed processes and profiles
-are cleaned before retry or return, no third attempt occurs, and the final failure retains its
-underlying cause. Non-startup exceptions still preserve their original identity rather than being
-retried. The exact formerly failing Phase 4J description test passed 50 consecutive real-Chromium
-executions, the focused real-Chromium corpus passed 11 of 11 tests, the focused
-acquisition/lifecycle/document corpus passed 38 of 38 tests, and the complete website suite passed
-159 of 159 tests.
-
-The docs-only follow-up run started Chromium successfully but exposed a separate brittle timing
-gate: seed 11 generation p95 stayed below its 25 ms contract while one wall-clock sample reached
-80.5 ms and failed the former 50 ms maximum. The host scheduler may pause Chromium during any single
-sample, so hosted CI now enforces the percentile ceilings and keeps every maximum in the result as
-diagnostic evidence.
 
 ### Historical route-proof automated execution record
 

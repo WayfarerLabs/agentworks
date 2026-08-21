@@ -1,6 +1,7 @@
 # ruff: noqa: F405
 
 import json
+import os
 import sys
 import threading
 import time
@@ -9,13 +10,7 @@ from html.parser import HTMLParser
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable
 
-from chromium_test_support import (
-    DevToolsConnection,
-    acquire_chromium,
-    cleanup_profile,
-    devtools_target,
-    stop_process,
-)
+from chromium_test_support import DevToolsConnection, cleanup_profile, devtools_target
 from site_test_support import *  # noqa: F403
 
 
@@ -207,9 +202,9 @@ def browser_geometry(
     width: int,
     *,
     chromium_path: str | None = None,
-    connection_factory: Callable[..., DevToolsConnection] = DevToolsConnection,
+    connection_factory: Callable[[str], DevToolsConnection] = DevToolsConnection,
     popen_factory: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
-    target_factory: Callable[..., str] = devtools_target,
+    target_factory: Callable[[Path, subprocess.Popen[bytes]], str] = devtools_target,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, object]:
     chromium = chromium_path or next(
@@ -246,18 +241,29 @@ document.querySelector("#result").textContent = JSON.stringify({
     server = ThreadingHTTPServer(("127.0.0.1", 0), partial(QuietHandler, directory=str(output)))
     thread = threading.Thread(target=server.serve_forever, daemon=True, name="site-geometry-browser-server")
     thread.start()
-    profile: tempfile.TemporaryDirectory[str] | None = None
+    profile = tempfile.TemporaryDirectory()
     process: subprocess.Popen[bytes] | None = None
     connection: DevToolsConnection | None = None
     try:
         port = server.server_address[1]
-        profile, process, connection = acquire_chromium(
-            chromium,
-            connection_factory=connection_factory,
-            popen_factory=popen_factory,
-            target_factory=target_factory,
-            sleep=sleep,
+        process = popen_factory(
+            (
+                chromium,
+                "--headless",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--remote-allow-origins=*",
+                "--remote-debugging-port=0",
+                f"--user-data-dir={profile.name}",
+                "about:blank",
+            ),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env={**os.environ, "HOME": profile.name},
         )
+        connection = connection_factory(target_factory(Path(profile.name), process))
         for domain in ("Runtime", "Page"):
             connection.call(f"{domain}.enable")
         connection.call(
@@ -293,13 +299,18 @@ document.querySelector("#result").textContent = JSON.stringify({
 
         if connection is not None:
             cleanup(connection.close)
-        if process is not None:
-            cleanup(lambda: stop_process(process))
+        if process is not None and process.poll() is None:
+            cleanup(process.terminate)
+            if process.poll() is None:
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    cleanup(process.kill)
+                    cleanup(lambda: process.wait(timeout=5))
         cleanup(server.shutdown)
         cleanup(server.server_close)
         cleanup(lambda: thread.join(timeout=5))
-        if profile is not None:
-            cleanup(lambda: cleanup_profile(profile))
+        cleanup(lambda: cleanup_profile(profile))
         if active_error is None and cleanup_errors:
             raise cleanup_errors[0]
 
@@ -684,14 +695,21 @@ class GeneratedDocumentTests(RepositoryFixture):
             self.output,
             390,
             chromium_path="chromium-test",
-            connection_factory=lambda url, **kwargs: connection,
+            connection_factory=lambda url: connection,
             popen_factory=spawn,
-            target_factory=lambda profile, owned, **kwargs: "ws://chromium.test",
+            target_factory=lambda profile, owned: "ws://chromium.test",
         )
 
         command = spawn.call_args.args[0]
         self.assertIn("--remote-debugging-port=0", command)
         self.assertEqual(command[-1], "about:blank")
+        profile_argument = next(
+            argument for argument in command if argument.startswith("--user-data-dir=")
+        )
+        self.assertEqual(
+            spawn.call_args.kwargs["env"]["HOME"],
+            profile_argument.removeprefix("--user-data-dir="),
+        )
         self.assertEqual(result["display"], "block")
         self.assertTrue(connection.closed)
         self.assertTrue(process.terminated)
@@ -747,9 +765,9 @@ class GeneratedDocumentTests(RepositoryFixture):
                 self.output,
                 390,
                 chromium_path="chromium-test",
-                connection_factory=lambda url, **kwargs: connection,
+                connection_factory=lambda url: connection,
                 popen_factory=lambda *args, **kwargs: process,
-                target_factory=lambda profile, owned, **kwargs: "ws://chromium.test",
+                target_factory=lambda profile, owned: "ws://chromium.test",
                 sleep=lambda seconds: None,
             )
 
@@ -798,9 +816,9 @@ class GeneratedDocumentTests(RepositoryFixture):
                 self.output,
                 390,
                 chromium_path="chromium-test",
-                connection_factory=lambda url, **kwargs: FailingConnection(),
+                connection_factory=lambda url: FailingConnection(),
                 popen_factory=lambda *args, **kwargs: process,
-                target_factory=lambda profile, owned, **kwargs: "ws://chromium.test",
+                target_factory=lambda profile, owned: "ws://chromium.test",
             )
 
         with self.assertRaises(RuntimeError) as caught:
