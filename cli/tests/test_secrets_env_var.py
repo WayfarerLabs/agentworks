@@ -39,12 +39,10 @@ def test_factory_and_context_entry_do_not_read_the_environment(monkeypatch: pyte
         lambda request: pytest.fail("environment read started"),
     )
     context = EnvVarBackend.create_client(
-        source_name="env-var",
         config=EnvVarSourceConfig(name="env-var"),
         intent=ResolutionIntent(),
         tty_access=TtyInteractionAccess.UNAVAILABLE,
         interaction_broker=None,
-        remaining_time=lambda: None,
     )
     client = context.__enter__()
     context.__exit__(None, None, None)

@@ -17,7 +17,6 @@ from agentworks.capabilities.secret_backend import (
     InteractionBroker,
     LookupDescription,
     LookupDisposition,
-    RemainingTime,
     SecretBackend,
     SecretClientIntent,
     SecretSourceClient,
@@ -113,12 +112,10 @@ class MissingTtySupportBackend(SecretBackend):
     def create_client(
         cls,
         *,
-        source_name: str,
         config: AgwModel,
         intent: SecretClientIntent,
         tty_access: TtyInteractionAccess,
         interaction_broker: InteractionBroker | None,
-        remaining_time: RemainingTime,
     ) -> AbstractContextManager[SecretSourceClient]:
         raise NotImplementedError
 
@@ -396,12 +393,10 @@ Factory = Callable[..., AbstractContextManager[SecretSourceClient]]
 def _valid_factory(
     cls,
     *,
-    source_name: str,
     config: AgwModel,
     intent: SecretClientIntent,
     tty_access: TtyInteractionAccess,
     interaction_broker: InteractionBroker | None,
-    remaining_time: RemainingTime,
 ) -> AbstractContextManager[SecretSourceClient]:
     raise NotImplementedError
 
@@ -409,12 +404,10 @@ def _valid_factory(
 def _alternate_binding_name(
     klass,
     *,
-    source_name: str,
     config: AgwModel,
     intent: SecretClientIntent,
     tty_access: TtyInteractionAccess,
     interaction_broker: InteractionBroker | None,
-    remaining_time: RemainingTime,
 ) -> AbstractContextManager[SecretSourceClient]:
     raise NotImplementedError
 
@@ -423,12 +416,10 @@ def _positional_only_binding(
     cls,
     /,
     *,
-    source_name: str,
     config: AgwModel,
     intent: SecretClientIntent,
     tty_access: TtyInteractionAccess,
     interaction_broker: InteractionBroker | None,
-    remaining_time: RemainingTime,
 ) -> AbstractContextManager[SecretSourceClient]:
     raise NotImplementedError
 
@@ -436,12 +427,10 @@ def _positional_only_binding(
 def _defaulted_binding(
     cls=None,
     *,
-    source_name: str,
     config: AgwModel,
     intent: SecretClientIntent,
     tty_access: TtyInteractionAccess,
     interaction_broker: InteractionBroker | None,
-    remaining_time: RemainingTime,
 ) -> AbstractContextManager[SecretSourceClient]:
     raise NotImplementedError
 
@@ -449,11 +438,9 @@ def _defaulted_binding(
 def _too_few(
     cls,
     *,
-    source_name: str,
     config: AgwModel,
     intent: SecretClientIntent,
     tty_access: TtyInteractionAccess,
-    interaction_broker: InteractionBroker | None,
 ) -> AbstractContextManager[SecretSourceClient]:
     raise NotImplementedError
 
@@ -461,12 +448,10 @@ def _too_few(
 def _too_many(
     cls,
     *,
-    source_name: str,
     config: AgwModel,
     intent: SecretClientIntent,
     tty_access: TtyInteractionAccess,
     interaction_broker: InteractionBroker | None,
-    remaining_time: RemainingTime,
     extra: object,
 ) -> AbstractContextManager[SecretSourceClient]:
     raise NotImplementedError
@@ -475,25 +460,21 @@ def _too_many(
 def _wrong_parameter_name(
     cls,
     *,
-    source: str,
-    config: AgwModel,
+    configuration: AgwModel,
     intent: SecretClientIntent,
     tty_access: TtyInteractionAccess,
     interaction_broker: InteractionBroker | None,
-    remaining_time: RemainingTime,
 ) -> AbstractContextManager[SecretSourceClient]:
     raise NotImplementedError
 
 
 def _positional_parameter(
     cls,
-    source_name: str,
-    *,
     config: AgwModel,
+    *,
     intent: SecretClientIntent,
     tty_access: TtyInteractionAccess,
     interaction_broker: InteractionBroker | None,
-    remaining_time: RemainingTime,
 ) -> AbstractContextManager[SecretSourceClient]:
     raise NotImplementedError
 
@@ -501,12 +482,10 @@ def _positional_parameter(
 def _defaulted_parameter(
     cls,
     *,
-    source_name: str = "default",
-    config: AgwModel,
+    config: AgwModel | None = None,
     intent: SecretClientIntent,
     tty_access: TtyInteractionAccess,
     interaction_broker: InteractionBroker | None,
-    remaining_time: RemainingTime,
 ) -> AbstractContextManager[SecretSourceClient]:
     raise NotImplementedError
 

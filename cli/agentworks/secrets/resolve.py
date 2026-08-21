@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import concurrent.futures
-import time
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Self, cast
@@ -54,7 +53,7 @@ from agentworks.secrets.policy import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Mapping, Sequence
     from types import TracebackType
 
     from pydantic import BaseModel
@@ -153,22 +152,6 @@ class _Evidence:
     @classmethod
     def empty(cls) -> Self:
         return cls(tty_blocks=[], missing=[], source_blocks=[])
-
-
-class _MonotonicBudget:
-    __slots__ = ("_clock", "_deadline")
-
-    def __init__(self, deadline: float | None, clock: Callable[[], float]) -> None:
-        self._deadline = deadline
-        self._clock = clock
-
-    @classmethod
-    def start(cls, timeout: float | None, *, clock: Callable[[], float] = time.monotonic) -> Self:
-        now = clock()
-        return cls(None if timeout is None else now + timeout, clock)
-
-    def remaining(self) -> float | None:
-        return None if self._deadline is None else max(0.0, self._deadline - self._clock())
 
 
 _CLEANUP_WARNING = "secret source {source_name!r}: cleanup failed; primary result unchanged"
@@ -442,8 +425,6 @@ def _drive_source(
     interaction_broker: InteractionBroker | None,
 ) -> Mapping[str, BackendPreview] | Mapping[str, BackendResolution]:
     """Drive exactly one source method under a fresh operation client."""
-    budget = _MonotonicBudget.start(None)
-    remaining = budget.remaining
     supports_tty = source.backend_class.supports_tty_interaction
     broker_allowed = (
         supports_tty
@@ -458,12 +439,10 @@ def _drive_source(
     if broker_allowed and broker is None:
         raise StateError(f"secret source {source.name!r} requires a terminal interaction broker")
     context = source.backend_class.create_client(
-        source_name=source.name,
         config=source.config,
         intent=intent,
         tty_access=tty_access,
         interaction_broker=broker,
-        remaining_time=remaining,
     )
     driver = _SourceContextDriver(context, source_name=source.name)
     with driver as client:

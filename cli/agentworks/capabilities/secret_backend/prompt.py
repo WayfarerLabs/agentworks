@@ -26,7 +26,6 @@ from agentworks.capabilities.secret_backend.client import (
     PreviewFailed,
     PreviewIndeterminate,
     PreviewIntent,
-    RemainingTime,
     ResolutionIntent,
     SecretClientIntent,
     SecretLookupRequest,
@@ -179,11 +178,9 @@ class PromptBackend(SecretBackend):
     def create_client(
         cls,
         *,
-        source_name: str,
         config: AgwModel,
         intent: SecretClientIntent,
         tty_access: TtyInteractionAccess,
         interaction_broker: InteractionBroker | None,
-        remaining_time: RemainingTime,
     ) -> AbstractContextManager[SecretSourceClient]:
         return _PromptContext(intent=intent, tty_access=tty_access, broker=interaction_broker)

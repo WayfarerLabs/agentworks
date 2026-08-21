@@ -20,7 +20,6 @@ from agentworks.capabilities.secret_backend.client import (
     PreviewAvailable,
     PreviewFailed,
     PreviewMissing,
-    RemainingTime,
     SecretClientIntent,
     SecretLookupRequest,
     SecretSourceClient,
@@ -134,11 +133,9 @@ class EnvVarBackend(SecretBackend):
     def create_client(
         cls,
         *,
-        source_name: str,
         config: AgwModel,
         intent: SecretClientIntent,
         tty_access: TtyInteractionAccess,
         interaction_broker: InteractionBroker | None,
-        remaining_time: RemainingTime,
     ) -> AbstractContextManager[SecretSourceClient]:
         return _EnvVarContext()

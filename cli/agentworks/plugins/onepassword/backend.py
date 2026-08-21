@@ -28,7 +28,6 @@ from agentworks.capabilities.secret_backend.client import (
     PreviewFailed,
     PreviewIndeterminate,
     PreviewIntent,
-    RemainingTime,
     ResolutionIntent,
     SecretClientIntent,
     SecretLookupRequest,
@@ -167,11 +166,9 @@ class _OnePasswordClient:
         *,
         config: OnePasswordSourceConfig,
         intent: SecretClientIntent,
-        remaining_time: RemainingTime,
     ) -> None:
         self._config = config
         self._intent = intent
-        self._remaining_time = remaining_time
         self._deadline = _MONOTONIC() + config.timeout
 
     def _read(self, request: SecretLookupRequest) -> _BoundedRead:
@@ -182,11 +179,7 @@ class _OnePasswordClient:
         if self._config.account is not None:
             args += ["--account", self._config.account]
         args.append(mapping.root)
-        configured_remaining = max(0.0, self._deadline - _MONOTONIC())
-        operation_remaining = self._remaining_time()
-        timeout = (
-            configured_remaining if operation_remaining is None else min(configured_remaining, operation_remaining)
-        )
+        timeout = max(0.0, self._deadline - _MONOTONIC())
         return _bounded_read(args, timeout=timeout)
 
     def preview(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendPreview]:
@@ -230,17 +223,14 @@ class _OnePasswordContext(AbstractContextManager[SecretSourceClient]):
         *,
         config: OnePasswordSourceConfig,
         intent: SecretClientIntent,
-        remaining_time: RemainingTime,
     ) -> None:
         self._config = config
         self._intent = intent
-        self._remaining_time = remaining_time
 
     def __enter__(self) -> SecretSourceClient:
         return _OnePasswordClient(
             config=self._config,
             intent=self._intent,
-            remaining_time=self._remaining_time,
         )
 
     def __exit__(self, *args: object) -> None:
@@ -289,13 +279,11 @@ class OnePasswordBackend(SecretBackend):
     def create_client(
         cls,
         *,
-        source_name: str,
         config: AgwModel,
         intent: SecretClientIntent,
         tty_access: TtyInteractionAccess,
         interaction_broker: InteractionBroker | None,
-        remaining_time: RemainingTime,
     ) -> AbstractContextManager[SecretSourceClient]:
         if not isinstance(config, OnePasswordSourceConfig):
             raise ConfigError("onepassword received the wrong source config model")
-        return _OnePasswordContext(config=config, intent=intent, remaining_time=remaining_time)
+        return _OnePasswordContext(config=config, intent=intent)

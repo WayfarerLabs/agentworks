@@ -30,12 +30,10 @@ _OPERATION_CONTRACTS: dict[str, tuple[_ParameterContract, ...]] = {
         _ParameterContract("mapping", inspect.Parameter.POSITIONAL_OR_KEYWORD),
     ),
     "create_client": (
-        _ParameterContract("source_name", inspect.Parameter.KEYWORD_ONLY),
         _ParameterContract("config", inspect.Parameter.KEYWORD_ONLY),
         _ParameterContract("intent", inspect.Parameter.KEYWORD_ONLY),
         _ParameterContract("tty_access", inspect.Parameter.KEYWORD_ONLY),
         _ParameterContract("interaction_broker", inspect.Parameter.KEYWORD_ONLY),
-        _ParameterContract("remaining_time", inspect.Parameter.KEYWORD_ONLY),
     ),
 }
 

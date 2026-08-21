@@ -33,7 +33,6 @@ from agentworks.capabilities.secret_backend import (
     InteractionBroker,
     LookupDescription,
     LookupDisposition,
-    RemainingTime,
     SecretBackend,
     SecretClientIntent,
     SecretLookupRequest,
@@ -188,12 +187,10 @@ class ConformingSecretBackend(SecretBackend):
     def create_client(
         cls,
         *,
-        source_name: str,
         config: AgwModel,
         intent: SecretClientIntent,
         tty_access: TtyInteractionAccess,
         interaction_broker: InteractionBroker | None,
-        remaining_time: RemainingTime,
     ) -> AbstractContextManager[SecretSourceClient]:
         return nullcontext(_FixtureSecretClient())
 

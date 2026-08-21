@@ -47,12 +47,10 @@ def _client(
     intent: PreviewIntent | ResolutionIntent,
     account: str | None = None,
     timeout: float = 30.0,
-    remaining: float | None = 12.0,
     app_impact: AppAuthenticationImpact = AppAuthenticationImpact.OPERATOR_ACTION,
     tty_access: TtyInteractionAccess = TtyInteractionAccess.DISABLED,
 ) -> tuple[AbstractContextManager[SecretSourceClient], SecretSourceClient]:
     context = OnePasswordBackend.create_client(
-        source_name="work",
         config=OnePasswordSourceConfig(
             name="onepassword",
             account=account,
@@ -62,7 +60,6 @@ def _client(
         intent=intent,
         tty_access=tty_access,
         interaction_broker=None,
-        remaining_time=lambda: remaining,
     )
     return context, context.__enter__()
 
@@ -92,12 +89,10 @@ def test_bounded_read_repr_redacts_value() -> None:
 def test_factory_and_context_entry_do_no_provider_work(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: pytest.fail("provider work started"))
     context = OnePasswordBackend.create_client(
-        source_name="work",
         config=OnePasswordSourceConfig(name="onepassword"),
         intent=ResolutionIntent(),
         tty_access=TtyInteractionAccess.AVAILABLE,
         interaction_broker=None,
-        remaining_time=lambda: None,
     )
     client = context.__enter__()
     context.__exit__(None, None, None)
@@ -106,6 +101,8 @@ def test_factory_and_context_entry_do_no_provider_work(monkeypatch: pytest.Monke
 
 def test_resolution_exact_subprocess_boundary_ignores_tty_policy(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[list[str], dict[str, object]]] = []
+    clock = iter((100.0, 102.5))
+    monkeypatch.setattr(onepassword_backend, "_MONOTONIC", lambda: next(clock))
 
     def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append((args, kwargs))
@@ -115,7 +112,7 @@ def test_resolution_exact_subprocess_boundary_ignores_tty_policy(monkeypatch: py
     context, client = _client(
         intent=ResolutionIntent(),
         account="work.example.com",
-        remaining=4.5,
+        timeout=7.0,
         tty_access=TtyInteractionAccess.DISABLED,
     )
     try:
@@ -154,7 +151,7 @@ def test_configured_timeout_shrinks_across_the_whole_source_turn(
         return subprocess.CompletedProcess(args, 0, stdout="resolved", stderr="")
 
     monkeypatch.setattr(subprocess, "run", run)
-    context, client = _client(intent=intent, timeout=10.0, remaining=50.0)
+    context, client = _client(intent=intent, timeout=10.0)
     requests = (
         _request("op://Work/first/password", name="first"),
         _request("op://Work/second/password", name="second"),

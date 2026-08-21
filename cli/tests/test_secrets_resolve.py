@@ -27,7 +27,6 @@ from agentworks.capabilities.secret_backend import (
     PreviewAvailable,
     PreviewIndeterminate,
     PreviewIntent,
-    RemainingTime,
     ResolutionIntent,
     SecretClientIntent,
     SecretLookupRequest,
@@ -74,7 +73,7 @@ class _Backend(SecretBackend):
     mapping_model = _Mapping
     supports_tty_interaction = False
     client_type: ClassVar[type[_Client]] = _Client
-    factory_calls: ClassVar[list[tuple[str, SecretClientIntent, TtyInteractionAccess, InteractionBroker | None]]] = []
+    factory_calls: ClassVar[list[tuple[SecretClientIntent, TtyInteractionAccess, InteractionBroker | None]]] = []
 
     @classmethod
     def backend_readiness(cls) -> Readiness:
@@ -88,14 +87,12 @@ class _Backend(SecretBackend):
     def create_client(
         cls,
         *,
-        source_name: str,
         config: AgwModel,
         intent: SecretClientIntent,
         tty_access: TtyInteractionAccess,
         interaction_broker: InteractionBroker | None,
-        remaining_time: RemainingTime,
     ) -> AbstractContextManager[SecretSourceClient]:
-        cls.factory_calls.append((source_name, intent, tty_access, interaction_broker))
+        cls.factory_calls.append((intent, tty_access, interaction_broker))
         return nullcontext(cls.client_type())
 
 
@@ -334,10 +331,7 @@ def test_factory_receives_exact_intent_access_and_least_authority_broker(
             tty_access=access,
             interaction_broker=broker,
         )
-    [(source_name, received_intent, received_access, received_broker)] = cast(
-        "type[_Backend]", source.backend_class
-    ).factory_calls
-    assert source_name == "authority"
+    [(received_intent, received_access, received_broker)] = cast("type[_Backend]", source.backend_class).factory_calls
     assert received_intent == intent
     assert type(received_intent) is type(intent)
     assert received_access is access

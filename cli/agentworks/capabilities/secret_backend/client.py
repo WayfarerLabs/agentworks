@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import unicodedata
-from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from pydantic import BaseModel
 
 
@@ -113,10 +114,6 @@ class InteractionBroker(Protocol):
     """Caller-owned access to an explicitly authorized terminal prompt."""
 
     def request_secret(self, name: str, /) -> str: ...
-
-
-type RemainingTime = Callable[[], float | None]
-"""A live view of the outer operation budget, if one is bounded."""
 
 
 @dataclass(frozen=True, slots=True)

@@ -150,10 +150,14 @@ Context exit always handles cleanup. A primary exception is never suppressed or 
 With no primary exception, user abort, cancellation, and other protected cleanup exits propagate; an
 ordinary cleanup failure emits fixed source-only warning text and returns normally.
 
-The client is operation-local and is never cached in a registry. `remaining_time()` is a live view
-of the outer operation budget; `None` means that outer budget is unbounded. A backend combines it
-with its own validated source deadline at each cancellable external boundary. The backend returns
-`DEADLINE_EXCEEDED` rather than exposing a provider timeout exception.
+The client is operation-local and is never cached in a registry. Provider deadlines are
+backend-owned source configuration, not part of the generic factory contract. A backend that
+supports a deadline validates it in its source model and applies one shrinking deadline across the
+complete source turn. The 1Password backend follows this rule for every provider read in the batch.
+It returns `DEADLINE_EXCEEDED` rather than exposing a provider timeout exception.
+
+Core keeps the configured source name for its own ordered evidence and cleanup diagnostics. Source
+identity does not cross the backend factory boundary.
 
 User abort and cancellation propagate. Ordinary exceptions from the selected client `preview` or
 `resolve` method are normalized by core to `UNEXPECTED`; ordinary `describe_lookup` exceptions are
@@ -199,7 +203,6 @@ from agentworks.capabilities.secret_backend import (
     PreviewAvailable,
     PreviewFailed,
     PreviewMissing,
-    RemainingTime,
     SecretBackend,
     SecretClientIntent,
     SecretLookupRequest,
@@ -272,22 +275,20 @@ class ExampleBackend(SecretBackend):
     def create_client(
         cls,
         *,
-        source_name: str,
         config: AgwModel,
         intent: SecretClientIntent,
         tty_access: TtyInteractionAccess,
         interaction_broker: InteractionBroker | None,
-        remaining_time: RemainingTime,
     ) -> AbstractContextManager[SecretSourceClient]:
         if not isinstance(config, ExampleSourceConfig):
             raise ConfigError("example received the wrong source config model")
-        # A real backend stores intent and remaining_time when its methods need
-        # them. This non-TTY example has a local, resource-free provider seam.
+        # A real backend stores the inputs its methods need. This non-TTY
+        # example has a local, resource-free provider seam.
         return nullcontext(ExampleClient({}))
 ```
 
 Registration checks `backend_readiness`, `describe_lookup`, and `create_client` as class methods
-with the exact names, parameter kinds, and requiredness above. `create_client` has six required,
+with the exact names, parameter kinds, and requiredness above. `create_client` has four required,
 keyword-only arguments after `cls`. Registration also checks the nominal base, exact version,
 constructibility, exact boolean TTY capability, and both model surfaces. Runtime validation owns
 returned map shapes and values.

@@ -15,7 +15,6 @@ if TYPE_CHECKING:
     from agentworks.capabilities.secret_backend.client import (
         InteractionBroker,
         LookupDescription,
-        RemainingTime,
         SecretClientIntent,
         SecretSourceClient,
         TtyInteractionAccess,
@@ -55,12 +54,10 @@ class SecretBackend(Capability):
     def create_client(
         cls,
         *,
-        source_name: str,
         config: AgwModel,
         intent: SecretClientIntent,
         tty_access: TtyInteractionAccess,
         interaction_broker: InteractionBroker | None,
-        remaining_time: RemainingTime,
     ) -> AbstractContextManager[SecretSourceClient]:
         """Create an unentered, resource-free client context for one source."""
 
