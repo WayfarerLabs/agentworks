@@ -2,29 +2,29 @@
 
 - Status: Draft for review
 - Date: 2026-08-18
-- Amended: 2026-08-19
+- Amended: 2026-08-21
 - Governing requirements: [FRD](./frd.md)
 - Detailed contracts: [preview contract LLD](./preview-contract-lld.md) and
   [operator surfaces LLD](./operator-surfaces-lld.md)
 
 ## Executive summary
 
-The architecture replaces the static backend `interactive` classification with an explicit
-operator-impact intent at each backend action. Preview becomes a real source-client operation with a
-closed, value-free result sum. Core supplies one policy input, the allowed operator impact, plus
-objective execution capabilities such as terminal availability. The backend determines how far it
-can proceed and returns the most informative result available within those constraints.
+The architecture replaces the static backend `interactive` classification with two orthogonal,
+narrow concepts. Preview receives an explicit operator-impact allowance. TTY interaction access
+controls only whether a backend may use terminal input. Preview becomes a real source-client
+operation with a closed, value-free result sum, and the backend returns the most informative result
+available within those constraints.
 
 The result separates five semantic states: `available`, ordinary `missing`, impact-limited
 `indeterminate`, execution `blocked`, and operational `failed`. Backends classify only those facts.
 Core centrally owns fallthrough and hard-stop behavior, so a missing value can use a lower source
 but an invalid or failing configured source cannot be silently hidden by fallback.
 
-Actual resolution uses the same impact and classification vocabulary but remains a separate
-value-bearing operation. Preflight does not simulate full resolution. It invokes preview at zero
-operator impact and treats a higher-precedence indeterminate attempt as not disproven, even when a
-later source fails, then the operation performs one authoritative resolution before external
-mutation.
+Actual resolution is a separate value-bearing operation with no operator-impact allowance. It may
+trigger out-of-band provider action regardless of TTY state or global `--non-interactive`. That flag
+means only "do not use the TTY for interactions, even if one is present." Preflight does not
+simulate full resolution: it previews at zero impact, then the operation performs one authoritative
+source-first resolution before external mutation.
 
 ## Architectural shape
 
@@ -47,16 +47,15 @@ closed backend preview
 core chain disposition + caller-owned rendering or decision
 ```
 
-The actual resolution path is parallel, not downstream of preview. It passes the operation's impact
-allowance to the same source-bound client and receives values through the existing private batch. No
-caller uses preview as a value cache or extracts a value from its result.
+The actual resolution path is parallel, not downstream of preview. It receives values through the
+private batch and has no preview-impact input. No caller uses preview as a value cache or extracts a
+value from its result.
 
 ## Components and responsibilities
 
-### Operator-impact policy
+### Preview operator-impact policy
 
-`OperatorImpact` replaces `InteractionPolicy` as the exact, caller-supplied intent type. Its initial
-levels are:
+`OperatorImpact` is the exact preview intent type. Its initial levels are:
 
 - `NONE`: the backend may not knowingly cause an operator action.
 - `ALLOW`: the maximum level; operator actions are permitted.
@@ -64,24 +63,41 @@ levels are:
 This is deliberately a two-level contract. New levels require an observed need and a contract
 revision. Certainty is not a policy member. TTY availability is not a policy member.
 
-Every public service boundary that accepts this value checks exact enum identity before work, as the
-current interaction policy does. Ordinary CLI roots derive `ALLOW` unless global `--non-interactive`
-was selected. They do not consult `isatty()` when deriving authority.
+Every preview boundary checks exact enum identity before work. The caller selects `NONE` for
+non-disruptive preview or `ALLOW` for explicit inspection. Global `--non-interactive` does not alter
+this value.
 
-### Execution capabilities
+### TTY interaction access
 
-Core records whether a safe terminal input channel is available. This fact is supplied to preview
-without changing the impact allowance. For actual resolution, core supplies a prompt broker only
-when both conditions hold: operator impact is allowed and usable terminal input exists.
+The existing broad `InteractionPolicy` becomes the exact `TtyInteractionPolicy`: `ALLOW` or
+`REFUSE`. Global `--non-interactive` selects `REFUSE` and means exactly "do not use the TTY for
+interactions, even if one is present." It does not describe whether the operator may need to approve
+a provider action elsewhere and does not control output presentation.
+
+Core combines that policy with physical terminal availability into one `TtyInteractionAccess` state
+supplied to backend clients:
+
+- `AVAILABLE`: TTY use is allowed and usable terminal input exists;
+- `UNAVAILABLE`: TTY use is allowed but no usable terminal input exists;
+- `DISABLED`: global `--non-interactive` forbids TTY use, whether or not a TTY exists.
+
+Each backend declares exact `supports_tty_interaction: bool`. This is a least-authority capability,
+not a prediction: `True` means the backend may receive a broker, not that the operation will prompt.
+Core supplies a broker only when the capability is true, access is `AVAILABLE`, and the selected
+operation permits a prompt: actual resolution always does, while preview does only at
+`OperatorImpact.ALLOW`. A backend declaring `False` cannot return a TTY block. Env-var and
+OnePassword declare `False`; prompt declares `True`.
 
 This produces truthful combinations:
 
-| Impact | TTY | OnePassword app path                                          | Prompt path                             |
-| ------ | --- | ------------------------------------------------------------- | --------------------------------------- |
-| none   | no  | probe only when backend knows/configures it as non-disruptive | `blocked/tty-unavailable`               |
-| none   | yes | same backend decision                                         | `indeterminate/operator-impact-limited` |
-| allow  | no  | bounded read is allowed                                       | `blocked/tty-unavailable`               |
-| allow  | yes | bounded read is allowed                                       | `available`, `missing`, or `failed`     |
+| Preview impact | TTY access  | OnePassword app path                                          | Prompt path                             |
+| -------------- | ----------- | ------------------------------------------------------------- | --------------------------------------- |
+| none           | unavailable | probe only when backend knows/configures it as non-disruptive | `blocked/tty-unavailable`               |
+| none           | disabled    | same backend decision                                         | `blocked/tty-interaction-disabled`      |
+| none           | available   | same backend decision                                         | `indeterminate/operator-impact-limited` |
+| allow          | unavailable | bounded read is allowed                                       | `blocked/tty-unavailable`               |
+| allow          | disabled    | bounded read is allowed                                       | `blocked/tty-interaction-disabled`      |
+| allow          | available   | bounded read is allowed                                       | `available`, `missing`, or `failed`     |
 
 `ALLOW` removes impact-limited uncertainty; it does not manufacture terminal capability or provider
 success.
@@ -97,44 +113,46 @@ This structured projection replaces `would_attempt` and keeps `secret list` chea
 non-candidates remain visible in mapping output but do not become backend preview attempts.
 `secret list` continues to describe mappings and readiness; it does not open provider clients.
 
+Actual resolution is simpler: OnePassword runs in all three TTY states. Prompt resolves only when
+TTY access is available and otherwise returns the matching blocked reason.
+
 ### Source-client results
 
-The operation-bounded `SecretSourceClient` gains one batch `preview` method. Core supplies exact
-operator impact, terminal availability, an optional prompt broker, and the shrinking operation
-budget once, when it constructs the client. `preview` and `resolve` then receive only candidate
-requests; their authority cannot disagree with their client's construction. Each method returns
-exactly one closed tagged result per request and no other payload:
+The operation-bounded `SecretSourceClient` gains one batch `preview` method. Core constructs a fresh
+client with a tagged intent: `PreviewIntent(impact)` or `ResolutionIntent()`. It also supplies exact
+TTY interaction access, an optional prompt broker, and the shrinking operation budget before any
+backend lifecycle code runs. `preview` and `resolve` receive only candidate requests. Each method
+returns exactly one closed tagged result per request and no other payload:
 
 - `PreviewAvailable`: a valid value exists; stop successfully;
 - `PreviewMissing`: a valid lookup established ordinary absence; fall through silently;
 - `PreviewIndeterminate`: broader operator-impact authority could change the answer; preview falls
   through but preserves precedence uncertainty;
-- `PreviewBlocked`: current execution, readiness, or applicability state prevents resolution; a
-  source attempt falls through and retains the reason. Core uses `blocked/no-candidate` for
-  aggregate exhaustion where no lookup ran;
+- `PreviewBlocked`: a backend reports a TTY execution limitation; core constructs blocked attempts
+  for source readiness or disabled-plugin state. Each falls through and retains the reason. Core
+  uses `blocked/no-candidate` for aggregate exhaustion where no lookup ran;
 - `PreviewFailed`: mapping, provider, deadline, value, protocol, or unexpected failure; hard-stop.
 
 Actual resolution returns a parallel sum:
 
 - `BackendResolved(value)`: the only value-bearing result, with redacted representation;
 - `BackendMissing`: ordinary fallthrough;
-- `BackendBlocked`: authority or execution fallthrough;
+- `BackendBlocked`: TTY execution fallthrough;
 - `BackendFailed`: hard-stop.
 
-There is no actual-resolution `indeterminate`: insufficient authority is a definite block for that
-operation. Result types carry closed reasons only where a reason changes diagnostics. They contain
-no remediation, provider message, arbitrary metadata, or backend-selected flow instruction.
+Actual resolution has neither `indeterminate` nor `operator-impact-limited`: it has no impact
+allowance to exhaust. Result types carry closed reasons only where a reason changes diagnostics.
+They contain no remediation, provider message, arbitrary metadata, or backend-selected flow
+instruction.
 
 ### Lifecycle and provider boundary
 
-Core passes exact impact and terminal facts into `create_client` before backend factory or
-context-entry code can run. Construction remains resource-free, context entry is provider-I/O-free,
-and the selected method owns provider work. The old `prepare` and `external_operation_timeout` hooks
-are removed: every in-tree `prepare` is a no-op, and a timeout declaration evaluated before client
-construction would be an authority-blind backend hook. A backend validates its timeout in source
-config, enforces it inside its provider boundary together with the supplied remaining-time view, and
-returns `failed/deadline-exceeded`. This leaves no pre-policy setup phase and one typed result
-surface per operation.
+Core passes exact tagged operation intent and TTY access into `create_client` before backend factory
+or context-entry code can run. Construction remains resource-free, context entry is
+provider-I/O-free, and the selected method owns provider work. The old `prepare` and
+`external_operation_timeout` hooks are removed: every in-tree `prepare` is a no-op, and the provider
+client already enforces validated source timeout together with the remaining-time view. This leaves
+no pre-intent setup phase and one typed result surface per operation.
 
 Backends share their private acquisition path between preview and resolve:
 
@@ -145,10 +163,10 @@ Backends share their private acquisition path between preview and resolve:
 - native text is classified inside the backend for both paths.
 
 At `OperatorImpact.ALLOW`, runtime contract enforcement rejects `PreviewIndeterminate` as a backend
-protocol failure. It still accepts `blocked` and `failed`, because maximum authority cannot
-guarantee a terminal, network response, authentication success, or valid mapping. Actual resolution
-likewise rejects `BackendBlocked(operator-impact-limited)` at `ALLOW`; core converts that whole
-source turn to protocol failure rather than repeat an impossible higher-authority frontier.
+protocol failure. It still accepts `blocked` and `failed`, because maximum preview authority cannot
+guarantee TTY access, a network response, authentication success, or valid mapping. Actual
+resolution rejects every preview-only reason, including `operator-impact-limited`. Either method
+rejects a TTY block from a backend whose `supports_tty_interaction` is `False`.
 
 ### Core chain disposition
 
@@ -188,21 +206,14 @@ node order, so duplicate references cannot repeat provider work, and secrets ref
 unreachable later nodes cause no lookup or audit event. The established first-failing node order
 remains unchanged. Actual resolution never reuses a preview result.
 
-### Complete-batch authority staging
+### Actual-resolution pass
 
-Complete actual resolution under caller authority `ALLOW` preserves batch doom through iterative
-backend-owned gating. Core closes every reachable actual-resolution path at `NONE` and stops each
-unresolved secret at its first `BackendBlocked(operator-impact-limited)` frontier. If the batch
-remains viable, it runs exactly one single-request `ALLOW` turn, returns to no-impact closure for
-that request's fallthrough, and checks viability again before another `ALLOW` turn. A known
-`BackendFailed` result therefore dooms pending secrets before every later operator-impacting action,
-including another request at the same configured source. Multiple impact-bearing frontiers are real:
-a chain may contain both OnePassword and prompt, and different required secrets may stop at the same
-source. A fixed two-pass or opaque source batch cannot preserve precedence and regain core control
-before each next interaction.
-
-Values acquired at `NONE` remain in the private resolution batch; no preview result is promoted to
-authority. Caller impact `NONE` and partial resolution use one pass at their exact impact.
+Actual resolution performs one bounded source-first pass. Each ready source receives the unresolved
+candidate batch once, returns exact resolution variants, and releases its resources before core
+continues. Missing and TTY blocks fall through, failed hard-stops each affected chain, and resolved
+values remain in the private batch. There is no preview pass, impact frontier, retry at a broader
+authority, or single-request interaction loop. Complete resolution still finishes before the
+consuming operation's first external mutation.
 
 ### Core diagnostics
 
@@ -210,8 +221,8 @@ Backends return only a result tag and, where required, a closed reason. Core add
 name and safe lookup identifier, then derives any hint at the consuming surface. For example:
 
 - `tty-unavailable` can suggest running the command with usable terminal input;
-- `operator-impact-limited` can mention `--allow-interaction` on commands that offer it or explain
-  global `--non-interactive` on ordinary commands;
+- `tty-interaction-disabled` can explain that global `--non-interactive` disabled terminal use;
+- preview `operator-impact-limited` can mention `--allow-interaction` on commands that offer it;
 - `authentication` can map to the existing sign-in guidance.
 
 No backend chooses remediation, command syntax, halt behavior, fallback behavior, or prose. Existing
@@ -228,9 +239,9 @@ closed result.
 | doctor secret check | none            | report indeterminate as uncertainty and failed as failure            |
 | `secret list`       | no preview      | show static mapping applicability only                               |
 
-Actual ordinary resolution uses `ALLOW` unless global `--non-interactive` selects `NONE`. Explicit
-verification remains conservative by default even though ordinary resolution is permissive. That is
-a caller decision, not a backend exception.
+Actual resolution has no row in this table because it has no preview-impact policy. Global
+`--non-interactive` controls only TTY access. `--allow-interaction` on describe or verify may be
+combined with it: out-of-band preview work is allowed while prompt remains disabled.
 
 ## Backend behavior
 
@@ -242,11 +253,12 @@ impact level.
 
 ### Prompt
 
-Prompt first considers terminal availability. With no usable TTY it returns
-`PreviewBlocked(tty-unavailable)`. With a TTY and zero impact it returns
-`PreviewIndeterminate(operator-impact-limited)`. With maximum impact it requests and validates the
-value through the broker, discards it, and returns `PreviewAvailable` or a typed failure. Actual
-resolution follows the same gates but delivers the accepted value through the private batch.
+Prompt first considers TTY interaction access. Unavailable returns
+`PreviewBlocked(tty-unavailable)`; disabled returns `PreviewBlocked(tty-interaction-disabled)`. With
+available access and zero preview impact it returns `PreviewIndeterminate(operator-impact-limited)`.
+With available access and maximum preview impact it requests and validates the value through the
+broker, discards it, and returns `PreviewAvailable` or a typed failure. Actual resolution considers
+only TTY access and delivers the accepted value through the private batch when access is available.
 
 ### OnePassword
 
@@ -259,6 +271,9 @@ invoking `op`.
 A source setting can classify app authentication as no operator impact. This setting covers the app
 authentication event as a whole because the backend cannot reliably predict whether the app will use
 a cached session, biometric, device credential, or another configured method before invocation.
+
+This classification is preview-only. Actual resolution always performs the bounded `op read` for a
+candidate request, including under global `--non-interactive` and without a TTY.
 
 When invocation is permitted, preview uses the existing bounded `op read`, discards stdout inside
 the backend, and converts native outcomes to exact tags. Valid value is available. An unambiguous
@@ -273,8 +288,11 @@ syntax remains `invalid-mapping`.
 - Preview variants have no value field, generic metadata, provider message, or serialization escape
   hatch.
 - Provider stdout and stderr remain backend-local. Native exceptions do not cross the boundary.
-- Backend code receives operator impact explicitly and receives no prompt broker when actual prompt
-  authority or terminal capability is absent.
+- Backend code receives tagged preview or resolution intent explicitly. Actual resolution receives
+  no operator-impact allowance. No prompt broker exists when TTY access is unavailable or disabled.
+- A backend that declares no TTY-interaction support never receives a broker and cannot report a TTY
+  block. This keeps out-of-band implementations independent of global `--non-interactive` by
+  construction.
 - Backend factory and context entry receive intent before they run; provider and prompt work is
   confined to the selected client method.
 - Core revalidates every backend-produced diagnostic identifier before storing it in an attempt or
@@ -289,8 +307,8 @@ syntax remains `invalid-mapping`.
 
 The secret-backend contract, descriptor checks, authoring documentation, and all three in-tree
 implementations change atomically. The rewrite removes `interactive` and `would_attempt`, makes
-lookup description structured, and extends the source client with preview and impact-aware
-resolution.
+lookup description structured, adds the narrower `supports_tty_interaction` capability, and extends
+the source client with preview while making resolution TTY-aware but impact-free.
 
 There are no external secret-backend plugins, so no adapter, deprecation window, or parallel runtime
 is useful. The descriptor and all three implementations reset their exact registration sentinel from

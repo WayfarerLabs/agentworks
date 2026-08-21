@@ -2,29 +2,35 @@
 
 - Status: Draft for review
 - Date: 2026-08-18
-- Amended: 2026-08-19
+- Amended: 2026-08-21
 - Governing design: [HLA](./hla.md)
 
-## Policy derivation
+## Orthogonal policy derivation
 
-The CLI helper becomes `ordinary_operator_impact()` and returns:
+Global `--non-interactive` has one meaning throughout the CLI: **do not use the TTY for
+interactions, even if one is present**. It neither requests unattended provider behavior nor forbids
+biometric, app, browser, device, or other out-of-band operator action. It does not suppress color or
+otherwise change presentation; output stream capability and the existing presentation controls own
+that decision.
+
+The broad `InteractionPolicy` becomes `TtyInteractionPolicy`. CLI roots derive `REFUSE` only from
+global `--non-interactive`; otherwise they derive `ALLOW`. Resolution composition combines that
+policy with `sys.stdin.isatty()` into exact `TtyInteractionAccess`:
 
 ```python
-OperatorImpact.NONE if output.non_interactive() else OperatorImpact.ALLOW
+if tty_policy is TtyInteractionPolicy.REFUSE:
+    tty_access = TtyInteractionAccess.DISABLED
+elif terminal_input_is_usable():
+    tty_access = TtyInteractionAccess.AVAILABLE
+else:
+    tty_access = TtyInteractionAccess.UNAVAILABLE
 ```
 
-It does not call `output.is_interactive()` or any `isatty()` method. The global `--non-interactive`
-flag remains the explicit unattended/fail-fast request. Lack of a TTY is handled later as an
-execution fact by backends that need it.
-
-A separate root helper derives terminal availability from `sys.stdin.isatty()` without consulting
-global `--non-interactive`. The CLI threads that exact `TerminalAvailability` fact only to preview
-and resolution composition boundaries. Service callers that do not originate at the CLI provide the
-fact explicitly; no backend reads ambient TTY state for itself.
-
-Published service methods continue to require an explicit, exact policy with no default. The
-existing audit rule for constructor totality and early boundary validation moves from
-`InteractionPolicy` to `OperatorImpact`.
+Preview impact is selected separately by each preview caller: `NONE` for non-disruptive inspection
+and `ALLOW` for an explicit opt-in. Global `--non-interactive` never changes preview impact. Service
+callers provide exact TTY policy or access explicitly; no backend reads ambient TTY state for
+itself. Core supplies a broker only to a backend whose exact `supports_tty_interaction` capability
+is true.
 
 ## Preflight
 
@@ -40,7 +46,7 @@ preflight_all
 Its semantics change as follows:
 
 - `predict_resolution` has fixed preview impact `NONE`; it does not accept a certainty argument.
-- It receives terminal availability from the command execution context as a fact.
+- It receives exact TTY interaction access from the command execution context.
 - `require_predicted_refs` accepts aggregate `available` and `indeterminate`.
 - It rejects aggregate `missing` or `blocked` with the closed tag and reason, when any.
 - It rejects aggregate `failed` unless its ordered attempts contain an earlier higher-precedence
@@ -50,7 +56,7 @@ Its semantics change as follows:
   mandatory and completes before the first consuming mutation.
 
 `preflight_all` owns one lazy command-scoped preview memo. Its key is the secret name because active
-sources, validated config, fixed `NONE` impact, and terminal availability are immutable for that
+sources, validated config, fixed `NONE` impact, and TTY interaction access are immutable for that
 command. Immediately before each node's preflight, core batches only that node's as-yet unseen
 secret names, stores the resulting value-free previews, then evaluates the node's references in
 their existing order. A repeated secret reuses its stored preview and cannot cause a second provider
@@ -66,13 +72,16 @@ for a later authoritative operation, not a current-health renderer.
 
 ## Actual operation resolution
 
-The operation-scoped resolver receives the exact `OperatorImpact` chosen at the CLI or service root.
-It passes that impact into each source client. Core no longer skips a whole source because of a
-static backend `interactive` flag.
+The operation-scoped resolver receives no `OperatorImpact`. Core no longer skips a whole source
+because of a static backend `interactive` flag.
 
-- `ALLOW` permits out-of-band provider approval even with no TTY.
-- `NONE` prevents a backend from starting an action it classifies as operator impact.
-- Prompt receives a broker only when `ALLOW` and terminal availability are both true.
+- Out-of-band providers run regardless of TTY availability or global `--non-interactive`.
+- Env-var and OnePassword declare no TTY-interaction support, receive no broker, and cannot return a
+  TTY block.
+- Prompt declares TTY-interaction support and receives a broker only when TTY interaction access is
+  `AVAILABLE`.
+- Prompt returns `BackendBlocked(TTY_UNAVAILABLE)` or `BackendBlocked(TTY_INTERACTION_DISABLED)` for
+  the other two access states.
 - `BackendMissing` and `BackendBlocked` fall through to later sources.
 - `BackendFailed` hard-stops the current secret's source chain; core does not warn and continue.
 - Static non-candidates, source readiness, and disabled plugins retain their core-owned fallback
@@ -82,13 +91,9 @@ This contract does not add a generic outage-fallback mode. If one is later justi
 explicit core/source policy with separately reviewed precedence and warning semantics. A backend
 does not decide whether its own failure may be ignored.
 
-Complete resolution remains fail-before-mutation. The no-interaction doom check also remains: a
-caller that authorizes `ALLOW` first drives actual resolution at `NONE` until each secret resolves,
-fails, exhausts, or stops at its first impact block. Core then permits one single-request `ALLOW`
-turn, advances that request's fallthrough frontier at `NONE`, and repeats the viability check before
-every later `ALLOW` turn. This is authoritative actual resolution, not preview reuse, and a failure
-learned from one authorized lookup prevents operator work for every still-pending request, including
-another request at the same source.
+Complete resolution remains fail-before-mutation and becomes one source-first pass. Each ready
+source receives its unresolved candidate batch once. There is no zero-impact resolution phase,
+authority frontier, one-request interaction staging, or preview reuse.
 
 ## `agw secret describe`
 
@@ -102,10 +107,11 @@ Default behavior requests `OperatorImpact.NONE`. It may read and discard values 
 that know the read is non-disruptive, and it may return `indeterminate`. It does not equate
 read-only output with a no-I/O guarantee.
 
-`--allow-interaction` requests `OperatorImpact.ALLOW`. It is rejected with global
-`--non-interactive`, matching `secret verify`. The resulting preview contains no `indeterminate`; a
-prompt backend may request and discard a value when that is the only permitted probe. Maximum impact
-still allows blocked and failed results.
+`--allow-interaction` requests `OperatorImpact.ALLOW`. It may be combined with global
+`--non-interactive`: out-of-band work such as 1Password app approval is permitted, while prompt
+remains `blocked/tty-interaction-disabled`. The resulting preview contains no `indeterminate`; with
+TTY access available, prompt may request and discard a value. Maximum impact still allows blocked
+and failed results.
 
 The existing static `Backend mappings` section remains no-I/O and is driven by structured
 `describe_lookup`. The `Resolution preview` section renders the aggregate and ordered runtime
@@ -135,8 +141,8 @@ agw secret verify NAME... [--allow-interaction]
 
 - Default impact is `NONE`.
 - Only aggregate `available` is a success row; every other status causes exit 1.
-- `--allow-interaction` selects `ALLOW`, conflicts with global `--non-interactive`, and eliminates
-  `indeterminate`; blocked and failed remain possible.
+- `--allow-interaction` selects `ALLOW` and eliminates `indeterminate`; blocked and failed remain
+  possible. It is orthogonal to global `--non-interactive`, which disables prompt only.
 - All unique names are previewed in first-written order through bounded source batches.
 - An available row proves current backend presence under the requested impact, not suitability for
   every consumer-specific value grammar.
@@ -192,6 +198,7 @@ remediation or text. Important projections include:
 | `missing`                               | a valid lookup found no value; later sources were considered         |
 | `indeterminate/operator-impact-limited` | the backend cannot answer further under the current impact allowance |
 | `blocked/tty-unavailable`               | this source needs terminal input, which this process does not have   |
+| `blocked/tty-interaction-disabled`      | global `--non-interactive` disabled terminal interaction             |
 | `blocked/no-candidate`                  | no active source has an applicable runtime lookup                    |
 | `failed/invalid-mapping`                | the configured provider reference is invalid                         |
 | `failed/lookup-rejected`                | the provider rejected the lookup without proving ordinary absence    |
@@ -199,8 +206,8 @@ remediation or text. Important projections include:
 | `failed/deadline-exceeded`              | bounded provider work did not complete                               |
 
 Hints name only controls available on that command. `secret describe` and `secret verify` may name
-`--allow-interaction`; an ordinary command blocked by global mode names `--non-interactive` as the
-cause instead of suggesting a nonexistent local flag.
+`--allow-interaction`; a prompt blocked by global mode names `--non-interactive` as the TTY-only
+cause and never implies that out-of-band interaction was forbidden.
 
 Failure prose is core-authored from the closed reason. Provider stderr, native exception messages,
 secret references that are not already approved safe identifiers, and arbitrary backend context are
@@ -296,9 +303,9 @@ v1.
 
 - Add `--allow-interaction` to `secret describe` completion/introspection surfaces.
 - Keep `secret verify --allow-interaction` unchanged.
-- Do not add this flag to ordinary resolving commands; global `--non-interactive` is their explicit
-  impact control.
-- Keep `--allow-interaction` incompatible with global `--non-interactive` at the command boundary.
+- Do not add this flag to ordinary resolving commands; actual resolution has no impact policy.
+- Permit `--allow-interaction` with global `--non-interactive`; the former controls preview impact,
+  while the latter disables TTY interaction only.
 
 ## Permanent collateral
 
@@ -317,7 +324,9 @@ Implementation updates, in the same PR:
 - sample source config for OnePassword impact classification;
 - generated shell completions and schema snapshots;
 - any module docstrings that still claim preview is pure, a negative status always falls through, or
-  TTY grants interaction authority.
+  TTY grants interaction authority;
+- global flag help, output helpers, and CLI documentation that currently make `--non-interactive`
+  alter color or presentation.
 
 No permanent file links to this SDD.
 
@@ -326,18 +335,19 @@ No permanent file links to this SDD.
 The behavior suite crosses these axes:
 
 - caller: preflight, describe, verify, doctor, ordinary resolution;
-- impact: none, allow;
-- terminal: present, absent;
+- preview impact: none, allow;
+- TTY access: available, unavailable, disabled;
 - backend: env-var, prompt, OnePassword fake provider;
 - provider state: value, valid missing target, invalid mapping, auth failure, connectivity failure,
   timeout, malformed value, other provider failure;
-- OnePassword auth classification: known unattended, default app action, configured no-impact app
-  authentication;
+- OnePassword preview classification: known unattended, default app action, configured no-impact app
+  authentication; actual resolution ignores that classification;
 - source order: earlier indeterminate then later available or failed, ordinary missing then later
   available, blocked then later available, failed then otherwise-available fallback, all missing, no
   candidate;
 - output: human fields, describe and doctor JSON tagged structures, both legacy JSON v1
   `would_attempt` fields, exit status, exception category, doctor status/count/exit mapping,
-  sentinel leak scan.
+  sentinel leak scan, and color/presentation parity with and without global `--non-interactive` on
+  the same output stream.
 
 Tests assert structured behavior. They do not pin prose authored by Agentworks.

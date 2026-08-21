@@ -2,7 +2,7 @@
 
 - Status: Draft for review
 - Date: 2026-08-18
-- Amended: 2026-08-20
+- Amended: 2026-08-21
 - Requirements: [FRD](./frd.md)
 - Architecture: [HLA](./hla.md)
 - Detailed design: [preview contract LLD](./preview-contract-lld.md) and
@@ -33,46 +33,56 @@
       rebased onto `667793ee`; intervening changes did not alter runtime secret semantics.)
 - [x] Refresh the branch again before revision-1 handoff. (2026-08-20: rebased onto `1d921b3a`;
       intervening process and documentation changes did not alter runtime secret semantics.)
+- [x] Refresh the branch before revision-2 handoff. (2026-08-21: rebased onto `202036a6`;
+      intervening validation-process, onboarding-guide, and website changes did not alter runtime
+      secret semantics.)
 - [x] Complete FRD, prior-art research, HLA, preview-contract LLD, operator-surfaces LLD, migration
       strategy, and this tracked plan. (2026-08-18.)
 - [x] Run artifact lint, spelling, link, lockfile, Rulesync, and manual typography checks.
       (2026-08-18: all passed locally; the lockfile gate is rerun against the committed diff before
       handoff.)
 - [x] Obtain a private `agentworks-reviewer` pass and resolve material findings before public
-      handoff. (2026-08-18: JSON v1, exact resolution flow, pre-lifecycle authority, batch doom,
-      memoization, sequencing, and collateral findings resolved; final focused pass had no
-      findings.)
+      handoff. (2026-08-18: JSON v1, exact resolution flow, pre-lifecycle intent, memoization,
+      sequencing, and collateral findings resolved; final focused pass had no findings.)
 - [x] Amend the design with the operator-approved tagged result model: ordinary missing,
       impact-limited indeterminate, execution blocked, and hard-stop failed are distinct.
       (2026-08-19.)
 - [x] Rerun the private artifact gate after the tagged-result amendment and resolve material
       findings before public handoff. (2026-08-19: corrected no-candidate truthfulness,
-      maximum-impact actual-resolution validation, aggregate-only preflight, doctor status mapping,
-      and fail-closed OnePassword evidence requirements; focused re-review had no findings.)
+      preview/actual result boundaries, aggregate-only preflight, doctor status mapping, and
+      fail-closed OnePassword evidence requirements; focused re-review had no findings.)
 - [x] Commit the artifact set with the session trailer, push the feature branch, open one draft PR,
       and apply `saga:next-steps` and `review-requested`. (2026-08-19: draft PR #619.)
 - [x] Request and collect the three named artifact perspectives: saga lead contract review, Muntz
       complexity review, and integration tester testability review. (2026-08-19: all three returned
       at exact head `74b497f5`; revision requested.)
-- [ ] Apply no more than two pre-authorized artifact feedback/fix iterations, rerunning artifact
+- [x] Apply no more than two pre-authorized artifact feedback/fix iterations, rerunning artifact
       gates and recording review dispositions on the PR after each round.
 - [x] Artifact feedback/fix iteration 1: preserve both JSON v1 applicability projections, make
-      aggregation current-impact truthful, serialize complete-batch impact calls, close lifecycle
-      and identity boundaries, simplify duplicate vocabularies, strengthen README and live-test
-      gates, and carry permanent collateral plus test-estate ownership. (2026-08-20: all accepted
-      findings applied, gates passed, and focused private re-review reported no blocking or
-      important findings.)
+      aggregation current-impact truthful, close lifecycle and identity boundaries, simplify
+      duplicate vocabularies, strengthen README and live-test gates, and carry permanent collateral
+      plus test-estate ownership. (2026-08-20: all accepted findings applied, gates passed, and
+      focused private re-review reported no blocking or important findings. Its actual-resolution
+      staging was later superseded by direct operator ruling.)
+- [x] Artifact feedback/fix iteration 2: apply the direct operator ruling that global
+      `--non-interactive` disables TTY interaction only, remove impact policy and staged authority
+      turns from actual resolution, and prove preview impact is orthogonal to exact TTY access.
+      (2026-08-21: added least-authority TTY broker capability, decoupled presentation, removed
+      resolution staging, passed artifact gates, and received a clean focused private re-review.)
 - [x] Confirm the design remains within the accepted FRD and that review has not introduced an
-      unnecessary compatibility track or a secret-backend version other than `1`. (2026-08-20:
+      unnecessary compatibility track or a secret-backend version other than `1`. (2026-08-21:
       confirmed; the dated direct operator ruling remains authoritative.)
 
 ### Artifact definition of done
 
 - Every FRD requirement maps to architecture, detailed design, plan work, and an objective test or
   review condition.
-- Caller semantics contain one impact input and no certainty policy.
+- Preview caller semantics contain one impact input and no certainty policy; actual resolution
+  contains no impact input.
 - Maximum-impact no-indeterminate behavior, best effort, missing TTY, backend-local discard, derived
   hints, and the absence of free-form backend text are unambiguous across all artifacts.
+- Global `--non-interactive` means only "do not use the TTY for interactions, even if one is
+  present" and does not suppress out-of-band provider work or alter presentation.
 - Ordinary missing falls through, blocked retains exhaustion evidence, and failed hard-stops.
 - No-candidate exhaustion is blocked/no-candidate rather than a synthetic lookup miss.
 - Preflight's existing use of preview and its attempt-aware treatment of higher-precedence
@@ -99,8 +109,9 @@
 
 ## Phase 1: Contract types and validation scaffolding
 
-- [ ] Add `OperatorImpact`, exact validation, `TerminalAvailability`, lookup-description, closed
-      reason enums, tagged preview results, and aggregate attempt types.
+- [ ] Add preview-only `OperatorImpact`, exact `TtyInteractionPolicy` and `TtyInteractionAccess`,
+      exact `supports_tty_interaction`, tagged client intent, lookup-description, closed reason
+      enums, tagged preview results, and aggregate attempt types.
 - [ ] Add the redacted resolved, missing, blocked, and failed actual-resolution variants.
 - [ ] Add constructor invariants, exact-map validators, safe representations, exhaustive
       variant-to-flow rules, backend-returnable reason subsets, and maximum-impact no-indeterminate
@@ -108,8 +119,8 @@
 - [ ] Make no-candidate a dedicated aggregate-only variant and revalidate backend-produced secret,
       source, and identifier text at every core wrapper boundary, including hostile control and
       format characters.
-- [ ] Reject `BackendBlocked(OPERATOR_IMPACT_LIMITED)` from an `ALLOW` resolution turn as a
-      whole-turn backend protocol failure so an authority frontier cannot repeat.
+- [ ] Reject preview-only results and reasons from actual resolution, and reject
+      `PreviewIndeterminate` under maximum preview impact as a backend protocol failure.
 - [ ] Add focused tests for adversarial values, provider text, malformed maps, invalid variants or
       reasons, partial values, and safe representations without changing the live descriptor.
 - [ ] Replace the legacy runtime resolution category/detail/remediation enums with the same final
@@ -124,10 +135,12 @@
 
 ## Phase 2: Backend vertical slices
 
+- [ ] Set exact TTY-broker capability on every backend: prompt `True`, env-var and OnePassword
+      `False`; prove the latter two receive no broker in any intent or TTY state.
 - [ ] Refactor env-var acquisition so preview validates and discards locally while resolution uses
       the same private path, behind the current runtime contract.
-- [ ] Implement prompt terminal-first preview and resolution behavior; prove no broker call or stdin
-      read occurs without both authority and terminal capability.
+- [ ] Implement prompt TTY-first preview and resolution behavior; prove no broker call or stdin read
+      occurs unless TTY use is allowed and usable input is present.
 - [ ] Add the OnePassword app-authentication impact config and generated schema representation.
 - [ ] Infer known unattended OnePassword modes where provider facts make that safe; apply the
       conservative source setting otherwise.
@@ -146,53 +159,57 @@
       item/field markers failed/lookup-rejected, and keep unknown text failed/external. Fake output
       is never evidence.
 - [ ] Prove factory construction and context entry perform no provider or broker work before the
-      selected method acts through a client constructed with exact impact and terminal facts.
+      selected method acts through a client constructed with tagged operation intent and exact TTY
+      access.
 
 ### Phase 2 definition of done
 
 - All three in-tree backends have private acquisition and final-result seams ready for one atomic
   contract cutover, while legacy public methods still drive runtime.
-- Focused final-seam tests prove OnePassword can run from a non-TTY process when impact permits it,
-  while prompt never reads without a TTY.
+- Focused final-seam tests prove actual OnePassword resolution runs without a TTY and under global
+  `--non-interactive`, while prompt never reads without allowed, usable TTY access.
 - Preview and resolution parity tests cover every shared provider classification.
 
 ## Phase 3: Atomic contract cutover and core orchestration
 
 - [ ] Remove the no-op client `prepare` method and `external_operation_timeout`; extend
-      `create_client` with exact impact, terminal, broker, and remaining-time inputs before any
-      backend lifecycle hook runs, while `preview(requests)` and `resolve(requests)` reuse that
-      fixed client authority without duplicate policy parameters.
+      `create_client` with tagged preview-or-resolution intent, exact TTY access, broker, and
+      remaining-time inputs before any backend lifecycle hook runs. Keep policy out of
+      `preview(requests)` and `resolve(requests)` because it is fixed at construction.
 - [ ] Update the `SecretBackend` ABC, descriptor, root exports, and all implementations atomically,
       resetting the exact secret-backend contract sentinel from `2` to `1` while removing
-      `interactive` and `would_attempt`.
+      `interactive`, adding exact `supports_tty_interaction`, and removing `would_attempt`.
 - [ ] Remove backend-selected failure/remediation exceptions, return exact resolution blocks, and
       derive exception class and guidance directly from the final tag, reason, and backend identity
       in core. Preserve the 1Password pending-approval timeout hint without a backend hint channel.
 - [ ] Update registration and runtime conformance for method shapes, exact result maps, legal result
-      variants and reasons, construction/entry authority, and maximum-impact no-indeterminate
-      behavior.
+      variants and reasons, construction/entry intent, actual-resolution impact absence, and
+      maximum-preview-impact no-indeterminate behavior. Reject TTY blocks from backends that declare
+      no TTY support.
 - [ ] Update both backend-authoring READMEs with a complete rewritten example and conformance rules.
 - [ ] Make `cli/agentworks/capabilities/secret_backend/README.md` the self-contained permanent
-      contract authority for exact variants, reason ownership, core flow, impact and terminal rules,
-      lifecycle constraints, value containment, and conformance; it must not rely on this SDD.
+      contract authority for exact variants, reason ownership, core flow, preview impact, TTY broker
+      capability and access rules, lifecycle constraints, the exact TTY-only meaning of
+      `--non-interactive`, value containment, and conformance; it must not rely on this SDD.
 - [ ] Run a named manual README contract gate covering exact version-1 signatures, every variant and
-      legal reason owner, one normative core-flow section, impact/TTY matrix, lifecycle and
-      exception boundaries, exact-map and maximum-impact constraints, value containment, and a
-      complete conforming example. Prove it has no SDD links and behaviorally test the example shape
-      without asserting authored prose.
+      legal reason owner, one normative core-flow section, impact/TTY matrix, broker-capability
+      rules, lifecycle and exception boundaries, exact-map and maximum-impact constraints, value
+      containment, and a complete conforming example. Prove it has no SDD links and behaviorally
+      test the example shape without asserting authored prose.
 - [ ] Replace `_lookup_projection` and `would_attempt` use with structured static lookup
       descriptions.
 - [ ] Replace both legacy policy-free and operation-policy preview helpers with one impact-explicit,
-      terminal-explicit preview batch boundary; leave static inspection on `describe_lookup` only.
+      TTY-access-explicit preview batch boundary; leave static inspection on `describe_lookup` only.
 - [ ] Implement operation-bounded batch preview over active sources with the existing source-turn
       budget and cleanup discipline.
-- [ ] Implement current-impact tagged aggregation, ordinary-missing and execution-block fallthrough,
-      failed hard-stop, ordered earlier-indeterminate evidence, and iterative no-impact closure plus
-      a viability check before every single-request `ALLOW` complete-batch turn.
-- [ ] Add event-ledger tests for no-impact closure, single-request authority turns, intra-source and
-      post-turn failure preventing every later impact action, higher-source failure preventing lower
-      provider invocation, earlier-indeterminate/later-available or failed aggregation, and
-      adversarial maximum-impact indeterminate becoming failed/backend-protocol.
+- [ ] Implement current-impact preview aggregation with ordinary-missing and execution-block
+      fallthrough, failed hard-stop, and ordered earlier-indeterminate evidence.
+- [ ] Implement actual resolution as one bounded source-first pass with one batch per ready source,
+      ordinary-missing and TTY-block fallthrough, failed hard-stop, and no preview reuse.
+- [ ] Add event-ledger tests for source-first batching, higher-source failure preventing lower
+      provider invocation, earlier-indeterminate/later-available or failed preview aggregation,
+      adversarial maximum-impact indeterminate becoming failed/backend-protocol, and actual
+      resolution never receiving impact policy.
 - [ ] Emit aggregate blocked/no-candidate with no runtime attempts when no candidate lookup ran;
       never synthesize missing for that condition.
 - [ ] Make preflight preview impact fixed at `NONE`, accept available and indeterminate, reject
@@ -224,29 +241,38 @@
 
 ## Phase 4: Policy propagation and operation boundaries
 
-- [ ] Replace `InteractionPolicy` with exact `OperatorImpact` across production and test call sites,
-      preserving early validation and explicit forwarding.
+- [ ] Rename broad `InteractionPolicy` to exact `TtyInteractionPolicy` across production and test
+      call sites, preserving early validation and explicit forwarding.
 - [ ] Keep the 100-plus-file policy rename in one mechanical commit so review can separate it from
       the behavioral contract changes.
-- [ ] Derive ordinary CLI impact only from global `--non-interactive`, never TTY.
-- [ ] Remove every remaining static interactive-source skip and pass impact and terminal facts from
-      service roots to the cut-over source clients.
-- [ ] Construct prompt brokers only when impact and terminal capability permit; leave out-of-band
-      backends independent of the broker.
+- [ ] Define global `--non-interactive` everywhere as "do not use the TTY for interactions, even if
+      one is present" and derive only `TtyInteractionPolicy.REFUSE` from it.
+- [ ] Add the flag/physical-TTY cross product at the CLI and service seams: the flag yields
+      `DISABLED` regardless of attachment; otherwise usable input yields `AVAILABLE` and absent
+      input yields `UNAVAILABLE`.
+- [ ] Remove every remaining static interactive-source skip and pass preview impact only for
+      preview, tagged operation intent for every client, and exact TTY access from service roots.
+- [ ] Construct prompt brokers only when TTY access is available; leave out-of-band backends
+      independent of the broker and global flag through exact `supports_tty_interaction`.
+- [ ] Remove global-flag color and presentation gating. Preserve color decisions based on output
+      stream capability and existing presentation controls, with parity tests on the same stream.
 - [ ] Sweep all resolving commands and service entry points for exact policy propagation and
       fail-before-mutation ordering.
 
 ### Phase 4 definition of done
 
 - The original non-TTY OnePassword scenario succeeds without a plaintext environment workaround.
-- Global `--non-interactive` remains the truthful unattended control.
+- Global `--non-interactive` is a truthful TTY-only control and never promises fully unattended
+  execution.
+- The flag has no presentation side effect; color and formatting follow their own existing inputs.
 - Prompt cannot hang a non-TTY invocation.
-- No `InteractionPolicy`, backend `interactive`, or runtime `would_attempt` authority remains.
+- OnePassword actual resolution runs with and without global `--non-interactive`.
+- No broad `InteractionPolicy`, backend `interactive`, or runtime `would_attempt` authority remains.
 
 ## Phase 5: Operator surfaces and collateral
 
-- [ ] Add `secret describe --allow-interaction`, its global-mode conflict, help, introspection, and
-      completions.
+- [ ] Add `secret describe --allow-interaction`, help, introspection, and completions; permit it
+      with global `--non-interactive` because preview impact and TTY use are orthogonal.
 - [ ] Render default describe tagged results and closed reasons; prove maximum-impact results
       contain no indeterminate status.
 - [ ] Reimplement `secret verify` on backend preview, preserving refusal-by-default, name
@@ -267,6 +293,8 @@
       `would attempt` vocabulary, plus secret describe's static fallthrough wording.
 - [ ] Remove stale claims that preview is pure, doctor never performs a provider read, or TTY grants
       general interaction consent.
+- [ ] Update every global flag help/reference surface to state the exact TTY-only meaning and remove
+      claims that the flag itself selects plain or colorless output.
 - [ ] Trim the secret-backend and secrets test estates to the simplification sweep standard as part
       of this rewrite, deleting worthless tests rather than assigning them to a later cleanup.
 
@@ -288,18 +316,21 @@
 - [ ] Obtain a private `agentworks-reviewer` pass on the complete diff and resolve material
       findings.
 - [ ] Request fresh-eyes review after the last material implementation change.
-- [ ] Snapshot live Agentworks state before any tester mutation and invoke `agentworks-tester` with
-      the approved environment inventory, naming prefix, resource budget, and scoped charter.
+- [ ] Request the separately operated `agentworks-tester` with the approved environment inventory,
+      naming prefix, resource budget, and scoped charter; the effort lead does not duplicate its
+      integration run.
 - [ ] Exercise at minimum non-TTY OnePassword-equivalent out-of-band behavior through the real CLI
       seam, prompt with and without a PTY, default and opted-in describe/verify, global
       `--non-interactive`, preflight indeterminate, missing-versus-failed fallback, and human/JSON
-      value containment.
+      value containment. On one fixed TTY output stream, prove the global flag does not change color
+      or presentation.
 - [ ] Use isolated `HOME`, scratch manifests, and a fake-only `op` path for doctor, preflight,
       describe, verify, aggregation, and leak campaigns. Do not traverse broad operator config or
       run broad doctor against a real provider.
 - [ ] Exercise an ordinary resolving surface such as seeded `agw env show --vm ... --resolve` with
-      non-TTY stdin: default app-impact without the global flag invokes the fake provider; global
-      `--non-interactive` does not; known unattended or configured no-impact mode still invokes it.
+      non-TTY stdin: OnePassword invokes the fake provider both without and with global
+      `--non-interactive`; prompt performs no broker or stdin access in either non-TTY or disabled
+      TTY states.
 - [ ] Limit any real OnePassword exercise to one dedicated authorized reference, record provider
       audit activity as an expected external effect, and never expose a real value. Treat
       desktop-app approval for AC1 separately from error-token evidence; if unavailable, record it
@@ -316,9 +347,9 @@
 
 - Required gates pass at the final commit.
 - Independent reviewers have no unresolved critical or high-severity finding.
-- Live tests provide evidence for the original failure path, TTY safety, explicit unattended mode,
-  maximum-impact no-indeterminate behavior, hard-stop failure, and value containment, or the
-  operator explicitly accepts a documented gap.
+- Live tests provide evidence for the original failure path, TTY safety, the exact TTY-only global
+  mode, maximum-preview-impact no-indeterminate behavior, hard-stop failure, and value containment,
+  or the operator explicitly accepts a documented gap.
 - The draft PR body and comments contain no credentials, provider output, or secret values.
 
 ## Phase 7: Closeout and ready-for-merge handoff
@@ -339,8 +370,9 @@
 - Every acceptance criterion in the FRD is satisfied.
 - The rewritten contract is the sole runtime and documented secret-backend contract. Its descriptor
   and implementations declare version `1`, with no compatibility branch.
-- Ordinary non-TTY commands can use permitted out-of-band secret providers, prompt remains TTY-safe,
-  and global `--non-interactive` remains explicit and effective.
+- Ordinary commands use configured out-of-band secret providers regardless of TTY state or global
+  `--non-interactive`; prompt remains TTY-safe, and the global flag disables only terminal
+  interaction without changing presentation.
 - Preview is best-effort within impact, tagged as available/missing/indeterminate/blocked/failed,
   contains no indeterminate result at maximum impact, and is value-free across the backend boundary.
 - The PR is ready to merge, fully reviewed, fully gated, live-tested or given an explicit operator

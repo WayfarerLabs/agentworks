@@ -2,7 +2,7 @@
 
 - Status: Draft for review
 - Date: 2026-08-18
-- Amended: 2026-08-19
+- Amended: 2026-08-21
 - Parent saga: `docs/sdd/2026-08-04-next-steps/`
 - Seed problem: `task-2026-08-18-non-tty-secret-resolution.md`
 - Requirements owner: operator
@@ -31,15 +31,17 @@ on evidence that a configured source is broken.
 - **Operator impact**: an action the operator would have to take, such as answering a prompt,
   approving a request, or completing biometric authentication, as classified by the backend and its
   source config.
-- **Execution fact**: an objective capability of the current process, such as whether usable
-  terminal input exists. An execution fact does not grant consent.
+- **TTY interaction access**: whether core may expose terminal input to a backend. It is available
+  only when usable terminal input exists and global `--non-interactive` is absent. The flag means
+  exactly "do not use the TTY for interactions, even if one is present." It says nothing about
+  biometric approval, an app dialog, or any other out-of-band operator action.
 - **Preview**: a value-free attempt to determine a source's resolution disposition for a named
   secret. A backend may acquire a value internally and discard it before returning.
 - **Missing**: the backend performed a valid lookup and established ordinary absence. It is safe to
   try the next source.
 - **Indeterminate**: the backend exhausted every permitted route, but broader operator-impact
   authority could change the answer. It is not failure or absence.
-- **Blocked**: an execution, authority, readiness, or applicability limitation prevents resolution
+- **Blocked**: an execution, TTY-access, readiness, or applicability limitation prevents the lookup
   in the current operation. A source-level block may fall through; the limiting reason is retained.
   A chain with no candidate is the core-owned aggregate `blocked/no-candidate`, never an attempt
   result or ordinary missing.
@@ -53,25 +55,31 @@ on evidence that a configured source is broken.
 
 - R1. Backend preview returns one closed tagged result: `available`, `missing`, `indeterminate`,
   `blocked`, or `failed`. The result carries no resolved value.
-- R2. The only caller-controlled policy dimension passed to preview is the allowed operator impact.
-  There is no requested-certainty flag, TTY policy, or equivalent second input.
+- R2. The only policy that controls how much operator impact preview may cause is the allowed
+  operator impact. There is no requested-certainty flag. TTY interaction access is orthogonal: it
+  controls only terminal use and never lowers permission for out-of-band actions.
 - R3. A backend always goes as far as it safely can within the allowed operator impact. It returns
   `indeterminate` only after exhausting every permitted route and only when additional authority
   could change the outcome.
 - R4. The maximum operator-impact allowance guarantees a definitive disposition: a conforming
   backend never returns `indeterminate` at that level. It does not turn provider failure, timeout,
   missing terminal input, or invalid configuration into an existence judgment.
-- R5. Usable terminal input is an execution fact. Its absence never lowers operator consent, never
-  prevents an out-of-band backend from running by itself, and prevents an stdin-reading backend from
-  attempting a read or hanging.
-- R6. Missing terminal input is `blocked/tty-unavailable`, distinct from ordinary `missing`,
-  `indeterminate`, and `failed`. It is an expected execution limitation, not a provider exception.
+- R5. TTY interaction access has three exact states: available, physically unavailable, or disabled
+  by global `--non-interactive`. Neither unavailable nor disabled lowers operator-impact permission,
+  prevents an out-of-band backend from running, or authorizes a backend to read stdin. A backend
+  receives a prompt broker only when it declares that it supports TTY interaction, access is
+  available, and the selected operation permits prompting.
+- R6. Missing terminal input is `blocked/tty-unavailable`; explicit terminal refusal is
+  `blocked/tty-interaction-disabled`. Both are distinct from ordinary `missing`, `indeterminate`,
+  and `failed`, and neither is a provider exception.
 - R7. A backend may fetch a secret value to establish presence, but the value is discarded inside
   the backend boundary. Preview never returns a value to the resolution core, CLI, renderer,
   machine-output projection, exception, or log.
 - R8. Backends receive intent and decide how to honor it using provider knowledge. Source config may
   classify backend-specific actions for impact purposes, including an operator choice that treats
-  1Password app authentication as non-disruptive.
+  1Password app authentication as non-disruptive. The exact static `supports_tty_interaction`
+  capability grants only eligibility to receive a broker; it never predicts whether interaction will
+  occur and never gates non-TTY provider work.
 - R9. Backend results contain no remediation field, free-form failure text, provider message,
   arbitrary metadata, or caller-flow instruction. Core derives command-specific hints from the
   closed result tag and reason.
@@ -90,9 +98,12 @@ on evidence that a configured source is broken.
     `indeterminate` result;
   - actual resolution remains authoritative and delivers a value only through its existing scoped
     resolution boundary.
-- R12. Ordinary resolving commands allow operator impact unless the operator selected global
-  `--non-interactive`. This choice is independent of whether stdin is a TTY. `secret verify` retains
-  its refusal-shaped default and explicit `--allow-interaction` opt-in.
+- R12. Actual resolution has no operator-impact allowance. It may perform provider work that causes
+  out-of-band operator action, including biometric or app approval. Global `--non-interactive` means
+  exactly "do not use the TTY for interactions, even if one is present"; it disables prompt input
+  and does not alter presentation, color, or out-of-band behavior. Preview's `--allow-interaction`
+  opt-in is orthogonal and may be combined with global `--non-interactive` to allow out-of-band work
+  while keeping TTY interaction disabled.
 - R13. Preview respects active-source order, source readiness, mapping applicability, hard-failure
   versus fallthrough semantics, and first-source-wins behavior. The aggregate reports the
   current-impact disposition: a later success is `available`, and a later hard failure is `failed`.
@@ -106,14 +117,15 @@ on evidence that a configured source is broken.
 - R15. The secret-backend contract and every in-tree implementation are rewritten atomically. There
   is no compatibility adapter, deprecation track, or parallel old/new runtime. The descriptor and
   every implementation declare `contract_version = 1`; this pre-external-plugin rewrite establishes
-  that value as the sole supported secret-backend contract version.
+  that value as the sole supported secret-backend contract version. The broad `interactive` flag is
+  gone; `supports_tty_interaction` is the only static TTY-broker capability.
 - R16. Human and machine-facing diagnostics distinguish `indeterminate`, missing TTY, provider or
   mapping failure, and ordinary absence without exposing provider text or secret data.
 - R17. Permanent backend-authoring, operator, CLI, JSON, completion, sample-config, and guide
   collateral changes ship with the code that makes them true. The secret-backend README becomes the
   self-contained permanent contract authority for result variants, reason ownership, core flow,
-  impact and terminal rules, lifecycle constraints, value containment, conformance, and a complete
-  implementation example; it does not depend on this SDD.
+  preview impact, TTY broker capability and access rules, lifecycle constraints, value containment,
+  conformance, and a complete implementation example; it does not depend on this SDD.
 - R18. The existing JSON v1 shapes remain compatible. Both `secret describe`'s
   `source_mappings[].would_attempt` and `secret list`'s `sources[].would_attempt` remain additive
   compatibility projections derived from structured lookup disposition. Secret checks in doctor may
@@ -121,12 +133,14 @@ on evidence that a configured source is broken.
 
 ## Acceptance criteria
 
-- AC1. With a ready 1Password source and no TTY, an ordinary resolving command can invoke `op read`
-  and complete after an out-of-band app approval when global `--non-interactive` is not set.
+- AC1. With a ready 1Password source and no TTY, an ordinary resolving command invokes `op read` and
+  can complete after an out-of-band app approval whether or not global `--non-interactive` is set.
 - AC2. With no TTY, the prompt backend never reads stdin. Preview reports `blocked/tty-unavailable`,
   and actual resolution falls through with the same truthful cause.
-- AC3. Global `--non-interactive` prevents any action that the selected backend and source config
-  classify as operator impact, while still allowing work known not to require an operator.
+- AC3. With a usable TTY and global `--non-interactive`, prompt performs no broker or stdin access
+  and reports `blocked/tty-interaction-disabled`; env-var and OnePassword resolution proceed
+  normally. A fake OnePassword path that records a biometric-equivalent approval is invoked in this
+  mode. Human output retains the same color decision it would make without the flag.
 - AC4. A non-disruptive preview reports `indeterminate/operator-impact-limited` only after the
   backend has exhausted every permitted way to answer.
 - AC5. A maximum-impact preview returns no `indeterminate` rows. It returns `available` or `missing`
@@ -149,15 +163,15 @@ on evidence that a configured source is broken.
 - AC10. Sentinel secret values do not appear in preview objects, serialized output, human output,
   exceptions, logs, or representations, including when a backend fetched and discarded the value.
 - AC11. Backend conformance rejects malformed tagged results, invalid result maps, provider-authored
-  text, legacy result shapes, preview `indeterminate` at maximum impact, and actual-resolution
-  `blocked/operator-impact-limited` at maximum impact before those results reach an operator
-  surface.
+  text, legacy result shapes, preview `indeterminate` at maximum impact, and preview-only reasons in
+  actual-resolution results before those results reach an operator surface. It also rejects a TTY
+  block from a backend that declares no TTY-interaction support.
 - AC12. Existing env-var, prompt, and OnePassword source precedence remains intact; ordinary absence
   and execution blocks retain fallback, while provider and mapping failures retain or gain explicit
   hard-stop behavior.
-- AC13. In a complete resolution batch, core regains control and rechecks viability before every
-  individual impact-bearing lookup. A failure learned from one authorized lookup prevents any later
-  operator-impacting lookup for the doomed batch.
+- AC13. Actual resolution performs one authoritative source-first pass without preview staging or an
+  operator-impact frontier. It completes before the consuming operation mutates external state, and
+  it never reuses a preview result or discarded preview value.
 - AC14. Core validates every backend-produced diagnostic identifier before retaining or rendering
   it. Control, format, line-separator, and paragraph-separator characters cannot forge an output
   row.
@@ -172,8 +186,9 @@ on evidence that a configured source is broken.
   halt flag, or backend-selected fallback policy.
 - Adding an outage fallback mode. A future operator-configured fallback policy would be a separate
   core/source design, not an implicit backend decision.
-- Making every provider operation side-effect-free. The guarantee is bounded operator impact and
-  value containment, not zero network traffic or zero provider audit events.
+- Making every provider operation side-effect-free. Preview is bounded by its operator-impact
+  allowance; actual resolution is not. Both retain value containment and bounded provider work, not
+  zero network traffic or zero provider audit events.
 - Reworking secret-source declaration, source precedence, or credential-minting boundaries.
 
 ## Settled operator rulings
@@ -192,6 +207,10 @@ on evidence that a configured source is broken.
   missing.
 - Backends report semantic facts; they do not select halt behavior, remediation, or free-form prose.
 - Missing TTY is distinct from ordinary absence and provider failure.
+- Global `--non-interactive` means exactly "do not use the TTY for interactions, even if one is
+  present." It does not prohibit a biometric unlock, app approval, or any other out-of-band operator
+  action, and it does not change output presentation. Actual resolution has no operator-impact
+  policy; impact classification exists only for preview.
 - There are no external secret-backend plugins. Rewrite the contract and all implementations in one
   atomic change and reset the secret-backend descriptor and implementations from the current
   internal sentinel `2` to `1`. This is authenticated operator direction from 2026-08-19: because

@@ -1,8 +1,8 @@
-# LLD: Secret preview and impact contracts
+# LLD: Secret preview and TTY contracts
 
 - Status: Draft for review
 - Date: 2026-08-18
-- Amended: 2026-08-19
+- Amended: 2026-08-21
 - Governing design: [HLA](./hla.md)
 
 ## Contract goals
@@ -21,9 +21,10 @@ class OperatorImpact(StrEnum):
     ALLOW = "allow"
 
 
-class TerminalAvailability(StrEnum):
+class TtyInteractionAccess(StrEnum):
     AVAILABLE = "available"
     UNAVAILABLE = "unavailable"
+    DISABLED = "disabled"
 
 
 class IndeterminateReason(StrEnum):
@@ -31,13 +32,12 @@ class IndeterminateReason(StrEnum):
 
 
 class BlockReason(StrEnum):
-    OPERATOR_IMPACT_LIMITED = "operator-impact-limited"
     TTY_UNAVAILABLE = "tty-unavailable"
+    TTY_INTERACTION_DISABLED = "tty-interaction-disabled"
     SOURCE_NOT_READY = "source-not-ready"
     BACKEND_PLUGIN_DISABLED = "backend-plugin-disabled"
     NO_ACTIVE_SOURCE = "no-active-source"
     NO_ATTEMPTABLE_SOURCE = "no-attemptable-source"
-    BATCH_DOOMED_BEFORE_INTERACTION = "batch-doomed-before-interaction"
 
 
 class FailureReason(StrEnum):
@@ -52,30 +52,31 @@ class FailureReason(StrEnum):
     UNEXPECTED = "unexpected"
 ```
 
-`OperatorImpact` is the sole preview policy. `TerminalAvailability` is an observed process fact and
-must be exact-validated before dispatch. Neither type has a truthiness shortcut or string coercion.
+`OperatorImpact` is the sole preview-impact policy. `TtyInteractionAccess` says only whether TTY
+interaction is usable, physically unavailable, or disabled by global `--non-interactive`. That flag
+means "do not use the TTY for interactions, even if one is present"; it does not constrain biometric
+or app approval. Both types are exact-validated before dispatch and have no truthiness shortcut or
+string coercion.
 
 The reason enums are core-owned and closed. Backend code selects a permitted member but cannot
 extend the set. `source-not-ready`, `backend-plugin-disabled`, `no-active-source`,
-`no-attemptable-source`, `batch-doomed-before-interaction`, `backend-protocol`, and `unexpected` are
-core-constructed only. No-candidate is a separate aggregate preview variant, not a block reason a
-backend or source attempt can construct. The two occurrences of `operator-impact-limited` are
-deliberately typed differently: preview uncertainty says broader authority could answer, while
-actual-resolution blockage says the current operation lacks that authority.
+`no-attemptable-source`, `backend-protocol`, and `unexpected` are core-constructed only.
+No-candidate is a separate aggregate preview variant, not a block reason a backend or source attempt
+can construct. `operator-impact-limited` exists only as preview uncertainty; actual resolution has
+no operator-impact allowance or corresponding reason.
 
 Blocked-reason placement is exact:
 
-| Producer and result position                       | Legal blocked reasons                                                |
-| -------------------------------------------------- | -------------------------------------------------------------------- |
-| backend `PreviewBlocked`                           | `tty-unavailable`                                                    |
-| core-owned preview source attempt                  | `source-not-ready`, `backend-plugin-disabled`                        |
-| backend `BackendBlocked`                           | `operator-impact-limited`, `tty-unavailable`                         |
-| core-owned final actual-resolution outcome         | any `BlockReason`, subject to the exhaustion and staging rules below |
-| aggregate preview with no candidate lookup attempt | structural `AggregateNoCandidate`; never a `BlockReason`             |
+| Producer and result position                       | Legal blocked reasons                                    |
+| -------------------------------------------------- | -------------------------------------------------------- |
+| backend `PreviewBlocked`                           | TTY reasons only when `supports_tty_interaction` is true |
+| core-owned preview source attempt                  | `source-not-ready`, `backend-plugin-disabled`            |
+| backend `BackendBlocked`                           | TTY reasons only when `supports_tty_interaction` is true |
+| core-owned final actual-resolution outcome         | any `BlockReason`, subject to the exhaustion rules below |
+| aggregate preview with no candidate lookup attempt | structural `AggregateNoCandidate`; never a `BlockReason` |
 
-`no-active-source`, `no-attemptable-source`, and `batch-doomed-before-interaction` are legal only on
-core-owned final actual-resolution outcomes. They are rejected in every backend map and every
-preview source attempt.
+`no-active-source` and `no-attemptable-source` are legal only on core-owned final actual-resolution
+outcomes. They are rejected in every backend map and every preview source attempt.
 
 There is no common catch-all detail enum. The tagged result determines which reason type, if any, is
 legal.
@@ -129,7 +130,7 @@ Backend clients may return:
 | `PreviewAvailable`     | none                                                                                                |
 | `PreviewMissing`       | none                                                                                                |
 | `PreviewIndeterminate` | `operator-impact-limited`                                                                           |
-| `PreviewBlocked`       | `tty-unavailable`                                                                                   |
+| `PreviewBlocked`       | TTY reasons, only from a backend that declares TTY-interaction support                              |
 | `PreviewFailed`        | invalid mapping, lookup rejected, authentication, connectivity, deadline, external, malformed value |
 
 Core may construct blocked results for not-ready or disabled candidate sources,
@@ -185,32 +186,68 @@ Mapping structure that can be rejected from the declaration fails configuration 
 client creation. A provider-specific mapping that passes local validation but is ambiguously
 rejected later becomes `PreviewFailed(LOOKUP_REJECTED)`.
 
-## Client creation and source-client methods
+## TTY broker capability
 
-Core communicates authority before any backend-controlled lifecycle hook by changing the backend
-factory shape to:
+Each backend class declares exact `supports_tty_interaction: bool`. This is a least-authority
+capability, not a prediction about whether an operator action will occur. It says only whether core
+may give the client an `InteractionBroker`:
 
 ```python
+class SecretBackend(ABC):
+    contract_version: ClassVar[int] = 1
+    supports_tty_interaction: ClassVar[bool]
+```
+
+- env-var and OnePassword declare `False`;
+- prompt declares `True`;
+- registration rejects a missing or non-exact boolean;
+- a backend declaring `False` receives no broker and returning either TTY block reason is a protocol
+  failure.
+
+A backend declaring `True` may still complete without TTY, use an out-of-band alternative, or return
+another exact result. Missing or disabled TTY does not cause a core-created backend result; the
+backend must exhaust its own valid routes before returning the matching TTY block.
+
+## Client creation and source-client methods
+
+Core communicates the selected operation and TTY access before any backend-controlled lifecycle
+hook. The intent is a small tagged sum rather than an optional or overloaded impact value:
+
+```python
+@dataclass(frozen=True, slots=True)
+class PreviewIntent:
+    impact: OperatorImpact
+
+
+@dataclass(frozen=True, slots=True)
+class ResolutionIntent:
+    pass
+
+
+type SecretClientIntent = PreviewIntent | ResolutionIntent
+
+
 @classmethod
 def create_client(
     cls,
     *,
     source_name: str,
     config: AgwModel,
-    impact: OperatorImpact,
-    terminal: TerminalAvailability,
+    intent: SecretClientIntent,
+    tty_access: TtyInteractionAccess,
     interaction_broker: InteractionBroker | None,
     remaining_time: RemainingTime,
 ) -> AbstractContextManager[SecretSourceClient]: ...
 ```
 
-`impact` and `terminal` are exact-validated before factory invocation. The broker is present only
-for a prompt preview or resolution with `ALLOW` and an available terminal. Factory construction
-remains resource-free, and context entry may acquire operation-local resources but must not invoke a
-provider or prompt; provider work belongs to the selected client method. Passing intent before both
-hooks closes the authority gap even for a library whose nominally local setup has an unexpected side
-effect. In-tree and adversarial-fixture tests prove that disallowed calls produce no provider or
-broker observation during factory construction, context entry, or the selected method.
+The intent and TTY access are exact-validated before factory invocation. Actual resolution carries
+no `OperatorImpact`. The broker is present exactly when `supports_tty_interaction` is true, TTY
+access is `AVAILABLE`, and the operation may use it: every actual resolution, or a preview at
+`ALLOW`. Factory construction remains resource-free, and context entry may acquire operation-local
+resources but must not invoke a provider or prompt; provider work belongs to the selected client
+method. Passing intent before both hooks closes the pre-method gap. In-tree and adversarial-fixture
+tests prove that forbidden TTY or preview-impact calls produce no provider or broker observation
+during construction, context entry, or the selected method.
 
 The old `prepare` and `external_operation_timeout` hooks are removed. All three `prepare`
 implementations are no-ops. The timeout hook is evaluated before `create_client` in the shipped
@@ -234,16 +271,16 @@ class SecretSourceClient(Protocol):
     ) -> Mapping[str, BackendResolution]: ...
 ```
 
-Impact, terminal capability, broker, and remaining-time view are fixed for the lifetime of this
-fresh client and are not repeated on either method. Core never reuses a client across authority
-levels. This makes disagreement between constructor policy and per-call policy impossible.
+Intent, TTY access, broker, and remaining-time view are fixed for the lifetime of this fresh client
+and are not repeated on either method. Core never reuses a client across intents or preview-impact
+levels. This makes disagreement between constructor intent and per-call behavior impossible.
 
 Each method returns exactly one entry for every request it owns. Core validates the whole map before
 rendering, aggregating, or copying any resolved value. Missing keys, extra keys, wrong types,
-backend use of core-only reasons, `PreviewIndeterminate` under `OperatorImpact.ALLOW`, or
-`BackendBlocked(OPERATOR_IMPACT_LIMITED)` under `OperatorImpact.ALLOW` are backend protocol
-failures. Validation uses the exact impact passed to that source turn. Expected provider conditions
-use closed result variants, not exceptions. The exact exception boundary is defined below.
+backend use of core-only reasons, `PreviewIndeterminate` under `OperatorImpact.ALLOW`, a preview map
+from a resolution client, a resolution map from a preview client, or any preview-only reason in an
+actual-resolution result is a backend protocol failure. Expected provider conditions use closed
+result variants, not exceptions. The exact exception boundary is defined below.
 
 ## Actual-resolution result sum
 
@@ -280,30 +317,26 @@ type BackendResolution = BackendResolved | BackendMissing | BackendBlocked | Bac
 
 `BackendResolved` is the one value-bearing boundary and is legal only on actual resolution. Its
 constructor enforces the minimum framework value contract and all representations are redacted.
-Backend-returned `BackendBlocked` permits only `operator-impact-limited` and `tty-unavailable`.
-Backend-returned `BackendFailed` permits the same backend failure reasons as preview. Core-only
+Backend-returned `BackendBlocked` permits only `tty-unavailable` and `tty-interaction-disabled`, and
+only from a backend that declares `supports_tty_interaction = True`. Backend-returned
+`BackendFailed` permits the same backend failure reasons as preview. Core-only and preview-only
 reasons are rejected.
 
-Actual resolution has no indeterminate variant. At `OperatorImpact.NONE`, when a necessary action
-exceeds the operation's impact, `BackendBlocked(OPERATOR_IMPACT_LIMITED)` definitively describes
-that operation and falls through or becomes a complete-batch pending frontier. At
-`OperatorImpact.ALLOW`, the same result is a backend protocol failure because no broader impact
-level exists; core converts the entire source turn to failed protocol results and does not repeat
-the frontier. For resolution, `terminal` remains an execution fact. The optional interaction broker
-is an authority-bearing capability supplied only when impact and terminal permit it. A backend must
-not infer permission from terminal availability.
+Actual resolution has no indeterminate variant and no operator-impact input. It performs configured
+provider actions, including out-of-band biometric or app approval, in every TTY state. The optional
+interaction broker is present only when the backend declares TTY support and `tty_access` is
+`AVAILABLE`; a backend must not read ambient stdin or infer TTY permission from any other fact.
 
 After source traversal, core projects final actual-resolution blockage without inventing legacy
 detail or remediation fields:
 
-| Final condition                                                                                     | Final outcome                                       |
-| --------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| no active source exists                                                                             | `blocked/no-active-source`                          |
-| active sources exist but traversal retains no impact, TTY, missing, not-ready, or disabled evidence | `blocked/no-attemptable-source`                     |
-| complete-batch viability fails before a pending authority turn                                      | `blocked/batch-doomed-before-interaction`           |
-| attempted chain exhausts with an impact or TTY block                                                | `blocked/<first retained block reason by priority>` |
-| attempted chain has no impact or TTY block and includes an ordinary miss                            | `missing`                                           |
-| attempted chain has no impact block, TTY block, or ordinary miss but has a not-ready/disabled block | `blocked/<first retained block reason by priority>` |
+| Final condition                                                                             | Final outcome                                       |
+| ------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| no active source exists                                                                     | `blocked/no-active-source`                          |
+| active sources exist but traversal retains no TTY, missing, not-ready, or disabled evidence | `blocked/no-attemptable-source`                     |
+| attempted chain exhausts with a TTY block                                                   | `blocked/<first retained TTY block>`                |
+| attempted chain has no TTY block and includes an ordinary miss                              | `missing`                                           |
+| attempted chain has no TTY block or ordinary miss but has a not-ready/disabled block        | `blocked/<first retained block reason by priority>` |
 
 Within each retained class, "first" means configured source order. Every hard failure is
 `failed/<failure reason>`. The consuming core maps these final tags to the established
@@ -332,10 +365,10 @@ At maximum impact, step 3 is unreachable because there is no higher operator-imp
 backend must still return `PreviewBlocked` when an execution capability is absent and
 `PreviewFailed` when permitted work fails.
 
-Actual resolution follows the same acquisition and classification seam. At step 3 under
-`OperatorImpact.NONE` it returns `BackendBlocked(OPERATOR_IMPACT_LIMITED)` instead of an
-indeterminate result. Step 3 is unreachable at `ALLOW`; a returned impact block is a protocol
-failure.
+Actual resolution shares the acquisition and provider-classification seam but skips steps 2 and 3:
+there is no impact allowance to consult. It performs the bounded action and returns resolved,
+missing, or failed. A backend returns a TTY block only when its acquisition requires terminal input
+and the supplied TTY access is unavailable or disabled.
 
 ## OnePassword impact classification
 
@@ -358,8 +391,9 @@ operator impact without an override. When app authentication may occur:
 - `none` permits the bounded read at preview impact `NONE`;
 - preview impact `ALLOW` permits the bounded read under either setting.
 
-Actual resolution applies the same classification. Under insufficient impact it returns
-`BackendBlocked(OPERATOR_IMPACT_LIMITED)` without invoking `op`.
+Actual resolution ignores this preview-only setting and invokes the bounded `op read` for every
+candidate request. Global `--non-interactive`, missing TTY, biometric approval, and app approval do
+not change that rule.
 
 The setting intentionally does not say `biometric`. 1Password may choose cached access, a biometric,
 a device credential, or another app-configured method after invocation; Agentworks cannot reliably
@@ -397,15 +431,16 @@ provable through env-var and controlled contract fixtures.
 
 ## Prompt behavior
 
-| Terminal    | Impact        | Preview behavior                                                   |
-| ----------- | ------------- | ------------------------------------------------------------------ |
-| unavailable | none or allow | `PreviewBlocked(TTY_UNAVAILABLE)`; never call broker               |
-| available   | none          | `PreviewIndeterminate(OPERATOR_IMPACT_LIMITED)`; never call broker |
-| available   | allow         | request, validate, discard; return available or failed             |
+| TTY access  | Preview impact | Preview behavior                                                   |
+| ----------- | -------------- | ------------------------------------------------------------------ |
+| unavailable | none or allow  | `PreviewBlocked(TTY_UNAVAILABLE)`; never call broker               |
+| disabled    | none or allow  | `PreviewBlocked(TTY_INTERACTION_DISABLED)`; never call broker      |
+| available   | none           | `PreviewIndeterminate(OPERATOR_IMPACT_LIMITED)`; never call broker |
+| available   | allow          | request, validate, discard; return available or failed             |
 
-Actual resolution uses the same ordering. At `ALLOW`, an absent broker is a core protocol failure if
-terminal was declared available. At `NONE`, no broker is exposed. Prompt cancellation retains the
-existing protected-abort behavior rather than becoming missing or failed.
+Actual prompt resolution uses only TTY access: unavailable and disabled return the matching
+`BackendBlocked`, while available requires a broker and requests the value. Prompt cancellation
+retains the existing protected-abort behavior rather than becoming missing or failed.
 
 ## Environment behavior
 
@@ -421,65 +456,39 @@ non-candidates contribute only to the separate mapping projection. Core construc
 not-ready sources, disabled backend plugins, boundary expiry, backend protocol failure, and
 unexpected exceptions; a client constructs the remaining attempts.
 
-| Result or condition          | Preview flow                                                         | Actual-resolution flow                                   |
-| ---------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------- |
-| available / resolved         | stop available; retain every earlier attempt                         | copy value and stop                                      |
-| static not applicable        | omit attempt; continue                                               | do not open client; continue                             |
-| source not ready             | core blocked attempt; continue                                       | core block; continue                                     |
-| backend plugin disabled      | core blocked attempt; continue                                       | core block; continue                                     |
-| no active source             | aggregate blocked/no-candidate; no source attempt                    | blocked/no-active-source                                 |
-| no attemptable source        | aggregate blocked/no-candidate; no source attempt                    | blocked/no-attemptable-source                            |
-| missing                      | continue silently                                                    | continue silently                                        |
-| indeterminate / impact block | continue; retain precedence evidence                                 | continue, or hold frontier during complete-batch staging |
-| blocked / TTY unavailable    | continue; retain exhaustion evidence                                 | continue without broker or stdin access                  |
-| failed                       | stop traversal                                                       | stop traversal                                           |
-| backend protocol failure     | core failed attempt; stop; discard all partial returned values       | core failure; stop; discard all partial returned values  |
-| unexpected exception         | core failed attempt; stop; discard exception text and partial values | core failure; stop; discard text and partial values      |
+| Result or condition                   | Preview flow                                                         | Actual-resolution flow                                  |
+| ------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------- |
+| available / resolved                  | stop available; retain every earlier attempt                         | copy value and stop                                     |
+| static not applicable                 | omit attempt; continue                                               | do not open client; continue                            |
+| source not ready                      | core blocked attempt; continue                                       | core block; continue                                    |
+| backend plugin disabled               | core blocked attempt; continue                                       | core block; continue                                    |
+| no active source                      | aggregate blocked/no-candidate; no source attempt                    | blocked/no-active-source                                |
+| no attemptable source                 | aggregate blocked/no-candidate; no source attempt                    | blocked/no-attemptable-source                           |
+| missing                               | continue silently                                                    | continue silently                                       |
+| indeterminate                         | continue; retain precedence evidence                                 | impossible                                              |
+| blocked / TTY unavailable or disabled | continue; retain exhaustion evidence                                 | continue without broker or stdin access                 |
+| failed                                | stop traversal                                                       | stop traversal                                          |
+| backend protocol failure              | core failed attempt; stop; discard all partial returned values       | core failure; stop; discard all partial returned values |
+| unexpected exception                  | core failed attempt; stop; discard exception text and partial values | core failure; stop; discard text and partial values     |
 
 A hard stop ends later-source traversal for that request. A later available or failed attempt is the
 current-impact aggregate even when an earlier attempt was indeterminate. The earlier attempt remains
 ordered evidence that a higher-impact authoritative pass could avoid reaching that later source; it
 never hides the success or failure from current-impact diagnostics.
 
-Actual-resolution exhaustion retains this evidence priority: first operator-impact block, then first
-TTY block, then first ordinary miss, then first not-ready or disabled source, then the exact
-no-active-source or no-attemptable-source core outcome. A later resolved value or hard failure takes
-precedence over fallthrough evidence.
+Actual-resolution exhaustion retains this evidence priority: first TTY block, then first ordinary
+miss, then first not-ready or disabled source, then the exact no-active-source or
+no-attemptable-source core outcome. A later resolved value or hard failure takes precedence over
+fallthrough evidence.
 
-## Complete-batch authority staging
+## Actual-resolution pass
 
-Complete actual resolution preserves the existing rule that a known failure in one required secret
-prevents operator-impacting work for another secret that cannot make the batch complete. Static
-`interactive` cannot implement that rule after this rewrite, and non-authoritative preview is not
-reused. A caller that authorizes `ALLOW` therefore uses iterative actual-resolution stages:
-
-1. **No-impact closure:** core creates clients with `OperatorImpact.NONE`, no prompt broker, and the
-   real terminal fact. Each required secret advances from its current frontier until it resolves
-   without classified impact, returns `BackendFailed`, exhausts, or reaches its first
-   `BackendBlocked(OPERATOR_IMPACT_LIMITED)`. That impact block becomes a pending frontier; the pass
-   does not inspect lower-precedence sources for that secret.
-2. **Viability check:** if any required secret failed or exhausted, no `ALLOW` client is created.
-   Pending secrets receive the existing core-only `batch-doomed-before-interaction` outcome.
-3. **One authority turn:** otherwise core selects the earliest pending request by required-secret
-   order and then configured-source order, creates one fresh `ALLOW` client, and sends exactly that
-   request. A broker is supplied only where terminal capability permits. Resolved and failed results
-   become final; missing and execution-blocked results advance that request beyond that source.
-4. Core returns to no-impact closure for every advanced unresolved frontier, repeats the viability
-   check, and permits the next `ALLOW` source turn only while the batch is still completable. The
-   loop ends when all required secrets resolve or a known failure dooms the remainder.
-
-No-impact closure calls `resolve`, not `preview`; a value resolved under `NONE` is retained only in
-the private resolution batch and is authoritative. A pending source has performed no
-operator-impacting provider action, so retrying it with `ALLOW` does not duplicate such work.
-Rechecking after every single-request authority turn preserves the before-every-interaction doom
-guarantee even when one lookup interacts and then fails; an opaque multi-request call could not stop
-before its second interaction while also returning an exact result map. This staging is needed for
-real configurations: separate required secrets may stop at one OnePassword source, and one chain may
-contain both OnePassword and prompt impact frontiers. A fixed two-pass algorithm cannot preserve
-source precedence across them. Caller impact `NONE` uses one ordinary pass where impact blocks fall
-through. Partial resolution has no complete-batch guarantee and likewise uses one pass at the
-caller's exact impact. Per-source budgets, cleanup, source-first no-impact batching, value
-containment, and fail-before-mutation apply throughout the loop.
+Actual resolution is one source-first pass. Core opens each ready source once with
+`ResolutionIntent`, sends the unresolved candidate batch, validates the complete returned map, and
+closes the source before continuing. It never performs a zero-impact resolution pass, promotes a
+preview result, retries at broader authority, or serializes provider work into one-request impact
+turns. TTY blocks fall through exactly like other execution blocks. Complete resolution still
+finishes before the consuming operation's first external mutation.
 
 ## Aggregate attempt model
 
@@ -551,8 +560,8 @@ hint may include a known command flag; a backend may not.
 `ResolutionCategory`, `ResolutionDetail`, `ResolutionRemediation`, and their translation table are
 removed. Expected client conditions use exact variants. The value-free final resolution outcome uses
 `resolved`, `missing`, `blocked(reason)`, or `failed(reason)` directly, with core-only block reasons
-for batch doom and exhausted source state. Core maps that one tagged vocabulary to the established
-exception hierarchy and derives human guidance at its consuming surface.
+for exhausted source state. Core maps that one tagged vocabulary to the established exception
+hierarchy and derives human guidance at its consuming surface.
 
 OnePassword plus `failed/deadline-exceeded` retains the existing core-authored guidance that a
 pending desktop-app approval is a common cause and `op whoami` is not a reliable exclusion test. The
@@ -564,28 +573,32 @@ where a frozen schema requires them; no runtime legacy-detail enum remains.
 Contract registration and runtime tests cover:
 
 - exact required class operations and attributes;
-- exact impact and terminal types at public boundaries;
+- exact `supports_tty_interaction` boolean and broker delivery derived from it;
+- exact preview impact, operation intent, and TTY access types at public boundaries;
 - complete, exact-key preview and resolution maps;
 - exact result variants and backend-returnable reason subsets;
 - rejection of core-only final block reasons in backend maps and preview attempts, plus exact
-  no-active-source, no-attemptable-source, and batch-doomed-before-interaction final outcomes;
+  no-active-source and no-attemptable-source final outcomes;
+- rejection of TTY blocks from env-var, OnePassword, or any backend that declares no TTY support;
 - maximum-impact rejection of `PreviewIndeterminate`;
-- `ALLOW` resolution rejection of `BackendBlocked(OPERATOR_IMPACT_LIMITED)` without a repeated
-  frontier;
+- rejection of preview-only reasons and impact inputs from actual resolution;
 - no free-form or generic metadata fields and no backend-selected flow instruction;
 - no stdout, stderr, native exception text, or sentinel value in result objects and `repr`;
-- prompt broker absence under disallowed impact or missing TTY;
+- broker absence for backends without TTY support, non-disruptive preview, unavailable TTY, or
+  global `--non-interactive`;
 - no provider or broker call during construction or context entry;
 - removal of `prepare`, `external_operation_timeout`, backend failure/remediation exceptions, and
   the legacy runtime resolution-detail vocabulary;
 - bounded provider work and cleanup on success, missing, failure, timeout, and interruption;
 - ordinary missing fallthrough and failed hard-stop across source precedence;
-- mixed exhaustion in which impact and TTY blocks outrank ordinary missing, while ordinary missing
-  outranks not-ready and disabled-source blocks;
+- mixed actual-resolution exhaustion in which TTY blocks outrank ordinary missing, while ordinary
+  missing outranks not-ready and disabled-source blocks;
 - no-active-source and no-attemptable-source only as the final fallbacks after all retained
   per-source exhaustion evidence;
 - final blocked-reason projection through the existing exception hierarchy and frozen machine
   schemas without recreating legacy resolution detail or remediation fields;
+- OnePassword actual resolution under available, unavailable, and disabled TTY access, proving
+  global `--non-interactive` never suppresses out-of-band provider work;
 - parity between preview and resolve classification for the same fake-provider result.
 
 Tests assert structured fields and behavioral effects, not authored prose wording.

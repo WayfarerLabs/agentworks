@@ -1,7 +1,7 @@
 # Prior art: intent-aware, value-free secret preview
 
 - Date: 2026-08-18
-- Amended: 2026-08-20
+- Amended: 2026-08-21
 - Scope: TTY capability, provider authentication modes, value containment, and backend-owned probes
 - Sources: current Agentworks code plus primary language and vendor documentation
 
@@ -31,11 +31,18 @@ nothing about a desktop application, mobile approval, network identity, or servi
 
 Design consequences:
 
-- TTY availability is an execution fact, separate from operator-impact authority.
+- TTY availability is an execution fact, separate from preview operator-impact authority.
+- Global `--non-interactive` can truthfully mean only "do not use the TTY for interactions, even if
+  one is present." It must not suppress app approval, biometric unlock, or other out-of-band work.
+- Output presentation remains a separate concern. The flag must not override the output stream's
+  existing color or formatting decision.
 - Prompt must require a usable terminal before reading.
 - A non-TTY process does not by itself block OnePassword or any other out-of-band backend.
 
-Source: [Python `sys` documentation](https://docs.python.org/3/library/sys.html#sys.stdin)
+Sources:
+
+- [Python `sys` documentation](https://docs.python.org/3/library/sys.html#sys.stdin)
+- `cli/agentworks/output.py` at baseline `c01263d0`
 
 ### One provider command can use materially different authentication paths
 
@@ -49,8 +56,9 @@ Design consequences:
 - `onepassword` cannot truthfully be classified once as interactive or non-interactive.
 - The backend may infer a known unattended mode from provider-specific ambient facts.
 - Source config may classify otherwise uncertain app authentication according to the operator's
-  impact preference.
-- The impact decision belongs beside the `op` invocation, not in core's TTY test.
+  preview impact preference.
+- The preview impact decision belongs beside the `op` invocation, not in core's TTY test. Actual
+  resolution has no impact input and attempts the configured provider lookup.
 
 Sources:
 
@@ -114,7 +122,8 @@ useful fallback or silently hide broken configuration.
 Design consequences:
 
 - Ordinary absence is an exact missing variant and falls through.
-- Execution or authority limitations are blocked or indeterminate, not absence.
+- Execution limitations are blocked, and preview impact limitations are indeterminate; neither is
+  absence.
 - Invalid mapping and provider failures are exact failed variants and hard-stop by default;
   ambiguous provider rejection uses `lookup-rejected` rather than claiming local invalidity.
 - Backends classify semantic outcomes, while core owns the one exhaustive flow table. A backend does
@@ -165,8 +174,8 @@ Sources:
 
 ## Refuted or not adopted
 
-- **TTY as interaction policy:** valid only for stdin access and disproved by out-of-band app
-  authentication and service-account modes.
+- **TTY as general interaction policy:** disproved by out-of-band app authentication and
+  service-account modes. A TTY-only policy remains the correct guard for terminal input.
 - **One static backend interaction flag:** cannot describe provider state that varies by source,
   authentication mode, and invocation.
 - **Separate preview and probe methods:** creates two answers that can drift. One method with an
