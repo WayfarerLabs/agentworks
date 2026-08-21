@@ -122,7 +122,8 @@ the ready-PR integration findings, and passed:
 - the full non-integration CLI suite: 7,288 passed and 1 environment-gated skip;
 - the Secret Sources real-entry drive: 6 of 6 retained behavior cases, and the recorder real-code
   drive: 6 of 6 never-raises cases;
-- Ruff lint and format plus strict mypy across 695 source files;
+- Ruff lint and format plus strict mypy across the standard 694-source CI target and the repaired
+  recorder harness;
 - 155 Python and 103 Node website tests plus byte-identical repeated builds at both site bases;
 - Typer isolation, assistance package generation, Rulesync drift, SDD lock, file lint, and diff
   checks; and

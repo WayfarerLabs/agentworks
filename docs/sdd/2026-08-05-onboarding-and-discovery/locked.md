@@ -33,13 +33,14 @@ version 0.14.0, reached the agent-mode guide index, and removed its entire tempo
 parity covers the repository README, website, Claude Code, and Codex projections.
 
 The final pre-lock tree passed 7,288 non-integration tests with 1 environment-gated skip; Ruff,
-formatting, and strict mypy across 695 source files; the six-case Secret Sources and recorder real
-drives; 155 Python and 103 Node website tests plus deterministic builds; Typer isolation; package
-generation; Rulesync drift; locked-SDD validation; file lint; and diff checks. Project review of the
-final disposition delta was clean. Earlier exact checkpoint project, integration, Muntz, saga, and
-CI reviews established the acceptance baseline; their final routing findings are consumed in this
-lock round. Per the repository review sequence, this completed pre-ready record is handed off as
-ready so the integration tester can inspect the final PR.
+formatting, and strict mypy across the standard 694-source CI target plus the repaired recorder
+harness; the six-case Secret Sources and recorder real drives; 155 Python and 103 Node website tests
+plus deterministic builds; Typer isolation; package generation; Rulesync drift; locked-SDD
+validation; file lint; and diff checks. Project review of the final disposition delta was clean.
+Earlier exact checkpoint project, integration, Muntz, saga, and CI reviews established the
+acceptance baseline; their final routing findings are consumed in this lock round. Per the
+repository review sequence, this completed pre-ready record is handed off as ready so the
+integration tester can inspect the final PR.
 
 ## Agent-mode and regression disposition
 
