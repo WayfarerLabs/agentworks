@@ -52,10 +52,11 @@ the context that needs it most.
   non-interactive invocation.
 - Operators retain an explicit way to run unattended invocations that fail fast rather than waiting
   on any human. **Superseded (authenticated operator ruling, 2026-08-21, recorded in the successor
-  effort's FRD):** this effort defines no general unattended-resolution mode, and adding one needs
-  separate operator authority and design. The practical consequence, recorded so nobody rediscovers
-  it: an unattended caller with an out-of-band source waits out that source's timeout instead of
-  failing immediately, and can raise an approval prompt on an unattended desktop.
+  effort's FRD at `docs/sdd/2026-08-18-secret-preview-contract/frd.md`, which reaches `main` when PR
+  #619 merges and is not there yet):** this effort defines no general unattended-resolution mode,
+  and adding one needs separate operator authority and design. The practical consequence, recorded
+  so nobody rediscovers it: an unattended caller with an out-of-band source waits out that source's
+  timeout instead of failing immediately, and can raise an approval prompt on an unattended desktop.
 - Failure diagnostics tell the truth: whatever gates a source names a remediation that actually
   exists on the failing command.
 - Hand-carrying a value around the operator-selected source loses its motivation: the configured
