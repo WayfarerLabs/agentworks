@@ -439,6 +439,75 @@ def test_ordinary_cleanup_truthiness_failure_warns_without_raising(monkeypatch: 
     assert len(warnings) == 1
 
 
+def test_ordinary_warning_emission_failure_is_best_effort_without_a_primary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_warning(_message: str) -> None:
+        raise RuntimeError("warning sink failure")
+
+    monkeypatch.setattr("agentworks.secrets.resolve.output.warn", fail_warning)
+    with _SourceContextDriver(_ExitContext(cleanup_error=RuntimeError("cleanup")), source_name="fixture"):
+        pass
+
+
+@pytest.mark.parametrize(
+    "warning_error",
+    [
+        UserAbort("warning"),
+        concurrent.futures.CancelledError(),
+        KeyboardInterrupt(),
+        SystemExit(),
+        GeneratorExit(),
+        _ProtectedExit(),
+    ],
+    ids=("user-abort", "cancelled", "keyboard", "system-exit", "generator-exit", "other-base"),
+)
+def test_warning_emission_protected_exit_propagates_by_identity_without_a_primary(
+    monkeypatch: pytest.MonkeyPatch,
+    warning_error: BaseException,
+) -> None:
+    def fail_warning(_message: str) -> None:
+        raise warning_error
+
+    monkeypatch.setattr("agentworks.secrets.resolve.output.warn", fail_warning)
+    with (
+        pytest.raises(type(warning_error)) as caught,
+        _SourceContextDriver(_ExitContext(cleanup_error=RuntimeError("cleanup")), source_name="fixture"),
+    ):
+        pass
+    assert caught.value is warning_error
+
+
+@pytest.mark.parametrize(
+    "warning_error",
+    [
+        RuntimeError("warning"),
+        UserAbort("warning"),
+        concurrent.futures.CancelledError(),
+        KeyboardInterrupt(),
+        SystemExit(),
+        GeneratorExit(),
+        _ProtectedExit(),
+    ],
+    ids=("ordinary", "user-abort", "cancelled", "keyboard", "system-exit", "generator-exit", "other-base"),
+)
+def test_body_primary_wins_over_every_warning_emission_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    warning_error: BaseException,
+) -> None:
+    def fail_warning(_message: str) -> None:
+        raise warning_error
+
+    monkeypatch.setattr("agentworks.secrets.resolve.output.warn", fail_warning)
+    primary = RuntimeError("primary")
+    with (
+        pytest.raises(RuntimeError) as caught,
+        _SourceContextDriver(_ExitContext(cleanup_error=RuntimeError("cleanup")), source_name="fixture"),
+    ):
+        raise primary
+    assert caught.value is primary
+
+
 @pytest.mark.parametrize(
     "truthiness_error",
     [

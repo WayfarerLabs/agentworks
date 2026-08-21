@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import time
-from contextlib import AbstractContextManager, suppress
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Self, cast
 
@@ -174,9 +174,16 @@ class _MonotonicBudget:
 _CLEANUP_WARNING = "secret source {source_name!r}: cleanup failed; primary result unchanged"
 
 
-def _warn_cleanup_failure(source_name: str) -> None:
-    with suppress(BaseException):
+def _is_protected_exit(error: BaseException) -> bool:
+    return isinstance(error, (UserAbort, concurrent.futures.CancelledError)) or not isinstance(error, Exception)
+
+
+def _warn_cleanup_failure(source_name: str, *, primary: BaseException | None) -> None:
+    try:
         output.warn(_CLEANUP_WARNING.format(source_name=source_name))
+    except BaseException as warning_error:
+        if primary is None and _is_protected_exit(warning_error):
+            raise
 
 
 class _SourceContextDriver(AbstractContextManager[SecretSourceClient]):
@@ -198,14 +205,11 @@ class _SourceContextDriver(AbstractContextManager[SecretSourceClient]):
         try:
             suppressed = self._inner.__exit__(exc_type, exc, traceback)
             if suppressed:
-                _warn_cleanup_failure(self._source_name)
+                _warn_cleanup_failure(self._source_name, primary=exc)
         except BaseException as cleanup_error:
-            if exc is None and (
-                isinstance(cleanup_error, (UserAbort, concurrent.futures.CancelledError))
-                or not isinstance(cleanup_error, Exception)
-            ):
+            if exc is None and _is_protected_exit(cleanup_error):
                 raise
-            _warn_cleanup_failure(self._source_name)
+            _warn_cleanup_failure(self._source_name, primary=exc)
         return False
 
 
