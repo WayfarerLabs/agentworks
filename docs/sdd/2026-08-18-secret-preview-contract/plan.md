@@ -1,6 +1,6 @@
 # Plan: Value-free secret resolution preview
 
-- Status: Operator-approved contract simplification in progress
+- Status: Simplified implementation green; independent review pending
 - Date: 2026-08-18
 - Amended: 2026-08-21
 - Requirements: [FRD](./frd.md)
@@ -185,9 +185,10 @@
       initial implementation also carried a remaining-time input; the next item supersedes that dead
       part without changing the intent-at-construction boundary. Keep policy out of
       `preview(requests)` and `resolve(requests)` because it is fixed at construction.
-- [ ] Apply the 2026-08-21 operator-approved simplification that supersedes the dead factory inputs:
+- [x] Apply the 2026-08-21 operator-approved simplification that supersedes the dead factory inputs:
       remove `source_name`, `remaining_time`, `RemainingTime`, and `_MonotonicBudget`; keep source
-      identity in core and the one real shrinking OnePassword timeout in source config.
+      identity in core and the one real shrinking OnePassword timeout in source config. (Implemented
+      in `da5f1e6a`.)
 - [x] Update the `SecretBackend` ABC, descriptor, root exports, and all implementations atomically,
       resetting the exact secret-backend contract sentinel from `2` to `1` while removing
       `interactive`, adding exact `supports_tty_interaction`, and removing `would_attempt`.
@@ -330,7 +331,10 @@
 - [x] Run manual em-dash, double-dash punctuation, value-leak, and stale-vocabulary scans.
       (2026-08-21: final implementation scans passed; the remaining string assertion covers a
       provider-supplied containment sentinel rather than authored prose.)
-- [ ] Rerun the complete implementation and repository gates after removing the dead factory inputs.
+- [x] Rerun the complete implementation and repository gates after removing the dead factory inputs.
+      (2026-08-21: focused contract coverage passed 319 tests; full non-live passed 7,223 with one
+      skip; Ruff, format, Mypy, file lint, lock, locked-SDD, Rulesync, generated-package, Typer
+      isolation, website Python and Node, and both deterministic-build variants passed.)
 - [x] Obtain a private `agentworks-reviewer` pass on the complete diff and resolve material
       findings. (2026-08-21: three bounded correction rounds closed lifecycle, timeout, TTY-access,
       exact-map, static-description, cleanup, documentation, and test-quality findings; final exact
