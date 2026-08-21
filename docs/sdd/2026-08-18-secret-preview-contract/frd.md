@@ -211,6 +211,9 @@ on evidence that a configured source is broken.
   present." It does not prohibit a biometric unlock, app approval, or any other out-of-band operator
   action, and it does not change output presentation. Actual resolution has no operator-impact
   policy; impact classification exists only for preview.
+- This authenticated operator ruling from 2026-08-21 supersedes the seed requirement for an explicit
+  fully unattended, fail-fast resolution path. This effort intentionally defines no general
+  unattended-resolution mode; adding one requires separate operator authority and design.
 - There are no external secret-backend plugins. Rewrite the contract and all implementations in one
   atomic change and reset the secret-backend descriptor and implementations from the current
   internal sentinel `2` to `1`. This is authenticated operator direction from 2026-08-19: because

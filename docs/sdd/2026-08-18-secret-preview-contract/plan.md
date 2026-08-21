@@ -69,6 +69,9 @@
       turns from actual resolution, and prove preview impact is orthogonal to exact TTY access.
       (2026-08-21: added least-authority TTY broker capability, decoupled presentation, removed
       resolution staging, passed artifact gates, and received a clean focused private re-review.)
+- [x] Apply the separately authorized post-iteration traceability amendment after final Muntz
+      review: record that the 2026-08-21 operator ruling supersedes the seed's general unattended
+      fail-fast requirement and that this effort defines no general unattended-resolution mode.
 - [x] Confirm the design remains within the accepted FRD and that review has not introduced an
       unnecessary compatibility track or a secret-backend version other than `1`. (2026-08-21:
       confirmed; the dated direct operator ruling remains authoritative.)
