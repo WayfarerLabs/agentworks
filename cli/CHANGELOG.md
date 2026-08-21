@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.2](https://github.com/WayfarerLabs/agentworks/compare/v0.14.1...v0.14.2) (2026-08-21)
+
+
+### Bug Fixes
+
+* **onboarding:** close integration review gaps ([8fbf71a](https://github.com/WayfarerLabs/agentworks/commit/8fbf71a4dc5b8b5932934537c55d0940d10d28c9))
+
 ## [0.14.1](https://github.com/WayfarerLabs/agentworks/compare/v0.14.0...v0.14.1) (2026-08-19)
 
 
