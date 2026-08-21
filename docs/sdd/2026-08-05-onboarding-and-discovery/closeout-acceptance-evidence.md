@@ -126,5 +126,5 @@ the ready-PR integration findings, and passed:
 - 155 Python and 103 Node website tests plus byte-identical repeated builds at both site bases;
 - Typer isolation, assistance package generation, Rulesync drift, SDD lock, file lint, and diff
   checks; and
-- independent project review with no findings after preserving the saga message as its required
-  one-file commit.
+- independent project reviews with no findings, including the correction-round review after
+  preserving each saga message as its required one-file commit.

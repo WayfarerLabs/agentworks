@@ -788,7 +788,7 @@ this bounded correction round on 2026-08-21.
 - [x] Restore concise 1Password source guidance directly in `concept-secrets`, record why the guide
       and completion harness cases remain deleted, and repair the stale `extract_references` call in
       the adjacent maintained recorder drive without adding prose assertions.
-- [ ] Run the affected real drives, focused/full/static gates, and independent project review, then
+- [x] Run the affected real drives, focused/full/static gates, and independent project review, then
       re-hand off the exact green head as ready for integration re-review.
 
 Definition of done: both follow-up gaps have durable homes, permanent secret guidance names the
