@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
 
-_UNSAFE_IDENTITY_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
+_UNSAFE_IDENTITY_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
 
 
 def safe_identity(value: str) -> str:

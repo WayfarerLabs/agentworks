@@ -345,9 +345,9 @@ def test_factory_receives_exact_intent_access_and_least_authority_broker(
 
 
 class _ExitContext(AbstractContextManager[SecretSourceClient]):
-    def __init__(self, *, cleanup_error: BaseException | None = None, suppress_primary: bool = False) -> None:
+    def __init__(self, *, cleanup_error: BaseException | None = None, exit_result: object = False) -> None:
         self.cleanup_error = cleanup_error
-        self.suppress_primary = suppress_primary
+        self.exit_result = exit_result
 
     def __enter__(self) -> SecretSourceClient:
         return _Client()
@@ -355,11 +355,19 @@ class _ExitContext(AbstractContextManager[SecretSourceClient]):
     def __exit__(self, *args: object) -> bool:
         if self.cleanup_error is not None:
             raise self.cleanup_error
-        return self.suppress_primary
+        return cast("bool", self.exit_result)
 
 
 class _ProtectedExit(BaseException):
     pass
+
+
+class _HostileTruth:
+    def __init__(self, error: BaseException) -> None:
+        self.error = error
+
+    def __bool__(self) -> bool:
+        raise self.error
 
 
 @pytest.mark.parametrize(
@@ -392,12 +400,15 @@ def test_cleanup_preserves_primary_over_failure_and_suppression(monkeypatch: pyt
     for context in (
         _ExitContext(cleanup_error=RuntimeError("cleanup")),
         _ExitContext(cleanup_error=UserAbort("cleanup")),
-        _ExitContext(suppress_primary=True),
+        _ExitContext(exit_result=True),
+        _ExitContext(exit_result=_HostileTruth(RuntimeError("truthiness"))),
+        _ExitContext(exit_result=_HostileTruth(UserAbort("truthiness"))),
+        _ExitContext(exit_result=_HostileTruth(_ProtectedExit())),
     ):
         with pytest.raises(RuntimeError) as caught, _SourceContextDriver(context, source_name="fixture"):
             raise primary
         assert caught.value is primary
-    assert len(warnings) == 3
+    assert len(warnings) == 6
 
     primary_abort = UserAbort("primary")
     with (
@@ -406,7 +417,7 @@ def test_cleanup_preserves_primary_over_failure_and_suppression(monkeypatch: pyt
     ):
         raise primary_abort
     assert caught_abort.value is primary_abort
-    assert len(warnings) == 4
+    assert len(warnings) == 7
 
 
 def test_ordinary_cleanup_failure_warns_without_raising(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -415,6 +426,43 @@ def test_ordinary_cleanup_failure_warns_without_raising(monkeypatch: pytest.Monk
     with _SourceContextDriver(_ExitContext(cleanup_error=RuntimeError("native")), source_name="fixture"):
         pass
     assert len(warnings) == 1
+
+
+def test_ordinary_cleanup_truthiness_failure_warns_without_raising(monkeypatch: pytest.MonkeyPatch) -> None:
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.secrets.resolve.output.warn", warnings.append)
+    with _SourceContextDriver(
+        _ExitContext(exit_result=_HostileTruth(RuntimeError("native"))),
+        source_name="fixture",
+    ):
+        pass
+    assert len(warnings) == 1
+
+
+@pytest.mark.parametrize(
+    "truthiness_error",
+    [
+        UserAbort("cleanup"),
+        concurrent.futures.CancelledError(),
+        KeyboardInterrupt(),
+        SystemExit(),
+        GeneratorExit(),
+        _ProtectedExit(),
+    ],
+    ids=("user-abort", "cancelled", "keyboard", "system-exit", "generator-exit", "other-base"),
+)
+def test_cleanup_truthiness_protected_exit_propagates_by_identity_without_a_primary(
+    truthiness_error: BaseException,
+) -> None:
+    with (
+        pytest.raises(type(truthiness_error)) as caught,
+        _SourceContextDriver(
+            _ExitContext(exit_result=_HostileTruth(truthiness_error)),
+            source_name="fixture",
+        ),
+    ):
+        pass
+    assert caught.value is truthiness_error
 
 
 @pytest.mark.parametrize(
@@ -454,6 +502,28 @@ def test_ordinary_describe_lookup_exception_is_text_free_backend_protocol() -> N
     ).outcomes[0]
     assert outcome.reason is FailureReason.BACKEND_PROTOCOL
     assert "provider-native sentinel" not in repr(outcome)
+
+
+@pytest.mark.parametrize("variant", ["wrong-type", "forged-fields"])
+def test_malformed_lookup_description_is_backend_protocol(variant: str) -> None:
+    source = _source("describe", client_type=_Client)
+
+    def describe(cls: type[_Backend], secret_name: str, mapping: BaseModel | None) -> LookupDescription:
+        if variant == "wrong-type":
+            return object()  # type: ignore[return-value]
+        forged = object.__new__(LookupDescription)
+        object.__setattr__(forged, "disposition", "candidate")
+        object.__setattr__(forged, "identifier", "fixture")
+        return forged
+
+    source.backend_class.describe_lookup = classmethod(describe)  # type: ignore[method-assign,assignment]
+    outcome = resolve_batch(
+        [_decl("a")],
+        [source],
+        tty_access=TtyInteractionAccess.UNAVAILABLE,
+        interaction_broker=None,
+    ).outcomes[0]
+    assert outcome.reason is FailureReason.BACKEND_PROTOCOL
 
 
 class _SingleReadMapping(Mapping[str, BackendResolution]):
@@ -542,6 +612,251 @@ def test_mapping_snapshot_preserves_user_abort_by_identity() -> None:
             interaction_broker=None,
         )
     assert caught.value is abort
+
+
+@pytest.mark.parametrize("preview", [False, True], ids=("resolution", "preview"))
+@pytest.mark.parametrize(
+    "protected_error",
+    [concurrent.futures.CancelledError(), KeyboardInterrupt(), _ProtectedExit()],
+    ids=("cancelled", "keyboard", "other-base"),
+)
+def test_mapping_snapshot_access_preserves_protected_exit_by_identity(
+    preview: bool,
+    protected_error: BaseException,
+) -> None:
+    class ProtectedAccessMapping(Mapping[str, object]):
+        def __iter__(self) -> Iterator[str]:
+            return iter(("a",))
+
+        def __len__(self) -> int:
+            return 1
+
+        def __getitem__(self, key: str) -> object:
+            raise protected_error
+
+    returned = ProtectedAccessMapping()
+
+    class Client(_Client):
+        def preview(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendPreview]:
+            return cast("Mapping[str, BackendPreview]", returned)
+
+        def resolve(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendResolution]:
+            return cast("Mapping[str, BackendResolution]", returned)
+
+    with pytest.raises(type(protected_error)) as caught:
+        if preview:
+            preview_batch(
+                [_decl("a")],
+                [_source("protected-access", client_type=Client)],
+                impact=OperatorImpact.NONE,
+                tty_access=TtyInteractionAccess.UNAVAILABLE,
+                interaction_broker=None,
+            )
+        else:
+            resolve_batch(
+                [_decl("a")],
+                [_source("protected-access", client_type=Client)],
+                tty_access=TtyInteractionAccess.DISABLED,
+                interaction_broker=None,
+            )
+    assert caught.value is protected_error
+
+
+class _ContextBoundMapping(Mapping[str, object]):
+    def __init__(self, result: object) -> None:
+        self.result = result
+        self.active = True
+        self.reads = 0
+
+    def __iter__(self) -> Iterator[str]:
+        if not self.active:
+            raise RuntimeError("context is closed")
+        return iter(("a",))
+
+    def __len__(self) -> int:
+        if not self.active:
+            raise RuntimeError("context is closed")
+        return 1
+
+    def __getitem__(self, key: str) -> object:
+        if not self.active:
+            raise RuntimeError("context is closed")
+        self.reads += 1
+        return self.result
+
+
+class _ContextBoundClient(_Client):
+    def __init__(self, returned: _ContextBoundMapping) -> None:
+        self.returned = returned
+
+    def preview(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendPreview]:
+        return cast("Mapping[str, BackendPreview]", self.returned)
+
+    def resolve(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendResolution]:
+        return cast("Mapping[str, BackendResolution]", self.returned)
+
+
+class _ContextBoundContext(AbstractContextManager[SecretSourceClient]):
+    def __init__(self, returned: _ContextBoundMapping, *, cleanup_error: BaseException | None = None) -> None:
+        self.returned = returned
+        self.cleanup_error = cleanup_error
+        self.primary: BaseException | None = None
+
+    def __enter__(self) -> SecretSourceClient:
+        return _ContextBoundClient(self.returned)
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: object,
+    ) -> None:
+        del exc_type, traceback
+        self.primary = exc
+        self.returned.active = False
+        if self.cleanup_error is not None:
+            raise self.cleanup_error
+
+
+def _install_context(source: ActiveSource, context: AbstractContextManager[SecretSourceClient]) -> None:
+    def create_client(cls: type[_Backend], **kwargs: object) -> AbstractContextManager[SecretSourceClient]:
+        del cls, kwargs
+        return context
+
+    source.backend_class.create_client = classmethod(create_client)  # type: ignore[method-assign,assignment]
+
+
+@pytest.mark.parametrize("preview", [False, True], ids=("resolution", "preview"))
+def test_context_local_lazy_mapping_is_snapshotted_before_context_exit(preview: bool) -> None:
+    result: BackendResolution | BackendPreview = PreviewAvailable() if preview else BackendResolved("value")
+    returned = _ContextBoundMapping(result)
+    context = _ContextBoundContext(returned)
+    source = _source("context-local", client_type=_Client)
+    _install_context(source, context)
+
+    if preview:
+        projected = preview_batch(
+            [_decl("a")],
+            [source],
+            impact=OperatorImpact.NONE,
+            tty_access=TtyInteractionAccess.UNAVAILABLE,
+            interaction_broker=None,
+        )["a"]
+        assert projected.status is PreviewStatus.AVAILABLE
+    else:
+        batch = resolve_batch(
+            [_decl("a")],
+            [source],
+            tty_access=TtyInteractionAccess.DISABLED,
+            interaction_broker=None,
+        )
+        assert batch.complete_or_raise() == {"a": "value"}
+
+    assert returned.reads == 1
+    assert returned.active is False
+    with pytest.raises(RuntimeError):
+        dict(returned)
+
+
+@pytest.mark.parametrize("preview", [False, True], ids=("resolution", "preview"))
+@pytest.mark.parametrize(
+    "cleanup_error",
+    [RuntimeError("cleanup"), UserAbort("cleanup"), _ProtectedExit()],
+    ids=("ordinary-cleanup", "user-abort-cleanup", "protected-cleanup"),
+)
+def test_in_context_map_validation_is_primary_over_cleanup(
+    preview: bool,
+    cleanup_error: BaseException,
+) -> None:
+    result: BackendResolution | BackendPreview = PreviewAvailable() if preview else BackendResolved("value")
+    returned = _ContextBoundMapping(result)
+    context = _ContextBoundContext(returned, cleanup_error=cleanup_error)
+    source = _source("invalid-context-local", client_type=_Client)
+    _install_context(source, context)
+
+    declarations = [_decl("a"), _decl("b")]
+    if preview:
+        projected = preview_batch(
+            declarations,
+            [source],
+            impact=OperatorImpact.NONE,
+            tty_access=TtyInteractionAccess.UNAVAILABLE,
+            interaction_broker=None,
+        )
+        assert {item.status for item in projected.values()} == {PreviewStatus.FAILED}
+        assert {item.reason for item in projected.values()} == {FailureReason.BACKEND_PROTOCOL.value}
+    else:
+        batch = resolve_batch(
+            declarations,
+            [source],
+            tty_access=TtyInteractionAccess.DISABLED,
+            interaction_broker=None,
+        )
+        assert {outcome.reason for outcome in batch.outcomes} == {FailureReason.BACKEND_PROTOCOL}
+
+    assert context.primary is not None
+    assert returned.active is False
+
+
+class _EqualButHostileKey(str):
+    comparisons = 0
+
+    def __eq__(self, other: object) -> bool:
+        type(self).comparisons += 1
+        if type(self).comparisons > 1:
+            raise RuntimeError("hostile repeated comparison")
+        return str.__eq__(self, other)
+
+    __hash__ = str.__hash__
+
+
+class _HostileKeyMapping(Mapping[object, object]):
+    def __init__(self, result: object) -> None:
+        self.key = _EqualButHostileKey("a")
+        self.result = result
+
+    def __iter__(self) -> Iterator[object]:
+        return iter((self.key,))
+
+    def __len__(self) -> int:
+        return 1
+
+    def __getitem__(self, key: object) -> object:
+        return self.result
+
+
+@pytest.mark.parametrize("preview", [False, True], ids=("resolution", "preview"))
+def test_equal_but_non_exact_stateful_result_key_is_rejected_without_comparison(preview: bool) -> None:
+    _EqualButHostileKey.comparisons = 0
+    result: BackendResolution | BackendPreview = PreviewAvailable() if preview else BackendResolved("value")
+    returned = _HostileKeyMapping(result)
+
+    class Client(_Client):
+        def preview(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendPreview]:
+            return cast("Mapping[str, BackendPreview]", returned)
+
+        def resolve(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendResolution]:
+            return cast("Mapping[str, BackendResolution]", returned)
+
+    if preview:
+        projected = preview_batch(
+            [_decl("a")],
+            [_source("hostile-key", client_type=Client)],
+            impact=OperatorImpact.NONE,
+            tty_access=TtyInteractionAccess.UNAVAILABLE,
+            interaction_broker=None,
+        )["a"]
+        assert projected.reason == FailureReason.BACKEND_PROTOCOL.value
+    else:
+        outcome = resolve_batch(
+            [_decl("a")],
+            [_source("hostile-key", client_type=Client)],
+            tty_access=TtyInteractionAccess.DISABLED,
+            interaction_broker=None,
+        ).outcomes[0]
+        assert outcome.reason is FailureReason.BACKEND_PROTOCOL
+
+    assert _EqualButHostileKey.comparisons == 0
 
 
 @pytest.mark.parametrize(

@@ -146,18 +146,20 @@ source block. Core performs one source-first pass and does not reuse preview as 
 `create_client(...)` returns an unentered, resource-free context manager. Factory construction and
 context entry perform no provider operation, authentication, browser launch, biometric request,
 broker call, or stdin read. The selected `preview` or `resolve` method performs the authorized work.
-Context exit always handles cleanup. Cleanup never suppresses or masks a primary result or
-interruption. With no primary exception, user abort, cancellation, and other protected exits
-propagate; an ordinary cleanup failure emits fixed source-only warning text and returns normally.
+Context exit always handles cleanup. A primary exception is never suppressed or masked by cleanup.
+With no primary exception, user abort, cancellation, and other protected cleanup exits propagate; an
+ordinary cleanup failure emits fixed source-only warning text and returns normally.
 
 The client is operation-local and is never cached in a registry. `remaining_time()` is a live view
 of the outer operation budget; `None` means that outer budget is unbounded. A backend combines it
 with its own validated source deadline at each cancellable external boundary. The backend returns
 `DEADLINE_EXCEEDED` rather than exposing a provider timeout exception.
 
-User abort and cancellation propagate. Other backend exceptions are normalized by core to
-`UNEXPECTED`; malformed maps, illegal variants, illegal reasons, unsafe identities, and maximum-
-impact indeterminate become `BACKEND_PROTOCOL`. Backends do not supply remediation or free-form
+User abort and cancellation propagate. Ordinary exceptions from the selected client `preview` or
+`resolve` method are normalized by core to `UNEXPECTED`; ordinary `describe_lookup` exceptions are
+normalized to `BACKEND_PROTOCOL` at runtime and a core-owned configuration failure during
+finalization. Malformed maps, illegal variants, illegal reasons, unsafe identities, and maximum-
+impact indeterminate also become `BACKEND_PROTOCOL`. Backends do not supply remediation or free-form
 diagnostic text. Core derives exception classes and operator guidance from the closed result and
 backend identity.
 

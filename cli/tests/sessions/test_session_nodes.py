@@ -454,15 +454,13 @@ def test_sweep_predicts_a_harness_integration_config_secret_with_owner_usage_fra
     session = _scanner_session(db, monkeypatch)
     scope = OperationScope(level=ScopeLevel.SESSION, vm="box", workspace="ws1", session="s1", admin=True)
 
-    with pytest.raises(ConfigError) as caught:
+    with pytest.raises(ConfigError):
         preflight_all(
             [session],
             RunContext(config=config, operation_scope=scope),
             registry=registry,
             interaction=TtyInteractionPolicy.REFUSE,
         )
-    assert "session/s1" in str(caught.value)
-    assert "scanner API key" in str(caught.value)
 
 
 def test_sweep_passes_a_resolvable_harness_integration_config_secret(

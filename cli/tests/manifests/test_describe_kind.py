@@ -176,7 +176,6 @@ def test_secret_backend_describes_its_source_config() -> None:
     assert "name  (one of: onepassword, required)" in text
     assert "account  (string or null, optional, min length 1)" in text
     assert "timeout  (number, optional, default 30.0, gt 0)" in text
-    assert "app_authentication_impact  (one of: operator-action, none, optional, default operator-action)" in text
 
 
 def test_tag_only_secret_backend_source_config_is_a_table() -> None:

@@ -24,7 +24,10 @@ from agentworks.capabilities.secret_backend import (
 from agentworks.capabilities.secret_backend.client import safe_identity
 
 
-@pytest.mark.parametrize("value", ["", "line\nbreak", "tab\tbreak", "format\u200bbreak", "line\u2028break"])
+@pytest.mark.parametrize(
+    "value",
+    ["", "line\nbreak", "tab\tbreak", "format\u200bbreak", "surrogate\ud800break", "line\u2028break"],
+)
 def test_safe_identity_rejects_empty_and_line_forging_text(value: str) -> None:
     with pytest.raises(ValueError):
         safe_identity(value)
@@ -43,6 +46,8 @@ def test_lookup_description_enforces_disposition_and_identifier_pairing() -> Non
         LookupDescription(LookupDisposition.NOT_APPLICABLE, "identifier")
     with pytest.raises(ValueError):
         LookupDescription("candidate", None)  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        LookupDescription(LookupDisposition.CANDIDATE, "surrogate\ud800identifier")
 
 
 @pytest.mark.parametrize(

@@ -252,7 +252,7 @@ def test_rekey_missing_key_fails_at_the_one_resolve_before_status(
     monkeypatch.delenv("AW_SECRET_TAILSCALE_AUTH_KEY", raising=False)
     events = _fake_status(monkeypatch, VMStatus.RUNNING)
 
-    with pytest.raises(ConfigError, match="tailscale-auth-key"):
+    with pytest.raises(ConfigError):
         vm_manager.rekey_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == []

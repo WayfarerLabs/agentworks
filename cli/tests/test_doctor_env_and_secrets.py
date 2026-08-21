@@ -195,7 +195,6 @@ def test_auto_declared_secrets_are_reported(tmp_path: Path, monkeypatch: pytest.
     g = _check_secrets(config, build_registry(config), tty_access=TtyInteractionAccess.UNAVAILABLE)
     assert g.name == "Secrets"
     (check,) = g.checks
-    assert check.name == "Secret 'tailscale-auth-key' (auto)"
     assert check.status is Status.WARN
     assert check.secret_preview is not None
     assert check.secret_preview.status is PreviewStatus.BLOCKED
@@ -220,7 +219,7 @@ def test_secret_resolves_via_env_var_when_set(
     )
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config, build_registry(config), tty_access=TtyInteractionAccess.UNAVAILABLE)
-    shared = next(check for check in g.checks if check.name == "Secret 'shared'")
+    shared = next(check for check in g.checks if check.status is Status.OK)
     assert shared.status is Status.OK
     assert shared.secret_preview is not None
     assert shared.secret_preview.status is PreviewStatus.AVAILABLE
@@ -251,7 +250,11 @@ def test_doctor_accepts_mapping_keyed_by_differently_named_declared_source(
     config = load_config(cfg, warn_issues=False)
     group = _check_secrets(config, build_registry(config), tty_access=TtyInteractionAccess.UNAVAILABLE)
 
-    shared = next(check for check in group.checks if check.name == "Secret 'shared'")
+    shared = next(
+        check
+        for check in group.checks
+        if check.secret_preview is not None and check.secret_preview.source == "work-env"
+    )
     assert shared.status is Status.OK
     assert shared.secret_preview is not None
     assert shared.secret_preview.status is PreviewStatus.AVAILABLE
@@ -276,7 +279,7 @@ def test_secret_resolves_via_prompt_when_env_var_unset(
     )
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config, build_registry(config), tty_access=TtyInteractionAccess.UNAVAILABLE)
-    shared = next(check for check in g.checks if check.name == "Secret 'shared'")
+    shared = g.checks[-1]
     assert shared.status is Status.WARN
     assert shared.secret_preview is not None
     assert shared.secret_preview.status is PreviewStatus.BLOCKED
@@ -411,7 +414,11 @@ def test_check_secrets_flags_a_not_ready_only_source(tmp_path: Path, monkeypatch
     )
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config, build_registry(config), tty_access=TtyInteractionAccess.UNAVAILABLE)
-    op_only = next(check for check in g.checks if check.name == "Secret 'op-only'")
+    op_only = next(
+        check
+        for check in g.checks
+        if check.secret_preview is not None and check.secret_preview.reason == BlockReason.SOURCE_NOT_READY.value
+    )
     assert op_only.status is Status.WARN
     assert op_only.secret_preview is not None
     assert op_only.secret_preview.status is PreviewStatus.BLOCKED

@@ -136,12 +136,15 @@ class SecretDecl(DeclaredResource):
         ``describe_lookup`` is a pure function of ``(secret, mapping)`` (the
         ``SecretBackend`` contract), so freezing candidates into edges at
         finalize is safe: ``edges_of(secret)`` is the full candidate set that
-        resolution (LLD d) walks. Total and non-throwing. Deduped by target
-        source name in first-encountered order (present sources in registry
-        order, then any extra explicit keys).
+        resolution (LLD d) walks. A backend protocol violation becomes a
+        core-owned configuration failure. Deduped by target source name in
+        first-encountered order (present sources in registry order, then any
+        extra explicit keys).
         """
         from agentworks.capabilities.secret_backend import LookupDisposition
+        from agentworks.errors import ConfigError
         from agentworks.resources.reference import ResourceReference, sourced_references
+        from agentworks.secrets.lookup import LookupDescriptionProtocolError, describe_lookup_exact
         from agentworks.secrets.sources import (
             finalize_source_backend_lookup,
             source_backend_class,
@@ -184,7 +187,12 @@ class SecretDecl(DeclaredResource):
                     owner=self.mapping_owner(source_name),
                     location=self.error_location,
                 )
-            description = backend.describe_lookup(self.name, validated)
+            try:
+                description = describe_lookup_exact(backend, self.name, validated)
+            except LookupDescriptionProtocolError:
+                raise ConfigError(
+                    f"secret/{self.name} source {source_name!r} returned an invalid lookup description"
+                ) from None
             if description.disposition is LookupDisposition.CANDIDATE:
                 emit(source_name)
 

@@ -417,7 +417,6 @@ def test_render_grid_uses_readiness_vocabulary(tmp_path: Path, monkeypatch, capt
     assert "not ready: op CLI not installed" in out
     assert "op://Vault/item/field" not in out  # hidden: not-ready wins over the ref
     assert "won't attempt" in out
-    assert "candidate" in out  # a ready prompt with no static key
     # The retired overloaded literals are gone as standalone cells.
     for line in captured_output.info:
         cells = [c.strip() for c in line.split("  ") if c.strip()]

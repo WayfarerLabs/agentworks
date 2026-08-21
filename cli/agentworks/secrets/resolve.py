@@ -37,6 +37,7 @@ from agentworks.capabilities.secret_backend.client import (
 )
 from agentworks.errors import ConfigError, StateError, UserAbort
 from agentworks.schema import AgwModel, RefOwner
+from agentworks.secrets.lookup import LookupDescriptionProtocolError, describe_lookup_exact
 from agentworks.secrets.outcomes import (
     ResolutionBlocked,
     ResolutionFailed,
@@ -196,6 +197,8 @@ class _SourceContextDriver(AbstractContextManager[SecretSourceClient]):
     ) -> Literal[False]:
         try:
             suppressed = self._inner.__exit__(exc_type, exc, traceback)
+            if suppressed:
+                _warn_cleanup_failure(self._source_name)
         except BaseException as cleanup_error:
             if exc is None and (
                 isinstance(cleanup_error, (UserAbort, concurrent.futures.CancelledError))
@@ -203,9 +206,6 @@ class _SourceContextDriver(AbstractContextManager[SecretSourceClient]):
             ):
                 raise
             _warn_cleanup_failure(self._source_name)
-        else:
-            if suppressed:
-                _warn_cleanup_failure(self._source_name)
         return False
 
 
@@ -327,16 +327,8 @@ def _lookup_projection(
         if validated is None:
             raise StateError(f"secret-source/{source.name} mapping validation selected no backend model")
     try:
-        description = source.backend_class.describe_lookup(secret.name, validated)
-    except (UserAbort, concurrent.futures.CancelledError):
-        raise
-    except Exception:
-        raise _BackendProtocolError from None
-    if type(description) is not LookupDescription:
-        raise _BackendProtocolError
-    try:
-        checked = LookupDescription(description.disposition, description.identifier)
-    except ValueError:
+        checked = describe_lookup_exact(source.backend_class, secret.name, validated)
+    except LookupDescriptionProtocolError:
         raise _BackendProtocolError from None
     if checked.disposition is LookupDisposition.NOT_APPLICABLE:
         return None, checked
@@ -375,18 +367,24 @@ def _validate_result_map(
         if not isinstance(returned, Mapping):
             raise _BackendProtocolError
         snapshot = dict(returned)
+        snapshot_keys = tuple(snapshot)
+        if any(type(key) is not str for key in snapshot_keys):
+            raise _BackendProtocolError
+        if len(snapshot_keys) != len(requests):
+            raise _BackendProtocolError
+        if any(request.name not in snapshot for request in requests):
+            raise _BackendProtocolError
     except (UserAbort, concurrent.futures.CancelledError):
         raise
     except _BackendProtocolError:
         raise
     except Exception:
         raise _BackendProtocolError from None
-    names = {request.name for request in requests}
-    if set(snapshot) != names:
-        raise _BackendProtocolError
     preview = preview_impact is not None
+    normalized_results: dict[str, BackendPreview | BackendResolution] = {}
     try:
-        for name, result in tuple(snapshot.items()):
+        for request in requests:
+            result = snapshot[request.name]
             normalized: BackendPreview | BackendResolution
             if preview:
                 if type(result) is PreviewAvailable:
@@ -421,14 +419,14 @@ def _validate_result_map(
                     raise _BackendProtocolError
             else:
                 raise _BackendProtocolError
-            snapshot[name] = normalized
+            normalized_results[request.name] = normalized
     except (UserAbort, concurrent.futures.CancelledError):
         raise
     except _BackendProtocolError:
         raise
     except Exception:
         raise _BackendProtocolError from None
-    return cast("dict[str, BackendPreview] | dict[str, BackendResolution]", snapshot)
+    return cast("dict[str, BackendPreview] | dict[str, BackendResolution]", normalized_results)
 
 
 def _drive_source(
@@ -464,21 +462,20 @@ def _drive_source(
         remaining_time=remaining,
     )
     driver = _SourceContextDriver(context, source_name=source.name)
-    returned: Mapping[str, BackendPreview] | Mapping[str, BackendResolution]
-    impact: OperatorImpact | None
     with driver as client:
         if isinstance(intent, PreviewIntent):
-            returned = client.preview(requests)
-            impact = intent.impact
-        else:
-            returned = client.resolve(requests)
-            impact = None
-    return _validate_result_map(
-        requests,
-        returned,
-        preview_impact=impact,
-        supports_tty_interaction=supports_tty,
-    )
+            return _validate_result_map(
+                requests,
+                client.preview(requests),
+                preview_impact=intent.impact,
+                supports_tty_interaction=supports_tty,
+            )
+        return _validate_result_map(
+            requests,
+            client.resolve(requests),
+            preview_impact=None,
+            supports_tty_interaction=supports_tty,
+        )
 
 
 def _resolution_outcome(

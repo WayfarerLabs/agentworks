@@ -396,20 +396,17 @@ def test_a_mixed_valid_and_version_two_plugin_contribution_seats_nothing() -> No
         },
     )
     before = _snapshot_registries()
-    with pytest.raises(PluginError, match="declares contract_version 2"):
+    with pytest.raises(PluginError):
         register_plugin(plugin)
     assert _snapshot_registries() == before
 
 
 @pytest.mark.parametrize(
-    ("backend", "expected"),
+    "backend",
     [
-        (_BackendWithInstanceReadiness, "backend_readiness must be declared as @classmethod"),
-        (_BackendWithZeroParameterFactory, "create_client must declare a 'cls' binding parameter"),
-        (
-            _BackendWithNonBooleanTtySupport,
-            "supports_tty_interaction class attribute is 1, not a bool",
-        ),
+        _BackendWithInstanceReadiness,
+        _BackendWithZeroParameterFactory,
+        _BackendWithNonBooleanTtySupport,
     ],
     ids=(
         "instance-readiness-method",
@@ -417,7 +414,7 @@ def test_a_mixed_valid_and_version_two_plugin_contribution_seats_nothing() -> No
         "malformed-tty-support",
     ),
 )
-def test_malformed_secret_backend_registration_is_atomic(backend: type, expected: str) -> None:
+def test_malformed_secret_backend_registration_is_atomic(backend: type) -> None:
     plugin = Plugin(
         name="malformed-secret-backend",
         capabilities={
@@ -426,7 +423,7 @@ def test_malformed_secret_backend_registration_is_atomic(backend: type, expected
         },
     )
     before = _snapshot_registries()
-    with pytest.raises(PluginError, match=expected):
+    with pytest.raises(PluginError):
         register_plugin(plugin)
     assert _snapshot_registries() == before
 

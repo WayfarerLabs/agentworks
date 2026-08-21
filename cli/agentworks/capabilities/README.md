@@ -697,12 +697,14 @@ Secret backends exercise the provider-side variant of the model. The registry st
 class, never a process-global backend object. One source configuration and each per-secret mapping
 are separate declared models, while an operation creates a source-bound client context only for an
 attempted source turn. The class supplies offline readiness and lookup description; the bounded
-client supplies provider work and cleanup.
+client supplies provider work and cleanup. Its `remaining_time()` callback reports the optional
+outer operation budget; the backend combines that live bound with its own validated source deadline
+at each external boundary.
 
 Because secret resolution precedes ordinary capability lifecycle, `SecretBackend.preflight` and
 `runup` are final no-ops rather than provider hooks. Authentication, connectivity, and external work
-belong to the operation-scoped client under the source turn's remaining-time budget. This is a
-deliberate specialization of the shared base, documented in
+belong to the operation-scoped client under the combined outer-operation and backend-owned source
+budgets. This is a deliberate specialization of the shared base, documented in
 [`secret_backend/README.md`](secret_backend/README.md), not an unresolved sibling-base question.
 
 ### Related

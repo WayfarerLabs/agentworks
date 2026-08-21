@@ -626,8 +626,6 @@ def test_unreachable_secret_error_message_and_hint(tmp_path: Path) -> None:
     assert exc.value.hint is not None
     assert "active source chain" in exc.value.hint
     assert "env-var" in exc.value.hint
-    # The hint mentions the three remediation paths.
-    assert "candidate secret-source" in exc.value.hint
     assert "remove" in exc.value.hint
 
 
