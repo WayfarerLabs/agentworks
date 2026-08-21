@@ -9,7 +9,7 @@ from agentworks.resources.graph import Readiness
 from agentworks.schema import CapabilityBlock
 from agentworks.secrets import SecretDecl, SecretSourceDecl
 from agentworks.secrets.outcomes import ResolutionCategory, ResolutionOutcome
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolve import (
     ActiveSource,
     CompletionPolicy,
@@ -32,7 +32,7 @@ def _resolve(decl: SecretDecl) -> tuple[dict[str, str], ResolutionOutcome]:
         [decl],
         [_source()],
         policy=ResolutionPolicy(
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
             completion=CompletionPolicy.COMPLETE,
         ),
         interaction_broker=None,
@@ -79,7 +79,7 @@ def test_opt_out_is_per_source(monkeypatch: pytest.MonkeyPatch) -> None:
     batch = resolve_batch(
         [decl],
         [source],
-        policy=ResolutionPolicy(InteractionPolicy.REFUSE, CompletionPolicy.COMPLETE),
+        policy=ResolutionPolicy(TtyInteractionPolicy.REFUSE, CompletionPolicy.COMPLETE),
         interaction_broker=None,
     )
     assert batch.outcomes[0].category is not ResolutionCategory.RESOLVED
@@ -90,7 +90,7 @@ def test_unset_env_is_soft_miss(monkeypatch: pytest.MonkeyPatch) -> None:
     batch = resolve_batch(
         [SecretDecl(name="missing", description="missing")],
         [_source()],
-        policy=ResolutionPolicy(InteractionPolicy.REFUSE, CompletionPolicy.COMPLETE),
+        policy=ResolutionPolicy(TtyInteractionPolicy.REFUSE, CompletionPolicy.COMPLETE),
         interaction_broker=None,
     )
     assert batch.outcomes[0].detail.value == "soft-miss"

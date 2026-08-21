@@ -27,7 +27,7 @@ from agentworks.resources.graph import Readiness
 from agentworks.resources.reference import ResourceReference, SecretReference
 from agentworks.schema import AgwModel, AgwRootModel, CapabilityBlock
 from agentworks.secrets.base import SecretDecl
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.preview import PreviewCategory, SkippedSource
 from agentworks.secrets.sources import SecretSourceDecl
 
@@ -229,7 +229,7 @@ def test_prediction_reports_the_first_attemptable_source() -> None:
         _FakeSource("env-var"),  # attempts but produces nothing
         _FakeSource("op", values={"a": "1"}),
     )
-    preview = predict_resolution([_decl("a")], sources, interaction=InteractionPolicy.REFUSE)["a"]
+    preview = predict_resolution([_decl("a")], sources, interaction=TtyInteractionPolicy.REFUSE)["a"]
     assert preview.category is PreviewCategory.ATTEMPTABLE
     assert preview.source == "env-var"
     assert sources[0].source.name == "env-var"
@@ -243,14 +243,14 @@ def test_prediction_skips_a_not_ready_source() -> None:
         _FakeSource("op", values={"a": "1"}, not_ready_reason="op CLI not installed"),
         _FakeSource("env-var", values={"a": "2"}),
     )
-    preview = predict_resolution([_decl("a")], sources, interaction=InteractionPolicy.REFUSE)["a"]
+    preview = predict_resolution([_decl("a")], sources, interaction=TtyInteractionPolicy.REFUSE)["a"]
     assert preview.category is PreviewCategory.ATTEMPTABLE
     assert preview.source == "env-var"
     assert preview.skipped_not_ready == (SkippedSource(source="op", reason="op CLI not installed"),)
 
 
 def test_prediction_none_when_nothing_would_resolve() -> None:
-    preview = predict_resolution([], _sources(_FakeSource("env-var")), interaction=InteractionPolicy.REFUSE)
+    preview = predict_resolution([], _sources(_FakeSource("env-var")), interaction=TtyInteractionPolicy.REFUSE)
     assert preview == {}
 
 
@@ -263,7 +263,7 @@ def test_interactive_source_predicted_resolvable_when_interactive(
 
     monkeypatch.setattr(output, "is_interactive", lambda: True)
     prompt = _FakeSource("prompt", interactive=True)
-    preview = predict_resolution([_decl("a")], _sources(prompt), interaction=InteractionPolicy.ALLOW)["a"]
+    preview = predict_resolution([_decl("a")], _sources(prompt), interaction=TtyInteractionPolicy.ALLOW)["a"]
     assert preview.category is PreviewCategory.ATTEMPTABLE
     assert preview.source == "prompt"
     assert prompt.resolve_calls == []
@@ -279,7 +279,7 @@ def test_interactive_source_predicted_unresolvable_when_non_interactive(
 
     monkeypatch.setattr(output, "is_interactive", lambda: False)
     prompt = _FakeSource("prompt", interactive=True)
-    preview = predict_resolution([_decl("a")], _sources(prompt), interaction=InteractionPolicy.REFUSE)["a"]
+    preview = predict_resolution([_decl("a")], _sources(prompt), interaction=TtyInteractionPolicy.REFUSE)["a"]
     assert preview.category is PreviewCategory.REFUSED_INTERACTION
     assert preview.source == "prompt"
     assert prompt.resolve_calls == []
@@ -288,7 +288,7 @@ def test_interactive_source_predicted_unresolvable_when_non_interactive(
 def test_prediction_respects_source_opt_out() -> None:
     prompt = _FakeSource("prompt", interactive=True)
     decl = _decl("a", backend_mappings={"prompt": False})
-    preview = predict_resolution([decl], _sources(prompt), interaction=InteractionPolicy.REFUSE)["a"]
+    preview = predict_resolution([decl], _sources(prompt), interaction=TtyInteractionPolicy.REFUSE)["a"]
     assert preview.category is PreviewCategory.UNAVAILABLE
 
 
@@ -371,7 +371,7 @@ def test_operation_preview_rejects_a_non_enum_policy_before_walking_any_source()
 
 def test_prediction_covers_every_declaration() -> None:
     sources = _sources(_FakeSource("env-var", values={"a": "1"}))
-    predictions = predict_resolution([_decl("a"), _decl("b")], sources, interaction=InteractionPolicy.REFUSE)
+    predictions = predict_resolution([_decl("a"), _decl("b")], sources, interaction=TtyInteractionPolicy.REFUSE)
     assert tuple(predictions) == ("a", "b")
     assert all(preview.category is PreviewCategory.ATTEMPTABLE for preview in predictions.values())
 
@@ -420,7 +420,7 @@ def test_require_predicted_refs_prompt_only_passes_when_interactive(
     config, registry = _env_and_prompt_setup(tmp_path)
     monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN", raising=False)
     monkeypatch.setattr(output, "is_interactive", lambda: True)
-    require_predicted_refs("vm-site/px", (_px_ref(),), config, registry, interaction=InteractionPolicy.ALLOW)
+    require_predicted_refs("vm-site/px", (_px_ref(),), config, registry, interaction=TtyInteractionPolicy.ALLOW)
 
 
 def test_require_predicted_refs_prompt_only_fails_fast_when_non_interactive(
@@ -435,13 +435,13 @@ def test_require_predicted_refs_prompt_only_fails_fast_when_non_interactive(
     monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN", raising=False)
     monkeypatch.setattr(output, "is_interactive", lambda: False)
     with pytest.raises(ConfigError, match="not attemptable by any active source"):
-        require_predicted_refs("vm-site/px", (_px_ref(),), config, registry, interaction=InteractionPolicy.REFUSE)
+        require_predicted_refs("vm-site/px", (_px_ref(),), config, registry, interaction=TtyInteractionPolicy.REFUSE)
 
 
 def test_require_predicted_refs_passes_when_resolvable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config, registry = _env_only_setup(tmp_path)
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "tok")
-    require_predicted_refs("vm-site/px", (_px_ref(),), config, registry, interaction=InteractionPolicy.REFUSE)
+    require_predicted_refs("vm-site/px", (_px_ref(),), config, registry, interaction=TtyInteractionPolicy.REFUSE)
 
 
 def test_require_predicted_refs_refuses_with_owner_usage_framing(
@@ -454,7 +454,7 @@ def test_require_predicted_refs_refuses_with_owner_usage_framing(
     config, registry = _px_site_setup(tmp_path, '"prompt"')
     monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN", raising=False)
     with pytest.raises(ConfigError) as exc:
-        require_predicted_refs("vm-site/px", (_px_ref(),), config, registry, interaction=InteractionPolicy.REFUSE)
+        require_predicted_refs("vm-site/px", (_px_ref(),), config, registry, interaction=TtyInteractionPolicy.REFUSE)
     assert str(exc.value) == (
         "vm-site/px: secret 'proxmox-token' (the Proxmox API token) is not attemptable by any active source"
     )
@@ -467,7 +467,7 @@ def test_require_predicted_refs_empty_refs_is_a_no_op() -> None:
     """The early return: with nothing declared, neither the config nor
     the registry is touched (the cast object would explode on any
     lookup), so a secret-free node's preflight costs nothing here."""
-    require_predicted_refs("vm/box", (), None, cast("Registry", object()), interaction=InteractionPolicy.REFUSE)
+    require_predicted_refs("vm/box", (), None, cast("Registry", object()), interaction=TtyInteractionPolicy.REFUSE)
 
 
 def test_require_predicted_refs_without_config_is_loud(
@@ -479,7 +479,7 @@ def test_require_predicted_refs_without_config_is_loud(
     resolver guard's successor)."""
     _config, registry = _env_only_setup(tmp_path)
     with pytest.raises(ConfigError, match="without config on the context") as exc:
-        require_predicted_refs("vm-site/px", (_px_ref(),), None, registry, interaction=InteractionPolicy.REFUSE)
+        require_predicted_refs("vm-site/px", (_px_ref(),), None, registry, interaction=TtyInteractionPolicy.REFUSE)
     assert str(exc.value).startswith("vm-site/px: ")
 
 
@@ -586,4 +586,4 @@ def test_require_declared_refs_says_nothing_about_resolvability(
     require_declared_refs("vm-site/px", (_px_ref(),), registry)  # no raise
     # ... while the prediction the SWEEP runs over the same reference does refuse.
     with pytest.raises(ConfigError, match="not attemptable"):
-        require_predicted_refs("vm-site/px", (_px_ref(),), config, registry, interaction=InteractionPolicy.REFUSE)
+        require_predicted_refs("vm-site/px", (_px_ref(),), config, registry, interaction=TtyInteractionPolicy.REFUSE)

@@ -10,7 +10,7 @@ from agentworks import output
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db
 from agentworks.machine_output import OutputFormat
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 
 secret_app = typer.Typer(
     name="secret",
@@ -131,7 +131,7 @@ def secret_verify(
     ),
 ) -> None:
     """Prove that declared secrets resolve without displaying their values."""
-    interaction = InteractionPolicy.ALLOW if allow_interaction else InteractionPolicy.REFUSE
+    interaction = TtyInteractionPolicy.ALLOW if allow_interaction else TtyInteractionPolicy.REFUSE
     from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
     from agentworks.errors import ValidationError

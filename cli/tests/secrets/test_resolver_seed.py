@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from agentworks.errors import StateError
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolver import Resolver
 
 if TYPE_CHECKING:
@@ -59,7 +59,9 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> _ResolveSpy:
 
 
 def _resolver() -> Resolver:
-    return Resolver(cast("Config", object()), cast("Registry", _EmptyRegistry()), interaction=InteractionPolicy.REFUSE)
+    return Resolver(
+        cast("Config", object()), cast("Registry", _EmptyRegistry()), interaction=TtyInteractionPolicy.REFUSE
+    )
 
 
 def test_seeded_value_is_readable_before_the_boundary_pass(

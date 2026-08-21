@@ -21,7 +21,7 @@ import pytest
 
 from agentworks.db import VMStatus
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 
 if TYPE_CHECKING:
@@ -104,7 +104,7 @@ def test_start_stopped_vm_resolves_once_starts_and_clears_flag(
     _seed_vm(db, operator_stopped=True)
     events = _fake_power(monkeypatch, VMStatus.STOPPED)
 
-    vm_manager.start_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+    vm_manager.start_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"], ["tailscale-auth-key"]]
     assert events == ["status", "start", "tailscale"]
@@ -129,7 +129,7 @@ def test_start_running_vm_short_circuits_but_still_clears_flag(
     _seed_vm(db, operator_stopped=True)
     events = _fake_power(monkeypatch, VMStatus.RUNNING)
 
-    vm_manager.start_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+    vm_manager.start_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"], ["tailscale-auth-key"]]
     assert events == ["status", "tailscale"]
@@ -247,7 +247,7 @@ def test_start_healthy_probe_stays_inside_hold_and_never_acquires_auth(
         lambda *args, **kwargs: pytest.fail("healthy start acquired Tailscale auth"),
     )
 
-    vm_manager.start_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+    vm_manager.start_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert events == ["hold-enter", "probe-false", "hold-exit"]
 
@@ -300,7 +300,7 @@ def test_start_rejoin_orders_acquisition_reader_ensure_cleanup_and_release(
 
     calls = _patch_actual_ensure_sequence(monkeypatch, events)
 
-    vm_manager.start_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+    vm_manager.start_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert events == [
         "hold-enter",
@@ -379,7 +379,7 @@ def test_start_lazy_repair_validates_after_start_and_delivery_before_rejoin_work
     )
 
     with pytest.raises(ValidationError) as caught:
-        vm_manager.start_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+        vm_manager.start_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert events == [
         "status",
@@ -436,7 +436,7 @@ def test_start_tailscale_failure_matrix_cleans_before_one_release_without_retry(
     values = _TrackedValues(events)
 
     def _acquire(*args: object, **kwargs: object) -> dict[str, str]:
-        assert kwargs["interaction"] is InteractionPolicy.REFUSE
+        assert kwargs["interaction"] is TtyInteractionPolicy.REFUSE
         _stage("resolve")
         return values
 
@@ -464,7 +464,7 @@ def test_start_tailscale_failure_matrix_cleans_before_one_release_without_retry(
     )
 
     with pytest.raises(failure_type) as caught:
-        vm_manager.start_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+        vm_manager.start_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert caught.value is failure
     assert events.count(failure_stage) == 1
@@ -538,7 +538,7 @@ def test_stop_running_vm_resolves_once_stops_and_sets_flag(
     _seed_vm(db)
     events = _fake_power(monkeypatch, VMStatus.RUNNING)
 
-    vm_manager.stop_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+    vm_manager.stop_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"]]
     assert events == ["status", "stop"]
@@ -561,7 +561,7 @@ def test_stop_sets_flag_before_already_stopped_shortcut(
     _seed_vm(db)
     events = _fake_power(monkeypatch, VMStatus.STOPPED)
 
-    vm_manager.stop_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+    vm_manager.stop_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     row = db.get_vm("box")
     assert row is not None and row.operator_stopped is True
@@ -587,7 +587,7 @@ def test_stop_of_a_manually_stopped_vm_is_a_true_noop(
     _seed_vm(db, operator_stopped=True)
     _fake_power(monkeypatch, VMStatus.STOPPED)
 
-    vm_manager.stop_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+    vm_manager.stop_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     (message,) = [m for m in captured_output.info if not m.startswith("Resolved ")]
     assert message == "VM 'box' is already manually stopped"
@@ -617,7 +617,7 @@ def test_vm_scope_reaches_node_readiness(
 
     monkeypatch.setattr(ProxmoxPlatform, "preflight", _recording)
 
-    vm_manager.start_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+    vm_manager.start_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     (scope,) = scopes
     assert scope is not None

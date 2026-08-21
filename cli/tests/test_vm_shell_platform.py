@@ -22,7 +22,7 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.db import Database
 from agentworks.errors import StateError
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from tests.conftest import empty_secret_target, stub_build_registry, stub_vm_gates
 
 if TYPE_CHECKING:
@@ -146,7 +146,7 @@ def test_shell_vm_raises_when_no_tailscale_host_and_no_platform_flag(
     db = _seed_db(tmp_path, tailscale_host=None)
 
     with pytest.raises(StateError) as exc_info:
-        vm_manager.shell_vm(db, _make_config(), "vm1", interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
+        vm_manager.shell_vm(db, _make_config(), "vm1", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
     err = exc_info.value
     assert err.entity_kind == "vm"
@@ -181,7 +181,7 @@ def test_shell_vm_platform_flag_bypasses_tailscale_check(
     # shell_vm returns interactive()'s exit code (0, stubbed); the CLI
     # layer owns the process exit.
     rc = vm_manager.shell_vm(  # type: ignore[arg-type]
-        db, _make_config(), "vm1", platform_transport=True, interaction=InteractionPolicy.REFUSE
+        db, _make_config(), "vm1", platform_transport=True, interaction=TtyInteractionPolicy.REFUSE
     )
     assert rc == 0
     assert interactive_log == [True], "the interactive shell should have been opened"
@@ -248,7 +248,7 @@ def test_shell_vm_platform_uses_native_transport(
 
     assert (
         vm_manager.shell_vm(  # type: ignore[arg-type]
-            db, _make_config(), "vm1", platform_transport=True, interaction=InteractionPolicy.REFUSE
+            db, _make_config(), "vm1", platform_transport=True, interaction=TtyInteractionPolicy.REFUSE
         )
         == 0
     )
@@ -633,7 +633,7 @@ def test_shell_vm_warns_but_continues_on_failed_init(
     interactive_log: list[bool] = []
     _patch_common(monkeypatch, vm_manager, interactive_log=interactive_log)
 
-    rc = vm_manager.shell_vm(db, _make_config(), "vm1", interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
+    rc = vm_manager.shell_vm(db, _make_config(), "vm1", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
     assert rc == 0
     assert interactive_log == [True], "shell must still open on a failed-init VM"
 
@@ -657,7 +657,7 @@ def test_shell_vm_still_raises_on_failed_provisioning(
     db = _seed_db(tmp_path, provisioning_status="failed")
 
     with pytest.raises(StateError) as exc_info:
-        vm_manager.shell_vm(db, _make_config(), "vm1", interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
+        vm_manager.shell_vm(db, _make_config(), "vm1", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
     err = exc_info.value
     assert "failed provisioning" in str(err)
@@ -700,7 +700,7 @@ def test_exec_vm_warns_but_continues_on_failed_init(
 
     monkeypatch.setattr("agentworks.transports.transport", exec_target_stub)
 
-    exit_code = vm_manager.exec_vm(db, _make_config(), "vm1", ["echo", "hi"], interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
+    exit_code = vm_manager.exec_vm(db, _make_config(), "vm1", ["echo", "hi"], interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
     assert exit_code == 0  # the underlying exec returned 0
 
     err = capsys.readouterr().err

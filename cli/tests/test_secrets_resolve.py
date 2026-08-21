@@ -20,7 +20,7 @@ from agentworks.resources.graph import Readiness
 from agentworks.schema import AgwModel, CapabilityBlock
 from agentworks.secrets import SecretDecl
 from agentworks.secrets.outcomes import ResolutionCategory, ResolutionDetail
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolve import (
     ActiveSource,
     CompletionPolicy,
@@ -33,7 +33,7 @@ from tests.secrets.test_resolution_lifecycle import _Backend, _source
 
 def _policy(*, partial: bool = False) -> ResolutionPolicy:
     return ResolutionPolicy(
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
         completion=CompletionPolicy.PARTIAL if partial else CompletionPolicy.COMPLETE,
     )
 
@@ -287,7 +287,7 @@ def test_complete_mode_dooms_before_prompt_factory_or_broker() -> None:
     batch = resolve_batch(
         [doomed, independent],
         [_source(name="first", backend_class=_First), _prompt_source()],
-        policy=ResolutionPolicy(interaction=InteractionPolicy.ALLOW, completion=CompletionPolicy.COMPLETE),
+        policy=ResolutionPolicy(interaction=TtyInteractionPolicy.ALLOW, completion=CompletionPolicy.COMPLETE),
         interaction_broker=broker,
     )
     assert [outcome.detail for outcome in batch.outcomes] == [
@@ -307,7 +307,7 @@ def test_partial_mode_resolves_independent_secret_instead_of_dooming() -> None:
     batch = resolve_batch(
         [doomed, independent],
         [_source(name="first", backend_class=_First), _prompt_source()],
-        policy=ResolutionPolicy(interaction=InteractionPolicy.ALLOW, completion=CompletionPolicy.PARTIAL),
+        policy=ResolutionPolicy(interaction=TtyInteractionPolicy.ALLOW, completion=CompletionPolicy.PARTIAL),
         interaction_broker=broker,
     )
     assert [outcome.detail for outcome in batch.outcomes] == [
@@ -328,7 +328,7 @@ def test_complete_doom_applies_to_interactive_plugin_without_a_broker() -> None:
             _source(name="first", backend_class=_First),
             _source(name="interactive", backend_class=_Interactive),
         ],
-        policy=ResolutionPolicy(interaction=InteractionPolicy.ALLOW, completion=CompletionPolicy.COMPLETE),
+        policy=ResolutionPolicy(interaction=TtyInteractionPolicy.ALLOW, completion=CompletionPolicy.COMPLETE),
         interaction_broker=None,
     )
     assert batch.outcomes[1].detail is ResolutionDetail.BATCH_DOOMED

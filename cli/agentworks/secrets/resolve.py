@@ -29,7 +29,7 @@ from agentworks.secrets.outcomes import (
     _safe_diagnostic_text,
     complete_resolution_error,
 )
-from agentworks.secrets.policy import InteractionPolicy, require_exact_interaction_policy
+from agentworks.secrets.policy import TtyInteractionPolicy, require_exact_tty_interaction_policy
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -111,7 +111,7 @@ class ResolutionPolicy:
     ``interaction`` is the boundary. It arrives from callers our type checker
     does not see, through the published service surface, and this constructor
     is the totality half of the check the note above
-    ``require_exact_interaction_policy`` describes.
+    ``require_exact_tty_interaction_policy`` describes.
 
     ``completion`` is not a boundary, and is checked anyway. Every value
     comes from a first-party literal and no published function takes it as a
@@ -121,11 +121,11 @@ class ResolutionPolicy:
     cost of a ``type()`` comparison.
     """
 
-    interaction: InteractionPolicy
+    interaction: TtyInteractionPolicy
     completion: CompletionPolicy
 
     def __post_init__(self) -> None:
-        require_exact_interaction_policy(self.interaction)
+        require_exact_tty_interaction_policy(self.interaction)
         if type(self.completion) is not CompletionPolicy:
             raise StateError("completion must be an exact CompletionPolicy") from None
 
@@ -448,7 +448,7 @@ def _remaining_attemptable(
     for source in sources:
         if not source.readiness.is_ready:
             continue
-        if source.interactive and policy.interaction is InteractionPolicy.REFUSE:
+        if source.interactive and policy.interaction is TtyInteractionPolicy.REFUSE:
             continue
         if source.would_attempt(secret):
             return True
@@ -536,7 +536,7 @@ def resolve_batch(
             for request, identifier in projected:
                 evidence[request.name].not_ready.append((source.name, identifier, source.disabled_backend_plugin))
             continue
-        if source.interactive and policy.interaction is InteractionPolicy.REFUSE:
+        if source.interactive and policy.interaction is TtyInteractionPolicy.REFUSE:
             for request, identifier in projected:
                 evidence[request.name].refused.append((source.name, identifier))
             continue
@@ -668,17 +668,17 @@ def resolve_partial_for_reveal(
     secrets: Sequence[SecretDecl],
     sources: Sequence[ActiveSource],
     *,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> PartialResolution:
     """Resolve independent values for the explicit env reveal surface.
 
     Checks its own ``interaction`` because the coverage rule beside
-    ``require_exact_interaction_policy`` says every constructing function does. The
+    ``require_exact_tty_interaction_policy`` says every constructing function does. The
     constructor would catch a bad value one line later here, which is exactly why the
     rule is applied rather than judged.
     """
-    require_exact_interaction_policy(interaction)
-    broker = OutputInteractionBroker(secrets) if interaction is InteractionPolicy.ALLOW else None
+    require_exact_tty_interaction_policy(interaction)
+    broker = OutputInteractionBroker(secrets) if interaction is TtyInteractionPolicy.ALLOW else None
     batch = resolve_batch(
         secrets,
         sources,

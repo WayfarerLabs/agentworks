@@ -13,7 +13,7 @@ import pytest
 
 from agentworks.config import load_config
 from agentworks.db import VMStatus
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 
 if TYPE_CHECKING:
@@ -70,7 +70,7 @@ def _describe(
         return None
 
     monkeypatch.setattr(vm_manager, "_query_live_resources", _fake_live)
-    vm_manager.describe_vm(db, config, "dvm", interaction=InteractionPolicy.REFUSE)
+    vm_manager.describe_vm(db, config, "dvm", interaction=TtyInteractionPolicy.REFUSE)
     return calls
 
 

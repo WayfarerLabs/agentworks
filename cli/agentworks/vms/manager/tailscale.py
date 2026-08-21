@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
 
 # Guards the missing-tailscale-binary warning to once per process: the
 # power-state fast path calls _is_tailscale_reachable on every gated
@@ -77,7 +77,7 @@ def port_forward_vm(
     address: str = "localhost",
     verbose: bool = False,
     *,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> int:
     """Forward one or more local ports to a VM via SSH tunnels.
 

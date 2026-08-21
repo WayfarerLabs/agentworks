@@ -12,7 +12,7 @@ from agentworks.errors import ConfigError
 from agentworks.orchestration.readiness import preflight_all
 from agentworks.resources import Registry
 from agentworks.resources.reference import ResourceReference
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 
 
 @dataclass
@@ -45,7 +45,7 @@ def test_sweep_hits_every_node_in_order_with_one_context() -> None:
     log: list[tuple[str, RunContext]] = []
     nodes = [_N("vm-site/px", log), _N("git-credential/gh", log), _N("vm/box", log)]
     ctx = RunContext()
-    preflight_all(nodes, ctx, registry=Registry.empty(), interaction=InteractionPolicy.REFUSE)
+    preflight_all(nodes, ctx, registry=Registry.empty(), interaction=TtyInteractionPolicy.REFUSE)
     assert [key for key, _ in log] == ["vm-site/px", "git-credential/gh", "vm/box"]
     assert all(seen is ctx for _, seen in log)
 
@@ -58,7 +58,7 @@ def test_sweep_propagates_the_first_failure() -> None:
         _N("vm/box", log),
     ]
     with pytest.raises(ConfigError, match="git-credential/gh"):
-        preflight_all(nodes, RunContext(), registry=Registry.empty(), interaction=InteractionPolicy.REFUSE)
+        preflight_all(nodes, RunContext(), registry=Registry.empty(), interaction=TtyInteractionPolicy.REFUSE)
     # Nothing after the failure ran (the command aborts pre-mutation).
     assert [key for key, _ in log] == ["vm-site/px", "git-credential/gh"]
 
@@ -151,7 +151,7 @@ def test_sweep_predicts_source_attemptability_without_probing_values(
     config, registry, nodes = _site_graph(tmp_path, '"env-var"')
     monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN", raising=False)
 
-    preflight_all(nodes, RunContext(config=config), registry=registry, interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
+    preflight_all(nodes, RunContext(config=config), registry=registry, interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
 
 def test_node_preflight_alone_does_not_predict(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -181,7 +181,7 @@ def test_sweep_fails_fast_non_interactively_on_a_prompt_only_secret(
 
     monkeypatch.setattr(output, "is_interactive", lambda: False)
     with pytest.raises(ConfigError, match="not attemptable by any active source"):
-        preflight_all(nodes, RunContext(config=config), registry=registry, interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
+        preflight_all(nodes, RunContext(config=config), registry=registry, interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
     monkeypatch.setattr(output, "is_interactive", lambda: True)
-    preflight_all(nodes, RunContext(config=config), registry=registry, interaction=InteractionPolicy.ALLOW)  # type: ignore[arg-type]
+    preflight_all(nodes, RunContext(config=config), registry=registry, interaction=TtyInteractionPolicy.ALLOW)  # type: ignore[arg-type]

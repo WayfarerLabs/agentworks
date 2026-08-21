@@ -8,7 +8,7 @@ import pytest
 from typer.testing import CliRunner
 
 from agentworks.cli import app
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager as session_manager
 
 
@@ -33,7 +33,7 @@ def command_calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, 
                     "name": "coding",
                     "force": True,
                     "yes": True,
-                    "interaction": InteractionPolicy.REFUSE,
+                    "interaction": TtyInteractionPolicy.REFUSE,
                 },
             ),
         ),
@@ -48,7 +48,7 @@ def command_calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, 
                     "admin_only": False,
                     "include_running": False,
                     "force": False,
-                    "interaction": InteractionPolicy.REFUSE,
+                    "interaction": TtyInteractionPolicy.REFUSE,
                 },
             ),
         ),

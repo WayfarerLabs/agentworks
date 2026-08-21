@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from agentworks.errors import NotFoundError, ValidationError
 from agentworks.naming import MAX_SECRET_NAME_LENGTH, validate_name
 from agentworks.secrets.outcomes import format_remediation
-from agentworks.secrets.policy import InteractionPolicy, require_exact_interaction_policy
+from agentworks.secrets.policy import TtyInteractionPolicy, require_exact_tty_interaction_policy
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -54,10 +54,10 @@ def verify_secrets(
     registry: Registry,
     names: Sequence[str],
     *,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> tuple[ResolutionOutcome, ...]:
     """Resolve requested declarations once and return value-free outcomes."""
-    require_exact_interaction_policy(interaction)
+    require_exact_tty_interaction_policy(interaction)
     if not names:
         raise ValidationError("at least one secret name is required")
     invalid_name = False
@@ -98,7 +98,7 @@ def verify_secrets(
         resolve_batch,
     )
 
-    broker = OutputInteractionBroker(declarations) if interaction is InteractionPolicy.ALLOW else None
+    broker = OutputInteractionBroker(declarations) if interaction is TtyInteractionPolicy.ALLOW else None
     batch = resolve_batch(
         declarations,
         active_sources(config, registry),

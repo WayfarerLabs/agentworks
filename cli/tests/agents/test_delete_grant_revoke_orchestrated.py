@@ -32,7 +32,7 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 
 if TYPE_CHECKING:
@@ -167,7 +167,7 @@ def test_graph_is_the_live_vm_alone_for_the_trio(
     vm = db.get_vm("box")
     assert vm is not None
     registry = build_registry(config)
-    resolver = Resolver(config, registry, interaction=InteractionPolicy.REFUSE)
+    resolver = Resolver(config, registry, interaction=TtyInteractionPolicy.REFUSE)
 
     nodes = walk(live_vm_node(db, config, registry, vm))
 
@@ -197,7 +197,7 @@ def test_grant_reachable_vm_is_one_boundary_burst(
     _reachable(monkeypatch, True)
 
     agent_grants.grant_workspaces(
-        db, config, agent_name="a1", workspace_names=["ws1"], interaction=InteractionPolicy.REFUSE
+        db, config, agent_name="a1", workspace_names=["ws1"], interaction=TtyInteractionPolicy.REFUSE
     )
 
     assert resolve_counter == [["proxmox-token"]]
@@ -226,7 +226,7 @@ def test_grant_stopped_vm_gate_burst_seeds_the_whole_union(
     _stop_the_vm(monkeypatch, events)
 
     agent_grants.grant_workspaces(
-        db, config, agent_name="a1", workspace_names=["ws1"], interaction=InteractionPolicy.REFUSE
+        db, config, agent_name="a1", workspace_names=["ws1"], interaction=TtyInteractionPolicy.REFUSE
     )
 
     assert events == ["status", "start", "tailscale"]  # the gate ran
@@ -249,7 +249,7 @@ def test_revoke_reachable_vm_is_one_boundary_burst(
     _reachable(monkeypatch, True)
 
     agent_grants.revoke_workspaces(
-        db, config, agent_name="a1", workspace_names=["ws1"], interaction=InteractionPolicy.REFUSE
+        db, config, agent_name="a1", workspace_names=["ws1"], interaction=TtyInteractionPolicy.REFUSE
     )
 
     assert resolve_counter == [["proxmox-token"]]
@@ -276,7 +276,7 @@ def test_revoke_stopped_vm_gate_burst_seeds_the_whole_union(
     _stop_the_vm(monkeypatch, events)
 
     agent_grants.revoke_workspaces(
-        db, config, agent_name="a1", workspace_names=["ws1"], interaction=InteractionPolicy.REFUSE
+        db, config, agent_name="a1", workspace_names=["ws1"], interaction=TtyInteractionPolicy.REFUSE
     )
 
     assert events == ["status", "start", "tailscale"]
@@ -297,7 +297,7 @@ def test_delete_reachable_vm_is_one_boundary_burst(
     _seed(db)
     _reachable(monkeypatch, True)
 
-    agent_manager.delete_agent(db, config, name="a1", yes=True, interaction=InteractionPolicy.REFUSE)
+    agent_manager.delete_agent(db, config, name="a1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"]]
     assert db.get_agent("a1") is None
@@ -317,7 +317,7 @@ def test_delete_stopped_vm_gate_burst_seeds_the_whole_union(
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
 
-    agent_manager.delete_agent(db, config, name="a1", yes=True, interaction=InteractionPolicy.REFUSE)
+    agent_manager.delete_agent(db, config, name="a1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert events == ["status", "start", "tailscale"]
     assert resolve_counter == [["proxmox-token"]]
@@ -342,7 +342,7 @@ def test_delete_sessions_guard_refuses_with_zero_resolves_and_zero_gate(
     _no_gate(monkeypatch)
 
     with pytest.raises(StateError, match="has 1 session"):
-        agent_manager.delete_agent(db, config, name="a1", interaction=InteractionPolicy.REFUSE)
+        agent_manager.delete_agent(db, config, name="a1", interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == []
     assert target.commands == []
@@ -363,7 +363,7 @@ def test_delete_declined_confirm_aborts_with_zero_resolves_and_zero_gate(
     captured_output.confirm_response = False
 
     with pytest.raises(UserAbort, match="delete cancelled"):
-        agent_manager.delete_agent(db, config, name="a1", interaction=InteractionPolicy.REFUSE)
+        agent_manager.delete_agent(db, config, name="a1", interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == []
     assert target.commands == []
@@ -383,7 +383,7 @@ def test_grant_empty_request_fails_with_zero_resolves_and_zero_gate(
 
     with pytest.raises(ValidationError, match="needs at least one workspace name"):
         agent_grants.grant_workspaces(
-            db, config, agent_name="a1", workspace_names=[], interaction=InteractionPolicy.REFUSE
+            db, config, agent_name="a1", workspace_names=[], interaction=TtyInteractionPolicy.REFUSE
         )
 
     assert resolve_counter == []
@@ -403,7 +403,7 @@ def test_revoke_unknown_agent_fails_with_zero_resolves_and_zero_gate(
 
     with pytest.raises(NotFoundError, match="agent 'ghost' not found"):
         agent_grants.revoke_workspaces(
-            db, config, agent_name="ghost", workspace_names=["ws1"], interaction=InteractionPolicy.REFUSE
+            db, config, agent_name="ghost", workspace_names=["ws1"], interaction=TtyInteractionPolicy.REFUSE
         )
 
     assert resolve_counter == []
@@ -436,7 +436,7 @@ def test_agent_scope_reaches_node_readiness(
     monkeypatch.setattr(ProxmoxPlatform, "preflight", _recording)
 
     agent_grants.grant_workspaces(
-        db, config, agent_name="a1", workspace_names=["ws1"], interaction=InteractionPolicy.REFUSE
+        db, config, agent_name="a1", workspace_names=["ws1"], interaction=TtyInteractionPolicy.REFUSE
     )
 
     (scope,) = scopes
@@ -469,7 +469,7 @@ def test_delete_choreography_end_to_end_standalone(
     _seed_live_session(db, name="s1", ws="ws1", agent="a1")
     _reachable(monkeypatch, True)
 
-    agent_manager.delete_agent(db, config, name="a1", force=True, yes=True, interaction=InteractionPolicy.REFUSE)
+    agent_manager.delete_agent(db, config, name="a1", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert any("has-session -t s1" in c for c in target.commands)
     assert any("kill-session -t s1" in c for c in target.commands)
@@ -631,7 +631,7 @@ def test_delete_nested_platform_path_reuses_the_callers_composition(
     vm_node = _node_holding(db, config, bound)
 
     agent_manager.delete_agent(
-        db, config, name="a1", force=True, yes=True, vm_node=vm_node, interaction=InteractionPolicy.REFUSE
+        db, config, name="a1", force=True, yes=True, vm_node=vm_node, interaction=TtyInteractionPolicy.REFUSE
     )
 
     assert resolve_counter == []  # nothing resolved beyond the caller's pass
@@ -662,7 +662,7 @@ def test_delete_nested_rejects_a_mismatched_vm_node(
 
     with pytest.raises(StateError, match="teardown-wiring bug"):
         agent_manager.delete_agent(
-            db, config, name="a1", force=True, yes=True, vm_node=vm_node, interaction=InteractionPolicy.REFUSE
+            db, config, name="a1", force=True, yes=True, vm_node=vm_node, interaction=TtyInteractionPolicy.REFUSE
         )
 
     assert resolve_counter == []  # refused before any resolve
@@ -689,7 +689,7 @@ def test_grant_all_sets_flag_and_adds_every_vm_workspace(
     _reachable(monkeypatch, True)
 
     agent_grants.grant_workspaces(
-        db, config, agent_name="a1", workspace_names=[], grant_all=True, interaction=InteractionPolicy.REFUSE
+        db, config, agent_name="a1", workspace_names=[], grant_all=True, interaction=TtyInteractionPolicy.REFUSE
     )
 
     row = db.get_agent("a1")
@@ -715,7 +715,7 @@ def test_grant_missing_workspace_warns_and_skips(
     _reachable(monkeypatch, True)
 
     agent_grants.grant_workspaces(
-        db, config, agent_name="a1", workspace_names=["ws1", "nope"], interaction=InteractionPolicy.REFUSE
+        db, config, agent_name="a1", workspace_names=["ws1", "nope"], interaction=TtyInteractionPolicy.REFUSE
     )
 
     assert db.has_any_grant("a1", "ws1")
@@ -742,7 +742,7 @@ def test_revoke_named_workspace_with_implicit_access_keeps_membership(
     _reachable(monkeypatch, True)
 
     agent_grants.revoke_workspaces(
-        db, config, agent_name="a1", workspace_names=["ws1"], interaction=InteractionPolicy.REFUSE
+        db, config, agent_name="a1", workspace_names=["ws1"], interaction=TtyInteractionPolicy.REFUSE
     )
 
     assert db.has_any_grant("a1", "ws1")  # the implicit grant survives
@@ -778,7 +778,7 @@ def test_revoke_all_warns_about_remaining_implicit_access(
     _reachable(monkeypatch, True)
 
     agent_grants.revoke_workspaces(
-        db, config, agent_name="a1", workspace_names=[], revoke_all=True, interaction=InteractionPolicy.REFUSE
+        db, config, agent_name="a1", workspace_names=[], revoke_all=True, interaction=TtyInteractionPolicy.REFUSE
     )
 
     row = db.get_agent("a1")

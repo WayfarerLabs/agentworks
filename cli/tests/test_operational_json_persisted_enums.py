@@ -18,7 +18,7 @@ from agentworks.db.projections import (
     project_vm_initialization_status,
     project_vm_provisioning_status,
 )
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -83,7 +83,7 @@ def test_invalid_database_enums_are_closed_in_shared_facts(
         db,
         config,
         no_status=True,
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     ).sessions[0]
     assert session_fact.mode == "unknown"
     assert session_fact.status == "unavailable"

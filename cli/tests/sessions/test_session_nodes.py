@@ -14,7 +14,7 @@ from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.capabilities.harness_integration import HarnessIntegration
 from agentworks.errors import StateError
 from agentworks.schema import AgwModel, NonEmptyStr, SecretRef
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.nodes import pending_session_node
 from agentworks.sessions.templates import ResolvedSessionTemplate
 from agentworks.vms.nodes import LiveVMNode, VMSiteNode
@@ -65,7 +65,7 @@ def _pending_agent(db: Database, vm: LiveVMNode, name: str = "dev"):
     from agentworks.agents.templates import ResolvedAgentTemplate
 
     template = AgentTemplateNode(ResolvedAgentTemplate(name="default"), ())
-    return pending_agent_node(db, _stub_config(), name, template, vm, interaction=InteractionPolicy.REFUSE)
+    return pending_agent_node(db, _stub_config(), name, template, vm, interaction=TtyInteractionPolicy.REFUSE)
 
 
 def _session(
@@ -79,7 +79,9 @@ def _session(
     from agentworks.workspaces.nodes import pending_workspace_node
 
     vm_node = vm if vm is not None else _vm_node(db)
-    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm_node, None, interaction=InteractionPolicy.REFUSE)
+    workspace = pending_workspace_node(
+        db, _stub_config(), "ws1", vm_node, None, interaction=TtyInteractionPolicy.REFUSE
+    )
     template = ResolvedSessionTemplate(name="claude", harness_integration_config={"required_commands": list(required)})
     return pending_session_node(
         db,
@@ -274,8 +276,8 @@ def test_session_create_graph_shares_one_vm_node(db: Database) -> None:
         cast("Registry", object()),
     )
     template = AgentTemplateNode(ResolvedAgentTemplate(name="default", git_credentials=["gh"]), (cred,))
-    agent = pending_agent_node(db, _stub_config(), "dev", template, vm, interaction=InteractionPolicy.REFUSE)
-    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm, None, interaction=InteractionPolicy.REFUSE)
+    agent = pending_agent_node(db, _stub_config(), "dev", template, vm, interaction=TtyInteractionPolicy.REFUSE)
+    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm, None, interaction=TtyInteractionPolicy.REFUSE)
     session = pending_session_node(
         db,
         _stub_config(),
@@ -351,7 +353,7 @@ def _scanner_session(db: Database, monkeypatch: pytest.MonkeyPatch):  # noqa: AN
 
     monkeypatch.setitem(HARNESS_INTEGRATION_REGISTRY, "scanner", _SecretHarnessIntegration)
     vm = _vm_node(db)
-    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm, None, interaction=InteractionPolicy.REFUSE)
+    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm, None, interaction=TtyInteractionPolicy.REFUSE)
     template = ResolvedSessionTemplate(name="scan", harness_integration="scanner")
     return pending_session_node(
         db,
@@ -456,7 +458,7 @@ def test_sweep_predicts_a_harness_integration_config_secret_with_owner_usage_fra
         [session],
         RunContext(config=config, operation_scope=scope),
         registry=registry,
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
 
 
@@ -481,7 +483,7 @@ def test_sweep_passes_a_resolvable_harness_integration_config_secret(
         [session],
         RunContext(config=config, operation_scope=scope),
         registry=registry,
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
 
     assert secret_union([session]) == ("scanner-api-key",)
@@ -536,7 +538,7 @@ def test_pending_workspace_teardown_is_todays_rollback_body(db: Database, monkey
         lambda db_, config, **kw: calls.append(dict(kw)),
     )
     vm = _vm_node(db)
-    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm, None, interaction=InteractionPolicy.REFUSE)
+    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm, None, interaction=TtyInteractionPolicy.REFUSE)
     workspace.mark_realized()
     workspace.teardown()
     (call,) = calls
@@ -679,7 +681,7 @@ def test_reverse_realization_order_reproduces_rollback_order(db: Database, monke
         lambda *a, **k: order.append("workspace"),
     )
     vm = _vm_node(db)
-    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm, None, interaction=InteractionPolicy.REFUSE)
+    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm, None, interaction=TtyInteractionPolicy.REFUSE)
     agent = _pending_agent(db, vm)
     log = RealizationLog()
     log.mark_realized(workspace)  # creation order: workspace, then agent
@@ -909,7 +911,9 @@ def _seam_harness_integration(db: Database, blob: dict[str, object], harness_int
     from agentworks.workspaces.nodes import pending_workspace_node
 
     vm_node = _vm_node(db)
-    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm_node, None, interaction=InteractionPolicy.REFUSE)
+    workspace = pending_workspace_node(
+        db, _stub_config(), "ws1", vm_node, None, interaction=TtyInteractionPolicy.REFUSE
+    )
     template = ResolvedSessionTemplate(name="t", harness_integration=harness_integration_name)
     return _harness_integration_for_template(
         template,
@@ -932,7 +936,9 @@ def test_same_key_writers_land_in_distinct_namespaces(db: Database, monkeypatch:
     from agentworks.workspaces.nodes import pending_workspace_node
 
     vm_node = _vm_node(db)
-    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm_node, None, interaction=InteractionPolicy.REFUSE)
+    workspace = pending_workspace_node(
+        db, _stub_config(), "ws1", vm_node, None, interaction=TtyInteractionPolicy.REFUSE
+    )
     for hname in ("toy-a", "toy-b"):
         monkeypatch.setitem(HARNESS_INTEGRATION_REGISTRY, hname, _toy_harness_integration(hname))
     blob: dict[str, object] = {}

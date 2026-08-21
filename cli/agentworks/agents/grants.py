@@ -27,7 +27,7 @@ from agentworks.vms.manager import gated_vm_boundary
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.ssh import SSHLogger
 
 WS_GROUP_PREFIX = "ws-"
@@ -58,7 +58,7 @@ def grant_workspaces(
     agent_name: str,
     workspace_names: list[str],
     grant_all: bool = False,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Grant an agent explicit access to workspaces.
 
@@ -128,7 +128,7 @@ def revoke_workspaces(
     agent_name: str,
     workspace_names: list[str],
     revoke_all: bool = False,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Revoke explicit workspace grants from an agent.
 

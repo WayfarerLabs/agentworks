@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.config import load_config
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from tests.conftest import ManifestDoc, write_cfg
 
 if TYPE_CHECKING:
@@ -33,11 +33,11 @@ def _resolve_tailscale_key(config, registry, vm_tmpl) -> str:  # type: ignore[no
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import vm_template_node
 
-    resolver = Resolver(config, registry, interaction=InteractionPolicy.REFUSE)
+    resolver = Resolver(config, registry, interaction=TtyInteractionPolicy.REFUSE)
     node = vm_template_node(vm_tmpl)
     for name in node.secret_refs():
         resolver.register_name(name)
-    preflight_all([node], RunContext(config=config), registry=registry, interaction=InteractionPolicy.REFUSE)
+    preflight_all([node], RunContext(config=config), registry=registry, interaction=TtyInteractionPolicy.REFUSE)
     resolver.resolve()
     return resolver.get(vm_tmpl.tailscale_auth_key)
 
@@ -137,7 +137,7 @@ def test_template_preflight_predicts_env_source_without_probing_key(
         [vm_template_node(vm_tmpl)],
         RunContext(config=config),
         registry=registry,
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
 
 

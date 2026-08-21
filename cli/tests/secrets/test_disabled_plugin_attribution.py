@@ -14,7 +14,7 @@ from agentworks.secrets.outcomes import (
     ResolutionDetail,
     format_outcome,
 )
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolve import active_sources
 from agentworks.secrets.verification import verify_secrets
 from tests.conftest import ManifestDoc, write_cfg
@@ -58,7 +58,7 @@ def test_declared_source_accepts_string_subclass_plugin_attribution(
         config,
         registry,
         ["token"],
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
     assert outcome.detail is ResolutionDetail.SOURCE_BACKEND_PLUGIN_DISABLED
     assert outcome.remediation_target is plugin_name

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.config import load_config
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from tests.conftest import ManifestDoc, write_cfg
 
 if TYPE_CHECKING:
@@ -32,7 +32,7 @@ def _resolve_tokens(config: object, registry: object, names: list[str]) -> dict[
     from agentworks.orchestration.secrets import ScopedSecrets, secret_union
     from agentworks.secrets.resolver import Resolver
 
-    resolver = Resolver(config, registry, interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
+    resolver = Resolver(config, registry, interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
     nodes = [git_credential_node(registry, n) for n in names]
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)

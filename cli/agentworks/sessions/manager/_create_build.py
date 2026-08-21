@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
     from agentworks.resources.registry import Registry
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.workspaces.nodes import (
         LiveWorkspaceNode,
         PendingWorkspaceNode,
@@ -50,7 +50,7 @@ def _build_session_graph(
     registry: Registry,
     plan: SessionPlan,
     template_name: str | None,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> SessionGraph:
     """Resolve the template and build the node graph, resolver union, and
     scope into a :class:`SessionGraph` (section S9)."""

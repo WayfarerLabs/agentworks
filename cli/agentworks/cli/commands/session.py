@@ -11,7 +11,7 @@ from agentworks.cli._helpers import get_db, ordinary_interaction_policy, parse_c
 from agentworks.machine_output import OutputFormat
 
 if TYPE_CHECKING:
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
 
 session_app = typer.Typer(
     name="session",
@@ -250,7 +250,7 @@ def _resume_sessions(
     admin: bool,
     force: bool,
     yes: bool,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Validate and execute the single or batch session resume operation."""
     from agentworks.config import load_config

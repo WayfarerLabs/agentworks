@@ -16,7 +16,7 @@ from agentworks.config import load_config
 from agentworks.env import EnvEntry
 from agentworks.errors import StateError, ValidationError
 from agentworks.secrets import SecretTarget
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolve import ResolutionBatch
 from agentworks.secrets.resolver import Resolver
 from tests.conftest import ManifestDoc, write_manifests
@@ -44,7 +44,7 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 def test_construction_rejects_a_non_enum_policy(env) -> None:
     """The check every ``Resolver(...)`` site inherits, including both shared VM
-    boundaries. ``InteractionPolicy`` is a ``StrEnum`` and every consumer branches
+    boundaries. ``TtyInteractionPolicy`` is a ``StrEnum`` and every consumer branches
     on it by identity, so a plain ``"refuse"`` is equal to the enum, fails the
     identity test, and resolves through an interactive source in a run that meant
     to refuse."""
@@ -55,7 +55,7 @@ def test_construction_rejects_a_non_enum_policy(env) -> None:
 
 def test_register_name_synthesizes_when_registry_is_sparse(env) -> None:
     config, registry = env()
-    resolver = Resolver(config, registry, interaction=InteractionPolicy.REFUSE)
+    resolver = Resolver(config, registry, interaction=TtyInteractionPolicy.REFUSE)
     decl = resolver.register_name("never-declared")
     assert decl.name == "never-declared"
 
@@ -75,7 +75,7 @@ def test_resolve_is_one_pass_and_idempotent(env, monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setattr(secrets_resolve, "resolve_batch", _counting)
 
-    resolver = Resolver(config, registry, interaction=InteractionPolicy.REFUSE)
+    resolver = Resolver(config, registry, interaction=TtyInteractionPolicy.REFUSE)
     resolver.register_name("some-token")
     resolver.resolve()
     resolver.resolve()  # idempotent while the set is unchanged
@@ -97,7 +97,7 @@ def test_operation_resolver_preserves_env_var_multiline_value(
 ) -> None:
     config, registry = env()
     monkeypatch.setenv("AW_SECRET_STRUCTURED", value)
-    resolver = Resolver(config, registry, interaction=InteractionPolicy.REFUSE)
+    resolver = Resolver(config, registry, interaction=TtyInteractionPolicy.REFUSE)
     resolver.register_name("structured")
 
     resolver.resolve()
@@ -119,7 +119,7 @@ def test_operation_resolver_rejects_multiline_environment_target_after_delivery(
 ) -> None:
     config, registry = env(manifests=[ManifestDoc("secret", "structured", description="environment input")])
     monkeypatch.setenv("AW_SECRET_STRUCTURED", value)
-    resolver = Resolver(config, registry, interaction=InteractionPolicy.REFUSE)
+    resolver = Resolver(config, registry, interaction=TtyInteractionPolicy.REFUSE)
     resolver.register_targets([SecretTarget(vm={"STRUCTURED": EnvEntry({"secret": "structured"})})])
 
     with pytest.raises(ValidationError) as caught:
@@ -141,14 +141,14 @@ def test_empty_set_resolves_without_touching_backends(env, monkeypatch: pytest.M
         "resolve_batch",
         lambda *a, **k: (_ for _ in ()).throw(AssertionError("no backends for an empty set")),
     )
-    resolver = Resolver(config, registry, interaction=InteractionPolicy.REFUSE)
+    resolver = Resolver(config, registry, interaction=TtyInteractionPolicy.REFUSE)
     resolver.resolve()
     assert resolver.resolved
 
 
 def test_get_before_resolve_raises(env) -> None:
     config, registry = env()
-    resolver = Resolver(config, registry, interaction=InteractionPolicy.REFUSE)
+    resolver = Resolver(config, registry, interaction=TtyInteractionPolicy.REFUSE)
     resolver.register_name("some-token")
     with pytest.raises(StateError, match="before the operation's resolve"):
         resolver.get("some-token")
@@ -156,7 +156,7 @@ def test_get_before_resolve_raises(env) -> None:
 
 def test_get_unregistered_name_raises(env, monkeypatch: pytest.MonkeyPatch) -> None:
     config, registry = env()
-    resolver = Resolver(config, registry, interaction=InteractionPolicy.REFUSE)
+    resolver = Resolver(config, registry, interaction=TtyInteractionPolicy.REFUSE)
     resolver.resolve()
     with pytest.raises(StateError, match="not part of the operation's resolve"):
         resolver.get("never-registered")
@@ -167,7 +167,7 @@ def test_late_registration_then_resolve_raises(env, monkeypatch: pytest.MonkeyPa
     a second prompt session; the contract violation is loud."""
     config, registry = env()
     monkeypatch.setenv("AW_SECRET_EARLY", "v")
-    resolver = Resolver(config, registry, interaction=InteractionPolicy.REFUSE)
+    resolver = Resolver(config, registry, interaction=TtyInteractionPolicy.REFUSE)
     resolver.register_name("early")
     resolver.resolve()
     resolver.register_name("late")

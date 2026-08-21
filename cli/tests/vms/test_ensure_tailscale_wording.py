@@ -27,7 +27,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.db import VMStatus
 from agentworks.errors import StateError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 
 if TYPE_CHECKING:
@@ -169,7 +169,7 @@ def test_start_vm_threads_already_running_from_status(
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: None)
     monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: captured.update(k) or False)
 
-    vm_manager.start_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+    vm_manager.start_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert captured["already_running"] is expected_flag
 
@@ -217,7 +217,7 @@ def test_start_vm_through_wsl2_shaped_hold_verifies_exactly_once(
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: None)
     monkeypatch.setattr(ProxmoxPlatform, "vm_active", _wsl2_shaped_hold)
 
-    vm_manager.start_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+    vm_manager.start_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     verifying = [line for line in captured_output.detail if "Verifying Tailscale connectivity" in line]
     assert len(verifying) == 1, f"expected exactly one verify line, got {verifying}"

@@ -22,12 +22,12 @@ from agentworks.secrets.outcomes import (
     ResolutionOutcome,
     ResolutionRemediation,
 )
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolve import validate_chain
 from agentworks.secrets.sources import SecretSourceDecl, publish_builtin_secret_sources
 
 __all__ = [
-    "InteractionPolicy",
+    "TtyInteractionPolicy",
     "ResolutionCategory",
     "ResolutionDetail",
     "ResolutionOutcome",

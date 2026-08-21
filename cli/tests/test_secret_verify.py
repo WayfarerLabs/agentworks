@@ -41,7 +41,7 @@ from agentworks.secrets.outcomes import (
     complete_resolution_error,
     format_outcome,
 )
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolve import (
     ActiveSource,
     CompletionPolicy,
@@ -150,7 +150,7 @@ def _verify(monkeypatch: pytest.MonkeyPatch, *names: str) -> tuple[ResolutionOut
         SimpleNamespace(),  # type: ignore[arg-type]
         _registry(*names),  # type: ignore[arg-type]
         names,
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
 
 
@@ -216,7 +216,7 @@ def test_verify_preserves_first_order_dedupe_in_one_batch(monkeypatch: pytest.Mo
         SimpleNamespace(),  # type: ignore[arg-type]
         registry,  # type: ignore[arg-type]
         ["b", "a", "b"],
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
     assert [outcome.name for outcome in outcomes] == ["b", "a"]
     assert registry.lookups == ["b", "a"]
@@ -235,7 +235,7 @@ def test_verify_disabled_sources_collapse_to_no_active_source(monkeypatch: pytes
         SimpleNamespace(),  # type: ignore[arg-type]
         _registry("token"),  # type: ignore[arg-type]
         ["token"],
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
     assert outcome.detail is ResolutionDetail.NO_ACTIVE_SOURCE
     assert _Backend.events == []
@@ -252,7 +252,7 @@ def test_verify_not_ready_source_never_constructs_client(monkeypatch: pytest.Mon
         SimpleNamespace(),  # type: ignore[arg-type]
         _registry("token"),  # type: ignore[arg-type]
         ["token"],
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
     assert outcome.detail is ResolutionDetail.SOURCE_NOT_READY
     assert outcome.remediation is ResolutionRemediation.ENABLE_SOURCE
@@ -282,7 +282,7 @@ def test_verify_disabled_plugin_source_discards_printable_readiness_reason(
         SimpleNamespace(),  # type: ignore[arg-type]
         _registry("token"),  # type: ignore[arg-type]
         ["token"],
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
 
     assert outcome.detail is ResolutionDetail.SOURCE_BACKEND_PLUGIN_DISABLED
@@ -318,7 +318,7 @@ def test_verify_declared_source_retains_disabled_backend_plugin_remediation(
         config,
         registry,
         ["token"],
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
     assert outcome.detail is ResolutionDetail.SOURCE_BACKEND_PLUGIN_DISABLED
     assert outcome.remediation is ResolutionRemediation.ENABLE_PLUGIN
@@ -343,7 +343,7 @@ def test_verify_refuses_interactive_source_without_construction(monkeypatch: pyt
         SimpleNamespace(),  # type: ignore[arg-type]
         _registry("token"),  # type: ignore[arg-type]
         ["token"],
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
     assert outcome.detail is ResolutionDetail.INTERACTION_REFUSED
     assert _Backend.events == []
@@ -428,7 +428,7 @@ def test_verify_validates_every_name_before_lookup_or_source_work(monkeypatch: p
             SimpleNamespace(),  # type: ignore[arg-type]
             registry,  # type: ignore[arg-type]
             ["valid", "bad\nname"],
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     assert registry.lookups == []
     assert "bad\nname" not in str(caught.value)
@@ -452,7 +452,7 @@ def test_invalid_name_error_is_safe_and_context_free(
             SimpleNamespace(),  # type: ignore[arg-type]
             _registry(),  # type: ignore[arg-type]
             [rejected],  # type: ignore[list-item]
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
 
     assert str(caught.value) == (
@@ -483,7 +483,7 @@ def test_unexpected_name_validator_failure_propagates_by_identity(monkeypatch: p
             SimpleNamespace(),  # type: ignore[arg-type]
             registry,  # type: ignore[arg-type]
             ["token"],
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
 
     assert caught.value is unexpected
@@ -501,7 +501,7 @@ def test_verify_looks_up_every_unique_name_before_source_work(monkeypatch: pytes
             SimpleNamespace(),  # type: ignore[arg-type]
             registry,  # type: ignore[arg-type]
             ["present", "missing"],
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     assert registry.lookups == ["present", "missing"]
 
@@ -513,7 +513,7 @@ def test_verify_rejects_empty_or_unsafe_names_without_echo(names: list[str]) -> 
             SimpleNamespace(),  # type: ignore[arg-type]
             _registry(),  # type: ignore[arg-type]
             names,
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     assert "bad\nname" not in str(caught.value)
     assert caught.value.__cause__ is None
@@ -546,7 +546,7 @@ def test_service_and_renderer_reduce_unicode_separator_to_one_protocol_row(
         SimpleNamespace(),  # type: ignore[arg-type]
         _registry("token"),  # type: ignore[arg-type]
         ["token"],
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
 
     assert len(outcomes) == 1
@@ -594,7 +594,7 @@ def test_an_auto_declared_name_cannot_split_one_outcome_into_two_rendered_rows(
             [decl],
             active_sources(config, registry),
             policy=ResolutionPolicy(
-                interaction=InteractionPolicy.REFUSE,
+                interaction=TtyInteractionPolicy.REFUSE,
                 completion=CompletionPolicy.COMPLETE,
             ),
             interaction_broker=None,
@@ -672,7 +672,7 @@ def test_service_allow_is_explicit_under_global_noninteractive_and_uses_onepassw
         SimpleNamespace(),  # type: ignore[arg-type]
         registry,  # type: ignore[arg-type]
         ["token"],
-        interaction=InteractionPolicy.ALLOW,
+        interaction=TtyInteractionPolicy.ALLOW,
     )
 
     assert outcomes[0].category is ResolutionCategory.RESOLVED
@@ -704,7 +704,7 @@ def test_prompt_user_abort_propagates_by_identity_without_exposing_prior_value(
             SimpleNamespace(),  # type: ignore[arg-type]
             _registry("first", "second"),  # type: ignore[arg-type]
             ["first", "second"],
-            interaction=InteractionPolicy.ALLOW,
+            interaction=TtyInteractionPolicy.ALLOW,
         )
 
     assert caught.value is abort
@@ -745,7 +745,7 @@ def test_complete_batch_dooms_remaining_names_before_prompt_interaction(
         SimpleNamespace(),  # type: ignore[arg-type]
         registry,  # type: ignore[arg-type]
         ["blocked", "would-prompt"],
-        interaction=InteractionPolicy.ALLOW,
+        interaction=TtyInteractionPolicy.ALLOW,
     )
 
     assert [outcome.detail for outcome in outcomes] == [
@@ -948,7 +948,7 @@ def test_provider_keyboard_interrupt_preserves_identity_cleanup_and_cli_exit_130
             SimpleNamespace(),  # type: ignore[arg-type]
             _registry("token"),  # type: ignore[arg-type]
             ["token"],
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     assert caught.value is interrupt
     assert _Backend.events == ["factory", "enter", "prepare", "resolve", "exit"]

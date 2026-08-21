@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow, VMRow
     from agentworks.machine_output import JsonObject
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.sessions.tmux import RunCommand
 
 
@@ -104,7 +104,7 @@ def delete_session(
     name: str,
     force: bool = False,
     yes: bool = False,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Delete a session. Prompts if running/unknown (--yes to skip). --force for BROKEN."""
     session = _mgr._require_session(db, name)
@@ -287,7 +287,7 @@ def _cleanup_now_empty_workspace(
     session: SessionRow,
     *,
     yes: bool,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Handle the deleted session's workspace when it now has no sessions.
 
@@ -358,7 +358,7 @@ def _cleanup_now_empty_agent(
     session: SessionRow,
     *,
     yes: bool,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Handle the deleted session's agent when it becomes a cleanup candidate.
 
@@ -408,7 +408,7 @@ def session_description(
     config: Config,
     *,
     name: str,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> SessionDescription:
     """Collect session detail facts while retaining the live status behavior.
 
@@ -492,7 +492,7 @@ def describe_session(
     config: Config,
     *,
     name: str,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Show session details."""
     render_session_description(session_description(db, config, name=name, interaction=interaction))
@@ -508,7 +508,7 @@ def list_sessions(
     admin_only: bool = False,
     no_status: bool = False,
     names_only: bool = False,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """List sessions with batched status checks (one SSH call per VM, parallel).
 
@@ -562,7 +562,7 @@ def session_listing(
     agent_name: str | list[str] | None = None,
     admin_only: bool = False,
     no_status: bool = False,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> SessionListing:
     """Collect ordered session list facts with the existing status repair pass."""
     sessions = _mgr.filter_sessions(
@@ -682,7 +682,7 @@ def attach_session(
     config: Config,
     *,
     name: str,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> int:
     """Attach to a session's tmux session (interactive).
 

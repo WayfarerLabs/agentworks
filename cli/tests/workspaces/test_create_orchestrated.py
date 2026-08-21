@@ -18,7 +18,7 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.errors import ExternalError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from agentworks.workspaces import manager as workspace_manager
 from tests.conftest import ManifestDoc
@@ -109,7 +109,7 @@ def test_create_graph_derives_from_row_and_pending_name(
     registry = build_registry(config)
 
     vm_node = live_vm_node(db, config, registry, vm)
-    pending = pending_workspace_node(db, config, "ws1", vm_node, None, interaction=InteractionPolicy.REFUSE)
+    pending = pending_workspace_node(db, config, "ws1", vm_node, None, interaction=TtyInteractionPolicy.REFUSE)
     nodes = walk(pending)
 
     assert [n.key for n in nodes] == ["vm-site/proxmox", "vm/box", "workspace/ws1"]
@@ -138,7 +138,7 @@ def test_create_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
 
-    workspace_manager.create_workspace(db, config, name="ws1", vm_name="box", interaction=InteractionPolicy.REFUSE)
+    workspace_manager.create_workspace(db, config, name="ws1", vm_name="box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"]]
     assert events == ["status", "start", "tailscale"]  # the gate ran
@@ -164,7 +164,7 @@ def test_create_reachable_vm_fast_path_costs_no_gate_resolve(
     _seed_vm(db)
     _reachable(monkeypatch, True)
 
-    workspace_manager.create_workspace(db, config, name="ws1", vm_name="box", interaction=InteractionPolicy.REFUSE)
+    workspace_manager.create_workspace(db, config, name="ws1", vm_name="box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"]]
     assert db.get_workspace("ws1") is not None
@@ -194,7 +194,7 @@ def test_create_bad_template_bails_before_any_prompt_or_start(
 
     with pytest.raises(NotFoundError, match="nope"):
         workspace_manager.create_workspace(
-            db, config, name="ws1", vm_name="box", template_name="nope", interaction=InteractionPolicy.REFUSE
+            db, config, name="ws1", vm_name="box", template_name="nope", interaction=TtyInteractionPolicy.REFUSE
         )
 
     assert resolve_counter == []  # no prompt, no backend pass
@@ -218,7 +218,7 @@ def test_create_never_resolves_the_template_env_secret(
     _seed_vm(db)
     _reachable(monkeypatch, True)
 
-    workspace_manager.create_workspace(db, config, name="ws1", vm_name="box", interaction=InteractionPolicy.REFUSE)
+    workspace_manager.create_workspace(db, config, name="ws1", vm_name="box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"]]
     assert all("ws-env-secret" not in burst for burst in resolve_counter), (
@@ -261,7 +261,9 @@ def test_create_mutation_failure_cleans_up_and_leaves_no_row(
     )
 
     with pytest.raises(ExternalError, match="creating workspace: ssh exploded"):
-        workspace_manager.create_workspace(db, config, name="ws1", vm_name="box", interaction=InteractionPolicy.REFUSE)
+        workspace_manager.create_workspace(
+            db, config, name="ws1", vm_name="box", interaction=TtyInteractionPolicy.REFUSE
+        )
 
     assert deletes == ["/srv/ws1"]  # the body's partial-state cleanup ran
     assert db.get_workspace("ws1") is None
@@ -291,7 +293,7 @@ def test_workspace_scope_reaches_node_readiness(
 
     monkeypatch.setattr(ProxmoxPlatform, "preflight", _recording)
 
-    workspace_manager.create_workspace(db, config, name="ws1", vm_name="box", interaction=InteractionPolicy.REFUSE)
+    workspace_manager.create_workspace(db, config, name="ws1", vm_name="box", interaction=TtyInteractionPolicy.REFUSE)
 
     (scope,) = scopes
     assert scope is not None

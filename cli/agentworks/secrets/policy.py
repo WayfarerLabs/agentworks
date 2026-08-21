@@ -7,7 +7,7 @@ from enum import StrEnum
 from agentworks.errors import StateError
 
 
-class InteractionPolicy(StrEnum):
+class TtyInteractionPolicy(StrEnum):
     """Whether an operation permits sources that may require interaction."""
 
     # Consumers branch on this type by identity (`is`), so an equal-but-not-identical value
@@ -53,13 +53,13 @@ class InteractionPolicy(StrEnum):
 # Apply both halves mechanically, including at a site whose own construction sits a line or two
 # down and whose constructor would therefore reject the value anyway. The alternative is a
 # per-site judgment about how close is close enough, which is what left a boundary bare before.
-def require_exact_interaction_policy(interaction: InteractionPolicy) -> None:
-    """Reject anything that is not an exact ``InteractionPolicy`` member.
+def require_exact_tty_interaction_policy(interaction: TtyInteractionPolicy) -> None:
+    """Reject anything that is not an exact ``TtyInteractionPolicy`` member.
 
     Boundary: a caller-supplied argument crossing the published service surface. The
     services that resolve secrets accept ``interaction`` from callers our type checker
     does not see, and the value decides whether an interactive source may be attempted,
     so it is checked on arrival. Interior forwarding needs no check of its own.
     """
-    if type(interaction) is not InteractionPolicy:
-        raise StateError("interaction must be an exact InteractionPolicy")
+    if type(interaction) is not TtyInteractionPolicy:
+        raise StateError("interaction must be an exact TtyInteractionPolicy")

@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
     from agentworks.capabilities.base import RunContext
     from agentworks.resources.registry import Registry
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
 
     from .node import Node, Readiness
 
@@ -34,7 +34,7 @@ def preflight_all(
     ctx: RunContext,
     *,
     registry: Registry,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """The preflight-all sweep: every participating node, against the
     one command-start context, before any prompt or mutation (the

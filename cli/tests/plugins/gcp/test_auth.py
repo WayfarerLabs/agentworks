@@ -136,7 +136,7 @@ def test_real_env_source_and_operation_resolver_deliver_exact_downloaded_json(
     from agentworks.capabilities.base import RunContext
     from agentworks.config import load_config
     from agentworks.orchestration.secrets import ScopedSecrets
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.secrets.resolver import Resolver
     from tests.conftest import write_cfg
 
@@ -160,7 +160,7 @@ def test_real_env_source_and_operation_resolver_deliver_exact_downloaded_json(
     )
     registry = build_registry(config)
     monkeypatch.setenv("AW_SECRET_SVC_JSON", document)
-    resolver = Resolver(config, registry, interaction=InteractionPolicy.REFUSE)
+    resolver = Resolver(config, registry, interaction=TtyInteractionPolicy.REFUSE)
     resolver.register_name("svc-json")
     resolver.resolve()
 

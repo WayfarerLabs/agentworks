@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.db import Database, WorkspaceRow
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.transports import SSHTransport, Transport
 
 
@@ -29,7 +29,7 @@ def backup_vm(
     config: Config,
     vm_name: str,
     *,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> Path:
     """Create a full backup of a VM: metadata + workspace files.
 

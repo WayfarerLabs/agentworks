@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from agentworks.db import Database, WorkspaceRow
     from agentworks.orchestration.node import Node
     from agentworks.resources.reference import ResourceReference
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.vms.nodes import LiveVMNode
 
 
@@ -89,7 +89,7 @@ class PendingWorkspaceNode:
         vm: LiveVMNode,
         template: str | None,
         *,
-        interaction: InteractionPolicy,
+        interaction: TtyInteractionPolicy,
     ) -> None:
         self._db = db
         self._config = config
@@ -184,7 +184,7 @@ def pending_workspace_node(
     vm: LiveVMNode,
     template: str | None,
     *,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> PendingWorkspaceNode:
     """Build the pending ``workspace/<name>`` node with its VM edge
     attached."""

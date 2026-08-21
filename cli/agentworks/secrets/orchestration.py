@@ -16,7 +16,7 @@ cache exists to hit or miss).
 Usage at a manager entry point:
 
     from agentworks.secrets.orchestration import SecretTarget, resolve_for_command
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
 
     targets = [
         SecretTarget(
@@ -30,7 +30,7 @@ Usage at a manager entry point:
         targets,
         config,
         registry,
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )  # raises on non-interactive miss
     # ... thread `values` down to every compose_env(values=...) site.
 
@@ -63,7 +63,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.env.merge import effective_env
 from agentworks.errors import StateError
-from agentworks.secrets.policy import InteractionPolicy, require_exact_interaction_policy
+from agentworks.secrets.policy import TtyInteractionPolicy, require_exact_tty_interaction_policy
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -221,7 +221,7 @@ def resolve_for_command(
     registry: Registry,
     *,
     extra_decls: Iterable[SecretDecl] = (),
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> dict[str, str]:
     """Resolve every secret referenced by the candidate targets: THE
     command's one resolve call.
@@ -249,7 +249,7 @@ def resolve_for_command(
     call it: they inherit the env captured at shell-create time and
     consume no secrets.
     """
-    require_exact_interaction_policy(interaction)
+    require_exact_tty_interaction_policy(interaction)
     decls = compute_needed_secrets(targets, registry, extra_decls=extra_decls)
     if not decls:
         return {}
@@ -261,7 +261,7 @@ def resolve_for_command(
         resolve_batch,
     )
 
-    broker = OutputInteractionBroker(decls) if interaction is InteractionPolicy.ALLOW else None
+    broker = OutputInteractionBroker(decls) if interaction is TtyInteractionPolicy.ALLOW else None
     batch = resolve_batch(
         decls,
         active_sources(config, registry),

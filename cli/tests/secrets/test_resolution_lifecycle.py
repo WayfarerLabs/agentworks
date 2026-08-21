@@ -37,7 +37,7 @@ from agentworks.secrets.outcomes import (
     format_outcome,
     format_remediation,
 )
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolve import (
     ActiveSource,
     CompletionPolicy,
@@ -200,7 +200,7 @@ def _source(
 
 def _policy(
     *,
-    interaction: InteractionPolicy = InteractionPolicy.REFUSE,
+    interaction: TtyInteractionPolicy = TtyInteractionPolicy.REFUSE,
     completion: CompletionPolicy = CompletionPolicy.COMPLETE,
 ) -> ResolutionPolicy:
     return ResolutionPolicy(interaction=interaction, completion=completion)
@@ -273,7 +273,7 @@ def test_allow_scopes_live_output_broker_to_prompt_factory(
     batch = resolve_batch(
         [secret],
         [_source(backend_class=_BrokerCapturingBackend), prompt_source],
-        policy=_policy(interaction=InteractionPolicy.ALLOW),
+        policy=_policy(interaction=TtyInteractionPolicy.ALLOW),
         interaction_broker=broker,
     )
 

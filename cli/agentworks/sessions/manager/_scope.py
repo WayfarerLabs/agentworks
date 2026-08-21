@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow, VMRow, WorkspaceRow
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.sessions.tmux import RunCommand
     from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
@@ -78,7 +78,7 @@ def _prepare_vm(
     session: SessionRow,
     *,
     operation: str | None = None,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> Iterator[tuple[WorkspaceRow, VMRow, RunCommand, RunCommand, Transport]]:
     """The singular session ops' composition root (stop / delete /
     describe / attach / logs): validate the session's workspace and VM
@@ -224,7 +224,7 @@ def _batch_vm_boundary(
     config: Config,
     vms: Sequence[VMRow],
     *,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> Iterator[None]:
     """The batch session ops' composition root (stop_all_sessions,
     resume_all_sessions, list_sessions' status pass): ONE boundary

@@ -16,7 +16,7 @@ from agentworks.capabilities.secret_backend import InteractionBroker
 from agentworks.cli import app
 from agentworks.db import PID_STOPPED, SessionMode, SessionStatus, VMStatus
 from agentworks.resources.graph import Readiness
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolve import ActiveSource, ResolutionBatch, ResolutionPolicy
 
 if TYPE_CHECKING:
@@ -602,7 +602,7 @@ def test_vm_describe_propagates_operator_abort_in_service_and_both_cli_formats(
         monkeypatch.setattr("agentworks.secrets.resolver.Resolver.resolve", abort)
 
     with pytest.raises(UserAbort, match="operator declined"):
-        manager.vm_description(db, config, "box", interaction=InteractionPolicy.ALLOW)
+        manager.vm_description(db, config, "box", interaction=TtyInteractionPolicy.ALLOW)
 
     for output_format in ("human", "json"):
         result = CliRunner().invoke(app, ["vm", "describe", "box", "--output", output_format])

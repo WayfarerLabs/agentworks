@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from agentworks.orchestration.node import Node
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.vms.nodes import LiveVMNode
 
     from .templates import ResolvedAgentTemplate
@@ -154,7 +154,7 @@ class PendingAgentNode:
         template: AgentTemplateNode,
         vm: LiveVMNode,
         *,
-        interaction: InteractionPolicy,
+        interaction: TtyInteractionPolicy,
     ) -> None:
         self._db = db
         self._config = config
@@ -288,7 +288,7 @@ def pending_agent_node(
     template: AgentTemplateNode,
     vm: LiveVMNode,
     *,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> PendingAgentNode:
     """Build the pending ``agent/<name>`` node with its edges attached.
 

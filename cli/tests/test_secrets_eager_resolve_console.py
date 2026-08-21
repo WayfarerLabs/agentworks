@@ -21,7 +21,7 @@ from types import SimpleNamespace
 import pytest
 
 from agentworks.errors import SecretUnavailableError
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 
 from ._secrets_eager_support import _seed_basic_db, _stub_build_registry
 from .conftest import stub_vm_gates
@@ -75,7 +75,7 @@ def test_console_add_shell_eager_resolve_fires_before_db_update(
             session_name="s1",
             cwd=None,
             admin=False,
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
 
     # The shells list must still be the original empty list -- no DB write.
@@ -133,7 +133,7 @@ def test_console_add_shell_promotes_admin_for_admin_mode_session(
         session_name="s1",
         cwd=None,
         admin=False,  # operator did NOT pass --admin
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
 
     assert captured["is_admin_pane"] is True, (
@@ -205,7 +205,7 @@ def test_attach_console_build_path_eager_resolves_before_tmux(
 
     monkeypatch.delenv("TMUX", raising=False)
     with pytest.raises(SecretUnavailableError, match="api-key"):
-        multi_console.attach_console(db, config, name="c1", interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
+        multi_console.attach_console(db, config, name="c1", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
     assert build_called == [], "eager-resolve must fire before _build_console_tmux; build ran anyway"
     db.close()
@@ -322,7 +322,7 @@ def test_attach_console_existing_tmux_session_skips_eager_resolve(
     )
 
     monkeypatch.delenv("TMUX", raising=False)
-    multi_console.attach_console(db, config, name="c1", interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
+    multi_console.attach_console(db, config, name="c1", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
     assert resolve_called == [], (
         "plain attach (existing tmux session) must NOT eager-resolve "
@@ -388,7 +388,7 @@ def test_console_add_sessions_does_not_eager_resolve_live_branch(
         config,
         console_name="c1",
         session_specs=["s1"],  # type: ignore[arg-type]
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
 
     assert resolve_called == [], "console add-sessions even on the live branch must not eager-resolve"
@@ -425,7 +425,7 @@ def test_console_add_sessions_does_not_eager_resolve_db_only_branch(
         config,
         console_name="c1",
         session_specs=["s1"],  # type: ignore[arg-type]
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
 
     assert resolve_called == [], "console add-sessions DB-only branch must not eager-resolve"
@@ -474,7 +474,7 @@ def test_console_add_sessions_with_shells_eager_resolves(
             config,  # type: ignore[arg-type]
             console_name="c1",
             session_specs=["s1+2"],
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
 
     # DB write must not have happened.
@@ -517,7 +517,7 @@ def test_console_add_sessions_without_shells_does_not_eager_resolve(
         config,  # type: ignore[arg-type]
         console_name="c1",
         session_specs=["s1"],
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
 
     assert resolve_called == [], "add-sessions without +N must not eager-resolve; wrappers only join existing sessions"
@@ -595,7 +595,7 @@ def test_restore_session_window_missing_branch_eager_resolves(
             config,  # type: ignore[arg-type]
             console_name="c1",
             session_name="s1",
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
 
     assert add_called == [], "eager-resolve must fire BEFORE _add_session_window in the window-missing rebuild branch"

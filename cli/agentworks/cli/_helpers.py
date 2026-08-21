@@ -17,17 +17,17 @@ import typer
 
 from agentworks.cli._app import completion_mode_enabled, require_interactive
 from agentworks.errors import BackupError, StateError
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 
 if TYPE_CHECKING:
     from agentworks.db import Database, VMRow, WorkspaceRow
 
 
-def ordinary_interaction_policy() -> InteractionPolicy:
+def ordinary_interaction_policy() -> TtyInteractionPolicy:
     """Derive ordinary-operation interaction authority at a CLI root."""
     from agentworks import output
 
-    return InteractionPolicy.ALLOW if output.is_interactive() else InteractionPolicy.REFUSE
+    return TtyInteractionPolicy.ALLOW if output.is_interactive() else TtyInteractionPolicy.REFUSE
 
 
 def get_db() -> Database:

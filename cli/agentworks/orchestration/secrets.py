@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
     from agentworks.secrets.base import SecretDecl
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.secrets.preview import ResolutionPreview
     from agentworks.secrets.resolve import ActiveSource
 
@@ -96,7 +96,7 @@ def predict_resolution(
     decls: Iterable[SecretDecl],
     sources: Sequence[ActiveSource],
     *,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> dict[str, ResolutionPreview]:
     """Pure applicability prediction over declared references.
 
@@ -110,12 +110,12 @@ def predict_resolution(
     Checks its own ``interaction`` rather than relying on the per-declaration
     call below to do it: with no declarations, that call never happens and
     this returns successfully having checked nothing. That is the same reach
-    the entry-point rule beside ``require_exact_interaction_policy`` names.
+    the entry-point rule beside ``require_exact_tty_interaction_policy`` names.
     """
-    from agentworks.secrets.policy import require_exact_interaction_policy
+    from agentworks.secrets.policy import require_exact_tty_interaction_policy
     from agentworks.secrets.preview import preview_operation_resolution
 
-    require_exact_interaction_policy(interaction)
+    require_exact_tty_interaction_policy(interaction)
     return {decl.name: preview_operation_resolution(decl, sources, interaction=interaction) for decl in decls}
 
 
@@ -169,7 +169,7 @@ def require_predicted_refs(
     config: Config | None,
     registry: Registry,
     *,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Pure impossibility screen over one node's declared config secrets.
 

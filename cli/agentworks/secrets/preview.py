@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError
 from agentworks.secrets.outcomes import _safe_diagnostic_text
-from agentworks.secrets.policy import InteractionPolicy, require_exact_interaction_policy
+from agentworks.secrets.policy import TtyInteractionPolicy, require_exact_tty_interaction_policy
 from agentworks.secrets.resolve import ActiveSource, _BackendProtocolError, _lookup_projection
 
 if TYPE_CHECKING:
@@ -86,7 +86,7 @@ def _preview(
     secret: SecretDecl,
     sources: Sequence[ActiveSource],
     *,
-    interaction: InteractionPolicy | None,
+    interaction: TtyInteractionPolicy | None,
 ) -> ResolutionPreview:
     skipped: list[SkippedSource] = []
     first_refused: tuple[str, str | None] | None = None
@@ -103,7 +103,7 @@ def _preview(
                 raise StateError(f"secret source {source.name!r} has invalid readiness") from None
             skipped.append(SkippedSource(source=source.name, reason=reason))
             continue
-        if interaction is InteractionPolicy.REFUSE and source.interactive:
+        if interaction is TtyInteractionPolicy.REFUSE and source.interactive:
             if first_refused is None:
                 first_refused = (source.name, identifier)
             continue
@@ -144,7 +144,7 @@ def preview_operation_resolution(
     secret: SecretDecl,
     sources: Sequence[ActiveSource],
     *,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> ResolutionPreview:
     """Predict whether an operation has a source under an exact interaction policy.
 
@@ -155,5 +155,5 @@ def preview_operation_resolution(
     operation would refuse. The check is first, before any source walk, so a
     rejection costs nothing.
     """
-    require_exact_interaction_policy(interaction)
+    require_exact_tty_interaction_policy(interaction)
     return _preview(secret, sources, interaction=interaction)

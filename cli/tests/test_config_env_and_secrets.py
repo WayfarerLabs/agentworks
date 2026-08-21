@@ -39,7 +39,7 @@ import pytest
 from agentworks.bootstrap import build_registry
 from agentworks.config import ConfigError, load_config
 from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolve import (
     CompletionPolicy,
     ResolutionPolicy,
@@ -118,7 +118,7 @@ def test_no_secrets_section_loads_with_default_chain(tmp_path: Path) -> None:
         [],
         sources,
         policy=ResolutionPolicy(
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
             completion=CompletionPolicy.COMPLETE,
         ),
         interaction_broker=None,

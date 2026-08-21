@@ -12,7 +12,7 @@ from agentworks.resources.graph import Readiness
 from agentworks.schema import CapabilityBlock
 from agentworks.secrets import SecretDecl, SecretSourceDecl
 from agentworks.secrets.outcomes import ResolutionCategory, ResolutionDetail
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolve import (
     ActiveSource,
     CompletionPolicy,
@@ -44,7 +44,7 @@ def test_prompt_requires_explicit_allow_and_uses_name_only_broker() -> None:
     batch = resolve_batch(
         [SecretDecl(name="a", description="A"), SecretDecl(name="b", description="B")],
         [_source()],
-        policy=ResolutionPolicy(InteractionPolicy.ALLOW, CompletionPolicy.COMPLETE),
+        policy=ResolutionPolicy(TtyInteractionPolicy.ALLOW, CompletionPolicy.COMPLETE),
         interaction_broker=broker,
     )
     assert batch.complete_or_raise() == {"a": "value:a", "b": "value:b"}
@@ -56,7 +56,7 @@ def test_refusal_constructs_nothing_and_records_typed_outcome() -> None:
     batch = resolve_batch(
         [SecretDecl(name="x", description="X")],
         [_source()],
-        policy=ResolutionPolicy(InteractionPolicy.REFUSE, CompletionPolicy.COMPLETE),
+        policy=ResolutionPolicy(TtyInteractionPolicy.REFUSE, CompletionPolicy.COMPLETE),
         interaction_broker=broker,
     )
     assert broker.names == []
@@ -69,7 +69,7 @@ def test_false_mapping_opts_out_before_broker() -> None:
     batch = resolve_batch(
         [SecretDecl(name="x", description="X", backend_mappings={"prompt": False})],
         [_source()],
-        policy=ResolutionPolicy(InteractionPolicy.ALLOW, CompletionPolicy.COMPLETE),
+        policy=ResolutionPolicy(TtyInteractionPolicy.ALLOW, CompletionPolicy.COMPLETE),
         interaction_broker=broker,
     )
     assert broker.names == []
@@ -85,7 +85,7 @@ def test_allowed_prompt_without_broker_is_state_error() -> None:
         resolve_batch(
             [SecretDecl(name="x", description="X")],
             [_source()],
-            policy=ResolutionPolicy(InteractionPolicy.ALLOW, CompletionPolicy.COMPLETE),
+            policy=ResolutionPolicy(TtyInteractionPolicy.ALLOW, CompletionPolicy.COMPLETE),
             interaction_broker=None,
         )
 
@@ -97,7 +97,7 @@ def test_prompt_uses_no_tty_or_global_interactivity_read(monkeypatch: pytest.Mon
     batch = resolve_batch(
         [SecretDecl(name="x", description="X")],
         [_source()],
-        policy=ResolutionPolicy(InteractionPolicy.ALLOW, CompletionPolicy.COMPLETE),
+        policy=ResolutionPolicy(TtyInteractionPolicy.ALLOW, CompletionPolicy.COMPLETE),
         interaction_broker=broker,
     )
     assert batch.complete_or_raise() == {"x": "value:x"}
@@ -114,7 +114,7 @@ def test_prompt_abort_does_not_expose_earlier_answers_in_exception() -> None:
         resolve_batch(
             [SecretDecl(name="a", description="A"), SecretDecl(name="b", description="B")],
             [_source()],
-            policy=ResolutionPolicy(InteractionPolicy.ALLOW, CompletionPolicy.COMPLETE),
+            policy=ResolutionPolicy(TtyInteractionPolicy.ALLOW, CompletionPolicy.COMPLETE),
             interaction_broker=_AbortBroker(),
         )
     assert "sentinel-first-value" not in repr(caught.value)
@@ -132,7 +132,7 @@ def test_prompt_broker_user_abort_propagates_by_identity() -> None:
         resolve_batch(
             [SecretDecl(name="token", description="Token")],
             [_source()],
-            policy=ResolutionPolicy(InteractionPolicy.ALLOW, CompletionPolicy.COMPLETE),
+            policy=ResolutionPolicy(TtyInteractionPolicy.ALLOW, CompletionPolicy.COMPLETE),
             interaction_broker=_AbortBroker(),
         )
 

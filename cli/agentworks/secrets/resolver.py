@@ -22,7 +22,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError
-from agentworks.secrets.policy import require_exact_interaction_policy
+from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from agentworks.resources.registry import Registry
     from agentworks.secrets.base import SecretDecl
     from agentworks.secrets.orchestration import SecretTarget
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
 
 
 class Resolver:
@@ -57,9 +57,9 @@ class Resolver:
         config: Config,
         registry: Registry,
         *,
-        interaction: InteractionPolicy,
+        interaction: TtyInteractionPolicy,
     ) -> None:
-        require_exact_interaction_policy(interaction)
+        require_exact_tty_interaction_policy(interaction)
         self._config = config
         self._registry = registry
         self._interaction = interaction
@@ -174,7 +174,7 @@ class Resolver:
 
             validate_target_values(self._targets, self._values)
             return
-        from agentworks.secrets.policy import InteractionPolicy
+        from agentworks.secrets.policy import TtyInteractionPolicy
         from agentworks.secrets.resolve import (
             CompletionPolicy,
             OutputInteractionBroker,
@@ -189,7 +189,7 @@ class Resolver:
         if not missing:
             resolved = dict(self._seeded)
         else:
-            broker = OutputInteractionBroker(missing) if self._interaction is InteractionPolicy.ALLOW else None
+            broker = OutputInteractionBroker(missing) if self._interaction is TtyInteractionPolicy.ALLOW else None
             batch = resolve_batch(
                 missing,
                 active_sources(self._config, self._registry),
@@ -210,7 +210,7 @@ class Resolver:
         existing = self._seeded.get(name)
         if existing is not None:
             return existing
-        from agentworks.secrets.policy import InteractionPolicy
+        from agentworks.secrets.policy import TtyInteractionPolicy
         from agentworks.secrets.resolve import (
             CompletionPolicy,
             OutputInteractionBroker,
@@ -219,7 +219,7 @@ class Resolver:
             resolve_batch,
         )
 
-        broker = OutputInteractionBroker([decl]) if self._interaction is InteractionPolicy.ALLOW else None
+        broker = OutputInteractionBroker([decl]) if self._interaction is TtyInteractionPolicy.ALLOW else None
         batch = resolve_batch(
             [decl],
             active_sources(self._config, self._registry),
@@ -236,7 +236,7 @@ class Resolver:
         """Resolve one authorized repair secret without widening the cache."""
         if self._values is None:
             raise StateError("a late repair secret requires the operation boundary")
-        from agentworks.secrets.policy import InteractionPolicy
+        from agentworks.secrets.policy import TtyInteractionPolicy
         from agentworks.secrets.resolve import (
             CompletionPolicy,
             OutputInteractionBroker,
@@ -245,7 +245,7 @@ class Resolver:
             resolve_batch,
         )
 
-        broker = OutputInteractionBroker([decl]) if self._interaction is InteractionPolicy.ALLOW else None
+        broker = OutputInteractionBroker([decl]) if self._interaction is TtyInteractionPolicy.ALLOW else None
         batch = resolve_batch(
             [decl],
             active_sources(self._config, self._registry),

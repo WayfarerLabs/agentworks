@@ -19,7 +19,7 @@ from agentworks.errors import (
     UserAbort,
 )
 from agentworks.naming import validate_name
-from agentworks.secrets.policy import require_exact_interaction_policy
+from agentworks.secrets.policy import require_exact_tty_interaction_policy
 from agentworks.vms.manager import gated_vm_boundary
 
 from ._common import MAX_AGENT_NAME_LENGTH, _require_vm, agent_scope
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.db import Database
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.vms.nodes import LiveVMNode
 
 # ``_mgr`` binds this module's own package object (safe: by the time
@@ -49,7 +49,7 @@ def create_agent(
     vm_name: str,
     template: str | None = None,
     grant_all_workspaces: bool = False,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Create an agent on a VM.
 
@@ -217,7 +217,7 @@ def delete_agent(
     force: bool = False,
     yes: bool = False,
     vm_node: LiveVMNode | None = None,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Delete an agent from a VM.
 
@@ -397,7 +397,7 @@ def reinit_agent(
     *,
     name: str,
     update_template: str | None = None,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Re-run agent setup using the stored template.
 
@@ -426,7 +426,7 @@ def reinit_agent(
     from agentworks.agents.templates import resolve_template
     from agentworks.bootstrap import load_request_registry
 
-    require_exact_interaction_policy(interaction)
+    require_exact_tty_interaction_policy(interaction)
 
     # build_registry runs first so framework miss-policies fire before
     # template / DB / VM business logic.

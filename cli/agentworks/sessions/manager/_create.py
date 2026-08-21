@@ -15,7 +15,7 @@ from ._create_roll import _roll_forward
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.sessions.tmux import RunCommand
     from agentworks.transports import Transport
 
@@ -62,7 +62,7 @@ def _preflight_and_resolve(
     graph: SessionGraph,
     vm: VMRow,
     target: Transport,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> tuple[dict[str, str], Transport | None]:
     """Run the Preflight sweep and the Resolving-Secrets boundary resolve.
 
@@ -150,7 +150,7 @@ def create_session(
     admin: bool = False,
     # VM anchor (validated against workspace/agent VMs when both specified):
     vm_name: str | None = None,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Create and start a session.
 

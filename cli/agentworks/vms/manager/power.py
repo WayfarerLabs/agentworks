@@ -9,7 +9,7 @@ from agentworks import output
 from agentworks.capabilities.base import RunContext
 from agentworks.db import VMStatus
 from agentworks.errors import StateError, UserAbort
-from agentworks.secrets.policy import require_exact_interaction_policy
+from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
 from ._helpers import (
     _guard_failed_vm,
@@ -23,7 +23,7 @@ from .boundary import _live_vm_boundary, _platform_ops_ctx
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.vms.nodes import LiveVMNode
 
 
@@ -32,7 +32,7 @@ def start_vm(
     config: Config,
     name: str,
     *,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Start a stopped VM. Clears the operator-stopped flag so the
     activation gate resumes auto-starting on demand.
@@ -122,7 +122,7 @@ def stop_vm(
     config: Config,
     name: str,
     *,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Stop a running VM and record the operator's intent.
 
@@ -166,7 +166,7 @@ def delete_vm(
     *,
     force: bool = False,
     yes: bool = False,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Delete a VM, cleaning up all associated resources.
 
@@ -195,7 +195,7 @@ def delete_vm(
     """
     import agentworks.vms.manager as _mgr
 
-    require_exact_interaction_policy(interaction)
+    require_exact_tty_interaction_policy(interaction)
     vm = _require_vm(db, name)
 
     # Check for workspaces (which contain agents and sessions)
@@ -306,7 +306,7 @@ def rekey_vm(
     *,
     wait_for_share: bool = False,
     ignore_env: bool = False,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Assign a new Tailscale auth key to a VM (logout + rejoin).
 

@@ -24,7 +24,7 @@ import pytest
 from agentworks.capabilities.vm_platform.tailscale_join import TAILSCALE_JOIN_STDIN_COMMAND
 from agentworks.db import VMStatus
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 
 if TYPE_CHECKING:
@@ -84,7 +84,7 @@ def test_describe_running_vm_is_one_boundary_burst_and_reads_only(
     _seed_vm(db)
     events = _fake_status(monkeypatch, VMStatus.RUNNING)
 
-    vm_manager.describe_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+    vm_manager.describe_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"]]
     assert events == ["status"]
@@ -111,7 +111,7 @@ def test_describe_operator_stopped_vm_never_gates(
 
     monkeypatch.setattr(vm_manager, "_query_live_resources", _no_live)
 
-    vm_manager.describe_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+    vm_manager.describe_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"]]
     assert events == ["status"]  # never "start"
@@ -139,7 +139,7 @@ def test_describe_scope_reaches_node_readiness(
 
     monkeypatch.setattr(ProxmoxPlatform, "preflight", _recording)
 
-    vm_manager.describe_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+    vm_manager.describe_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     (scope,) = scopes
     assert scope is not None
@@ -231,7 +231,7 @@ def test_rekey_running_check_runs_after_the_resolve_boundary(
     monkeypatch.setattr(Resolver, "resolve", _spying_resolve)
 
     with pytest.raises(StateError, match="is not running"):
-        vm_manager.rekey_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+        vm_manager.rekey_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     # The boundary (preflight, then the one resolve pass) fully
     # precedes the status op; nothing re-resolves afterwards.
@@ -253,7 +253,7 @@ def test_rekey_missing_key_fails_at_the_one_resolve_before_status(
     events = _fake_status(monkeypatch, VMStatus.RUNNING)
 
     with pytest.raises(SecretUnavailableError, match="tailscale-auth-key"):
-        vm_manager.rekey_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+        vm_manager.rekey_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == [["tailscale-auth-key", "proxmox-token"]]
     assert events == []
@@ -277,7 +277,7 @@ def test_rekey_rejects_multiline_key_before_status_or_daemon_action(
     )
 
     with pytest.raises(ValidationError) as caught:
-        vm_manager.rekey_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+        vm_manager.rekey_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert auth_key not in repr((caught.value.args, vars(caught.value)))
     assert caught.value.__cause__ is None
@@ -338,7 +338,7 @@ def test_rekey_one_boundary_burst_covers_key_and_site_secret(
     events = _fake_status(monkeypatch, VMStatus.RUNNING)
     calls = _fake_rekey_transports(monkeypatch)
 
-    vm_manager.rekey_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+    vm_manager.rekey_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert len(resolve_counter) == 1
     assert sorted(resolve_counter[0]) == ["proxmox-token", "tailscale-auth-key"]
@@ -375,7 +375,7 @@ def test_rekey_gate_serves_the_boundary_cache(
     events = _fake_status(monkeypatch, VMStatus.RUNNING)
     _fake_rekey_transports(monkeypatch)
 
-    vm_manager.rekey_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+    vm_manager.rekey_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert len(resolve_counter) == 1
     # The pre-gate running check, then the gate's own observation.
@@ -405,7 +405,7 @@ def test_rekey_scope_reaches_node_readiness(
 
     monkeypatch.setattr(ProxmoxPlatform, "preflight", _recording)
 
-    vm_manager.rekey_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+    vm_manager.rekey_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     (scope,) = scopes
     assert scope is not None
@@ -431,7 +431,7 @@ def test_rekey_wraps_steps_in_a_section(
     _fake_status(monkeypatch, VMStatus.RUNNING)
     _fake_rekey_transports(monkeypatch)
 
-    vm_manager.rekey_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+    vm_manager.rekey_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert any(role is Role.HEADER and lvl == 0 and msg == "Rekeying 'box'" for role, lvl, msg in captured_output.lines)
     body_l1 = [msg for role, lvl, msg in captured_output.lines if role is Role.BODY and lvl == 1]
@@ -488,7 +488,8 @@ def test_port_forward_reachable_vm_is_one_boundary_burst(
     # The service returns the SSH exit code; the CLI layer owns the
     # translation to process exit (check 9: no sys.exit in the service).
     assert (
-        vm_manager.port_forward_vm(db, config, "box", ["8080", "9000:3000"], interaction=InteractionPolicy.REFUSE) == 0
+        vm_manager.port_forward_vm(db, config, "box", ["8080", "9000:3000"], interaction=TtyInteractionPolicy.REFUSE)
+        == 0
     )
 
     assert resolve_counter == [["proxmox-token"]]
@@ -521,7 +522,7 @@ def test_port_forward_stopped_vm_gates_then_forwards(
     monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: True)
     monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
 
-    assert vm_manager.port_forward_vm(db, config, "box", ["8080"], interaction=InteractionPolicy.REFUSE) == 0
+    assert vm_manager.port_forward_vm(db, config, "box", ["8080"], interaction=TtyInteractionPolicy.REFUSE) == 0
 
     assert events == ["status", "start", "tailscale"]  # the gate ran
     assert resolve_counter == [["proxmox-token"]]
@@ -543,9 +544,9 @@ def test_port_forward_bad_spec_fails_with_zero_resolves_and_zero_gate(
     _reachable(monkeypatch, False)
 
     with pytest.raises(ValidationError, match="invalid port"):
-        vm_manager.port_forward_vm(db, config, "box", ["nope"], interaction=InteractionPolicy.REFUSE)
+        vm_manager.port_forward_vm(db, config, "box", ["nope"], interaction=TtyInteractionPolicy.REFUSE)
     with pytest.raises(ValidationError, match="out of range"):
-        vm_manager.port_forward_vm(db, config, "box", ["70000"], interaction=InteractionPolicy.REFUSE)
+        vm_manager.port_forward_vm(db, config, "box", ["70000"], interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == []
     assert events == []
@@ -573,7 +574,7 @@ def test_port_forward_scope_reaches_node_readiness(
 
     monkeypatch.setattr(ProxmoxPlatform, "preflight", _recording)
 
-    assert vm_manager.port_forward_vm(db, config, "box", ["8080"], interaction=InteractionPolicy.REFUSE) == 0
+    assert vm_manager.port_forward_vm(db, config, "box", ["8080"], interaction=TtyInteractionPolicy.REFUSE) == 0
 
     (scope,) = scopes
     assert scope is not None
@@ -621,7 +622,7 @@ def test_backup_reachable_vm_is_one_boundary_burst(
     _seed_vm(db)
     _reachable(monkeypatch, True)
 
-    backup_dir = vm_backup.backup_vm(db, backup_env, "box", interaction=InteractionPolicy.REFUSE)
+    backup_dir = vm_backup.backup_vm(db, backup_env, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"]]
     manifest = json.loads((backup_dir / "manifest.json").read_text())
@@ -658,7 +659,7 @@ def test_backup_stopped_vm_gates_then_backs_up(
         lambda *a, **k: gate_events.append("tailscale"),
     )
 
-    backup_dir = vm_backup.backup_vm(db, backup_env, "box", interaction=InteractionPolicy.REFUSE)
+    backup_dir = vm_backup.backup_vm(db, backup_env, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert gate_events == ["status", "start", "tailscale"]  # the gate ran
     assert resolve_counter == [["proxmox-token"]]
@@ -685,7 +686,7 @@ def test_backup_scope_reaches_node_readiness(
 
     monkeypatch.setattr(ProxmoxPlatform, "preflight", _recording)
 
-    vm_backup.backup_vm(db, backup_env, "box", interaction=InteractionPolicy.REFUSE)
+    vm_backup.backup_vm(db, backup_env, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     (scope,) = scopes
     assert scope is not None
@@ -708,7 +709,7 @@ def test_backup_wraps_phases_in_a_section(
     _seed_vm(db)
     _reachable(monkeypatch, True)
 
-    vm_backup.backup_vm(db, backup_env, "box", interaction=InteractionPolicy.REFUSE)
+    vm_backup.backup_vm(db, backup_env, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert any(
         role is Role.HEADER and lvl == 0 and msg.startswith("Backing up VM 'box'")
