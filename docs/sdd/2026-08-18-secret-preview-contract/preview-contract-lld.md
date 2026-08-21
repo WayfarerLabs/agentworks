@@ -194,10 +194,12 @@ may give the client an `InteractionBroker`:
 
 ```python
 class SecretBackend(ABC):
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int]
     supports_tty_interaction: ClassVar[bool]
 ```
 
+- the abstract capability surface provides no default version; every concrete implementation must
+  declare exact value `1` itself;
 - env-var and OnePassword declare `False`;
 - prompt declares `True`;
 - registration rejects a missing or non-exact boolean;
@@ -476,6 +478,8 @@ current-impact aggregate even when an earlier attempt was indeterminate. The ear
 ordered evidence that a higher-impact authoritative pass could avoid reaching that later source; it
 never hides the success or failure from current-impact diagnostics.
 
+Preview exhaustion retains this evidence priority: first indeterminate, then first TTY block, then
+first ordinary miss, then first not-ready or disabled-source block, then aggregate no-candidate.
 Actual-resolution exhaustion retains this evidence priority: first TTY block, then first ordinary
 miss, then first not-ready or disabled source, then the exact no-active-source or
 no-attemptable-source core outcome. A later resolved value or hard failure takes precedence over
@@ -591,8 +595,8 @@ Contract registration and runtime tests cover:
   the legacy runtime resolution-detail vocabulary;
 - bounded provider work and cleanup on success, missing, failure, timeout, and interruption;
 - ordinary missing fallthrough and failed hard-stop across source precedence;
-- mixed actual-resolution exhaustion in which TTY blocks outrank ordinary missing, while ordinary
-  missing outranks not-ready and disabled-source blocks;
+- mixed preview and actual-resolution exhaustion in which indeterminate is preview-only, TTY blocks
+  outrank ordinary missing, and ordinary missing outranks not-ready and disabled-source blocks;
 - no-active-source and no-attemptable-source only as the final fallbacks after all retained
   per-source exhaustion evidence;
 - final blocked-reason projection through the existing exception hierarchy and frozen machine

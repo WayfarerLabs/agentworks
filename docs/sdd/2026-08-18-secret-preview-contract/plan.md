@@ -1,6 +1,6 @@
 # Plan: Value-free secret resolution preview
 
-- Status: Simplified implementation green; independent review pending
+- Status: Feedback/fix round 1 scoped
 - Date: 2026-08-18
 - Amended: 2026-08-21
 - Requirements: [FRD](./frd.md)
@@ -181,14 +181,15 @@
 ## Phase 3: Atomic contract cutover and core orchestration
 
 - [x] Remove the no-op client `prepare` method and `external_operation_timeout`; extend
-      `create_client` so operation policy is fixed before any backend lifecycle hook runs. The
-      initial implementation also carried a remaining-time input; the next item supersedes that dead
-      part without changing the intent-at-construction boundary. Keep policy out of
+      `create_client` with tagged preview-or-resolution intent, exact TTY access, broker, and
+      remaining-time inputs before any backend lifecycle hook runs. Keep policy out of
       `preview(requests)` and `resolve(requests)` because it is fixed at construction.
 - [x] Apply the 2026-08-21 operator-approved simplification that supersedes the dead factory inputs:
       remove `source_name`, `remaining_time`, `RemainingTime`, and `_MonotonicBudget`; keep source
       identity in core and the one real shrinking OnePassword timeout in source config. (Implemented
       in `da5f1e6a`.)
+- [ ] Require every concrete secret backend to declare contract version `1`; leave the abstract
+      capability annotation-only and add the missing-declaration conformance guard.
 - [x] Update the `SecretBackend` ABC, descriptor, root exports, and all implementations atomically,
       resetting the exact secret-backend contract sentinel from `2` to `1` while removing
       `interactive`, adding exact `supports_tty_interaction`, and removing `would_attempt`.
@@ -199,6 +200,8 @@
       variants and reasons, construction/entry intent, actual-resolution impact absence, and
       maximum-preview-impact no-indeterminate behavior. Reject TTY blocks from backends that declare
       no TTY support.
+- [ ] Add direct preview and actual-resolution adversarial guards proving that a backend which
+      declares no TTY support cannot return either TTY block reason without a protocol failure.
 - [x] Update both backend-authoring READMEs with a complete rewritten example and conformance rules.
 - [x] Make `cli/agentworks/capabilities/secret_backend/README.md` the self-contained permanent
       contract authority for exact variants, reason ownership, core flow, preview impact, TTY broker
@@ -217,6 +220,10 @@
       budget and cleanup discipline.
 - [x] Implement current-impact preview aggregation with ordinary-missing and execution-block
       fallthrough, failed hard-stop, and ordered earlier-indeterminate evidence.
+- [ ] Align exhausted preview diagnostics with actual resolution: first indeterminate where legal,
+      then TTY block, ordinary missing, readiness or disabled-plugin block, and no-candidate; cover
+      both paths with an adversarial category matrix, and make no-candidate guidance cover either an
+      absent active source or an absent applicable mapping without expanding the result contract.
 - [x] Implement actual resolution as one bounded source-first pass with one batch per ready source,
       ordinary-missing and TTY-block fallthrough, failed hard-stop, and no preview reuse.
 - [x] Add event-ledger tests for source-first batching, higher-source failure preventing lower
@@ -308,6 +315,10 @@
       general interaction consent.
 - [x] Update every global flag help/reference surface to state the exact TTY-only meaning and remove
       claims that the flag itself selects plain or colorless output.
+- [ ] Add one explicit operator-facing behavior-change callout to the upgrade guide: the flag now
+      disables TTY use only, no longer controls presentation, does not prevent out-of-band provider
+      approval or waiting, and is not an unattended fail-fast guarantee; name unattended source and
+      authentication alternatives.
 - [x] Trim the secret-backend and secrets test estates to the simplification sweep standard as part
       of this rewrite, deleting worthless tests rather than assigning them to a later cleanup.
 
