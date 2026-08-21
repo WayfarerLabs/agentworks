@@ -38,6 +38,9 @@
 - [x] Refresh the branch before revision-2 handoff. (2026-08-21: rebased onto `202036a6`;
       intervening validation-process, onboarding-guide, and website changes did not alter runtime
       secret semantics.)
+- [x] Refresh the branch before final implementation review. (2026-08-21: rebased onto `d83bfa71`;
+      intervening changes touched only the parent saga artifacts, and range-diff proved all 15
+      child-effort patches unchanged.)
 - [x] Complete FRD, prior-art research, HLA, preview-contract LLD, operator-surfaces LLD, migration
       strategy, and this tracked plan. (2026-08-18.)
 - [x] Run artifact lint, spelling, link, lockfile, Rulesync, and manual typography checks.
@@ -364,8 +367,9 @@
 
 ## Phase 7: Closeout and ready-for-merge handoff
 
-- [ ] Rebase or merge current `origin/main` as appropriate, rerun affected gates, and confirm the PR
-      diff contains no unrelated user work.
+- [x] Rebase or merge current `origin/main` as appropriate, rerun affected gates, and confirm the PR
+      diff contains no unrelated user work. (2026-08-21: rebased onto `d83bfa71`; file, SDD lock,
+      Rulesync, and diff gates passed; the complete diff is scoped to this child effort.)
 - [ ] Reconcile every FRD acceptance criterion against code, tests, docs, and the evidence available
       before formal integration.
 - [ ] Update this plan truthfully without changing any completed checkbox that has merged to main.
