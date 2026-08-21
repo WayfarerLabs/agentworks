@@ -353,6 +353,9 @@
       (2026-08-21: focused coverage passed 227 tests; full non-live passed 7,239 with one skip;
       Ruff, format, Mypy, file lint, lock, locked-SDD, Rulesync, generated-package, Typer isolation,
       website Python and Node, and both deterministic-build variants passed.)
+- [x] Correct the round-1 exact-head documentation findings: keep the new exhaustion precedence in
+      the effort-owned design rather than the accepted FRD, reconcile the numbered LLD algorithm,
+      and preserve the earlier completed plan checkbox verbatim.
 - [x] Obtain a private `agentworks-reviewer` pass on the complete diff and resolve material
       findings. (2026-08-21: three bounded correction rounds closed lifecycle, timeout, TTY-access,
       exact-map, static-description, cleanup, documentation, and test-quality findings; final exact

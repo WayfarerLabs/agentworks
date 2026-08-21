@@ -89,12 +89,6 @@ on evidence that a configured source is broken.
   - `indeterminate` falls through during preview and preserves higher-precedence uncertainty;
   - `blocked` falls through and preserves the reason if the chain exhausts;
   - `failed` stops the chain immediately.
-
-  On exhausted preview chains, core selects the first indeterminate result, then the first TTY
-  block, then the first ordinary miss, then the first readiness or disabled-plugin block. Actual
-  resolution uses the same ordering without indeterminate, which is impossible there. This keeps
-  preview and resolution diagnostics consistent for the same observed source state.
-
 - R11. Callers own fixed preview semantics:
   - preflight requests `OperatorImpact.NONE`, accepts `available` or `indeterminate`, rejects
     `missing` or `blocked`, and rejects `failed` unless an earlier higher-precedence attempt is

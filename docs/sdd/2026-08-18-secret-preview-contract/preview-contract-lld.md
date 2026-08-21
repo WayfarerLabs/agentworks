@@ -528,13 +528,13 @@ wire status `blocked` and reason `no-candidate`; it is legal only with no source
 attempts. This makes the aggregate-only truth structural instead of a prose restriction on a block
 enum. The aggregate result is computed as follows:
 
-1. Missing and blocked attempts fall through. Remember the first blocked attempt for exhaustion.
+1. Missing and blocked attempts fall through. Retain their ordered category evidence for exhaustion.
 2. Indeterminate falls through and remains in ordered evidence.
 3. Available stops traversal and becomes aggregate available, while retaining earlier attempts.
 4. Failed stops traversal and becomes aggregate failed, while retaining earlier attempts.
-5. Exhaustion with an earlier indeterminate is indeterminate. Otherwise, it is blocked when a block
-   was retained, missing when at least one lookup ran and every attempt ordinarily missed, and
-   `AggregateNoCandidate` when no candidate lookup ran.
+5. Exhaustion selects the first indeterminate, then the first TTY block, then the first ordinary
+   missing result, then the first readiness or disabled-plugin block. It uses `AggregateNoCandidate`
+   only when no candidate lookup ran.
 
 At `ALLOW`, steps involving indeterminate are unreachable for a conforming backend. The aggregate is
 therefore a definitive disposition, although blocked and failed remain legal.
