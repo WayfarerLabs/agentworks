@@ -56,8 +56,9 @@ The atomic rewrite makes these changes:
 | `describe_lookup(...) -> str \| None` | structured static `LookupDescription`                                  |
 | no client preview                     | batch `preview(requests) -> Mapping[str, BackendPreview]` tagged sum   |
 | no-op, impact-blind `prepare`         | removed                                                                |
-| pre-client timeout hook               | removed; client enforces validated config and remaining budget         |
+| pre-client timeout hook               | removed; client enforces its validated source timeout directly         |
 | factory lacks intent                  | factory receives tagged preview/resolution intent and exact TTY access |
+| dead source-name and budget inputs    | removed; core owns identity and no outer operation deadline exists     |
 | value-map `resolve`                   | resolved, missing, blocked, or failed tagged sum                       |
 | broad actual-resolution policy        | no impact input; only TTY access can constrain prompt                  |
 | one negative/failure channel          | missing fallthrough, blocked fallthrough, failed hard-stop             |
@@ -148,12 +149,10 @@ class OnePasswordBackend(SecretBackend):
     def create_client(
         cls,
         *,
-        source_name,
         config,
         intent,
         tty_access,
         interaction_broker,
-        remaining_time,
     ) -> AbstractContextManager[SecretSourceClient]:
         ...
 

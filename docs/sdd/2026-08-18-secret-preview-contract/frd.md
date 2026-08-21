@@ -219,3 +219,8 @@ on evidence that a configured source is broken.
   internal sentinel `2` to `1`. This is authenticated operator direction from 2026-08-19: because
   the sentinel is registration-only and no external implementation exists, `1` is deliberately
   re-established as the sole supported pre-publication contract rather than minting `3`.
+- Remove `source_name` and `remaining_time` from `create_client`, together with the unused
+  `RemainingTime` and core budget types. This is authenticated operator direction from 2026-08-21:
+  core retains source identity for its own diagnostics, backend config owns every real provider
+  timeout, and a future outer deadline must add a real value rather than reserve a dead contract
+  extension point.

@@ -120,9 +120,10 @@ TTY access is available and otherwise returns the matching blocked reason.
 
 The operation-bounded `SecretSourceClient` gains one batch `preview` method. Core constructs a fresh
 client with a tagged intent: `PreviewIntent(impact)` or `ResolutionIntent()`. It also supplies exact
-TTY interaction access, an optional prompt broker, and the shrinking operation budget before any
-backend lifecycle code runs. `preview` and `resolve` receive only candidate requests. Each method
-returns exactly one closed tagged result per request and no other payload:
+TTY interaction access and an optional prompt broker before any backend lifecycle code runs. Source
+identity remains core-owned, and backend config owns any real provider timeout; the factory carries
+no unused generic deadline or source-identity input. `preview` and `resolve` receive only candidate
+requests. Each method returns exactly one closed tagged result per request and no other payload:
 
 - `PreviewAvailable`: a valid value exists; stop successfully;
 - `PreviewMissing`: a valid lookup established ordinary absence; fall through silently;
@@ -151,8 +152,8 @@ Core passes exact tagged operation intent and TTY access into `create_client` be
 or context-entry code can run. Construction remains resource-free, context entry is
 provider-I/O-free, and the selected method owns provider work. The old `prepare` and
 `external_operation_timeout` hooks are removed: every in-tree `prepare` is a no-op, and the provider
-client already enforces validated source timeout together with the remaining-time view. This leaves
-no pre-intent setup phase and one typed result surface per operation.
+client enforces its validated source timeout directly. This leaves no pre-intent setup phase, no
+speculative outer-budget contract, and one typed result surface per operation.
 
 Backends share their private acquisition path between preview and resolve:
 

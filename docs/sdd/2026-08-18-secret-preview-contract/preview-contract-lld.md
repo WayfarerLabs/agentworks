@@ -231,12 +231,10 @@ type SecretClientIntent = PreviewIntent | ResolutionIntent
 def create_client(
     cls,
     *,
-    source_name: str,
     config: AgwModel,
     intent: SecretClientIntent,
     tty_access: TtyInteractionAccess,
     interaction_broker: InteractionBroker | None,
-    remaining_time: RemainingTime,
 ) -> AbstractContextManager[SecretSourceClient]: ...
 ```
 
@@ -249,11 +247,13 @@ method. Passing intent before both hooks closes the pre-method gap. In-tree and 
 tests prove that forbidden TTY or preview-impact calls produce no provider or broker observation
 during construction, context entry, or the selected method.
 
-The old `prepare` and `external_operation_timeout` hooks are removed. All three `prepare`
-implementations are no-ops. The timeout hook is evaluated before `create_client` in the shipped
-driver, receives no authority, and duplicates the OnePassword source config that the provider client
-already enforces. Keeping either hook would create an extra pre-method failure surface. Source
-config validates any backend timeout; the client applies it together with `remaining_time` at every
+The old `prepare` and `external_operation_timeout` hooks are removed. The timeout hook is evaluated
+before `create_client` in the shipped driver, receives no authority, and duplicates the OnePassword
+source config that the provider client already enforces. Keeping either hook would create an extra
+pre-method failure surface. The shipped driver has no outer operation deadline, so `remaining_time`
+and its always-unbounded budget would be dead extension points; `source_name` is likewise
+unnecessary because core already owns source diagnostics and no backend consumes it. Source config
+validates any backend timeout, and the client applies one shrinking source deadline at every
 external boundary and reports expiry as `failed/deadline-exceeded`.
 
 The rewritten protocol is:
@@ -271,9 +271,9 @@ class SecretSourceClient(Protocol):
     ) -> Mapping[str, BackendResolution]: ...
 ```
 
-Intent, TTY access, broker, and remaining-time view are fixed for the lifetime of this fresh client
-and are not repeated on either method. Core never reuses a client across intents or preview-impact
-levels. This makes disagreement between constructor intent and per-call behavior impossible.
+Intent, TTY access, and broker are fixed for the lifetime of this fresh client and are not repeated
+on either method. Core never reuses a client across intents or preview-impact levels. This makes
+disagreement between constructor intent and per-call behavior impossible.
 
 Each method returns exactly one entry for every request it owns. Core validates the whole map before
 rendering, aggregating, or copying any resolved value. Missing keys, extra keys, wrong types,

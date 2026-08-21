@@ -1,6 +1,6 @@
 # Plan: Value-free secret resolution preview
 
-- Status: Implementation reviewed and green; formal integration validation pending
+- Status: Operator-approved contract simplification in progress
 - Date: 2026-08-18
 - Amended: 2026-08-21
 - Requirements: [FRD](./frd.md)
@@ -181,9 +181,13 @@
 ## Phase 3: Atomic contract cutover and core orchestration
 
 - [x] Remove the no-op client `prepare` method and `external_operation_timeout`; extend
-      `create_client` with tagged preview-or-resolution intent, exact TTY access, broker, and
-      remaining-time inputs before any backend lifecycle hook runs. Keep policy out of
+      `create_client` so operation policy is fixed before any backend lifecycle hook runs. The
+      initial implementation also carried a remaining-time input; the next item supersedes that dead
+      part without changing the intent-at-construction boundary. Keep policy out of
       `preview(requests)` and `resolve(requests)` because it is fixed at construction.
+- [ ] Apply the 2026-08-21 operator-approved simplification that supersedes the dead factory inputs:
+      remove `source_name`, `remaining_time`, `RemainingTime`, and `_MonotonicBudget`; keep source
+      identity in core and the one real shrinking OnePassword timeout in source config.
 - [x] Update the `SecretBackend` ABC, descriptor, root exports, and all implementations atomically,
       resetting the exact secret-backend contract sentinel from `2` to `1` while removing
       `interactive`, adding exact `supports_tty_interaction`, and removing `would_attempt`.
@@ -326,6 +330,7 @@
 - [x] Run manual em-dash, double-dash punctuation, value-leak, and stale-vocabulary scans.
       (2026-08-21: final implementation scans passed; the remaining string assertion covers a
       provider-supplied containment sentinel rather than authored prose.)
+- [ ] Rerun the complete implementation and repository gates after removing the dead factory inputs.
 - [x] Obtain a private `agentworks-reviewer` pass on the complete diff and resolve material
       findings. (2026-08-21: three bounded correction rounds closed lifecycle, timeout, TTY-access,
       exact-map, static-description, cleanup, documentation, and test-quality findings; final exact
@@ -333,9 +338,12 @@
 - [x] Request fresh-eyes review after the last material implementation change. (2026-08-21: the
       final pass independently reproduced protected-exit and cleanup precedence and reported exact
       head `1a97e58b` clean.)
-- [ ] Request the separately operated `agentworks-tester` with the approved environment inventory,
+- [ ] Obtain clean reviewer-of-record and fresh-eyes dispositions on the simplified exact head.
+- [x] Request the separately operated `agentworks-tester` with the approved environment inventory,
       naming prefix, resource budget, and scoped charter; the effort lead does not duplicate its
-      integration run.
+      integration run. (2026-08-21: ready head `6964bf21` triggered the pipeline, then returned to
+      draft before a report when the operator accepted the Muntz simplification.)
+- [ ] Re-request the separately operated integration run on the simplified ready head.
 - [ ] Exercise at minimum non-TTY OnePassword-equivalent out-of-band behavior through the real CLI
       seam, prompt with and without a PTY, default and opted-in describe/verify, global
       `--non-interactive`, preflight indeterminate, missing-versus-failed fallback, and human/JSON
@@ -379,8 +387,12 @@
       source flow, TTY policy, provider classification, operator surfaces, and value containment;
       AC1, AC3, and the live portion of AC10 remain assigned to formal integration.)
 - [ ] Update this plan truthfully without changing any completed checkbox that has merged to main.
-- [ ] Remove draft status when the complete, green, independently reviewed implementation is
+- [x] Remove draft status when the complete, green, independently reviewed implementation is
       intended to merge as-is; that transition requests the separately operated integration run.
+      (2026-08-21: handed off `6964bf21`, then returned to draft under authenticated operator
+      direction for the dead-parameter removal.)
+- [ ] Reapply the ready signal after the operator-approved contract simplification is complete,
+      green, and independently reviewed.
 - [ ] After integration disposition, return the PR to draft before any closeout mutation, then
       create `locked.md` with the final implementation summary, design deltas, validation evidence,
       review disposition, and remaining known limitations.
