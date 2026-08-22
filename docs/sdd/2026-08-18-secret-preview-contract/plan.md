@@ -1,6 +1,6 @@
 # Plan: Value-free secret resolution preview
 
-- Status: Feedback/fix round 2 implemented; exact-head review pending
+- Status: Feedback/fix round 2 clean; revised ready signal pending
 - Date: 2026-08-18
 - Amended: 2026-08-21
 - Requirements: [FRD](./frd.md)
@@ -367,12 +367,14 @@
 - [x] Correct the round-1 exact-head documentation findings: keep the new exhaustion precedence in
       the effort-owned design rather than the accepted FRD, reconcile the numbered LLD algorithm,
       and preserve the earlier completed plan checkbox verbatim.
-- [ ] Run the complete implementation and repository gates after formal-integration feedback/fix
+- [x] Run the complete implementation and repository gates after formal-integration feedback/fix
       round 2, then obtain clean reviewer-of-record and fresh-eyes dispositions on the exact head.
       (2026-08-21: implementation gates passed at `dda1f055`: focused 164 tests; full non-live 7,258
       tests with one skip; Ruff, format, Mypy, file lint, lock, locked-SDD, Rulesync,
       generated-package, Typer isolation, website Python and Node, and both deterministic-build
-      variants passed. Exact-head reviews remain pending.)
+      variants passed. Reviewer-of-record and fresh-eyes passes reported no material finding at
+      exact head `0a4d427d`; their independent focused gates passed 176 and 154 tests, respectively,
+      and the fresh-eyes full non-live rerun reproduced 7,258 tests with one skip.)
 - [x] Obtain a private `agentworks-reviewer` pass on the complete diff and resolve material
       findings. (2026-08-21: three bounded correction rounds closed lifecycle, timeout, TTY-access,
       exact-map, static-description, cleanup, documentation, and test-quality findings; final exact
