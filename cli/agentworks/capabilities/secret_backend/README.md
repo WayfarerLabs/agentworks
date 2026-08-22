@@ -114,9 +114,10 @@ Backend-returnable failure reasons are:
 - `MALFORMED_VALUE`
 
 `BACKEND_PROTOCOL` and `UNEXPECTED` are core-owned failure reasons. `SOURCE_NOT_READY`,
-`BACKEND_PLUGIN_DISABLED`, `NO_ACTIVE_SOURCE`, and `NO_ATTEMPTABLE_SOURCE` are core-owned block
-reasons. Aggregate preview also has a dedicated no-candidate result when no runtime lookup ran; it
-is not synthetic missing.
+`BACKEND_PLUGIN_DISABLED`, `NO_ACTIVE_SOURCE`, `NO_ATTEMPTABLE_SOURCE`, and `BATCH_DOOMED` are
+core-owned block reasons. `BATCH_DOOMED` is legal only on an unattributed final actual-resolution
+outcome; a backend result or preview attempt carrying it is a protocol violation. Aggregate preview
+also has a dedicated no-candidate result when no runtime lookup ran; it is not synthetic missing.
 
 A backend returns missing only with provider-specific evidence of normal absence. Invalid mapping,
 invalid reference, ambiguous rejection, authentication trouble, timeout, connectivity trouble, and
@@ -140,7 +141,14 @@ When preview exhausts the chain, the first indeterminate outranks the first TTY 
 outranks the first ordinary missing result, which outranks the first core source block. A later
 available or failed result is the aggregate and keeps the earlier attempts as evidence. When actual
 resolution exhausts the chain, a TTY block outranks ordinary missing, which outranks a core source
-block. Core performs one source-first pass and does not reuse preview as resolution.
+block. Core performs one source-first pass and does not reuse preview as resolution. Before opening
+a later provider source for a complete operation, core checks whether the batch is already terminal
+from a hard failure or static remaining-source facts. It then skips that source and gives other
+unresolved names the unattributed `BATCH_DOOMED` result. This completion invariant stays inside
+core; the explicit partial-reveal path continues independent names. Static viability uses only
+mapping applicability, folded readiness, and plugin enablement. Core never inspects TTY access or
+`supports_tty_interaction` to predict viability: it passes exact TTY access into the client, and the
+backend alone classifies whether that fact limits its attempt.
 
 ## Lifecycle and exception boundary
 

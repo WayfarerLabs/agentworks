@@ -74,6 +74,7 @@ class SourcePreviewAttempt:
         if isinstance(self.result, PreviewBlocked) and self.result.reason in {
             BlockReason.NO_ACTIVE_SOURCE,
             BlockReason.NO_ATTEMPTABLE_SOURCE,
+            BlockReason.BATCH_DOOMED,
         }:
             raise ValueError("final-only block reason cannot appear in a preview attempt")
 

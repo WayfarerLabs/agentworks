@@ -60,6 +60,7 @@ class BlockReason(StrEnum):
     BACKEND_PLUGIN_DISABLED = "backend-plugin-disabled"
     NO_ACTIVE_SOURCE = "no-active-source"
     NO_ATTEMPTABLE_SOURCE = "no-attemptable-source"
+    BATCH_DOOMED = "batch-doomed-before-interaction"
 
 
 class FailureReason(StrEnum):

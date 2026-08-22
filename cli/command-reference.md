@@ -283,15 +283,19 @@ is configured database state, never live tmux state.
 
 ```text
 {
-  groups: [{name, checks: [{name, status, message, hint}]}],
+  groups: [{name, checks: [{name, status, message, hint, secret_preview?}]}],
   counts: {ok, info, warn, fail}
 }
 ```
 
 `status` is exactly `ok`, `info`, `warn`, or `fail`. Group and check arrays keep report construction
 order, and counts are integers from the complete report. `message` and `hint` are the same nullable
-facts used by the human renderer. A failing report is still written in full, then the command exits
-1:
+facts used by the human renderer. A secret check adds the optional, value-free `secret_preview`
+record `{status, source, identifier, reason?, attempts}`. Its status is `available`, `missing`,
+`indeterminate`, `blocked`, or `failed`; source and identifier are nullable; reason is present only
+for a result with a closed reason; and attempts retain source order as
+`{source, identifier, status, reason?}`. Non-secret checks omit the field. No secret value enters
+this projection. A failing report is still written in full, then the command exits 1:
 
 ```bash
 agw doctor --output json
@@ -392,9 +396,14 @@ line-oriented environment, credential, header, or stdin consumer accepts the val
 Actual resolution is separate. It performs one bounded source-first pass, preserves multiline
 strings, rejects NUL, falls through ordinary missing and blocked sources, and hard-stops a secret on
 invalid mapping, authentication, provider rejection, transport, timeout, or malformed-value
-failures. For truly unattended operation, configure `env-var` or a provider authentication mode
-known to be unattended, such as supported 1Password service-account or Connect credentials. Do not
-rely on `--non-interactive` as a general provider-work prohibition.
+failures. A complete batch that is already terminal stops before another provider source and gives
+other skipped names the core-only `batch-doomed-before-interaction` reason; explicit partial reveal
+continues independent names. For truly unattended operation, configure `env-var` or a provider
+authentication mode known to be unattended, such as supported 1Password service-account or Connect
+credentials. The static JSON v1 resolution-category vocabulary remains `attemptable`,
+`refused-interaction`, and `unavailable`; `refused-interaction` is retained for compatibility even
+when the current TTY-only path does not emit it. Do not rely on `--non-interactive` as a general
+provider-work prohibition.
 
 ### VMs
 

@@ -10,9 +10,17 @@ import pytest
 from agentworks.bootstrap import build_registry
 from agentworks.capabilities.secret_backend import OperatorImpact, TtyInteractionAccess
 from agentworks.config import load_config
-from agentworks.secrets.inspect import describe_secret, secret_description_data
+from agentworks.secrets.inspect import StaticResolutionCategory, describe_secret, secret_description_data
 from agentworks.secrets.preview import PreviewStatus
 from tests.conftest import ManifestDoc, write_manifests
+
+
+def test_json_v1_static_resolution_categories_remain_frozen() -> None:
+    assert tuple(category.value for category in StaticResolutionCategory) == (
+        "attemptable",
+        "refused-interaction",
+        "unavailable",
+    )
 
 
 def _configured_secret(tmp_path: Path) -> tuple[object, object]:

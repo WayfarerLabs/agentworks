@@ -30,6 +30,10 @@ from agentworks.secrets.outcomes import (
             ResolutionBlocked(BlockReason.NO_ACTIVE_SOURCE),
         ),
         ResolutionOutcome(
+            "batch-doomed",
+            ResolutionBlocked(BlockReason.BATCH_DOOMED),
+        ),
+        ResolutionOutcome(
             "failed",
             ResolutionFailed(FailureReason.CONNECTIVITY),
             source="fixture",
@@ -39,3 +43,10 @@ from agentworks.secrets.outcomes import (
 def test_format_outcome_is_safe_for_every_accepted_result(outcome: ResolutionOutcome) -> None:
     rendered = format_outcome(outcome)
     assert outcome.status.value in rendered
+
+
+def test_batch_doomed_is_an_unattributed_final_outcome_only() -> None:
+    outcome = ResolutionOutcome("secret", ResolutionBlocked(BlockReason.BATCH_DOOMED))
+    assert outcome.source is None
+    with pytest.raises(ValueError):
+        ResolutionOutcome("secret", ResolutionBlocked(BlockReason.BATCH_DOOMED), source="fixture")

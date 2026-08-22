@@ -135,7 +135,6 @@ def test_vm_describe_json_suppresses_the_ordinary_resolver_presentation(
     _platform_fast_path(monkeypatch)
     _install_skipped_backend(monkeypatch)
     calls = _resolution_spy(monkeypatch)
-    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
 
     human = CliRunner().invoke(app, ["vm", "describe", "box", "--output", "human"])
     machine = CliRunner().invoke(app, ["vm", "describe", "box", "--output", "json"])
@@ -178,7 +177,6 @@ def test_session_describe_uses_the_same_real_gate_chain_for_both_formats(
     _wire_cli(monkeypatch, db, config)
     _platform_fast_path(monkeypatch)
     _install_skipped_backend(monkeypatch)
-    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr(sessions, "_ensure_pid", lambda row, *, target, db: row)
     monkeypatch.setattr(sessions, "check_session_status", lambda row, *, target: SessionStatus.STOPPED)
 
@@ -247,7 +245,6 @@ def test_session_list_status_and_late_repair_use_the_same_resolution_path(
     _wire_cli(monkeypatch, db, config)
     _install_skipped_backend(monkeypatch)
     calls = _resolution_spy(monkeypatch)
-    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr(vms, "_tailscale_rejoin_required", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.STOPPED)
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: None)

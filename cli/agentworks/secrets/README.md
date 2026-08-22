@@ -85,6 +85,15 @@ resolved, missing, blocked, or failed. Flow is fixed:
 - failed hard-stops that secret; and
 - preview indeterminate falls through while retaining ordered evidence.
 
+Before another provider source turn in a complete operation, core stops a batch that is already
+terminal from a hard failure or static remaining-source facts. It performs no later provider or
+broker work and records each otherwise skipped unresolved name as the core-only, unattributed
+`blocked/batch-doomed-before-interaction` result. The explicit partial-reveal surface does not apply
+this all-required completion rule and continues resolving independent names. Static viability uses
+only mapping applicability, readiness, and plugin enablement. It never uses TTY access or backend
+TTY capability as a prediction; each backend receives exact TTY access and decides whether it is
+limiting.
+
 A later preview available or failed result becomes the aggregate while earlier indeterminate
 attempts remain visible. A chain with no applicable runtime lookup is blocked/no-candidate, not
 missing. Preflight uses zero-impact preview, accepts available or indeterminate, rejects missing and

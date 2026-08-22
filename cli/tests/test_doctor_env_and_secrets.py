@@ -170,8 +170,16 @@ def test_secret_checks_use_only_explicit_tty_access(
         registry,
         tty_access=TtyInteractionAccess.AVAILABLE,
     )
-    unavailable_row = next(check for check in unavailable.checks if check.secret_preview is not None)
-    available_row = next(check for check in available.checks if check.secret_preview is not None)
+    unavailable_row = next(
+        check
+        for check in unavailable.checks
+        if check.secret_preview is not None and check.secret_preview.name == "tailscale-auth-key"
+    )
+    available_row = next(
+        check
+        for check in available.checks
+        if check.secret_preview is not None and check.secret_preview.name == "tailscale-auth-key"
+    )
     assert unavailable_row.secret_preview is not None
     assert available_row.secret_preview is not None
     assert unavailable_row.secret_preview.status is PreviewStatus.BLOCKED
@@ -219,7 +227,9 @@ def test_secret_resolves_via_env_var_when_set(
     )
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config, build_registry(config), tty_access=TtyInteractionAccess.UNAVAILABLE)
-    shared = next(check for check in g.checks if check.status is Status.OK)
+    shared = next(
+        check for check in g.checks if check.secret_preview is not None and check.secret_preview.name == "shared"
+    )
     assert shared.status is Status.OK
     assert shared.secret_preview is not None
     assert shared.secret_preview.status is PreviewStatus.AVAILABLE
@@ -279,7 +289,9 @@ def test_secret_resolves_via_prompt_when_env_var_unset(
     )
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config, build_registry(config), tty_access=TtyInteractionAccess.UNAVAILABLE)
-    shared = g.checks[-1]
+    shared = next(
+        check for check in g.checks if check.secret_preview is not None and check.secret_preview.name == "shared"
+    )
     assert shared.status is Status.WARN
     assert shared.secret_preview is not None
     assert shared.secret_preview.status is PreviewStatus.BLOCKED

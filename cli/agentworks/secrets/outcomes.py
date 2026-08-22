@@ -93,7 +93,11 @@ class ResolutionOutcome:
         if isinstance(self.result, (ResolutionResolved, ResolutionMissing, ResolutionFailed)) and self.source is None:
             raise ValueError("this resolution result requires a source")
         if isinstance(self.result, ResolutionBlocked):
-            structural = self.result.reason in {BlockReason.NO_ACTIVE_SOURCE, BlockReason.NO_ATTEMPTABLE_SOURCE}
+            structural = self.result.reason in {
+                BlockReason.NO_ACTIVE_SOURCE,
+                BlockReason.NO_ATTEMPTABLE_SOURCE,
+                BlockReason.BATCH_DOOMED,
+            }
             if structural is (self.source is not None):
                 raise ValueError("resolution block reason disagrees with source identity")
 
@@ -160,6 +164,7 @@ def format_hint(outcome: ResolutionOutcome) -> str:
         BlockReason.BACKEND_PLUGIN_DISABLED: "enable the configured secret-backend plugin",
         BlockReason.NO_ACTIVE_SOURCE: "configure an active secret source",
         BlockReason.NO_ATTEMPTABLE_SOURCE: "configure an applicable secret mapping or source",
+        BlockReason.BATCH_DOOMED: "resolve the other blocking secrets before retrying this complete operation",
     }[result.reason]
 
 

@@ -310,6 +310,7 @@ class StaticResolutionCategory(StrEnum):
     """Frozen JSON v1 applicability projection."""
 
     ATTEMPTABLE = "attemptable"
+    REFUSED_INTERACTION = "refused-interaction"
     UNAVAILABLE = "unavailable"
 
 

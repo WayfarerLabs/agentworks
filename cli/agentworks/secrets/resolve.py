@@ -510,12 +510,26 @@ def _collapse_actual(name: str, evidence: _Evidence, *, sources_empty: bool) -> 
     return _resolution_outcome(name, ResolutionBlocked(reason))
 
 
-def resolve_batch(
+def _mark_batch_doomed(
+    names: Sequence[str],
+    outcomes: dict[str, ResolutionOutcome],
+) -> None:
+    """Complete a terminal batch without attributing skipped work to a source."""
+    for name in names:
+        if name not in outcomes:
+            outcomes[name] = _resolution_outcome(
+                name,
+                ResolutionBlocked(BlockReason.BATCH_DOOMED),
+            )
+
+
+def _resolve_batch(
     secrets: Sequence[SecretDecl],
     sources: Sequence[ActiveSource],
     *,
     tty_access: TtyInteractionAccess,
     interaction_broker: InteractionBroker | None,
+    complete: bool,
 ) -> ResolutionBatch:
     """Resolve one deduplicated batch in one bounded source-first pass."""
     if type(tty_access) is not TtyInteractionAccess:
@@ -527,16 +541,64 @@ def resolve_batch(
     outcomes: dict[str, ResolutionOutcome] = {}
     values: dict[str, str] = {}
     evidence = {name: _Evidence.empty() for name in deduped}
+    projection_cache: dict[
+        tuple[int, str],
+        tuple[SecretLookupRequest | None, LookupDescription] | None,
+    ] = {}
 
-    for source in sources:
+    def projection_for(
+        source_index: int,
+        secret: SecretDecl,
+    ) -> tuple[SecretLookupRequest | None, LookupDescription] | None:
+        key = (source_index, secret.name)
+        if key not in projection_cache:
+            try:
+                projection_cache[key] = _lookup_projection(secret, sources[source_index])
+            except _BackendProtocolError:
+                projection_cache[key] = None
+        return projection_cache[key]
+
+    def static_terminal_outcome(
+        secret: SecretDecl,
+        *,
+        start: int,
+    ) -> ResolutionOutcome | None:
+        prospective = _Evidence(
+            tty_blocks=list(evidence[secret.name].tty_blocks),
+            missing=list(evidence[secret.name].missing),
+            source_blocks=list(evidence[secret.name].source_blocks),
+        )
+        for source_index in range(start, len(sources)):
+            source = sources[source_index]
+            projection = projection_for(source_index, secret)
+            if projection is None:
+                return _resolution_outcome(
+                    secret.name,
+                    ResolutionFailed(FailureReason.BACKEND_PROTOCOL),
+                    source=source.name,
+                    backend=source.backend_class.name,
+                )
+            request, description = projection
+            if request is None:
+                continue
+            reason: BlockReason | None = None
+            if source.disabled_backend_plugin is not None:
+                reason = BlockReason.BACKEND_PLUGIN_DISABLED
+            elif not source.readiness.is_ready:
+                reason = BlockReason.SOURCE_NOT_READY
+            if reason is None:
+                return None
+            prospective.source_blocks.append((source.name, description.identifier, source.backend_class.name, reason))
+        return _collapse_actual(secret.name, prospective, sources_empty=not sources)
+
+    for source_index, source in enumerate(sources):
         unresolved = [declarations[name] for name in deduped if name not in outcomes]
         if not unresolved:
             break
         projected: list[tuple[SecretLookupRequest, str | None]] = []
         for secret in unresolved:
-            try:
-                request, description = _lookup_projection(secret, source)
-            except _BackendProtocolError:
+            projection = projection_for(source_index, secret)
+            if projection is None:
                 outcomes[secret.name] = _resolution_outcome(
                     secret.name,
                     ResolutionFailed(FailureReason.BACKEND_PROTOCOL),
@@ -544,6 +606,7 @@ def resolve_batch(
                     backend=source.backend_class.name,
                 )
                 continue
+            request, description = projection
             if request is not None:
                 projected.append((request, description.identifier))
         if not projected:
@@ -559,6 +622,18 @@ def resolve_batch(
                     (source.name, identifier, source.backend_class.name, block_reason)
                 )
             continue
+
+        if complete:
+            terminal = any(outcome.status is ResolutionStatus.FAILED for outcome in outcomes.values())
+            if not terminal:
+                for secret in (declarations[name] for name in deduped if name not in outcomes):
+                    outcome = static_terminal_outcome(secret, start=source_index)
+                    if outcome is not None:
+                        outcomes[secret.name] = outcome
+                        terminal = True
+            if terminal:
+                _mark_batch_doomed(deduped, outcomes)
+                break
 
         requests = tuple(request for request, _identifier in projected)
         identifiers = {request.name: identifier for request, identifier in projected}
@@ -609,6 +684,23 @@ def resolve_batch(
     return ResolutionBatch(tuple(outcomes[name] for name in deduped), values)
 
 
+def resolve_batch(
+    secrets: Sequence[SecretDecl],
+    sources: Sequence[ActiveSource],
+    *,
+    tty_access: TtyInteractionAccess,
+    interaction_broker: InteractionBroker | None,
+) -> ResolutionBatch:
+    """Resolve one complete batch in one bounded source-first pass."""
+    return _resolve_batch(
+        secrets,
+        sources,
+        tty_access=tty_access,
+        interaction_broker=interaction_broker,
+        complete=True,
+    )
+
+
 @dataclass(slots=True)
 class PartialResolution:
     """Explicit partial reveal result with values separate from diagnostics."""
@@ -634,11 +726,12 @@ def resolve_partial_for_reveal(
     require_exact_tty_interaction_policy(interaction)
     tty_access = tty_interaction_access(interaction, terminal_input_usable=sys.stdin.isatty())
     broker = OutputInteractionBroker(secrets) if tty_access is TtyInteractionAccess.AVAILABLE else None
-    batch = resolve_batch(
+    batch = _resolve_batch(
         secrets,
         sources,
         tty_access=tty_access,
         interaction_broker=broker,
+        complete=False,
     )
     return PartialResolution(values=dict(batch._values), outcomes=batch.outcomes)
 

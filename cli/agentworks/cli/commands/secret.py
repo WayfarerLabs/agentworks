@@ -9,9 +9,8 @@ import typer
 from agentworks import output
 from agentworks.capabilities.secret_backend import OperatorImpact
 from agentworks.cli._app import app
-from agentworks.cli._helpers import get_db, ordinary_tty_interaction_policy
+from agentworks.cli._helpers import get_db, ordinary_tty_interaction_access
 from agentworks.machine_output import OutputFormat
-from agentworks.secrets.policy import tty_interaction_access
 
 secret_app = typer.Typer(
     name="secret",
@@ -112,13 +111,8 @@ def secret_describe(
     config = load_config(warn_issues=output_format is OutputFormat.HUMAN, workload_gated_issues_fatal=False)
     registry = load_request_registry(config, warn=output_format is OutputFormat.HUMAN)
     db = get_db()
-    import sys
-
     impact = OperatorImpact.ALLOW if allow_interaction else OperatorImpact.NONE
-    tty_access = tty_interaction_access(
-        ordinary_tty_interaction_policy(),
-        terminal_input_usable=sys.stdin.isatty(),
-    )
+    tty_access = ordinary_tty_interaction_access()
     desc = describe_secret(config, registry, name, db=db, impact=impact, tty_access=tty_access)
     if output_format is OutputFormat.JSON:
         from click import get_binary_stream
@@ -144,8 +138,6 @@ def secret_verify(
     ),
 ) -> None:
     """Prove that declared secrets resolve without displaying their values."""
-    import sys
-
     from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
     from agentworks.secrets.preview import PreviewStatus
@@ -154,10 +146,7 @@ def secret_verify(
     config = load_config()
     registry = load_request_registry(config)
     impact = OperatorImpact.ALLOW if allow_interaction else OperatorImpact.NONE
-    tty_access = tty_interaction_access(
-        ordinary_tty_interaction_policy(),
-        terminal_input_usable=sys.stdin.isatty(),
-    )
+    tty_access = ordinary_tty_interaction_access()
     outcomes = verify_secrets(config, registry, names, impact=impact, tty_access=tty_access)
     render_verification(outcomes)
     if any(outcome.status is not PreviewStatus.AVAILABLE for outcome in outcomes):

@@ -253,3 +253,24 @@ def test_non_tty_backend_tty_block_is_backend_protocol_failure(
         ).outcomes[0]
         assert resolution_result.status is ResolutionStatus.FAILED
         assert resolution_result.reason is FailureReason.BACKEND_PROTOCOL
+
+
+def test_batch_doom_cannot_appear_in_a_preview_attempt() -> None:
+    with pytest.raises(ValueError):
+        SourcePreviewAttempt("fixture", None, PreviewBlocked(BlockReason.BATCH_DOOMED))
+
+
+def test_backend_cannot_return_batch_doom_in_preview() -> None:
+    class Client(_Client):
+        preview_result = PreviewBlocked(BlockReason.BATCH_DOOMED)
+
+    result = preview_batch(
+        [SecretDecl(name="secret", description="secret")],
+        [_source(Client)],
+        impact=OperatorImpact.NONE,
+        tty_access=TtyInteractionAccess.UNAVAILABLE,
+        interaction_broker=None,
+    )["secret"]
+
+    assert result.status is PreviewStatus.FAILED
+    assert result.reason == FailureReason.BACKEND_PROTOCOL.value

@@ -39,7 +39,7 @@ from agentworks.errors import UserAbort
 from agentworks.resources.graph import Readiness
 from agentworks.schema import AgwModel, AgwRootModel, CapabilityBlock
 from agentworks.secrets import SecretDecl, SecretSourceDecl
-from agentworks.secrets.outcomes import ResolutionFailed, ResolutionStatus
+from agentworks.secrets.outcomes import ResolutionStatus
 from agentworks.secrets.preview import PreviewStatus, preview_batch
 from agentworks.secrets.resolve import ActiveSource, _SourceContextDriver, resolve_batch
 
@@ -175,30 +175,6 @@ def test_registered_conformance_and_resolution_share_the_exact_backend_name_boun
         interaction_broker=None,
     )
     assert batch.complete_or_raise() == {"a": "value"}
-
-
-def test_backend_failure_hard_stops_that_secret_but_not_its_siblings() -> None:
-    class First(_Client):
-        resolution_results = {
-            "a": BackendFailed(FailureReason.LOOKUP_REJECTED),
-            "b": BackendMissing(),
-        }
-        calls = []
-
-    class Second(_Client):
-        resolution_results = {"b": BackendResolved("second-b")}
-        calls = []
-
-    batch = resolve_batch(
-        [_decl("a"), _decl("b")],
-        [_source("first", client_type=First), _source("second", client_type=Second)],
-        tty_access=TtyInteractionAccess.UNAVAILABLE,
-        interaction_broker=None,
-    )
-    assert isinstance(batch.outcomes[0].result, ResolutionFailed)
-    assert batch.outcomes[0].result.reason is FailureReason.LOOKUP_REJECTED
-    assert batch.outcomes[1].status is ResolutionStatus.RESOLVED
-    assert Second.calls == [("b",)]
 
 
 def test_blocked_source_falls_through_and_is_retained_on_exhaustion() -> None:
@@ -938,9 +914,10 @@ def test_equal_but_non_exact_stateful_result_key_is_rejected_without_comparison(
     "result",
     [
         BackendBlocked(BlockReason.SOURCE_NOT_READY),
+        BackendBlocked(BlockReason.BATCH_DOOMED),
         BackendFailed(FailureReason.BACKEND_PROTOCOL),
     ],
-    ids=("core-only-block", "core-only-failure"),
+    ids=("core-source-block", "core-batch-doom", "core-only-failure"),
 )
 def test_backend_cannot_forge_core_owned_reasons(result: BackendResolution) -> None:
     class Client(_Client):

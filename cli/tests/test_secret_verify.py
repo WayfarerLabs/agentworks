@@ -2,20 +2,30 @@
 
 from __future__ import annotations
 
+import warnings
+from getpass import GetPassWarning
 from types import SimpleNamespace
 
 import pytest
 from typer.testing import CliRunner
 
 from agentworks.capabilities.secret_backend import (
+    BackendPreview,
+    BlockReason,
+    FailureReason,
+    IndeterminateReason,
     OperatorImpact,
     PreviewAvailable,
+    PreviewBlocked,
+    PreviewFailed,
+    PreviewIndeterminate,
+    PreviewMissing,
     TtyInteractionAccess,
 )
 from agentworks.cli import app
 from agentworks.errors import NotFoundError, ValidationError
 from agentworks.secrets import SecretDecl
-from agentworks.secrets.preview import ResolutionPreview, SourcePreviewAttempt
+from agentworks.secrets.preview import PreviewStatus, ResolutionPreview, SourcePreviewAttempt
 from agentworks.secrets.verification import verify_secrets
 
 
@@ -36,6 +46,11 @@ class _Registry:
 def _available(name: str) -> ResolutionPreview:
     attempt = SourcePreviewAttempt("fixture", f"id:{name}", PreviewAvailable())
     return ResolutionPreview(name, PreviewAvailable(), "fixture", f"id:{name}", (attempt,))
+
+
+def _preview(name: str, result: BackendPreview) -> ResolutionPreview:
+    attempt = SourcePreviewAttempt("fixture", f"id:{name}", result)
+    return ResolutionPreview(name, result, "fixture", f"id:{name}", (attempt,))
 
 
 def test_verify_deduplicates_in_first_order_and_returns_only_previews(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -106,3 +121,74 @@ def test_cli_keeps_operator_impact_separate_from_global_tty_policy(monkeypatch: 
     assert result.exit_code == 0, result.output
     assert captured["impact"] is OperatorImpact.ALLOW
     assert captured["tty_access"] is TtyInteractionAccess.DISABLED
+
+
+@pytest.mark.parametrize(
+    ("preview", "exit_code"),
+    [
+        (_available("token"), 0),
+        (_preview("token", PreviewMissing()), 1),
+        (_preview("token", PreviewIndeterminate(IndeterminateReason.OPERATOR_IMPACT_LIMITED)), 1),
+        (_preview("token", PreviewBlocked(BlockReason.TTY_UNAVAILABLE)), 1),
+        (_preview("token", PreviewFailed(FailureReason.EXTERNAL)), 1),
+    ],
+    ids=(status.value for status in PreviewStatus),
+)
+def test_cli_renders_every_technical_status_and_only_available_succeeds(
+    preview: ResolutionPreview,
+    exit_code: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("agentworks.config.load_config", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda config: _Registry("token"))
+    monkeypatch.setattr("agentworks.secrets.verification.verify_secrets", lambda *args, **kwargs: (preview,))
+
+    result = CliRunner().invoke(app, ["secret", "verify", "token"])
+
+    assert result.exit_code == exit_code
+    assert preview.status.value in result.stdout
+
+
+def test_cli_verify_drives_the_real_prompt_broker_without_exposing_the_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks import output
+    from agentworks.capabilities.secret_backend.prompt import PromptBackend, PromptSourceConfig
+    from agentworks.cli._typer_output import TyperHandler
+    from agentworks.resources.graph import Readiness
+    from agentworks.schema import CapabilityBlock
+    from agentworks.secrets import SecretSourceDecl
+    from agentworks.secrets.resolve import ActiveSource
+
+    source = ActiveSource(
+        source=SecretSourceDecl(name="prompt", backend=CapabilityBlock.of("prompt")),
+        backend_class=PromptBackend,
+        config=PromptSourceConfig(name="prompt"),
+        readiness=Readiness.ready(),
+    )
+    monkeypatch.setattr("agentworks.config.load_config", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda config: _Registry("token"))
+    monkeypatch.setattr("agentworks.secrets.resolve.active_sources", lambda config, registry: (source,))
+    monkeypatch.setattr(
+        "agentworks.cli._helpers.sys",
+        SimpleNamespace(stdin=SimpleNamespace(isatty=lambda: True)),
+    )
+
+    value = "prompt-value-must-not-escape"
+    previous_handler = output.get_handler()
+    output.set_handler(TyperHandler())
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", GetPassWarning)
+            result = CliRunner().invoke(
+                app,
+                ["secret", "verify", "token", "--allow-interaction"],
+                input=f"{value}\n",
+            )
+    finally:
+        output.set_handler(previous_handler)
+
+    assert result.exit_code == 0, result.output
+    assert PreviewStatus.AVAILABLE.value in result.stdout
+    assert value not in result.stdout
+    assert value not in result.stderr

@@ -263,7 +263,11 @@ candidate in the batch. Ordinary missing values and sources blocked by TTY acces
 invalid mappings, authentication errors, provider rejection, transport errors, and timeouts are hard
 failures for that secret and do not fall through. Values remain inside the resolution path and are
 never part of inspection results. Commands resolve their statically planned secrets before mutation,
-except deliberately lazy conditional work such as Tailscale repair.
+except deliberately lazy conditional work such as Tailscale repair. A complete batch that is already
+terminal stops before opening another provider source; other skipped names report the core-only
+`batch-doomed-before-interaction` reason. Static viability never predicts from TTY access; the
+backend receives that exact fact and decides whether it is limiting. Explicit partial reveal
+continues independent names.
 
 Preflight uses the same provider-aware preview contract as the inspection commands, fixed at no
 operator impact. It may read a provider and safely discard a value, but it cannot prompt or perform
