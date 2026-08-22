@@ -500,13 +500,14 @@ finishes before the consuming operation's first external mutation.
 
 Complete operation resolution also preserves the pre-existing fail-before-interaction invariant
 without recreating an operator-impact policy. Before each later provider source turn, core uses only
-static lookup description, folded readiness, disabled-plugin state, and exact TTY access to ask
-whether every still-unresolved requested name has a viable remaining candidate. A hard-failed name
-also makes the complete batch terminal. When the batch cannot succeed, core opens no later client,
-marks other unresolved names `blocked/batch-doomed-before-interaction`, and returns the complete
-value-free outcome set. The explicit partial-reveal path continues resolving independent names. This
-is a core completion-scope rule; no completion flag, impact classification, or doom prediction
-crosses the backend factory boundary.
+static lookup description, folded readiness, and disabled-plugin state to ask whether every
+still-unresolved requested name has a viable remaining candidate. TTY access is not a core viability
+input: core passes it to the backend, and the backend alone decides whether that state is limiting.
+A hard-failed name also makes the complete batch terminal. When the batch cannot succeed, core opens
+no later client, marks other unresolved names `blocked/batch-doomed-before-interaction`, and returns
+the complete value-free outcome set. The explicit partial-reveal path continues resolving
+independent names. This is a core completion-scope rule; no completion flag, impact classification,
+TTY prediction, or doom prediction crosses the backend factory boundary.
 
 ## Aggregate attempt model
 

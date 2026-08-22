@@ -99,8 +99,10 @@ source receives its unresolved candidate batch once. There is no zero-impact res
 authority frontier, one-request interaction staging, or preview reuse.
 
 Batch doom is a completion invariant, not an operator-impact gate: core derives it from hard results
-and static remaining viability, never asks a backend whether an action might affect the operator,
-and does not pass completion policy into a backend client.
+and static remaining viability, never treats TTY access as a viability prediction, never asks a
+backend whether an action might affect the operator, and does not pass completion policy into a
+backend client. Core passes exact TTY access to each backend; the backend alone decides whether it
+is limiting.
 
 ## `agw secret describe`
 

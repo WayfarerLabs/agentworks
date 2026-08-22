@@ -1,6 +1,6 @@
 # Plan: Value-free secret resolution preview
 
-- Status: Feedback/fix round 2 scoped from formal integration
+- Status: Feedback/fix round 2 implemented; exact-head review pending
 - Date: 2026-08-18
 - Amended: 2026-08-21
 - Requirements: [FRD](./frd.md)
@@ -229,10 +229,12 @@
       (Implemented in `e679ac38`.)
 - [x] Implement actual resolution as one bounded source-first pass with one batch per ready source,
       ordinary-missing and TTY-block fallthrough, failed hard-stop, and no preview reuse.
-- [ ] Restore complete-batch fail-before-interaction without restoring actual-resolution impact:
+- [x] Restore complete-batch fail-before-interaction without restoring actual-resolution impact:
       recheck static remaining viability before later provider turns, stop after any hard terminal
       result, emit the core-only `batch-doomed-before-interaction` block for skipped unresolved
-      names, and keep explicit partial reveal independent.
+      names, and keep explicit partial reveal independent. Static viability uses mapping
+      applicability, folded readiness, and plugin enablement only. Core passes TTY access to the
+      backend but never uses it as a viability prediction. (Implemented in `dda1f055`.)
 - [x] Add event-ledger tests for source-first batching, higher-source failure preventing lower
       provider invocation, earlier-indeterminate/later-available or failed preview aggregation,
       adversarial maximum-impact indeterminate becoming failed/backend-protocol, and actual
@@ -328,10 +330,11 @@
       authentication alternatives. (Implemented in `e679ac38`.)
 - [x] Trim the secret-backend and secrets test estates to the simplification sweep standard as part
       of this rewrite, deleting worthless tests rather than assigning them to a later cleanup.
-- [ ] Close the formal integration collateral and coverage findings: stabilize doctor checks by
+- [x] Close the formal integration collateral and coverage findings: stabilize doctor checks by
       structured secret identity, document doctor `secret_preview`, correct orchestration's stale
       pure-preview claim, retain the frozen JSON v1 `refused-interaction` vocabulary, and add
-      compact renderer, verify exit-status, and real CLI prompt-broker coverage.
+      compact renderer, verify exit-status, and real CLI prompt-broker coverage. (Implemented in
+      `dda1f055`.)
 
 ### Phase 5 definition of done
 
@@ -366,6 +369,10 @@
       and preserve the earlier completed plan checkbox verbatim.
 - [ ] Run the complete implementation and repository gates after formal-integration feedback/fix
       round 2, then obtain clean reviewer-of-record and fresh-eyes dispositions on the exact head.
+      (2026-08-21: implementation gates passed at `dda1f055`: focused 164 tests; full non-live 7,258
+      tests with one skip; Ruff, format, Mypy, file lint, lock, locked-SDD, Rulesync,
+      generated-package, Typer isolation, website Python and Node, and both deterministic-build
+      variants passed. Exact-head reviews remain pending.)
 - [x] Obtain a private `agentworks-reviewer` pass on the complete diff and resolve material
       findings. (2026-08-21: three bounded correction rounds closed lifecycle, timeout, TTY-access,
       exact-map, static-description, cleanup, documentation, and test-quality findings; final exact
