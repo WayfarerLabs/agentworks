@@ -21,7 +21,7 @@ from .boundary import gated_vm_boundary
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
 
 # NOTE on ``_resolve_vm_admin_env_scopes`` / ``_vm_secret_target``: both
 # are defined in ``_helpers.py``, and tests monkeypatch them as
@@ -40,7 +40,7 @@ def shell_vm(
     *,
     platform_transport: bool = False,
     workspace_name: str | None = None,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> int:
     """Open a shell on a VM as the admin user.
 
@@ -166,7 +166,7 @@ def exec_vm(
     command: list[str],
     *,
     workspace_name: str | None = None,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> int:
     """Execute a command on a VM as the admin user via direct admin SSH.
 
@@ -260,7 +260,7 @@ def add_git_credential(
     name: str,
     credential_name: str,
     *,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Add or update a git credential on a VM.
 

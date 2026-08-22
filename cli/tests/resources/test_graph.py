@@ -365,7 +365,7 @@ def test_auto_declared_secret_has_resolving_source_edges(tmp_path: Path) -> None
     materialize loop): the default VM template auto-declares
     ``tailscale-auth-key``, and the materialized secret's
     ``dependencies(context)`` emits its ``secret -> secret-source`` edges to
-    every present would-attempt source. env-var and prompt are
+    every present candidate source. env-var and prompt are
     mapping-optional (always attempt), so both are candidates; onepassword is
     mapping-required and unmapped, so it is not. That the build COMPLETES pins
     the no-loop regression: a materialized secret walks its backend edges, and
@@ -402,7 +402,7 @@ def test_source_rows_gain_inbound_secret_refs(tmp_path: Path) -> None:
 
 def test_onepassword_mapped_secret_gets_declared_source_edge(tmp_path: Path) -> None:
     """A secret with an explicit ``backend_mappings.onepassword`` gains the
-    onepassword edge (its ``would_attempt`` is mapping-required), on top of
+    onepassword edge (its static lookup is mapping-required), on top of
     the default env-var / prompt edges."""
     cfg = _write_cfg(
         tmp_path,

@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.machine_output import JsonObject
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
 
 # NAME-column truncation cap for ``vm list``, derived from the VM-name cap so
 # the two cannot drift: a valid name (<= MAX_VM_NAME_LENGTH) never truncates,
@@ -432,7 +432,7 @@ def vm_description(
     config: Config,
     name: str,
     *,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> VMDescription:
     """Collect safe VM detail facts, degrading bounded live reads to issues."""
     import agentworks.vms.manager as _mgr
@@ -702,7 +702,7 @@ def describe_vm(
     config: Config,
     name: str,
     *,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Show VM details through the shared inspection fact record."""
     render_vm_description(vm_description(db, config, name, interaction=interaction))

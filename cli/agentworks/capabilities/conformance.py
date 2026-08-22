@@ -68,7 +68,7 @@ def _contract_error(descriptor: CapabilityKindDescriptor, impl: type) -> str | N
 
 def _metadata_error(impl: type) -> str | None:
     name = getattr(impl, "name", None)
-    if not isinstance(name, str) or not name or "/" in name:
+    if type(name) is not str or not name or "/" in name:
         return f"its capability name {name!r} is not a non-empty, '/'-free 'name' class attribute"
     description = getattr(impl, "description", None)
     if not isinstance(description, str):

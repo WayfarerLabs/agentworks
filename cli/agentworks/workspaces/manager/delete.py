@@ -12,7 +12,7 @@ from agentworks.workspaces.manager._common import _workspace_scope
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.transports import Transport
     from agentworks.vms.nodes import LiveVMNode
 
@@ -25,7 +25,7 @@ def delete_workspace(
     force: bool = False,
     yes: bool = False,
     vm_node: LiveVMNode | None = None,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Delete a workspace.
 

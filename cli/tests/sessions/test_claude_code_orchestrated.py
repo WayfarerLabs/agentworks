@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.db import Database, SessionMode, SessionStatus
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 
 from ..conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
 
@@ -160,7 +160,7 @@ def test_create_produces_launch_string_and_persists_the_minted_id(
         name="s1",
         workspace="ws1",
         admin=True,
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
 
     # The op minted an id, recorded it on the row in the namespaced shape
@@ -195,7 +195,7 @@ def test_create_resumes_when_a_transcript_exists(tmp_path: Path, monkeypatch: py
         name="s1",
         workspace="ws1",
         admin=True,
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
 
     sid = _claude_ns(db)["session_id"]
@@ -254,7 +254,7 @@ def test_resume_reads_stored_id_and_resumes_after_the_kill(tmp_path: Path, monke
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),
         name="s1",
         yes=True,
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )  # type: ignore[arg-type]
 
     # The stored id is read back verbatim and resumed.
@@ -288,7 +288,7 @@ def test_resume_of_a_pre_column_session_mints_and_persists_the_id(
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),
         name="s1",
         yes=True,
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )  # type: ignore[arg-type]
 
     sid = _claude_ns(db)["session_id"]
@@ -322,7 +322,7 @@ def test_resume_hoists_a_pre_namespacing_row_and_resumes_its_id(
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),
         name="s1",
         yes=True,
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )  # type: ignore[arg-type]
 
     assert f"--resume {sid}" in captured["command"]
@@ -352,7 +352,7 @@ def test_resume_leaves_a_foreign_namespace_untouched(tmp_path: Path, monkeypatch
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),
         name="s1",
         yes=True,
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )  # type: ignore[arg-type]
 
     # claude-code did NOT inherit the foreign id; it minted its own.
@@ -391,7 +391,7 @@ def test_resume_under_another_harness_integration_leaves_the_flat_legacy_key_int
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),
         name="s1",
         yes=True,
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )  # type: ignore[arg-type]
 
     refreshed = db.get_session("s1")
@@ -429,7 +429,7 @@ def test_substitution_leaves_the_generated_snippet_intact_and_substitutes_extra_
         name="s1",
         workspace="ws1",
         admin=True,
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
 
     command = captured["command"]

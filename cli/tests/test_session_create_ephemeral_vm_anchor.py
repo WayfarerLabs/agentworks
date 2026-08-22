@@ -17,7 +17,7 @@ import pytest
 
 from agentworks.db import Database
 from agentworks.errors import ValidationError
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 
 from ._session_ephemeral_support import (
     _install_session_prep_stubs,
@@ -55,7 +55,7 @@ def test_ephemeral_workspace_name_uses_workspace_cap(tmp_path: Path) -> None:
             new_workspace=True,
             workspace_name="w" * (MAX_WORKSPACE_NAME_LENGTH + 1),
             vm_name="vm1",
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     # Explicitly-passed name: plain error, no override hint (the operator named
     # it directly, so pointing at --workspace-name would be noise).
@@ -83,7 +83,7 @@ def test_ephemeral_agent_name_uses_agent_cap(tmp_path: Path) -> None:
             workspace="ws1",
             new_agent=True,
             agent_name="a" * (MAX_AGENT_NAME_LENGTH + 1),
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     # Explicitly-passed name: plain error, no override hint.
     assert excinfo.value.hint is None
@@ -115,7 +115,7 @@ def test_defaulted_ephemeral_agent_name_overflow_hints_override_flag(tmp_path: P
             name=long_session,
             workspace="ws1",
             new_agent=True,
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     hint = excinfo.value.hint
     assert hint is not None, "defaulted-overflow must carry a hint"
@@ -147,7 +147,7 @@ def test_defaulted_ephemeral_workspace_name_overflow_hints_override_flag(tmp_pat
             name=long_session,
             new_workspace=True,
             vm_name="vm1",
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     hint = excinfo.value.hint
     assert hint is not None, "defaulted-overflow must carry a hint"
@@ -174,7 +174,7 @@ def test_session_name_uses_socket_derived_cap(tmp_path: Path) -> None:
             name="s" * (MAX_SESSION_NAME_LENGTH + 1),
             workspace="ws1",
             admin=True,
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     assert db.get_session("s" * (MAX_SESSION_NAME_LENGTH + 1)) is None
     db.close()
@@ -197,7 +197,7 @@ def test_cross_vm_existing_workspace_and_agent_fails_upfront(tmp_path: Path) -> 
             name="s1",
             workspace="ws-A",
             agent="agt-B",
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
 
     # No state mutated: no session row written.
@@ -221,7 +221,7 @@ def test_explicit_vm_disagreeing_with_workspace_fails_upfront(tmp_path: Path) ->
             workspace="ws-A",
             vm_name="vm-B",
             admin=True,  # mode is now required; admin doesn't affect VM check
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
 
     assert db.get_session("s1") is None
@@ -270,7 +270,7 @@ def test_explicit_vm_agreeing_with_workspace_passes_anchor_check(
             workspace="ws-A",
             agent="agt-A",  # also on vm-A; pins the mode so no mode prompt fires
             vm_name="vm-A",
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     assert called == ["build_graph"]
     db.close()
@@ -294,7 +294,7 @@ def test_no_vm_anchor_with_multiple_vms_raises_in_non_interactive(
             name="s1",
             new_workspace=True,
             admin=True,
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     db.close()
 
@@ -315,7 +315,7 @@ def test_no_vm_anchor_with_zero_vms_raises(tmp_path: Path) -> None:
             name="s1",
             new_workspace=True,
             admin=True,
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     db.close()
 
@@ -363,7 +363,7 @@ def test_no_vm_anchor_with_single_vm_auto_selects(tmp_path: Path, monkeypatch: p
             name="s1",
             new_workspace=True,
             admin=True,
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     assert called == ["build_graph"]
     db.close()
@@ -383,7 +383,7 @@ def test_workspace_and_new_workspace_mutex(tmp_path: Path) -> None:
             name="s1",
             workspace="ws1",
             new_workspace=True,
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     db.close()
 
@@ -402,7 +402,7 @@ def test_workspace_template_requires_new_workspace(tmp_path: Path) -> None:
             name="s1",
             workspace="ws1",
             workspace_template="some-template",
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     db.close()
 
@@ -422,7 +422,7 @@ def test_admin_and_agent_mutex(tmp_path: Path) -> None:
             workspace="ws1",
             admin=True,
             agent="something",
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     db.close()
 
@@ -441,7 +441,7 @@ def test_agent_template_requires_new_agent(tmp_path: Path) -> None:
             name="s1",
             workspace="ws1",
             agent_template="some-template",
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     db.close()
 
@@ -473,7 +473,7 @@ def test_new_agent_with_explicit_agent_name(tmp_path: Path, monkeypatch: pytest.
             workspace="ws1",
             new_agent=True,
             agent_name="my-named-agent",
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     (call,) = realize_agent_calls
     assert call["name"] == "my-named-agent"
@@ -519,7 +519,7 @@ def test_ephemeral_agent_name_defaults_to_session_name(tmp_path: Path, monkeypat
             new_workspace=True,
             new_agent=True,
             vm_name="bbvm1",
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
 
     # Both ephemerals defaulted to the session name.
@@ -546,6 +546,6 @@ def test_ephemeral_workspace_name_collision_raises(tmp_path: Path) -> None:
             workspace_name="ws1",  # collides
             vm_name="vm1",
             admin=True,  # mode is required
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     db.close()

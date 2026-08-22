@@ -20,6 +20,7 @@ import pytest
 import typer
 
 from agentworks import output
+from agentworks.capabilities.secret_backend import TtyInteractionAccess
 from agentworks.cli._typer_output import TyperHandler
 from agentworks.cli.commands.doctor import doctor
 from agentworks.doctor import HealthGroup, HealthReport
@@ -91,6 +92,23 @@ def _run_doctor(capsys: pytest.CaptureFixture[str]) -> str:
     return capsys.readouterr().out
 
 
+def test_cli_threads_exact_tty_access_to_the_service(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "agentworks.cli.commands.doctor.ordinary_tty_interaction_access",
+        lambda: TtyInteractionAccess.DISABLED,
+    )
+
+    def run_checks(**kwargs: object) -> HealthReport:
+        captured.update(kwargs)
+        return _fake_report()
+
+    monkeypatch.setattr("agentworks.doctor.run_checks", run_checks)
+    with pytest.raises(typer.Exit):
+        doctor()
+    assert captured["tty_access"] is TtyInteractionAccess.DISABLED
+
+
 @pytest.mark.usefixtures("_stub_run_checks", "_typer_handler")
 class TestDoctorColorOnATty:
     def test_ok_label_is_green(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -159,14 +177,13 @@ class TestDoctorPlainFallback:
         out = _run_doctor(capsys)
         assert _ANSI_RE.search(out) is None
 
-    def test_non_interactive_forces_byte_plain_even_on_a_tty(
+    def test_non_interactive_does_not_change_tty_presentation(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-        monkeypatch.delenv("NO_COLOR", raising=False)
+        _tty(monkeypatch)
         output.set_non_interactive(True)
         try:
             out = _run_doctor(capsys)
         finally:
             output.set_non_interactive(False)
-        assert _ANSI_RE.search(out) is None
+        assert _ANSI_RE.search(out) is not None

@@ -34,6 +34,7 @@ from agentworks.resources.inspect import ResourceSummary, summarize_resource
 from agentworks.resources.render import format_origin_line, sanitize_fact_line
 
 if TYPE_CHECKING:
+    from agentworks.capabilities.secret_backend import TtyInteractionAccess
     from agentworks.config import Config
     from agentworks.resources.kind import InstanceRef
     from agentworks.resources.registry import Registry
@@ -111,9 +112,14 @@ def show_resource(
     registry: Registry,
     identity: ResourceIdentity,
     live_source: DatabaseLiveSource,
+    *,
+    tty_access: TtyInteractionAccess,
 ) -> ResourceShow:
     """Compose all authoritative focused facts for one finalized registry row."""
     from agentworks.resources import KIND_REGISTRY
+    from agentworks.secrets.policy import require_exact_tty_interaction_access
+
+    require_exact_tty_interaction_access(tty_access)
 
     resolved = resolve_resource(registry, identity)
     handler = KIND_REGISTRY[identity.kind]
@@ -137,7 +143,7 @@ def show_resource(
 
     focused: FocusedGraphFacts = focused_graph_facts(registry, identity, live_source)
     summary = summarize_resource(registry, identity, focused.used_by)
-    diagnostics = checks_for_resource(config, registry, identity)
+    diagnostics = checks_for_resource(config, registry, identity, tty_access=tty_access)
 
     return ResourceShow(
         summary=summary,

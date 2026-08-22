@@ -1,335 +1,975 @@
-"""Ordered typed secret-source resolution semantics."""
+"""Core source-first resolution and provider-aware preview behavior."""
 
 from __future__ import annotations
 
-from contextlib import AbstractContextManager
-from typing import ClassVar
+import concurrent.futures
+from collections.abc import Iterator, Mapping
+from contextlib import AbstractContextManager, nullcontext
+from typing import ClassVar, Literal, cast
 
 import pytest
+from pydantic import BaseModel
 
-from agentworks.capabilities.secret_backend.client import (
+from agentworks.capabilities.secret_backend import (
+    BackendBlocked,
+    BackendFailed,
+    BackendMissing,
+    BackendPreview,
+    BackendResolution,
+    BackendResolved,
+    BlockReason,
+    FailureReason,
+    IndeterminateReason,
     InteractionBroker,
-    RemainingTime,
-    SecretClientFailure,
-    SecretClientFailureKind,
-    SecretClientRemediation,
+    LookupDescription,
+    LookupDisposition,
+    OperatorImpact,
+    PreviewAvailable,
+    PreviewFailed,
+    PreviewIndeterminate,
+    PreviewIntent,
+    ResolutionIntent,
+    SecretClientIntent,
+    SecretLookupRequest,
     SecretSourceClient,
+    TtyInteractionAccess,
 )
-from agentworks.capabilities.secret_backend.prompt import PromptBackend, PromptSourceConfig
+from agentworks.capabilities.secret_backend.base import SecretBackend
+from agentworks.errors import UserAbort
 from agentworks.resources.graph import Readiness
-from agentworks.schema import AgwModel, CapabilityBlock
-from agentworks.secrets import SecretDecl
-from agentworks.secrets.outcomes import ResolutionCategory, ResolutionDetail
-from agentworks.secrets.policy import InteractionPolicy
-from agentworks.secrets.resolve import (
-    ActiveSource,
-    CompletionPolicy,
-    ResolutionPolicy,
-    resolve_batch,
-)
-from agentworks.secrets.sources import SecretSourceDecl
-from tests.secrets.test_resolution_lifecycle import _Backend, _source
+from agentworks.schema import AgwModel, AgwRootModel, CapabilityBlock
+from agentworks.secrets import SecretDecl, SecretSourceDecl
+from agentworks.secrets.outcomes import ResolutionStatus
+from agentworks.secrets.preview import PreviewStatus, preview_batch
+from agentworks.secrets.resolve import ActiveSource, _SourceContextDriver, resolve_batch
 
 
-def _policy(*, partial: bool = False) -> ResolutionPolicy:
-    return ResolutionPolicy(
-        interaction=InteractionPolicy.REFUSE,
-        completion=CompletionPolicy.PARTIAL if partial else CompletionPolicy.COMPLETE,
-    )
+class _Config(AgwModel):
+    name: Literal["fixture"]
 
 
-class _First(_Backend):
-    events: ClassVar[list[str]] = []
-    values: ClassVar[dict[str, str]] = {}
-    failure: ClassVar[BaseException | None] = None
+class _Mapping(AgwRootModel[str]):
+    pass
 
 
-class _Second(_Backend):
-    events: ClassVar[list[str]] = []
-    values: ClassVar[dict[str, str]] = {}
-    failure: ClassVar[BaseException | None] = None
+class _Client:
+    preview_results: ClassVar[dict[str, BackendPreview]] = {}
+    resolution_results: ClassVar[dict[str, BackendResolution]] = {}
+    calls: ClassVar[list[tuple[str, ...]]] = []
+
+    def preview(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendPreview]:
+        self.calls.append(tuple(request.name for request in requests))
+        return {request.name: self.preview_results[request.name] for request in requests}
+
+    def resolve(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendResolution]:
+        self.calls.append(tuple(request.name for request in requests))
+        return {request.name: self.resolution_results[request.name] for request in requests}
 
 
-def _reset() -> None:
-    for backend in (_First, _Second):
-        backend.events = []
-        backend.values = {}
-        backend.failure = None
+class _Backend(SecretBackend):
+    name = "fixture"
+    description = "fixture"
+    contract_version = 1
+    config_model: ClassVar[type[AgwModel]] = _Config
+    mapping_model = _Mapping
+    supports_tty_interaction = False
+    client_type: ClassVar[type[_Client]] = _Client
+    factory_calls: ClassVar[list[tuple[SecretClientIntent, TtyInteractionAccess, InteractionBroker | None]]] = []
 
-
-def test_first_resolved_source_wins_and_later_source_is_lazy() -> None:
-    _reset()
-    _First.values = {"x": "first"}
-    _Second.values = {"x": "second"}
-    batch = resolve_batch(
-        [SecretDecl(name="x", description="x")],
-        [_source(name="first", backend_class=_First), _source(name="second", backend_class=_Second)],
-        policy=_policy(),
-        interaction_broker=None,
-    )
-    assert batch.complete_or_raise() == {"x": "first"}
-    assert _Second.events == []
-
-
-def test_soft_miss_falls_through_in_request_order() -> None:
-    _reset()
-    _Second.values = {"x": "second"}
-    batch = resolve_batch(
-        [SecretDecl(name="x", description="x")],
-        [_source(name="first", backend_class=_First), _source(name="second", backend_class=_Second)],
-        policy=_policy(),
-        interaction_broker=None,
-    )
-    assert batch.complete_or_raise() == {"x": "second"}
-    assert _First.events == ["factory", "enter", "prepare", "resolve", "exit"]
-    assert _Second.events == ["factory", "enter", "prepare", "resolve", "exit"]
-
-
-def test_hard_failure_halts_attempted_secret_but_unrelated_secret_continues() -> None:
-    _reset()
-    _First.failure = SecretClientFailure(
-        kind=SecretClientFailureKind.HARD_MAPPING,
-        remediation=SecretClientRemediation.CHECK_MAPPING,
-    )
-    _Second.values = {"other": "ok"}
-    mapped = SecretDecl(name="mapped", description="mapped")
-    other = SecretDecl(name="other", description="other", backend_mappings={"first": False})
-    batch = resolve_batch(
-        [mapped, other],
-        [_source(name="first", backend_class=_First), _source(name="second", backend_class=_Second)],
-        policy=_policy(partial=True),
-        interaction_broker=None,
-    )
-    assert batch.outcomes[0].detail is ResolutionDetail.HARD_MAPPING
-    assert batch.outcomes[1].category is ResolutionCategory.RESOLVED
-
-
-def test_false_opt_out_is_keyed_by_source_name() -> None:
-    _reset()
-    _First.values = {"x": "wrong"}
-    _Second.values = {"x": "right"}
-    decl = SecretDecl(name="x", description="x", backend_mappings={"first": False})
-    batch = resolve_batch(
-        [decl],
-        [_source(name="first", backend_class=_First), _source(name="second", backend_class=_Second)],
-        policy=_policy(),
-        interaction_broker=None,
-    )
-    assert batch.complete_or_raise() == {"x": "right"}
-    assert _First.events == []
-
-
-def test_client_mapping_iteration_order_cannot_reorder_outcomes() -> None:
-    _reset()
-    _First.values = {"b": "b", "a": "a"}
-    batch = resolve_batch(
-        [SecretDecl(name="a", description="a"), SecretDecl(name="b", description="b")],
-        [_source(name="first", backend_class=_First)],
-        policy=_policy(),
-        interaction_broker=None,
-    )
-    assert [outcome.name for outcome in batch.outcomes] == ["a", "b"]
-
-
-@pytest.mark.parametrize(
-    ("kind", "detail"),
-    [
-        (SecretClientFailureKind.HARD_MAPPING, ResolutionDetail.HARD_MAPPING),
-        (SecretClientFailureKind.AUTHENTICATION, ResolutionDetail.AUTHENTICATION),
-        (SecretClientFailureKind.CONNECTIVITY, ResolutionDetail.CONNECTIVITY),
-        (SecretClientFailureKind.EXTERNAL, ResolutionDetail.EXTERNAL),
-    ],
-)
-def test_every_typed_hard_failure_halts_the_attempted_secret(
-    kind: SecretClientFailureKind,
-    detail: ResolutionDetail,
-) -> None:
-    _reset()
-    remediation = {
-        SecretClientFailureKind.HARD_MAPPING: SecretClientRemediation.CHECK_MAPPING,
-        SecretClientFailureKind.AUTHENTICATION: SecretClientRemediation.SIGN_IN,
-        SecretClientFailureKind.CONNECTIVITY: SecretClientRemediation.CHECK_CONNECTIVITY,
-        SecretClientFailureKind.EXTERNAL: SecretClientRemediation.RETRY,
-    }[kind]
-    _First.failure = SecretClientFailure(kind=kind, remediation=remediation)
-    _Second.values = {"token": "must-not-fall-through"}
-    batch = resolve_batch(
-        [SecretDecl(name="token", description="token")],
-        [_source(name="first", backend_class=_First), _source(name="second", backend_class=_Second)],
-        policy=_policy(partial=True),
-        interaction_broker=None,
-    )
-    assert batch.outcomes[0].detail is detail
-    assert _Second.events == []
-
-
-def test_not_ready_source_falls_through_without_construction() -> None:
-    _reset()
-    _Second.values = {"token": "winner"}
-    batch = resolve_batch(
-        [SecretDecl(name="token", description="token")],
-        [
-            _source(name="first", backend_class=_First, ready=False),
-            _source(name="second", backend_class=_Second),
-        ],
-        policy=_policy(),
-        interaction_broker=None,
-    )
-    assert batch.complete_or_raise() == {"token": "winner"}
-    assert _First.events == []
-
-
-class _Interactive(_Second):
-    interactive: ClassVar[bool] = True
-
-
-class _NeverAttempts(_Second):
     @classmethod
-    def would_attempt(cls, secret_name: str, *, mapping_present: bool) -> bool:
-        return False
+    def backend_readiness(cls) -> Readiness:
+        return Readiness.ready()
 
-
-def test_final_evidence_precedence_is_refused_then_soft_miss_then_not_ready() -> None:
-    _reset()
-    secret = SecretDecl(name="token", description="token")
-    refused = resolve_batch(
-        [secret],
-        [
-            _source(name="first", backend_class=_First),
-            _source(name="second", backend_class=_Interactive),
-        ],
-        policy=_policy(partial=True),
-        interaction_broker=None,
-    )
-    assert refused.outcomes[0].detail is ResolutionDetail.INTERACTION_REFUSED
-    assert refused.outcomes[0].source == "second"
-
-    soft = resolve_batch(
-        [secret],
-        [
-            _source(name="first", backend_class=_First),
-            _source(name="second", backend_class=_Second, ready=False),
-        ],
-        policy=_policy(partial=True),
-        interaction_broker=None,
-    )
-    assert soft.outcomes[0].detail is ResolutionDetail.SOFT_MISS
-    assert soft.outcomes[0].source == "first"
-
-    not_ready = resolve_batch(
-        [secret],
-        [_source(name="second", backend_class=_Second, ready=False)],
-        policy=_policy(partial=True),
-        interaction_broker=None,
-    )
-    assert not_ready.outcomes[0].detail is ResolutionDetail.SOURCE_NOT_READY
-    assert not_ready.outcomes[0].source == "second"
-
-
-def test_empty_chain_and_non_attempting_chain_are_distinct() -> None:
-    secret = SecretDecl(name="token", description="token")
-    empty = resolve_batch([secret], [], policy=_policy(partial=True), interaction_broker=None)
-    inert = resolve_batch(
-        [secret],
-        [_source(name="inert", backend_class=_NeverAttempts)],
-        policy=_policy(partial=True),
-        interaction_broker=None,
-    )
-    assert empty.outcomes[0].detail is ResolutionDetail.NO_ACTIVE_SOURCE
-    assert inert.outcomes[0].detail is ResolutionDetail.NO_ATTEMPTABLE_SOURCE
-
-
-class _Broker:
-    def __init__(self) -> None:
-        self.calls: list[str] = []
-
-    def request_secret(self, name: str, /) -> str:
-        self.calls.append(name)
-        return f"prompted-{name}"
-
-
-class _PromptProbe(PromptBackend):
-    factories: ClassVar[int] = 0
+    @classmethod
+    def describe_lookup(cls, secret_name: str, mapping: BaseModel | None) -> LookupDescription:
+        return LookupDescription(LookupDisposition.CANDIDATE, f"id:{secret_name}")
 
     @classmethod
     def create_client(
         cls,
         *,
-        source_name: str,
         config: AgwModel,
+        intent: SecretClientIntent,
+        tty_access: TtyInteractionAccess,
         interaction_broker: InteractionBroker | None,
-        remaining_time: RemainingTime,
     ) -> AbstractContextManager[SecretSourceClient]:
-        cls.factories += 1
-        return super().create_client(
-            source_name=source_name,
-            config=config,
-            interaction_broker=interaction_broker,
-            remaining_time=remaining_time,
-        )
+        cls.factory_calls.append((intent, tty_access, interaction_broker))
+        return nullcontext(cls.client_type())
 
 
-def _prompt_source() -> ActiveSource:
+def _source(
+    name: str,
+    *,
+    client_type: type[_Client],
+    ready: bool = True,
+    supports_tty: bool = False,
+) -> ActiveSource:
+    backend = cast(
+        "type[_Backend]",
+        type(
+            f"{name.title()}Backend",
+            (_Backend,),
+            {
+                "name": name,
+                "client_type": client_type,
+                "supports_tty_interaction": supports_tty,
+                "factory_calls": [],
+            },
+        ),
+    )
+    config_model = cast(
+        "type[AgwModel]",
+        type(
+            f"{name.title()}Config",
+            (AgwModel,),
+            {"__annotations__": {"name": Literal[name]}},  # type: ignore[valid-type]
+        ),
+    )
+    backend.config_model = config_model
+    readiness = Readiness.ready() if ready else Readiness.blocked("not ready")
     return ActiveSource(
-        source=SecretSourceDecl(name="prompt", backend=CapabilityBlock.of("prompt")),
-        backend_class=_PromptProbe,
-        config=PromptSourceConfig(name="prompt"),
-        readiness=Readiness.ready(),
+        source=SecretSourceDecl(name=name, backend=CapabilityBlock.of(name)),
+        backend_class=backend,
+        config=config_model.model_validate({"name": name}),
+        readiness=readiness,
     )
 
 
-def test_complete_mode_dooms_before_prompt_factory_or_broker() -> None:
-    _reset()
-    _PromptProbe.factories = 0
-    broker = _Broker()
-    doomed = SecretDecl(name="doomed", description="doomed", backend_mappings={"prompt": False})
-    independent = SecretDecl(name="independent", description="independent")
+def _decl(name: str) -> SecretDecl:
+    return SecretDecl(name=name, description=name)
+
+
+def test_actual_resolution_is_one_source_first_pass_with_missing_fallthrough() -> None:
+    class First(_Client):
+        resolution_results = {"a": BackendMissing(), "b": BackendResolved("first-b")}
+        calls = []
+
+    class Second(_Client):
+        resolution_results = {"a": BackendResolved("second-a")}
+        calls = []
+
     batch = resolve_batch(
-        [doomed, independent],
-        [_source(name="first", backend_class=_First), _prompt_source()],
-        policy=ResolutionPolicy(interaction=InteractionPolicy.ALLOW, completion=CompletionPolicy.COMPLETE),
-        interaction_broker=broker,
-    )
-    assert [outcome.detail for outcome in batch.outcomes] == [
-        ResolutionDetail.SOFT_MISS,
-        ResolutionDetail.BATCH_DOOMED,
-    ]
-    assert _PromptProbe.factories == 0
-    assert broker.calls == []
-
-
-def test_partial_mode_resolves_independent_secret_instead_of_dooming() -> None:
-    _reset()
-    _PromptProbe.factories = 0
-    broker = _Broker()
-    doomed = SecretDecl(name="doomed", description="doomed", backend_mappings={"prompt": False})
-    independent = SecretDecl(name="independent", description="independent")
-    batch = resolve_batch(
-        [doomed, independent],
-        [_source(name="first", backend_class=_First), _prompt_source()],
-        policy=ResolutionPolicy(interaction=InteractionPolicy.ALLOW, completion=CompletionPolicy.PARTIAL),
-        interaction_broker=broker,
-    )
-    assert [outcome.detail for outcome in batch.outcomes] == [
-        ResolutionDetail.SOFT_MISS,
-        ResolutionDetail.RESOLVED,
-    ]
-    assert _PromptProbe.factories == 1
-    assert broker.calls == ["independent"]
-
-
-def test_complete_doom_applies_to_interactive_plugin_without_a_broker() -> None:
-    _reset()
-    doomed = SecretDecl(name="doomed", description="doomed", backend_mappings={"interactive": False})
-    independent = SecretDecl(name="independent", description="independent")
-    batch = resolve_batch(
-        [doomed, independent],
-        [
-            _source(name="first", backend_class=_First),
-            _source(name="interactive", backend_class=_Interactive),
-        ],
-        policy=ResolutionPolicy(interaction=InteractionPolicy.ALLOW, completion=CompletionPolicy.COMPLETE),
+        [_decl("a"), _decl("b")],
+        [_source("first", client_type=First), _source("second", client_type=Second)],
+        tty_access=TtyInteractionAccess.DISABLED,
         interaction_broker=None,
     )
-    assert batch.outcomes[1].detail is ResolutionDetail.BATCH_DOOMED
-    assert _Interactive.events == []
+    assert batch.complete_or_raise() == {"a": "second-a", "b": "first-b"}
+    assert First.calls == [("a", "b")]
+    assert Second.calls == [("a",)]
+
+
+def test_registered_conformance_and_resolution_share_the_exact_backend_name_boundary() -> None:
+    from agentworks.capabilities.conformance import conformance_error
+    from agentworks.capabilities.descriptor import descriptor_for
+
+    class Client(_Client):
+        resolution_results = {"a": BackendResolved("value")}
+
+    source = _source("conforming", client_type=Client)
+    assert conformance_error(descriptor_for("secret-backend"), source.backend_class) is None
+    batch = resolve_batch(
+        [_decl("a")],
+        [source],
+        tty_access=TtyInteractionAccess.DISABLED,
+        interaction_broker=None,
+    )
+    assert batch.complete_or_raise() == {"a": "value"}
+
+
+def test_blocked_source_falls_through_and_is_retained_on_exhaustion() -> None:
+    class Blocked(_Client):
+        resolution_results = {"a": BackendBlocked(BlockReason.TTY_UNAVAILABLE)}
+        calls = []
+
+    class Missing(_Client):
+        resolution_results = {"a": BackendMissing()}
+        calls = []
+
+    outcome = resolve_batch(
+        [_decl("a")],
+        [
+            _source("promptish", client_type=Blocked, supports_tty=True),
+            _source("missing", client_type=Missing),
+        ],
+        tty_access=TtyInteractionAccess.UNAVAILABLE,
+        interaction_broker=None,
+    ).outcomes[0]
+    assert outcome.status is ResolutionStatus.BLOCKED
+    assert outcome.reason is BlockReason.TTY_UNAVAILABLE
+
+
+@pytest.mark.parametrize(
+    ("definitive", "status"),
+    [
+        (PreviewAvailable(), PreviewStatus.AVAILABLE),
+        (PreviewFailed(FailureReason.LOOKUP_REJECTED), PreviewStatus.FAILED),
+    ],
+    ids=("available", "failed"),
+)
+def test_preview_uses_later_definitive_result_and_retains_attempt_evidence(
+    definitive: BackendPreview,
+    status: PreviewStatus,
+) -> None:
+    class First(_Client):
+        preview_results = {"a": PreviewIndeterminate(IndeterminateReason.OPERATOR_IMPACT_LIMITED)}
+        calls = []
+
+    class Second(_Client):
+        preview_results = {"a": definitive}
+        calls = []
+
+    preview = preview_batch(
+        [_decl("a")],
+        [_source("first", client_type=First), _source("second", client_type=Second)],
+        impact=OperatorImpact.NONE,
+        tty_access=TtyInteractionAccess.UNAVAILABLE,
+        interaction_broker=None,
+    )["a"]
+    assert preview.status is status
+    assert [attempt.source for attempt in preview.attempts] == ["first", "second"]
+
+
+def test_allow_preview_rejects_indeterminate_as_backend_protocol_failure() -> None:
+    class Client(_Client):
+        preview_results = {"a": PreviewIndeterminate(IndeterminateReason.OPERATOR_IMPACT_LIMITED)}
+
+    preview = preview_batch(
+        [_decl("a")],
+        [_source("fixture", client_type=Client)],
+        impact=OperatorImpact.ALLOW,
+        tty_access=TtyInteractionAccess.AVAILABLE,
+        interaction_broker=None,
+    )["a"]
+    assert preview.status is PreviewStatus.FAILED
+    assert preview.reason == FailureReason.BACKEND_PROTOCOL.value
+
+
+def test_exact_result_map_is_validated_before_any_value_is_copied() -> None:
+    class Incomplete(_Client):
+        def resolve(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendResolution]:
+            return {"a": BackendResolved("must-not-escape")}
+
+    batch = resolve_batch(
+        [_decl("a"), _decl("b")],
+        [_source("fixture", client_type=Incomplete)],
+        tty_access=TtyInteractionAccess.DISABLED,
+        interaction_broker=None,
+    )
+    assert [outcome.status for outcome in batch.outcomes] == [ResolutionStatus.FAILED, ResolutionStatus.FAILED]
+    assert "must-not-escape" not in repr(batch)
+
+
+def test_false_mapping_is_excluded_before_backend_call() -> None:
+    class Client(_Client):
+        resolution_results = {"a": BackendResolved("unused")}
+        calls = []
+
+    decl = SecretDecl(name="a", description="a", backend_mappings={"fixture": False})
+    outcome = resolve_batch(
+        [decl],
+        [_source("fixture", client_type=Client)],
+        tty_access=TtyInteractionAccess.AVAILABLE,
+        interaction_broker=None,
+    ).outcomes[0]
+    assert outcome.reason is BlockReason.NO_ATTEMPTABLE_SOURCE
+    assert Client.calls == []
+
+
+class _Broker:
+    def request_secret(self, name: str, /) -> str:
+        return name
+
+
+@pytest.mark.parametrize(
+    ("intent", "supports_tty", "access", "broker_expected"),
+    [
+        (PreviewIntent(OperatorImpact.NONE), True, TtyInteractionAccess.AVAILABLE, False),
+        (PreviewIntent(OperatorImpact.ALLOW), True, TtyInteractionAccess.AVAILABLE, True),
+        (ResolutionIntent(), True, TtyInteractionAccess.AVAILABLE, True),
+        (ResolutionIntent(), True, TtyInteractionAccess.DISABLED, False),
+        (ResolutionIntent(), False, TtyInteractionAccess.AVAILABLE, False),
+    ],
+    ids=("preview-none", "preview-allow", "resolution-available", "resolution-disabled", "non-tty"),
+)
+def test_factory_receives_exact_intent_access_and_least_authority_broker(
+    intent: PreviewIntent | ResolutionIntent,
+    supports_tty: bool,
+    access: TtyInteractionAccess,
+    broker_expected: bool,
+) -> None:
+    class Client(_Client):
+        preview_results = {"a": PreviewAvailable()}
+        resolution_results = {"a": BackendResolved("value")}
+
+    source = _source("authority", client_type=Client, supports_tty=supports_tty)
+    broker = _Broker()
+    if isinstance(intent, PreviewIntent):
+        preview_batch(
+            [_decl("a")],
+            [source],
+            impact=intent.impact,
+            tty_access=access,
+            interaction_broker=broker,
+        )
+    else:
+        resolve_batch(
+            [_decl("a")],
+            [source],
+            tty_access=access,
+            interaction_broker=broker,
+        )
+    [(received_intent, received_access, received_broker)] = cast("type[_Backend]", source.backend_class).factory_calls
+    assert received_intent == intent
+    assert type(received_intent) is type(intent)
+    assert received_access is access
+    assert (received_broker is broker) is broker_expected
+
+
+class _ExitContext(AbstractContextManager[SecretSourceClient]):
+    def __init__(self, *, cleanup_error: BaseException | None = None, exit_result: object = False) -> None:
+        self.cleanup_error = cleanup_error
+        self.exit_result = exit_result
+
+    def __enter__(self) -> SecretSourceClient:
+        return _Client()
+
+    def __exit__(self, *args: object) -> bool:
+        if self.cleanup_error is not None:
+            raise self.cleanup_error
+        return cast("bool", self.exit_result)
+
+
+class _ProtectedExit(BaseException):
+    pass
+
+
+class _HostileTruth:
+    def __init__(self, error: BaseException) -> None:
+        self.error = error
+
+    def __bool__(self) -> bool:
+        raise self.error
+
+
+@pytest.mark.parametrize(
+    "cleanup_error",
+    [
+        UserAbort("cleanup"),
+        concurrent.futures.CancelledError(),
+        KeyboardInterrupt(),
+        SystemExit(),
+        GeneratorExit(),
+        _ProtectedExit(),
+    ],
+    ids=("user-abort", "cancelled", "keyboard", "system-exit", "generator-exit", "other-base"),
+)
+def test_cleanup_protected_exit_propagates_by_identity_without_a_primary(
+    cleanup_error: BaseException,
+) -> None:
+    with (
+        pytest.raises(type(cleanup_error)) as caught,
+        _SourceContextDriver(_ExitContext(cleanup_error=cleanup_error), source_name="fixture"),
+    ):
+        pass
+    assert caught.value is cleanup_error
+
+
+def test_cleanup_preserves_primary_over_failure_and_suppression(monkeypatch: pytest.MonkeyPatch) -> None:
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.secrets.resolve.output.warn", warnings.append)
+    primary = RuntimeError("primary")
+    for context in (
+        _ExitContext(cleanup_error=RuntimeError("cleanup")),
+        _ExitContext(cleanup_error=UserAbort("cleanup")),
+        _ExitContext(exit_result=True),
+        _ExitContext(exit_result=_HostileTruth(RuntimeError("truthiness"))),
+        _ExitContext(exit_result=_HostileTruth(UserAbort("truthiness"))),
+        _ExitContext(exit_result=_HostileTruth(_ProtectedExit())),
+    ):
+        with pytest.raises(RuntimeError) as caught, _SourceContextDriver(context, source_name="fixture"):
+            raise primary
+        assert caught.value is primary
+    assert len(warnings) == 6
+
+    primary_abort = UserAbort("primary")
+    with (
+        pytest.raises(UserAbort) as caught_abort,
+        _SourceContextDriver(_ExitContext(cleanup_error=RuntimeError("cleanup")), source_name="fixture"),
+    ):
+        raise primary_abort
+    assert caught_abort.value is primary_abort
+    assert len(warnings) == 7
+
+
+def test_ordinary_cleanup_failure_warns_without_raising(monkeypatch: pytest.MonkeyPatch) -> None:
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.secrets.resolve.output.warn", warnings.append)
+    with _SourceContextDriver(_ExitContext(cleanup_error=RuntimeError("native")), source_name="fixture"):
+        pass
+    assert len(warnings) == 1
+
+
+def test_ordinary_cleanup_truthiness_failure_warns_without_raising(monkeypatch: pytest.MonkeyPatch) -> None:
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.secrets.resolve.output.warn", warnings.append)
+    with _SourceContextDriver(
+        _ExitContext(exit_result=_HostileTruth(RuntimeError("native"))),
+        source_name="fixture",
+    ):
+        pass
+    assert len(warnings) == 1
+
+
+def test_ordinary_warning_emission_failure_is_best_effort_without_a_primary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_warning(_message: str) -> None:
+        raise RuntimeError("warning sink failure")
+
+    monkeypatch.setattr("agentworks.secrets.resolve.output.warn", fail_warning)
+    with _SourceContextDriver(_ExitContext(cleanup_error=RuntimeError("cleanup")), source_name="fixture"):
+        pass
+
+
+@pytest.mark.parametrize(
+    "warning_error",
+    [
+        UserAbort("warning"),
+        concurrent.futures.CancelledError(),
+        KeyboardInterrupt(),
+        SystemExit(),
+        GeneratorExit(),
+        _ProtectedExit(),
+    ],
+    ids=("user-abort", "cancelled", "keyboard", "system-exit", "generator-exit", "other-base"),
+)
+def test_warning_emission_protected_exit_propagates_by_identity_without_a_primary(
+    monkeypatch: pytest.MonkeyPatch,
+    warning_error: BaseException,
+) -> None:
+    def fail_warning(_message: str) -> None:
+        raise warning_error
+
+    monkeypatch.setattr("agentworks.secrets.resolve.output.warn", fail_warning)
+    with (
+        pytest.raises(type(warning_error)) as caught,
+        _SourceContextDriver(_ExitContext(cleanup_error=RuntimeError("cleanup")), source_name="fixture"),
+    ):
+        pass
+    assert caught.value is warning_error
+
+
+@pytest.mark.parametrize(
+    "warning_error",
+    [
+        RuntimeError("warning"),
+        UserAbort("warning"),
+        concurrent.futures.CancelledError(),
+        KeyboardInterrupt(),
+        SystemExit(),
+        GeneratorExit(),
+        _ProtectedExit(),
+    ],
+    ids=("ordinary", "user-abort", "cancelled", "keyboard", "system-exit", "generator-exit", "other-base"),
+)
+def test_body_primary_wins_over_every_warning_emission_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    warning_error: BaseException,
+) -> None:
+    def fail_warning(_message: str) -> None:
+        raise warning_error
+
+    monkeypatch.setattr("agentworks.secrets.resolve.output.warn", fail_warning)
+    primary = RuntimeError("primary")
+    with (
+        pytest.raises(RuntimeError) as caught,
+        _SourceContextDriver(_ExitContext(cleanup_error=RuntimeError("cleanup")), source_name="fixture"),
+    ):
+        raise primary
+    assert caught.value is primary
+
+
+@pytest.mark.parametrize(
+    "truthiness_error",
+    [
+        UserAbort("cleanup"),
+        concurrent.futures.CancelledError(),
+        KeyboardInterrupt(),
+        SystemExit(),
+        GeneratorExit(),
+        _ProtectedExit(),
+    ],
+    ids=("user-abort", "cancelled", "keyboard", "system-exit", "generator-exit", "other-base"),
+)
+def test_cleanup_truthiness_protected_exit_propagates_by_identity_without_a_primary(
+    truthiness_error: BaseException,
+) -> None:
+    with (
+        pytest.raises(type(truthiness_error)) as caught,
+        _SourceContextDriver(
+            _ExitContext(exit_result=_HostileTruth(truthiness_error)),
+            source_name="fixture",
+        ),
+    ):
+        pass
+    assert caught.value is truthiness_error
+
+
+@pytest.mark.parametrize(
+    "backend_error",
+    [UserAbort("abort"), concurrent.futures.CancelledError(), KeyboardInterrupt(), GeneratorExit()],
+    ids=("user-abort", "cancelled", "keyboard", "generator-exit"),
+)
+def test_describe_lookup_protected_exits_propagate_by_identity(backend_error: BaseException) -> None:
+    source = _source("describe", client_type=_Client)
+
+    def describe(cls: type[_Backend], secret_name: str, mapping: BaseModel | None) -> LookupDescription:
+        raise backend_error
+
+    source.backend_class.describe_lookup = classmethod(describe)  # type: ignore[method-assign,assignment]
+    with pytest.raises(type(backend_error)) as caught:
+        resolve_batch(
+            [_decl("a")],
+            [source],
+            tty_access=TtyInteractionAccess.UNAVAILABLE,
+            interaction_broker=None,
+        )
+    assert caught.value is backend_error
+
+
+def test_ordinary_describe_lookup_exception_is_text_free_backend_protocol() -> None:
+    source = _source("describe", client_type=_Client)
+
+    def describe(cls: type[_Backend], secret_name: str, mapping: BaseModel | None) -> LookupDescription:
+        raise RuntimeError("provider-native sentinel")
+
+    source.backend_class.describe_lookup = classmethod(describe)  # type: ignore[method-assign,assignment]
+    outcome = resolve_batch(
+        [_decl("a")],
+        [source],
+        tty_access=TtyInteractionAccess.UNAVAILABLE,
+        interaction_broker=None,
+    ).outcomes[0]
+    assert outcome.reason is FailureReason.BACKEND_PROTOCOL
+    assert "provider-native sentinel" not in repr(outcome)
+
+
+@pytest.mark.parametrize("variant", ["wrong-type", "forged-fields"])
+def test_malformed_lookup_description_is_backend_protocol(variant: str) -> None:
+    source = _source("describe", client_type=_Client)
+
+    def describe(cls: type[_Backend], secret_name: str, mapping: BaseModel | None) -> LookupDescription:
+        if variant == "wrong-type":
+            return object()  # type: ignore[return-value]
+        forged = object.__new__(LookupDescription)
+        object.__setattr__(forged, "disposition", "candidate")
+        object.__setattr__(forged, "identifier", "fixture")
+        return forged
+
+    source.backend_class.describe_lookup = classmethod(describe)  # type: ignore[method-assign,assignment]
+    outcome = resolve_batch(
+        [_decl("a")],
+        [source],
+        tty_access=TtyInteractionAccess.UNAVAILABLE,
+        interaction_broker=None,
+    ).outcomes[0]
+    assert outcome.reason is FailureReason.BACKEND_PROTOCOL
+
+
+class _SingleReadMapping(Mapping[str, BackendResolution]):
+    def __init__(self, result: BackendResolution) -> None:
+        self.result = result
+        self.reads = 0
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(("a",))
+
+    def __len__(self) -> int:
+        return 1
+
+    def __getitem__(self, key: str) -> BackendResolution:
+        assert key == "a"
+        self.reads += 1
+        if self.reads != 1:
+            raise RuntimeError("backend mapping was consumed after snapshot")
+        return self.result
+
+
+def test_backend_mapping_is_snapshotted_once_before_core_consumption() -> None:
+    returned = _SingleReadMapping(BackendResolved("value"))
+
+    class Client(_Client):
+        def resolve(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendResolution]:
+            return returned
+
+    batch = resolve_batch(
+        [_decl("a")],
+        [_source("snapshot", client_type=Client)],
+        tty_access=TtyInteractionAccess.DISABLED,
+        interaction_broker=None,
+    )
+    assert batch.complete_or_raise() == {"a": "value"}
+    assert returned.reads == 1
+
+
+def test_lazy_mapping_failure_becomes_backend_protocol() -> None:
+    class LazyFailure(Mapping[str, BackendResolution]):
+        def __iter__(self) -> Iterator[str]:
+            raise RuntimeError("lazy provider text")
+
+        def __len__(self) -> int:
+            return 1
+
+        def __getitem__(self, key: str) -> BackendResolution:
+            raise AssertionError("iteration must fail first")
+
+    class Client(_Client):
+        def resolve(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendResolution]:
+            return LazyFailure()
+
+    outcome = resolve_batch(
+        [_decl("a")],
+        [_source("lazy", client_type=Client)],
+        tty_access=TtyInteractionAccess.DISABLED,
+        interaction_broker=None,
+    ).outcomes[0]
+    assert outcome.reason is FailureReason.BACKEND_PROTOCOL
+    assert "lazy provider text" not in repr(outcome)
+
+
+def test_mapping_snapshot_preserves_user_abort_by_identity() -> None:
+    abort = UserAbort("abort")
+
+    class ProtectedMapping(Mapping[str, BackendResolution]):
+        def __iter__(self) -> Iterator[str]:
+            raise abort
+
+        def __len__(self) -> int:
+            return 1
+
+        def __getitem__(self, key: str) -> BackendResolution:
+            raise AssertionError("iteration must abort first")
+
+    class Client(_Client):
+        def resolve(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendResolution]:
+            return ProtectedMapping()
+
+    with pytest.raises(UserAbort) as caught:
+        resolve_batch(
+            [_decl("a")],
+            [_source("protected", client_type=Client)],
+            tty_access=TtyInteractionAccess.DISABLED,
+            interaction_broker=None,
+        )
+    assert caught.value is abort
+
+
+@pytest.mark.parametrize("preview", [False, True], ids=("resolution", "preview"))
+@pytest.mark.parametrize(
+    "protected_error",
+    [concurrent.futures.CancelledError(), KeyboardInterrupt(), _ProtectedExit()],
+    ids=("cancelled", "keyboard", "other-base"),
+)
+def test_mapping_snapshot_access_preserves_protected_exit_by_identity(
+    preview: bool,
+    protected_error: BaseException,
+) -> None:
+    class ProtectedAccessMapping(Mapping[str, object]):
+        def __iter__(self) -> Iterator[str]:
+            return iter(("a",))
+
+        def __len__(self) -> int:
+            return 1
+
+        def __getitem__(self, key: str) -> object:
+            raise protected_error
+
+    returned = ProtectedAccessMapping()
+
+    class Client(_Client):
+        def preview(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendPreview]:
+            return cast("Mapping[str, BackendPreview]", returned)
+
+        def resolve(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendResolution]:
+            return cast("Mapping[str, BackendResolution]", returned)
+
+    with pytest.raises(type(protected_error)) as caught:
+        if preview:
+            preview_batch(
+                [_decl("a")],
+                [_source("protected-access", client_type=Client)],
+                impact=OperatorImpact.NONE,
+                tty_access=TtyInteractionAccess.UNAVAILABLE,
+                interaction_broker=None,
+            )
+        else:
+            resolve_batch(
+                [_decl("a")],
+                [_source("protected-access", client_type=Client)],
+                tty_access=TtyInteractionAccess.DISABLED,
+                interaction_broker=None,
+            )
+    assert caught.value is protected_error
+
+
+class _ContextBoundMapping(Mapping[str, object]):
+    def __init__(self, result: object) -> None:
+        self.result = result
+        self.active = True
+        self.reads = 0
+
+    def __iter__(self) -> Iterator[str]:
+        if not self.active:
+            raise RuntimeError("context is closed")
+        return iter(("a",))
+
+    def __len__(self) -> int:
+        if not self.active:
+            raise RuntimeError("context is closed")
+        return 1
+
+    def __getitem__(self, key: str) -> object:
+        if not self.active:
+            raise RuntimeError("context is closed")
+        self.reads += 1
+        return self.result
+
+
+class _ContextBoundClient(_Client):
+    def __init__(self, returned: _ContextBoundMapping) -> None:
+        self.returned = returned
+
+    def preview(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendPreview]:
+        return cast("Mapping[str, BackendPreview]", self.returned)
+
+    def resolve(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendResolution]:
+        return cast("Mapping[str, BackendResolution]", self.returned)
+
+
+class _ContextBoundContext(AbstractContextManager[SecretSourceClient]):
+    def __init__(self, returned: _ContextBoundMapping, *, cleanup_error: BaseException | None = None) -> None:
+        self.returned = returned
+        self.cleanup_error = cleanup_error
+        self.primary: BaseException | None = None
+
+    def __enter__(self) -> SecretSourceClient:
+        return _ContextBoundClient(self.returned)
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: object,
+    ) -> None:
+        del exc_type, traceback
+        self.primary = exc
+        self.returned.active = False
+        if self.cleanup_error is not None:
+            raise self.cleanup_error
+
+
+def _install_context(source: ActiveSource, context: AbstractContextManager[SecretSourceClient]) -> None:
+    def create_client(cls: type[_Backend], **kwargs: object) -> AbstractContextManager[SecretSourceClient]:
+        del cls, kwargs
+        return context
+
+    source.backend_class.create_client = classmethod(create_client)  # type: ignore[method-assign,assignment]
+
+
+@pytest.mark.parametrize("preview", [False, True], ids=("resolution", "preview"))
+def test_context_local_lazy_mapping_is_snapshotted_before_context_exit(preview: bool) -> None:
+    result: BackendResolution | BackendPreview = PreviewAvailable() if preview else BackendResolved("value")
+    returned = _ContextBoundMapping(result)
+    context = _ContextBoundContext(returned)
+    source = _source("context-local", client_type=_Client)
+    _install_context(source, context)
+
+    if preview:
+        projected = preview_batch(
+            [_decl("a")],
+            [source],
+            impact=OperatorImpact.NONE,
+            tty_access=TtyInteractionAccess.UNAVAILABLE,
+            interaction_broker=None,
+        )["a"]
+        assert projected.status is PreviewStatus.AVAILABLE
+    else:
+        batch = resolve_batch(
+            [_decl("a")],
+            [source],
+            tty_access=TtyInteractionAccess.DISABLED,
+            interaction_broker=None,
+        )
+        assert batch.complete_or_raise() == {"a": "value"}
+
+    assert returned.reads == 1
+    assert returned.active is False
+    with pytest.raises(RuntimeError):
+        dict(returned)
+
+
+@pytest.mark.parametrize("preview", [False, True], ids=("resolution", "preview"))
+@pytest.mark.parametrize(
+    "cleanup_error",
+    [RuntimeError("cleanup"), UserAbort("cleanup"), _ProtectedExit()],
+    ids=("ordinary-cleanup", "user-abort-cleanup", "protected-cleanup"),
+)
+def test_in_context_map_validation_is_primary_over_cleanup(
+    preview: bool,
+    cleanup_error: BaseException,
+) -> None:
+    result: BackendResolution | BackendPreview = PreviewAvailable() if preview else BackendResolved("value")
+    returned = _ContextBoundMapping(result)
+    context = _ContextBoundContext(returned, cleanup_error=cleanup_error)
+    source = _source("invalid-context-local", client_type=_Client)
+    _install_context(source, context)
+
+    declarations = [_decl("a"), _decl("b")]
+    if preview:
+        projected = preview_batch(
+            declarations,
+            [source],
+            impact=OperatorImpact.NONE,
+            tty_access=TtyInteractionAccess.UNAVAILABLE,
+            interaction_broker=None,
+        )
+        assert {item.status for item in projected.values()} == {PreviewStatus.FAILED}
+        assert {item.reason for item in projected.values()} == {FailureReason.BACKEND_PROTOCOL.value}
+    else:
+        batch = resolve_batch(
+            declarations,
+            [source],
+            tty_access=TtyInteractionAccess.DISABLED,
+            interaction_broker=None,
+        )
+        assert {outcome.reason for outcome in batch.outcomes} == {FailureReason.BACKEND_PROTOCOL}
+
+    assert context.primary is not None
+    assert returned.active is False
+
+
+class _EqualButHostileKey(str):
+    comparisons = 0
+
+    def __eq__(self, other: object) -> bool:
+        type(self).comparisons += 1
+        if type(self).comparisons > 1:
+            raise RuntimeError("hostile repeated comparison")
+        return str.__eq__(self, other)
+
+    __hash__ = str.__hash__
+
+
+class _HostileKeyMapping(Mapping[object, object]):
+    def __init__(self, result: object) -> None:
+        self.key = _EqualButHostileKey("a")
+        self.result = result
+
+    def __iter__(self) -> Iterator[object]:
+        return iter((self.key,))
+
+    def __len__(self) -> int:
+        return 1
+
+    def __getitem__(self, key: object) -> object:
+        return self.result
+
+
+@pytest.mark.parametrize("preview", [False, True], ids=("resolution", "preview"))
+def test_equal_but_non_exact_stateful_result_key_is_rejected_without_comparison(preview: bool) -> None:
+    _EqualButHostileKey.comparisons = 0
+    result: BackendResolution | BackendPreview = PreviewAvailable() if preview else BackendResolved("value")
+    returned = _HostileKeyMapping(result)
+
+    class Client(_Client):
+        def preview(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendPreview]:
+            return cast("Mapping[str, BackendPreview]", returned)
+
+        def resolve(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendResolution]:
+            return cast("Mapping[str, BackendResolution]", returned)
+
+    if preview:
+        projected = preview_batch(
+            [_decl("a")],
+            [_source("hostile-key", client_type=Client)],
+            impact=OperatorImpact.NONE,
+            tty_access=TtyInteractionAccess.UNAVAILABLE,
+            interaction_broker=None,
+        )["a"]
+        assert projected.reason == FailureReason.BACKEND_PROTOCOL.value
+    else:
+        outcome = resolve_batch(
+            [_decl("a")],
+            [_source("hostile-key", client_type=Client)],
+            tty_access=TtyInteractionAccess.DISABLED,
+            interaction_broker=None,
+        ).outcomes[0]
+        assert outcome.reason is FailureReason.BACKEND_PROTOCOL
+
+    assert _EqualButHostileKey.comparisons == 0
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        BackendBlocked(BlockReason.SOURCE_NOT_READY),
+        BackendBlocked(BlockReason.BATCH_DOOMED),
+        BackendFailed(FailureReason.BACKEND_PROTOCOL),
+    ],
+    ids=("core-source-block", "core-batch-doom", "core-only-failure"),
+)
+def test_backend_cannot_forge_core_owned_reasons(result: BackendResolution) -> None:
+    class Client(_Client):
+        resolution_results = {"a": result}
+
+    outcome = resolve_batch(
+        [_decl("a")],
+        [_source("forged", client_type=Client, supports_tty=True)],
+        tty_access=TtyInteractionAccess.UNAVAILABLE,
+        interaction_broker=None,
+    ).outcomes[0]
+    assert outcome.reason is FailureReason.BACKEND_PROTOCOL
+
+
+def test_forged_resolved_result_is_revalidated_before_value_copy() -> None:
+    forged = object.__new__(BackendResolved)
+    object.__setattr__(forged, "value", "must-not-escape\0")
+
+    class Client(_Client):
+        resolution_results = {"a": forged}
+
+    batch = resolve_batch(
+        [_decl("a")],
+        [_source("forged", client_type=Client)],
+        tty_access=TtyInteractionAccess.DISABLED,
+        interaction_broker=None,
+    )
+    assert batch.outcomes[0].reason is FailureReason.BACKEND_PROTOCOL
+    assert "must-not-escape" not in repr(batch)
+
+
+def test_duplicate_declarations_use_the_first_mapping_in_preview_and_resolution() -> None:
+    class Client(_Client):
+        preview_results = {"a": PreviewAvailable()}
+        resolution_results = {"a": BackendResolved("unused")}
+        calls = []
+
+    first = SecretDecl(name="a", description="first", backend_mappings={"duplicates": False})
+    second = SecretDecl(name="a", description="second")
+    preview = preview_batch(
+        [first, second],
+        [_source("duplicates", client_type=Client)],
+        impact=OperatorImpact.NONE,
+        tty_access=TtyInteractionAccess.UNAVAILABLE,
+        interaction_broker=None,
+    )["a"]
+    outcome = resolve_batch(
+        [first, second],
+        [_source("duplicates", client_type=Client)],
+        tty_access=TtyInteractionAccess.UNAVAILABLE,
+        interaction_broker=None,
+    ).outcomes[0]
+    assert preview.status is PreviewStatus.BLOCKED
+    assert outcome.reason is BlockReason.NO_ATTEMPTABLE_SOURCE
+    assert Client.calls == []

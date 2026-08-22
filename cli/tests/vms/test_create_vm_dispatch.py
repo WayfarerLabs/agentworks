@@ -16,7 +16,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionResult
 from agentworks.config import load_config
 from agentworks.errors import NotFoundError, ProvisioningError, ValidationError
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from tests.conftest import ManifestDoc, write_manifests
 from tests.orchestrated_fixtures import proxmox_site
@@ -97,7 +97,7 @@ def test_create_vm_request_shape_and_row(
     )
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
 
-    vm_manager.create_vm(db, config, name="dvm", interaction=InteractionPolicy.REFUSE)
+    vm_manager.create_vm(db, config, name="dvm", interaction=TtyInteractionPolicy.REFUSE)
 
     (request,) = captured_request
     assert request.vm_name == "dvm"
@@ -161,7 +161,7 @@ def test_create_vm_stores_and_provisions_selected_admin_template(
     )
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
 
-    vm_manager.create_vm(db, config, name="wvm", admin_template="work", interaction=InteractionPolicy.REFUSE)
+    vm_manager.create_vm(db, config, name="wvm", admin_template="work", interaction=TtyInteractionPolicy.REFUSE)
 
     (request,) = captured
     assert request.admin_username == "worker"  # from the work admin-template
@@ -194,7 +194,7 @@ def test_unknown_admin_template_errors_before_any_work(
     monkeypatch.setattr(vm_manager, "_resolve_system_slug", _no_slug)
 
     with pytest.raises(NotFoundError) as exc:
-        vm_manager.create_vm(db, config, name="nvm", admin_template="ghost", interaction=InteractionPolicy.REFUSE)
+        vm_manager.create_vm(db, config, name="nvm", admin_template="ghost", interaction=TtyInteractionPolicy.REFUSE)
     assert exc.value.entity_kind == "admin-template"
     assert exc.value.entity_name == "ghost"
     assert db.get_vm("nvm") is None
@@ -231,7 +231,7 @@ def test_not_ready_site_errors_before_tailscale_and_slug_prompt(
     monkeypatch.setattr(vm_manager, "_resolve_system_slug", _no_slug)
 
     with pytest.raises(StateError, match="not ready on this host") as exc:
-        vm_manager.create_vm(db, config, name="dvm", site="lima-local", interaction=InteractionPolicy.REFUSE)
+        vm_manager.create_vm(db, config, name="dvm", site="lima-local", interaction=TtyInteractionPolicy.REFUSE)
     assert "limactl" in str(exc.value)
 
 
@@ -269,7 +269,7 @@ def test_create_vm_composes_r11_hostname_with_slug(
     )
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
 
-    vm_manager.create_vm(db, config, name="svm", interaction=InteractionPolicy.REFUSE)
+    vm_manager.create_vm(db, config, name="svm", interaction=TtyInteractionPolicy.REFUSE)
 
     (request,) = captured
     assert request.hostname == "team-a-svm"
@@ -307,7 +307,7 @@ def test_slug_resolution_precedes_secrets_and_insert(
     monkeypatch.setattr(Resolver, "resolve", _resolve_spy)
 
     with pytest.raises(_Stop):
-        vm_manager.create_vm(db, make_config(), name="ovm", interaction=InteractionPolicy.REFUSE)
+        vm_manager.create_vm(db, make_config(), name="ovm", interaction=TtyInteractionPolicy.REFUSE)
 
     assert order == ["slug", "secrets"]
     assert db.get_vm("ovm") is None  # insert happens after the resolve
@@ -335,7 +335,7 @@ def test_create_rejects_multiline_tailscale_key_before_runup_db_or_platform(
     )
 
     with pytest.raises(ValidationError) as caught:
-        vm_manager.create_vm(db, make_config(), name="unsafe-ts", interaction=InteractionPolicy.REFUSE)
+        vm_manager.create_vm(db, make_config(), name="unsafe-ts", interaction=TtyInteractionPolicy.REFUSE)
 
     assert db.get_vm("unsafe-ts") is None
     assert auth_key not in repr((caught.value.args, vars(caught.value)))
@@ -373,7 +373,7 @@ def test_create_rejects_multiline_git_token_before_runup_db_or_platform(
     )
 
     with pytest.raises(ValidationError) as caught:
-        vm_manager.create_vm(db, config, name="unsafe-git", interaction=InteractionPolicy.REFUSE)
+        vm_manager.create_vm(db, config, name="unsafe-git", interaction=TtyInteractionPolicy.REFUSE)
 
     assert db.get_vm("unsafe-git") is None
     assert token not in repr((caught.value.args, vars(caught.value)))
@@ -426,7 +426,7 @@ def test_proxmox_token_resolves_end_to_end(
     monkeypatch.setattr(ProxmoxPlatform, "create", _fake_create)
 
     with pytest.raises(ProvisioningError, match="halt after binding"):
-        vm_manager.create_vm(db, config, name="pvm", site="proxmox", interaction=InteractionPolicy.REFUSE)
+        vm_manager.create_vm(db, config, name="pvm", site="proxmox", interaction=TtyInteractionPolicy.REFUSE)
 
     assert captured["token"] == "pve-token-value"
     # Rollback removed the row after the failed provisioning.

@@ -20,7 +20,7 @@ from agentworks.env.identity import ResourceContext, per_context_identity_env
 from agentworks.env.merge import effective_env
 from agentworks.errors import ValidationError
 from agentworks.secrets.outcomes import format_outcome
-from agentworks.secrets.policy import require_exact_interaction_policy
+from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
 if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from agentworks.db import AgentRow, Database, SessionRow, VMRow, WorkspaceRow
     from agentworks.env.entry import EnvEntry
     from agentworks.resources.registry import Registry
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.sessions.templates import ResolvedSessionTemplate
     from agentworks.vms.templates import ResolvedVMTemplate
 
@@ -79,7 +79,7 @@ def show_env(
     agent_name: str | None = None,
     session_name: str | None = None,
     reveal_secrets: bool = False,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> list[ResolvedEnvRow]:
     """Resolve the context, compute provenance-aware env, render rows.
 
@@ -89,7 +89,7 @@ def show_env(
 
     Raises ``ValidationError`` when no context flag is provided.
     """
-    require_exact_interaction_policy(interaction)
+    require_exact_tty_interaction_policy(interaction)
     ctx = _resolve_context(
         db,
         vm_name=vm_name,
@@ -386,7 +386,7 @@ def _reveal_values(
     merged: dict[str, EnvEntry],
     *,
     reveal: bool,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> tuple[dict[str, str], dict[str, str]]:
     """Resolve every secret referenced by ``merged`` when revealing.
 
@@ -404,7 +404,7 @@ def _reveal_values(
         return {}, {}
     from agentworks.resources.access import secret_decls
     from agentworks.secrets import SecretDecl
-    from agentworks.secrets.outcomes import ResolutionCategory
+    from agentworks.secrets.outcomes import ResolutionStatus
     from agentworks.secrets.resolve import active_sources, resolve_partial_for_reveal
 
     decls = secret_decls(registry)
@@ -424,7 +424,7 @@ def _reveal_values(
     errors = {
         outcome.name: format_outcome(outcome)
         for outcome in result.outcomes
-        if outcome.category is not ResolutionCategory.RESOLVED
+        if outcome.status is not ResolutionStatus.RESOLVED
     }
     from agentworks.secrets.line_safety import (
         LineOrientedSecretUse,

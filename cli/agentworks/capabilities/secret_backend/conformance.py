@@ -25,20 +25,15 @@ class _ParameterContract:
 #: TypeError at the first source turn rather than at registration.
 _OPERATION_CONTRACTS: dict[str, tuple[_ParameterContract, ...]] = {
     "backend_readiness": (),
-    "would_attempt": (
-        _ParameterContract("secret_name", inspect.Parameter.POSITIONAL_OR_KEYWORD),
-        _ParameterContract("mapping_present", inspect.Parameter.KEYWORD_ONLY),
-    ),
     "describe_lookup": (
         _ParameterContract("secret_name", inspect.Parameter.POSITIONAL_OR_KEYWORD),
         _ParameterContract("mapping", inspect.Parameter.POSITIONAL_OR_KEYWORD),
     ),
-    "external_operation_timeout": (_ParameterContract("config", inspect.Parameter.POSITIONAL_OR_KEYWORD),),
     "create_client": (
-        _ParameterContract("source_name", inspect.Parameter.KEYWORD_ONLY),
         _ParameterContract("config", inspect.Parameter.KEYWORD_ONLY),
+        _ParameterContract("intent", inspect.Parameter.KEYWORD_ONLY),
+        _ParameterContract("tty_access", inspect.Parameter.KEYWORD_ONLY),
         _ParameterContract("interaction_broker", inspect.Parameter.KEYWORD_ONLY),
-        _ParameterContract("remaining_time", inspect.Parameter.KEYWORD_ONLY),
     ),
 }
 
@@ -54,9 +49,9 @@ def _secret_backend_conformance_error(impl: type[SecretBackend]) -> str | None:
     way ``resolve.py`` calls it. Return values and annotations are not
     re-checked, at registration or per call.
     """
-    interactive = getattr(impl, "interactive", None)
-    if type(interactive) is not bool:
-        return f"its interactive class attribute is {interactive!r}, not a bool"
+    supports_tty_interaction = getattr(impl, "supports_tty_interaction", None)
+    if type(supports_tty_interaction) is not bool:
+        return f"its supports_tty_interaction class attribute is {supports_tty_interaction!r}, not a bool"
 
     for name, parameters in _OPERATION_CONTRACTS.items():
         error = _classmethod_conformance_error(impl, name=name, parameters=parameters)

@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 from textwrap import dedent
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
 from agentworks.bootstrap import build_registry
+from agentworks.capabilities.secret_backend import BlockReason, TtyInteractionAccess
 from agentworks.config import load_config
 from agentworks.doctor import Status, _check_config, _check_secrets, checks_for_resource
-from agentworks.errors import ConfigError
+from agentworks.errors import ConfigError, StateError
 from agentworks.resources.access import ResourceIdentity
+from agentworks.secrets.preview import PreviewStatus
 from tests.conftest import ManifestDoc, write_manifests
 
 if TYPE_CHECKING:
@@ -76,13 +78,31 @@ def test_focused_checks_are_the_exact_bulk_resource_rows(tmp_path: Path) -> None
         (ResourceIdentity("vm-platform", "lima"), _check_vm_platforms(registry)),
         (ResourceIdentity("secret-backend", "env-var"), _check_secret_backends(registry)),
         (ResourceIdentity("secret-source", "env-var"), _check_secret_sources(config, registry)),
-        (ResourceIdentity("secret", "tailscale-auth-key"), _check_secrets(config, registry)),
+        (
+            ResourceIdentity("secret", "tailscale-auth-key"),
+            _check_secrets(config, registry, tty_access=TtyInteractionAccess.UNAVAILABLE),
+        ),
     )
 
     for identity, group in cases:
-        focused = checks_for_resource(config, registry, identity)
+        focused = checks_for_resource(
+            config,
+            registry,
+            identity,
+            tty_access=TtyInteractionAccess.UNAVAILABLE,
+        )
         assert len(focused) == 1
         assert focused[0] in group.checks
+
+
+def test_focused_checks_reject_non_exact_tty_access_before_resource_work() -> None:
+    with pytest.raises(StateError):
+        checks_for_resource(
+            cast("Any", object()),
+            cast("Any", object()),
+            ResourceIdentity("secret", "token"),
+            tty_access=cast("Any", "unavailable"),
+        )
 
 
 def test_focused_admin_dotfiles_matches_bulk_and_empty_source_has_no_check(
@@ -96,7 +116,15 @@ def test_focused_admin_dotfiles_matches_bulk_and_empty_source_has_no_check(
     empty_config = load_config(_write_config(empty_path), warn_issues=False)
     empty_registry = build_registry(empty_config)
     identity = ResourceIdentity("admin-template", "default")
-    assert checks_for_resource(empty_config, empty_registry, identity) == ()
+    assert (
+        checks_for_resource(
+            empty_config,
+            empty_registry,
+            identity,
+            tty_access=TtyInteractionAccess.UNAVAILABLE,
+        )
+        == ()
+    )
 
     configured_path = tmp_path / "configured"
     configured_path.mkdir()
@@ -108,7 +136,12 @@ def test_focused_admin_dotfiles_matches_bulk_and_empty_source_has_no_check(
     bulk_group, config, registry = _check_config()
     assert config is not None
     assert registry is not None
-    focused = checks_for_resource(config, registry, identity)
+    focused = checks_for_resource(
+        config,
+        registry,
+        identity,
+        tty_access=TtyInteractionAccess.UNAVAILABLE,
+    )
     assert len(focused) == 1
     assert focused[0] in bulk_group.checks
 
@@ -116,6 +149,41 @@ def test_focused_admin_dotfiles_matches_bulk_and_empty_source_has_no_check(
 # ---------------------------------------------------------------------------
 # _check_secrets
 # ---------------------------------------------------------------------------
+
+
+def test_secret_checks_use_only_explicit_tty_access(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks import output
+
+    config = load_config(_write_config(tmp_path), warn_issues=False)
+    registry = build_registry(config)
+    monkeypatch.setattr(output, "non_interactive", lambda: pytest.fail("doctor read ambient TTY policy"))
+    unavailable = _check_secrets(
+        config,
+        registry,
+        tty_access=TtyInteractionAccess.UNAVAILABLE,
+    )
+    available = _check_secrets(
+        config,
+        registry,
+        tty_access=TtyInteractionAccess.AVAILABLE,
+    )
+    unavailable_row = next(
+        check
+        for check in unavailable.checks
+        if check.secret_preview is not None and check.secret_preview.name == "tailscale-auth-key"
+    )
+    available_row = next(
+        check
+        for check in available.checks
+        if check.secret_preview is not None and check.secret_preview.name == "tailscale-auth-key"
+    )
+    assert unavailable_row.secret_preview is not None
+    assert available_row.secret_preview is not None
+    assert unavailable_row.secret_preview.status is PreviewStatus.BLOCKED
+    assert available_row.secret_preview.status is PreviewStatus.INDETERMINATE
 
 
 def test_auto_declared_secrets_are_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -132,10 +200,13 @@ def test_auto_declared_secrets_are_reported(tmp_path: Path, monkeypatch: pytest.
     monkeypatch.delenv("AW_SECRET_TAILSCALE_AUTH_KEY", raising=False)
     cfg = _write_config(tmp_path)
     config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(config, build_registry(config))
+    g = _check_secrets(config, build_registry(config), tty_access=TtyInteractionAccess.UNAVAILABLE)
     assert g.name == "Secrets"
-    statuses = [(c.name, c.status, c.message) for c in g.checks]
-    assert statuses == [("Secret 'tailscale-auth-key' (auto)", Status.OK, "would attempt via env-var")], statuses
+    (check,) = g.checks
+    assert check.status is Status.WARN
+    assert check.secret_preview is not None
+    assert check.secret_preview.status is PreviewStatus.BLOCKED
+    assert check.secret_preview.reason == BlockReason.TTY_UNAVAILABLE.value
 
 
 def test_secret_resolves_via_env_var_when_set(
@@ -155,12 +226,14 @@ def test_secret_resolves_via_env_var_when_set(
         manifests=[ManifestDoc("secret", "shared", description="Shared API token")],
     )
     config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(config, build_registry(config))
-    msgs = [(c.status, c.name, c.message) for c in g.checks]
-    assert any(
-        status == Status.OK and "shared" in name and "would attempt via env-var" in (msg or "")
-        for status, name, msg in msgs
-    ), msgs
+    g = _check_secrets(config, build_registry(config), tty_access=TtyInteractionAccess.UNAVAILABLE)
+    shared = next(
+        check for check in g.checks if check.secret_preview is not None and check.secret_preview.name == "shared"
+    )
+    assert shared.status is Status.OK
+    assert shared.secret_preview is not None
+    assert shared.secret_preview.status is PreviewStatus.AVAILABLE
+    assert shared.secret_preview.source == "env-var"
 
 
 def test_doctor_accepts_mapping_keyed_by_differently_named_declared_source(
@@ -185,11 +258,17 @@ def test_doctor_accepts_mapping_keyed_by_differently_named_declared_source(
         ],
     )
     config = load_config(cfg, warn_issues=False)
-    group = _check_secrets(config, build_registry(config))
+    group = _check_secrets(config, build_registry(config), tty_access=TtyInteractionAccess.UNAVAILABLE)
 
-    shared = next(check for check in group.checks if check.name == "Secret 'shared'")
+    shared = next(
+        check
+        for check in group.checks
+        if check.secret_preview is not None and check.secret_preview.source == "work-env"
+    )
     assert shared.status is Status.OK
-    assert shared.message == "would attempt via work-env"
+    assert shared.secret_preview is not None
+    assert shared.secret_preview.status is PreviewStatus.AVAILABLE
+    assert shared.secret_preview.source == "work-env"
 
 
 def test_secret_resolves_via_prompt_when_env_var_unset(
@@ -209,11 +288,14 @@ def test_secret_resolves_via_prompt_when_env_var_unset(
         manifests=[ManifestDoc("secret", "shared", description="Shared API token")],
     )
     config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(config, build_registry(config))
-    oks = [c for c in g.checks if c.status == Status.OK]
-    assert any("shared" in c.name and "would attempt via env-var" in (c.message or "") for c in oks), [
-        (c.name, c.message) for c in oks
-    ]
+    g = _check_secrets(config, build_registry(config), tty_access=TtyInteractionAccess.UNAVAILABLE)
+    shared = next(
+        check for check in g.checks if check.secret_preview is not None and check.secret_preview.name == "shared"
+    )
+    assert shared.status is Status.WARN
+    assert shared.secret_preview is not None
+    assert shared.secret_preview.status is PreviewStatus.BLOCKED
+    assert shared.secret_preview.reason == BlockReason.TTY_UNAVAILABLE.value
 
 
 def test_secret_not_available_when_env_var_unset_and_prompt_opted_out(
@@ -241,10 +323,11 @@ def test_secret_not_available_when_env_var_unset_and_prompt_opted_out(
         ],
     )
     config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(config, build_registry(config))
+    g = _check_secrets(config, build_registry(config), tty_access=TtyInteractionAccess.UNAVAILABLE)
     row = next(c for c in g.checks if "opted-out" in c.name)
-    assert row.status is Status.OK
-    assert row.message == "would attempt via env-var"
+    assert row.status is Status.WARN
+    assert row.secret_preview is not None
+    assert row.secret_preview.status is PreviewStatus.MISSING
 
 
 # ---------------------------------------------------------------------------
@@ -295,7 +378,15 @@ def test_secret_backends_group_skips_disabled_plugin_backend(tmp_path: Path, mon
     assert by_name["prompt"].status is Status.OK
     # Disabled: skipped here, never a misleading [ok].
     assert "onepassword" not in by_name
-    assert checks_for_resource(config, registry, ResourceIdentity("secret-backend", "onepassword")) == ()
+    assert (
+        checks_for_resource(
+            config,
+            registry,
+            ResourceIdentity("secret-backend", "onepassword"),
+            tty_access=TtyInteractionAccess.UNAVAILABLE,
+        )
+        == ()
+    )
 
     # The System plugins roster IS the enablement authority: it lists the
     # disabled backend's plugin as disabled.
@@ -334,12 +425,16 @@ def test_check_secrets_flags_a_not_ready_only_source(tmp_path: Path, monkeypatch
         ],
     )
     config = load_config(cfg, warn_issues=False)
-    g = _check_secrets(config, build_registry(config))
-    warns = [c for c in g.checks if c.status == Status.WARN]
-    assert any(
-        "op-only" in c.name and "not ready" in (c.message or "") and "op CLI not installed" in (c.message or "")
-        for c in warns
-    ), [(c.name, c.message) for c in warns]
+    g = _check_secrets(config, build_registry(config), tty_access=TtyInteractionAccess.UNAVAILABLE)
+    op_only = next(
+        check
+        for check in g.checks
+        if check.secret_preview is not None and check.secret_preview.reason == BlockReason.SOURCE_NOT_READY.value
+    )
+    assert op_only.status is Status.WARN
+    assert op_only.secret_preview is not None
+    assert op_only.secret_preview.status is PreviewStatus.BLOCKED
+    assert op_only.secret_preview.reason == BlockReason.SOURCE_NOT_READY.value
 
 
 def test_r9_3_manifest_malformed_block_surfaces_under_resource_registry(
@@ -588,7 +683,12 @@ def test_prompt_only_site_secret_leaves_the_site_row_ok(
 
     g = _check_vm_sites(config, registry)
     row = next(c for c in g.checks if c.name == "azure-dev")
-    focused = checks_for_resource(config, registry, ResourceIdentity("vm-site", "azure-dev"))
+    focused = checks_for_resource(
+        config,
+        registry,
+        ResourceIdentity("vm-site", "azure-dev"),
+        tty_access=TtyInteractionAccess.UNAVAILABLE,
+    )
     assert row.status is Status.OK, (row.status, row.message)
     assert "azure-vm" in (row.message or "")
     assert focused == (row,)
@@ -612,7 +712,12 @@ def test_focused_vm_site_preserves_bulk_preflight_exception_facts(
 
     bulk = doctor._check_vm_sites(config, registry)
     row = next(check for check in bulk.checks if check.name == "azure-dev")
-    focused = checks_for_resource(config, registry, ResourceIdentity("vm-site", "azure-dev"))
+    focused = checks_for_resource(
+        config,
+        registry,
+        ResourceIdentity("vm-site", "azure-dev"),
+        tty_access=TtyInteractionAccess.UNAVAILABLE,
+    )
 
     assert focused == (row,)
     assert row.status is Status.WARN
@@ -630,10 +735,12 @@ def test_prompt_only_site_secret_still_renders_on_its_own_secret_row(
     config = load_config(_sp_site_config(tmp_path), warn_issues=False)
     registry = build_registry(config)
 
-    g = _check_secrets(config, registry)
+    g = _check_secrets(config, registry, tty_access=TtyInteractionAccess.UNAVAILABLE)
     row = next(c for c in g.checks if "az-sp" in c.name)
-    assert row.status is Status.OK
-    assert "would attempt via env-var" in (row.message or "")
+    assert row.status is Status.WARN
+    assert row.secret_preview is not None
+    assert row.secret_preview.status is PreviewStatus.BLOCKED
+    assert row.secret_preview.reason == BlockReason.TTY_UNAVAILABLE.value
 
 
 # The #310 regression pair (``test_config_load_validation_error_yields_fail_row_not_abort``

@@ -131,10 +131,12 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # declared secret. The chain's configured sources produce the value at command
 # time; agentworks never persists secret values to disk.
 #
-# Use `agw secret list` to see how each active source would look up each
-# declared secret. Use `agw secret describe <name>` for a full view including
-# which env entries reference the secret. `agw doctor` reports one ok/warn row
-# per registry secret; invalid source names fail Registry construction first.
+# Use `agw secret list` for each active source's static mapping. Use
+# `agw secret describe <name>` for references plus a provider-aware, value-free
+# preview, and add `--allow-interaction` for a definitive preview when operator
+# action is acceptable. `agw doctor` runs the no-impact preview and reports one
+# ok, warn, or fail row per registry secret. Invalid source names fail Registry
+# construction first.
 
 # The source CHAIN below is a setting and lives here. It lists configured
 # `secret-source` resource names in precedence order. Agentworks synthesizes
@@ -151,8 +153,12 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #                 validation precedes every rejoin-specific action.
 # Additional sources are YAML resources. For 1Password, enable its plugin and
 # declare a source such as `work-op` with `spec.backend.name: onepassword`.
-# Put `account` and the positive `timeout` (default 30 seconds) in that backend
-# block. Each secret then maps `work-op` to one scalar `op://...` reference.
+# Put `account`, the positive source-turn `timeout` (default 30 seconds), and
+# `app_authentication_impact` (`operator-action`, the default, or `none`) in
+# that backend block. Set the impact to `none` only when this site's app approval
+# policy treats it as non-disruptive. Service-account and Connect credentials are
+# detected as unattended. Each secret then maps `work-op` to one scalar
+# `op://...` reference.
 # `agw resource sample secret-source` prints the manifest shape;
 # `agw resource explain secret-backend/onepassword` documents its config
 # and mapping model.

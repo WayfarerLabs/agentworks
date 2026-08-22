@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, WorkspaceRow
     from agentworks.resources.registry import Registry
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.transports import Transport
 
 
@@ -29,7 +29,7 @@ def repair_workspace(
     config: Config,
     name: str,
     *,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Repair a workspace by converging its live VM state to the DB.
 

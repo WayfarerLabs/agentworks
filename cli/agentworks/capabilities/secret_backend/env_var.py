@@ -8,10 +8,22 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from agentworks.capabilities.secret_backend.base import SecretBackend
 from agentworks.capabilities.secret_backend.client import (
+    BackendFailed,
+    BackendMissing,
+    BackendPreview,
+    BackendResolution,
+    BackendResolved,
+    FailureReason,
     InteractionBroker,
-    RemainingTime,
+    LookupDescription,
+    LookupDisposition,
+    PreviewAvailable,
+    PreviewFailed,
+    PreviewMissing,
+    SecretClientIntent,
     SecretLookupRequest,
     SecretSourceClient,
+    TtyInteractionAccess,
 )
 from agentworks.errors import ConfigError
 from agentworks.schema import AgwModel, AgwRootModel, NonEmptyStr
@@ -40,29 +52,36 @@ class EnvVarMapping(AgwRootModel[NonEmptyStr]):
     """An explicit environment-variable name for one secret lookup."""
 
 
-class _EnvVarClient:
-    def prepare(
-        self,
-        requests: tuple[SecretLookupRequest, ...],
-        *,
-        remaining_time: RemainingTime,
-    ) -> None:
-        return None
+def _read(request: SecretLookupRequest) -> str | None:
+    mapping = request.mapping
+    env_name = mapping.root if isinstance(mapping, EnvVarMapping) else env_var_name_for(request.name)
+    return os.environ.get(env_name)
 
-    def resolve(
-        self,
-        requests: tuple[SecretLookupRequest, ...],
-        *,
-        remaining_time: RemainingTime,
-    ) -> Mapping[str, str]:
-        resolved: dict[str, str] = {}
+
+class _EnvVarClient:
+    def preview(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendPreview]:
+        results: dict[str, BackendPreview] = {}
         for request in requests:
-            mapping = request.mapping
-            env_name = mapping.root if isinstance(mapping, EnvVarMapping) else env_var_name_for(request.name)
-            raw = os.environ.get(env_name)
-            if raw is not None:
-                resolved[request.name] = raw
-        return resolved
+            value = _read(request)
+            if value is None:
+                results[request.name] = PreviewMissing()
+            elif "\0" in value:
+                results[request.name] = PreviewFailed(FailureReason.MALFORMED_VALUE)
+            else:
+                results[request.name] = PreviewAvailable()
+        return results
+
+    def resolve(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendResolution]:
+        results: dict[str, BackendResolution] = {}
+        for request in requests:
+            value = _read(request)
+            if value is None:
+                results[request.name] = BackendMissing()
+            elif "\0" in value:
+                results[request.name] = BackendFailed(FailureReason.MALFORMED_VALUE)
+            else:
+                results[request.name] = BackendResolved(value)
+        return results
 
 
 class _EnvVarContext(AbstractContextManager[SecretSourceClient]):
@@ -76,7 +95,7 @@ class _EnvVarContext(AbstractContextManager[SecretSourceClient]):
 class EnvVarBackend(SecretBackend):
     """Resolve secrets from operator-side environment variables."""
 
-    contract_version: ClassVar[int] = 2
+    contract_version: ClassVar[int] = 1
     config_model: ClassVar[type[AgwModel]] = EnvVarSourceConfig
     mapping_model: ClassVar[type[AgwRootModel[Any]]] = EnvVarMapping
     name: ClassVar[str] = "env-var"
@@ -89,10 +108,10 @@ class EnvVarBackend(SecretBackend):
         so a secret needs no mapping at all to be resolvable this way.
 
         An explicit mapping overrides that name with the variable you actually have. An
-        unset variable is a soft miss, so resolution can continue to a later source.
+        unset variable is an ordinary miss, so resolution can continue to a later source.
         """,
     )
-    interactive: ClassVar[bool] = False
+    supports_tty_interaction: ClassVar[bool] = False
 
     @classmethod
     def backend_readiness(cls) -> Readiness:
@@ -101,24 +120,22 @@ class EnvVarBackend(SecretBackend):
         return Readiness.ready()
 
     @classmethod
-    def would_attempt(cls, secret_name: str, *, mapping_present: bool) -> bool:
-        return True
-
-    @classmethod
-    def describe_lookup(cls, secret_name: str, mapping: BaseModel | None) -> str | None:
+    def describe_lookup(cls, secret_name: str, mapping: BaseModel | None) -> LookupDescription:
         if mapping is None:
-            return env_var_name_for(secret_name)
-        if not isinstance(mapping, EnvVarMapping):
+            identifier = env_var_name_for(secret_name)
+        elif isinstance(mapping, EnvVarMapping):
+            identifier = mapping.root
+        else:
             raise ConfigError(f"env-var received {type(mapping).__name__}, not EnvVarMapping")
-        return mapping.root
+        return LookupDescription(LookupDisposition.CANDIDATE, identifier)
 
     @classmethod
     def create_client(
         cls,
         *,
-        source_name: str,
         config: AgwModel,
+        intent: SecretClientIntent,
+        tty_access: TtyInteractionAccess,
         interaction_broker: InteractionBroker | None,
-        remaining_time: RemainingTime,
     ) -> AbstractContextManager[SecretSourceClient]:
         return _EnvVarContext()

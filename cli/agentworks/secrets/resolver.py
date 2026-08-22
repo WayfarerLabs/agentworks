@@ -22,7 +22,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError
-from agentworks.secrets.policy import require_exact_interaction_policy
+from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -31,7 +31,8 @@ if TYPE_CHECKING:
     from agentworks.resources.registry import Registry
     from agentworks.secrets.base import SecretDecl
     from agentworks.secrets.orchestration import SecretTarget
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.secrets.resolve import ResolutionBatch
 
 
 class Resolver:
@@ -57,9 +58,9 @@ class Resolver:
         config: Config,
         registry: Registry,
         *,
-        interaction: InteractionPolicy,
+        interaction: TtyInteractionPolicy,
     ) -> None:
-        require_exact_interaction_policy(interaction)
+        require_exact_tty_interaction_policy(interaction)
         self._config = config
         self._registry = registry
         self._interaction = interaction
@@ -174,28 +175,13 @@ class Resolver:
 
             validate_target_values(self._targets, self._values)
             return
-        from agentworks.secrets.policy import InteractionPolicy
-        from agentworks.secrets.resolve import (
-            CompletionPolicy,
-            OutputInteractionBroker,
-            ResolutionPolicy,
-            active_sources,
-            resolve_batch,
-        )
-
         # Gate-seeded values are already resolved (by the gate's own
         # source-chain pass); the boundary loop covers only the rest.
         missing = [decl for name, decl in self._decls.items() if name not in self._seeded]
         if not missing:
             resolved = dict(self._seeded)
         else:
-            broker = OutputInteractionBroker(missing) if self._interaction is InteractionPolicy.ALLOW else None
-            batch = resolve_batch(
-                missing,
-                active_sources(self._config, self._registry),
-                policy=ResolutionPolicy(interaction=self._interaction, completion=CompletionPolicy.COMPLETE),
-                interaction_broker=broker,
-            )
+            batch = self._resolve_declarations(missing)
             resolved = {**self._seeded, **batch.complete_or_raise()}
         from agentworks.secrets.orchestration import validate_target_values
 
@@ -210,22 +196,7 @@ class Resolver:
         existing = self._seeded.get(name)
         if existing is not None:
             return existing
-        from agentworks.secrets.policy import InteractionPolicy
-        from agentworks.secrets.resolve import (
-            CompletionPolicy,
-            OutputInteractionBroker,
-            ResolutionPolicy,
-            active_sources,
-            resolve_batch,
-        )
-
-        broker = OutputInteractionBroker([decl]) if self._interaction is InteractionPolicy.ALLOW else None
-        batch = resolve_batch(
-            [decl],
-            active_sources(self._config, self._registry),
-            policy=ResolutionPolicy(interaction=self._interaction, completion=CompletionPolicy.COMPLETE),
-            interaction_broker=broker,
-        )
+        batch = self._resolve_declarations([decl])
         projected = batch.complete_or_raise()
         if tuple(projected) != (name,):
             raise StateError("gate secret resolution returned an invalid singleton result")
@@ -236,26 +207,28 @@ class Resolver:
         """Resolve one authorized repair secret without widening the cache."""
         if self._values is None:
             raise StateError("a late repair secret requires the operation boundary")
-        from agentworks.secrets.policy import InteractionPolicy
-        from agentworks.secrets.resolve import (
-            CompletionPolicy,
-            OutputInteractionBroker,
-            ResolutionPolicy,
-            active_sources,
-            resolve_batch,
-        )
-
-        broker = OutputInteractionBroker([decl]) if self._interaction is InteractionPolicy.ALLOW else None
-        batch = resolve_batch(
-            [decl],
-            active_sources(self._config, self._registry),
-            policy=ResolutionPolicy(interaction=self._interaction, completion=CompletionPolicy.COMPLETE),
-            interaction_broker=broker,
-        )
+        batch = self._resolve_declarations([decl])
         projected = batch.complete_or_raise()
         if tuple(projected) != (decl.name,):
             raise StateError("late repair resolution returned an invalid singleton result")
         return projected[decl.name]
+
+    def _resolve_declarations(self, decls: Sequence[SecretDecl]) -> ResolutionBatch:
+        """Drive one authorized actual-resolution batch under current TTY facts."""
+        import sys
+
+        from agentworks.capabilities.secret_backend import TtyInteractionAccess
+        from agentworks.secrets.policy import tty_interaction_access
+        from agentworks.secrets.resolve import OutputInteractionBroker, active_sources, resolve_batch
+
+        tty_access = tty_interaction_access(self._interaction, terminal_input_usable=sys.stdin.isatty())
+        broker = OutputInteractionBroker(decls) if tty_access is TtyInteractionAccess.AVAILABLE else None
+        return resolve_batch(
+            decls,
+            active_sources(self._config, self._registry),
+            tty_access=tty_access,
+            interaction_broker=broker,
+        )
 
     def get(self, name: str) -> str:
         """A resolved value, from the boundary pass's cache (or, before

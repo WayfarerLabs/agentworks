@@ -178,16 +178,17 @@ layer's sharpest security property. Capabilities and nodes **declare** secret re
 resolve them. The command's union is computed from the walked plan's `secret_refs`, never from a
 construction side effect. Resolvability is **predicted centrally** over the declarations
 (`predict_resolution` in `secrets.py`), by the operation rather than the resource that named the
-secret, because whether a name is attemptable is a property of this run's active sources and
-interaction policy, not of the resource. Prediction is a pure impossibility screen, not a value
-probe; actual presence and provider failures belong to the resolution boundary. That placement is
-what makes doctor come out right for free: doctor invokes each node's `preflight` per row without
-running the sweep, so a prompt-only secret leaves a site row healthy while the Secrets group reports
-on the secret once, where it belongs. The union then resolves in **one boundary pass**, and values
-are **delivered scoped**: `ScopedSecrets` (the `ctx.secret(name)` view) hands a node only the names
-it declared and refuses anything else with a typed error. An instance therefore cannot read a secret
-it did not declare and cannot hold a value source of its own; scoped delivery over the boundary pass
-is the only way it ever sees a value.
+secret, because whether a name is available is a property of this run's active sources and operation
+inputs, not of the resource. Prediction is a provider-aware, value-free preview: core passes exact
+TTY access, the backend alone decides whether it is limiting, and the backend may perform work
+allowed by the preview intent, including a safe fetch-and-discard. No value crosses the backend
+boundary. That placement is what makes doctor come out right for free: doctor invokes each node's
+`preflight` per row without running the sweep, so a prompt-only secret leaves a site row healthy
+while the Secrets group reports on the secret once, where it belongs. The union then resolves in
+**one boundary pass**, and values are **delivered scoped**: `ScopedSecrets` (the `ctx.secret(name)`
+view) hands a node only the names it declared and refuses anything else with a typed error. An
+instance therefore cannot read a secret it did not declare and cannot hold a value source of its
+own; scoped delivery over the boundary pass is the only way it ever sees a value.
 
 ## Relationship to the Capability Model
 

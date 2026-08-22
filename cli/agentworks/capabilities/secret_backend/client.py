@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
@@ -13,6 +13,93 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
 
+_UNSAFE_IDENTITY_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
+
+
+def safe_identity(value: str) -> str:
+    """Validate one backend-boundary identity field.
+
+    Boundary: plugin-produced or operator-authored text that core may retain
+    and render. Exact, non-empty strings only, with no characters capable of
+    forging a diagnostic line.
+    """
+    if type(value) is not str or not value:
+        raise ValueError("invalid secret identity")
+    if any(unicodedata.category(char) in _UNSAFE_IDENTITY_CATEGORIES for char in value):
+        raise ValueError("invalid secret identity")
+    return value
+
+
+class OperatorImpact(StrEnum):
+    """The operator impact a value-free preview may cause."""
+
+    NONE = "none"
+    ALLOW = "allow"
+
+
+class TtyInteractionAccess(StrEnum):
+    """Whether a backend may use terminal input for this operation."""
+
+    AVAILABLE = "available"
+    UNAVAILABLE = "unavailable"
+    DISABLED = "disabled"
+
+
+class IndeterminateReason(StrEnum):
+    """Why broader preview impact could improve an answer."""
+
+    OPERATOR_IMPACT_LIMITED = "operator-impact-limited"
+
+
+class BlockReason(StrEnum):
+    """Closed execution limitations retained by core."""
+
+    TTY_UNAVAILABLE = "tty-unavailable"
+    TTY_INTERACTION_DISABLED = "tty-interaction-disabled"
+    SOURCE_NOT_READY = "source-not-ready"
+    BACKEND_PLUGIN_DISABLED = "backend-plugin-disabled"
+    NO_ACTIVE_SOURCE = "no-active-source"
+    NO_ATTEMPTABLE_SOURCE = "no-attemptable-source"
+    BATCH_DOOMED = "batch-doomed-before-interaction"
+
+
+class FailureReason(StrEnum):
+    """Closed lookup and provider failure categories."""
+
+    INVALID_MAPPING = "invalid-mapping"
+    LOOKUP_REJECTED = "lookup-rejected"
+    AUTHENTICATION = "authentication"
+    CONNECTIVITY = "connectivity"
+    DEADLINE_EXCEEDED = "deadline-exceeded"
+    EXTERNAL = "external"
+    MALFORMED_VALUE = "malformed-value"
+    BACKEND_PROTOCOL = "backend-protocol"
+    UNEXPECTED = "unexpected"
+
+
+class LookupDisposition(StrEnum):
+    """The static applicability of one declared backend mapping."""
+
+    CANDIDATE = "candidate"
+    NOT_APPLICABLE = "not-applicable"
+
+
+@dataclass(frozen=True, slots=True)
+class LookupDescription:
+    """A no-I/O declaration projection for one source lookup."""
+
+    disposition: LookupDisposition
+    identifier: str | None
+
+    def __post_init__(self) -> None:
+        if type(self.disposition) is not LookupDisposition:
+            raise ValueError("invalid lookup disposition")
+        if self.identifier is not None:
+            safe_identity(self.identifier)
+        if self.disposition is LookupDisposition.NOT_APPLICABLE and self.identifier is not None:
+            raise ValueError("a non-applicable lookup cannot carry an identifier")
+
+
 @dataclass(frozen=True, slots=True)
 class SecretLookupRequest:
     """The only per-secret data a source-bound client receives."""
@@ -20,127 +107,128 @@ class SecretLookupRequest:
     name: str
     mapping: BaseModel | None
 
+    def __post_init__(self) -> None:
+        safe_identity(self.name)
+
 
 class InteractionBroker(Protocol):
-    """Caller-owned access to an explicitly authorized secret prompt."""
+    """Caller-owned access to an explicitly authorized terminal prompt."""
 
     def request_secret(self, name: str, /) -> str: ...
 
 
-type RemainingTime = Callable[[], float | None]
-"""A live view of the current source-turn budget."""
+@dataclass(frozen=True, slots=True)
+class PreviewIntent:
+    """Construct a source client for a value-free preview."""
+
+    impact: OperatorImpact
+
+    def __post_init__(self) -> None:
+        if type(self.impact) is not OperatorImpact:
+            raise ValueError("preview impact must be an exact OperatorImpact")
+
+
+@dataclass(frozen=True, slots=True)
+class ResolutionIntent:
+    """Construct a source client for authoritative value resolution."""
+
+
+type SecretClientIntent = PreviewIntent | ResolutionIntent
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewAvailable:
+    """A preview established that a valid value exists."""
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewMissing:
+    """A valid preview lookup established ordinary absence."""
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewIndeterminate:
+    """Broader operator impact could improve the preview answer."""
+
+    reason: IndeterminateReason
+
+    def __post_init__(self) -> None:
+        if type(self.reason) is not IndeterminateReason:
+            raise ValueError("invalid preview indeterminate reason")
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewBlocked:
+    """The preview cannot execute under a current capability fact."""
+
+    reason: BlockReason
+
+    def __post_init__(self) -> None:
+        if type(self.reason) is not BlockReason:
+            raise ValueError("invalid preview block reason")
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewFailed:
+    """The configured lookup or permitted provider work failed."""
+
+    reason: FailureReason
+
+    def __post_init__(self) -> None:
+        if type(self.reason) is not FailureReason:
+            raise ValueError("invalid preview failure reason")
+
+
+type BackendPreview = PreviewAvailable | PreviewMissing | PreviewIndeterminate | PreviewBlocked | PreviewFailed
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class BackendResolved:
+    """The only value-bearing backend result."""
+
+    value: str
+
+    def __post_init__(self) -> None:
+        if type(self.value) is not str or "\0" in self.value:
+            raise ValueError("invalid resolved secret value")
+
+    def __repr__(self) -> str:
+        return "BackendResolved(value=<redacted>)"
+
+
+@dataclass(frozen=True, slots=True)
+class BackendMissing:
+    """A valid resolution lookup established ordinary absence."""
+
+
+@dataclass(frozen=True, slots=True)
+class BackendBlocked:
+    """Authoritative resolution cannot execute under a TTY fact."""
+
+    reason: BlockReason
+
+    def __post_init__(self) -> None:
+        if type(self.reason) is not BlockReason:
+            raise ValueError("invalid backend block reason")
+
+
+@dataclass(frozen=True, slots=True)
+class BackendFailed:
+    """The configured lookup or provider operation failed."""
+
+    reason: FailureReason
+
+    def __post_init__(self) -> None:
+        if type(self.reason) is not FailureReason:
+            raise ValueError("invalid backend failure reason")
+
+
+type BackendResolution = BackendResolved | BackendMissing | BackendBlocked | BackendFailed
 
 
 class SecretSourceClient(Protocol):
     """One operation-bounded client for one configured secret source."""
 
-    def prepare(
-        self,
-        requests: tuple[SecretLookupRequest, ...],
-        *,
-        remaining_time: RemainingTime,
-    ) -> None: ...
+    def preview(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendPreview]: ...
 
-    def resolve(
-        self,
-        requests: tuple[SecretLookupRequest, ...],
-        *,
-        remaining_time: RemainingTime,
-    ) -> Mapping[str, str]: ...
-
-
-class SecretClientFailureKind(StrEnum):
-    """Value-free provider failure categories consumed by the resolver."""
-
-    HARD_MAPPING = "hard-mapping"
-    AUTHENTICATION = "authentication"
-    CONNECTIVITY = "connectivity"
-    EXTERNAL = "external"
-
-
-class SecretClientRemediation(StrEnum):
-    """The fixed remediation associated with a provider failure kind."""
-
-    CHECK_MAPPING = "check-mapping"
-    SIGN_IN = "sign-in"
-    CHECK_CONNECTIVITY = "check-connectivity"
-    RETRY = "retry"
-
-
-class SecretClientFailure(Exception):
-    """A value-free, safely representable client failure."""
-
-    __slots__ = ("kind", "remediation")
-
-    kind: SecretClientFailureKind
-    remediation: SecretClientRemediation
-
-    def __init__(
-        self,
-        *,
-        kind: SecretClientFailureKind,
-        remediation: SecretClientRemediation,
-    ) -> None:
-        expected = {
-            SecretClientFailureKind.HARD_MAPPING: SecretClientRemediation.CHECK_MAPPING,
-            SecretClientFailureKind.AUTHENTICATION: SecretClientRemediation.SIGN_IN,
-            SecretClientFailureKind.CONNECTIVITY: SecretClientRemediation.CHECK_CONNECTIVITY,
-            SecretClientFailureKind.EXTERNAL: SecretClientRemediation.RETRY,
-        }[kind]
-        if remediation is not expected:
-            raise ValueError("invalid secret client failure remediation")
-        super().__init__()
-        self.kind = kind
-        self.remediation = remediation
-
-    def __str__(self) -> str:
-        return "secret client failure"
-
-    def __repr__(self) -> str:
-        return f"SecretClientFailure(kind={self.kind.value!r}, remediation={self.remediation.value!r})"
-
-
-class TimeoutGuidance(StrEnum):
-    """A closed set of backend-selectable timeout causes.
-
-    A backend never supplies its own guidance text: it selects a member of
-    this enum, and core (``secrets.outcomes.format_remediation``) owns the
-    fixed prose each member maps to. This is what keeps the channel
-    value-free even though ``SecretClientTimeout`` is raised from plugin
-    code we do not type-check: a character screen on free text cannot prove
-    the text is static rather than provider output, but membership in a
-    closed, core-defined enum can be checked and enforced outright.
-    """
-
-    ONEPASSWORD_PENDING_APPROVAL = "onepassword-pending-approval"
-    """A pending approval prompt in the 1Password desktop app is a common
-    cause of a onepassword backend timeout."""
-
-
-class SecretClientTimeout(Exception):
-    """A client boundary timed out after its underlying work stopped.
-
-    ``guidance`` is optional: a backend selects a member of the closed
-    ``TimeoutGuidance`` set, never raw text. This exception carries no
-    native text at all (that boundary is what keeps a timeout value-free),
-    and construction itself rejects anything that is not an actual
-    ``TimeoutGuidance`` member, so a plugin cannot forge one by passing a
-    plain string with a matching value. ``None`` when the backend has
-    nothing more specific to say than "it timed out."
-    """
-
-    __slots__ = ("guidance",)
-
-    guidance: TimeoutGuidance | None
-
-    def __init__(self, *, guidance: TimeoutGuidance | None = None) -> None:
-        if guidance is not None and not isinstance(guidance, TimeoutGuidance):
-            raise ValueError("invalid secret client timeout guidance")
-        super().__init__()
-        self.guidance = guidance
-
-    def __str__(self) -> str:
-        return "secret client operation timed out"
-
-    def __repr__(self) -> str:
-        return f"SecretClientTimeout(guidance={self.guidance!r})"
+    def resolve(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendResolution]: ...

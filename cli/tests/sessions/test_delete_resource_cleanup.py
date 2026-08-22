@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 from agentworks.agents.manager import agent_has_grants, agent_has_sessions, agent_is_unused
 from agentworks.db import PID_STOPPED, Database, SessionRow
 from agentworks.errors import ConnectivityError
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.manager._queries import (
     _cleanup_now_empty_agent,
     _cleanup_now_empty_workspace,
@@ -212,7 +212,7 @@ def test_now_empty_workspace_offered_and_deleted_interactive(
     prompts = _record_confirm(monkeypatch, answer=True)
 
     session = _session_snapshot("s", "ws-vm1", created_workspace=False)
-    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=False, interaction=InteractionPolicy.REFUSE)
+    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=False, interaction=TtyInteractionPolicy.REFUSE)
 
     assert any("ws-vm1" in p and "now has no sessions" in p for p in prompts)
     assert calls == ["ws-vm1"]
@@ -229,7 +229,7 @@ def test_now_empty_workspace_created_interactive_offer_notes_provenance(
     prompts = _record_confirm(monkeypatch, answer=True)
 
     session = _session_snapshot("s", "ws-vm1", created_workspace=True)
-    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=False, interaction=InteractionPolicy.REFUSE)
+    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=False, interaction=TtyInteractionPolicy.REFUSE)
 
     assert any("Workspace 'ws-vm1' (created with this session) now has no sessions" in p for p in prompts)
     assert calls == ["ws-vm1"]
@@ -244,7 +244,7 @@ def test_now_empty_workspace_declined_interactive_keeps(
     _record_confirm(monkeypatch, answer=False)
 
     session = _session_snapshot("s", "ws-vm1", created_workspace=False)
-    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=False, interaction=InteractionPolicy.REFUSE)
+    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=False, interaction=TtyInteractionPolicy.REFUSE)
 
     assert calls == []
     assert db.get_workspace("ws-vm1") is not None
@@ -259,7 +259,7 @@ def test_now_empty_workspace_yes_not_created_reports_but_keeps(
     calls = _spy_delete_workspace(db, monkeypatch)
 
     session = _session_snapshot("s", "ws-vm1", created_workspace=False)
-    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=True, interaction=InteractionPolicy.REFUSE)
+    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert calls == []
     assert db.get_workspace("ws-vm1") is not None
@@ -283,7 +283,7 @@ def test_now_empty_workspace_yes_created_auto_deletes(
     monkeypatch.setattr("agentworks.output.confirm", _no_confirm)
 
     session = _session_snapshot("s", "ws-vm1", created_workspace=True)
-    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=True, interaction=InteractionPolicy.REFUSE)
+    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert calls == ["ws-vm1"]
     assert db.get_workspace("ws-vm1") is None
@@ -307,7 +307,7 @@ def test_now_empty_workspace_yes_created_kept_when_external_explicit_grant(
     monkeypatch.setattr("agentworks.output.confirm", _no_confirm)
 
     session = _session_snapshot("s", "ws-vm1", created_workspace=True)
-    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=True, interaction=InteractionPolicy.REFUSE)
+    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert calls == []
     assert db.get_workspace("ws-vm1") is not None
@@ -334,7 +334,7 @@ def test_now_empty_workspace_yes_created_auto_deletes_with_only_grant_all_row(
     monkeypatch.setattr("agentworks.output.confirm", _no_confirm)
 
     session = _session_snapshot("s", "ws-vm1", created_workspace=True)
-    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=True, interaction=InteractionPolicy.REFUSE)
+    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert calls == ["ws-vm1"]
     assert db.get_workspace("ws-vm1") is None
@@ -353,7 +353,7 @@ def test_now_empty_workspace_interactive_offer_discloses_grants(
     prompts = _record_confirm(monkeypatch, answer=True)
 
     session = _session_snapshot("s", "ws-vm1", created_workspace=False)
-    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=False, interaction=InteractionPolicy.REFUSE)
+    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=False, interaction=TtyInteractionPolicy.REFUSE)
 
     assert any(
         "Workspace 'ws-vm1' now has no sessions (deleting revokes explicit grant(s) held by: bot). Delete it?" in p
@@ -376,7 +376,7 @@ def test_now_empty_workspace_interactive_offer_plain_with_only_grant_all_row(
     prompts = _record_confirm(monkeypatch, answer=True)
 
     session = _session_snapshot("s", "ws-vm1", created_workspace=False)
-    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=False, interaction=InteractionPolicy.REFUSE)
+    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=False, interaction=TtyInteractionPolicy.REFUSE)
 
     assert any("Workspace 'ws-vm1' now has no sessions. Delete it?" in p for p in prompts)
     assert all("revokes explicit grant" not in p for p in prompts)
@@ -393,8 +393,8 @@ def test_workspace_with_remaining_sessions_not_touched(
     prompts = _record_confirm(monkeypatch, answer=True)
 
     session = _session_snapshot("s", "ws-vm1", created_workspace=True)
-    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=False, interaction=InteractionPolicy.REFUSE)
-    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=True, interaction=InteractionPolicy.REFUSE)
+    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=False, interaction=TtyInteractionPolicy.REFUSE)
+    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert prompts == []
     assert calls == []
@@ -417,7 +417,7 @@ def test_now_empty_workspace_delete_failure_warns(
 
     session = _session_snapshot("s", "ws-vm1", created_workspace=False)
     # No exception escapes.
-    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=False, interaction=InteractionPolicy.REFUSE)
+    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=False, interaction=TtyInteractionPolicy.REFUSE)
 
     assert db.get_workspace("ws-vm1") is not None
     assert any(
@@ -453,7 +453,7 @@ def test_now_empty_agent_offered_and_deleted_interactive(
     prompts = _record_confirm(monkeypatch, answer=True)
 
     session = _session_snapshot("s", "ws-vm1", agent_name="bot", created_agent=False)
-    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=False, interaction=InteractionPolicy.REFUSE)
+    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=False, interaction=TtyInteractionPolicy.REFUSE)
 
     assert any("bot" in p and "now has no sessions" in p for p in prompts)
     assert calls == ["bot"]
@@ -471,7 +471,7 @@ def test_now_empty_agent_created_interactive_offer_notes_provenance(
     prompts = _record_confirm(monkeypatch, answer=True)
 
     session = _session_snapshot("s", "ws-vm1", agent_name="bot", created_agent=True)
-    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=False, interaction=InteractionPolicy.REFUSE)
+    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=False, interaction=TtyInteractionPolicy.REFUSE)
 
     assert any("Agent 'bot' (created with this session) now has no sessions" in p for p in prompts)
     assert calls == ["bot"]
@@ -486,7 +486,7 @@ def test_now_empty_agent_yes_not_created_reports_but_keeps(
     calls = _spy_delete_agent(db, monkeypatch)
 
     session = _session_snapshot("s", "ws-vm1", agent_name="bot", created_agent=False)
-    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=True, interaction=InteractionPolicy.REFUSE)
+    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert calls == []
     assert db.get_agent("bot") is not None
@@ -503,7 +503,7 @@ def test_now_empty_agent_yes_created_auto_deletes(
     calls = _spy_delete_agent(db, monkeypatch)
 
     session = _session_snapshot("s", "ws-vm1", agent_name="bot", created_agent=True)
-    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=True, interaction=InteractionPolicy.REFUSE)
+    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert calls == ["bot"]
     assert db.get_agent("bot") is None
@@ -519,8 +519,8 @@ def test_admin_session_skips_agent_cleanup(
     prompts = _record_confirm(monkeypatch, answer=True)
 
     session = _session_snapshot("s", "ws-vm1", agent_name=None)
-    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=False, interaction=InteractionPolicy.REFUSE)
-    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=True, interaction=InteractionPolicy.REFUSE)
+    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=False, interaction=TtyInteractionPolicy.REFUSE)
+    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert prompts == []
     assert calls == []
@@ -541,8 +541,8 @@ def test_agent_with_remaining_sessions_not_touched(
     prompts = _record_confirm(monkeypatch, answer=True)
 
     session = _session_snapshot("s", "ws-vm1", agent_name="bot", created_agent=True)
-    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=False, interaction=InteractionPolicy.REFUSE)
-    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=True, interaction=InteractionPolicy.REFUSE)
+    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=False, interaction=TtyInteractionPolicy.REFUSE)
+    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert prompts == []
     assert calls == []
@@ -563,7 +563,7 @@ def test_now_empty_agent_delete_failure_warns(
     _record_confirm(monkeypatch, answer=True)
 
     session = _session_snapshot("s", "ws-vm1", agent_name="bot", created_agent=False)
-    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=False, interaction=InteractionPolicy.REFUSE)
+    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=False, interaction=TtyInteractionPolicy.REFUSE)
 
     assert db.get_agent("bot") is not None
     assert any(
@@ -586,8 +586,8 @@ def test_granted_sessionless_agent_not_touched(
 
     for created in (False, True):
         session = _session_snapshot("s", "ws-vm1", agent_name="bot", created_agent=created)
-        _cleanup_now_empty_agent(db, _StubConfig(), session, yes=False, interaction=InteractionPolicy.REFUSE)
-        _cleanup_now_empty_agent(db, _StubConfig(), session, yes=True, interaction=InteractionPolicy.REFUSE)
+        _cleanup_now_empty_agent(db, _StubConfig(), session, yes=False, interaction=TtyInteractionPolicy.REFUSE)
+        _cleanup_now_empty_agent(db, _StubConfig(), session, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert prompts == []
     assert calls == []
@@ -608,13 +608,13 @@ def test_agent_becomes_candidate_once_grant_removed(
 
     session = _session_snapshot("s", "ws-vm1", agent_name="bot", created_agent=False)
     # Still granted: suppressed.
-    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=False, interaction=InteractionPolicy.REFUSE)
+    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=False, interaction=TtyInteractionPolicy.REFUSE)
     assert prompts == []
     assert calls == []
 
     # Grant revoked: now a candidate, so the offer fires and, accepted, deletes.
     db.delete_agent_grant("bot", "ws-vm1", "explicit")
-    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=False, interaction=InteractionPolicy.REFUSE)
+    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=False, interaction=TtyInteractionPolicy.REFUSE)
     assert any("bot" in p and "now has no sessions" in p for p in prompts)
     assert calls == ["bot"]
     assert db.get_agent("bot") is None
@@ -633,8 +633,8 @@ def test_grant_all_sessionless_agent_not_touched(
 
     for created in (False, True):
         session = _session_snapshot("s", "ws-vm1", agent_name="bot", created_agent=created)
-        _cleanup_now_empty_agent(db, _StubConfig(), session, yes=False, interaction=InteractionPolicy.REFUSE)
-        _cleanup_now_empty_agent(db, _StubConfig(), session, yes=True, interaction=InteractionPolicy.REFUSE)
+        _cleanup_now_empty_agent(db, _StubConfig(), session, yes=False, interaction=TtyInteractionPolicy.REFUSE)
+        _cleanup_now_empty_agent(db, _StubConfig(), session, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert prompts == []
     assert calls == []
@@ -667,8 +667,8 @@ def test_workspace_delete_cascade_makes_agent_candidate(
     # Before the workspace delete, the grant guards the agent.
     assert agent_is_unused(db, "bot") is False
 
-    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=False, interaction=InteractionPolicy.REFUSE)
-    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=False, interaction=InteractionPolicy.REFUSE)
+    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=False, interaction=TtyInteractionPolicy.REFUSE)
+    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=False, interaction=TtyInteractionPolicy.REFUSE)
 
     assert ws_calls == ["ws-vm1"]
     # The workspace delete cascaded the only grant away, unguarding the agent.
@@ -697,8 +697,8 @@ def test_agent_stays_guarded_when_workspace_kept(
     monkeypatch.setattr("agentworks.output.confirm", _confirm)
 
     session = _session_snapshot("s", "ws-vm1", agent_name="bot")
-    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=False, interaction=InteractionPolicy.REFUSE)
-    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=False, interaction=InteractionPolicy.REFUSE)
+    _cleanup_now_empty_workspace(db, _StubConfig(), session, yes=False, interaction=TtyInteractionPolicy.REFUSE)
+    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=False, interaction=TtyInteractionPolicy.REFUSE)
 
     assert ws_calls == []
     assert db.get_workspace("ws-vm1") is not None
@@ -743,7 +743,7 @@ def test_delete_session_interactive_offers_now_empty_workspace(
     calls = _spy_delete_workspace(db, monkeypatch)
     prompts = _record_confirm(monkeypatch, answer=True)
 
-    manager_mod.delete_session(db, _StubConfig(), name="s", yes=False, interaction=InteractionPolicy.REFUSE)
+    manager_mod.delete_session(db, _StubConfig(), name="s", yes=False, interaction=TtyInteractionPolicy.REFUSE)
 
     assert db.get_session("s") is None
     assert any("ws-vm1" in p and "now has no sessions" in p for p in prompts)
@@ -764,7 +764,7 @@ def test_delete_session_yes_reports_now_empty_uncreated_workspace(
     _prep_delete_session(db, monkeypatch, created_workspace=False)
     calls = _spy_delete_workspace(db, monkeypatch)
 
-    manager_mod.delete_session(db, _StubConfig(), name="s", yes=True, interaction=InteractionPolicy.REFUSE)
+    manager_mod.delete_session(db, _StubConfig(), name="s", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert db.get_session("s") is None
     assert calls == []
@@ -788,7 +788,7 @@ def test_delete_session_yes_auto_deletes_created_workspace(
     _prep_delete_session(db, monkeypatch, created_workspace=True)
     calls = _spy_delete_workspace(db, monkeypatch)
 
-    manager_mod.delete_session(db, _StubConfig(), name="s", yes=True, interaction=InteractionPolicy.REFUSE)
+    manager_mod.delete_session(db, _StubConfig(), name="s", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert calls == ["ws-vm1"]
     assert db.get_workspace("ws-vm1") is None
@@ -812,7 +812,7 @@ def test_delete_session_warns_when_now_empty_workspace_delete_raises(
     monkeypatch.setattr("agentworks.workspaces.manager.delete_workspace", _boom)
     _record_confirm(monkeypatch, answer=True)
 
-    manager_mod.delete_session(db, _StubConfig(), name="s", yes=False, interaction=InteractionPolicy.REFUSE)
+    manager_mod.delete_session(db, _StubConfig(), name="s", yes=False, interaction=TtyInteractionPolicy.REFUSE)
 
     assert db.get_session("s") is None
     assert "Session 's' deleted" in captured_output.info

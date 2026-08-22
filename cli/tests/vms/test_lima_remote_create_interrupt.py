@@ -17,7 +17,7 @@ from agentworks.capabilities.vm_platform import lima as lima_mod
 from agentworks.capabilities.vm_platform.bootstrap_script import REBOOT_SENTINEL_PATH
 from agentworks.capabilities.vm_platform.lima import _REBOOT_CLEAR_MARKER, LimaPlatform
 from agentworks.errors import ProvisioningError, StateError
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.ssh import SSHError
 from agentworks.vms import manager as vm_manager
 
@@ -388,7 +388,7 @@ def test_remote_provision_log_is_removed_by_normal_vm_delete(
         SimpleNamespace(),  # type: ignore[arg-type]
         "myvm",
         yes=True,
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
 
     assert not created_log.exists()

@@ -23,13 +23,15 @@ CLI drives honor `AGW_CLI_DIR` when it points at another prepared CLI tree.
 ## `secret_sources_drive.py`: value-free Secret Sources acceptance drive
 
 Runs the selected tree's real `agw` console script through the Secret Sources acceptance cases on
-POSIX Unix/Linux hosts, including current CI: implied environment resolution, prompt refusal, a
-mixed variadic proof, doctor readiness and applicability, direct OnePassword backend migration
-guidance, and a declared OnePassword source at a fake provider boundary. The harness fails closed on
-Windows and every other unsupported host before it reads the environment, selects a CLI, creates
-fixtures, looks up a provider, or runs a child command. It never attempts a provider there. When
-`AGW_CLI_DIR` is set on a supported host, the harness uses that tree's `.venv` and rejects an
-executable or imported `agentworks` package outside the tree.
+POSIX Unix/Linux hosts, including current CI: implied environment preview, a no-TTY prompt block, a
+mixed variadic preview, doctor readiness and no-impact preview, direct OnePassword backend migration
+guidance, and a declared OnePassword source at a fake provider boundary under global
+`--non-interactive`. That last case proves the global flag disables TTY interaction without
+suppressing out-of-band provider work. The harness fails closed on Windows and every other
+unsupported host before it reads the environment, selects a CLI, creates fixtures, looks up a
+provider, or runs a child command. It never attempts a provider there. When `AGW_CLI_DIR` is set on
+a supported host, the harness uses that tree's `.venv` and rejects an executable or imported
+`agentworks` package outside the tree.
 
 Child processes receive an allowlisted environment with no inherited home, credential, user-site, or
 import path. `Path.home()` resolves to a fresh temporary directory. The OnePassword case uses a

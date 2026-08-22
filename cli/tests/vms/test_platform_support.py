@@ -290,6 +290,7 @@ def test_doctor_lists_platforms_and_not_ready_sites(make_config, monkeypatch: py
     roster is the enablement authority, so this section never renders them as a
     misleading ``[ok]``."""
     from agentworks import doctor
+    from agentworks.capabilities.secret_backend import TtyInteractionAccess
     from agentworks.resources.access import ResourceIdentity
 
     _support(monkeypatch, wsl2="Windows only", lima_local="limactl not installed")
@@ -314,6 +315,7 @@ def test_doctor_lists_platforms_and_not_ready_sites(make_config, monkeypatch: py
             config,
             registry,
             ResourceIdentity("vm-platform", "azure-vm"),
+            tty_access=TtyInteractionAccess.UNAVAILABLE,
         )
         == ()
     )

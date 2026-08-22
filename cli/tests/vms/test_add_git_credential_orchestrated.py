@@ -28,7 +28,7 @@ from agentworks.capabilities.git_credential.github import GitHubCredentialProvid
 from agentworks.db import VMStatus
 from agentworks.errors import StateError, TokenRejectedError, ValidationError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from tests.conftest import ManifestDoc
 from tests.orchestrated_fixtures import PLUGINS_ENABLED, proxmox_site, write_operator_config
@@ -140,7 +140,7 @@ def test_orchestrated_add_writes_the_credential(
     vm = _seed_vm(db)
     _reachable(monkeypatch, True)
 
-    vm_manager.add_git_credential(db, config, vm.name, "gh", interaction=InteractionPolicy.REFUSE)
+    vm_manager.add_git_credential(db, config, vm.name, "gh", interaction=TtyInteractionPolicy.REFUSE)
 
     assert len(resolve_counter) == 1
     assert sorted(resolve_counter[0]) == ["git-token-gh", "proxmox-token"]
@@ -187,7 +187,7 @@ def test_scoped_credential_refused_before_any_resolve_or_gate(
 
     monkeypatch.setattr(ProxmoxPlatform, "status", _no_status)
     with pytest.raises(ValidationError, match="scoped"):
-        vm_manager.add_git_credential(db, config, "box", "widgets-bot", interaction=InteractionPolicy.REFUSE)
+        vm_manager.add_git_credential(db, config, "box", "widgets-bot", interaction=TtyInteractionPolicy.REFUSE)
     assert resolve_counter == []
     assert target.writes == []
 
@@ -255,7 +255,7 @@ def test_runup_rejection_is_fatal_and_writes_nothing(
 
     monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _probe)
     with pytest.raises(TokenRejectedError, match="rejected the token"):
-        vm_manager.add_git_credential(db, config, vm.name, "gh", interaction=InteractionPolicy.REFUSE)
+        vm_manager.add_git_credential(db, config, vm.name, "gh", interaction=TtyInteractionPolicy.REFUSE)
     assert target.writes == []
     assert target.opens == 0
     assert target.runs == []
@@ -284,7 +284,7 @@ def test_disabled_runup_rejects_multiline_before_transport_or_write(
             config,
             vm.name,
             "gh",
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
 
     assert target.opens == 0
@@ -326,7 +326,7 @@ def test_conformant_provider_cannot_inject_returned_line_before_transport_or_wri
             config,
             vm.name,
             "gh",
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
 
     assert target.opens == 0
@@ -363,7 +363,7 @@ def test_nodes_receive_only_their_declared_secrets(
         seen["token"] = ctx.secret(self.secret_name)
 
     monkeypatch.setattr(GitHubCredentialProvider, "runup", _probing_runup)
-    vm_manager.add_git_credential(db, config, vm.name, "gh", interaction=InteractionPolicy.REFUSE)
+    vm_manager.add_git_credential(db, config, vm.name, "gh", interaction=TtyInteractionPolicy.REFUSE)
     assert seen["token"] == "ghtok"
 
 
@@ -391,7 +391,7 @@ def test_operation_scope_reaches_node_readiness(
         real(self, ctx)
 
     monkeypatch.setattr(GitHubCredentialProvider, "preflight", _recording)
-    vm_manager.add_git_credential(db, config, vm.name, "gh", interaction=InteractionPolicy.REFUSE)
+    vm_manager.add_git_credential(db, config, vm.name, "gh", interaction=TtyInteractionPolicy.REFUSE)
 
     (scope,) = scopes
     assert scope is not None
@@ -439,7 +439,7 @@ def test_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
     monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: True)
     monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
 
-    vm_manager.add_git_credential(db, config, vm.name, "gh", interaction=InteractionPolicy.REFUSE)
+    vm_manager.add_git_credential(db, config, vm.name, "gh", interaction=TtyInteractionPolicy.REFUSE)
 
     assert events == ["status-token:pve-token", "start", "tailscale"]
     # Exactly two backend passes (gate, then boundary), no name twice,
@@ -474,7 +474,7 @@ def test_operator_stopped_vm_refuses_via_the_reread_race_guard(
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: started.append("start"))
 
     with pytest.raises(StateError, match="manually stopped") as exc:
-        vm_manager.add_git_credential(db, config, vm.name, "gh", interaction=InteractionPolicy.REFUSE)
+        vm_manager.add_git_credential(db, config, vm.name, "gh", interaction=TtyInteractionPolicy.REFUSE)
     assert "agw vm start box" in (exc.value.hint or "")
     assert started == []
     assert target.writes == []

@@ -548,6 +548,15 @@ class TestOptionFlagsInSpec:
         opts = [opt for param in resource_list.params for opt in param.opts]
         assert "--include-disabled" in opts
 
+    def test_secret_preview_opt_in_reaches_describe_and_verify_completions(self) -> None:
+        commands = _walk_commands(build_spec(app))
+        for path in ("agentworks.secret.describe", "agentworks.secret.verify"):
+            opts = [opt for param in commands[path].params for opt in param.opts]
+            assert "--allow-interaction" in opts
+        for shell in ("bash", "zsh", "powershell"):
+            script = generate(shell)
+            assert "--allow-interaction" in script
+
     def test_machine_output_options_reach_every_shell_completion(self) -> None:
         """Every JSON v1 command exposes the closed output choices to generated shells."""
         spec = build_spec(app)

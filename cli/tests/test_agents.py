@@ -12,7 +12,7 @@ from agentworks.agents.grants import (
 from agentworks.agents.manager import derive_linux_user
 from agentworks.db import Database
 from agentworks.errors import ValidationError
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 
 
 @pytest.mark.parametrize(
@@ -54,7 +54,7 @@ def test_grant_workspaces_rejects_empty_request(db: Database) -> None:
             agent_name="any-agent",
             workspace_names=[],
             grant_all=False,
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
 
 
@@ -66,7 +66,7 @@ def test_revoke_workspaces_rejects_empty_request(db: Database) -> None:
             agent_name="any-agent",
             workspace_names=[],
             revoke_all=False,
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
 
 

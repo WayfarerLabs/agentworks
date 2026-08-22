@@ -17,17 +17,26 @@ import typer
 
 from agentworks.cli._app import completion_mode_enabled, require_interactive
 from agentworks.errors import BackupError, StateError
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy, tty_interaction_access
 
 if TYPE_CHECKING:
+    from agentworks.capabilities.secret_backend import TtyInteractionAccess
     from agentworks.db import Database, VMRow, WorkspaceRow
 
 
-def ordinary_interaction_policy() -> InteractionPolicy:
-    """Derive ordinary-operation interaction authority at a CLI root."""
+def ordinary_tty_interaction_policy() -> TtyInteractionPolicy:
+    """Derive ordinary-operation TTY authority at a CLI root."""
     from agentworks import output
 
-    return InteractionPolicy.ALLOW if output.is_interactive() else InteractionPolicy.REFUSE
+    return TtyInteractionPolicy.REFUSE if output.non_interactive() else TtyInteractionPolicy.ALLOW
+
+
+def ordinary_tty_interaction_access() -> TtyInteractionAccess:
+    """Combine the CLI-root TTY policy with the current terminal fact."""
+    return tty_interaction_access(
+        ordinary_tty_interaction_policy(),
+        terminal_input_usable=sys.stdin.isatty(),
+    )
 
 
 def get_db() -> Database:

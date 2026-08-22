@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
+from agentworks.capabilities.secret_backend import TtyInteractionAccess
 from agentworks.doctor import (
     HealthCheck,
     HealthGroup,
@@ -228,7 +229,7 @@ def test_run_checks_returns_report() -> None:
     """
     from agentworks.doctor import run_checks
 
-    report = run_checks()
+    report = run_checks(tty_access=TtyInteractionAccess.UNAVAILABLE)
 
     assert isinstance(report, HealthReport)
     assert len(report.groups) >= 5  # python, tools, platforms, tailscale, config, db, completions
@@ -238,6 +239,14 @@ def test_run_checks_returns_report() -> None:
     assert "Required tools" in group_names
     assert "VM platforms" in group_names
     assert "Database" in group_names
+
+
+def test_run_checks_rejects_non_exact_tty_access_before_health_work() -> None:
+    from agentworks.doctor import run_checks
+    from agentworks.errors import StateError
+
+    with pytest.raises(StateError):
+        run_checks(tty_access=cast("Any", "unavailable"))
 
 
 @pytest.mark.xdist_group(name="doctor-environment")
@@ -263,7 +272,7 @@ def test_run_checks_group_order_and_config_failure_placeholder(
     failed.fail("Config", "did not load")
     monkeypatch.setattr(doctor, "_check_config", lambda: (failed, None, None))
 
-    report = doctor.run_checks()
+    report = doctor.run_checks(tty_access=TtyInteractionAccess.UNAVAILABLE)
 
     assert [g.name for g in report.groups] == [
         "System",
@@ -319,7 +328,7 @@ def test_run_checks_secrets_group_skips_not_vanishes_when_config_broken(
     failed.fail("Manifest", "kind: not-a-real-kind")
     monkeypatch.setattr(doctor, "_check_config", lambda: (failed, None, None))
 
-    report = doctor.run_checks()
+    report = doctor.run_checks(tty_access=TtyInteractionAccess.UNAVAILABLE)
 
     secrets = next(g for g in report.groups if g.name == "Secrets")
     vm_sites = next(g for g in report.groups if g.name == "VM sites")

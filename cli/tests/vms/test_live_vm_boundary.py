@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from tests.conftest import ManifestDoc
 from tests.orchestrated_fixtures import PLUGINS_ENABLED, proxmox_site, write_operator_config
@@ -60,7 +60,7 @@ def test_no_site_secrets_skips_the_resolve_pass(
     loop never runs, so nothing can prompt."""
     config = make_config()
     vm_node, _ops_ctx = vm_manager._live_vm_boundary(
-        db, config, _seed_vm(db, "lima-local"), interaction=InteractionPolicy.REFUSE
+        db, config, _seed_vm(db, "lima-local"), interaction=TtyInteractionPolicy.REFUSE
     )
     assert vm_node.site.platform.name == "lima"
     assert resolve_counter == []
@@ -78,7 +78,7 @@ def test_secret_bearing_site_resolves_exactly_once(
 
     config = make_config(PLUGINS_ENABLED, manifests=[proxmox_site()])
     vm_node, ops_ctx = vm_manager._live_vm_boundary(
-        db, config, _seed_vm(db, "proxmox"), interaction=InteractionPolicy.REFUSE
+        db, config, _seed_vm(db, "proxmox"), interaction=TtyInteractionPolicy.REFUSE
     )
     assert isinstance(vm_node.site.platform, ProxmoxPlatform)
     assert ops_ctx.secret("proxmox-token") == "pve-token"
@@ -102,7 +102,7 @@ def test_preflight_failure_prevents_the_resolve_pass(
     monkeypatch.setattr(ProxmoxPlatform, "preflight", _boom)
     config = make_config(PLUGINS_ENABLED, manifests=[proxmox_site()])
     with pytest.raises(ConnectivityError):
-        vm_manager._live_vm_boundary(db, config, _seed_vm(db, "proxmox"), interaction=InteractionPolicy.REFUSE)
+        vm_manager._live_vm_boundary(db, config, _seed_vm(db, "proxmox"), interaction=TtyInteractionPolicy.REFUSE)
     assert resolve_counter == []
 
 
@@ -131,7 +131,7 @@ def test_env_targets_join_the_site_secret_pass(
         label="test-shell",
     )
     with vm_manager.gated_vm_boundary(
-        db, config, registry, _seed_vm(db, "proxmox"), targets=[target], interaction=InteractionPolicy.REFUSE
+        db, config, registry, _seed_vm(db, "proxmox"), targets=[target], interaction=TtyInteractionPolicy.REFUSE
     ) as (
         _vm_node,
         resolver,

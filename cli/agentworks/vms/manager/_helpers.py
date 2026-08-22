@@ -248,7 +248,7 @@ def _mask_env_var_backend_for(
 
     Used by ``vm rekey --ignore-env`` to force the source chain to
     skip the env-var source and fall through to the prompt source.
-    The env-var source reads ``os.environ`` at ``would_attempt`` time,
+    The env-var source reads ``os.environ`` during preview and resolution,
     so popping the matching env vars during the resolve call makes the
     source silently skips; the next source in the chain takes over.
 

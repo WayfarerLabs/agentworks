@@ -26,7 +26,7 @@ from agentworks.capabilities.git_credential.github import GitHubCredentialProvid
 from agentworks.config import load_config
 from agentworks.errors import TokenRejectedError, ValidationError
 from agentworks.plugins.azure.azdo import AzDOCredentialProvider
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from tests.conftest import ManifestDoc, write_manifests
 
 _EXPIRY_HEADER = "github-authentication-token-expiration"
@@ -222,7 +222,7 @@ def test_collect_git_tokens_does_not_probe(tmp_path: Path, monkeypatch: pytest.M
     from agentworks.orchestration.secrets import ScopedSecrets, secret_union
     from agentworks.secrets.resolver import Resolver
 
-    resolver = Resolver(config, registry, interaction=InteractionPolicy.REFUSE)
+    resolver = Resolver(config, registry, interaction=TtyInteractionPolicy.REFUSE)
     node = git_credential_node(registry, "gh")
     for secret_name in secret_union([node]):
         resolver.register_name(secret_name)

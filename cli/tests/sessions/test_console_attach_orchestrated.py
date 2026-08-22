@@ -23,7 +23,7 @@ import pytest
 from agentworks.db import VMStatus
 from agentworks.errors import StateError, ValidationError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import multi_console
 from agentworks.vms import manager as vm_manager
 from tests.conftest import ManifestDoc
@@ -146,7 +146,7 @@ def test_named_console_attach_holds_across_the_interactive_attach(
 
     target.interactive = _tracking  # type: ignore[method-assign]
 
-    multi_console.attach_console(db, config, name="c1", interaction=InteractionPolicy.REFUSE)
+    multi_console.attach_console(db, config, name="c1", interaction=TtyInteractionPolicy.REFUSE)
 
     assert events == ["hold-open", "interactive", "hold-close"]
     assert any("Attaching to running console 'c1'" in m for m in captured_output.info)
@@ -186,7 +186,7 @@ def test_console_recreate_multiline_environment_secret_refuses_before_rebuild(
             config,
             name="c1",
             recreate=True,
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
 
     assert rebuilds == []
@@ -211,7 +211,7 @@ def test_named_console_stopped_vm_gate_burst_seeds_the_boundary(
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
 
-    assert multi_console.attach_console(db, config, name="c1", interaction=InteractionPolicy.REFUSE) == 0
+    assert multi_console.attach_console(db, config, name="c1", interaction=TtyInteractionPolicy.REFUSE) == 0
 
     assert events == ["status", "start", "tailscale"]
     assert resolve_counter == [["proxmox-token"]]
@@ -235,7 +235,7 @@ def test_named_console_no_tailscale_fails_with_zero_resolves_and_zero_gate(
     monkeypatch.setattr(ProxmoxPlatform, "status", _no_status)
 
     with pytest.raises(StateError, match="no Tailscale address"):
-        multi_console.attach_console(db, config, name="c1", interaction=InteractionPolicy.REFUSE)
+        multi_console.attach_console(db, config, name="c1", interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == []
 
@@ -293,7 +293,7 @@ def test_restore_session_stopped_vm_drives_the_real_gated_composition(
     monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kwargs: fake)
 
     multi_console.restore_session(
-        db, config, console_name="c1", session_name="s1", interaction=InteractionPolicy.REFUSE
+        db, config, console_name="c1", session_name="s1", interaction=TtyInteractionPolicy.REFUSE
     )
 
     assert events == ["status", "start", "tailscale"]  # the gate ran

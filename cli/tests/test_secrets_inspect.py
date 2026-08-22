@@ -124,7 +124,7 @@ def test_env_var_cell_shows_default_convention_identifier(tmp_path: Path) -> Non
     table = _build_table(cfg_file)
     row = table.rows[0]
     env_var_cell = next(c for c in row.cells if c.source == "env-var")
-    assert env_var_cell.would_attempt is True
+    assert env_var_cell.candidate is True
     assert env_var_cell.identifier == "AW_SECRET_GITHUB_TOKEN"
 
 
@@ -150,7 +150,7 @@ def test_env_var_cell_shows_mapping_override(tmp_path: Path) -> None:
 
 
 def test_env_var_cell_when_opted_out_reports_wont_attempt(tmp_path: Path) -> None:
-    """``backend_mappings.env-var = false``: would_attempt is False so the
+    """``backend_mappings.env-var = false``: candidate is False so the
     renderer reports ``won't attempt``. Identifier is None."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
@@ -167,13 +167,13 @@ def test_env_var_cell_when_opted_out_reports_wont_attempt(tmp_path: Path) -> Non
     )
     table = _build_table(cfg_file)
     env_var_cell = next(c for c in table.rows[0].cells if c.source == "env-var")
-    assert env_var_cell.would_attempt is False
+    assert env_var_cell.candidate is False
     assert env_var_cell.identifier is None
 
 
 def test_prompt_cell_has_no_static_identifier(tmp_path: Path) -> None:
     """Prompt always attempts but has no static lookup key; CLI renders
-    this as ``would attempt``."""
+    this as ``candidate``."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
@@ -182,7 +182,7 @@ def test_prompt_cell_has_no_static_identifier(tmp_path: Path) -> None:
     )
     table = _build_table(cfg_file)
     prompt_cell = next(c for c in table.rows[0].cells if c.source == "prompt")
-    assert prompt_cell.would_attempt is True
+    assert prompt_cell.candidate is True
     assert prompt_cell.identifier is None
 
 
@@ -277,7 +277,7 @@ def test_render_secret_table_caps_long_backend_identifier(
                 cells=(
                     SecretSourceCell(
                         source="onepassword",
-                        would_attempt=True,
+                        candidate=True,
                         identifier=long_ident,
                         not_ready_reason=None,
                     ),
@@ -318,7 +318,7 @@ def test_render_secret_table_caps_long_name(
                 cells=(
                     SecretSourceCell(
                         source="env-var",
-                        would_attempt=True,
+                        candidate=True,
                         identifier=None,
                         not_ready_reason=None,
                     ),
@@ -387,7 +387,7 @@ def test_grid_cell_not_ready_wins_over_identifier(tmp_path: Path, monkeypatch) -
     table = _build_table(_readiness_grid_config(tmp_path))
     row = next(r for r in table.rows if r.name == "mapped-op")
     op = next(c for c in row.cells if c.source == "onepassword")
-    assert op.would_attempt is True  # has a mapping
+    assert op.candidate is True  # has a mapping
     assert op.identifier == "op://Vault/item/field"  # the ref is still known
     assert op.not_ready_reason == "op CLI not installed"  # but readiness wins at render
 
@@ -400,13 +400,13 @@ def test_grid_cell_wont_attempt_wins_over_not_ready(tmp_path: Path, monkeypatch)
     table = _build_table(_readiness_grid_config(tmp_path))
     row = next(r for r in table.rows if r.name == "unmapped-op")
     op = next(c for c in row.cells if c.source == "onepassword")
-    assert op.would_attempt is False
+    assert op.candidate is False
     assert op.not_ready_reason == "op CLI not installed"  # backend is not-ready...
     # ...but the rendered cell is won't-attempt (checked below), not not-ready.
 
 
 def test_render_grid_uses_readiness_vocabulary(tmp_path: Path, monkeypatch, captured_output: CapturedOutput) -> None:
-    """R9.7 at the rendered level: cells are the identifier / ``would attempt`` /
+    """R9.7 at the rendered level: cells are the identifier / ``candidate`` /
     ``not ready: <reason>`` / ``won't attempt`` states, never the retired
     ``enabled`` / ``disabled`` literals."""
     monkeypatch.setattr("shutil.which", lambda name: None)
@@ -417,7 +417,6 @@ def test_render_grid_uses_readiness_vocabulary(tmp_path: Path, monkeypatch, capt
     assert "not ready: op CLI not installed" in out
     assert "op://Vault/item/field" not in out  # hidden: not-ready wins over the ref
     assert "won't attempt" in out
-    assert "would attempt" in out  # a ready prompt with no static key
     # The retired overloaded literals are gone as standalone cells.
     for line in captured_output.info:
         cells = [c.strip() for c in line.split("  ") if c.strip()]

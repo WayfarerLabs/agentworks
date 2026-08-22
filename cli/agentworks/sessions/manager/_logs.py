@@ -16,7 +16,7 @@ from agentworks.machine_output import write_all
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
 
 
 def session_logs(
@@ -25,7 +25,7 @@ def session_logs(
     *,
     name: str,
     lines: int | None = None,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Dump the scrollback buffer for a session."""
     from agentworks.sessions.tmux import capture_output

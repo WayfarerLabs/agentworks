@@ -20,7 +20,7 @@ import pytest
 
 from agentworks import output
 from agentworks.errors import ValidationError
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 
 from ._session_ephemeral_support import (
     _install_session_prep_stubs,
@@ -87,7 +87,7 @@ def test_admin_non_interactive_on_vm_with_agents_does_not_prompt(
             name="s1",
             workspace="ws1",
             admin=True,
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     assert called == ["build_graph"]
     db.close()
@@ -111,7 +111,7 @@ def test_mode_required_in_non_interactive(tmp_path: Path) -> None:
             name="s1",
             workspace="ws1",
             # No --admin, no --agent, no --new-agent.
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     db.close()
 
@@ -133,7 +133,7 @@ def test_workspace_required_in_non_interactive(tmp_path: Path) -> None:
             config,  # type: ignore[arg-type]
             name="s1",
             admin=True,  # mode is specified; workspace is what's under test
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     db.close()
 
@@ -162,7 +162,7 @@ def test_workspace_prompt_picks_existing(tmp_path: Path, monkeypatch: pytest.Mon
             config,  # type: ignore[arg-type]
             name="s1",
             admin=True,
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     assert called == ["build_graph"]
     db.close()
@@ -199,7 +199,7 @@ def test_workspace_prompt_picks_create_new(tmp_path: Path, monkeypatch: pytest.M
             config,  # type: ignore[arg-type]
             name="s1",
             admin=True,
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     # The flow reached the workspace realization body, which means
     # new_workspace=True was set by the prompt-driven path.
@@ -230,7 +230,7 @@ def test_mode_prompt_picks_admin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
             config,  # type: ignore[arg-type]
             name="s1",
             workspace="ws1",
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     assert called == ["build_graph"]
     db.close()
@@ -255,7 +255,7 @@ def test_mode_prompt_picks_existing_agent(tmp_path: Path, monkeypatch: pytest.Mo
             config,  # type: ignore[arg-type]
             name="s1",
             workspace="ws1",
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     assert called == ["build_graph"]
     db.close()
@@ -295,7 +295,7 @@ def test_mode_prompt_picks_create_new(tmp_path: Path, monkeypatch: pytest.Monkey
             config,  # type: ignore[arg-type]
             name="s1",
             workspace="ws1",
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     # The flow reached the agent realization body with the session name
     # defaulted in.

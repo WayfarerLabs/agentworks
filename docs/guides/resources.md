@@ -643,7 +643,8 @@ Three pieces have separate jobs:
 - `[secret_config].sources` lists source names in precedence order. Each `backend_mappings` key is
   also a source name. The default remains `["env-var", "prompt"]`.
 
-For example, a configured 1Password source owns its account and an optional operation timeout:
+For example, a configured 1Password source owns its account, timeout, and zero-impact preview view
+of app authentication:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -655,6 +656,7 @@ spec:
     name: onepassword
     account: work.example.com
     timeout: 30
+    app_authentication_impact: operator-action
 ```
 
 Enable the `onepassword` plugin, add `work-op` to the chain, and map a secret with
@@ -662,8 +664,13 @@ Enable the `onepassword` plugin, add `work-op` to the chain, and map a secret wi
 `prompt` source names remain valid unchanged. A direct configured-backend reference such as
 `onepassword` breaks in 0.14; the error gives the exact source declaration and reference rewrite,
 with no compatibility row or legacy parser. When rewriting the old OnePassword mapping table, move
-its account to the source. The optional timeout is new source configuration and defaults to 30
-seconds; it did not move from the old mapping.
+its account to the source. The timeout bounds the complete source turn and defaults to 30 seconds.
+
+`app_authentication_impact` is conservative by default: zero-impact preview returns indeterminate
+when app authentication may require operator action. Set it to `none` only if app authentication is
+acceptable during zero-impact preview. Supported service-account and Connect environment facts are
+recognized as unattended. This field affects preview only; actual resolution always attempts the
+bounded provider read.
 
 ### The words the surfaces use
 
@@ -679,43 +686,48 @@ should you when reading them:
   `onepassword` is not-ready when `op` is absent. Readiness is not resolvability.
 - **active**: named in `[secret_config].sources`. Only active sources are columns in
   `agw secret list`.
-- **would-attempt**: for this secret, the selected backend has a mapping or is mapping-optional. A
-  pure function of the secret and its `backend_mappings`, independent of readiness. `won't attempt`
-  is a `false` opt-out, or a mapping-required backend (like `onepassword`) with no mapping.
+- **candidate / not applicable**: the backend's static, no-I/O lookup disposition for this secret. A
+  `false` opt-out or a mapping-required backend with no mapping is not applicable. JSON v1 keeps the
+  derived key `would_attempt` for compatibility.
 
 Resolution is a pass over the chain in precedence order: the first source that produces a value
 wins. You are never prompted for the same secret twice in one command, and plan-wide prompting
 happens up front, before the command starts changing anything. Conditional Tailscale repair remains
 lazy so healthy and already-connected paths never ask for a repair key: a stopped VM may start
 before late key delivery, then Agentworks validates the key before any rejoin-specific mutation,
-transport, installation, or daemon action. The walk considers a candidate only when it is **present,
-enabled, ready, active, and would-attempt** the secret.
+transport, installation, or daemon action. The walk considers a lookup only when its source is
+**present, enabled, ready, active, and a candidate** for the secret.
 
-A **not-ready** active source is **skipped with a warning**, and resolution continues with the next
-candidate. A _ready_ store's hard miss stops the chain so a bad mapping cannot fall through to a
-prompt. A secret no active source can resolve fails at preflight with a hint, before any prompt or
-mutation.
+A **not-ready** active source is blocked and resolution continues with the next candidate. Ordinary
+missing also falls through. Invalid mapping, rejected lookup, authentication, connectivity, timeout,
+malformed value, and other provider failures hard-stop that secret. A chain with no candidate is
+blocked/no-candidate rather than reported as missing.
 
-Readiness is offline and honest; it sits UNDER the optimistic interactivity preview. A `prompt` (or
-a biometric `op`) is still previewed optimistically on would-attempt alone: the inspection surfaces
-never probe an interaction to answer readiness.
+Readiness is offline and distinct from provider-aware preview. Preview performs every provider step
+allowed by its operator-impact ceiling, discards any fetched value inside the backend, and reports
+`available`, `missing`, `indeterminate`, `blocked`, or `failed`. Default preview permits no operator
+action. Maximum impact permits it and guarantees a definitive status, though that status can still
+be blocked or failed.
 
-`agw secret list` shows, per active source column, the lookup identifier / `would attempt` /
-`not ready: <reason>` / `won't attempt`; `agw secret describe <name>` shows one secret in full
-(mappings flagged not-ready where they apply, and a resolution preview that skips not-ready
-sources); `agw doctor` has a **Secret backends** group (one readiness row per implementation) plus
-one non-probing row per secret previewing whether a source could attempt it and whether that source
-is ready. Doctor never resolves a secret or reports a runtime resolution outcome.
+`agw secret list` is static and shows lookup identifiers, candidates, readiness, and opt-outs.
+`agw secret describe <name>` adds provider-aware zero-impact preview; add `--allow-interaction` for
+maximum-impact preview. `agw doctor` has a **Secret backends** readiness group and one zero-impact
+preview row per secret. Preview may read a provider and safely discard the value; it never returns a
+value.
 
-Use `agw secret verify NAME...` when you need proof rather than a preview. It deduplicates names in
-first-written order, performs one real batch resolution, and renders one value-free row per unique
-name. Each row reports category, source, safe identifier, typed detail, and remediation. An
-all-resolved batch exits 0; if any row is not `resolved`, the full table is still rendered and the
-command exits 1.
+`agw secret verify NAME...` uses the same preview contract, deduplicates names in first-written
+order, and renders one value-free row per unique name. It exits 0 only when all are `available`.
 
-Interactive sources are refused by default. Add `--allow-interaction` only when you consent to a
-prompt, biometric check, or backend authentication. That opt-in is incompatible with the global
-`--non-interactive` flag. Guide rendering and readiness or preview rows do not grant that consent.
+Describe and verify refuse operator impact by default. Add `--allow-interaction` only when you
+consent to a possible prompt, biometric, app, browser, device, or renewed-authentication step. It is
+valid with global `--non-interactive`: preview impact permits out-of-band work while the global flag
+still disables TTY input.
+
+Global `--non-interactive` means only "do not use the TTY for interactions, even if one is present."
+It does not disable color or formatting and does not suppress out-of-band provider work. There is no
+general unattended fail-fast mode; app-authenticated work may raise approval and wait until the
+source timeout. Truly unattended workflows should use env-var or a provider mode known to be
+unattended, such as supported 1Password service-account or Connect authentication.
 
 ## Inspecting the whole picture
 

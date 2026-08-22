@@ -12,6 +12,7 @@ from typing import Annotated
 import typer
 
 from agentworks.cli._app import app
+from agentworks.cli._helpers import ordinary_tty_interaction_access
 from agentworks.machine_output import OutputFormat
 from agentworks.output import StatusStyle, style_status
 
@@ -30,7 +31,10 @@ def doctor(
     from agentworks.completions.spec import build_spec, completion_version
     from agentworks.doctor import Status, health_report_data, run_checks
 
-    report = run_checks(completion_version=completion_version(build_spec(app)))
+    report = run_checks(
+        tty_access=ordinary_tty_interaction_access(),
+        completion_version=completion_version(build_spec(app)),
+    )
 
     if output_format is OutputFormat.JSON:
         from click import get_binary_stream

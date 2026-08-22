@@ -32,8 +32,10 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, cast
 
 import pytest
+from pydantic import BaseModel
 
 from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled
+from agentworks.capabilities.secret_backend import LookupDescription, LookupDisposition
 from agentworks.errors import ConfigError, StateError
 from agentworks.git_credentials import remote_advisories
 from agentworks.git_credentials.credential import GitCredentialConfig
@@ -125,8 +127,11 @@ class _FixtureBackend(ConformingSecretBackend):
     mapping_model: ClassVar[type[AgwRootModel[Any]]] = _FixtureBackendMapping
 
     @classmethod
-    def would_attempt(cls, secret_name: str, *, mapping_present: bool) -> bool:
-        return mapping_present
+    def describe_lookup(cls, secret_name: str, mapping: BaseModel | None) -> LookupDescription:
+        return LookupDescription(
+            LookupDisposition.CANDIDATE if mapping is not None else LookupDisposition.NOT_APPLICABLE,
+            None,
+        )
 
 
 def _capable_plugin(name: str = PLUGIN) -> Plugin:

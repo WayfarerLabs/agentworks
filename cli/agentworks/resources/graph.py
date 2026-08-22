@@ -427,7 +427,7 @@ def build_context(resources: Mapping[str, Mapping[str, object]]) -> FinalizeCont
 
     Reads each present ``secret-backend`` node's impl off the code registry via
     :func:`_impl_for` (the whitelisted builder-reads-registry path, R11 / LLD
-    b), so a ``secret`` can ask ``would_attempt`` without a consumer-side
+    b), so a ``secret`` can describe candidate lookups without a consumer-side
     registry probe. The backend nodes are published before finalize and never
     materialize later, so the context is assembled once at the start of the
     build.
