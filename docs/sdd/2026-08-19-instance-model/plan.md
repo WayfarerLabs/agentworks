@@ -82,8 +82,9 @@ Definition of done: the saga lead accepts R1 and unblocks storage implementation
       rollback, enclosing transaction composition, read snapshots, and owner cleanup.
 - [x] Review the touched database tests for duplicate or prose-policing coverage; add neither and
       preserve migration, backup, restore, lock, and snapshot behavior coverage.
-- [ ] Obtain equal-capability project review and an independent fresh-eyes pass, resolve every
-      material finding, run focused and full gates, and hand the exact R2 head to the saga lead.
+- [x] Obtain equal-capability project review and an independent fresh-eyes pass, resolve every
+      material finding, and run focused and full gates.
+- [ ] Hand the exact green R2 head to the saga lead.
 
 Checkpoint evidence before handoff: the project reviewer and fresh-eyes reviewer approved the
 corrected tree with no remaining findings. The focused suite passed 88 tests. The full Python gate
