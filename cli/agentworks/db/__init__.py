@@ -39,6 +39,12 @@ from agentworks.db.backup import (
 )
 from agentworks.db.converters import _parse_shells
 from agentworks.db.database import Database, DatabaseDriverError
+from agentworks.db.instance_state import (
+    AppliedStateSlice,
+    DesiredOverlayRecord,
+    InstanceKind,
+    VersionedPayload,
+)
 from agentworks.db.migrations import (
     LATEST_VERSION,
     MIGRATIONS,
@@ -80,13 +86,16 @@ __all__ = [
     "SYSTEM_SLUG_KEY",
     "AgentGrantRow",
     "AgentRow",
+    "AppliedStateSlice",
     "AutomaticBackupResult",
     "ConsoleRow",
     "ConsoleSessionRow",
     "Database",
     "DatabaseOpenPlan",
     "DatabaseDriverError",
+    "DesiredOverlayRecord",
     "InitStatus",
+    "InstanceKind",
     "MigrationContext",
     "ProvisioningStatus",
     "RetentionCleanupFailure",
@@ -100,6 +109,7 @@ __all__ = [
     "VMEventRow",
     "VMRow",
     "VMStatus",
+    "VersionedPayload",
     "WorkspaceRow",
     "_load_legacy_toml",
     "_parse_shells",

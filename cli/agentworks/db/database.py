@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
+    from agentworks.db.instance_state import InstanceStateRepository
     from agentworks.db.models import (
         AgentGrantRow,
         AgentRow,
@@ -153,6 +154,8 @@ class Database:
         self._tx_depth = 1
         try:
             with self._conn:
+                if not self._conn.in_transaction:
+                    self._conn.execute("BEGIN")
                 yield
         finally:
             self._tx_depth = 0
@@ -184,6 +187,13 @@ class Database:
         """Commit pending changes unless inside an explicit transaction()."""
         if self._tx_depth == 0:
             self._conn.commit()
+
+    @property
+    def instance_state(self) -> InstanceStateRepository:
+        """Return the typed instance-state repository on this connection."""
+        from agentworks.db.instance_state import InstanceStateRepository
+
+        return InstanceStateRepository(self)
 
     @staticmethod
     def check_schema(path: Path | None = None) -> tuple[bool, int, int]:
@@ -374,23 +384,41 @@ class Database:
         self._conn.commit()
 
     def delete_vm(self, name: str) -> None:
-        # console_sessions cascade via FK when consoles are deleted
-        self._conn.execute("DELETE FROM consoles WHERE vm_name = ?", (name,))
-        self._conn.execute(
-            "DELETE FROM sessions WHERE workspace_name IN (SELECT name FROM workspaces WHERE vm_name = ?)",
-            (name,),
-        )
-        # Agents are VM-scoped; grants cascade via FK
-        self._conn.execute("DELETE FROM agents WHERE vm_name = ?", (name,))
-        self._conn.execute(
-            "DELETE FROM agent_workspace_grants WHERE workspace_name IN "
-            "(SELECT name FROM workspaces WHERE vm_name = ?)",
-            (name,),
-        )
-        self._conn.execute("DELETE FROM workspaces WHERE vm_name = ?", (name,))
-        self._conn.execute("DELETE FROM vm_events WHERE vm_name = ?", (name,))
-        self._conn.execute("DELETE FROM vms WHERE name = ?", (name,))
-        self._conn.commit()
+        with self.transaction():
+            workspace_names = tuple(
+                row[0]
+                for row in self._conn.execute("SELECT name FROM workspaces WHERE vm_name = ?", (name,)).fetchall()
+            )
+            session_names = tuple(
+                row[0]
+                for row in self._conn.execute(
+                    "SELECT name FROM sessions WHERE workspace_name IN (SELECT name FROM workspaces WHERE vm_name = ?)",
+                    (name,),
+                ).fetchall()
+            )
+            agent_names = tuple(
+                row[0] for row in self._conn.execute("SELECT name FROM agents WHERE vm_name = ?", (name,)).fetchall()
+            )
+            self.instance_state._delete_instance_records_for_names("session", session_names)
+            self.instance_state._delete_instance_records_for_names("agent", agent_names)
+            self.instance_state._delete_instance_records_for_names("workspace", workspace_names)
+            self.instance_state._delete_instance_records_for_names("vm", (name,))
+            # console_sessions cascade via FK when consoles are deleted
+            self._conn.execute("DELETE FROM consoles WHERE vm_name = ?", (name,))
+            self._conn.execute(
+                "DELETE FROM sessions WHERE workspace_name IN (SELECT name FROM workspaces WHERE vm_name = ?)",
+                (name,),
+            )
+            # Agents are VM-scoped; grants cascade via FK
+            self._conn.execute("DELETE FROM agents WHERE vm_name = ?", (name,))
+            self._conn.execute(
+                "DELETE FROM agent_workspace_grants WHERE workspace_name IN "
+                "(SELECT name FROM workspaces WHERE vm_name = ?)",
+                (name,),
+            )
+            self._conn.execute("DELETE FROM workspaces WHERE vm_name = ?", (name,))
+            self._conn.execute("DELETE FROM vm_events WHERE vm_name = ?", (name,))
+            self._conn.execute("DELETE FROM vms WHERE name = ?", (name,))
 
     # -- Settings ------------------------------------------------------------
 
@@ -453,11 +481,17 @@ class Database:
         self._conn.commit()
 
     def delete_workspace(self, name: str) -> None:
-        self._conn.execute("DELETE FROM sessions WHERE workspace_name = ?", (name,))
-        # Grants cascade via FK; agents are VM-scoped so not deleted with workspaces
-        self._conn.execute("DELETE FROM agent_workspace_grants WHERE workspace_name = ?", (name,))
-        self._conn.execute("DELETE FROM workspaces WHERE name = ?", (name,))
-        self._conn.commit()
+        with self.transaction():
+            session_names = tuple(
+                row[0]
+                for row in self._conn.execute("SELECT name FROM sessions WHERE workspace_name = ?", (name,)).fetchall()
+            )
+            self.instance_state._delete_instance_records_for_names("session", session_names)
+            self.instance_state._delete_instance_records_for_names("workspace", (name,))
+            self._conn.execute("DELETE FROM sessions WHERE workspace_name = ?", (name,))
+            # Grants cascade via FK; agents are VM-scoped so not deleted with workspaces
+            self._conn.execute("DELETE FROM agent_workspace_grants WHERE workspace_name = ?", (name,))
+            self._conn.execute("DELETE FROM workspaces WHERE name = ?", (name,))
 
     def count_workspaces_on_vm(self, vm_name: str) -> int:
         row = self._conn.execute("SELECT COUNT(*) FROM workspaces WHERE vm_name = ?", (vm_name,)).fetchone()
@@ -515,9 +549,10 @@ class Database:
         return [_to_agent(r) for r in rows]
 
     def delete_agent(self, name: str) -> None:
-        # Grants cascade via FK
-        self._conn.execute("DELETE FROM agents WHERE name = ?", (name,))
-        self._conn.commit()
+        with self.transaction():
+            self.instance_state._delete_instance_records_for_names("agent", (name,))
+            # Grants cascade via FK
+            self._conn.execute("DELETE FROM agents WHERE name = ?", (name,))
 
     def update_agent_template(self, name: str, template: str) -> None:
         """Re-point the agent's stored template (used by
@@ -797,20 +832,25 @@ class Database:
         self._conn.commit()
 
     def delete_session(self, name: str) -> None:
-        self._conn.execute(
-            "DELETE FROM sessions WHERE name = ?",
-            (name,),
-        )
-        self._conn.commit()
+        with self.transaction():
+            self.instance_state._delete_instance_records_for_names("session", (name,))
+            self._conn.execute(
+                "DELETE FROM sessions WHERE name = ?",
+                (name,),
+            )
 
     def delete_sessions_for_workspace(self, workspace_name: str) -> list[SessionRow]:
         """Delete all sessions for a workspace, returning the deleted sessions."""
-        sessions = self.list_sessions(workspace_name=workspace_name)
-        self._conn.execute(
-            "DELETE FROM sessions WHERE workspace_name = ?",
-            (workspace_name,),
-        )
-        self._conn.commit()
+        with self.transaction():
+            sessions = self.list_sessions(workspace_name=workspace_name)
+            self.instance_state._delete_instance_records_for_names(
+                "session",
+                tuple(session.name for session in sessions),
+            )
+            self._conn.execute(
+                "DELETE FROM sessions WHERE workspace_name = ?",
+                (workspace_name,),
+            )
         return sessions
 
     # -- Consoles ----------------------------------------------------------

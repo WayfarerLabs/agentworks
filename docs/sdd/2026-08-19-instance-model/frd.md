@@ -1,6 +1,6 @@
 # Instance Model and State: Functional Requirements
 
-- Status: Active (effort lead assigned; R1 assessment in progress)
+- Status: Active (R1 accepted; R2 implementation checkpoint in progress)
 - Date: 2026-08-19
 - Parent: the `2026-08-04-next-steps` saga (destination 2 and the wave-4 enabling track)
 
