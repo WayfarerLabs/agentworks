@@ -1,7 +1,8 @@
 # Instance Model and State: Database Assessment
 
-- Status: Draft for saga-lead review
+- Status: Revised for saga-lead re-review
 - Date: 2026-08-21
+- Last revised: 2026-08-23
 - Requirement: R1 in `frd.md`
 - Scope: the current persistence estate and the storage needs of R3 through R5
 - Code basis: schema version 31
@@ -9,11 +10,18 @@
 ## Executive assessment
 
 Agentworks has one SQLite state database and already keeps runtime SQL behind a typed facade. The
-public `Database` class returns row dataclasses, owns connection setup, and contains all ordinary
-CRUD SQL. Raw SQLite outside that class is confined to migration and backup internals. The smallest
-R2 is therefore not a new application-wide repository framework and not an ORM. It is recognition of
-`Database` as the existing repository boundary, plus one concrete, typed instance-state repository
-inside the `agentworks.db` package for the new cross-kind record.
+public `Database` class owns connection setup and all ordinary CRUD SQL. Row retrieval normally
+returns dataclasses, while counts, existence checks, and scalar projections return typed primitives.
+Four composite but positional returns are worth naming: `check_schema()` returns a three-element
+status tuple, `list_granted_workspaces_with_types()` returns grant fact triples,
+`list_consoles_with_counts()` returns console/count pairs, and `snapshot_vm_backup_data()` returns a
+six-element backup snapshot tuple (`cli/agentworks/db/database.py:188-209`,
+`cli/agentworks/db/database.py:609-627`, `cli/agentworks/db/database.py:848-904`,
+`cli/agentworks/db/database.py:1051-1080`). Raw SQLite outside the class is confined to migration
+and backup internals. These exceptions make parts of the facade less self-describing, but they do
+not create SQL bypasses or justify an ORM. The smallest R2 is recognition of `Database` as the
+existing repository boundary, plus one concrete, typed instance-state repository inside the
+`agentworks.db` package for the new cross-kind record.
 
 The new repository should expose consumer-shaped methods for desired instance overlays, applied
 state, and drift-oriented batch reads. Its persisted carrier should identify an instance by kind and
@@ -37,10 +45,12 @@ Four findings constrain the design:
    (`cli/agentworks/db/database.py:134-186`, `cli/agentworks/db/database.py:292-393`). New state
    writes need explicit atomic repository operations, and any lifecycle write combined with them
    must be made transaction-aware deliberately.
-4. Password protection is not a distinct identity and must not become an error condition. The
-   repository stores a public fingerprint or an explicit unknown result, never private key material.
-   Fingerprint acquisition must preserve password-protected key support. How an ssh-agent-held
-   identity participates remains outside this SDD and open.
+4. Password protection is not a distinct identity and must not become an error condition. An
+   encrypted `openssh-key-v1` file exposes its public blob outside the encrypted section, so it is
+   fully verifiable without unlocking. Other encrypted formats, including legacy PEM, may not expose
+   the public identity without a passphrase. The repository stores a public fingerprint or an
+   explicit unknown result, never private key material. It must not use an adjacent public-key file
+   as evidence. How an ssh-agent-held identity participates remains outside this SDD and open.
 
 No storage implementation should begin until the saga lead accepts this assessment.
 
@@ -184,7 +194,9 @@ write in `transaction()` would still expose a torn result. This is the highest-r
 Recommendation: give each new lifecycle checkpoint one repository operation that writes all of its
 state slices atomically. Convert an existing instance-row mutation to transaction-aware commit only
 when that same checkpoint must compose with it. Do not claim that all existing CRUD is now
-transactional without converting and testing every affected method.
+transactional without converting and testing every affected method. The broader contract mismatch is
+tracked in [issue 635](https://github.com/WayfarerLabs/agentworks/issues/635) with its root cause
+and representative call sites.
 
 ### P2: schema classification has several readers
 
@@ -198,7 +210,8 @@ different error contracts, so one helper does not necessarily replace them all, 
 classifier would worsen the estate.
 
 Recommendation: reuse `inspect_schema()` and the safe-open entry path. Consolidate only a duplicate
-that the new migration actually touches; otherwise retain this as scoped follow-up.
+that the new migration actually touches. The known unclassified open seams remain tracked in
+[issue 505](https://github.com/WayfarerLabs/agentworks/issues/505).
 
 ### P3: exact schema validation shadows the migration ladder
 
@@ -209,7 +222,9 @@ is valuable validation backed by duplicate maintenance, not a reason to weaken r
 
 Recommendation: if the new table makes sentinel maintenance materially worse, derive completed
 shapes from migration replay and retain restore's exact-schema behavior. Otherwise, add the one
-version entry and leave derivation as follow-up. A broad migration rewrite is not required for R3.
+version entry. A broad migration rewrite is not required for R3; derivation is tracked in
+[issue 633](https://github.com/WayfarerLabs/agentworks/issues/633) with the dependent restore and
+test call sites.
 
 ### P4: one class contains unrelated repositories and mixed query quality
 
@@ -236,7 +251,9 @@ caller. The live VM inspector still renders `last_seen_at` when present
 
 Recommendation: never repurpose or backfill these columns for R3. The new applied-state record is
 the authority. Removing write-dead columns is reasonable only if the design phase prices the table
-rebuild and test trim as cheaper than carrying them; it is not a prerequisite.
+rebuild and test trim as cheaper than carrying them; it is not a prerequisite. The deferred rebuild
+is tracked in [issue 634](https://github.com/WayfarerLabs/agentworks/issues/634) with each current
+reader and writer.
 
 ### P6: relationship cleanup is inconsistent
 
@@ -307,9 +324,17 @@ complete applied spec unless its contract grows into full convergence. Absence r
 
 The proving SSH slice stores the public fingerprint of the identity actually selected for transport,
 plus non-secret diagnostic context such as the configured private-key reference. It stores neither
-private key material nor a passphrase. Derivation may return unknown. Password protection by itself
-must not be classified as mismatch or unsupported, and the unresolved ssh-agent selection question
-must not be encoded into the repository contract.
+private key material nor a passphrase. For `openssh-key-v1`, the safe non-interactive mechanism is
+to parse the private file's unencrypted public blob directly and fingerprint that blob. Do not use
+`ssh-keygen -lf PRIVATE_PATH`: when an adjacent `.pub` exists, OpenSSH prefers it, so a stale or
+mismatched public file produces a fingerprint for the wrong identity and can create the exact false
+pass this slice exists to prevent. `ssh-keygen -y -f PRIVATE_PATH` reads the authoritative private
+identity but cannot derive an encrypted key without unlocking it.
+
+Encrypted formats such as legacy PEM do not expose the public identity outside their encrypted
+payload. When no non-interactive authoritative derivation exists, the result is unknown rather than
+mismatch, pass, or unsupported. Password protection by itself is never the diagnosis, and the
+unresolved ssh-agent selection question must not be encoded into the repository contract.
 
 ### R4: desired per-instance overlay
 
@@ -331,11 +356,13 @@ R5 writes nothing new. It needs:
 - one exact overlay read while resolving a live instance;
 - one exact applied-state read for live-instance show;
 - batch applied-state reads for doctor drift reporting; and
-- stable tri-state comparison: unknown, match, or drift.
+- stable tri-state comparison: not recorded, match, or drift.
 
 `resource show` already holds one read snapshot and preserves absent live state as an explicit
 source state (`cli/agentworks/resources/graph_query.py:266-301`). The repository should participate
-in that same connection and snapshot. It must not open a sidecar or a second database.
+in that same connection and snapshot. It must not open a sidecar or a second database. Both doctor
+and live-instance show must render an absent applied record as not recorded; omitting the row would
+quietly imply agreement where the system has no evidence.
 
 ## Recommended minimum repository shape
 
@@ -392,17 +419,20 @@ new state and test trim on surfaces this effort rewrites. Schema-classifier or s
 consolidation is welcome only when it makes the required migration simpler and safer in the same
 change.
 
-## Review questions for the saga lead
+## Saga-lead checkpoint disposition
 
-1. Does the one-table, typed-record recommendation satisfy the wave-2 store ruling without exposing
-   an overly generic API?
-2. Is the explicit no-backfill, slice-by-slice applied-state rule the intended interpretation for
-   existing VMs and the later workspace/session/agent adopters?
-3. Does the proposed boundary for inherited database cleanup match the saga's expectation: required
-   transaction fixes and touched-surface test trim now, classifier/sentinel consolidation only when
-   directly justified?
+The saga lead accepted the assessment's three architectural recommendations at head `d9646fcb`,
+subject to the corrections incorporated in this revision:
 
-The ssh-agent question is intentionally not presented for resolution. Password-protected-key gaps
-that do not fall inside a changed surface will be recorded as follow-up to this SDD.
+1. One physical typed-record store satisfies the wave-2 ruling only while its public consumer API
+   remains closed and enumerated. A generic query, filter, or blob API would violate the ruling.
+2. No-backfill applies to VMs and every later adopter. An absent record must render visibly as not
+   recorded rather than disappear from output or imply a match.
+3. This effort owns required transaction fixes and test trim for surfaces it rewrites. Classifier,
+   sentinel, dead-column, and unrelated transaction work remains bounded by the assessment and is
+   tracked in issues 505, 633, 634, and 635 rather than left only in prose.
+
+The authenticated operator channel accepted those decisions and directed the format-aware SSH
+clarification in this revision. The ssh-agent question remains intentionally unresolved.
 
 -- agw-ns-instance-model (instance-model effort lead)
