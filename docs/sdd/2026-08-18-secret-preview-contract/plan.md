@@ -1,8 +1,8 @@
 # Plan: Value-free secret resolution preview
 
-- Status: Feedback/fix round 2 clean; revised ready signal pending
+- Status: Complete; locked on merge of PR #619
 - Date: 2026-08-18
-- Amended: 2026-08-21
+- Amended: 2026-08-23
 - Requirements: [FRD](./frd.md)
 - Architecture: [HLA](./hla.md)
 - Detailed design: [preview contract LLD](./preview-contract-lld.md) and
@@ -389,7 +389,9 @@
       naming prefix, resource budget, and scoped charter; the effort lead does not duplicate its
       integration run. (2026-08-21: ready head `6964bf21` triggered the pipeline, then returned to
       draft before a report when the operator accepted the Muntz simplification.)
-- [ ] Re-request the separately operated integration run on the simplified ready head.
+- [x] Re-request the separately operated integration run on the simplified ready head. (2026-08-23:
+      the tester completed two passes at exact runtime head `bf3a9a42`, including a real remote-Lima
+      positive control, and reported no blocker.)
 - [ ] Exercise at minimum non-TTY OnePassword-equivalent out-of-band behavior through the real CLI
       seam, prompt with and without a PTY, default and opted-in describe/verify, global
       `--non-interactive`, preflight indeterminate, missing-versus-failed fallback, and human/JSON
@@ -402,17 +404,30 @@
       non-TTY stdin: OnePassword invokes the fake provider both without and with global
       `--non-interactive`; prompt performs no broker or stdin access in either non-TTY or disabled
       TTY states.
-- [ ] Limit any real OnePassword exercise to one dedicated authorized reference, record provider
+- [x] Limit any real OnePassword exercise to one dedicated authorized reference, record provider
       audit activity as an expected external effect, and never expose a real value. Treat
       desktop-app approval for AC1 separately from error-token evidence; if unavailable, record it
-      untested and obtain explicit operator acceptance before readying the PR.
+      untested and obtain explicit operator acceptance before readying the PR. (2026-08-23: no real
+      OnePassword credential was used; the operator accepted that documented boundary after the
+      no-finding live report.)
 - [ ] Exercise supported `op` error classification against an authorized real provider when the
       environment permits, record only sanitized value-free tokens, and retain fail-closed behavior
       plus an explicit test disposition when ordinary absence cannot be proven safely.
-- [ ] Clean up tester-created resources independently of test success and restore or document the
-      state snapshot disposition.
-- [ ] Treat integration findings as input, fix only within authenticated scope, and obtain operator
+- [x] Clean up tester-created resources independently of test success and restore or document the
+      state snapshot disposition. (2026-08-23: the isolated home was removed, operator config was
+      unchanged, the VM and workspace were deleted, remote Lima had no instance, and no scratch
+      config or workspace artifact remained. The expected offline tailnet record from a
+      non-ephemeral key was documented.)
+- [x] Treat integration findings as input, fix only within authenticated scope, and obtain operator
       disposition for any skipped, inconclusive, or environment-blocked critical scenario.
+      (2026-08-23: the tester and saga lead reported no blocker; the operator accepted the report
+      and directed closeout in this PR.)
+- [x] Record the final live-evidence disposition without claiming unexecuted scenarios. The same
+      capture mechanism and sentinel detector proved eight preview surfaces silent. The intended
+      `env show --resolve` surface revealed the sentinel on a real VM. Non-TTY prompt, JSON shape,
+      real provisioning, and cleanup passed. Real OnePassword authentication and error-token
+      classification plus the fixed TTY color-parity check were not exercised live and are accepted
+      documented test limits.
 
 ### Phase 6 definition of done
 
@@ -436,16 +451,19 @@
       before formal integration. (2026-08-21: code and non-live evidence cover the closed contract,
       source flow, TTY policy, provider classification, operator surfaces, and value containment;
       AC1, AC3, and the live portion of AC10 remain assigned to formal integration.)
-- [ ] Update this plan truthfully without changing any completed checkbox that has merged to main.
+- [x] Update this plan truthfully without changing any completed checkbox that has merged to main.
+      (2026-08-23: completed live work is checked, unexecuted provider-specific scenarios remain
+      unchecked, and the operator's acceptance is recorded separately.)
 - [x] Remove draft status when the complete, green, independently reviewed implementation is
       intended to merge as-is; that transition requests the separately operated integration run.
       (2026-08-21: handed off `6964bf21`, then returned to draft under authenticated operator
       direction for the dead-parameter removal.)
-- [ ] Reapply the ready signal after the operator-approved contract simplification is complete,
-      green, and independently reviewed.
-- [ ] After integration disposition, return the PR to draft before any closeout mutation, then
+- [x] Reapply the ready signal after the operator-approved contract simplification is complete,
+      green, and independently reviewed. (2026-08-22: exact head `bf3a9a42` was handed off after
+      both feedback/fix rounds and the 45-minute collection window.)
+- [x] After integration disposition, return the PR to draft before any closeout mutation, then
       create `locked.md` with the final implementation summary, design deltas, validation evidence,
-      review disposition, and remaining known limitations.
+      review disposition, and remaining known limitations. (2026-08-23.)
 - [ ] Reapply the ready signal for the exact closeout head; the integration pipeline may cite the
       preceding live run when the runtime diff is byte-identical.
 - [ ] Hand the ready PR to the operator with the atomic-rewrite ruling, review rounds, gate results,
