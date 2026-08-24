@@ -11,8 +11,3 @@
 # text=auto keeps Git's binary detection, so only files Git considers text are
 # converted. eol=lf is what pins the working-tree side on every platform.
 * text=auto eol=lf
-
-# The only tracked blobs carrying CR bytes, as image data rather than line
-# endings. Declared explicitly rather than left to content detection so no
-# conversion can ever reach them.
-*.png binary
