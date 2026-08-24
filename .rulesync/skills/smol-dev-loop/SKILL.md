@@ -44,7 +44,8 @@ and unmerged pull request with:
 - last-check time and the durable IDs or cursors of processed comments, reviews, checks, and head
   changes;
 - CI and conflict status;
-- the qualifying queue-label event ID and actor, plus the approved issue revision or content digest;
+- the qualifying label event's immutable ID when available, its immutable actor ID, and the approved
+  issue revision ID or canonical title/body digest;
 - the owning developer handle and its latest recovery handoff.
 
 The recovery handoff records the exact branch and head, completed work and gates, remaining work,
@@ -78,16 +79,20 @@ creation time, breaking ties by issue number. One accepted issue may be in imple
 initial CI cycle at a time. The label is only a discovery hint.
 
 Before any GitHub mutation for the candidate, verify that the most recent label event admitting the
-issue to the current `smol-dev` queue was performed by an actor named in the operator's allowlist.
-Also verify that the current title, body, and acceptance payload are the revision that actor
-admitted. Record the immutable revision ID when available; otherwise record a digest of that payload
-with the qualifying label-event ID. The event must not precede the latest material edit. If
-provenance or approved content state cannot be verified, use only the containment transition below
-and report through the authenticated operator channel. Record an evidence fingerprint in the ledger
-and do not repeat the report until that evidence changes.
+issue to the current `smol-dev` queue has an immutable actor ID in the operator's allowlist. A
+mutable login alone never qualifies. Record the label event's immutable ID when GitHub supplies one.
 
-Recheck that admission evidence before every later GitHub mutation. A material title, body, or
-acceptance change invalidates it. The one preauthorized containment exception applies only when the
+Bind that event to the exact raw issue title and body through GitHub's edit history. Prefer an
+immutable issue revision ID. If none is available, record a canonical digest:
+`SHA-256(LT || T || LB || B)`, where `T` and `B` are the exact, unnormalized UTF-8 title and body
+bytes, and `LT` and `LB` are their unsigned 64-bit big-endian byte lengths. If edit history cannot
+prove that exact content was current at the label event and remained unchanged afterward, fail
+closed: use only the containment transition below and report through the authenticated operator
+channel. Record an evidence fingerprint in the ledger and do not repeat the report until that
+evidence changes.
+
+Recheck that admission evidence before every later GitHub mutation. Any change to the recorded raw
+title or body invalidates it. The one preauthorized containment exception applies only when the
 workflow already owns a ready pull request or checkpoint: return it to draft and remove this
 session's `review-requested` signal. Record the exact evidence locally, then make no push, comment,
 CI rerun, label change, close or reopen, or other GitHub mutation. Report through the authenticated
