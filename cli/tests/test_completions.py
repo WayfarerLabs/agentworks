@@ -163,6 +163,15 @@ class TestDynamicCompletionsMapping:
                 f"Completer '{completer_id}' from ({command_path}, {param_name}) has no bash snippet mapping"
             )
 
+    def test_zsh_function_mappings_match_declared_functions(self) -> None:
+        from agentworks.completions.zsh import COMPLETER_FUNC_NAMES, DYNAMIC_FUNCTIONS
+
+        assert DYNAMIC_FUNCTIONS.keys() == COMPLETER_FUNC_NAMES.keys()
+        for completer_id, function_body in DYNAMIC_FUNCTIONS.items():
+            declaration = re.match(r"\s*(?P<name>[^\s(){}]+)\s*\(\)\s*\{", function_body)
+            assert declaration is not None, f"{completer_id!r} has no zsh function declaration"
+            assert declaration.group("name") == COMPLETER_FUNC_NAMES[completer_id]
+
     def test_guide_show_topics_use_the_list_stream_in_every_shell(self) -> None:
         from agentworks.completions.bash import DYNAMIC_SNIPPETS as BASH_SNIPPETS
         from agentworks.completions.powershell import DYNAMIC_SNIPPETS as POWERSHELL_SNIPPETS
