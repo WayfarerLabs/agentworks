@@ -24,7 +24,14 @@ from agentworks.capabilities.secret_backend.client import (
     safe_identity,
 )
 from agentworks.errors import StateError, UserAbort
-from agentworks.secrets.resolve import ActiveSource, _BackendProtocolError, _drive_source, _lookup_projection
+from agentworks.secrets.resolve import (
+    ActiveSource,
+    _BackendProtocolError,
+    _BrokerScopeViolationError,
+    _drive_source,
+    _lookup_projection,
+    _require_interaction_broker,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -305,17 +312,19 @@ def preview_batch(
         requests = tuple(request for request, _identifier in projected)
         identifiers = {request.name: identifier for request, identifier in projected}
         returned: object
+        intent = PreviewIntent(impact)
+        _require_interaction_broker(source, intent, tty_access, interaction_broker)
         try:
             returned = _drive_source(
                 source,
                 requests,
-                intent=PreviewIntent(impact),
+                intent=intent,
                 tty_access=tty_access,
                 interaction_broker=interaction_broker,
             )
         except (UserAbort, concurrent.futures.CancelledError):
             raise
-        except _BackendProtocolError:
+        except (_BackendProtocolError, _BrokerScopeViolationError):
             returned = {request.name: PreviewFailed(FailureReason.BACKEND_PROTOCOL) for request in requests}
         except Exception:
             returned = {request.name: PreviewFailed(FailureReason.UNEXPECTED) for request in requests}

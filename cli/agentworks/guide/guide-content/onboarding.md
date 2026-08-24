@@ -65,9 +65,10 @@ again. See `agw guide show concept-virtual-machines` for the full model.
 
 ## Configure secrets and credentials
 
-Agentworks refers to secrets by name and resolves them only when an operation needs their value.
-Start with `agw guide show concept-secrets`, then use `agw secret describe NAME` to see where a
-named secret would come from without resolving it.
+Agentworks refers to secrets by name and resolves their values only when an operation needs them.
+Start with `agw guide show concept-secrets`, then use `agw secret describe NAME` for a value-free,
+provider-aware preview. A backend may read and safely discard a provider value while proving
+existence, but the value never reaches the describe command.
 
 By default, secret names map to workstation environment variables and fall back to an interactive
 prompt. This is a useful starting point. Configure additional backends and sources when the

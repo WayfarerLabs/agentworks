@@ -20,9 +20,10 @@ before choosing differently.
 
 The default VM template expects a secret named `tailscale-auth-key`. Another template may use a
 different name. Keep the value in an appropriate secret source and run
-`agw secret describe tailscale-auth-key` to inspect the predicted source without resolving it.
-Agentworks passes the resolved value only to the Tailscale operation that needs it; it does not
-store the value in its database or generated SSH configuration.
+`agw secret describe tailscale-auth-key` for a value-free, provider-aware preview. The backend may
+read and safely discard a provider value while proving existence, but describe never receives it.
+Agentworks passes an actually resolved value only to the Tailscale operation that needs it; it does
+not store the value in its database or generated SSH configuration.
 
 ## Recover or move a VM's tailnet association
 

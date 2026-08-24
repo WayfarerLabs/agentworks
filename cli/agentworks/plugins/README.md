@@ -147,6 +147,10 @@ Each failure is a `PluginError` naming the plugin, the kind, the impl, and what 
 The complete version-1 secret-backend authoring contract, including exact result variants, reason
 ownership, core flow, lifecycle, TTY broker rules, value containment, and a conforming example,
 lives in the [secret-backend capability README](../capabilities/secret_backend/README.md).
+Secret-backend version `2` shipped in Agentworks 0.14.0 and 0.14.1, when plugins could already
+contribute this capability; there are no known third-party implementations. Agentworks 0.15
+intentionally renumbers the incompatible complete contract to exact version `1`, with no adapter.
+Backend authors must migrate the complete client and tagged-result API before registration.
 
 ## Declaring config
 

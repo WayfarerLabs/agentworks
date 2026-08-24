@@ -217,6 +217,41 @@ class OutputInteractionBroker:
         return f"OutputInteractionBroker(prompts={len(self._prompts)})"
 
 
+class _SourceTurnInteractionBroker:
+    """Restrict one backend client to its exact source-turn requests."""
+
+    __slots__ = ("_active", "_allowed_names", "_closed", "_inner")
+
+    def __init__(
+        self,
+        inner: InteractionBroker,
+        requests: Sequence[SecretLookupRequest],
+    ) -> None:
+        self._active = False
+        self._inner = inner
+        self._allowed_names = frozenset(request.name for request in requests)
+        self._closed = False
+
+    def request_secret(self, name: str, /) -> str:
+        if not self._active or type(name) is not str or name not in self._allowed_names:
+            raise _BrokerScopeViolationError("secret backend requested terminal input outside its source turn")
+        return self._inner.request_secret(name)
+
+    def _activate(self) -> None:
+        """Open the view for its selected client method."""
+        if self._closed:
+            raise StateError("secret source-turn interaction broker is closed")
+        self._active = True
+
+    def _revoke(self) -> None:
+        """End this broker view's single source-turn lifetime."""
+        self._active = False
+        self._closed = True
+
+    def __repr__(self) -> str:
+        return f"_SourceTurnInteractionBroker(requests={len(self._allowed_names)})"
+
+
 def active_sources(config: Config, registry: Registry) -> tuple[ActiveSource, ...]:
     """Build the configured source chain from finalized source rows."""
     from agentworks.capabilities.config import validate_capability_config
@@ -280,6 +315,39 @@ class _BackendProtocolError(Exception):
     """A backend boundary returned a malformed shape."""
 
     __slots__ = ()
+
+
+class _BrokerScopeViolationError(StateError):
+    """A backend requested broker access outside its exact source turn."""
+
+    __slots__ = ()
+
+
+def _broker_allowed(
+    source: ActiveSource,
+    intent: SecretClientIntent,
+    tty_access: TtyInteractionAccess,
+) -> bool:
+    return (
+        source.backend_class.supports_tty_interaction
+        and tty_access is TtyInteractionAccess.AVAILABLE
+        and (
+            isinstance(intent, ResolutionIntent)
+            or isinstance(intent, PreviewIntent)
+            and intent.impact is OperatorImpact.ALLOW
+        )
+    )
+
+
+def _require_interaction_broker(
+    source: ActiveSource,
+    intent: SecretClientIntent,
+    tty_access: TtyInteractionAccess,
+    interaction_broker: InteractionBroker | None,
+) -> None:
+    """Validate the core caller's broker invariant before backend work."""
+    if _broker_allowed(source, intent, tty_access) and interaction_broker is None:
+        raise StateError(f"secret source {source.name!r} requires a terminal interaction broker")
 
 
 def _lookup_projection(
@@ -426,39 +494,53 @@ def _drive_source(
 ) -> Mapping[str, BackendPreview] | Mapping[str, BackendResolution]:
     """Drive exactly one source method under a fresh operation client."""
     supports_tty = source.backend_class.supports_tty_interaction
-    broker_allowed = (
-        supports_tty
-        and tty_access is TtyInteractionAccess.AVAILABLE
-        and (
-            isinstance(intent, ResolutionIntent)
-            or isinstance(intent, PreviewIntent)
-            and intent.impact is OperatorImpact.ALLOW
+    broker = (
+        _SourceTurnInteractionBroker(cast("InteractionBroker", interaction_broker), requests)
+        if _broker_allowed(source, intent, tty_access)
+        else None
+    )
+    try:
+        context = source.backend_class.create_client(
+            config=source.config,
+            intent=intent,
+            tty_access=tty_access,
+            interaction_broker=broker,
         )
-    )
-    broker = interaction_broker if broker_allowed else None
-    if broker_allowed and broker is None:
-        raise StateError(f"secret source {source.name!r} requires a terminal interaction broker")
-    context = source.backend_class.create_client(
-        config=source.config,
-        intent=intent,
-        tty_access=tty_access,
-        interaction_broker=broker,
-    )
-    driver = _SourceContextDriver(context, source_name=source.name)
-    with driver as client:
-        if isinstance(intent, PreviewIntent):
+        driver = _SourceContextDriver(context, source_name=source.name)
+        with driver as client:
+            returned: object
+            if isinstance(intent, PreviewIntent):
+                preview_method = client.preview
+                if broker is not None:
+                    broker._activate()
+                try:
+                    returned = preview_method(requests)
+                finally:
+                    if broker is not None:
+                        broker._revoke()
+                return _validate_result_map(
+                    requests,
+                    returned,
+                    preview_impact=intent.impact,
+                    supports_tty_interaction=supports_tty,
+                )
+            resolve_method = client.resolve
+            if broker is not None:
+                broker._activate()
+            try:
+                returned = resolve_method(requests)
+            finally:
+                if broker is not None:
+                    broker._revoke()
             return _validate_result_map(
                 requests,
-                client.preview(requests),
-                preview_impact=intent.impact,
+                returned,
+                preview_impact=None,
                 supports_tty_interaction=supports_tty,
             )
-        return _validate_result_map(
-            requests,
-            client.resolve(requests),
-            preview_impact=None,
-            supports_tty_interaction=supports_tty,
-        )
+    finally:
+        if broker is not None:
+            broker._revoke()
 
 
 def _resolution_outcome(
@@ -637,17 +719,19 @@ def _resolve_batch(
 
         requests = tuple(request for request, _identifier in projected)
         identifiers = {request.name: identifier for request, identifier in projected}
+        intent = ResolutionIntent()
+        _require_interaction_broker(source, intent, tty_access, interaction_broker)
         try:
             returned = _drive_source(
                 source,
                 requests,
-                intent=ResolutionIntent(),
+                intent=intent,
                 tty_access=tty_access,
                 interaction_broker=interaction_broker,
             )
         except (UserAbort, concurrent.futures.CancelledError):
             raise
-        except _BackendProtocolError:
+        except (_BackendProtocolError, _BrokerScopeViolationError):
             returned = {request.name: BackendFailed(FailureReason.BACKEND_PROTOCOL) for request in requests}
         except Exception:
             returned = {request.name: BackendFailed(FailureReason.UNEXPECTED) for request in requests}

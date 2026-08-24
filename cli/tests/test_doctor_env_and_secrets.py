@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from textwrap import dedent
 from typing import TYPE_CHECKING, Any, cast
+from unittest.mock import Mock
 
 import pytest
 
@@ -184,6 +185,36 @@ def test_secret_checks_use_only_explicit_tty_access(
     assert available_row.secret_preview is not None
     assert unavailable_row.secret_preview.status is PreviewStatus.BLOCKED
     assert available_row.secret_preview.status is PreviewStatus.INDETERMINATE
+
+
+def test_secret_checks_preview_the_sorted_declared_union_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.secrets import preview as preview_module
+
+    config = load_config(
+        _write_config(
+            tmp_path,
+            manifests=[
+                ManifestDoc("secret", "z-last", description="z"),
+                ManifestDoc("secret", "a-first", description="a"),
+            ],
+        ),
+        warn_issues=False,
+    )
+    registry = build_registry(config)
+    spy = Mock(wraps=preview_module.preview_batch)
+    monkeypatch.setattr(preview_module, "preview_batch", spy)
+
+    group = _check_secrets(config, registry, tty_access=TtyInteractionAccess.UNAVAILABLE)
+
+    assert spy.call_count == 1
+    declarations = spy.call_args.args[0]
+    requested_names = [decl.name for decl in declarations]
+    assert requested_names == sorted(requested_names)
+    rendered_names = [check.secret_preview.name for check in group.checks if check.secret_preview is not None]
+    assert rendered_names == requested_names
 
 
 def test_auto_declared_secrets_are_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
