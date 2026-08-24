@@ -1,7 +1,8 @@
 # HLA: Instance Model and State
 
-- Status: R2 active; R3 through R5 design in progress
+- Status: R2 accepted; R3 through R5 design in progress
 - Date: 2026-08-23
+- Last revised: 2026-08-24
 - FRD: [frd.md](./frd.md)
 - Assessment: [database-assessment.md](./database-assessment.md)
 - Store contract: [store-contract.md](./store-contract.md)
@@ -152,6 +153,14 @@ template selection and final partial layer form one effective declaration for va
 realization, persistence, and inspection. There is no desired-only spec mutation surface. The exact
 argv, inline JSON input, replacement behavior, validation boundary, and lifecycle-coupling rule are
 specified in `instance-spec-cli.md`.
+
+JSON `null` is rejected at every depth because omission is the one spelling for no contribution from
+a field. It is not an alternate clear or inheritance operator.
+
+The mutation surface reports the final retained desired-state outcome after success or unwind:
+whether the layer was set, retained, replaced, cleared, or explicitly left absent. It names sorted
+top-level fields without echoing values, because declaration data may include plaintext environment
+values. This is desired-state feedback, not a claim that remote work applied the declaration.
 
 ## R3: applied state and SSH identity
 

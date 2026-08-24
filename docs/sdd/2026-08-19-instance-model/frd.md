@@ -1,7 +1,8 @@
 # Instance Model and State: Functional Requirements
 
-- Status: Active (R1 accepted; R2 implementation checkpoint in progress)
+- Status: Active (R1 and R2 accepted; R3 through R5 pending)
 - Date: 2026-08-19
+- Last revised: 2026-08-24
 - Parent: the `2026-08-04-next-steps` saga (destination 2 and the wave-4 enabling track)
 
 ## Rulings this seed rests on
@@ -175,6 +176,9 @@ discipline: existing fields preserved, additions optional and tagged.
   so the resolved values first appear in provisioning output.
 - The key-change hazard is visible: after an operator edits the configured identity, a doctor run or
   an R5 surface names the drift against each affected instance's applied record.
+- At every supported template-setting lifecycle boundary, an operator can supply the final inline
+  instance layer and can tell from the command result whether that layer was set, retained,
+  replaced, cleared, or explicitly absent, without the CLI echoing its values.
 - The simple case does not get more verbose: an operator who never writes an overlay sees no new
   required ceremony.
 

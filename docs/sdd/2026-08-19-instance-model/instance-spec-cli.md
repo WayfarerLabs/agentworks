@@ -1,6 +1,6 @@
 # Instance Spec CLI Contract
 
-- Status: Design for R4
+- Status: Revised for R4 acceptance
 - Date: 2026-08-24
 - Requirements: R4 and R5 in `frd.md`
 
@@ -43,8 +43,10 @@ There is no wrapper, and the object cannot declare `kind`, `name`, `inherits`, d
 metadata, or framework provenance.
 
 Parsing is strict JSON at the service boundary. Duplicate object member names, non-finite numbers
-such as `NaN` or `Infinity`, and trailing content are rejected with the normal typed validation
-error. No parser-specific extension or last-member-wins behavior reaches the typed model.
+such as `NaN` or `Infinity`, trailing content, and JSON `null` at any depth are rejected with the
+normal typed validation error. Omission represents no contribution from a field; `null` is not a
+second spelling for inherit, clear, or unset. No parser-specific extension or last-member-wins
+behavior reaches the typed model.
 
 For example, a new VM can select a template and append its final partial layer in one operation:
 
@@ -120,6 +122,19 @@ lifecycle boundary, matching the existing `--update-template` retry behavior. A 
 therefore leave the newly selected declaration pending for the next retry, but no successful command
 can change a stored instance spec without running the lifecycle operation that consumes it.
 
+Each command reports every material instance-spec disposition with a human declaration-result line
+once success or unwind determines the final retained desired state. A nonempty layer reports `set`
+when no prior layer exists and `replaced` otherwise. Omission on `agent reinit` reports `retained`
+when a layer exists; omission with no stored layer emits no new line, preserving the simple case. An
+empty object reports `cleared` when it removes a prior layer and `explicitly absent` otherwise. Set,
+replacement, and retention name the sorted top-level fields; clear names the prior fields. Values
+are never echoed because a spec may contain plaintext environment values.
+
+A creation path that unwinds its owner and desired layer never emits a `set` line. A failed
+`agent reinit` still reports the retained, replaced, or cleared declaration because its
+pre-lifecycle persistence is the retry contract. The line reports final desired declaration, not
+remote application or applied state.
+
 ## Inspection and machine output
 
 The existing `vm describe`, `workspace describe`, `agent describe`, and `session describe` surfaces
@@ -128,5 +143,5 @@ state. Per-value provenance and comparison state appear only where resolution ex
 remain separately visible. Their JSON v1 forms add optional tagged fields without changing existing
 fields. Configured secret references may appear; resolved secret values never do.
 
-Creation and reinit produce their ordinary human lifecycle output. Automation reads the structural
-JSON v1 description after mutation.
+Creation and reinit retain their ordinary human lifecycle output and add the declaration-result line
+above when applicable. Automation reads the structural JSON v1 description after mutation.

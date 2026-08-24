@@ -2,13 +2,14 @@
 
 <!-- cspell:ignore sdds -->
 
-- Status: R2 checkpoint ready for saga review
+- Status: R2 accepted; R4 design correction in review
 - Date: 2026-08-23
+- Last revised: 2026-08-24
 - Requirements: [frd.md](./frd.md)
 - R1 assessment: [database-assessment.md](./database-assessment.md)
 - R2 contract: [store-contract.md](./store-contract.md)
 - Instance-spec CLI: [instance-spec-cli.md](./instance-spec-cli.md)
-- Code basis: `d1c5fbc7`, stacked on accepted R1 PR #632
+- Code basis: `893fc331`, stacked on accepted R1 PR #632
 - Delivery vehicle: accepted R1 artifact PR #632, then one stacked implementation branch and draft
   PR for R2 through R5
 
@@ -85,19 +86,20 @@ Definition of done: the saga lead accepts R1 and unblocks storage implementation
       preserve migration, backup, restore, lock, and snapshot behavior coverage.
 - [x] Obtain equal-capability project review and an independent fresh-eyes pass, resolve every
       material finding, and run focused and full gates.
-- [ ] Hand the exact green R2 head to the saga lead.
+- [x] Hand the exact green R2 head to the saga lead.
 
 Checkpoint evidence before handoff: the project reviewer and fresh-eyes reviewer approved the
-corrected tree with no remaining findings. The focused suite passed 88 tests. The full Python gate
-passed Ruff, formatting, strict mypy, Typer isolation, and 7,310 tests with one skip. Repository
-file lint, locked-SDD, Rulesync, website tests, and deterministic website builds passed.
-Disposable-home acceptance proved fresh v32 creation, repository round trips and owner cleanup, safe
-v31-to-v32 CLI migration with a pre-migration backup, and no synthesized records. R2 has no
-live-provider boundary.
+corrected tree with no remaining findings. The reproducible repository, backup, and migration
+selection passed 83 tests: `tests/db/test_instance_state.py`, `tests/test_database_backup.py`, and
+`tests/test_db_migration_harness_integration_state.py`. The current full Python gate passed Ruff,
+formatting, strict mypy, Typer isolation, and 7,280 tests with one skip. Repository file lint,
+locked-SDD, Rulesync, website tests, and deterministic website builds passed. Disposable-home
+acceptance proved fresh v32 creation, repository round trips and owner cleanup, safe v31-to-v32 CLI
+migration with a pre-migration backup, and no synthesized records. R2 has no live-provider boundary.
 
 Definition of done: the shipped repository contract is sufficient for R3 and for wave 4 to add a new
 named typed consumer without changing table, connection, transaction, or absence semantics. R3
-implementation does not begin until the saga lead accepts this checkpoint.
+implementation does not begin until the saga lead accepts this checkpoint. Accepted at `cd533a1b`.
 
 ## Phase 3: general layer stack and desired instance overlays
 
@@ -111,6 +113,8 @@ implementation does not begin until the saga lead accepts this checkpoint.
       provenance.
 - [ ] Define typed per-kind overlay payloads and codecs over the shared store, with one final
       overlay layer after the template chain and no required ceremony when it is absent.
+- [ ] Reject JSON `null` at every depth and report each material layer decision as set, retained,
+      replaced, cleared, or explicitly absent using a value-safe field-name summary.
 - [ ] Add inline JSON `--spec JSON` exactly where an instance template can be selected or changed:
       the four direct creation commands and `agent reinit`. Add `--workspace-spec JSON` and
       `--agent-spec JSON` to compound session creation for newly created child owners. Omit
