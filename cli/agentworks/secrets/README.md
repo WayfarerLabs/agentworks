@@ -79,7 +79,12 @@ Preview is provider-aware and value-free. Its one impact input is:
 
 Preview statuses are `available`, `missing`, `indeterminate`, `blocked`, and `failed`. Backends may
 fetch a value to establish existence, but they validate and discard it inside the backend. No value
-crosses the preview boundary.
+crosses the preview boundary. Indeterminate reasons preserve two different facts:
+
+- `operator-input-required` means usable terminal input exists and resolution will request the value
+  if it reaches that source;
+- `operator-impact-limited` means preview skipped provider work that broader operator impact could
+  permit, so availability was not checked.
 
 Actual resolution has no operator-impact input. It performs one source-first pass and returns only
 resolved, missing, blocked, or failed. Flow is fixed:
@@ -137,11 +142,11 @@ together: the former allows out-of-band impact, while the latter still disables 
 - `agw secret verify NAME...` uses the same preview contract. It deduplicates names in first-written
   order, renders every result, and exits 1 unless all are available. Add `--allow-interaction` only
   with consent for possible prompt or out-of-band authentication.
-- `agw doctor` previews each secret at zero impact. Available and indeterminate are OK; missing and
-  blocked are WARN; failed is FAIL. Indeterminate rows share one numbered group note instead of
-  repeating an interaction hint. Doctor omits secret descriptions and origin markers; those remain
-  on `secret list` and `secret describe`. JSON includes the note text and a value-free
-  `secret_preview` for secret checks.
+- `agw doctor` previews each secret at zero impact. Available and operator-input-required prompt
+  paths are OK; provider work skipped as operator-impact-limited is INFO; missing and blocked are
+  WARN; failed is FAIL. Doctor omits secret descriptions and origin markers; those remain on
+  `secret list` and `secret describe`. JSON includes a value-free `secret_preview` for secret
+  checks.
 - `agw env show --resolve` is the explicit partial-reveal surface. It resolves independent secrets;
   normal command resolution remains all-required.
 

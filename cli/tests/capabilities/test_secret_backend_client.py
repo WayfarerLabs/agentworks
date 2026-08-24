@@ -65,11 +65,12 @@ def test_closed_result_reasons_require_exact_enum_members(factory: Callable[[], 
         factory()
 
 
+@pytest.mark.parametrize("reason", list(IndeterminateReason))
+def test_closed_indeterminate_reason_members_are_accepted(reason: IndeterminateReason) -> None:
+    assert PreviewIndeterminate(reason).reason is reason
+
+
 def test_closed_result_reason_members_and_request_identity_are_accepted() -> None:
-    assert (
-        PreviewIndeterminate(IndeterminateReason.OPERATOR_IMPACT_LIMITED).reason
-        is IndeterminateReason.OPERATOR_IMPACT_LIMITED
-    )
     assert PreviewBlocked(BlockReason.TTY_UNAVAILABLE).reason is BlockReason.TTY_UNAVAILABLE
     assert PreviewFailed(FailureReason.EXTERNAL).reason is FailureReason.EXTERNAL
     assert BackendBlocked(BlockReason.TTY_INTERACTION_DISABLED).reason is BlockReason.TTY_INTERACTION_DISABLED

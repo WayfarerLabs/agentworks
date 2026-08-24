@@ -46,9 +46,10 @@ class TtyInteractionAccess(StrEnum):
 
 
 class IndeterminateReason(StrEnum):
-    """Why broader preview impact could improve an answer."""
+    """Why preview could not establish availability under the current intent."""
 
     OPERATOR_IMPACT_LIMITED = "operator-impact-limited"
+    OPERATOR_INPUT_REQUIRED = "operator-input-required"
 
 
 class BlockReason(StrEnum):
@@ -148,7 +149,7 @@ class PreviewMissing:
 
 @dataclass(frozen=True, slots=True)
 class PreviewIndeterminate:
-    """Broader operator impact could improve the preview answer."""
+    """The current preview intent cannot establish availability."""
 
     reason: IndeterminateReason
 

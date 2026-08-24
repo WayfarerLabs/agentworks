@@ -77,9 +77,12 @@ Core constructs each client with one tagged intent:
 - `ResolutionIntent()` requests the actual value. Actual resolution has no `OperatorImpact` input.
 
 Preview impact is a ceiling, not a shortcut. A backend must go as far as it can within the ceiling.
-It returns `PreviewIndeterminate(OPERATOR_IMPACT_LIMITED)` only when broader operator impact could
-improve the answer after all work permitted at the current impact has been exhausted. Under
-`OperatorImpact.ALLOW`, indeterminate is illegal and core converts it to a backend-protocol failure.
+At zero impact it may return `PreviewIndeterminate(OPERATOR_IMPACT_LIMITED)` when broader operator
+impact could permit more provider work, or `PreviewIndeterminate(OPERATOR_INPUT_REQUIRED)` when
+usable terminal input exists and actual resolution will request the value if it reaches that source.
+The latter is legal only from a TTY-capable backend with `TtyInteractionAccess.AVAILABLE`; core
+rejects every other combination as a backend-protocol failure. Under `OperatorImpact.ALLOW`, every
+indeterminate result is illegal and likewise becomes a backend-protocol failure.
 
 Terminal input is a separate fact:
 
@@ -120,7 +123,10 @@ request.
 
 - `PreviewAvailable()`: a valid value was proven to exist;
 - `PreviewMissing()`: a valid lookup proved ordinary absence;
-- `PreviewIndeterminate(OPERATOR_IMPACT_LIMITED)`: broader impact could improve the answer;
+- `PreviewIndeterminate(OPERATOR_INPUT_REQUIRED)`: usable terminal input will supply the value if
+  resolution reaches this source;
+- `PreviewIndeterminate(OPERATOR_IMPACT_LIMITED)`: broader impact could permit more provider work,
+  but availability was not checked at the current ceiling;
 - `PreviewBlocked(TTY_UNAVAILABLE | TTY_INTERACTION_DISABLED)`: a TTY fact prevented this backend
   from executing; or
 - `PreviewFailed(reason)`: the configured lookup or permitted provider work failed.

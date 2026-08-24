@@ -8,7 +8,7 @@ from textwrap import dedent
 import pytest
 
 from agentworks.bootstrap import build_registry
-from agentworks.capabilities.secret_backend import OperatorImpact, TtyInteractionAccess
+from agentworks.capabilities.secret_backend import IndeterminateReason, OperatorImpact, TtyInteractionAccess
 from agentworks.config import load_config
 from agentworks.secrets.inspect import StaticResolutionCategory, describe_secret, secret_description_data
 from agentworks.secrets.preview import PreviewStatus
@@ -92,6 +92,35 @@ def test_allow_impact_gets_definitive_preview_without_returning_the_value(
     assert description.preview.status is PreviewStatus.AVAILABLE
     assert "sentinel-value" not in repr(description)
     assert "sentinel-value" not in repr(secret_description_data(description))
+
+
+def test_json_v1_reports_prompt_input_requirement_as_the_preview_reason(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, registry = _configured_secret(tmp_path)
+    monkeypatch.delenv("TEST_API_KEY", raising=False)
+    data = secret_description_data(
+        describe_secret(
+            config,  # type: ignore[arg-type]
+            registry,  # type: ignore[arg-type]
+            "api-key",
+            impact=OperatorImpact.NONE,
+            tty_access=TtyInteractionAccess.AVAILABLE,
+        )
+    )
+    secret = data["secret"]
+    assert isinstance(secret, dict)
+    resolution = secret["resolution"]
+    assert isinstance(resolution, dict)
+    preview = resolution["preview"]
+    assert isinstance(preview, dict)
+    assert preview["reason"] == IndeterminateReason.OPERATOR_INPUT_REQUIRED.value
+    attempts = preview["attempts"]
+    assert isinstance(attempts, list)
+    prompt_attempt = attempts[-1]
+    assert isinstance(prompt_attempt, dict)
+    assert prompt_attempt["reason"] == IndeterminateReason.OPERATOR_INPUT_REQUIRED.value
 
 
 def test_json_v1_static_fields_remain_and_provider_preview_is_nested(

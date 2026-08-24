@@ -6,13 +6,30 @@ from typing import Any, cast
 
 import pytest
 
-from agentworks.capabilities.secret_backend import TtyInteractionAccess
+from agentworks.capabilities.secret_backend import (
+    BlockReason,
+    FailureReason,
+    IndeterminateReason,
+    PreviewAvailable,
+    PreviewBlocked,
+    PreviewFailed,
+    PreviewIndeterminate,
+    PreviewMissing,
+    TtyInteractionAccess,
+)
 from agentworks.doctor import (
     HealthCheck,
     HealthGroup,
     HealthReport,
     Status,
+    _secret_check,
     health_report_data,
+)
+from agentworks.secrets.preview import (
+    AggregateNoCandidate,
+    AggregatePreview,
+    ResolutionPreview,
+    SourcePreviewAttempt,
 )
 
 
@@ -76,25 +93,60 @@ def test_health_report_no_failures() -> None:
 def test_health_check_message_optional() -> None:
     check = HealthCheck(name="test", status=Status.OK)
     assert check.message is None
-    assert check.note is None
 
-    check_with_msg = HealthCheck(name="test", status=Status.WARN, message="details", note="context")
+    check_with_msg = HealthCheck(name="test", status=Status.WARN, message="details")
     assert check_with_msg.message == "details"
-    assert check_with_msg.note == "context"
 
 
 def test_machine_output_serializes_the_same_health_check_facts() -> None:
     """Human and JSON renderers consume one presentation-neutral check."""
     report = HealthReport()
     group = HealthGroup("Configuration")
-    group.fail("Config", "configuration did not load", hint="fix the config", note="shared context")
+    group.fail("Config", "configuration did not load", hint="fix the config")
     report.groups.append(group)
 
     check = _first_projected_check(report)
 
     assert check["message"] == "configuration did not load"
     assert check["hint"] == "fix the config"
-    assert check["note"] == "shared context"
+    assert "note" not in check
+
+
+def _resolution_preview(result: AggregatePreview) -> ResolutionPreview:
+    if isinstance(result, AggregateNoCandidate):
+        return ResolutionPreview("token", result, None, None, ())
+    return ResolutionPreview(
+        "token",
+        result,
+        "source",
+        None,
+        (SourcePreviewAttempt("source", None, result),),
+    )
+
+
+@pytest.mark.parametrize(
+    ("result", "expected"),
+    [
+        (PreviewAvailable(), Status.OK),
+        (PreviewMissing(), Status.WARN),
+        (PreviewIndeterminate(IndeterminateReason.OPERATOR_INPUT_REQUIRED), Status.OK),
+        (PreviewIndeterminate(IndeterminateReason.OPERATOR_IMPACT_LIMITED), Status.INFO),
+        (PreviewBlocked(BlockReason.TTY_UNAVAILABLE), Status.WARN),
+        (PreviewFailed(FailureReason.EXTERNAL), Status.FAIL),
+        (AggregateNoCandidate(), Status.WARN),
+    ],
+)
+def test_secret_check_classifies_every_preview_variant(
+    result: AggregatePreview,
+    expected: Status,
+) -> None:
+    preview = _resolution_preview(result)
+
+    check = _secret_check("token", preview)
+
+    assert check.status is expected
+    assert check.secret_preview is preview
+    assert (check.hint is None) is isinstance(result, PreviewIndeterminate)
 
 
 def test_config_exception_becomes_one_shared_health_fact(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:

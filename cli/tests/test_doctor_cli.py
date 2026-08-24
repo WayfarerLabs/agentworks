@@ -187,31 +187,3 @@ class TestDoctorPlainFallback:
         finally:
             output.set_non_interactive(False)
         assert _ANSI_RE.search(out) is not None
-
-
-@pytest.mark.usefixtures("_typer_handler")
-def test_repeated_group_notes_are_numbered_once_by_first_appearance(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    report = HealthReport()
-    group = HealthGroup("Sample")
-    group.ok("first", note="shared context")
-    group.ok("second", note="shared context")
-    group.ok("third", note="other context")
-    report.groups.append(group)
-    other_group = HealthGroup("Other")
-    other_group.ok("fourth", note="shared context")
-    report.groups.append(other_group)
-    monkeypatch.setattr("agentworks.doctor.run_checks", lambda **kwargs: report)
-
-    doctor()
-
-    out = capsys.readouterr().out
-    assert out.count("shared context") == 2
-    assert out.count("other context") == 1
-    assert out.count("(1)") == 5
-    assert out.count("(2)") == 2
-    assert out.index("first (1)") < out.index("second (1)") < out.index("third (2)")
-    shared_notes = [match.start() for match in re.finditer("shared context", out)]
-    assert out.index("third (2)") < shared_notes[0] < out.index("fourth (1)") < shared_notes[1]

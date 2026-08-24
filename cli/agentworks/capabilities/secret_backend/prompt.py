@@ -98,7 +98,7 @@ class _PromptClient:
             return {request.name: PreviewBlocked(block_reason) for request in requests}
         if self._intent.impact is OperatorImpact.NONE:
             return {
-                request.name: PreviewIndeterminate(IndeterminateReason.OPERATOR_IMPACT_LIMITED) for request in requests
+                request.name: PreviewIndeterminate(IndeterminateReason.OPERATOR_INPUT_REQUIRED) for request in requests
             }
         if self._broker is None:
             raise StateError("available prompt preview requires an interaction broker")

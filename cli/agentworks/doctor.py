@@ -12,7 +12,7 @@ import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, assert_never
 
 from agentworks.path_rendering import format_host_path
 from agentworks.resources.access import ResourceIdentity
@@ -45,9 +45,6 @@ class HealthCheck:
     CLI surface so the operator sees actionable next steps without
     cramming everything into one parenthetical."""
     secret_preview: ResolutionPreview | None = None
-    note: str | None = None
-    """Optional explanatory context. The human doctor renderer deduplicates
-    repeated notes within a group and renders numbered references."""
 
 
 @dataclass
@@ -61,7 +58,6 @@ class HealthGroup:
         name: str,
         message: str | None,
         hint: str | None,
-        note: str | None,
     ) -> None:
         self.checks.append(
             HealthCheck(
@@ -69,7 +65,6 @@ class HealthGroup:
                 status=status,
                 message=message,
                 hint=hint,
-                note=note,
             )
         )
 
@@ -79,9 +74,8 @@ class HealthGroup:
         message: str | None = None,
         *,
         hint: str | None = None,
-        note: str | None = None,
     ) -> None:
-        self._append(Status.OK, name, message, hint, note)
+        self._append(Status.OK, name, message, hint)
 
     def info(
         self,
@@ -89,9 +83,8 @@ class HealthGroup:
         message: str | None = None,
         *,
         hint: str | None = None,
-        note: str | None = None,
     ) -> None:
-        self._append(Status.INFO, name, message, hint, note)
+        self._append(Status.INFO, name, message, hint)
 
     def warn(
         self,
@@ -99,9 +92,8 @@ class HealthGroup:
         message: str | None = None,
         *,
         hint: str | None = None,
-        note: str | None = None,
     ) -> None:
-        self._append(Status.WARN, name, message, hint, note)
+        self._append(Status.WARN, name, message, hint)
 
     def fail(
         self,
@@ -109,9 +101,8 @@ class HealthGroup:
         message: str | None = None,
         *,
         hint: str | None = None,
-        note: str | None = None,
     ) -> None:
-        self._append(Status.FAIL, name, message, hint, note)
+        self._append(Status.FAIL, name, message, hint)
 
 
 @dataclass
@@ -187,8 +178,6 @@ def health_check_data(check: HealthCheck) -> JsonObject:
         "message": check.message,
         "hint": check.hint,
     }
-    if check.note is not None:
-        data["note"] = check.note
     if check.secret_preview is not None:
         from agentworks.secrets.preview import preview_data
 
@@ -260,30 +249,48 @@ def _secret_check(
     preview: ResolutionPreview,
 ) -> HealthCheck:
     """Build one value-free secret resolution preview row."""
-    from agentworks.secrets.preview import PreviewStatus, preview_hint
+    from agentworks.capabilities.secret_backend import (
+        IndeterminateReason,
+        PreviewAvailable,
+        PreviewBlocked,
+        PreviewFailed,
+        PreviewIndeterminate,
+        PreviewMissing,
+    )
+    from agentworks.secrets.preview import AggregateNoCandidate, preview_hint
 
     label = f"Secret {name!r}"
-    status = {
-        PreviewStatus.AVAILABLE: Status.OK,
-        PreviewStatus.MISSING: Status.WARN,
-        PreviewStatus.INDETERMINATE: Status.OK,
-        PreviewStatus.BLOCKED: Status.WARN,
-        PreviewStatus.FAILED: Status.FAIL,
-    }[preview.status]
+    result = preview.result
+    if isinstance(result, PreviewIndeterminate):
+        if result.reason is IndeterminateReason.OPERATOR_INPUT_REQUIRED:
+            return HealthCheck(
+                label,
+                Status.OK,
+                "provided interactively when needed",
+                secret_preview=preview,
+            )
+        if result.reason is IndeterminateReason.OPERATOR_IMPACT_LIMITED:
+            return HealthCheck(
+                label,
+                Status.INFO,
+                f"availability not checked through {preview.source}",
+                secret_preview=preview,
+            )
+        assert_never(result.reason)
+    if isinstance(result, PreviewAvailable):
+        status = Status.OK
+    elif isinstance(result, (PreviewMissing, PreviewBlocked, AggregateNoCandidate)):
+        status = Status.WARN
+    elif isinstance(result, PreviewFailed):
+        status = Status.FAIL
+    else:
+        assert_never(result)
     reason = f"/{preview.reason}" if preview.reason is not None else ""
-    indeterminate = preview.status is PreviewStatus.INDETERMINATE
     return HealthCheck(
         label,
         status,
-        f"source {preview.source}"
-        if indeterminate
-        else f"{preview.status.value}{reason}; source={preview.source or 'none'}",
-        hint=None if indeterminate else preview_hint(preview, interaction_opt_in=False),
-        note=(
-            "Doctor did not verify availability because doing so could require operator interaction."
-            if indeterminate
-            else None
-        ),
+        f"{preview.status.value}{reason}; source={preview.source or 'none'}",
+        hint=preview_hint(preview, interaction_opt_in=False),
         secret_preview=preview,
     )
 

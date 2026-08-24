@@ -376,9 +376,10 @@ enabled/disabled, provenance, and folded readiness; `Secrets` emits exactly one 
 secret, operator-declared and auto-declared alike. Doctor keeps these health rows compact; use
 `agw secret list` or `agw secret describe` for descriptions and origin details.
 
-- **OK** for an aggregate `available` or `indeterminate` preview. An `indeterminate` row keeps a
-  numbered note explaining the limited preview without treating expected interaction avoidance as a
-  health warning. Repeated notes are rendered once at the end of the group.
+- **OK** for `available`, and for an `indeterminate/operator-input-required` prompt path that can
+  collect the value when a command needs it.
+- **INFO** for `indeterminate/operator-impact-limited`, where doctor deliberately skipped a provider
+  lookup that might require operator action and therefore did not establish availability.
 - **WARN** for `missing` or `blocked`.
 - **FAIL** for a hard provider or mapping failure.
 

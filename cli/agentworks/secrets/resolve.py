@@ -17,6 +17,7 @@ from agentworks.capabilities.secret_backend.client import (
     BackendResolved,
     BlockReason,
     FailureReason,
+    IndeterminateReason,
     InteractionBroker,
     LookupDescription,
     LookupDisposition,
@@ -414,6 +415,7 @@ def _validate_result_map(
     *,
     preview_impact: OperatorImpact | None,
     supports_tty_interaction: bool,
+    tty_access: TtyInteractionAccess,
 ) -> dict[str, BackendPreview] | dict[str, BackendResolution]:
     """Validate a complete plugin result map before any value is copied."""
     from collections.abc import Mapping
@@ -449,6 +451,12 @@ def _validate_result_map(
                 elif type(result) is PreviewIndeterminate:
                     normalized = PreviewIndeterminate(result.reason)
                     if preview_impact is OperatorImpact.ALLOW:
+                        raise _BackendProtocolError
+                    if result.reason is IndeterminateReason.OPERATOR_INPUT_REQUIRED and (
+                        preview_impact is not OperatorImpact.NONE
+                        or not supports_tty_interaction
+                        or tty_access is not TtyInteractionAccess.AVAILABLE
+                    ):
                         raise _BackendProtocolError
                 elif type(result) is PreviewBlocked:
                     normalized = PreviewBlocked(result.reason)
@@ -523,6 +531,7 @@ def _drive_source(
                     returned,
                     preview_impact=intent.impact,
                     supports_tty_interaction=supports_tty,
+                    tty_access=tty_access,
                 )
             resolve_method = client.resolve
             if broker is not None:
@@ -537,6 +546,7 @@ def _drive_source(
                 returned,
                 preview_impact=None,
                 supports_tty_interaction=supports_tty,
+                tty_access=tty_access,
             )
     finally:
         if broker is not None:
