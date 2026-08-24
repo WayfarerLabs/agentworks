@@ -49,6 +49,13 @@ reviewable repository change; a caller cannot create one by spelling a new strin
 are VM-only: `hardware-provenance` and `ssh-identity`. Workspace, agent, and session applied-state
 keys are empty until a reviewed consumer adds them.
 
+An unknown applied key is well formed only when it is 1 to 64 ASCII characters in lower-kebab form:
+a lowercase letter followed by lowercase letters or digits, with single hyphens separating nonempty
+segments. A well-formed unknown key is evidence written by a newer release, not corruption. An older
+repository omits that unconsumed slice from typed reads, while partial replacement preserves its
+row. Known keys attached to invalid owner kinds, malformed keys, and malformed envelopes remain
+`StateError`.
+
 There is deliberately no polymorphic foreign key. Typed instance-deletion paths remove their owned
 records in the same transaction that removes the owner. This avoids a universal instance parent
 table while preserving lifecycle cleanup.
@@ -121,7 +128,9 @@ A new consumer is complete only when it adds all of the following together:
 6. Permanent documentation updates beside the code.
 
 A new slice within an existing record type also adds its repository-owned closed key and valid
-instance-kind pairing in the same change. Callers never supply an unregistered string key.
+instance-kind pairing in the same change. Callers never supply an unregistered string key. The
+extension remains backward compatible only while older readers ignore unknown well-formed keys and
+partial replacement preserves unrelated rows.
 
 New table columns are justified only by query or integrity requirements shared across consumers.
 Consumer-specific payload fields remain in the versioned JSON object. Integration applied-state and

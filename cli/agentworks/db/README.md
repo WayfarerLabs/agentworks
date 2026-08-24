@@ -12,6 +12,11 @@ type or caller-authored record key, provide raw JSON or SQL, or issue arbitrary 
 repository owns canonical JSON object encoding and treats a malformed persisted envelope as
 `StateError`, never as an absent record.
 
+Because the polymorphic table deliberately has no owner foreign key, a damaged or hand-edited
+database can contain identities that normal creation paths reject. Operator-facing errors retain a
+valid owner kind but include the owner name only when its representation is printable and bounded;
+persisted payload values and raw record keys are never used as diagnostic context.
+
 Desired overlays express current intent. Applied slices are evidence from a completed lifecycle
 operation. Applied slices use a repository-owned closed key type whose valid instance-kind/key pairs
 are checked on writes and persisted reads. The current VM-only keys are `hardware-provenance` and
@@ -19,6 +24,13 @@ are checked on writes and persisted reads. The current VM-only keys are `hardwar
 replaces only the supplied slice keys, with one operation and one timestamp, and preserves all
 unrelated facts. Empty replacement is a no-op. Existing instances have no synthesized records:
 absence means not recorded until a lifecycle operation establishes state.
+
+An unknown applied key is well formed only when it is 1 to 64 ASCII characters in lower-kebab form:
+a lowercase letter followed by lowercase letters or digits, with single hyphens separating nonempty
+segments. A well-formed unknown key is evidence written by a newer release, not corruption. An older
+release omits that unconsumed slice from typed reads and partial replacement preserves its row.
+Known keys attached to invalid owner kinds, malformed keys, and malformed envelopes still fail
+loudly.
 
 Every owner deletion must remove its records in the same transaction. VM deletion also removes
 records for the agents, workspaces, and sessions it deletes; workspace deletion removes records for
@@ -36,7 +48,9 @@ A new consumer adds all of these together:
 5. Lifecycle or declaration integration that records only facts the operation can prove.
 
 A new slice on an existing record type adds its closed key and valid owner-kind pairing in
-repository code; callers cannot mint keys by spelling a new string.
+repository code; callers cannot mint keys by spelling a new string. This extension remains backward
+compatible only while older readers ignore unknown well-formed keys and replacements preserve
+unrelated rows.
 
 Consumer fields belong in the versioned JSON object unless the shared store needs them for integrity
 or a shared query. Do not add a generic blob API, runtime record-type registry, sidecar connection,

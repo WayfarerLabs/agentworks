@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -21,11 +22,12 @@ type InstanceKind = Literal["vm", "workspace", "agent", "session"]
 type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]
 type JsonObject = dict[str, JsonValue]
 
-_INSTANCE_KINDS = frozenset({"vm", "workspace", "agent", "session"})
 _DESIRED_OVERLAY = "desired-overlay"
 _APPLIED_STATE = "applied-state"
 _DESIRED_KEY = "spec"
+_MAX_APPLIED_KEY_LENGTH = 64
 _MAX_OWNER_DISPLAY_LENGTH = 256
+_APPLIED_KEY_PATTERN = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*")
 
 
 class AppliedStateKey(StrEnum):
@@ -46,6 +48,7 @@ _APPLIED_KEYS_BY_KIND: dict[InstanceKind, frozenset[AppliedStateKey]] = {
     "agent": frozenset(),
     "session": frozenset(),
 }
+_INSTANCE_KINDS = frozenset(_APPLIED_KEYS_BY_KIND)
 
 
 @dataclass(frozen=True)
@@ -121,6 +124,10 @@ def _encode_payload(payload: VersionedPayload) -> str:
 
 
 def _is_safe_display_name(instance_name: object) -> TypeGuard[str]:
+    # The polymorphic record table deliberately has no owner foreign key, so a
+    # damaged or hand-edited database can contain names that normal creation
+    # paths reject. Bound and sanitize database-sourced identities before they
+    # enter operator-facing errors.
     return (
         isinstance(instance_name, str)
         and bool(instance_name)
@@ -129,15 +136,29 @@ def _is_safe_display_name(instance_name: object) -> TypeGuard[str]:
     )
 
 
+def _is_well_formed_applied_key(raw_key: object) -> TypeGuard[str]:
+    return (
+        isinstance(raw_key, str)
+        and 0 < len(raw_key) <= _MAX_APPLIED_KEY_LENGTH
+        and _APPLIED_KEY_PATTERN.fullmatch(raw_key) is not None
+    )
+
+
 def _state_error(detail: str, row: sqlite3.Row) -> StateError:
     instance_kind = row["instance_kind"]
     instance_name = row["instance_name"]
     hint = "Back up the state database before repairing it, or restore a known-good backup."
-    if isinstance(instance_kind, str) and instance_kind in _INSTANCE_KINDS and _is_safe_display_name(instance_name):
+    if isinstance(instance_kind, str) and instance_kind in _INSTANCE_KINDS:
+        if _is_safe_display_name(instance_name):
+            return StateError(
+                f"stored {instance_kind} {instance_name!r} instance state is malformed: {detail}",
+                entity_kind=instance_kind,
+                entity_name=instance_name,
+                hint=hint,
+            )
         return StateError(
-            f"stored {instance_kind} {instance_name!r} instance state is malformed: {detail}",
+            f"stored {instance_kind} instance state is malformed: {detail}",
             entity_kind=instance_kind,
-            entity_name=instance_name,
             hint=hint,
         )
     return StateError(
@@ -150,7 +171,7 @@ def _state_error(detail: str, row: sqlite3.Row) -> StateError:
 def _validate_instance_kind(instance_kind: str) -> InstanceKind:
     if instance_kind not in _INSTANCE_KINDS:
         raise ValueError(f"unsupported instance kind: {instance_kind}")
-    return cast("InstanceKind", instance_kind)
+    return instance_kind
 
 
 def _validate_identity(instance_kind: str, instance_name: str) -> InstanceKind:
@@ -163,6 +184,8 @@ def _validate_identity(instance_kind: str, instance_name: str) -> InstanceKind:
 def _validate_applied_key(instance_kind: InstanceKind, key: AppliedStateKey) -> None:
     if not isinstance(key, AppliedStateKey):
         raise TypeError("applied-state slice keys must use AppliedStateKey")
+    if not _is_well_formed_applied_key(key.value):
+        raise ValueError(f"registered applied-state key {key.value!r} is malformed")
     if key not in _APPLIED_KEYS_BY_KIND[instance_kind]:
         raise ValueError(f"applied-state key {key.value!r} is not valid for {instance_kind}")
 
@@ -206,7 +229,7 @@ def _decode_common(row: sqlite3.Row) -> tuple[InstanceKind, str, VersionedPayloa
         raise _state_error("recorded timestamp is invalid", row) from error
     if parsed_recorded_at.strftime("%Y-%m-%dT%H:%M:%SZ") != recorded_at:
         raise _state_error("recorded timestamp is not canonical UTC", row)
-    return cast("InstanceKind", instance_kind), instance_name, payload, recorded_at
+    return instance_kind, instance_name, payload, recorded_at
 
 
 class InstanceStateRepository:
@@ -290,7 +313,7 @@ class InstanceStateRepository:
             "ORDER BY record_key",
             (instance_kind, instance_name, _APPLIED_STATE),
         ).fetchall()
-        return tuple(self._to_applied(row) for row in rows)
+        return tuple(record for row in rows if (record := self._to_applied(row)) is not None)
 
     def replace_applied_slices(
         self,
@@ -344,7 +367,7 @@ class InstanceStateRepository:
             "ORDER BY instance_name, record_key",
             (instance_kind, _APPLIED_STATE),
         ).fetchall()
-        return tuple(self._to_applied(row) for row in rows)
+        return tuple(record for row in rows if (record := self._to_applied(row)) is not None)
 
     def _delete_instance_records_for_names(
         self,
@@ -370,20 +393,23 @@ class InstanceStateRepository:
         return DesiredOverlayRecord(instance_kind, instance_name, payload, recorded_at)
 
     @staticmethod
-    def _to_applied(row: sqlite3.Row) -> AppliedStateSlice:
+    def _to_applied(row: sqlite3.Row) -> AppliedStateSlice | None:
         if row["record_type"] != _APPLIED_STATE:
             raise _state_error("invalid applied-state discriminator", row)
         instance_kind, instance_name, payload, recorded_at = _decode_common(row)
         raw_key = row["record_key"]
         operation = row["operation"]
-        if not isinstance(raw_key, str):
+        if not _is_well_formed_applied_key(raw_key):
             raise _state_error("invalid applied-state slice key", row)
-        try:
-            key = AppliedStateKey(raw_key)
-        except ValueError as error:
-            raise _state_error("unknown applied-state slice key", row) from error
-        if key not in _APPLIED_KEYS_BY_KIND[instance_kind]:
-            raise _state_error("applied-state slice key is invalid for its owner kind", row)
         if not isinstance(operation, str) or not operation:
             raise _state_error("applied state has no lifecycle provenance", row)
+        try:
+            key = AppliedStateKey(raw_key)
+        except ValueError:
+            # A newer release may add an applied fact this release does not
+            # consume. Partial replacement preserves that row, so omitting it
+            # from this release's typed result is forward-compatible and lossless.
+            return None
+        if key not in _APPLIED_KEYS_BY_KIND[instance_kind]:
+            raise _state_error("applied-state slice key is invalid for its owner kind", row)
         return AppliedStateSlice(instance_kind, instance_name, key, payload, operation, recorded_at)

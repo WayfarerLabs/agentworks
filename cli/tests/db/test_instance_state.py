@@ -58,6 +58,27 @@ def _raw_rows(path: Path) -> list[sqlite3.Row]:
     return rows
 
 
+def _insert_raw_applied_row(
+    path: Path,
+    *,
+    record_key: str,
+    value_json: str = "{}",
+    operation: str | None = "op",
+    ignore_checks: bool = False,
+) -> None:
+    connection = sqlite3.connect(path)
+    if ignore_checks:
+        connection.execute("PRAGMA ignore_check_constraints = ON")
+    connection.execute(
+        "INSERT INTO instance_records "
+        "(instance_kind, instance_name, record_type, record_key, payload_version, "
+        "value_json, recorded_at, operation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ("vm", "alpha", "applied-state", record_key, 1, value_json, "2026-08-23T12:00:00Z", operation),
+    )
+    connection.commit()
+    connection.close()
+
+
 def test_v32_migration_is_additive_and_has_the_exact_record_key_and_batch_index(tmp_path: Path) -> None:
     fresh_path = tmp_path / "fresh.db"
     fresh = Database(fresh_path)
@@ -181,6 +202,21 @@ def test_persistence_accepts_nonempty_historic_owner_names(db: Database) -> None
     assert db.instance_state.get_desired_overlay("session", _HISTORIC_SESSION_NAME) == expected
 
 
+@pytest.mark.parametrize("instance_name", ["", 1, True])
+def test_desired_mutation_rejects_invalid_owner_name_before_writing(
+    db: Database,
+    instance_name: object,
+) -> None:
+    with pytest.raises(ValueError):
+        db.instance_state.put_desired_overlay(
+            "vm",
+            instance_name,  # type: ignore[arg-type]
+            _payload("intent"),
+        )
+
+    assert db.instance_state.list_desired_overlays("vm") == ()
+
+
 def test_applied_partial_replace_preserves_unrelated_slices_and_orders_results(
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
@@ -272,6 +308,10 @@ def test_applied_replace_rejects_unknown_key_before_writing(db: Database) -> Non
         )
 
     assert db.instance_state.get_applied_slices("vm", "alpha") == ()
+
+
+def test_registered_applied_keys_follow_the_persisted_key_grammar() -> None:
+    assert all(state_module._is_well_formed_applied_key(key.value) for key in AppliedStateKey)  # noqa: SLF001
 
 
 @pytest.mark.parametrize("instance_kind", ["workspace", "agent", "session"])
@@ -448,7 +488,6 @@ def test_malformed_persisted_record_raises_instead_of_becoming_absent(tmp_path: 
 @pytest.mark.parametrize(
     ("instance_kind", "record_key"),
     [
-        ("vm", "unknown"),
         *[
             (instance_kind, key.value)
             for instance_kind in ("workspace", "agent", "session")
@@ -456,7 +495,7 @@ def test_malformed_persisted_record_raises_instead_of_becoming_absent(tmp_path: 
         ],
     ],
 )
-def test_persisted_unknown_or_cross_kind_applied_key_is_malformed(
+def test_persisted_cross_kind_applied_key_is_malformed(
     tmp_path: Path,
     instance_kind: str,
     record_key: str,
@@ -484,8 +523,114 @@ def test_persisted_unknown_or_cross_kind_applied_key_is_malformed(
         database.close()
 
 
+def test_persisted_unknown_applied_key_is_ignored_and_preserved(tmp_path: Path) -> None:
+    path = tmp_path / "state.db"
+    Database(path).close()
+    connection = sqlite3.connect(path)
+    connection.executemany(
+        "INSERT INTO instance_records "
+        "(instance_kind, instance_name, record_type, record_key, payload_version, "
+        "value_json, recorded_at, operation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            ("vm", "alpha", "applied-state", "future-fact", 1, "{}", "2026-08-23T12:00:00Z", "future"),
+            (
+                "vm",
+                "alpha",
+                "applied-state",
+                AppliedStateKey.HARDWARE_PROVENANCE,
+                1,
+                "{}",
+                "2026-08-23T12:00:00Z",
+                "vm-create",
+            ),
+        ],
+    )
+    connection.commit()
+    connection.close()
+
+    database = Database(path)
+    try:
+        assert [record.key for record in database.instance_state.get_applied_slices("vm", "alpha")] == [
+            AppliedStateKey.HARDWARE_PROVENANCE
+        ]
+        assert [record.key for record in database.instance_state.list_applied_slices("vm")] == [
+            AppliedStateKey.HARDWARE_PROVENANCE
+        ]
+
+        database.instance_state.replace_applied_slices(
+            "vm",
+            "alpha",
+            "vm-create",
+            {AppliedStateKey.SSH_IDENTITY: _payload("identity")},
+        )
+
+        raw_keys = database._conn.execute(  # noqa: SLF001
+            "SELECT record_key FROM instance_records "
+            "WHERE instance_kind = 'vm' AND instance_name = 'alpha' AND record_type = 'applied-state' "
+            "ORDER BY record_key"
+        ).fetchall()
+        assert [row[0] for row in raw_keys] == ["future-fact", "hardware-provenance", "ssh-identity"]
+        assert [record.key for record in database.instance_state.get_applied_slices("vm", "alpha")] == [
+            AppliedStateKey.HARDWARE_PROVENANCE,
+            AppliedStateKey.SSH_IDENTITY,
+        ]
+    finally:
+        database.close()
+
+
+@pytest.mark.parametrize("record_key", [" ", "bad\nkey", "bad\0key", "x" * 65])
+def test_persisted_malformed_unknown_applied_key_raises(tmp_path: Path, record_key: str) -> None:
+    path = tmp_path / "state.db"
+    Database(path).close()
+    _insert_raw_applied_row(path, record_key=record_key)
+
+    database = Database(path, read_only=True)
+    try:
+        with pytest.raises(StateError) as raised:
+            database.instance_state.get_applied_slices("vm", "alpha")
+        assert raised.value.entity_kind == "vm"
+        assert raised.value.entity_name == "alpha"
+        assert raised.value.hint is not None
+        assert repr(record_key) not in str(raised.value)
+    finally:
+        database.close()
+
+
+@pytest.mark.parametrize(
+    ("value_json", "operation"),
+    [
+        ("not-json", "future"),
+        ("{}", None),
+    ],
+)
+def test_persisted_valid_unknown_key_with_malformed_envelope_raises(
+    tmp_path: Path,
+    value_json: str,
+    operation: str | None,
+) -> None:
+    path = tmp_path / "state.db"
+    Database(path).close()
+    _insert_raw_applied_row(
+        path,
+        record_key="future-fact",
+        value_json=value_json,
+        operation=operation,
+        ignore_checks=True,
+    )
+
+    database = Database(path, read_only=True)
+    try:
+        with pytest.raises(StateError) as raised:
+            database.instance_state.get_applied_slices("vm", "alpha")
+        assert raised.value.entity_kind == "vm"
+        assert raised.value.entity_name == "alpha"
+        assert raised.value.hint is not None
+    finally:
+        database.close()
+
+
 @pytest.mark.parametrize("unsafe_name", ["bad\nname", "x" * 1_000])
-def test_malformed_unsafe_owner_identity_uses_database_context(tmp_path: Path, unsafe_name: str) -> None:
+def test_malformed_unsafe_owner_identity_retains_kind_context(tmp_path: Path, unsafe_name: str) -> None:
     path = tmp_path / "state.db"
     Database(path).close()
     connection = sqlite3.connect(path)
@@ -503,7 +648,7 @@ def test_malformed_unsafe_owner_identity_uses_database_context(tmp_path: Path, u
     try:
         with pytest.raises(StateError) as raised:
             database.instance_state.list_desired_overlays("vm")
-        assert raised.value.entity_kind == "database"
+        assert raised.value.entity_kind == "vm"
         assert raised.value.entity_name is None
         assert raised.value.hint is not None
         assert unsafe_name not in str(raised.value)

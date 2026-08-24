@@ -136,8 +136,9 @@ class Database:
     def transaction(self) -> Iterator[None]:
         """Compose transaction-aware operations, committing or rolling back together.
 
-        Nested blocks join the outer transaction. Older CRUD methods that
-        commit directly do not participate in this composition contract.
+        Nested blocks join the outer transaction. Methods that call
+        ``_commit_unless_in_tx`` defer to it; older CRUD methods that commit
+        directly do not participate in this composition contract.
         """
         if self._read_only:
             from agentworks.errors import StateError

@@ -171,8 +171,9 @@ current transport will present, and no password-protected-key path regresses.
       overlaid contributors truthfully.
 - [ ] Extend live-instance show with current declared resolution, applied slices, and explicit not
       recorded, match, drift, or unverifiable comparison state in the existing read snapshot.
-- [ ] Add doctor batch reads, owner-existence validation for orphaned records, and structural SSH
-      drift checks without opening a sidecar or repeating one query per instance.
+- [ ] Add doctor batch reads, owner-existence validation for orphaned records, visibility for
+      unconsumed newer-release records, and structural SSH drift checks without opening a sidecar or
+      repeating one query per instance.
 - [ ] Preserve JSON v1 fields and add only optional tagged data; keep human and JSON facts
       reconciled without prose-policing tests.
 - [ ] Prove effective CPU, memory, disk, and swap are available before `vm create`; template and

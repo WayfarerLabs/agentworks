@@ -89,6 +89,13 @@ Known record types also close their key space in repository code. Applied-state 
 closed key type, and both writes and persisted reads enforce valid instance-kind/key pairs. A caller
 cannot create a new slice by spelling a string.
 
+An unknown applied key is well formed only when it is 1 to 64 ASCII characters in lower-kebab form:
+a lowercase letter followed by lowercase letters or digits, with single hyphens separating nonempty
+segments. A well-formed unknown key is an unconsumed fact written by a newer release, not a
+malformed row. Older readers omit it from typed results, and partial replacement preserves its row.
+Known keys attached to invalid owner kinds, malformed keys, and malformed envelopes still raise
+`StateError`.
+
 Standalone writes commit before returning. Inside `Database.transaction()` they defer to the outer
 boundary. Applied-slice replacement encodes the complete input first, then inserts or replaces the
 supplied keys with one operation and timestamp in one transaction. It leaves unrelated slices
@@ -109,7 +116,8 @@ A later consumer extends the repository in code with:
 4. malformed, unsupported-version, lifecycle, and projection tests.
 
 A new slice on an existing record type adds its repository-owned key and valid owner-kind pairing in
-the same reviewed change.
+the same reviewed change. This remains backward compatible only while unknown well-formed keys are
+omitted by older readers and partial replacement preserves unrelated rows.
 
 It does not register a plugin-provided record type at runtime or call a generic get/put method. Wave
 4 can add integration applied-state this way without changing table, connection, transaction,
