@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.db import InitStatus, ProvisioningStatus
 from agentworks.env import ResourceContext, vm_stable_identity_env
+from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.ssh import SSHError, SSHLogger
 from agentworks.transports import SSHTransport, Transport
 
@@ -575,7 +576,7 @@ def _phase_b_setup(
         # multi-user workspace model where agents access repos owned by admin)
         if admin.git_force_safe_directory:
             try:
-                ts_target.run("git config --global --add safe.directory '*'")
+                ensure_safe_directory_wildcard(ts_target)
                 output.info("Git safe.directory wildcard configured")
             except SSHError as e:
                 msg = f"git safe.directory setup failed: {e}"
