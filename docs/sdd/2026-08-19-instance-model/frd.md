@@ -1,6 +1,6 @@
 # Instance Model and State: Functional Requirements
 
-- Status: Seed FRD (saga lead authored; awaiting an effort lead)
+- Status: Active (effort lead assigned; R1 assessment in progress)
 - Date: 2026-08-19
 - Parent: the `2026-08-04-next-steps` saga (destination 2 and the wave-4 enabling track)
 
@@ -24,6 +24,17 @@
   through those doors; it must not re-litigate them.
 - **Use the database, not its sidecars (operator, 2026-08-12):** state reads go through the database
   with the concurrency semantics it already provides.
+- **Existing applied state remains unknown (authenticated operator channel to the instance-model
+  effort lead, 2026-08-21; reaffirmed 2026-08-23):** no migration reconstructs applied state from
+  current declarations. A real lifecycle operation establishes only the slices it can prove it
+  applied. Workspace repair is not full idempotent convergence, so it cannot manufacture a complete
+  workspace applied record. Unknown is visible and distinct from both match and drift.
+- **Password-protected SSH keys must not regress (authenticated operator channel to the
+  instance-model effort lead, 2026-08-21; clarified 2026-08-23):** password protection is neither a
+  mismatch nor an unsupported condition. Derive a fingerprint without unlocking when the private key
+  format exposes its public identity; otherwise report that the identity is unverifiable. Never
+  substitute an adjacent public-key file for the private identity. How an ssh-agent-held identity
+  participates remains deliberately unresolved.
 
 ## Why now
 
@@ -81,6 +92,11 @@ Applied state is readable through R5's surfaces and comparable against the curre
 drift is a reportable fact (doctor is the natural reporter). Remediation of drift (rotation,
 re-apply) is out of scope; making it visible is in scope.
 
+Under the existing-state ruling above, existing applied state stays unknown until a real lifecycle
+operation, such as reinit or resume, establishes what it actually applied. A missing record is a
+first-class outcome for comparisons and diagnostics, rendered as not recorded rather than omitted.
+It is not drift, a match, or an implicit pass.
+
 **The proving slice (operator direction, 2026-08-21):** record the operator SSH identity an instance
 was actually provisioned with, so preflight can check it and fail cleanly when it is missing,
 unreadable, or no longer the identity the instance trusts. Take this as R3's first vertical slice
@@ -97,10 +113,14 @@ configured reference stays worth recording as diagnostic context (it names what 
 at, which helps the message say something useful), but it is not the check. A public key fingerprint
 is not a secret, so persisting it costs nothing in exposure.
 
-Where the identity cannot be derived (an encrypted key, or one held by an agent), preflight says it
-cannot verify rather than implying a match: an unverifiable check reported as a pass is worse than
-no check. Failing cleanly means naming what the instance trusts against what the config now
-presents, and what the operator can do about it; it does not mean re-applying anything.
+Password-protected SSH private keys remain supported. The implementation must derive the
+authoritative public identity from the configured private identity without unlocking wherever the
+format permits, including password-protected OpenSSH keys, and must never use an adjacent public-key
+file as evidence. Where an encrypted format does not expose its public identity without unlocking,
+preflight says it cannot verify rather than implying a match or treating password protection as
+unsupported. Failing cleanly means naming what the instance trusts against what the config now
+presents, and what the operator can do about it; it does not mean re-applying anything. How an
+ssh-agent-held identity participates remains deliberately unresolved.
 
 ### R4: Instance spec overlays via the CLI
 
