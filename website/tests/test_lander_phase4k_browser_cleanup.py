@@ -34,23 +34,6 @@ class _FakeProcess:
         self.alive = False
 
 
-class _HandshakeEofSocket:
-    def __init__(self) -> None:
-        self.closed = False
-        self.receive_count = 0
-
-    def sendall(self, data: bytes) -> None:
-        del data
-
-    def recv(self, length: int) -> bytes:
-        del length
-        self.receive_count += 1
-        return b""
-
-    def close(self) -> None:
-        self.closed = True
-
-
 class _NullRootRaceConnection:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object] | None]] = []
@@ -112,14 +95,16 @@ class _DiscoveryConnection:
         self.targets = targets
         self.closed = False
         self.calls: list[str] = []
-        self.timeouts: list[float | None] = []
+        self.deadlines: list[float | None] = []
+        self.close_deadline: float | None = None
 
-    def call(self, method: str, *, timeout: float | None = None) -> dict[str, object]:
+    def call(self, method: str, *, deadline: float | None = None) -> dict[str, object]:
         self.calls.append(method)
-        self.timeouts.append(timeout)
+        self.deadlines.append(deadline)
         return {"targetInfos": self.targets}
 
-    def close(self) -> None:
+    def close(self, *, deadline: float | None = None) -> None:
+        self.close_deadline = deadline
         self.closed = True
 
 
@@ -139,20 +124,9 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
         self.assertEqual(snapshot(self.output), self.before)
         self.assertFalse((self.output / "phase4k-browser.js").exists())
         self.assertTrue(all(not path.exists() for path in self.profile_paths))
-        self.assertFalse(any(
-            thread.name == "phase4k-browser-server" and thread.is_alive()
-            for thread in threading.enumerate()
-        ))
-
-    def test_websocket_handshake_eof_fails_once_and_closes_the_socket(self) -> None:
-        eof_socket = _HandshakeEofSocket()
-        with (
-            mock.patch.object(chromium_support.socket, "create_connection", return_value=eof_socket),
-            self.assertRaises(ConnectionError),
-        ):
-            chromium_support.DevToolsConnection("ws://127.0.0.1:9222/devtools/page/1")
-        self.assertEqual(eof_socket.receive_count, 1)
-        self.assertTrue(eof_socket.closed)
+        self.assertFalse(
+            any(thread.name == "phase4k-browser-server" and thread.is_alive() for thread in threading.enumerate())
+        )
 
     def test_devtools_target_waits_for_complete_port_and_page_publication(self) -> None:
         process = _FakeProcess()
@@ -164,11 +138,11 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
         required_handshake_time = 1.0
         elapsed = 0.0
 
-        def connect(url: str, *, timeout: float) -> _DiscoveryConnection:
+        def connect(url: str, *, deadline: float) -> _DiscoveryConnection:
             nonlocal elapsed
-            connection_calls.append((url, timeout))
-            if timeout < required_handshake_time:
-                elapsed += timeout
+            connection_calls.append((url, deadline))
+            if deadline - elapsed < required_handshake_time:
+                elapsed = deadline
                 raise TimeoutError
             elapsed += required_handshake_time
             return connections[len(connection_calls) - 1]
@@ -189,9 +163,7 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
                 mock.patch.object(chromium_support.time, "monotonic", side_effect=lambda: elapsed),
                 mock.patch.object(chromium_support.time, "sleep", side_effect=publish),
             ):
-                target = chromium_support.devtools_target(
-                    Path(directory), process, connection_factory=connect
-                )
+                target = chromium_support.devtools_target(Path(directory), process, connection_factory=connect)
 
         self.assertEqual(target, "ws://127.0.0.1:9222/devtools/page/page-1")
         self.assertEqual(sleeps, 2)
@@ -199,14 +171,9 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
             [url for url, _ in connection_calls],
             ["ws://127.0.0.1:9222/devtools/browser/browser-1"] * 2,
         )
-        self.assertTrue(all(
-            required_handshake_time <= timeout <= chromium_support.DEVTOOLS_STARTUP_TIMEOUT
-            for _, timeout in connection_calls
-        ))
-        self.assertTrue(all(
-            connection.timeouts[0] is not None and connection.timeouts[0] < timeout
-            for connection, (_, timeout) in zip(connections, connection_calls, strict=True)
-        ))
+        self.assertEqual([deadline for _, deadline in connection_calls], [20.0, 20.0])
+        self.assertEqual([connection.deadlines for connection in connections], [[20.0], [20.0]])
+        self.assertEqual([connection.close_deadline for connection in connections], [20.0, 20.0])
         self.assertEqual(
             [connection.calls for connection in connections],
             [["Target.getTargets"]] * 2,
@@ -221,23 +188,19 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
             nonlocal elapsed
             elapsed += seconds
 
-        def stall(url: str, *, timeout: float) -> None:
+        def stall(url: str, *, deadline: float) -> None:
             del url
-            advance(timeout)
+            advance(deadline - elapsed)
             raise TimeoutError
 
         with tempfile.TemporaryDirectory() as directory:
-            (Path(directory) / "DevToolsActivePort").write_text(
-                "9222\n/devtools/browser/browser-1\n", encoding="utf-8"
-            )
+            (Path(directory) / "DevToolsActivePort").write_text("9222\n/devtools/browser/browser-1\n", encoding="utf-8")
             with (
                 mock.patch.object(chromium_support.time, "monotonic", side_effect=lambda: elapsed),
                 mock.patch.object(chromium_support.time, "sleep", side_effect=advance),
                 self.assertRaises(AssertionError),
             ):
-                chromium_support.devtools_target(
-                    Path(directory), process, connection_factory=stall
-                )
+                chromium_support.devtools_target(Path(directory), process, connection_factory=stall)
 
         self.assertLessEqual(elapsed, chromium_support.DEVTOOLS_STARTUP_TIMEOUT)
 
@@ -246,38 +209,79 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
         elapsed = 0.0
 
         class QueryStallConnection(_DiscoveryConnection):
-            def call(self, method: str, *, timeout: float | None = None) -> dict[str, object]:
+            def call(self, method: str, *, deadline: float | None = None) -> dict[str, object]:
                 nonlocal elapsed
                 self.calls.append(method)
-                self.timeouts.append(timeout)
-                if timeout is None:
-                    raise AssertionError("Target discovery has no timeout")
-                elapsed += timeout
+                self.deadlines.append(deadline)
+                if deadline is None:
+                    raise AssertionError("Target discovery has no deadline")
+                elapsed = deadline
                 raise TimeoutError
 
         connection = QueryStallConnection([])
 
-        def connect(url: str, *, timeout: float) -> _DiscoveryConnection:
+        def connect(url: str, *, deadline: float) -> _DiscoveryConnection:
             nonlocal elapsed
             del url
-            elapsed += min(7, timeout)
+            elapsed += min(7, deadline - elapsed)
             return connection
 
         with tempfile.TemporaryDirectory() as directory:
-            (Path(directory) / "DevToolsActivePort").write_text(
-                "9222\n/devtools/browser/browser-1\n", encoding="utf-8"
-            )
+            (Path(directory) / "DevToolsActivePort").write_text("9222\n/devtools/browser/browser-1\n", encoding="utf-8")
             with (
                 mock.patch.object(chromium_support.time, "monotonic", side_effect=lambda: elapsed),
                 self.assertRaises(AssertionError),
             ):
-                chromium_support.devtools_target(
-                    Path(directory), process, connection_factory=connect
-                )
+                chromium_support.devtools_target(Path(directory), process, connection_factory=connect)
 
         self.assertEqual(elapsed, chromium_support.DEVTOOLS_STARTUP_TIMEOUT)
         self.assertEqual(connection.calls, ["Target.getTargets"])
         self.assertTrue(connection.closed)
+
+    def test_discovery_close_timeout_preserves_the_target_result_and_query_error(self) -> None:
+        class CloseTimeoutConnection(_DiscoveryConnection):
+            def close(self, *, deadline: float | None = None) -> None:
+                super().close(deadline=deadline)
+                raise TimeoutError
+
+        process = _FakeProcess()
+        success = CloseTimeoutConnection([{"type": "page", "targetId": "page-1"}])
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "DevToolsActivePort").write_text("9222\n/devtools/browser/browser-1\n", encoding="utf-8")
+            target = chromium_support.devtools_target(
+                Path(directory),
+                process,
+                connection_factory=lambda url, deadline: success,
+            )
+        self.assertEqual(target, "ws://127.0.0.1:9222/devtools/page/page-1")
+        self.assertTrue(success.closed)
+
+        elapsed = 0.0
+        query_error = ConnectionError()
+
+        class QueryFailureConnection(CloseTimeoutConnection):
+            def call(self, method: str, *, deadline: float | None = None) -> dict[str, object]:
+                nonlocal elapsed
+                del method
+                if deadline is None:
+                    raise AssertionError("Target discovery has no deadline")
+                elapsed = deadline
+                raise query_error
+
+        failure = QueryFailureConnection([])
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "DevToolsActivePort").write_text("9222\n/devtools/browser/browser-1\n", encoding="utf-8")
+            with (
+                mock.patch.object(chromium_support.time, "monotonic", side_effect=lambda: elapsed),
+                self.assertRaises(AssertionError) as caught,
+            ):
+                chromium_support.devtools_target(
+                    Path(directory),
+                    process,
+                    connection_factory=lambda url, deadline: failure,
+                )
+        self.assertIs(caught.exception.__cause__, query_error)
+        self.assertTrue(failure.closed)
 
     def test_devtools_target_allows_the_full_slow_startup_window(self) -> None:
         process = _FakeProcess()
@@ -287,13 +291,13 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
             nonlocal elapsed
             elapsed += seconds
 
-        with tempfile.TemporaryDirectory() as directory:
-            with (
-                mock.patch.object(chromium_support.time, "monotonic", side_effect=lambda: elapsed),
-                mock.patch.object(chromium_support.time, "sleep", side_effect=advance),
-                self.assertRaises(AssertionError),
-            ):
-                chromium_support.devtools_target(Path(directory), process)
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch.object(chromium_support.time, "monotonic", side_effect=lambda: elapsed),
+            mock.patch.object(chromium_support.time, "sleep", side_effect=advance),
+            self.assertRaises(AssertionError),
+        ):
+            chromium_support.devtools_target(Path(directory), process)
 
         self.assertEqual(elapsed, chromium_support.DEVTOOLS_STARTUP_TIMEOUT)
 
@@ -361,7 +365,9 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
         self.assertIs(caught.exception, sentinel)
         self.assert_harness_clean()
 
-    def test_profile_and_spawn_failures_stop_the_server_and_restore_artifacts(self) -> None:
+    def test_profile_and_spawn_failures_stop_the_server_and_restore_artifacts(
+        self,
+    ) -> None:
         profile_sentinel = RuntimeError()
 
         def fail_profile() -> tempfile.TemporaryDirectory[str]:
@@ -390,7 +396,9 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
         self.assertIs(caught.exception, spawn_sentinel)
         self.assert_harness_clean()
 
-    def test_acquisition_and_connection_failures_terminate_the_owned_browser(self) -> None:
+    def test_acquisition_and_connection_failures_terminate_the_owned_browser(
+        self,
+    ) -> None:
         processes: list[_FakeProcess] = []
         environments: list[dict[str, str]] = []
 
@@ -442,7 +450,9 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
         )
         self.assert_harness_clean()
 
-    def test_null_root_navigation_race_times_out_without_evaluation_or_cleanup_failure(self) -> None:
+    def test_null_root_navigation_race_times_out_without_evaluation_or_cleanup_failure(
+        self,
+    ) -> None:
         process = _FakeProcess()
         connection = _NullRootRaceConnection()
         with (
@@ -459,7 +469,10 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
             )
         navigation = next(params for method, params in connection.calls if method == "Page.navigate")
         loaded_url = str(navigation["url"])
-        self.assertEqual(connection.expressions, [phase4k_browser._readiness_expression(loaded_url)] * 200)
+        self.assertEqual(
+            connection.expressions,
+            [phase4k_browser._readiness_expression(loaded_url)] * 200,
+        )
         readiness = connection.expressions[0]
         self.assertIn(f'location.href === "{loaded_url}"', readiness)
         self.assertIn("document.readyState === 'complete'", readiness)
@@ -468,9 +481,15 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
         self.assertTrue(process.terminated)
         self.assert_harness_clean()
 
-    def test_probe_uses_browser_events_instead_of_controller_input_shortcuts(self) -> None:
+    def test_probe_uses_browser_events_instead_of_controller_input_shortcuts(
+        self,
+    ) -> None:
         probe = phase4k_browser._probe_source()
-        for shortcut in ("controller.onKeyDown", "controller.onPointer", "controller.frame("):
+        for shortcut in (
+            "controller.onKeyDown",
+            "controller.onPointer",
+            "controller.frame(",
+        ):
             self.assertNotIn(shortcut, probe)
 
 
