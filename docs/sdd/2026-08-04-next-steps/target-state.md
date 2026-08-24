@@ -338,14 +338,15 @@ read as coverage.
 The merits are separately unresolved, and the saga lead's finding is that the flat mapping cannot
 express what is needed: `prompt` returns `indeterminate` only after ruling out a block, so a TTY
 genuinely exists and OK is honest, while `onepassword` returns it _before attempting any read_
-whenever impact is `NONE` and app authentication is `operator-action`. Both emit the same reason
-code, so OK for the second reports health for a secret nothing ever checked. Recommended shape if
-the operator reopens the decision: split `IndeterminateReason`, today a closed core-owned enum with
-one member, so "would ask at command time" and "declined to look" are distinct; the prompt case
-becomes a clean OK and the provider case keeps its actionable hint. That resolution would also
-remove the need for the generic doctor-notes mechanism #644's later round added to convey what
-suppressing the hint had hidden, which is why display machinery should wait on the ruling rather
-than accrete ahead of it.
+whenever impact is `NONE`, app authentication is `operator-action`, and no unattended mode is
+ambiently detectable; with a service-account or Connect configuration it proceeds to a real read.
+Both emit the same reason code, so OK for the second reports health for a secret nothing ever
+checked. Recommended shape if the operator reopens the decision: split `IndeterminateReason`, today
+a closed core-owned enum with one member, so "would ask at command time" and "declined to look" are
+distinct; the prompt case becomes a clean OK and the provider case keeps its actionable hint. That
+resolution would also remove the need for the generic doctor-notes mechanism #644's later round
+added to convey what suppressing the hint had hidden, which is why display machinery should wait on
+the ruling rather than accrete ahead of it.
 
 ### Harness scopes (destination 4)
 
