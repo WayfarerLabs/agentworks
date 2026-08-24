@@ -390,6 +390,24 @@ def test_list_consoles_for_session_returns_members(db: Database) -> None:
     assert db.list_consoles_for_session("nope") == []
 
 
+def test_list_console_memberships_for_session_returns_stored_positions(db: Database) -> None:
+    _seed_vm(db)
+    _seed_sessions(db, ["a", "b"])
+    db.insert_console("zeta", "vm1")
+    db.insert_console("alpha", "vm1")
+    db.add_console_session("zeta", "b", [])
+    db.add_console_session("zeta", "a", [])
+    db.add_console_session("alpha", "a", [])
+
+    memberships = db.list_console_memberships_for_session("a")
+
+    assert memberships == [
+        ("alpha", 0),
+        ("zeta", 1),
+    ]
+    assert db.list_console_memberships_for_session("nope") == []
+
+
 def test_kill_session_windows_kills_live_only(db: Database, fake_target: _FakeTarget) -> None:
     """Pairs are grouped by console; kill-window runs only where the console's
     tmux session is alive."""

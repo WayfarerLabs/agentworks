@@ -45,6 +45,12 @@ class SessionListing:
 
 
 @dataclass(frozen=True)
+class SessionConsole:
+    console_name: str
+    position: int
+
+
+@dataclass(frozen=True)
 class SessionDescription:
     name: str
     workspace_name: str
@@ -57,6 +63,7 @@ class SessionDescription:
     pid: int | None
     created_at: str
     updated_at: str
+    consoles: tuple[SessionConsole, ...]
 
 
 def session_listing_data(listing: SessionListing) -> JsonObject:
@@ -93,6 +100,9 @@ def session_description_data(description: SessionDescription) -> JsonObject:
             "pid": description.pid,
             "created_at": description.created_at,
             "updated_at": description.updated_at,
+            "consoles": [
+                {"console_name": console.console_name, "position": console.position} for console in description.consoles
+            ],
         },
     }
 
@@ -461,6 +471,10 @@ def session_description(
             pid=session.pid if session.pid is not None and session.pid > 0 else None,
             created_at=session.created_at,
             updated_at=session.updated_at,
+            consoles=tuple(
+                SessionConsole(console_name=console_name, position=position)
+                for console_name, position in db.list_console_memberships_for_session(session.name)
+            ),
         )
 
 
@@ -485,6 +499,12 @@ def render_session_description(description: SessionDescription) -> None:
     output.info(f"Status:     {status_label}")
     output.info(f"Created:    {description.created_at}")
     output.info(f"Updated:    {description.updated_at}")
+    output.info(f"\nConsoles ({len(description.consoles)}):")
+    if description.consoles:
+        for console in description.consoles:
+            output.detail(f"[{console.position}] {console.console_name}")
+    else:
+        output.detail("(none)")
 
 
 def describe_session(
