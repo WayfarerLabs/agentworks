@@ -147,7 +147,9 @@ credential, install command, or harness integration.
 
 The database is the one desired-overlay authority. R4 does not add VM, workspace, agent, or session
 instance documents to the resource-manifest frontend. The supported CLI mutation and instance
-inspection surfaces make the persisted overlay visible as desired declaration.
+inspection surfaces make the persisted overlay visible as desired declaration. The exact argv,
+inline JSON input, replacement behavior, validation boundary, and no-implicit-remote-work rule are
+specified in `instance-spec-cli.md`.
 
 ## R3: applied state and SSH identity
 

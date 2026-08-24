@@ -7,6 +7,7 @@
 - Requirements: [frd.md](./frd.md)
 - R1 assessment: [database-assessment.md](./database-assessment.md)
 - R2 contract: [store-contract.md](./store-contract.md)
+- Instance-spec CLI: [instance-spec-cli.md](./instance-spec-cli.md)
 - Code basis: `d1c5fbc7`, stacked on accepted R1 PR #632
 - Delivery vehicle: accepted R1 artifact PR #632, then one stacked implementation branch and draft
   PR for R2 through R5
@@ -110,9 +111,12 @@ implementation does not begin until the saga lead accepts this checkpoint.
       provenance.
 - [ ] Define typed per-kind overlay payloads and codecs over the shared store, with one final
       overlay layer after the template chain and no required ceremony when it is absent.
-- [ ] Add the conventional CLI mutation surface and declarative projection, with declaration-time
-      effective-instance reference and capability validation matching template error quality without
-      publishing a fake template or creating YAML instance manifests.
+- [ ] Add inline JSON `--spec JSON` to the four direct instance creation commands,
+      `--workspace-spec JSON` and `--agent-spec JSON` to compound session creation, and matching
+      `set-spec NAME SPEC` and `clear-spec NAME` verbs to all four instance groups, with
+      declaration-time effective-instance reference and capability validation matching template
+      error quality without publishing a fake template or creating instance manifests. Reject
+      copied-workspace specs while their synthetic `copied` template has no resolvable base.
 - [ ] Prove scalar override, list/map merge behavior, defaults, provenance, invalid overlays, absent
       overlays, persistence, deletion, and parity across VM, workspace, agent, and session kinds.
 - [ ] Update command reference, completions, sample configuration or manifest teaching, and guide
