@@ -112,9 +112,11 @@ class _DiscoveryConnection:
         self.targets = targets
         self.closed = False
         self.calls: list[str] = []
+        self.timeouts: list[float | None] = []
 
-    def call(self, method: str) -> dict[str, object]:
+    def call(self, method: str, *, timeout: float | None = None) -> dict[str, object]:
         self.calls.append(method)
+        self.timeouts.append(timeout)
         return {"targetInfos": self.targets}
 
     def close(self) -> None:
@@ -159,9 +161,16 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
             _DiscoveryConnection([{"type": "page", "targetId": "page-1"}]),
         )
         connection_calls: list[tuple[str, float]] = []
+        required_handshake_time = 1.0
+        elapsed = 0.0
 
         def connect(url: str, *, timeout: float) -> _DiscoveryConnection:
+            nonlocal elapsed
             connection_calls.append((url, timeout))
+            if timeout < required_handshake_time:
+                elapsed += timeout
+                raise TimeoutError
+            elapsed += required_handshake_time
             return connections[len(connection_calls) - 1]
 
         with tempfile.TemporaryDirectory() as directory:
@@ -170,13 +179,16 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
             sleeps = 0
 
             def publish(seconds: float) -> None:
-                nonlocal sleeps
-                del seconds
+                nonlocal elapsed, sleeps
+                elapsed += seconds
                 sleeps += 1
                 if sleeps == 1:
                     port_path.write_text("9222\n/devtools/browser/browser-1\n", encoding="utf-8")
 
-            with mock.patch.object(chromium_support.time, "sleep", side_effect=publish):
+            with (
+                mock.patch.object(chromium_support.time, "monotonic", side_effect=lambda: elapsed),
+                mock.patch.object(chromium_support.time, "sleep", side_effect=publish),
+            ):
                 target = chromium_support.devtools_target(
                     Path(directory), process, connection_factory=connect
                 )
@@ -187,7 +199,14 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
             [url for url, _ in connection_calls],
             ["ws://127.0.0.1:9222/devtools/browser/browser-1"] * 2,
         )
-        self.assertTrue(all(0 < timeout <= 0.25 for _, timeout in connection_calls))
+        self.assertTrue(all(
+            required_handshake_time <= timeout <= chromium_support.DEVTOOLS_STARTUP_TIMEOUT
+            for _, timeout in connection_calls
+        ))
+        self.assertTrue(all(
+            connection.timeouts[0] is not None and connection.timeouts[0] < timeout
+            for connection, (_, timeout) in zip(connections, connection_calls, strict=True)
+        ))
         self.assertEqual(
             [connection.calls for connection in connections],
             [["Target.getTargets"]] * 2,
@@ -221,6 +240,44 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
                 )
 
         self.assertLessEqual(elapsed, chromium_support.DEVTOOLS_STARTUP_TIMEOUT)
+
+    def test_devtools_target_reapplies_the_deadline_after_a_slow_handshake(self) -> None:
+        process = _FakeProcess()
+        elapsed = 0.0
+
+        class QueryStallConnection(_DiscoveryConnection):
+            def call(self, method: str, *, timeout: float | None = None) -> dict[str, object]:
+                nonlocal elapsed
+                self.calls.append(method)
+                self.timeouts.append(timeout)
+                if timeout is None:
+                    raise AssertionError("Target discovery has no timeout")
+                elapsed += timeout
+                raise TimeoutError
+
+        connection = QueryStallConnection([])
+
+        def connect(url: str, *, timeout: float) -> _DiscoveryConnection:
+            nonlocal elapsed
+            del url
+            elapsed += min(7, timeout)
+            return connection
+
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "DevToolsActivePort").write_text(
+                "9222\n/devtools/browser/browser-1\n", encoding="utf-8"
+            )
+            with (
+                mock.patch.object(chromium_support.time, "monotonic", side_effect=lambda: elapsed),
+                self.assertRaises(AssertionError),
+            ):
+                chromium_support.devtools_target(
+                    Path(directory), process, connection_factory=connect
+                )
+
+        self.assertEqual(elapsed, chromium_support.DEVTOOLS_STARTUP_TIMEOUT)
+        self.assertEqual(connection.calls, ["Target.getTargets"])
+        self.assertTrue(connection.closed)
 
     def test_devtools_target_allows_the_full_slow_startup_window(self) -> None:
         process = _FakeProcess()

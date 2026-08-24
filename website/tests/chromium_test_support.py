@@ -106,7 +106,15 @@ class DevToolsConnection:
                 if final:
                     return json.loads(payload)
 
-    def call(self, method: str, params: dict[str, object] | None = None) -> dict[str, object]:
+    def call(
+        self,
+        method: str,
+        params: dict[str, object] | None = None,
+        *,
+        timeout: float | None = None,
+    ) -> dict[str, object]:
+        if timeout is not None:
+            self.socket.settimeout(timeout)
         self.identifier += 1
         identifier = self.identifier
         self._send(
@@ -154,10 +162,13 @@ def devtools_target(
             if not 0 < port < 65536 or not browser_path.startswith("/"):
                 raise ValueError("Chromium published an invalid DevTools endpoint")
             connection = connection_factory(
-                f"ws://127.0.0.1:{port}{browser_path}", timeout=min(0.25, remaining)
+                f"ws://127.0.0.1:{port}{browser_path}", timeout=remaining
             )
             try:
-                result = connection.call("Target.getTargets")
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError
+                result = connection.call("Target.getTargets", timeout=remaining)
             finally:
                 connection.close()
             targets = result.get("targetInfos")
