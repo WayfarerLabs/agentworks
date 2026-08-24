@@ -2,7 +2,7 @@
 
 <!-- cspell:ignore sdds -->
 
-- Status: R2 accepted; R4 design correction ready for review
+- Status: R2 ready for merge; R4 design accepted
 - Date: 2026-08-23
 - Last revised: 2026-08-24
 - Requirements: [frd.md](./frd.md)
@@ -10,19 +10,20 @@
 - R2 contract: [store-contract.md](./store-contract.md)
 - Instance-spec CLI: [instance-spec-cli.md](./instance-spec-cli.md)
 - Code basis: `333b70bf`, based on `main` with accepted R1 PR #632 merged
-- Delivery vehicle: merged R1 artifact PR #632, then one implementation branch and draft PR for R2
-  through R5
+- Delivery vehicle: merged R1 artifact PR #632; R2 store and accepted R4 design in PR #636;
+  remaining phases as independently green PRs from `main`, stacked only for actual dependencies
 
 ## Delivery posture
 
-R1 is an independently reviewed coordination artifact merged through PR #632. R2 through R5 remain
-one feature because their value is the complete declaration, applied-state, and resolved-spec arc.
-The implementation PR now bases directly on `main`.
+R1 is an independently reviewed coordination artifact merged through PR #632. R2 is an independently
+valuable, always-green persistence increment in PR #636: it establishes the store contract needed by
+this effort and wave 4 without exposing the later SSH, merge, CLI, and diagnostic risk in the same
+review. Its accepted R4 design artifacts remain response material for the later implementation.
 
-The implementation PR uses two checkpoints while it remains draft:
-
-1. R2 store contract and implementation, reviewed by the saga lead before R3 lifecycle code lands.
-2. The complete R2 through R5 feature, reviewed and validated before merge intent.
+After PR #636 merges, each remaining delivery starts from `main` and is independently complete,
+reviewed, and green. Stack a PR only when its implementation actually depends on an unmerged
+predecessor, and merge the stack bottom-up. Each PR receives the validation appropriate to the
+behavior it introduces before merge intent.
 
 Completed checkboxes are immutable. The effort lead updates them only after the named behavior,
 tests, permanent collateral, and independent review are complete.
