@@ -708,7 +708,7 @@ panes you want preloaded into a session's window.
 order of every unlisted member. By default, or with `--to-index 0`, the listed members move to the
 front. `--to-index N` starts them at zero-based final session index `N`; valid positions range from
 zero through the number of unlisted members, inclusive. `--to-back` is the same as that upper bound.
-The two options are mutually exclusive.
+The two options are mutually exclusive. Session indices exclude the optional admin-shell window.
 
 `console list` accepts `--vm`, `--workspace`, and `--agent` to narrow the result set. Each filter
 takes a single value or a comma-separated list (`--workspace ws1,ws2`); commas within a filter are

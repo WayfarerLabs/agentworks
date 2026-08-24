@@ -301,14 +301,16 @@ def reorder_sessions(
     *,
     console_name: str,
     session_names: list[str],
-    start_index: int | None = 0,
+    start_index: int | None = None,
+    to_back: bool = False,
 ) -> None:
     """Move *session_names* to a chosen point in a console's session order.
 
-    The first listed session starts at zero-based final session index
-    *start_index*. ``None`` means after every unlisted member. Listed sessions
-    keep argument order, and unlisted members keep their current relative
-    order. The console's optional ``--admin--`` window is not a session index.
+    The first listed session starts at *start_index* among unlisted members;
+    omitting placement defaults to the front, while *to_back* places it after
+    all unlisted members. Listed sessions keep argument order, and unlisted
+    members keep their current relative order. The console's optional
+    ``--admin--`` window is not a session index.
 
     Every name in *session_names* must already be a member; duplicates and
     an empty list are rejected (matches create_console's stance that
@@ -320,6 +322,13 @@ def reorder_sessions(
     listed sessions are already in the requested order at the requested position.
     """
     console = _require_console(db, console_name)
+
+    if to_back and start_index is not None:
+        raise ValidationError(
+            "start_index and to_back are mutually exclusive",
+            entity_kind="console",
+            entity_name=console_name,
+        )
 
     if not session_names:
         raise ValidationError(
@@ -354,7 +363,7 @@ def reorder_sessions(
     # `remaining` preserves DB order for unlisted members regardless of where
     # in the input list those names appeared.
     remaining = [n for n in current_order if n not in seen]
-    resolved_index = len(remaining) if start_index is None else start_index
+    resolved_index = len(remaining) if to_back else (start_index if start_index is not None else 0)
     if not 0 <= resolved_index <= len(remaining):
         raise ValidationError(
             f"session reorder index {resolved_index} is outside the valid range "

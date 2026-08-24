@@ -273,7 +273,10 @@ def console_reorder_sessions(
     ],
     to_index: Annotated[
         int | None,
-        typer.Option("--to-index", help="Place the first listed session at this zero-based session index"),
+        typer.Option(
+            "--to-index",
+            help="Start at this index among unlisted members (valid from zero through their count)",
+        ),
     ] = None,
     to_back: Annotated[
         bool,
@@ -287,13 +290,13 @@ def console_reorder_sessions(
     if to_index is not None and to_back:
         raise typer.BadParameter("use --to-index or --to-back, not both")
 
-    start_index = None if to_back else (to_index if to_index is not None else 0)
     reorder_sessions(
         get_db(),
         load_config(),
         console_name=name,
         session_names=sessions,
-        start_index=start_index,
+        start_index=to_index,
+        to_back=to_back,
     )
 
 
