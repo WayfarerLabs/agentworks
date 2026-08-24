@@ -712,8 +712,9 @@ be blocked or failed.
 `agw secret list` is static and shows lookup identifiers, candidates, readiness, and opt-outs.
 `agw secret describe <name>` adds provider-aware zero-impact preview; add `--allow-interaction` for
 maximum-impact preview. `agw doctor` has a **Secret backends** readiness group and one zero-impact
-preview row per secret. Preview may read a provider and safely discard the value; it never returns a
-value.
+preview row per secret. An impact-limited indeterminate preview is an expected OK result with a
+compact note, not a warning. Preview may read a provider and safely discard the value; it never
+returns a value.
 
 `agw secret verify NAME...` uses the same preview contract, deduplicates names in first-written
 order, and renders one value-free row per unique name. It exits 0 only when all are `available`.

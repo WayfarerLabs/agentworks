@@ -137,8 +137,9 @@ together: the former allows out-of-band impact, while the latter still disables 
 - `agw secret verify NAME...` uses the same preview contract. It deduplicates names in first-written
   order, renders every result, and exits 1 unless all are available. Add `--allow-interaction` only
   with consent for possible prompt or out-of-band authentication.
-- `agw doctor` previews each secret at zero impact. Available is OK; missing, indeterminate, and
-  blocked are WARN; failed is FAIL. JSON includes a value-free `secret_preview` for secret checks.
+- `agw doctor` previews each secret at zero impact. Available and indeterminate are OK; missing and
+  blocked are WARN; failed is FAIL. Indeterminate keeps a compact note but no interaction hint. JSON
+  includes a value-free `secret_preview` for secret checks.
 - `agw env show --resolve` is the explicit partial-reveal surface. It resolves independent secrets;
   normal command resolution remains all-required.
 

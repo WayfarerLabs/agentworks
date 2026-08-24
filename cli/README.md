@@ -377,8 +377,10 @@ secret -- operator-declared and auto-declared alike (auto-declared rows, e.g. `t
 and the `git-token-*` family, carry an `(auto)` marker; they are exactly the secrets most likely to
 prompt at command time):
 
-- **OK** for an aggregate `available` preview.
-- **WARN** for `missing`, `indeterminate`, or `blocked`.
+- **OK** for an aggregate `available` or `indeterminate` preview. An `indeterminate` row keeps a
+  compact note explaining the limited preview without treating expected interaction avoidance as a
+  health warning.
+- **WARN** for `missing` or `blocked`.
 - **FAIL** for a hard provider or mapping failure.
 
 Source-applicability detail (per-source soft-skip reasons, inactive mappings, per-secret references)

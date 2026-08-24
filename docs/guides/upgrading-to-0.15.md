@@ -20,11 +20,11 @@ never contacted a secret provider. Now a secret check can be `FAIL`, and `agw do
 whenever any check fails. A CI job that gates on `agw doctor`'s exit code can turn red from a
 provider hiccup with no code change on your side.
 
-This happens through the closed preview-status mapping: `available` is OK, `failed` is FAIL,
-everything else (`missing`, `indeterminate`, `blocked`) is WARN. `failed` is real: for the built-in
-`env-var` and `prompt` backends it only fires on a malformed value (a NUL byte), but for a provider
-backend like `onepassword` it fires on the provider's own failure modes when doctor's zero-impact
-preview is actually able to reach the provider (see the next section for when that happens):
+This happens through the closed preview-status mapping: `available` and `indeterminate` are OK,
+`missing` and `blocked` are WARN, and `failed` is FAIL. `failed` is real: for the built-in `env-var`
+and `prompt` backends it only fires on a malformed value (a NUL byte), but for a provider backend
+like `onepassword` it fires on the provider's own failure modes when doctor's zero-impact preview is
+actually able to reach the provider (see the next section for when that happens):
 sign-out/authentication failure, the referenced item or field not found, connectivity or timeout, or
 an unrecognized non-zero exit from `op`.
 
@@ -34,23 +34,21 @@ Run `agw secret describe NAME --allow-interaction` for a definitive read on what
 doing. If your CI only needs a pass/fail signal, the exit code is still exactly that; if it parses
 the human table, the `[FAIL]` label and the `Results: ... fail` line are unchanged in shape.
 
-## `agw doctor` now WARNs on an unset secret that used to read as `ok`
+## `agw doctor` notes an unset prompt secret without warning
 
-Independent of the FAIL case above, a healthy default install can show new warnings after the
-upgrade. Pre-0.15, doctor's prediction for an unset secret falling through to the default `prompt`
-source always reported `ok: would attempt via prompt`, regardless of whether a TTY was actually
-available. Doctor's zero-impact preview now asks the `prompt` backend for real, and at zero operator
-impact prompt cannot give a definite answer (asking would BE the operator action), so it returns
-`indeterminate` when a TTY is available or `blocked` when it is not ; both map to WARN. The message
-changes from `would attempt via prompt` to something like
-`indeterminate/operator-impact-limited; source=prompt` in an interactive shell, or
-`blocked/tty-unavailable; source=prompt` in CI.
+Pre-0.15, doctor's prediction for an unset secret falling through to the default `prompt` source
+reported `ok: would attempt via prompt`, regardless of whether a TTY was actually available.
+Doctor's zero-impact preview now asks the `prompt` backend for real, and at zero operator impact
+prompt cannot give a definite answer because asking would be the operator action. It returns
+`indeterminate` when a TTY is available and keeps the row OK with a compact
+`indeterminate/operator-impact-limited; source=prompt` note. With no usable TTY it returns
+`blocked/tty-unavailable; source=prompt`, which is a warning because command-time prompting is not
+possible in that environment.
 
-**What to do:** this is not a regression, it is a more honest answer, but a script or dashboard that
-alerted on "0 warn" will need to accept this new baseline warning for every secret that relies on
-the prompt fallback. Configure the value in an earlier source (an environment variable, or a
-provider mapping) to get back to `ok`, or accept the warning as informational: doctor has no
-`--allow-interaction` flag to force a definitive answer here.
+**What to do:** no action is needed for an indeterminate row. Doctor deliberately avoids operator
+interaction, and that uncertainty is expected. A blocked row still means the current environment
+cannot use the prompt fallback; configure the value in an earlier non-TTY source if the command must
+run there. Doctor has no `--allow-interaction` flag to force a definitive answer.
 
 ## `agw doctor`, `agw secret describe`, and preflight now perform provider I/O
 
@@ -81,7 +79,7 @@ that `agw doctor` and every command's preflight now make a real provider call on
 matter of routine, which adds latency and a new failure surface (see the FAIL section above) to
 operations that used to be pure and local. If that is unwanted, do not set unattended auth (or set
 `app_authentication_impact: operator-action`, the default) purely to make doctor look clean; the
-WARN above is expected in that case.
+compact indeterminate OK note is expected in that case.
 
 ## `agw secret verify`'s output vocabulary and columns changed wholesale
 

@@ -184,7 +184,10 @@ def test_secret_checks_use_only_explicit_tty_access(
     assert unavailable_row.secret_preview is not None
     assert available_row.secret_preview is not None
     assert unavailable_row.secret_preview.status is PreviewStatus.BLOCKED
+    assert unavailable_row.status is Status.WARN
     assert available_row.secret_preview.status is PreviewStatus.INDETERMINATE
+    assert available_row.status is Status.OK
+    assert available_row.hint is None
 
 
 def test_secret_checks_preview_the_sorted_declared_union_once(

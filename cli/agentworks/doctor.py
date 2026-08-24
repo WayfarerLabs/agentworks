@@ -255,17 +255,21 @@ def _secret_check(
 
     auto = getattr(decl.origin, "variant", None) == "auto-declared"
     label = f"Secret {name!r} (auto)" if auto else f"Secret {name!r}"
-    status = (
-        Status.OK
-        if preview.status is PreviewStatus.AVAILABLE
-        else (Status.FAIL if preview.status is PreviewStatus.FAILED else Status.WARN)
-    )
+    status = {
+        PreviewStatus.AVAILABLE: Status.OK,
+        PreviewStatus.MISSING: Status.WARN,
+        PreviewStatus.INDETERMINATE: Status.OK,
+        PreviewStatus.BLOCKED: Status.WARN,
+        PreviewStatus.FAILED: Status.FAIL,
+    }[preview.status]
     reason = f"/{preview.reason}" if preview.reason is not None else ""
     return HealthCheck(
         label,
         status,
         f"{preview.status.value}{reason}; source={preview.source or 'none'}",
-        hint=preview_hint(preview, interaction_opt_in=False),
+        hint=(
+            None if preview.status is PreviewStatus.INDETERMINATE else preview_hint(preview, interaction_opt_in=False)
+        ),
         secret_preview=preview,
     )
 
