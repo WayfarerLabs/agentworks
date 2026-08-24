@@ -1,0 +1,13 @@
+# Line endings are LF everywhere: in the object store and in the working tree.
+#
+# Without this file, Git honors each contributor's core.autocrlf. On Windows
+# that is commonly true, so a checkout materializes CRLF while .editorconfig
+# declares end_of_line = lf and Prettier enforces it. The repository's own
+# linter then contradicts itself on that platform: ./scripts/lint-files.sh
+# reports a style failure for every text file, and its --fix pass rewrites the
+# whole tree to LF, which leaves several hundred files listed as modified even
+# though no content changed. CI never sees this because CI runs on Linux.
+#
+# text=auto keeps Git's binary detection, so only files Git considers text are
+# converted. eol=lf is what pins the working-tree side on every platform.
+* text=auto eol=lf
