@@ -26,7 +26,7 @@ The additive `instance_records` table has this semantic shape:
 | `instance_kind`   | One of `vm`, `workspace`, `agent`, or `session`.                                      |
 | `instance_name`   | The stable name used by the owning instance table.                                    |
 | `record_type`     | A private repository discriminator, initially `desired-overlay` or `applied-state`.   |
-| `record_key`      | `spec` for the one desired overlay, or a domain-owned applied-state slice key.        |
+| `record_key`      | `spec` for the one desired overlay, or a repository-enumerated applied-slice key.     |
 | `payload_version` | A positive version selected by the consuming domain's codec.                          |
 | `value_json`      | Canonical JSON object encoding of the domain payload.                                 |
 | `recorded_at`     | UTC time at which this value became authoritative.                                    |
@@ -43,6 +43,12 @@ Database constraints enforce the desired-overlay and applied-state envelopes but
 operation semantics on unknown future private record types. Their owning consumers define those
 semantics when they add named repository methods.
 
+The repository closes keys within each known record type. For `applied-state`, a public closed key
+type and valid instance-kind/key pairs are checked on writes and persisted reads. Adding a key is a
+reviewable repository change; a caller cannot create one by spelling a new string. The current keys
+are VM-only: `hardware-provenance` and `ssh-identity`. Workspace, agent, and session applied-state
+keys are empty until a reviewed consumer adds them.
+
 There is deliberately no polymorphic foreign key. Typed instance-deletion paths remove their owned
 records in the same transaction that removes the owner. This avoids a universal instance parent
 table while preserving lifecycle cleanup.
@@ -56,7 +62,8 @@ The repository boundary uses three frozen value records:
 - `DesiredOverlayRecord(instance_kind, instance_name, payload, recorded_at)` is desired declaration
   only. Its absence means no instance overlay.
 - `AppliedStateSlice(instance_kind, instance_name, key, payload, operation, recorded_at)` is
-  evidence established by one completed lifecycle operation. Its absence means not recorded.
+  evidence established by one completed lifecycle operation. Its key uses the closed
+  `AppliedStateKey` type. Its absence means not recorded.
 
 The repository validates persisted JSON and envelope invariants on every read. A missing row returns
 `None` or an empty tuple according to the named method. A present malformed row raises `StateError`;
@@ -74,15 +81,13 @@ clear_desired_overlay(instance_kind, instance_name) -> None
 list_desired_overlays(instance_kind) -> tuple[DesiredOverlayRecord, ...]
 
 get_applied_slices(instance_kind, instance_name) -> tuple[AppliedStateSlice, ...]
-replace_applied_slices(instance_kind, instance_name, operation, slices) -> tuple[AppliedStateSlice, ...]
+replace_applied_slices(instance_kind, instance_name, operation, slices: Mapping[AppliedStateKey, VersionedPayload]) -> tuple[AppliedStateSlice, ...]
 list_applied_slices(instance_kind) -> tuple[AppliedStateSlice, ...]
-
-delete_instance_records(instance_kind, instance_name) -> None
 ```
 
-No public method accepts `record_type`, raw JSON text, a SQL fragment, or an arbitrary filter.
-Future integration applied-state and artifact ownership consumers add named methods to this closed
-surface. They do not gain a generic escape hatch.
+No public method accepts `record_type`, a caller-authored record key, raw JSON text, a SQL fragment,
+or an arbitrary filter. Future integration applied-state and artifact ownership consumers add named
+methods to this closed surface. They do not gain a generic escape hatch.
 
 `replace_applied_slices` canonical-encodes every supplied payload before writing. It then inserts or
 replaces the supplied slice keys with one operation and one timestamp in a single transaction.
@@ -98,8 +103,8 @@ therefore participate in an enclosing read-only snapshot, and writes participate
 
 Each standalone repository mutation commits before returning. Inside an explicit transaction it
 defers the commit to the outer boundary. Multi-slice replacement always creates or joins a
-transaction, so callers never observe only part of one lifecycle checkpoint. Instance deletion and
-record deletion use the same rule.
+transaction, so callers never observe only part of one lifecycle checkpoint. Owner deletion and its
+private record cleanup use the same connection and transaction.
 
 The repository opens no connection, sidecar, cache, unit of work, or independent transaction
 manager.
@@ -114,6 +119,9 @@ A new consumer is complete only when it adds all of the following together:
 4. Persisted-boundary tests for absent, valid, malformed, and unsupported-version data.
 5. Lifecycle or declaration integration that writes only facts the operation can prove.
 6. Permanent documentation updates beside the code.
+
+A new slice within an existing record type also adds its repository-owned closed key and valid
+instance-kind pairing in the same change. Callers never supply an unregistered string key.
 
 New table columns are justified only by query or integrity requirements shared across consumers.
 Consumer-specific payload fields remain in the versioned JSON object. Integration applied-state and

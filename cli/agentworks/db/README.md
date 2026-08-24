@@ -8,14 +8,17 @@ writes join its transaction.
 
 The `instance_records` table is a storage envelope, not a public record API. Callers use the named
 desired-overlay and applied-state methods on `InstanceStateRepository`. They cannot choose a record
-type, provide raw JSON or SQL, or issue arbitrary filters. The repository owns canonical JSON object
-encoding and treats a malformed persisted envelope as `StateError`, never as an absent record.
+type or caller-authored record key, provide raw JSON or SQL, or issue arbitrary filters. The
+repository owns canonical JSON object encoding and treats a malformed persisted envelope as
+`StateError`, never as an absent record.
 
 Desired overlays express current intent. Applied slices are evidence from a completed lifecycle
-operation. `replace_applied_slices` replaces only the supplied slice keys, with one operation and
-one timestamp, and preserves all unrelated facts. Empty replacement is a no-op. Existing instances
-have no synthesized records: absence means not recorded until a lifecycle operation establishes
-state.
+operation. Applied slices use a repository-owned closed key type whose valid instance-kind/key pairs
+are checked on writes and persisted reads. The current VM-only keys are `hardware-provenance` and
+`ssh-identity`; workspace, agent, and session currently accept none. `replace_applied_slices`
+replaces only the supplied slice keys, with one operation and one timestamp, and preserves all
+unrelated facts. Empty replacement is a no-op. Existing instances have no synthesized records:
+absence means not recorded until a lifecycle operation establishes state.
 
 Every owner deletion must remove its records in the same transaction. VM deletion also removes
 records for the agents, workspaces, and sessions it deletes; workspace deletion removes records for
@@ -31,6 +34,9 @@ A new consumer adds all of these together:
 3. Consumer-named repository methods for only the required reads and writes.
 4. Boundary tests for absent, valid, malformed, and unsupported-version data.
 5. Lifecycle or declaration integration that records only facts the operation can prove.
+
+A new slice on an existing record type adds its closed key and valid owner-kind pairing in
+repository code; callers cannot mint keys by spelling a new string.
 
 Consumer fields belong in the versioned JSON object unless the shared store needs them for integrity
 or a shared query. Do not add a generic blob API, runtime record-type registry, sidecar connection,

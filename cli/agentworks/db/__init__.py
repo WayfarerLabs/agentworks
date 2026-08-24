@@ -40,6 +40,7 @@ from agentworks.db.backup import (
 from agentworks.db.converters import _parse_shells
 from agentworks.db.database import Database, DatabaseDriverError
 from agentworks.db.instance_state import (
+    AppliedStateKey,
     AppliedStateSlice,
     DesiredOverlayRecord,
     InstanceKind,
@@ -86,6 +87,7 @@ __all__ = [
     "SYSTEM_SLUG_KEY",
     "AgentGrantRow",
     "AgentRow",
+    "AppliedStateKey",
     "AppliedStateSlice",
     "AutomaticBackupResult",
     "ConsoleRow",

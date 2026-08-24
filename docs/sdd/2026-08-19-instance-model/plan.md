@@ -2,7 +2,7 @@
 
 <!-- cspell:ignore sdds -->
 
-- Status: R2 ready for merge; R4 design accepted
+- Status: R2 feedback correction complete; R4 design accepted
 - Date: 2026-08-23
 - Last revised: 2026-08-24
 - Requirements: [frd.md](./frd.md)
@@ -126,6 +126,9 @@ implementation does not begin until the saga lead accepts this checkpoint. Accep
       creating an instance manifest.
 - [ ] Prove scalar override, list/map merge behavior, defaults, provenance, invalid overlays, absent
       overlays, persistence, deletion, and parity across VM, workspace, agent, and session kinds.
+- [ ] Extend VM backup's exact snapshot and archive projection for desired overlays across the VM
+      owner tree, with explicit archive versioning and safe handling for plaintext environment
+      values.
 - [ ] Update command reference, completions, sample configuration or manifest teaching, and guide
       collateral in the same phase that makes each claim true.
 
@@ -151,6 +154,8 @@ instance layer through one shared stack mechanism, and no fifth per-kind merger 
       where they compose.
 - [ ] Add preflight comparison before SSH transport and structural diagnostic facts for not
       recorded, unverifiable, match, and drift without remediation.
+- [ ] Extend the VM backup projection with the non-secret R3 applied records and prove the archive
+      does not silently omit the hardware or SSH provenance it claims to preserve.
 - [ ] Prove matching, replaced private key at the same path, stale or mismatched adjacent public
       key, encrypted OpenSSH key, encrypted legacy PEM, missing/unreadable key, absent historic
       state, successful capture, failed-operation non-capture, and atomic lifecycle behavior.
@@ -166,8 +171,8 @@ current transport will present, and no password-protected-key path regresses.
       overlaid contributors truthfully.
 - [ ] Extend live-instance show with current declared resolution, applied slices, and explicit not
       recorded, match, drift, or unverifiable comparison state in the existing read snapshot.
-- [ ] Add doctor batch reads and structural SSH drift checks without opening a sidecar or repeating
-      one query per instance.
+- [ ] Add doctor batch reads, owner-existence validation for orphaned records, and structural SSH
+      drift checks without opening a sidecar or repeating one query per instance.
 - [ ] Preserve JSON v1 fields and add only optional tagged data; keep human and JSON facts
       reconciled without prose-policing tests.
 - [ ] Prove effective CPU, memory, disk, and swap are available before `vm create`; template and

@@ -55,7 +55,7 @@ PRIMARY KEY (instance_kind, instance_name, record_type, record_key)
 instance_kind    vm | workspace | agent | session
 instance_name    owning instance name
 record_type      private repository discriminator
-record_key       spec or a domain-owned slice key
+record_key       spec or a repository-enumerated slice key
 payload_version  positive domain payload version
 value_json       canonical JSON object
 recorded_at      authoritative UTC timestamp
@@ -85,6 +85,10 @@ object that a domain codec has already validated on write and validates again on
 repository rejects a malformed persisted JSON object with `StateError`; it does not convert
 corruption into absence.
 
+Known record types also close their key space in repository code. Applied-state methods accept a
+closed key type, and both writes and persisted reads enforce valid instance-kind/key pairs. A caller
+cannot create a new slice by spelling a string.
+
 Standalone writes commit before returning. Inside `Database.transaction()` they defer to the outer
 boundary. Applied-slice replacement encodes the complete input first, then inserts or replaces the
 supplied keys with one operation and timestamp in one transaction. It leaves unrelated slices
@@ -103,6 +107,9 @@ A later consumer extends the repository in code with:
 2. a private repository discriminator;
 3. consumer-named methods for its exact reads and writes; and
 4. malformed, unsupported-version, lifecycle, and projection tests.
+
+A new slice on an existing record type adds its repository-owned key and valid owner-kind pairing in
+the same reviewed change.
 
 It does not register a plugin-provided record type at runtime or call a generic get/put method. Wave
 4 can add integration applied-state this way without changing table, connection, transaction,

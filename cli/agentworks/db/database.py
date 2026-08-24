@@ -134,11 +134,10 @@ class Database:
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
-        """Run multiple writes as one transaction, committing on success or
-        rolling back on exception. Nested with-blocks defer to the outermost.
+        """Compose transaction-aware operations, committing or rolling back together.
 
-        Inside this context, CRUD methods skip their per-call commits and
-        defer to the enclosing transaction.
+        Nested blocks join the outer transaction. Older CRUD methods that
+        commit directly do not participate in this composition contract.
         """
         if self._read_only:
             from agentworks.errors import StateError
@@ -155,6 +154,9 @@ class Database:
         try:
             with self._conn:
                 if not self._conn.in_transaction:
+                    # A connection context controls commit and rollback but does not
+                    # start a transaction. Begin before the caller's first read so
+                    # gather-then-write operations retain one SQLite snapshot.
                     self._conn.execute("BEGIN")
                 yield
         finally:
@@ -1099,9 +1101,10 @@ class Database:
         list[VMEventRow],
         dict[str, list[AgentGrantRow]],
     ]:
-        """Read all VM-related data in a single transaction for backup consistency.
+        """Read the currently exported VM backup rows in one transaction.
 
         Returns (vm, agents, workspaces, sessions, events, grants_by_agent).
+        Instance records are not part of this export tuple.
         """
         self._conn.execute("BEGIN")
         try:

@@ -6,7 +6,8 @@ import json
 import math
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Literal, cast
+from enum import StrEnum
+from typing import TYPE_CHECKING, Literal, TypeGuard, cast
 
 from agentworks.errors import StateError
 
@@ -24,6 +25,27 @@ _INSTANCE_KINDS = frozenset({"vm", "workspace", "agent", "session"})
 _DESIRED_OVERLAY = "desired-overlay"
 _APPLIED_STATE = "applied-state"
 _DESIRED_KEY = "spec"
+_MAX_OWNER_DISPLAY_LENGTH = 256
+
+
+class AppliedStateKey(StrEnum):
+    """Closed keys for applied facts understood by this repository."""
+
+    HARDWARE_PROVENANCE = "hardware-provenance"
+    SSH_IDENTITY = "ssh-identity"
+
+
+_APPLIED_KEYS_BY_KIND: dict[InstanceKind, frozenset[AppliedStateKey]] = {
+    "vm": frozenset(
+        {
+            AppliedStateKey.HARDWARE_PROVENANCE,
+            AppliedStateKey.SSH_IDENTITY,
+        }
+    ),
+    "workspace": frozenset(),
+    "agent": frozenset(),
+    "session": frozenset(),
+}
 
 
 @dataclass(frozen=True)
@@ -57,7 +79,7 @@ class AppliedStateSlice:
 
     instance_kind: InstanceKind
     instance_name: str
-    key: str
+    key: AppliedStateKey
     payload: VersionedPayload
     operation: str
     recorded_at: str
@@ -98,8 +120,31 @@ def _encode_payload(payload: VersionedPayload) -> str:
     )
 
 
-def _state_error(detail: str) -> StateError:
-    return StateError(f"instance state record is malformed: {detail}", entity_kind="database")
+def _is_safe_display_name(instance_name: object) -> TypeGuard[str]:
+    return (
+        isinstance(instance_name, str)
+        and bool(instance_name)
+        and instance_name.isprintable()
+        and len(repr(instance_name)) <= _MAX_OWNER_DISPLAY_LENGTH
+    )
+
+
+def _state_error(detail: str, row: sqlite3.Row) -> StateError:
+    instance_kind = row["instance_kind"]
+    instance_name = row["instance_name"]
+    hint = "Back up the state database before repairing it, or restore a known-good backup."
+    if isinstance(instance_kind, str) and instance_kind in _INSTANCE_KINDS and _is_safe_display_name(instance_name):
+        return StateError(
+            f"stored {instance_kind} {instance_name!r} instance state is malformed: {detail}",
+            entity_kind=instance_kind,
+            entity_name=instance_name,
+            hint=hint,
+        )
+    return StateError(
+        f"instance state record is malformed: {detail}",
+        entity_kind="database",
+        hint=hint,
+    )
 
 
 def _validate_instance_kind(instance_kind: str) -> InstanceKind:
@@ -110,9 +155,16 @@ def _validate_instance_kind(instance_kind: str) -> InstanceKind:
 
 def _validate_identity(instance_kind: str, instance_name: str) -> InstanceKind:
     validated_kind = _validate_instance_kind(instance_kind)
-    if not instance_name:
-        raise ValueError("instance_name must not be empty")
+    if not isinstance(instance_name, str) or not instance_name:
+        raise ValueError("instance_name must be a nonempty string")
     return validated_kind
+
+
+def _validate_applied_key(instance_kind: InstanceKind, key: AppliedStateKey) -> None:
+    if not isinstance(key, AppliedStateKey):
+        raise TypeError("applied-state slice keys must use AppliedStateKey")
+    if key not in _APPLIED_KEYS_BY_KIND[instance_kind]:
+        raise ValueError(f"applied-state key {key.value!r} is not valid for {instance_kind}")
 
 
 def _decode_common(row: sqlite3.Row) -> tuple[InstanceKind, str, VersionedPayload, str]:
@@ -123,37 +175,37 @@ def _decode_common(row: sqlite3.Row) -> tuple[InstanceKind, str, VersionedPayloa
     recorded_at = row["recorded_at"]
 
     if not isinstance(instance_kind, str) or instance_kind not in _INSTANCE_KINDS:
-        raise _state_error("invalid instance kind")
+        raise _state_error("invalid instance kind", row)
     if not isinstance(instance_name, str) or not instance_name:
-        raise _state_error("invalid instance name")
+        raise _state_error("invalid instance name", row)
     if type(payload_version) is not int or payload_version <= 0:
-        raise _state_error("invalid payload version")
+        raise _state_error("invalid payload version", row)
     if not isinstance(value_json, str):
-        raise _state_error("payload is not text")
+        raise _state_error("payload is not text", row)
     try:
         value = json.loads(value_json)
     except (json.JSONDecodeError, RecursionError, UnicodeDecodeError) as error:
-        raise _state_error("payload is not valid JSON") from error
+        raise _state_error("payload is not valid JSON", row) from error
     if not isinstance(value, dict):
-        raise _state_error("payload is not a JSON object")
+        raise _state_error("payload is not a JSON object", row)
     try:
         payload = VersionedPayload(payload_version, cast("JsonObject", value))
     except (RecursionError, TypeError, ValueError) as error:
-        raise _state_error("payload contains invalid JSON values") from error
+        raise _state_error("payload contains invalid JSON values", row) from error
     try:
         canonical_value = _encode_payload(payload)
     except (TypeError, ValueError) as error:
-        raise _state_error("payload contains invalid JSON values") from error
+        raise _state_error("payload contains invalid JSON values", row) from error
     if canonical_value != value_json:
-        raise _state_error("payload is not canonically encoded")
+        raise _state_error("payload is not canonically encoded", row)
     if not isinstance(recorded_at, str):
-        raise _state_error("recorded timestamp is not text")
+        raise _state_error("recorded timestamp is not text", row)
     try:
         parsed_recorded_at = datetime.strptime(recorded_at, "%Y-%m-%dT%H:%M:%SZ")
     except ValueError as error:
-        raise _state_error("recorded timestamp is invalid") from error
+        raise _state_error("recorded timestamp is invalid", row) from error
     if parsed_recorded_at.strftime("%Y-%m-%dT%H:%M:%SZ") != recorded_at:
-        raise _state_error("recorded timestamp is not canonical UTC")
+        raise _state_error("recorded timestamp is not canonical UTC", row)
     return cast("InstanceKind", instance_kind), instance_name, payload, recorded_at
 
 
@@ -245,15 +297,14 @@ class InstanceStateRepository:
         instance_kind: InstanceKind,
         instance_name: str,
         operation: str,
-        slices: Mapping[str, VersionedPayload],
+        slices: Mapping[AppliedStateKey, VersionedPayload],
     ) -> tuple[AppliedStateSlice, ...]:
-        _validate_identity(instance_kind, instance_name)
-        if not operation:
-            raise ValueError("operation must not be empty")
-        encoded: list[tuple[str, VersionedPayload, str]] = []
+        validated_kind = _validate_identity(instance_kind, instance_name)
+        if not isinstance(operation, str) or not operation:
+            raise ValueError("operation must be a nonempty string")
+        encoded: list[tuple[AppliedStateKey, VersionedPayload, str]] = []
         for key, payload in slices.items():
-            if not key:
-                raise ValueError("applied-state slice keys must not be empty")
+            _validate_applied_key(validated_kind, key)
             encoded.append((key, payload, _encode_payload(payload)))
         if not encoded:
             return self.get_applied_slices(instance_kind, instance_name)
@@ -295,11 +346,6 @@ class InstanceStateRepository:
         ).fetchall()
         return tuple(self._to_applied(row) for row in rows)
 
-    def delete_instance_records(self, instance_kind: InstanceKind, instance_name: str) -> None:
-        _validate_identity(instance_kind, instance_name)
-        with self._transaction():
-            self._delete_instance_records_for_names(instance_kind, (instance_name,))
-
     def _delete_instance_records_for_names(
         self,
         instance_kind: InstanceKind,
@@ -317,21 +363,27 @@ class InstanceStateRepository:
     @staticmethod
     def _to_desired(row: sqlite3.Row) -> DesiredOverlayRecord:
         if row["record_type"] != _DESIRED_OVERLAY or row["record_key"] != _DESIRED_KEY:
-            raise _state_error("invalid desired-overlay discriminator")
+            raise _state_error("invalid desired-overlay discriminator", row)
         if row["operation"] is not None:
-            raise _state_error("desired overlay has lifecycle provenance")
+            raise _state_error("desired overlay has lifecycle provenance", row)
         instance_kind, instance_name, payload, recorded_at = _decode_common(row)
         return DesiredOverlayRecord(instance_kind, instance_name, payload, recorded_at)
 
     @staticmethod
     def _to_applied(row: sqlite3.Row) -> AppliedStateSlice:
         if row["record_type"] != _APPLIED_STATE:
-            raise _state_error("invalid applied-state discriminator")
-        key = row["record_key"]
-        operation = row["operation"]
-        if not isinstance(key, str) or not key:
-            raise _state_error("invalid applied-state slice key")
-        if not isinstance(operation, str) or not operation:
-            raise _state_error("applied state has no lifecycle provenance")
+            raise _state_error("invalid applied-state discriminator", row)
         instance_kind, instance_name, payload, recorded_at = _decode_common(row)
+        raw_key = row["record_key"]
+        operation = row["operation"]
+        if not isinstance(raw_key, str):
+            raise _state_error("invalid applied-state slice key", row)
+        try:
+            key = AppliedStateKey(raw_key)
+        except ValueError as error:
+            raise _state_error("unknown applied-state slice key", row) from error
+        if key not in _APPLIED_KEYS_BY_KIND[instance_kind]:
+            raise _state_error("applied-state slice key is invalid for its owner kind", row)
+        if not isinstance(operation, str) or not operation:
+            raise _state_error("applied state has no lifecycle provenance", row)
         return AppliedStateSlice(instance_kind, instance_name, key, payload, operation, recorded_at)

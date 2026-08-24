@@ -9,6 +9,7 @@ import pytest
 
 from agentworks.db import (
     MIGRATIONS,
+    AppliedStateKey,
     AppliedStateSlice,
     Database,
     DesiredOverlayRecord,
@@ -18,6 +19,8 @@ from agentworks.db import (
 )
 from agentworks.db import instance_state as state_module
 from agentworks.errors import StateError
+
+_HISTORIC_SESSION_NAME = f"{'w' * 40}--{'a' * 30}"
 
 
 def _build_schema(path: Path, target_version: int) -> None:
@@ -170,6 +173,14 @@ def test_desired_overlay_round_trip_upsert_clear_and_canonical_storage(tmp_path:
         database.close()
 
 
+def test_persistence_accepts_nonempty_historic_owner_names(db: Database) -> None:
+    assert len(_HISTORIC_SESSION_NAME) > 64
+
+    expected = db.instance_state.put_desired_overlay("session", _HISTORIC_SESSION_NAME, _payload("intent"))
+
+    assert db.instance_state.get_desired_overlay("session", _HISTORIC_SESSION_NAME) == expected
+
+
 def test_applied_partial_replace_preserves_unrelated_slices_and_orders_results(
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
@@ -181,9 +192,15 @@ def test_applied_partial_replace_preserves_unrelated_slices_and_orders_results(
         "vm",
         "alpha",
         "vm-create",
-        {"ssh": _payload("old-ssh"), "config": _payload("old-config")},
+        {
+            AppliedStateKey.SSH_IDENTITY: _payload("old-ssh"),
+            AppliedStateKey.HARDWARE_PROVENANCE: _payload("old-hardware"),
+        },
     )
-    assert [record.key for record in first] == ["config", "ssh"]
+    assert [record.key for record in first] == [
+        AppliedStateKey.HARDWARE_PROVENANCE,
+        AppliedStateKey.SSH_IDENTITY,
+    ]
     assert {record.recorded_at for record in first} == {"2026-08-23T12:00:00Z"}
     assert {record.operation for record in first} == {"vm-create"}
 
@@ -191,33 +208,91 @@ def test_applied_partial_replace_preserves_unrelated_slices_and_orders_results(
         "vm",
         "alpha",
         "vm-reinit",
-        {"config": _payload("new-config", version=2), "packages": _payload("new-packages")},
+        {AppliedStateKey.HARDWARE_PROVENANCE: _payload("new-hardware", version=2)},
     )
-    assert [record.key for record in second] == ["config", "packages", "ssh"]
+    assert [record.key for record in second] == [
+        AppliedStateKey.HARDWARE_PROVENANCE,
+        AppliedStateKey.SSH_IDENTITY,
+    ]
     by_key = {record.key: record for record in second}
-    assert by_key["ssh"] == first[1]
-    assert by_key["config"].payload == _payload("new-config", version=2)
-    assert by_key["config"].recorded_at == by_key["packages"].recorded_at == "2026-08-23T12:01:00Z"
-    assert by_key["config"].operation == by_key["packages"].operation == "vm-reinit"
+    assert by_key[AppliedStateKey.SSH_IDENTITY] == first[1]
+    assert by_key[AppliedStateKey.HARDWARE_PROVENANCE].payload == _payload("new-hardware", version=2)
+    assert by_key[AppliedStateKey.HARDWARE_PROVENANCE].recorded_at == "2026-08-23T12:01:00Z"
+    assert by_key[AppliedStateKey.HARDWARE_PROVENANCE].operation == "vm-reinit"
 
-    db.instance_state.replace_applied_slices("vm", "zeta", "vm-create", {"later": _payload("z")})
+    db.instance_state.replace_applied_slices(
+        "vm",
+        "zeta",
+        "vm-create",
+        {AppliedStateKey.SSH_IDENTITY: _payload("z")},
+    )
     listed = db.instance_state.list_applied_slices("vm")
     assert [(record.instance_name, record.key) for record in listed] == [
-        ("alpha", "config"),
-        ("alpha", "packages"),
-        ("alpha", "ssh"),
-        ("zeta", "later"),
+        ("alpha", AppliedStateKey.HARDWARE_PROVENANCE),
+        ("alpha", AppliedStateKey.SSH_IDENTITY),
+        ("zeta", AppliedStateKey.SSH_IDENTITY),
     ]
 
 
 def test_empty_applied_replace_is_a_no_op(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
-    existing = db.instance_state.replace_applied_slices("session", "one", "resume", {"spec": _payload("v")})
+    existing = db.instance_state.replace_applied_slices(
+        "vm",
+        "one",
+        "vm-create",
+        {AppliedStateKey.HARDWARE_PROVENANCE: _payload("v")},
+    )
 
     def fail_timestamp() -> str:
         raise AssertionError("an empty replacement must not mint provenance")
 
     monkeypatch.setattr(state_module, "_utc_now", fail_timestamp)
-    assert db.instance_state.replace_applied_slices("session", "one", "resume", {}) == existing
+    assert db.instance_state.replace_applied_slices("vm", "one", "vm-create", {}) == existing
+
+
+@pytest.mark.parametrize("operation", ["", 1, True])
+def test_applied_replace_rejects_invalid_operation_before_writing(db: Database, operation: object) -> None:
+    with pytest.raises(ValueError):
+        db.instance_state.replace_applied_slices(
+            "vm",
+            "alpha",
+            operation,  # type: ignore[arg-type]
+            {AppliedStateKey.HARDWARE_PROVENANCE: _payload("value")},
+        )
+
+    assert db.instance_state.get_applied_slices("vm", "alpha") == ()
+
+
+def test_applied_replace_rejects_unknown_key_before_writing(db: Database) -> None:
+    with pytest.raises(TypeError):
+        db.instance_state.replace_applied_slices(
+            "vm",
+            "alpha",
+            "vm-create",
+            {"unknown": _payload("value")},  # type: ignore[dict-item]
+        )
+
+    assert db.instance_state.get_applied_slices("vm", "alpha") == ()
+
+
+@pytest.mark.parametrize("instance_kind", ["workspace", "agent", "session"])
+@pytest.mark.parametrize(
+    "key",
+    [AppliedStateKey.HARDWARE_PROVENANCE, AppliedStateKey.SSH_IDENTITY],
+)
+def test_applied_replace_rejects_cross_kind_keys_before_writing(
+    db: Database,
+    instance_kind: str,
+    key: AppliedStateKey,
+) -> None:
+    with pytest.raises(ValueError):
+        db.instance_state.replace_applied_slices(
+            instance_kind,  # type: ignore[arg-type]
+            "alpha",
+            "resume",
+            {key: _payload("value")},
+        )
+
+    assert db.instance_state.get_applied_slices(instance_kind, "alpha") == ()  # type: ignore[arg-type]
 
 
 def test_replace_preencodes_all_payloads_before_writing(db: Database) -> None:
@@ -229,7 +304,10 @@ def test_replace_preencodes_all_payloads_before_writing(db: Database) -> None:
             "vm",
             "alpha",
             "vm-create",
-            {"first": _payload("valid"), "second": invalid},
+            {
+                AppliedStateKey.HARDWARE_PROVENANCE: _payload("valid"),
+                AppliedStateKey.SSH_IDENTITY: invalid,
+            },
         )
     assert db.instance_state.get_applied_slices("vm", "alpha") == ()
 
@@ -237,7 +315,7 @@ def test_replace_preencodes_all_payloads_before_writing(db: Database) -> None:
 def test_replace_rolls_back_every_slice_when_one_statement_fails(db: Database) -> None:
     db._conn.execute(  # noqa: SLF001
         "CREATE TRIGGER reject_second_slice BEFORE INSERT ON instance_records "
-        "WHEN NEW.record_key = 'second' BEGIN SELECT RAISE(ABORT, 'rejected'); END"
+        "WHEN NEW.record_key = 'ssh-identity' BEGIN SELECT RAISE(ABORT, 'rejected'); END"
     )
     db._conn.commit()  # noqa: SLF001
 
@@ -246,7 +324,10 @@ def test_replace_rolls_back_every_slice_when_one_statement_fails(db: Database) -
             "vm",
             "alpha",
             "vm-create",
-            {"first": _payload("one"), "second": _payload("two")},
+            {
+                AppliedStateKey.HARDWARE_PROVENANCE: _payload("one"),
+                AppliedStateKey.SSH_IDENTITY: _payload("two"),
+            },
         )
     assert db.instance_state.get_applied_slices("vm", "alpha") == ()
 
@@ -254,7 +335,7 @@ def test_replace_rolls_back_every_slice_when_one_statement_fails(db: Database) -
 def test_failed_nested_replace_does_not_poison_or_partially_write_outer_transaction(db: Database) -> None:
     db._conn.execute(  # noqa: SLF001
         "CREATE TRIGGER reject_second_slice BEFORE INSERT ON instance_records "
-        "WHEN NEW.record_key = 'second' BEGIN SELECT RAISE(ABORT, 'rejected'); END"
+        "WHEN NEW.record_key = 'ssh-identity' BEGIN SELECT RAISE(ABORT, 'rejected'); END"
     )
     db._conn.commit()  # noqa: SLF001
 
@@ -264,7 +345,10 @@ def test_failed_nested_replace_does_not_poison_or_partially_write_outer_transact
                 "vm",
                 "alpha",
                 "vm-create",
-                {"first": _payload("one"), "second": _payload("two")},
+                {
+                    AppliedStateKey.HARDWARE_PROVENANCE: _payload("one"),
+                    AppliedStateKey.SSH_IDENTITY: _payload("two"),
+                },
             )
         expected = db.instance_state.put_desired_overlay("vm", "alpha", _payload("intent"))
 
@@ -274,12 +358,17 @@ def test_failed_nested_replace_does_not_poison_or_partially_write_outer_transact
 
 def test_repository_writes_join_an_enclosing_transaction(db: Database) -> None:
     with pytest.raises(RuntimeError), db.transaction():
-        db.instance_state.put_desired_overlay("workspace", "alpha", _payload("intent"))
-        db.instance_state.replace_applied_slices("workspace", "alpha", "repair", {"spec": _payload("fact")})
+        db.instance_state.put_desired_overlay("vm", "alpha", _payload("intent"))
+        db.instance_state.replace_applied_slices(
+            "vm",
+            "alpha",
+            "vm-create",
+            {AppliedStateKey.HARDWARE_PROVENANCE: _payload("fact")},
+        )
         raise RuntimeError("roll back")
 
-    assert db.instance_state.get_desired_overlay("workspace", "alpha") is None
-    assert db.instance_state.get_applied_slices("workspace", "alpha") == ()
+    assert db.instance_state.get_desired_overlay("vm", "alpha") is None
+    assert db.instance_state.get_applied_slices("vm", "alpha") == ()
 
 
 def test_transaction_joins_an_existing_implicit_transaction(db: Database) -> None:
@@ -312,15 +401,33 @@ def test_repository_reads_share_a_read_only_snapshot(tmp_path: Path) -> None:
         writer.close()
 
 
+def test_write_transaction_establishes_snapshot_before_its_first_read(tmp_path: Path) -> None:
+    path = tmp_path / "state.db"
+    Database(path).close()
+    snapshot = Database(path)
+    writer = Database(path)
+    try:
+        with snapshot.transaction():
+            assert snapshot.list_vms() == []
+            writer.insert_vm("new-vm", site="local", hostname="new-vm")
+            assert snapshot.list_vms() == []
+
+        assert [vm.name for vm in snapshot.list_vms()] == ["new-vm"]
+    finally:
+        snapshot.close()
+        writer.close()
+
+
 def test_malformed_persisted_record_raises_instead_of_becoming_absent(tmp_path: Path) -> None:
     path = tmp_path / "state.db"
     Database(path).close()
     connection = sqlite3.connect(path)
+    secret = "do-not-disclose-this-persisted-value"
     connection.execute(
         "INSERT INTO instance_records "
         "(instance_kind, instance_name, record_type, record_key, payload_version, "
         "value_json, recorded_at, operation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        ("vm", "alpha", "desired-overlay", "spec", 1, "not-json", "2026-08-23T12:00:00Z", None),
+        ("vm", "alpha", "desired-overlay", "spec", 1, secret, "2026-08-23T12:00:00Z", None),
     )
     connection.commit()
     connection.close()
@@ -329,7 +436,115 @@ def test_malformed_persisted_record_raises_instead_of_becoming_absent(tmp_path: 
     try:
         with pytest.raises(StateError) as raised:
             database.instance_state.get_desired_overlay("vm", "alpha")
+        assert raised.value.entity_kind == "vm"
+        assert raised.value.entity_name == "alpha"
+        assert raised.value.hint is not None
+        assert "alpha" in str(raised.value)
+        assert secret not in str(raised.value)
+    finally:
+        database.close()
+
+
+@pytest.mark.parametrize(
+    ("instance_kind", "record_key"),
+    [
+        ("vm", "unknown"),
+        *[
+            (instance_kind, key.value)
+            for instance_kind in ("workspace", "agent", "session")
+            for key in (AppliedStateKey.HARDWARE_PROVENANCE, AppliedStateKey.SSH_IDENTITY)
+        ],
+    ],
+)
+def test_persisted_unknown_or_cross_kind_applied_key_is_malformed(
+    tmp_path: Path,
+    instance_kind: str,
+    record_key: str,
+) -> None:
+    path = tmp_path / f"{instance_kind}.db"
+    Database(path).close()
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "INSERT INTO instance_records "
+        "(instance_kind, instance_name, record_type, record_key, payload_version, "
+        "value_json, recorded_at, operation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (instance_kind, "alpha", "applied-state", record_key, 1, "{}", "2026-08-23T12:00:00Z", "op"),
+    )
+    connection.commit()
+    connection.close()
+
+    database = Database(path, read_only=True)
+    try:
+        with pytest.raises(StateError) as raised:
+            database.instance_state.get_applied_slices(instance_kind, "alpha")  # type: ignore[arg-type]
+        assert raised.value.entity_kind == instance_kind
+        assert raised.value.entity_name == "alpha"
+        assert raised.value.hint is not None
+    finally:
+        database.close()
+
+
+@pytest.mark.parametrize("unsafe_name", ["bad\nname", "x" * 1_000])
+def test_malformed_unsafe_owner_identity_uses_database_context(tmp_path: Path, unsafe_name: str) -> None:
+    path = tmp_path / "state.db"
+    Database(path).close()
+    connection = sqlite3.connect(path)
+    secret = "do-not-disclose-this-persisted-value"
+    connection.execute(
+        "INSERT INTO instance_records "
+        "(instance_kind, instance_name, record_type, record_key, payload_version, "
+        "value_json, recorded_at, operation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ("vm", unsafe_name, "desired-overlay", "spec", 1, secret, "2026-08-23T12:00:00Z", None),
+    )
+    connection.commit()
+    connection.close()
+
+    database = Database(path, read_only=True)
+    try:
+        with pytest.raises(StateError) as raised:
+            database.instance_state.list_desired_overlays("vm")
         assert raised.value.entity_kind == "database"
+        assert raised.value.entity_name is None
+        assert raised.value.hint is not None
+        assert unsafe_name not in str(raised.value)
+        assert secret not in str(raised.value)
+    finally:
+        database.close()
+
+
+@pytest.mark.parametrize(
+    ("instance_kind", "instance_name"),
+    [
+        ("session", _HISTORIC_SESSION_NAME),
+        ("vm", "legacy.vm"),
+    ],
+)
+def test_malformed_printable_legacy_owner_is_attributed(
+    tmp_path: Path,
+    instance_kind: str,
+    instance_name: str,
+) -> None:
+    path = tmp_path / f"{instance_kind}.db"
+    Database(path).close()
+    connection = sqlite3.connect(path)
+    secret = "do-not-disclose-this-persisted-value"
+    connection.execute(
+        "INSERT INTO instance_records "
+        "(instance_kind, instance_name, record_type, record_key, payload_version, "
+        "value_json, recorded_at, operation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (instance_kind, instance_name, "desired-overlay", "spec", 1, secret, "2026-08-23T12:00:00Z", None),
+    )
+    connection.commit()
+    connection.close()
+
+    database = Database(path, read_only=True)
+    try:
+        with pytest.raises(StateError) as raised:
+            database.instance_state.list_desired_overlays(instance_kind)  # type: ignore[arg-type]
+        assert raised.value.entity_kind == instance_kind
+        assert raised.value.entity_name == instance_name
+        assert instance_name in str(raised.value)
+        assert secret not in str(raised.value)
     finally:
         database.close()
 
@@ -350,10 +565,17 @@ def test_owner_and_aggregate_deletes_remove_all_owned_records(db: Database) -> N
     vm, workspace, agent, session = _create_owner_tree(db)
     for kind, name in (("vm", vm), ("workspace", workspace), ("agent", agent), ("session", session)):
         db.instance_state.put_desired_overlay(kind, name, _payload(name))
+    db.instance_state.replace_applied_slices(
+        "vm",
+        vm,
+        "vm-create",
+        {AppliedStateKey.HARDWARE_PROVENANCE: _payload("hardware")},
+    )
 
     db.delete_vm(vm)
     for kind, name in (("vm", vm), ("workspace", workspace), ("agent", agent), ("session", session)):
         assert db.instance_state.get_desired_overlay(kind, name) is None
+    assert db.instance_state.get_applied_slices("vm", vm) == ()
 
     _, workspace, agent, session = _create_owner_tree(db, "-individual")
     for kind, name in (("workspace", workspace), ("agent", agent), ("session", session)):
@@ -395,7 +617,7 @@ def test_owner_delete_rolls_back_record_cleanup_when_owner_delete_fails(db: Data
     assert db.instance_state.get_desired_overlay("vm", vm) == expected
 
 
-def test_standalone_mutations_commit_before_returning(tmp_path: Path) -> None:
+def test_standalone_desired_mutations_commit_before_returning(tmp_path: Path) -> None:
     path = tmp_path / "state.db"
     writer = Database(path)
     reader = Database(path, read_only=True)
@@ -403,7 +625,7 @@ def test_standalone_mutations_commit_before_returning(tmp_path: Path) -> None:
         expected = writer.instance_state.put_desired_overlay("vm", "alpha", _payload("intent"))
         assert reader.instance_state.get_desired_overlay("vm", "alpha") == expected
 
-        writer.instance_state.delete_instance_records("vm", "alpha")
+        writer.instance_state.clear_desired_overlay("vm", "alpha")
         assert reader.instance_state.get_desired_overlay("vm", "alpha") is None
     finally:
         reader.close()
@@ -413,7 +635,14 @@ def test_standalone_mutations_commit_before_returning(tmp_path: Path) -> None:
 def test_carriers_are_frozen() -> None:
     payload = _payload("value")
     desired = DesiredOverlayRecord("vm", "alpha", payload, "2026-08-23T12:00:00Z")
-    applied = AppliedStateSlice("vm", "alpha", "spec", payload, "vm-create", "2026-08-23T12:00:00Z")
+    applied = AppliedStateSlice(
+        "vm",
+        "alpha",
+        AppliedStateKey.HARDWARE_PROVENANCE,
+        payload,
+        "vm-create",
+        "2026-08-23T12:00:00Z",
+    )
     with pytest.raises(AttributeError):
         desired.instance_name = "other"  # type: ignore[misc]
     with pytest.raises(AttributeError):
