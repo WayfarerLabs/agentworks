@@ -1,7 +1,7 @@
 # Child SDDs
 
 - Status: Active ledger
-- Last updated: 2026-08-21
+- Last updated: 2026-08-24
 
 This is the saga's tracking document, the analog of an ordinary SDD's `plan.md`. Completed
 checkboxes are immutable records, per the standard rule. The saga SDD locks when every entry here is
@@ -474,10 +474,62 @@ tracked by the open boxes below until each has a delivered recipient-side artifa
       applied-state dependency; the resolved-spec surfaces discharge the routed effective-spec field
       finding, and applied state makes the operator's key-change hazard (2026-08-18) a detectable
       fact
-- [ ] Picked up by an effort lead (assessment phase first, per the FRD's rulings)
-- [ ] Store contract reviewed by the saga lead (gates wave 4's applied-state slice)
+- [x] Picked up by an effort lead; the R1 database assessment delivered and accepted (PR #632). The
+      estate half is evidenced to a high bar (ten-table inventory rebuilt from the real migration
+      ladder by the integration lane, zero raw-SQL bypasses outside the owning modules). The
+      saga-lead round corrected the SSH conclusions: passphrase-protected keys are fully verifiable
+      because the `openssh-key-v1` file carries its public blob in cleartext, so the gap being
+      deferred did not exist, and `ssh-keygen -lf PRIVATE_PATH` must never serve as evidence because
+      it prefers an adjacent `.pub` and will report a mismatched key's fingerprint, the exact false
+      pass the check exists to catch. Both facts were reproduced independently by two lanes
+- [x] Store contract reviewed and accepted by the saga lead (PR #636, the R2 checkpoint): the
+      consumer surface is closed and enumerated with no generic query or blob API, migration v32 is
+      additive with absence proven rather than promised (a malformed row raises instead of reading
+      as absent), wave 4 can register a record kind without touching the table, and owner deletion
+      now cleans up records inside one transaction, closing the torn-write gap R1 identified. Ruling
+      recorded: the `instance_kind` CHECK stays closed, since a future one-line widening is the
+      correct cost rather than loosening a live invariant for a consumer with no requirements
+- [ ] Correction round on the assessment before it becomes the factual base: the integration lane
+      found that `insert_vm` already persists resolved cpus, memory, and disk and nothing rewrites
+      them, so the VM hardware slice is applied state on the row today. R3 must decide whether its
+      record duplicates, supersedes, or references those columns; the saga lead's lean is not to
+      duplicate, because two writable copies of one fact drift, and drift between them would be
+      indistinguishable from the drift this effort exists to detect
 - [ ] Implementation phases per the effort's plan
 - [ ] Locked
+
+### Child SDD (from the non-TTY restart): 2026-08-18-secret-preview-contract
+
+- [x] Seeded from the problem statement alone (PR #619 opened 2026-08-19), the restart the operator
+      directed after two abandoned attempts. Verified across its rounds as a genuinely fresh
+      derivation rather than the closed attempt re-imported: classification moved from the backend
+      class to the configured source plus runtime facts, which fixes the hazard the closed attempt
+      carried (one backend, two authentication paths)
+- [x] Artifact rounds converged (saga-lead, complexity, and integration lanes): the `secret list`
+      JSON v1 compat projection specified alongside `describe`'s, the contract-sentinel decision
+      routed for operator disposition rather than asserted, the guide's consent paragraph extended
+      to the new surface, and the operator-facing behavior-change callout written covering all three
+      `--non-interactive` changes with guidance for unattended paths
+- [x] Implementation verified at exact heads: the field-evidence acceptance traced through the code
+      (a ready out-of-band source resolves from a non-TTY ordinary command with no flags), value
+      containment proven under adversarial reading including a forged-result injection test, the
+      preview/resolution precedence divergence found and fixed at the root with parallel matrices
+      pinning both sides, and the complete-batch doom guard shown to change only when futile work
+      stops, never whether an operation succeeds
+- [x] Live-verified on a real VM: a sentinel measured absent across eight preview surfaces, and the
+      positive control run on the one revealing surface so the negative results mean what they
+      appear to (`env show --resolve` reveals; without it, silent)
+- [x] Merged and locked (PR #619, 2026-08-24); `locked.md` binds at merge. The operator accepted
+      three documented test limits (real OnePassword authentication and desktop approval, live `op`
+      error-token classification, fixed-TTY color parity)
+- [ ] Residual carried here because the SDD is locked and may later be tombstoned: one coverage case
+      the saga lead asked for was not written and is not named in `locked.md`. It is a batch where
+      one name has already RESOLVED at an earlier source before a different name triggers the doom
+      guard, asserting the resolved value survives intact and the doomed name gets its unattributed
+      outcome without reaching the next source. The behavior is correct by trace at the merged head;
+      the gap is that a future refactor of that loop can break it silently, in the case where the
+      cost is an already-fetched secret value. Whoever next touches `secrets/resolve.py`'s batch
+      loop should add it
 
 ### Not yet spawned
 
