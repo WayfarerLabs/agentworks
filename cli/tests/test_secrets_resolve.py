@@ -539,6 +539,54 @@ def test_broker_rejects_use_outside_the_selected_method(
     assert "sentinel-provider-value" not in str(error.value)
 
 
+@pytest.mark.parametrize("preview", [False, True], ids=("resolution", "preview"))
+def test_broker_rejects_use_during_selected_method_lookup(preview: bool) -> None:
+    class Client(_Client):
+        preview_results = {"a": PreviewAvailable()}
+        resolution_results = {"a": BackendResolved("unused")}
+        calls: ClassVar[list[tuple[str, ...]]] = []
+        lookups: ClassVar[list[str]] = []
+
+        def __getattribute__(self, name: str) -> object:
+            if name in {"preview", "resolve"}:
+                type(self).lookups.append(name)
+                broker = object.__getattribute__(self, "interaction_broker")
+                assert broker is not None
+                broker.request_secret("a")
+            return super().__getattribute__(name)
+
+    source = _source("dispatch", client_type=Client, supports_tty=True)
+    broker = _Broker("sentinel-provider-value")
+    if preview:
+        result = preview_batch(
+            [_decl("a")],
+            [source],
+            impact=OperatorImpact.ALLOW,
+            tty_access=TtyInteractionAccess.AVAILABLE,
+            interaction_broker=broker,
+        )["a"]
+        assert result.status is PreviewStatus.FAILED
+        assert result.reason == FailureReason.BACKEND_PROTOCOL.value
+        rendered = repr(result)
+        expected_lookup = "preview"
+    else:
+        outcome = resolve_batch(
+            [_decl("a")],
+            [source],
+            tty_access=TtyInteractionAccess.AVAILABLE,
+            interaction_broker=broker,
+        ).outcomes[0]
+        assert outcome.status is ResolutionStatus.FAILED
+        assert outcome.reason is FailureReason.BACKEND_PROTOCOL
+        rendered = repr(outcome)
+        expected_lookup = "resolve"
+
+    assert Client.lookups == [expected_lookup]
+    assert Client.calls == []
+    assert broker.calls == []
+    assert "sentinel-provider-value" not in rendered
+
+
 class _ExitContext(AbstractContextManager[SecretSourceClient]):
     def __init__(self, *, cleanup_error: BaseException | None = None, exit_result: object = False) -> None:
         self.cleanup_error = cleanup_error

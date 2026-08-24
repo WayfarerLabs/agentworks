@@ -510,10 +510,11 @@ def _drive_source(
         with driver as client:
             returned: object
             if isinstance(intent, PreviewIntent):
+                preview_method = client.preview
                 if broker is not None:
                     broker._activate()
                 try:
-                    returned = client.preview(requests)
+                    returned = preview_method(requests)
                 finally:
                     if broker is not None:
                         broker._revoke()
@@ -523,10 +524,11 @@ def _drive_source(
                     preview_impact=intent.impact,
                     supports_tty_interaction=supports_tty,
                 )
+            resolve_method = client.resolve
             if broker is not None:
                 broker._activate()
             try:
-                returned = client.resolve(requests)
+                returned = resolve_method(requests)
             finally:
                 if broker is not None:
                     broker._revoke()

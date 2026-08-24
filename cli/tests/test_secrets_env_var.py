@@ -40,12 +40,16 @@ def _resolve(decl: SecretDecl) -> tuple[dict[str, str], str | None]:
 
 def test_pytest_isolates_nonintegration_secret_env_and_preserves_integration_injection(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cli_root = Path(__file__).resolve().parents[1]
     probe = tmp_path / "test_aw_secret_isolation_probe.py"
+    observations = tmp_path / "observations"
+    observations.mkdir()
     probe.write_text(
         """\
 import os
+from pathlib import Path
 
 import pytest
 
@@ -54,15 +58,20 @@ def test_nonintegration_isolated_then_test_can_set(monkeypatch):
     assert "AW_SECRET_PRESET_PROBE" not in os.environ
     monkeypatch.setenv("AW_SECRET_PRESET_PROBE", "test-value")
     assert os.environ["AW_SECRET_PRESET_PROBE"] == "test-value"
+    (Path(os.environ["AGENTWORKS_PYTEST_PROBE_DIR"]) / "nonintegration").touch()
 
 
 @pytest.mark.integration
 def test_integration_retains_injected_value():
     assert os.environ["AW_SECRET_PRESET_PROBE"] == "preset-not-secret"
+    (Path(os.environ["AGENTWORKS_PYTEST_PROBE_DIR"]) / "integration").touch()
 """
     )
+    monkeypatch.setenv("PYTEST_ADDOPTS", "--collect-only")
     environment = dict(os.environ)
+    environment.pop("PYTEST_ADDOPTS", None)
     environment["AW_SECRET_PRESET_PROBE"] = "preset-not-secret"
+    environment["AGENTWORKS_PYTEST_PROBE_DIR"] = str(observations)
     result = subprocess.run(
         [
             sys.executable,
@@ -83,6 +92,7 @@ def test_integration_retains_injected_value():
         text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    assert {path.name for path in observations.iterdir()} == {"integration", "nonintegration"}
 
 
 def test_factory_and_context_entry_do_not_read_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
