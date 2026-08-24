@@ -269,20 +269,35 @@ def console_reorder_sessions(
     name: Annotated[str, typer.Argument(help="Console name")],
     sessions: Annotated[
         list[str],
-        typer.Argument(
-            help=(
-                "Sessions (already members of the console) to bump to the "
-                "front, in the order they should appear after the admin-shell "
-                "window (if any)."
-            ),
-        ),
+        typer.Argument(help="Console member sessions to move, in the order they should appear."),
     ],
+    to_index: Annotated[
+        int | None,
+        typer.Option(
+            "--to-index",
+            help="Start at this index among unlisted members (valid from zero through their count)",
+        ),
+    ] = None,
+    to_back: Annotated[
+        bool,
+        typer.Option("--to-back", help="Place the listed sessions after all unlisted members"),
+    ] = False,
 ) -> None:
-    """Bump existing console members to the front of the session order."""
+    """Reorder existing console members while preserving unlisted member order."""
     from agentworks.config import load_config
     from agentworks.sessions.multi_console import reorder_sessions
 
-    reorder_sessions(get_db(), load_config(), console_name=name, session_names=sessions)
+    if to_index is not None and to_back:
+        raise typer.BadParameter("use --to-index or --to-back, not both")
+
+    reorder_sessions(
+        get_db(),
+        load_config(),
+        console_name=name,
+        session_names=sessions,
+        start_index=to_index,
+        to_back=to_back,
+    )
 
 
 @console_app.command("add-shell")
