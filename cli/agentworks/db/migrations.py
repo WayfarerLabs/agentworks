@@ -622,9 +622,9 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
     # -- committed and v31 only needs its schema-version record. -----------
     31: _rename_harness_integration_state,
     # -- Cross-kind desired and applied instance state. The envelope stays -
-    # -- stable as domain codecs add record payload versions; no existing --
-    # -- row can prove historic applied state, so this migration creates ---
-    # -- structure only and deliberately performs no backfill. -------------
+    # -- stable as domain codecs add record payload versions. Existing VM --
+    # -- hardware values lack the required operation provenance, so this ---
+    # -- migration creates structure only and performs no backfill. --------
     32: """
         CREATE TABLE instance_records (
             instance_kind  TEXT NOT NULL
@@ -632,8 +632,8 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
             instance_name  TEXT NOT NULL CHECK (length(instance_name) > 0),
             record_type    TEXT NOT NULL CHECK (length(record_type) > 0),
             record_key     TEXT NOT NULL CHECK (length(record_key) > 0),
-            schema_version INTEGER NOT NULL
-                CHECK (typeof(schema_version) = 'integer' AND schema_version > 0),
+            payload_version INTEGER NOT NULL
+                CHECK (typeof(payload_version) = 'integer' AND payload_version > 0),
             value_json     TEXT NOT NULL CHECK (typeof(value_json) = 'text'),
             recorded_at    TEXT NOT NULL,
             operation      TEXT,
@@ -752,7 +752,7 @@ _SCHEMA_SENTINEL_ADDITIONS: dict[int, dict[str, tuple[str, ...]]] = {
             "instance_name",
             "record_type",
             "record_key",
-            "schema_version",
+            "payload_version",
             "value_json",
             "recorded_at",
             "operation",

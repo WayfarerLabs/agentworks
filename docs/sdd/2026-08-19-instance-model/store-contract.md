@@ -21,21 +21,23 @@ the physical envelope as a general-purpose bag.
 
 The additive `instance_records` table has this semantic shape:
 
-| Column           | Contract                                                                              |
-| ---------------- | ------------------------------------------------------------------------------------- |
-| `instance_kind`  | One of `vm`, `workspace`, `agent`, or `session`.                                      |
-| `instance_name`  | The stable name used by the owning instance table.                                    |
-| `record_type`    | A private repository discriminator, initially `desired-overlay` or `applied-state`.   |
-| `record_key`     | `spec` for the one desired overlay, or a domain-owned applied-state slice key.        |
-| `schema_version` | A positive version selected by the consuming domain's codec.                          |
-| `value_json`     | Canonical JSON object encoding of the domain payload.                                 |
-| `recorded_at`    | UTC time at which this value became authoritative.                                    |
-| `operation`      | The lifecycle operation that established applied state; null for desired declaration. |
+| Column            | Contract                                                                              |
+| ----------------- | ------------------------------------------------------------------------------------- |
+| `instance_kind`   | One of `vm`, `workspace`, `agent`, or `session`.                                      |
+| `instance_name`   | The stable name used by the owning instance table.                                    |
+| `record_type`     | A private repository discriminator, initially `desired-overlay` or `applied-state`.   |
+| `record_key`      | `spec` for the one desired overlay, or a domain-owned applied-state slice key.        |
+| `payload_version` | A positive version selected by the consuming domain's codec.                          |
+| `value_json`      | Canonical JSON object encoding of the domain payload.                                 |
+| `recorded_at`     | UTC time at which this value became authoritative.                                    |
+| `operation`       | The lifecycle operation that established applied state; null for desired declaration. |
 
 The primary key is `(instance_kind, instance_name, record_type, record_key)`. An index beginning
-with `(instance_kind, record_type)` serves batch reads. The migration creates no rows. Current
-declarations, legacy columns, and current template resolution are never evidence of historic applied
-state.
+with `(instance_kind, record_type)` serves batch reads. The migration creates no rows. Existing VM
+hardware columns remain the authority for as-provisioned values, but they do not prove when or by
+which operation those values were applied. They therefore do not justify synthesizing new applied
+provenance for historic instances. Current declarations and template resolution are not applied
+evidence either.
 
 Database constraints enforce the desired-overlay and applied-state envelopes but do not impose
 operation semantics on unknown future private record types. Their owning consumers define those
@@ -49,7 +51,7 @@ table while preserving lifecycle cleanup.
 
 The repository boundary uses three frozen value records:
 
-- `VersionedPayload(schema_version, value)` carries one already validated domain payload as a JSON
+- `VersionedPayload(payload_version, value)` carries one already validated domain payload as a JSON
   object. The repository owns canonical encoding, not domain validation.
 - `DesiredOverlayRecord(instance_kind, instance_name, payload, recorded_at)` is desired declaration
   only. Its absence means no instance overlay.
@@ -59,7 +61,7 @@ The repository boundary uses three frozen value records:
 The repository validates persisted JSON and envelope invariants on every read. A missing row returns
 `None` or an empty tuple according to the named method. A present malformed row raises `StateError`;
 it never degrades to absence, match, or drift. The consuming domain then selects the decoder by
-`schema_version` and validates the decoded object as its own persisted-data boundary.
+`payload_version` and validates the decoded object as its own persisted-data boundary.
 
 ## Closed repository surface
 

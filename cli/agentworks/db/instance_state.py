@@ -30,12 +30,12 @@ _DESIRED_KEY = "spec"
 class VersionedPayload:
     """A domain-validated JSON object paired with its codec version."""
 
-    schema_version: int
+    payload_version: int
     value: JsonObject
 
     def __post_init__(self) -> None:
-        if type(self.schema_version) is not int or self.schema_version <= 0:
-            raise ValueError("schema_version must be a positive integer")
+        if type(self.payload_version) is not int or self.payload_version <= 0:
+            raise ValueError("payload_version must be a positive integer")
         if not isinstance(self.value, dict):
             raise TypeError("value must be a JSON object")
         _validate_json_value(self.value)
@@ -118,7 +118,7 @@ def _validate_identity(instance_kind: str, instance_name: str) -> InstanceKind:
 def _decode_common(row: sqlite3.Row) -> tuple[InstanceKind, str, VersionedPayload, str]:
     instance_kind = row["instance_kind"]
     instance_name = row["instance_name"]
-    schema_version = row["schema_version"]
+    payload_version = row["payload_version"]
     value_json = row["value_json"]
     recorded_at = row["recorded_at"]
 
@@ -126,8 +126,8 @@ def _decode_common(row: sqlite3.Row) -> tuple[InstanceKind, str, VersionedPayloa
         raise _state_error("invalid instance kind")
     if not isinstance(instance_name, str) or not instance_name:
         raise _state_error("invalid instance name")
-    if type(schema_version) is not int or schema_version <= 0:
-        raise _state_error("invalid schema version")
+    if type(payload_version) is not int or payload_version <= 0:
+        raise _state_error("invalid payload version")
     if not isinstance(value_json, str):
         raise _state_error("payload is not text")
     try:
@@ -137,7 +137,7 @@ def _decode_common(row: sqlite3.Row) -> tuple[InstanceKind, str, VersionedPayloa
     if not isinstance(value, dict):
         raise _state_error("payload is not a JSON object")
     try:
-        payload = VersionedPayload(schema_version, cast("JsonObject", value))
+        payload = VersionedPayload(payload_version, cast("JsonObject", value))
     except (RecursionError, TypeError, ValueError) as error:
         raise _state_error("payload contains invalid JSON values") from error
     try:
@@ -190,17 +190,17 @@ class InstanceStateRepository:
         with self._transaction():
             self._connection.execute(
                 "INSERT INTO instance_records "
-                "(instance_kind, instance_name, record_type, record_key, schema_version, "
+                "(instance_kind, instance_name, record_type, record_key, payload_version, "
                 "value_json, recorded_at, operation) VALUES (?, ?, ?, ?, ?, ?, ?, NULL) "
                 "ON CONFLICT(instance_kind, instance_name, record_type, record_key) DO UPDATE SET "
-                "schema_version = excluded.schema_version, value_json = excluded.value_json, "
+                "payload_version = excluded.payload_version, value_json = excluded.value_json, "
                 "recorded_at = excluded.recorded_at, operation = NULL",
                 (
                     instance_kind,
                     instance_name,
                     _DESIRED_OVERLAY,
                     _DESIRED_KEY,
-                    payload.schema_version,
+                    payload.payload_version,
                     value_json,
                     recorded_at,
                 ),
@@ -268,7 +268,7 @@ class InstanceStateRepository:
                     instance_name,
                     _APPLIED_STATE,
                     key,
-                    payload.schema_version,
+                    payload.payload_version,
                     value_json,
                     recorded_at,
                     operation,
@@ -277,10 +277,10 @@ class InstanceStateRepository:
         with self._transaction():
             self._connection.execute(
                 "INSERT INTO instance_records "
-                "(instance_kind, instance_name, record_type, record_key, schema_version, "
+                "(instance_kind, instance_name, record_type, record_key, payload_version, "
                 f"value_json, recorded_at, operation) VALUES {values_sql} "
                 "ON CONFLICT(instance_kind, instance_name, record_type, record_key) DO UPDATE SET "
-                "schema_version = excluded.schema_version, value_json = excluded.value_json, "
+                "payload_version = excluded.payload_version, value_json = excluded.value_json, "
                 "recorded_at = excluded.recorded_at, operation = excluded.operation",
                 parameters,
             )

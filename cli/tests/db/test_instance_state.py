@@ -67,7 +67,7 @@ def test_v32_migration_is_additive_and_has_the_exact_record_key_and_batch_index(
         "instance_name",
         "record_type",
         "record_key",
-        "schema_version",
+        "payload_version",
         "value_json",
         "recorded_at",
         "operation",
@@ -121,7 +121,7 @@ def test_v32_constraints_reject_invalid_envelopes(
     with pytest.raises(sqlite3.IntegrityError):
         connection.execute(
             "INSERT INTO instance_records "
-            "(instance_kind, instance_name, record_type, record_key, schema_version, "
+            "(instance_kind, instance_name, record_type, record_key, payload_version, "
             "value_json, recorded_at, operation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             values,
         )
@@ -134,7 +134,7 @@ def test_v32_envelope_does_not_invent_constraints_for_future_record_types(tmp_pa
     connection = sqlite3.connect(path)
     connection.execute(
         "INSERT INTO instance_records "
-        "(instance_kind, instance_name, record_type, record_key, schema_version, "
+        "(instance_kind, instance_name, record_type, record_key, payload_version, "
         "value_json, recorded_at, operation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         ("vm", "alpha", "future-consumer", "opaque", 1, "{}", "2026-08-23T12:00:00Z", None),
     )
@@ -161,7 +161,7 @@ def test_desired_overlay_round_trip_upsert_clear_and_canonical_storage(tmp_path:
 
         raw = _raw_rows(path)[0]
         assert raw["value_json"] == '{"value":"new"}'
-        assert raw["schema_version"] == 3
+        assert raw["payload_version"] == 3
         assert raw["operation"] is None
 
         database.instance_state.clear_desired_overlay("vm", "alpha")
@@ -318,7 +318,7 @@ def test_malformed_persisted_record_raises_instead_of_becoming_absent(tmp_path: 
     connection = sqlite3.connect(path)
     connection.execute(
         "INSERT INTO instance_records "
-        "(instance_kind, instance_name, record_type, record_key, schema_version, "
+        "(instance_kind, instance_name, record_type, record_key, payload_version, "
         "value_json, recorded_at, operation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         ("vm", "alpha", "desired-overlay", "spec", 1, "not-json", "2026-08-23T12:00:00Z", None),
     )

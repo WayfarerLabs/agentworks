@@ -129,8 +129,9 @@ instance layer through one shared stack mechanism, and no fifth per-kind merger 
 
 ## Phase 4: R3 applied instance state and SSH proving slice
 
-- [ ] Add domain-owned versioned codecs for the resolved applied specification and provisioned SSH
-      identity slices, without storing secrets, private key bytes, or passphrases.
+- [ ] Add domain-owned versioned codecs for row-backed hardware provenance and provisioned SSH
+      identity slices, without storing secrets, private key bytes, passphrases, or duplicate CPU,
+      memory, disk, and swap values.
 - [ ] Parse the authoritative public blob directly from `openssh-key-v1` private files and derive
       the OpenSSH SHA-256 fingerprint without consulting an adjacent public key or spawning a
       passphrase prompt.

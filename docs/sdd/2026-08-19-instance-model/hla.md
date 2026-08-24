@@ -55,7 +55,7 @@ instance_kind    vm | workspace | agent | session
 instance_name    owning instance name
 record_type      private repository discriminator
 record_key       spec or a domain-owned slice key
-schema_version   positive domain payload version
+payload_version  positive domain payload version
 value_json       canonical JSON object
 recorded_at      authoritative UTC timestamp
 operation        lifecycle provenance for applied state; null for desired declaration
@@ -159,7 +159,8 @@ specified in `instance-spec-cli.md`.
 
 Domain payloads live outside `agentworks.db`. The first VM codecs cover:
 
-- resolved configuration slices, divided by what lifecycle operations can actually establish; and
+- an applied-provenance marker for row-backed hardware that a post-R3 VM create actually
+  established, without copying the CPU, memory, disk, or swap values out of the VM row; and
 - provisioned SSH identity, including the configured private-key reference and either an
   authoritative public fingerprint or a recorded unverifiable outcome.
 
@@ -232,7 +233,7 @@ combine:
 
 - current template plus overlay resolution;
 - the persisted desired overlay;
-- applied slices from the same database snapshot; and
+- row-backed applied hardware values plus applied slices from the same database snapshot; and
 - structural comparison states: not recorded, unverifiable, match, or drift.
 
 `resource show` already holds one lazy read-only database transaction for live facts. Any overlay or
@@ -244,9 +245,11 @@ the same structural facts. Resolved specs include configured secret references o
 secret values.
 
 A missing or removed template is unresolved current declaration, not the built-in default. A later
-edit to the selected VM template can change currently resolved hardware while the applied record
-still describes provisioned hardware. VM reinit does not provision hardware again and must not
-record the newly resolved values as applied merely because other initialization steps succeeded.
+edit to the selected VM template can change currently resolved hardware while the VM row still
+describes provisioned hardware. The applied marker supplies operation and time proof without
+duplicating those values. Its absence on a historic row remains visibly not recorded. VM reinit does
+not provision hardware again and must not create or replace that marker merely because other
+initialization steps succeeded.
 
 ## Failure and integrity behavior
 
