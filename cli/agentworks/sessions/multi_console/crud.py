@@ -301,12 +301,14 @@ def reorder_sessions(
     *,
     console_name: str,
     session_names: list[str],
+    start_index: int | None = 0,
 ) -> None:
-    """Bump *session_names* to the front of a console's session order.
+    """Move *session_names* to a chosen point in a console's session order.
 
-    The listed sessions become the first windows (in the order given, after
-    the ``--admin--`` window if the console has one). Unlisted members keep
-    their current relative order and are pushed back.
+    The first listed session starts at zero-based final session index
+    *start_index*. ``None`` means after every unlisted member. Listed sessions
+    keep argument order, and unlisted members keep their current relative
+    order. The console's optional ``--admin--`` window is not a session index.
 
     Every name in *session_names* must already be a member; duplicates and
     an empty list are rejected (matches create_console's stance that
@@ -315,14 +317,13 @@ def reorder_sessions(
     ``tmux swap-window`` (best-effort).
 
     Short-circuits with an info message and no DB / tmux work when the
-    listed sessions are already in the requested order at the front.
+    listed sessions are already in the requested order at the requested position.
     """
     console = _require_console(db, console_name)
 
     if not session_names:
         raise ValidationError(
-            f"refusing to reorder console '{console_name}' with no sessions "
-            f"specified (pass the member names to bump to the front)",
+            f"refusing to reorder console '{console_name}' with no sessions specified (pass the member names to move)",
             entity_kind="console",
             entity_name=console_name,
         )
@@ -350,18 +351,27 @@ def reorder_sessions(
                 entity_name=name,
             )
 
-    # `remaining` preserves DB-order for unlisted members regardless of
-    # where in the input list those names appeared.
-    front = list(session_names)
+    # `remaining` preserves DB order for unlisted members regardless of where
+    # in the input list those names appeared.
     remaining = [n for n in current_order if n not in seen]
-    desired_order = front + remaining
+    resolved_index = len(remaining) if start_index is None else start_index
+    if not 0 <= resolved_index <= len(remaining):
+        raise ValidationError(
+            f"session reorder index {resolved_index} is outside the valid range "
+            f"0..{len(remaining)} for console '{console_name}'",
+            entity_kind="console",
+            entity_name=console_name,
+        )
+    desired_order = remaining[:resolved_index] + session_names + remaining[resolved_index:]
 
     if desired_order == current_order:
         output.info(f"Console '{console_name}' is already in the requested order; nothing to do.")
         return
 
     db.reorder_console_sessions(console_name, desired_order)
-    output.result(f"Reordered {len(front)} session(s) to the front of console '{console_name}'.")
+    output.result(
+        f"Reordered {len(session_names)} session(s) starting at index {resolved_index} of console '{console_name}'."
+    )
 
     with _live_best_effort(f"reorder-sessions in '{console_name}'", console_name=console_name):
         live = _mc._live_target(db, config, console.vm_name)

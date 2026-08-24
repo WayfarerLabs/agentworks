@@ -687,7 +687,7 @@ panes you want preloaded into a session's window.
 | `agw console delete <name>`                         | Tear down and remove the console                                  |
 | `agw console add-sessions <name> <sessions...>`     | Add session windows                                               |
 | `agw console remove-sessions <name> <sessions...>`  | Remove session windows (accepts `-y`/`--yes`)                     |
-| `agw console reorder-sessions <name> <sessions...>` | Bump member sessions to the front in the order given              |
+| `agw console reorder-sessions <name> <sessions...>` | Reorder member sessions (`--to-index N` or `--to-back`)           |
 | `agw console add-shell <name> <session>`            | Add a shell pane to a session window (accepts `--cwd`, `--admin`) |
 | `agw console restore-session <name> <session>`      | Repair one session window against its configured shell list       |
 
@@ -703,6 +703,12 @@ panes you want preloaded into a session's window.
   (one SSH round-trip; same probe `agw session list` uses). Mutually exclusive with `--all`.
   Requires the VM to be reachable.
 - `--add-admin-shell`: include a top-level admin-shell window as window 0.
+
+`console reorder-sessions` moves the listed members in argument order while preserving the relative
+order of every unlisted member. By default, or with `--to-index 0`, the listed members move to the
+front. `--to-index N` starts them at zero-based final session index `N`; valid positions range from
+zero through the number of unlisted members, inclusive. `--to-back` is the same as that upper bound.
+The two options are mutually exclusive.
 
 `console list` accepts `--vm`, `--workspace`, and `--agent` to narrow the result set. Each filter
 takes a single value or a comma-separated list (`--workspace ws1,ws2`); commas within a filter are
