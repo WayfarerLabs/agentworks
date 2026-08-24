@@ -113,15 +113,14 @@ configured reference stays worth recording as diagnostic context (it names what 
 at, which helps the message say something useful), but it is not the check. A public key fingerprint
 is not a secret, so persisting it costs nothing in exposure.
 
-Password-protected SSH private keys remain supported. An encrypted `openssh-key-v1` file carries its
-public blob outside the encrypted private section, so its fingerprint is derivable directly from the
-private-key file without a passphrase or subprocess. The implementation must support that path and
-must not use an adjacent public-key file as evidence of the private identity. Other encrypted key
-formats may not expose a public identity without unlocking; where the presented identity cannot be
-derived non-interactively, preflight says it cannot verify rather than implying a match or treating
-password protection as unsupported. Failing cleanly means naming what the instance trusts against
-what the config now presents, and what the operator can do about it; it does not mean re-applying
-anything. How an ssh-agent-held identity participates remains deliberately unresolved.
+Password-protected SSH private keys remain supported. The implementation must derive the
+authoritative public identity from the configured private identity without unlocking wherever the
+format permits, including password-protected OpenSSH keys, and must never use an adjacent public-key
+file as evidence. Where an encrypted format does not expose its public identity without unlocking,
+preflight says it cannot verify rather than implying a match or treating password protection as
+unsupported. Failing cleanly means naming what the instance trusts against what the config now
+presents, and what the operator can do about it; it does not mean re-applying anything. How an
+ssh-agent-held identity participates remains deliberately unresolved.
 
 ### R4: Instance spec overlays via the CLI
 
