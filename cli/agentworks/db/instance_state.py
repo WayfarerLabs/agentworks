@@ -322,6 +322,7 @@ class InstanceStateRepository:
         operation: str,
         slices: Mapping[AppliedStateKey, VersionedPayload],
     ) -> tuple[AppliedStateSlice, ...]:
+        """Upsert supplied slices atomically while preserving every unlisted slice."""
         validated_kind = _validate_identity(instance_kind, instance_name)
         if not isinstance(operation, str) or not operation:
             raise ValueError("operation must be a nonempty string")
