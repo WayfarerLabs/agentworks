@@ -49,11 +49,11 @@ current intent; only a successful lifecycle operation can establish applied stat
 Migration 32 adds `instance_records` with the envelope specified in `store-contract.md`:
 
 ```text
-PRIMARY KEY (instance_kind, instance_name, record_kind, record_key)
+PRIMARY KEY (instance_kind, instance_name, record_type, record_key)
 
 instance_kind    vm | workspace | agent | session
 instance_name    owning instance name
-record_kind      private repository discriminator
+record_type      private repository discriminator
 record_key       spec or a domain-owned slice key
 schema_version   positive domain payload version
 value_json       canonical JSON object
@@ -61,10 +61,10 @@ recorded_at      authoritative UTC timestamp
 operation        lifecycle provenance for applied state; null for desired declaration
 ```
 
-An index beginning with `(instance_kind, record_kind)` serves doctor and show batch reads. No row is
+An index beginning with `(instance_kind, record_type)` serves doctor and show batch reads. No row is
 backfilled. The table has no polymorphic foreign key because four owner tables would otherwise
 require a universal parent that has no product meaning. Typed deletion hooks preserve ownership.
-Database constraints enforce the two known discriminators only. Later private record kinds remain
+Database constraints enforce the two known discriminators only. Later private record types remain
 free to define their own operation semantics with their named repository methods.
 
 Schema migration remains an ordinary additive migration under the existing safe-open policy. The
@@ -75,8 +75,8 @@ and read-only open behavior are unchanged.
 
 `Database.instance_state` returns an `InstanceStateRepository` over the same SQLite connection. The
 repository owns every statement against `instance_records`, canonical JSON encoding, persisted
-envelope validation, deterministic ordering, and record-kind constants. Domain code never receives a
-raw table row and cannot select `record_kind`.
+envelope validation, deterministic ordering, and record-type constants. Domain code never receives a
+raw table row and cannot select `record_type`.
 
 The repository exposes only the methods listed in `store-contract.md`. The typed carriers
 distinguish desired overlay records from applied-state slices. Their payload is a versioned JSON
@@ -103,7 +103,7 @@ A later consumer extends the repository in code with:
 3. consumer-named methods for its exact reads and writes; and
 4. malformed, unsupported-version, lifecycle, and projection tests.
 
-It does not register a plugin-provided record kind at runtime or call a generic get/put method. Wave
+It does not register a plugin-provided record type at runtime or call a generic get/put method. Wave
 4 can add integration applied-state this way without changing table, connection, transaction,
 absence, or deletion semantics. No artifact-ownership model is invented before wave 6 states its
 requirements.

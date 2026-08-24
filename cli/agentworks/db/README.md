@@ -8,7 +8,7 @@ writes join its transaction.
 
 The `instance_records` table is a storage envelope, not a public record API. Callers use the named
 desired-overlay and applied-state methods on `InstanceStateRepository`. They cannot choose a record
-kind, provide raw JSON or SQL, or issue arbitrary filters. The repository owns canonical JSON object
+type, provide raw JSON or SQL, or issue arbitrary filters. The repository owns canonical JSON object
 encoding and treats a malformed persisted envelope as `StateError`, never as an absent record.
 
 Desired overlays express current intent. Applied slices are evidence from a completed lifecycle
@@ -27,11 +27,11 @@ private owner-batch helper.
 A new consumer adds all of these together:
 
 1. A domain-owned typed payload and versioned codec.
-2. A private record-kind discriminator in `InstanceStateRepository`.
+2. A private record-type discriminator in `InstanceStateRepository`.
 3. Consumer-named repository methods for only the required reads and writes.
 4. Boundary tests for absent, valid, malformed, and unsupported-version data.
 5. Lifecycle or declaration integration that records only facts the operation can prove.
 
 Consumer fields belong in the versioned JSON object unless the shared store needs them for integrity
-or a shared query. Do not add a generic blob API, runtime record-kind registry, sidecar connection,
+or a shared query. Do not add a generic blob API, runtime record-type registry, sidecar connection,
 cache, ORM, or independent transaction manager.

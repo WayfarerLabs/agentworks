@@ -173,7 +173,7 @@ class InstanceStateRepository:
         row = self._connection.execute(
             "SELECT * FROM instance_records "
             "WHERE instance_kind = ? AND instance_name = ? "
-            "AND record_kind = ? AND record_key = ?",
+            "AND record_type = ? AND record_key = ?",
             (instance_kind, instance_name, _DESIRED_OVERLAY, _DESIRED_KEY),
         ).fetchone()
         return None if row is None else self._to_desired(row)
@@ -190,9 +190,9 @@ class InstanceStateRepository:
         with self._transaction():
             self._connection.execute(
                 "INSERT INTO instance_records "
-                "(instance_kind, instance_name, record_kind, record_key, schema_version, "
+                "(instance_kind, instance_name, record_type, record_key, schema_version, "
                 "value_json, recorded_at, operation) VALUES (?, ?, ?, ?, ?, ?, ?, NULL) "
-                "ON CONFLICT(instance_kind, instance_name, record_kind, record_key) DO UPDATE SET "
+                "ON CONFLICT(instance_kind, instance_name, record_type, record_key) DO UPDATE SET "
                 "schema_version = excluded.schema_version, value_json = excluded.value_json, "
                 "recorded_at = excluded.recorded_at, operation = NULL",
                 (
@@ -213,14 +213,14 @@ class InstanceStateRepository:
             self._connection.execute(
                 "DELETE FROM instance_records "
                 "WHERE instance_kind = ? AND instance_name = ? "
-                "AND record_kind = ? AND record_key = ?",
+                "AND record_type = ? AND record_key = ?",
                 (instance_kind, instance_name, _DESIRED_OVERLAY, _DESIRED_KEY),
             )
 
     def list_desired_overlays(self, instance_kind: InstanceKind) -> tuple[DesiredOverlayRecord, ...]:
         _validate_instance_kind(instance_kind)
         rows = self._connection.execute(
-            "SELECT * FROM instance_records WHERE instance_kind = ? AND record_kind = ? "
+            "SELECT * FROM instance_records WHERE instance_kind = ? AND record_type = ? "
             "ORDER BY instance_name, record_key",
             (instance_kind, _DESIRED_OVERLAY),
         ).fetchall()
@@ -234,7 +234,7 @@ class InstanceStateRepository:
         _validate_identity(instance_kind, instance_name)
         rows = self._connection.execute(
             "SELECT * FROM instance_records "
-            "WHERE instance_kind = ? AND instance_name = ? AND record_kind = ? "
+            "WHERE instance_kind = ? AND instance_name = ? AND record_type = ? "
             "ORDER BY record_key",
             (instance_kind, instance_name, _APPLIED_STATE),
         ).fetchall()
@@ -277,9 +277,9 @@ class InstanceStateRepository:
         with self._transaction():
             self._connection.execute(
                 "INSERT INTO instance_records "
-                "(instance_kind, instance_name, record_kind, record_key, schema_version, "
+                "(instance_kind, instance_name, record_type, record_key, schema_version, "
                 f"value_json, recorded_at, operation) VALUES {values_sql} "
-                "ON CONFLICT(instance_kind, instance_name, record_kind, record_key) DO UPDATE SET "
+                "ON CONFLICT(instance_kind, instance_name, record_type, record_key) DO UPDATE SET "
                 "schema_version = excluded.schema_version, value_json = excluded.value_json, "
                 "recorded_at = excluded.recorded_at, operation = excluded.operation",
                 parameters,
@@ -289,7 +289,7 @@ class InstanceStateRepository:
     def list_applied_slices(self, instance_kind: InstanceKind) -> tuple[AppliedStateSlice, ...]:
         _validate_instance_kind(instance_kind)
         rows = self._connection.execute(
-            "SELECT * FROM instance_records WHERE instance_kind = ? AND record_kind = ? "
+            "SELECT * FROM instance_records WHERE instance_kind = ? AND record_type = ? "
             "ORDER BY instance_name, record_key",
             (instance_kind, _APPLIED_STATE),
         ).fetchall()
@@ -316,7 +316,7 @@ class InstanceStateRepository:
 
     @staticmethod
     def _to_desired(row: sqlite3.Row) -> DesiredOverlayRecord:
-        if row["record_kind"] != _DESIRED_OVERLAY or row["record_key"] != _DESIRED_KEY:
+        if row["record_type"] != _DESIRED_OVERLAY or row["record_key"] != _DESIRED_KEY:
             raise _state_error("invalid desired-overlay discriminator")
         if row["operation"] is not None:
             raise _state_error("desired overlay has lifecycle provenance")
@@ -325,7 +325,7 @@ class InstanceStateRepository:
 
     @staticmethod
     def _to_applied(row: sqlite3.Row) -> AppliedStateSlice:
-        if row["record_kind"] != _APPLIED_STATE:
+        if row["record_type"] != _APPLIED_STATE:
             raise _state_error("invalid applied-state discriminator")
         key = row["record_key"]
         operation = row["operation"]

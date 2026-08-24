@@ -630,25 +630,25 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
             instance_kind  TEXT NOT NULL
                 CHECK (instance_kind IN ('vm', 'workspace', 'agent', 'session')),
             instance_name  TEXT NOT NULL CHECK (length(instance_name) > 0),
-            record_kind    TEXT NOT NULL CHECK (length(record_kind) > 0),
+            record_type    TEXT NOT NULL CHECK (length(record_type) > 0),
             record_key     TEXT NOT NULL CHECK (length(record_key) > 0),
             schema_version INTEGER NOT NULL
                 CHECK (typeof(schema_version) = 'integer' AND schema_version > 0),
             value_json     TEXT NOT NULL CHECK (typeof(value_json) = 'text'),
             recorded_at    TEXT NOT NULL,
             operation      TEXT,
-            PRIMARY KEY (instance_kind, instance_name, record_kind, record_key),
+            PRIMARY KEY (instance_kind, instance_name, record_type, record_key),
             CHECK (
-                record_kind != 'desired-overlay'
+                record_type != 'desired-overlay'
                 OR (record_key = 'spec' AND operation IS NULL)
             ),
             CHECK (
-                record_kind != 'applied-state'
+                record_type != 'applied-state'
                 OR (typeof(operation) = 'text' AND length(operation) > 0)
             )
         );
-        CREATE INDEX idx_instance_records_kind_record
-            ON instance_records (instance_kind, record_kind, instance_name, record_key);
+        CREATE INDEX idx_instance_records_kind_type
+            ON instance_records (instance_kind, record_type, instance_name, record_key);
     """,
 }
 
@@ -750,7 +750,7 @@ _SCHEMA_SENTINEL_ADDITIONS: dict[int, dict[str, tuple[str, ...]]] = {
         "instance_records": (
             "instance_kind",
             "instance_name",
-            "record_kind",
+            "record_type",
             "record_key",
             "schema_version",
             "value_json",

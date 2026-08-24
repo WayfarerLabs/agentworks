@@ -10,11 +10,11 @@
 The instance state store is one additive SQLite table behind one typed repository that shares the
 owning `Database` connection. The table is a storage envelope, not a public record API. Consumers
 use closed, named methods for desired overlays and applied-state slices. A consumer cannot select a
-record kind, issue a generic filter, or pass SQL.
+record type, issue a generic filter, or pass SQL.
 
 The first implementation establishes the store and its closed repository surface. R3 supplies the
 first domain payload codecs and lifecycle calls. Later consumers add their own payload model, codec,
-private record-kind discriminator, and named repository methods. Adding a consumer must not expose
+private record-type discriminator, and named repository methods. Adding a consumer must not expose
 the physical envelope as a general-purpose bag.
 
 ## Physical envelope
@@ -25,20 +25,20 @@ The additive `instance_records` table has this semantic shape:
 | ---------------- | ------------------------------------------------------------------------------------- |
 | `instance_kind`  | One of `vm`, `workspace`, `agent`, or `session`.                                      |
 | `instance_name`  | The stable name used by the owning instance table.                                    |
-| `record_kind`    | A private repository discriminator, initially `desired-overlay` or `applied-state`.   |
+| `record_type`    | A private repository discriminator, initially `desired-overlay` or `applied-state`.   |
 | `record_key`     | `spec` for the one desired overlay, or a domain-owned applied-state slice key.        |
 | `schema_version` | A positive version selected by the consuming domain's codec.                          |
 | `value_json`     | Canonical JSON object encoding of the domain payload.                                 |
 | `recorded_at`    | UTC time at which this value became authoritative.                                    |
 | `operation`      | The lifecycle operation that established applied state; null for desired declaration. |
 
-The primary key is `(instance_kind, instance_name, record_kind, record_key)`. An index beginning
-with `(instance_kind, record_kind)` serves batch reads. The migration creates no rows. Current
+The primary key is `(instance_kind, instance_name, record_type, record_key)`. An index beginning
+with `(instance_kind, record_type)` serves batch reads. The migration creates no rows. Current
 declarations, legacy columns, and current template resolution are never evidence of historic applied
 state.
 
 Database constraints enforce the desired-overlay and applied-state envelopes but do not impose
-operation semantics on unknown future private record kinds. Their owning consumers define those
+operation semantics on unknown future private record types. Their owning consumers define those
 semantics when they add named repository methods.
 
 There is deliberately no polymorphic foreign key. Typed instance-deletion paths remove their owned
@@ -78,7 +78,7 @@ list_applied_slices(instance_kind) -> tuple[AppliedStateSlice, ...]
 delete_instance_records(instance_kind, instance_name) -> None
 ```
 
-No public method accepts `record_kind`, raw JSON text, a SQL fragment, or an arbitrary filter.
+No public method accepts `record_type`, raw JSON text, a SQL fragment, or an arbitrary filter.
 Future integration applied-state and artifact ownership consumers add named methods to this closed
 surface. They do not gain a generic escape hatch.
 
@@ -107,7 +107,7 @@ manager.
 A new consumer is complete only when it adds all of the following together:
 
 1. A domain-owned typed payload model and versioned codec.
-2. A private record-kind discriminator owned by the repository.
+2. A private record-type discriminator owned by the repository.
 3. Closed, consumer-named repository methods with the minimum required query shapes.
 4. Persisted-boundary tests for absent, valid, malformed, and unsupported-version data.
 5. Lifecycle or declaration integration that writes only facts the operation can prove.
@@ -122,7 +122,7 @@ artifact ownership receive no speculative schema in this effort.
 The store does not provide:
 
 - a public blob or key-value API;
-- generic record-kind registration by plugins;
+- generic record-type registration by plugins;
 - arbitrary filters or caller-authored SQL;
 - backfill of applied state;
 - drift comparison or remediation;

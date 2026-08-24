@@ -65,7 +65,7 @@ def test_v32_migration_is_additive_and_has_the_exact_record_key_and_batch_index(
     assert [column[1] for column in columns] == [
         "instance_kind",
         "instance_name",
-        "record_kind",
+        "record_type",
         "record_key",
         "schema_version",
         "value_json",
@@ -77,9 +77,9 @@ def test_v32_migration_is_additive_and_has_the_exact_record_key_and_batch_index(
         row[1]: [item[2] for item in connection.execute(f"PRAGMA index_info('{row[1]}')")]
         for row in connection.execute("PRAGMA index_list(instance_records)")
     }
-    assert indexes["idx_instance_records_kind_record"] == [
+    assert indexes["idx_instance_records_kind_type"] == [
         "instance_kind",
-        "record_kind",
+        "record_type",
         "instance_name",
         "record_key",
     ]
@@ -121,20 +121,20 @@ def test_v32_constraints_reject_invalid_envelopes(
     with pytest.raises(sqlite3.IntegrityError):
         connection.execute(
             "INSERT INTO instance_records "
-            "(instance_kind, instance_name, record_kind, record_key, schema_version, "
+            "(instance_kind, instance_name, record_type, record_key, schema_version, "
             "value_json, recorded_at, operation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             values,
         )
     connection.close()
 
 
-def test_v32_envelope_does_not_invent_constraints_for_future_record_kinds(tmp_path: Path) -> None:
+def test_v32_envelope_does_not_invent_constraints_for_future_record_types(tmp_path: Path) -> None:
     path = tmp_path / "future.db"
     Database(path).close()
     connection = sqlite3.connect(path)
     connection.execute(
         "INSERT INTO instance_records "
-        "(instance_kind, instance_name, record_kind, record_key, schema_version, "
+        "(instance_kind, instance_name, record_type, record_key, schema_version, "
         "value_json, recorded_at, operation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         ("vm", "alpha", "future-consumer", "opaque", 1, "{}", "2026-08-23T12:00:00Z", None),
     )
@@ -318,7 +318,7 @@ def test_malformed_persisted_record_raises_instead_of_becoming_absent(tmp_path: 
     connection = sqlite3.connect(path)
     connection.execute(
         "INSERT INTO instance_records "
-        "(instance_kind, instance_name, record_kind, record_key, schema_version, "
+        "(instance_kind, instance_name, record_type, record_key, schema_version, "
         "value_json, recorded_at, operation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         ("vm", "alpha", "desired-overlay", "spec", 1, "not-json", "2026-08-23T12:00:00Z", None),
     )
