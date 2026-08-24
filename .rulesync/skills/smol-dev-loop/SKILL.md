@@ -67,8 +67,11 @@ issue, claim, and unmerged pull request with:
 - owning developer handle and latest recovery handoff.
 
 The recovery handoff records the exact branch and head, completed work and gates, remaining work,
-and context needed for a replacement developer. Agent lifetime is not guaranteed. Rebuild missing
-ledger facts from GitHub and the session harness. Never commit runtime ledger state.
+and context needed for a replacement developer. Agent lifetime is not guaranteed. Rebuild factual
+server state from GitHub and the session harness, but never reconstruct the authenticated direction
+reference or vetted snapshot from GitHub. Recover those only from the authenticated channel or its
+session harness; if unavailable, preserve the work, pause, and request direction. Never commit
+runtime ledger state.
 
 `smol-dev` is a discovery hint only; its absence never blocks named or blessed work. Delivery owns
 `awaiting-direction`. Do not create or alter labels without authenticated authorization. If delivery
