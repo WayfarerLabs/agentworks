@@ -26,6 +26,7 @@ strongest available capability only when the reasoning warrants it. Name the sel
 harness permits it; inheritance is a choice, not an accidental default.
 
 The reviewer of record has at least the implementer's capability and reasoning depth. An independent
-fresh-eyes reading may be lighter because it is complementary, not the reviewer of record. Adapt
-launch syntax and role identifiers to the harness rather than treating any one harness's names as
-universal.
+fresh-eyes reading may be lighter because it is complementary, not the reviewer of record. A
+complexity pass is complementary too, but its verdicts are design judgments, so scale it to the
+judgment the change demands rather than to the implementer's tier. Adapt launch syntax and role
+identifiers to the harness rather than treating any one harness's names as universal.

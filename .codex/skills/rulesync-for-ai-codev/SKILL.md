@@ -26,7 +26,7 @@ on).
 Three targets are shared, and their generated output **is** checked in:
 
 - **Copilot**, under `.github/` (`copilot-instructions.md`, `instructions/`, `agents/`, `skills/`),
-  so Copilot Code Review has the project's rules and subagents on every PR.
+  so Copilot Code Review has the project's rules and subagents whenever it runs.
 - **Claude Code** (`CLAUDE.md`, `.claude/{agents,rules,skills}/`) and **Codex CLI** (`AGENTS.md`,
   `.codex/`), so those agents have full context on a fresh clone without any setup step. Only the
   rulesync-generated directories are committed; personal files (e.g. `.claude/settings.local.json`)
