@@ -77,7 +77,7 @@ remain hidden unless `--include-disabled` is requested.
   category, enablement, readiness,
   relationships: {dependencies: [edge...], dependents: [edge...]},
   used_by: [{kind, name}...] | null,
-  diagnostics: [{name, status, message, hint}...],
+  diagnostics: [{name, status, message, hint, note?}...],
   declaration
 }}
 ```
@@ -283,17 +283,19 @@ is configured database state, never live tmux state.
 
 ```text
 {
-  groups: [{name, checks: [{name, status, message, hint, secret_preview?}]}],
+  groups: [{name, checks: [{name, status, message, hint, note?, secret_preview?}]}],
   counts: {ok, info, warn, fail}
 }
 ```
 
 `status` is exactly `ok`, `info`, `warn`, or `fail`. Group and check arrays keep report construction
 order, and counts are integers from the complete report. `message` and `hint` are the same nullable
-facts used by the human renderer. A secret check adds the optional, value-free `secret_preview`
-record `{status, source, identifier, reason?, attempts}`. Its status is `available`, `missing`,
-`indeterminate`, `blocked`, or `failed`; source and identifier are nullable; reason is present only
-for a result with a closed reason; and attempts retain source order as
+facts used by the human renderer. A check with explanatory context adds `note`; checks without one
+omit it. Repeated notes are numbered and rendered once per group, while the JSON field carries the
+note text without that presentation-only number. A secret check adds the optional, value-free
+`secret_preview` record `{status, source, identifier, reason?, attempts}`. Its status is
+`available`, `missing`, `indeterminate`, `blocked`, or `failed`; source and identifier are nullable;
+reason is present only for a result with a closed reason; and attempts retain source order as
 `{source, identifier, status, reason?}`. Non-secret checks omit the field. No secret value enters
 this projection. A failing report is still written in full, then the command exits 1:
 

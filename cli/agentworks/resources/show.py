@@ -263,6 +263,7 @@ def render_resource_show(shown: ResourceShow) -> None:
             with output.section():
                 output.info(f"message: {_human_scalar(check.message)}")
                 output.info(f"hint: {_human_scalar(check.hint)}")
+                output.info(f"note: {_human_scalar(check.note)}")
 
     if shown.declaration is None:
         output.info("Declaration: null")

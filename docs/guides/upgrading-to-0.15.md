@@ -40,8 +40,8 @@ Pre-0.15, doctor's prediction for an unset secret falling through to the default
 reported `ok: would attempt via prompt`, regardless of whether a TTY was actually available.
 Doctor's zero-impact preview now asks the `prompt` backend for real, and at zero operator impact
 prompt cannot give a definite answer because asking would be the operator action. It returns
-`indeterminate` when a TTY is available and keeps the row OK with a compact
-`indeterminate/operator-impact-limited; source=prompt` note. With no usable TTY it returns
+`indeterminate` when a TTY is available and keeps the row OK with a numbered note rendered once at
+the end of the Secrets group. With no usable TTY it returns
 `blocked/tty-unavailable; source=prompt`, which is a warning because command-time prompting is not
 possible in that environment.
 
@@ -79,7 +79,7 @@ that `agw doctor` and every command's preflight now make a real provider call on
 matter of routine, which adds latency and a new failure surface (see the FAIL section above) to
 operations that used to be pure and local. If that is unwanted, do not set unattended auth (or set
 `app_authentication_impact: operator-action`, the default) purely to make doctor look clean; the
-compact indeterminate OK note is expected in that case.
+numbered indeterminate OK note is expected in that case.
 
 ## `agw secret verify`'s output vocabulary and columns changed wholesale
 

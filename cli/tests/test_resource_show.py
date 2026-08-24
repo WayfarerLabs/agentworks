@@ -36,7 +36,11 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-def _shown(*, declaration: JsonObject | None = None) -> ResourceShow:
+def _shown(
+    *,
+    declaration: JsonObject | None = None,
+    diagnostics: tuple[HealthCheck, ...] = (),
+) -> ResourceShow:
     return ResourceShow(
         summary=ResourceSummary(
             kind="secret",
@@ -52,7 +56,7 @@ def _shown(*, declaration: JsonObject | None = None) -> ResourceShow:
         readiness=Readiness.blocked("backend unavailable"),
         relationships=FocusedRelationships((), ()),
         used_by=(),
-        diagnostics=(),
+        diagnostics=diagnostics,
         declaration=declaration,
     )
 
@@ -98,6 +102,16 @@ def test_human_renderer_makes_disabled_capability_nulls_structural(
 
     assert all(role is Role.BODY for role, _level, _message in captured_output.lines)
     assert sum(message.endswith("null") for _role, _level, message in captured_output.lines) >= 3
+
+
+def test_human_renderer_projects_diagnostic_note(captured_output: CapturedOutput) -> None:
+    marker = "diagnostic note marker"
+    shown = _shown(diagnostics=(HealthCheck("check", Status.OK, note=marker),))
+
+    render_resource_show(shown)
+
+    occurrences = [(role, level) for role, level, message in captured_output.lines if marker in message]
+    assert occurrences == [(Role.BODY, 2)]
 
 
 def test_human_renderer_neutralizes_scalar_lines_and_preserves_yaml_values(

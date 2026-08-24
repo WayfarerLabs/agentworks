@@ -138,8 +138,10 @@ together: the former allows out-of-band impact, while the latter still disables 
   order, renders every result, and exits 1 unless all are available. Add `--allow-interaction` only
   with consent for possible prompt or out-of-band authentication.
 - `agw doctor` previews each secret at zero impact. Available and indeterminate are OK; missing and
-  blocked are WARN; failed is FAIL. Indeterminate keeps a compact note but no interaction hint. JSON
-  includes a value-free `secret_preview` for secret checks.
+  blocked are WARN; failed is FAIL. Indeterminate rows share one numbered group note instead of
+  repeating an interaction hint. Doctor omits secret descriptions and origin markers; those remain
+  on `secret list` and `secret describe`. JSON includes the note text and a value-free
+  `secret_preview` for secret checks.
 - `agw env show --resolve` is the explicit partial-reveal surface. It resolves independent secrets;
   normal command resolution remains all-required.
 

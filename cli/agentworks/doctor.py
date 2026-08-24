@@ -22,7 +22,6 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.machine_output import JsonObject
     from agentworks.resources.registry import Registry
-    from agentworks.secrets.base import SecretDecl
     from agentworks.secrets.preview import ResolutionPreview
     from agentworks.secrets.sources import SecretSourceDecl, SourceProvenance
     from agentworks.vms.admin import AdminConfig
@@ -46,6 +45,9 @@ class HealthCheck:
     CLI surface so the operator sees actionable next steps without
     cramming everything into one parenthetical."""
     secret_preview: ResolutionPreview | None = None
+    note: str | None = None
+    """Optional explanatory context. The human doctor renderer deduplicates
+    repeated notes within a group and renders numbered references."""
 
 
 @dataclass
@@ -59,6 +61,7 @@ class HealthGroup:
         name: str,
         message: str | None,
         hint: str | None,
+        note: str | None,
     ) -> None:
         self.checks.append(
             HealthCheck(
@@ -66,6 +69,7 @@ class HealthGroup:
                 status=status,
                 message=message,
                 hint=hint,
+                note=note,
             )
         )
 
@@ -75,8 +79,9 @@ class HealthGroup:
         message: str | None = None,
         *,
         hint: str | None = None,
+        note: str | None = None,
     ) -> None:
-        self._append(Status.OK, name, message, hint)
+        self._append(Status.OK, name, message, hint, note)
 
     def info(
         self,
@@ -84,8 +89,9 @@ class HealthGroup:
         message: str | None = None,
         *,
         hint: str | None = None,
+        note: str | None = None,
     ) -> None:
-        self._append(Status.INFO, name, message, hint)
+        self._append(Status.INFO, name, message, hint, note)
 
     def warn(
         self,
@@ -93,8 +99,9 @@ class HealthGroup:
         message: str | None = None,
         *,
         hint: str | None = None,
+        note: str | None = None,
     ) -> None:
-        self._append(Status.WARN, name, message, hint)
+        self._append(Status.WARN, name, message, hint, note)
 
     def fail(
         self,
@@ -102,8 +109,9 @@ class HealthGroup:
         message: str | None = None,
         *,
         hint: str | None = None,
+        note: str | None = None,
     ) -> None:
-        self._append(Status.FAIL, name, message, hint)
+        self._append(Status.FAIL, name, message, hint, note)
 
 
 @dataclass
@@ -179,6 +187,8 @@ def health_check_data(check: HealthCheck) -> JsonObject:
         "message": check.message,
         "hint": check.hint,
     }
+    if check.note is not None:
+        data["note"] = check.note
     if check.secret_preview is not None:
         from agentworks.secrets.preview import preview_data
 
@@ -247,14 +257,12 @@ def _secret_source_check(status: SecretSourceStatus) -> HealthCheck:
 
 def _secret_check(
     name: str,
-    decl: SecretDecl,
     preview: ResolutionPreview,
 ) -> HealthCheck:
     """Build one value-free secret resolution preview row."""
     from agentworks.secrets.preview import PreviewStatus, preview_hint
 
-    auto = getattr(decl.origin, "variant", None) == "auto-declared"
-    label = f"Secret {name!r} (auto)" if auto else f"Secret {name!r}"
+    label = f"Secret {name!r}"
     status = {
         PreviewStatus.AVAILABLE: Status.OK,
         PreviewStatus.MISSING: Status.WARN,
@@ -263,12 +271,18 @@ def _secret_check(
         PreviewStatus.FAILED: Status.FAIL,
     }[preview.status]
     reason = f"/{preview.reason}" if preview.reason is not None else ""
+    indeterminate = preview.status is PreviewStatus.INDETERMINATE
     return HealthCheck(
         label,
         status,
-        f"{preview.status.value}{reason}; source={preview.source or 'none'}",
-        hint=(
-            None if preview.status is PreviewStatus.INDETERMINATE else preview_hint(preview, interaction_opt_in=False)
+        f"source {preview.source}"
+        if indeterminate
+        else f"{preview.status.value}{reason}; source={preview.source or 'none'}",
+        hint=None if indeterminate else preview_hint(preview, interaction_opt_in=False),
+        note=(
+            "Doctor did not verify availability because doing so could require operator interaction."
+            if indeterminate
+            else None
         ),
         secret_preview=preview,
     )
@@ -330,7 +344,7 @@ def checks_for_resource(
             tty_access=tty_access,
             interaction_broker=None,
         )[row.name]
-        check = _secret_check(identity.name, row, preview)
+        check = _secret_check(identity.name, preview)
     elif identity == ResourceIdentity("admin-template", "default"):
         from agentworks.vms.admin import AdminConfig
 
@@ -909,7 +923,7 @@ def _check_secrets(
         interaction_broker=None,
     )
     for name, decl in ordered:
-        g.checks.append(_secret_check(name, decl, previews[decl.name]))
+        g.checks.append(_secret_check(name, previews[decl.name]))
 
     return g
 

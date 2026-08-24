@@ -713,8 +713,9 @@ be blocked or failed.
 `agw secret describe <name>` adds provider-aware zero-impact preview; add `--allow-interaction` for
 maximum-impact preview. `agw doctor` has a **Secret backends** readiness group and one zero-impact
 preview row per secret. An impact-limited indeterminate preview is an expected OK result with a
-compact note, not a warning. Preview may read a provider and safely discard the value; it never
-returns a value.
+numbered group note, not a warning. Repeated notes render once, and descriptions and origins remain
+on the dedicated secret inspection commands. Preview may read a provider and safely discard the
+value; it never returns a value.
 
 `agw secret verify NAME...` uses the same preview contract, deduplicates names in first-written
 order, and renders one value-free row per unique name. It exits 0 only when all are `available`.

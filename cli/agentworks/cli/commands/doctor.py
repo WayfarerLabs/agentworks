@@ -59,6 +59,7 @@ def doctor(
     typer.echo("Checking environment...\n")
     for group in report.groups:
         typer.echo(f"{group.name}:")
+        notes: dict[str, int] = {}
         for check in group.checks:
             label = {
                 Status.OK: "[ok]",
@@ -76,9 +77,17 @@ def doctor(
             msg = check.name
             if check.message is not None:
                 msg += f": {check.message}"
+            if check.note is not None:
+                note_number = notes.setdefault(check.note, len(notes) + 1)
+                msg += f" ({note_number})"
             typer.echo(f"  {label} {msg}")
             if check.hint:
                 typer.echo(f"         hint: {check.hint}")
+        if notes:
+            typer.echo()
+            typer.echo("  Notes:")
+            for note, number in notes.items():
+                typer.echo(f"    ({number}) {note}")
         typer.echo()
 
     c = report.counts()

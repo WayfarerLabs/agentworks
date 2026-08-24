@@ -660,7 +660,7 @@ def test_doctor_json_adds_value_free_preview_only_to_secret_checks(monkeypatch) 
                 "Secrets",
                 [
                     HealthCheck("token", Status.OK, secret_preview=preview),
-                    HealthCheck("ordinary", Status.OK),
+                    HealthCheck("ordinary", Status.OK, note="context"),
                 ],
             )
         ]
@@ -687,6 +687,7 @@ def test_doctor_json_adds_value_free_preview_only_to_secret_checks(monkeypatch) 
         ],
     }
     assert "secret_preview" not in checks[1]
+    assert checks[1]["note"] == "context"
 
 
 def test_malformed_config_doctor_json_and_human_share_structured_facts(

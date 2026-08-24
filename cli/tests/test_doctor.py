@@ -76,22 +76,25 @@ def test_health_report_no_failures() -> None:
 def test_health_check_message_optional() -> None:
     check = HealthCheck(name="test", status=Status.OK)
     assert check.message is None
+    assert check.note is None
 
-    check_with_msg = HealthCheck(name="test", status=Status.WARN, message="details")
+    check_with_msg = HealthCheck(name="test", status=Status.WARN, message="details", note="context")
     assert check_with_msg.message == "details"
+    assert check_with_msg.note == "context"
 
 
 def test_machine_output_serializes_the_same_health_check_facts() -> None:
     """Human and JSON renderers consume one presentation-neutral check."""
     report = HealthReport()
     group = HealthGroup("Configuration")
-    group.fail("Config", "configuration did not load", hint="fix the config")
+    group.fail("Config", "configuration did not load", hint="fix the config", note="shared context")
     report.groups.append(group)
 
     check = _first_projected_check(report)
 
     assert check["message"] == "configuration did not load"
     assert check["hint"] == "fix the config"
+    assert check["note"] == "shared context"
 
 
 def test_config_exception_becomes_one_shared_health_fact(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
