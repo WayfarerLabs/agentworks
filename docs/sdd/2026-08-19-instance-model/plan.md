@@ -2,22 +2,22 @@
 
 <!-- cspell:ignore sdds -->
 
-- Status: R2 accepted; R4 design correction in review
+- Status: R2 accepted; R4 design correction ready for review
 - Date: 2026-08-23
 - Last revised: 2026-08-24
 - Requirements: [frd.md](./frd.md)
 - R1 assessment: [database-assessment.md](./database-assessment.md)
 - R2 contract: [store-contract.md](./store-contract.md)
 - Instance-spec CLI: [instance-spec-cli.md](./instance-spec-cli.md)
-- Code basis: `893fc331`, stacked on accepted R1 PR #632
-- Delivery vehicle: accepted R1 artifact PR #632, then one stacked implementation branch and draft
-  PR for R2 through R5
+- Code basis: `333b70bf`, based on `main` with accepted R1 PR #632 merged
+- Delivery vehicle: merged R1 artifact PR #632, then one implementation branch and draft PR for R2
+  through R5
 
 ## Delivery posture
 
-R1 is an independently reviewed coordination artifact and is ready to merge. R2 through R5 remain
+R1 is an independently reviewed coordination artifact merged through PR #632. R2 through R5 remain
 one feature because their value is the complete declaration, applied-state, and resolved-spec arc.
-The implementation PR is a shallow stack on R1 until #632 merges, then rebases onto `main`.
+The implementation PR now bases directly on `main`.
 
 The implementation PR uses two checkpoints while it remains draft:
 
