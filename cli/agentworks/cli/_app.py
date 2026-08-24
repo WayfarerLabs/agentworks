@@ -132,7 +132,10 @@ def _global_options(
     ] = False,
     non_interactive: Annotated[
         bool,
-        typer.Option("--non-interactive", help="Disable interactive prompts"),
+        typer.Option(
+            "--non-interactive",
+            help="Do not use the TTY for interactions, even if one is present.",
+        ),
     ] = False,
     debug: Annotated[
         bool,

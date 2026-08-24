@@ -21,7 +21,7 @@ from agentworks.agents import manager as agent_manager
 from agentworks.db import VMStatus
 from agentworks.errors import AuthorizationError, ValidationError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from tests.conftest import ManifestDoc
 
@@ -129,7 +129,7 @@ def test_graph_derives_from_row_and_env_joins_via_targets(
     agent = db.get_agent("a1")
     assert vm is not None and agent is not None
     registry = build_registry(config)
-    resolver = Resolver(config, registry, interaction=InteractionPolicy.REFUSE)
+    resolver = Resolver(config, registry, interaction=TtyInteractionPolicy.REFUSE)
 
     nodes = walk(live_vm_node(db, config, registry, vm))
 
@@ -160,7 +160,7 @@ def test_shell_reachable_vm_is_one_boundary_burst(
     _reachable(monkeypatch, True)
 
     # shell_agent returns the interactive exit code; the CLI owns process exit.
-    assert agent_manager.shell_agent(db, config, name="a1", interaction=InteractionPolicy.REFUSE) == 0
+    assert agent_manager.shell_agent(db, config, name="a1", interaction=TtyInteractionPolicy.REFUSE) == 0
 
     assert len(resolve_counter) == 1
     assert sorted(resolve_counter[0]) == ["agent-env-secret", "proxmox-token"]
@@ -182,7 +182,7 @@ def test_shell_stopped_vm_gate_burst_then_boundary_burst(
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
 
-    assert agent_manager.shell_agent(db, config, name="a1", interaction=InteractionPolicy.REFUSE) == 0
+    assert agent_manager.shell_agent(db, config, name="a1", interaction=TtyInteractionPolicy.REFUSE) == 0
 
     assert events == ["status", "start", "tailscale"]  # the gate ran
     assert resolve_counter == [["proxmox-token"], ["agent-env-secret"]]
@@ -202,7 +202,9 @@ def test_exec_stopped_vm_gate_burst_then_boundary_burst(
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
 
-    rc = agent_manager.exec_agent(db, config, name="a1", command=["echo", "hi"], interaction=InteractionPolicy.REFUSE)
+    rc = agent_manager.exec_agent(
+        db, config, name="a1", command=["echo", "hi"], interaction=TtyInteractionPolicy.REFUSE
+    )
 
     assert rc == 0
     assert events == ["status", "start", "tailscale"]
@@ -236,7 +238,7 @@ def test_exec_dash_prefixed_command_fails_with_zero_resolves_and_zero_gate(
 
     with pytest.raises(ValidationError, match="cannot start with '-'") as exc_info:
         agent_manager.exec_agent(
-            db, config, name="a1", command=["--workspace", "ws1", "pwd"], interaction=InteractionPolicy.REFUSE
+            db, config, name="a1", command=["--workspace", "ws1", "pwd"], interaction=TtyInteractionPolicy.REFUSE
         )
 
     # The hint names the real workaround: the `--` separator (and the
@@ -264,7 +266,7 @@ def test_exec_double_dash_separator_runs_dash_led_command(
     _reachable(monkeypatch, True)
 
     rc = agent_manager.exec_agent(
-        db, config, name="a1", command=["--", "--version"], interaction=InteractionPolicy.REFUSE
+        db, config, name="a1", command=["--", "--version"], interaction=TtyInteractionPolicy.REFUSE
     )
 
     assert rc == 0
@@ -287,7 +289,7 @@ def test_exec_double_dash_separator_strips_only_the_first(
     _reachable(monkeypatch, True)
 
     rc = agent_manager.exec_agent(
-        db, config, name="a1", command=["--", "git", "log", "--", "path"], interaction=InteractionPolicy.REFUSE
+        db, config, name="a1", command=["--", "git", "log", "--", "path"], interaction=TtyInteractionPolicy.REFUSE
     )
 
     assert rc == 0
@@ -311,7 +313,7 @@ def test_exec_double_dash_separator_preserves_an_adjacent_second(
     _reachable(monkeypatch, True)
 
     rc = agent_manager.exec_agent(
-        db, config, name="a1", command=["--", "--", "x"], interaction=InteractionPolicy.REFUSE
+        db, config, name="a1", command=["--", "--", "x"], interaction=TtyInteractionPolicy.REFUSE
     )
 
     assert rc == 0
@@ -333,7 +335,9 @@ def test_exec_bare_flag_after_command_word_still_works(
     _seed(db)
     _reachable(monkeypatch, True)
 
-    rc = agent_manager.exec_agent(db, config, name="a1", command=["free", "-m"], interaction=InteractionPolicy.REFUSE)
+    rc = agent_manager.exec_agent(
+        db, config, name="a1", command=["free", "-m"], interaction=TtyInteractionPolicy.REFUSE
+    )
 
     assert rc == 0
     ((cmd, _env),) = target.streaming_calls
@@ -354,7 +358,7 @@ def test_exec_missing_command_after_double_dash_fails_pre_gate(
     _no_gate(monkeypatch)
 
     with pytest.raises(ValidationError, match="missing command after '--'"):
-        agent_manager.exec_agent(db, config, name="a1", command=["--"], interaction=InteractionPolicy.REFUSE)
+        agent_manager.exec_agent(db, config, name="a1", command=["--"], interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == []
     assert target.streaming_calls == []
@@ -376,7 +380,7 @@ def test_missing_grant_fails_with_zero_resolves_and_zero_gate(
 
     with pytest.raises(AuthorizationError, match="does not have access"):
         agent_manager.exec_agent(
-            db, config, name="a1", command=["echo", "hi"], workspace_name="ws1", interaction=InteractionPolicy.REFUSE
+            db, config, name="a1", command=["echo", "hi"], workspace_name="ws1", interaction=TtyInteractionPolicy.REFUSE
         )
 
     assert resolve_counter == []
@@ -421,7 +425,7 @@ def test_shell_interactive_runs_inside_the_held_active_span(
 
     target.interactive = _tracking  # type: ignore[method-assign]
 
-    assert agent_manager.shell_agent(db, config, name="a1", interaction=InteractionPolicy.REFUSE) == 0
+    assert agent_manager.shell_agent(db, config, name="a1", interaction=TtyInteractionPolicy.REFUSE) == 0
 
     assert events == ["hold-open", "interactive", "hold-close"]
 
@@ -450,7 +454,7 @@ def test_agent_scope_reaches_node_readiness(
 
     monkeypatch.setattr(ProxmoxPlatform, "preflight", _recording)
 
-    agent_manager.exec_agent(db, config, name="a1", command=["echo", "hi"], interaction=InteractionPolicy.REFUSE)
+    agent_manager.exec_agent(db, config, name="a1", command=["echo", "hi"], interaction=TtyInteractionPolicy.REFUSE)
 
     (scope,) = scopes
     assert scope is not None

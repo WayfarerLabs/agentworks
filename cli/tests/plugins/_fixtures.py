@@ -28,11 +28,16 @@ from agentworks.capabilities.descriptor import descriptor_for
 from agentworks.capabilities.git_credential.base import GitCredentialProvider, HelperEntry
 from agentworks.capabilities.harness_integration.base import HarnessIntegration
 from agentworks.capabilities.secret_backend import (
+    BackendPreview,
+    BackendResolution,
     InteractionBroker,
-    RemainingTime,
+    LookupDescription,
+    LookupDisposition,
     SecretBackend,
+    SecretClientIntent,
     SecretLookupRequest,
     SecretSourceClient,
+    TtyInteractionAccess,
 )
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.plugins import Plugin
@@ -150,20 +155,10 @@ class ConformingGitCredentialProvider(GitCredentialProvider):
 
 
 class _FixtureSecretClient:
-    def prepare(
-        self,
-        requests: tuple[SecretLookupRequest, ...],
-        *,
-        remaining_time: RemainingTime,
-    ) -> None:
-        return None
+    def preview(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendPreview]:
+        return {}
 
-    def resolve(
-        self,
-        requests: tuple[SecretLookupRequest, ...],
-        *,
-        remaining_time: RemainingTime,
-    ) -> Mapping[str, str]:
+    def resolve(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendResolution]:
         return {}
 
 
@@ -173,8 +168,8 @@ class ConformingSecretBackend(SecretBackend):
     config_model: ClassVar[type[AgwModel]] = AgwModel
     mapping_model: ClassVar[type[AgwRootModel[Any]]] = AgwRootModel[str]
 
-    contract_version = 2
-    interactive = False
+    contract_version = 1
+    supports_tty_interaction = False
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)
@@ -185,21 +180,17 @@ class ConformingSecretBackend(SecretBackend):
         return Readiness.ready()
 
     @classmethod
-    def would_attempt(cls, secret_name: str, *, mapping_present: bool) -> bool:
-        return False
-
-    @classmethod
-    def describe_lookup(cls, secret_name: str, mapping: BaseModel | None) -> str | None:
-        return None
+    def describe_lookup(cls, secret_name: str, mapping: BaseModel | None) -> LookupDescription:
+        return LookupDescription(LookupDisposition.NOT_APPLICABLE, None)
 
     @classmethod
     def create_client(
         cls,
         *,
-        source_name: str,
         config: AgwModel,
+        intent: SecretClientIntent,
+        tty_access: TtyInteractionAccess,
         interaction_broker: InteractionBroker | None,
-        remaining_time: RemainingTime,
     ) -> AbstractContextManager[SecretSourceClient]:
         return nullcontext(_FixtureSecretClient())
 

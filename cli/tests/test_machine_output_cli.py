@@ -11,8 +11,9 @@ import pytest
 from click.testing import Result
 from typer.testing import CliRunner
 
+from agentworks.capabilities.secret_backend import PreviewAvailable
 from agentworks.cli import app
-from agentworks.doctor import HealthGroup, HealthReport
+from agentworks.doctor import HealthCheck, HealthGroup, HealthReport, Status
 from agentworks.origin import Origin
 from agentworks.resources.inspect import KindRow, ResourceListing, ResourceSummary
 from agentworks.secrets.inspect import (
@@ -21,8 +22,10 @@ from agentworks.secrets.inspect import (
     SecretSourceCell,
     SecretTable,
     SourceMapping,
+    StaticResolution,
+    StaticResolutionCategory,
 )
-from agentworks.secrets.preview import PreviewCategory, ResolutionPreview, SkippedSource
+from agentworks.secrets.preview import ResolutionPreview, SourcePreviewAttempt
 from agentworks.secrets.sources import SourceProvenance
 
 
@@ -575,12 +578,18 @@ def test_secret_describe_json_preserves_nulls_and_source_order(monkeypatch) -> N
             SourceMapping("work-op", "onepassword", SourceProvenance.DECLARED, True, "op://Work/token", None),
             SourceMapping("prompt-fallback", "prompt", SourceProvenance.DECLARED, True, None, "source unavailable"),
         ),
-        resolution=ResolutionPreview(
-            name="token",
-            category=PreviewCategory.ATTEMPTABLE,
+        resolution=StaticResolution(
+            category=StaticResolutionCategory.ATTEMPTABLE,
             source="work-op",
             identifier="op://Work/token",
-            skipped_not_ready=(SkippedSource("prompt-fallback", "source unavailable"),),
+            skipped_not_ready=(),
+        ),
+        preview=ResolutionPreview(
+            name="token",
+            result=PreviewAvailable(),
+            source="work-op",
+            identifier="op://Work/token",
+            attempts=(SourcePreviewAttempt("work-op", "op://Work/token", PreviewAvailable()),),
         ),
     )
     monkeypatch.setattr(config, "load_config", lambda **_kwargs: object())
@@ -635,6 +644,51 @@ def test_doctor_json_writes_complete_failing_report_before_exit(monkeypatch) -> 
     )
 
 
+def test_doctor_json_adds_value_free_preview_only_to_secret_checks(monkeypatch) -> None:
+    from agentworks import doctor
+
+    preview = ResolutionPreview(
+        name="token",
+        result=PreviewAvailable(),
+        source="work-op",
+        identifier="op://Work/token",
+        attempts=(SourcePreviewAttempt("work-op", "op://Work/token", PreviewAvailable()),),
+    )
+    report = HealthReport(
+        [
+            HealthGroup(
+                "Secrets",
+                [
+                    HealthCheck("token", Status.OK, secret_preview=preview),
+                    HealthCheck("ordinary", Status.OK),
+                ],
+            )
+        ]
+    )
+    monkeypatch.setattr(doctor, "run_checks", lambda **_kwargs: report)
+
+    result = CliRunner().invoke(app, ["doctor", "--output", "json"])
+
+    assert result.exit_code == 0
+    data = _json_document(result)["data"]
+    assert isinstance(data, dict)
+    groups = cast("list[dict[str, object]]", data["groups"])
+    checks = cast("list[dict[str, object]]", groups[0]["checks"])
+    assert checks[0]["secret_preview"] == {
+        "status": "available",
+        "source": "work-op",
+        "identifier": "op://Work/token",
+        "attempts": [
+            {
+                "source": "work-op",
+                "identifier": "op://Work/token",
+                "status": "available",
+            }
+        ],
+    }
+    assert "secret_preview" not in checks[1]
+
+
 def test_malformed_config_doctor_json_and_human_share_structured_facts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -648,9 +702,10 @@ def test_malformed_config_doctor_json_and_human_share_structured_facts(
 
     def config_only_checks(
         *,
+        tty_access: object,
         completion_version: str | None = None,
     ) -> HealthReport:
-        del completion_version
+        del completion_version, tty_access
         group, _config, _registry = doctor._check_config()
         return HealthReport(groups=[group])
 

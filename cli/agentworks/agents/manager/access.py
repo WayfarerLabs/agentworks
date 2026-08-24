@@ -28,7 +28,7 @@ from ._common import (
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
 
 
 def shell_agent(
@@ -37,7 +37,7 @@ def shell_agent(
     *,
     name: str,
     workspace_name: str | None = None,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> int:
     """Open a shell as an agent user on a VM.
 
@@ -138,7 +138,7 @@ def exec_agent(
     name: str,
     command: list[str],
     workspace_name: str | None = None,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> int:
     """Execute a command as an agent user on a VM via direct agent SSH.
 

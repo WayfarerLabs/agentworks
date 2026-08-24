@@ -13,6 +13,7 @@ import pytest
 from pydantic import Field
 
 from agentworks.bootstrap import build_registry
+from agentworks.capabilities.secret_backend import TtyInteractionAccess
 from agentworks.config import Config, load_config
 from agentworks.db import Database
 from agentworks.declared_resource import FRAMEWORK_FIELDS, METADATA_FIELDS, DeclaredResource
@@ -93,7 +94,13 @@ def _request_context(tmp_path: Path) -> tuple[Config, Registry]:
 
 
 def _show(config: Config, registry: Registry, identity: ResourceIdentity, tmp_path: Path):
-    return show_resource(config, registry, identity, DatabaseLiveSource(tmp_path / "absent.db"))
+    return show_resource(
+        config,
+        registry,
+        identity,
+        DatabaseLiveSource(tmp_path / "absent.db"),
+        tty_access=TtyInteractionAccess.UNAVAILABLE,
+    )
 
 
 def _readiness_registry(
@@ -211,7 +218,13 @@ def test_show_summary_is_the_exact_matching_list_row(tmp_path: Path) -> None:
     database.close()
     identity = ResourceIdentity("secret", "npm-token")
 
-    shown = show_resource(config, registry, identity, DatabaseLiveSource(database_path))
+    shown = show_resource(
+        config,
+        registry,
+        identity,
+        DatabaseLiveSource(database_path),
+        tty_access=TtyInteractionAccess.UNAVAILABLE,
+    )
     list_row = next(row for row in listing.rows if (row.kind, row.name) == (identity.kind, identity.name))
     list_data = resource_listing_data(listing)["resources"]
     assert isinstance(list_data, list)
@@ -264,6 +277,7 @@ def test_enabled_rows_retain_stored_readiness_facts(
         registry,
         ResourceIdentity("show-test", verdict),
         DatabaseLiveSource(Path("/missing-show-test.db")),
+        tty_access=TtyInteractionAccess.UNAVAILABLE,
     )
 
     assert shown.readiness is not None
@@ -284,6 +298,7 @@ def test_disabled_row_projects_null_readiness(monkeypatch: pytest.MonkeyPatch) -
         registry,
         ResourceIdentity("show-test", "blocked"),
         DatabaseLiveSource(Path("/missing-show-test.db")),
+        tty_access=TtyInteractionAccess.UNAVAILABLE,
     )
     data = resource_show_data(shown)["resource"]
 
@@ -345,6 +360,7 @@ def test_category_row_mismatch_fails_instead_of_projecting_partial_data(
             registry,
             ResourceIdentity("show-test", "blocked"),
             DatabaseLiveSource(Path("/missing-show-test.db")),
+            tty_access=TtyInteractionAccess.UNAVAILABLE,
         )
 
     assert original.category == "declarable"

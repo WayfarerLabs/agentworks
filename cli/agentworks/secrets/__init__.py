@@ -17,21 +17,25 @@ from agentworks.secrets.orchestration import (
     resolve_for_command,
 )
 from agentworks.secrets.outcomes import (
-    ResolutionCategory,
-    ResolutionDetail,
+    ResolutionBlocked,
+    ResolutionFailed,
+    ResolutionMissing,
     ResolutionOutcome,
-    ResolutionRemediation,
+    ResolutionResolved,
+    ResolutionStatus,
 )
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolve import validate_chain
 from agentworks.secrets.sources import SecretSourceDecl, publish_builtin_secret_sources
 
 __all__ = [
-    "InteractionPolicy",
-    "ResolutionCategory",
-    "ResolutionDetail",
+    "TtyInteractionPolicy",
+    "ResolutionBlocked",
+    "ResolutionFailed",
+    "ResolutionMissing",
     "ResolutionOutcome",
-    "ResolutionRemediation",
+    "ResolutionResolved",
+    "ResolutionStatus",
     "SecretConfig",
     "SecretDecl",
     "SecretSourceDecl",

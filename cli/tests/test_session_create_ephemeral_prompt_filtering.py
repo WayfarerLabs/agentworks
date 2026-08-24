@@ -20,7 +20,7 @@ import pytest
 
 from agentworks import output
 from agentworks.errors import ValidationError
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 
 from ._session_ephemeral_support import (
     _non_interactive,
@@ -62,7 +62,7 @@ def test_workspace_prompt_filters_by_vm_flag(tmp_path: Path, monkeypatch: pytest
             name="s1",
             vm_name="vm-A",  # pins VM upfront
             admin=True,
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     # Exactly one choose call: the workspace prompt.
     assert len(captured_choose) == 1
@@ -105,7 +105,7 @@ def test_workspace_prompt_filters_by_existing_agent_vm(tmp_path: Path, monkeypat
             config,  # type: ignore[arg-type]
             name="s1",
             agent="agt-A",  # agt-A lives on vm-A
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     opts = captured_choose[0]
     assert any("ws-A" in o for o in opts)
@@ -143,7 +143,7 @@ def test_mode_prompt_filters_by_resolved_vm_with_info_line(tmp_path: Path, monke
             name="s1",
             workspace="ws-A",  # pins VM to vm-A
             # No mode flag → mode prompt fires.
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     opts = captured_choose[0]
     assert opts[0] == "admin"
@@ -179,7 +179,7 @@ def test_vm_and_existing_agent_mismatch_fails_before_workspace_prompt(
             name="s1",
             vm_name="vm-A",
             agent="agt-B",  # lives on vm-B
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     db.close()
 
@@ -223,7 +223,7 @@ def test_mode_prompt_picks_existing_agent_pins_vm_no_vm_prompt(tmp_path: Path, m
             name="s1",
             new_workspace=True,
             # No --vm, no mode flag.
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     # Exactly one chooser call -- the mode prompt, listing agents across
     # both VMs (with VM labels).
@@ -271,7 +271,7 @@ def test_mode_prompt_picks_admin_then_vm_prompt_fires(tmp_path: Path, monkeypatc
             config,  # type: ignore[arg-type]
             name="s1",
             new_workspace=True,
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
     assert call_count[0] == 2  # both prompts fired in order
     db.close()

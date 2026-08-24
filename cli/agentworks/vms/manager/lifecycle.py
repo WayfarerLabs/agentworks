@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.db import Database
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
 
 # NOTE on the initializer imports (``verify_tailscale_available``,
 # ``announce_git_credentials``, ``bootstrap_vm``, ``run_initialization``):
@@ -119,7 +119,7 @@ def create_vm(
     template: str | None = None,
     admin_template: str | None = None,
     site: str | None = None,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Create a new VM: provision + initialize.
 
@@ -553,7 +553,7 @@ def reinit_vm(
     config: Config,
     name: str,
     *,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Re-run initialization on a VM that has already been provisioned.
 

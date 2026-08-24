@@ -77,18 +77,17 @@ def _backend_readiness(name: str, impl: Any) -> Readiness:
 
 SECRET_BACKEND_DESCRIPTOR = CapabilityKindDescriptor(
     kind="secret-backend",
-    contract_version=2,
+    contract_version=1,
     implementation_contract=SecretBackend,
     registry=_backend_registry,
     required_operations=frozenset(
         {
             "backend_readiness",
-            "would_attempt",
             "describe_lookup",
             "create_client",
         },
     ),
-    required_attributes=frozenset({"interactive", "config_model", "mapping_model"}),
+    required_attributes=frozenset({"supports_tty_interaction", "config_model", "mapping_model"}),
     entry_factory=_backend_entry,
     readiness=_backend_readiness,
     publisher_source="agentworks.capabilities.secret_backend",

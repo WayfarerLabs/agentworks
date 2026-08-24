@@ -29,7 +29,7 @@ from agentworks.secrets import (
     compute_needed_secrets,
     resolve_for_command,
 )
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolve import ResolutionBatch
 from tests.conftest import ManifestDoc, write_manifests
 
@@ -335,7 +335,7 @@ def test_resolve_for_command_returns_resolved_values(
     )
     config = load_config(cfg, warn_issues=False)
     target = SecretTarget(vm={"K": EnvEntry({"secret": "api-key"})})
-    resolved = resolve_for_command([target], config, build_registry(config), interaction=InteractionPolicy.REFUSE)
+    resolved = resolve_for_command([target], config, build_registry(config), interaction=TtyInteractionPolicy.REFUSE)
     assert resolved == {"api-key": "from-env"}
 
 
@@ -346,7 +346,7 @@ def test_resolve_for_command_rejects_non_enum_policy_before_any_source_work(
     """A caller-supplied ``"refuse"`` is equal to the enum but not identical to it.
 
     Every consumer branches by identity, so without the boundary check this call would
-    take the not-refuse path and attempt the interactive sources it meant to refuse. This
+    take the not-refuse path and permit the TTY prompt it meant to refuse. This
     is the one name of the resolve family that ``agentworks.secrets`` exports, so it is
     the one most reachable from a caller our type checker never sees.
     """
@@ -402,7 +402,7 @@ def test_resolve_for_command_rejects_multiline_environment_target_after_delivery
             [target],
             config,
             build_registry(config),
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
 
     assert "cannot be used for environment injection" in str(caught.value)
@@ -430,7 +430,7 @@ def test_resolved_values_are_plain_data(
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
     target = SecretTarget(vm={"K": EnvEntry({"secret": "api-key"})})
-    values = resolve_for_command([target], config, registry, interaction=InteractionPolicy.REFUSE)
+    values = resolve_for_command([target], config, registry, interaction=TtyInteractionPolicy.REFUSE)
     assert values == {"api-key": "first"}
 
     monkeypatch.setenv("AW_SECRET_API_KEY", "second")
@@ -464,11 +464,11 @@ def test_resolve_for_command_skips_loop_when_no_secrets(
 
     monkeypatch.setattr("agentworks.secrets.resolve.resolve_batch", _spy)
 
-    resolve_for_command([], config, registry, interaction=InteractionPolicy.REFUSE)
+    resolve_for_command([], config, registry, interaction=TtyInteractionPolicy.REFUSE)
     assert called["count"] == 0
 
     plaintext_target = SecretTarget(vm={"K": EnvEntry({"value": "plain"})})
-    resolve_for_command([plaintext_target], config, registry, interaction=InteractionPolicy.REFUSE)
+    resolve_for_command([plaintext_target], config, registry, interaction=TtyInteractionPolicy.REFUSE)
     assert called["count"] == 0
 
 
@@ -501,7 +501,11 @@ def test_resolve_for_command_passes_extra_decls_through(
     monkeypatch.setattr("agentworks.secrets.resolve.resolve_batch", _spy)
 
     resolve_for_command(
-        [], config, registry, extra_decls=[registry.lookup("secret", "external")], interaction=InteractionPolicy.REFUSE
+        [],
+        config,
+        registry,
+        extra_decls=[registry.lookup("secret", "external")],
+        interaction=TtyInteractionPolicy.REFUSE,
     )
     assert calls == [["external"]]
 

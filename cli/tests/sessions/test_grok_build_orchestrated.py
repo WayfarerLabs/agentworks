@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.db import Database, SessionMode, SessionStatus
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 
 from ..conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
 
@@ -106,7 +106,7 @@ def test_create_persists_minted_uuid_and_launches_fresh(tmp_path: Path, monkeypa
         name="s1",
         workspace="ws1",
         admin=True,
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
 
     session = db.get_session("s1")
@@ -152,7 +152,7 @@ def test_resume_reads_uuid_and_detects_after_killing_old_workload(
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),  # type: ignore[arg-type]
         name="s1",
         yes=True,
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
 
     assert f"--resume {sid}" in captured["command"]

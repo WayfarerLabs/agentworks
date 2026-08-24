@@ -21,7 +21,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.errors import ExternalError, NotFoundError, StateError
 from agentworks.output import Role
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from tests.conftest import ManifestDoc
 from tests.orchestrated_fixtures import PLUGINS_ENABLED, proxmox_site, write_operator_config
@@ -115,8 +115,8 @@ def test_create_and_reinit_loggers_receive_all_git_tokens(
     _reachable(monkeypatch, True)
     monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
 
-    agent_manager.create_agent(db, config, name="dev", vm_name="box", interaction=InteractionPolicy.REFUSE)
-    agent_manager.reinit_agent(db, config, name="dev", interaction=InteractionPolicy.REFUSE)
+    agent_manager.create_agent(db, config, name="dev", vm_name="box", interaction=TtyInteractionPolicy.REFUSE)
+    agent_manager.reinit_agent(db, config, name="dev", interaction=TtyInteractionPolicy.REFUSE)
 
     assert captured == [
         ("box", "agent-create", ("ghtok",)),
@@ -148,7 +148,7 @@ def test_create_graph_derives_from_template_and_row(db: Database, make_config, m
 
     vm_node = live_vm_node(db, config, registry, vm)
     tmpl_node = agent_template_node(registry, resolve_template(registry, None))
-    pending = pending_agent_node(db, config, "dev", tmpl_node, vm_node, interaction=InteractionPolicy.REFUSE)
+    pending = pending_agent_node(db, config, "dev", tmpl_node, vm_node, interaction=TtyInteractionPolicy.REFUSE)
     nodes = walk(pending)
 
     assert [n.key for n in nodes] == [
@@ -219,7 +219,7 @@ def test_create_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
 
-    agent_manager.create_agent(db, config, name="dev", vm_name="box", interaction=InteractionPolicy.REFUSE)
+    agent_manager.create_agent(db, config, name="dev", vm_name="box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"], ["git-token-gh"]]
     assert events == ["status", "start", "tailscale"]  # the gate ran
@@ -258,7 +258,7 @@ def test_reinit_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
 
-    agent_manager.reinit_agent(db, config, name="dev", interaction=InteractionPolicy.REFUSE)
+    agent_manager.reinit_agent(db, config, name="dev", interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"], ["git-token-gh"]]
     assert events == ["status", "start", "tailscale"]
@@ -292,7 +292,7 @@ def test_create_reachable_vm_fast_path_costs_no_gate_resolve(
     _seed_vm(db)
     _reachable(monkeypatch, True)
 
-    agent_manager.create_agent(db, config, name="dev", vm_name="box", interaction=InteractionPolicy.REFUSE)
+    agent_manager.create_agent(db, config, name="dev", vm_name="box", interaction=TtyInteractionPolicy.REFUSE)
 
     # One burst covering the whole union, in the walk's deterministic
     # first-encounter order (the union's only source since the
@@ -331,7 +331,7 @@ def test_create_mutation_failure_cleans_up_and_leaves_no_row(
     )
 
     with pytest.raises(ExternalError, match="creating agent: ssh exploded"):
-        agent_manager.create_agent(db, config, name="dev", vm_name="box", interaction=InteractionPolicy.REFUSE)
+        agent_manager.create_agent(db, config, name="dev", vm_name="box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert deletes == ["agt-dev"]  # the body's partial-state cleanup ran
     assert db.get_agent("dev") is None
@@ -354,7 +354,7 @@ def test_reinit_mutation_failure_wraps_and_keeps_the_agent(
     monkeypatch.setattr(agent_initializer, "create_agent_on_vm", _boom)
 
     with pytest.raises(ExternalError, match="reinitializing agent: ssh exploded"):
-        agent_manager.reinit_agent(db, config, name="dev", interaction=InteractionPolicy.REFUSE)
+        agent_manager.reinit_agent(db, config, name="dev", interaction=TtyInteractionPolicy.REFUSE)
 
     assert db.get_agent("dev") is not None  # re-runnable, as before
 
@@ -383,7 +383,7 @@ def test_reinit_update_template_repoints_and_resolves_the_new_template(
     monkeypatch.setattr(agent_initializer, "create_agent_on_vm", _capture)
     monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None)
 
-    agent_manager.reinit_agent(db, config, name="dev", update_template="other", interaction=InteractionPolicy.REFUSE)
+    agent_manager.reinit_agent(db, config, name="dev", update_template="other", interaction=TtyInteractionPolicy.REFUSE)
 
     assert captured["template"] == "other"  # setup ran against the NEW template
     row = db.get_agent("dev")
@@ -412,7 +412,7 @@ def test_reinit_unknown_update_template_raises_and_keeps_the_row(
 
     with pytest.raises(NotFoundError, match="Unknown agent template"):
         agent_manager.reinit_agent(
-            db, config, name="dev", update_template="ghost", interaction=InteractionPolicy.REFUSE
+            db, config, name="dev", update_template="ghost", interaction=TtyInteractionPolicy.REFUSE
         )
 
     assert resolve_counter == []  # refused before any secret resolve
@@ -476,7 +476,7 @@ def test_reinit_update_template_persists_before_convergence_so_a_mid_failure_kee
 
     with pytest.raises(ExternalError, match="reinitializing agent: ssh exploded"):
         agent_manager.reinit_agent(
-            db, config, name="dev", update_template="other", interaction=InteractionPolicy.REFUSE
+            db, config, name="dev", update_template="other", interaction=TtyInteractionPolicy.REFUSE
         )
 
     row = db.get_agent("dev")
@@ -525,7 +525,12 @@ def test_create_agent_on_disabled_plugin_recipe_refuses_before_any_work(
 
     with pytest.raises(StateError, match="enable plugin `decl-plugin`"):
         agent_manager.create_agent(
-            db, config, name="dev", vm_name="box", template="fixture-agent-tmpl", interaction=InteractionPolicy.REFUSE
+            db,
+            config,
+            name="dev",
+            vm_name="box",
+            template="fixture-agent-tmpl",
+            interaction=TtyInteractionPolicy.REFUSE,
         )
 
     assert db.get_agent("dev") is None  # refused before any DB write
@@ -553,7 +558,7 @@ def test_reinit_update_template_to_disabled_recipe_refuses_before_persist(
 
     with pytest.raises(StateError, match="enable plugin `decl-plugin`"):
         agent_manager.reinit_agent(
-            db, config, name="dev", update_template="fixture-agent-tmpl", interaction=InteractionPolicy.REFUSE
+            db, config, name="dev", update_template="fixture-agent-tmpl", interaction=TtyInteractionPolicy.REFUSE
         )
 
     row = db.get_agent("dev")
@@ -587,7 +592,7 @@ def test_agent_scope_reaches_node_readiness(
 
     monkeypatch.setattr(GitHubCredentialProvider, "preflight", _recording)
 
-    agent_manager.create_agent(db, config, name="dev", vm_name="box", interaction=InteractionPolicy.REFUSE)
+    agent_manager.create_agent(db, config, name="dev", vm_name="box", interaction=TtyInteractionPolicy.REFUSE)
 
     (scope,) = scopes
     assert scope is not None
@@ -625,7 +630,7 @@ def test_create_grant_all_reconciles_between_insert_and_sync(
     )
 
     agent_manager.create_agent(
-        db, config, name="dev", vm_name="box", grant_all_workspaces=True, interaction=InteractionPolicy.REFUSE
+        db, config, name="dev", vm_name="box", grant_all_workspaces=True, interaction=TtyInteractionPolicy.REFUSE
     )
 
     row = db.get_agent("dev")
@@ -706,7 +711,7 @@ def test_reinit_reconciles_recorded_grants_onto_the_vm(
         lambda vm, config_, db_, linux_user, ws, **k: group_adds.append((linux_user, ws)),
     )
 
-    agent_manager.reinit_agent(db, config, name="dev", interaction=InteractionPolicy.REFUSE)
+    agent_manager.reinit_agent(db, config, name="dev", interaction=TtyInteractionPolicy.REFUSE)
 
     assert group_adds == [("agt-dev", "ws1")]
 
@@ -729,7 +734,7 @@ def test_reinit_reconcile_does_not_reinsert_grant_rows(
     monkeypatch.setattr(agent_grants, "add_to_workspace_group", lambda *a, **k: None)
 
     before = len(db.list_agent_grants("dev"))
-    agent_manager.reinit_agent(db, config, name="dev", interaction=InteractionPolicy.REFUSE)
+    agent_manager.reinit_agent(db, config, name="dev", interaction=TtyInteractionPolicy.REFUSE)
 
     assert len(db.list_agent_grants("dev")) == before == 1  # no new / duplicate rows
     assert db.has_any_grant("dev", "ws1")
@@ -757,8 +762,8 @@ def test_reinit_reconcile_is_idempotent_across_repeated_reinits(
         lambda vm, config_, db_, linux_user, ws, **k: calls.append((linux_user, ws)),
     )
 
-    agent_manager.reinit_agent(db, config, name="dev", interaction=InteractionPolicy.REFUSE)
-    agent_manager.reinit_agent(db, config, name="dev", interaction=InteractionPolicy.REFUSE)
+    agent_manager.reinit_agent(db, config, name="dev", interaction=TtyInteractionPolicy.REFUSE)
+    agent_manager.reinit_agent(db, config, name="dev", interaction=TtyInteractionPolicy.REFUSE)
 
     assert calls == [("agt-dev", "ws1"), ("agt-dev", "ws1")]  # ran unconditionally both times
     assert len(db.list_agent_grants("dev")) == 1  # no duplication
@@ -792,7 +797,7 @@ def test_reinit_skips_stale_grant_and_reconciles_the_rest(
 
     monkeypatch.setattr(agent_grants, "add_to_workspace_group", _fake)
 
-    agent_manager.reinit_agent(db, config, name="dev", interaction=InteractionPolicy.REFUSE)  # must not raise
+    agent_manager.reinit_agent(db, config, name="dev", interaction=TtyInteractionPolicy.REFUSE)  # must not raise
 
     assert done == ["good"]  # the healthy grant was still reconciled
     assert any("stale" in w and "skipping stale grant" in w for w in captured_output.warnings)
@@ -831,7 +836,7 @@ def test_reinit_reconciles_grant_all_agent_via_materialized_rows(
         lambda vm, config_, db_, linux_user, ws, **k: group_adds.append((linux_user, ws)),
     )
 
-    agent_manager.reinit_agent(db, config, name="dev", interaction=InteractionPolicy.REFUSE)
+    agent_manager.reinit_agent(db, config, name="dev", interaction=TtyInteractionPolicy.REFUSE)
 
     row = db.get_agent("dev")
     assert row is not None and row.grant_all  # the seed is a real grant_all agent

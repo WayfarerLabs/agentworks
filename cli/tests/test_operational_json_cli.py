@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 
 from agentworks.cli import app
 from agentworks.db import PID_STOPPED, SessionMode, SessionStatus, VMRow, WorkspaceRow
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -495,9 +495,9 @@ def test_session_json_status_repairs_and_no_status_are_preserved(
         _config: object,
         _vms: object,
         *,
-        interaction: InteractionPolicy,
+        interaction: TtyInteractionPolicy,
     ) -> Iterator[None]:
-        assert interaction is InteractionPolicy.REFUSE
+        assert interaction is TtyInteractionPolicy.ALLOW
         nonlocal boundary_calls
         boundary_calls += 1
         yield
@@ -572,10 +572,10 @@ def test_session_describe_json_positive_and_stopped_pid_with_degraded_template(
         row: SessionRow,
         *,
         operation: str | None,
-        interaction: InteractionPolicy,
+        interaction: TtyInteractionPolicy,
     ) -> Iterator[tuple[object, object, object, object, object]]:
         del config, operation
-        assert interaction is InteractionPolicy.REFUSE
+        assert interaction is TtyInteractionPolicy.ALLOW
         workspace = db.get_workspace(row.workspace_name)
         vm = db.get_vm("box")
         assert workspace is not None and vm is not None
@@ -649,10 +649,10 @@ def test_session_list_and_describe_degrade_harness_integration_without_error_tex
         row: SessionRow,
         *,
         operation: str | None,
-        interaction: InteractionPolicy,
+        interaction: TtyInteractionPolicy,
     ) -> Iterator[tuple[object, object, object, object, object]]:
         del config, operation
-        assert interaction is InteractionPolicy.REFUSE
+        assert interaction is TtyInteractionPolicy.ALLOW
         workspace = db.get_workspace(row.workspace_name)
         vm = db.get_vm("box")
         assert workspace is not None and vm is not None
@@ -837,7 +837,7 @@ def test_session_human_listing_uses_one_fact_path_and_names_only_stays_lightweig
     _queries.list_sessions(
         cast("Database", object()),
         cast("Config", object()),
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
     assert calls == ["collect", "render"]
 
@@ -854,6 +854,6 @@ def test_session_human_listing_uses_one_fact_path_and_names_only_stays_lightweig
         cast("Database", object()),
         cast("Config", object()),
         names_only=True,
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
     assert emitted == ["first", "second"]

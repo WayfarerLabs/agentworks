@@ -37,12 +37,10 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.bootstrap import build_registry
+from agentworks.capabilities.secret_backend import TtyInteractionAccess
 from agentworks.config import ConfigError, load_config
 from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
-from agentworks.secrets.policy import InteractionPolicy
 from agentworks.secrets.resolve import (
-    CompletionPolicy,
-    ResolutionPolicy,
     active_sources,
     resolve_batch,
 )
@@ -117,10 +115,7 @@ def test_no_secrets_section_loads_with_default_chain(tmp_path: Path) -> None:
     batch = resolve_batch(
         [],
         sources,
-        policy=ResolutionPolicy(
-            interaction=InteractionPolicy.REFUSE,
-            completion=CompletionPolicy.COMPLETE,
-        ),
+        tty_access=TtyInteractionAccess.DISABLED,
         interaction_broker=None,
     )
     assert batch.complete_or_raise() == {}
@@ -494,9 +489,12 @@ def test_active_sources_stand_up_when_configured(tmp_path: Path) -> None:
     cfg = load_config(cfg_file, warn_issues=False)
     registry = build_registry(cfg)
     sources = active_sources(cfg, registry)
-    # Smoke-check the chain: the first attempting source is env-var.
+    # Smoke-check the chain: the first candidate source is env-var.
     decl = registry.lookup("secret", "shared")
-    first = next((source for source in sources if source.would_attempt(decl)), None)
+    first = next(
+        (source for source in sources if source.describe_lookup(decl).disposition.value == "candidate"),
+        None,
+    )
     assert first is not None
     assert first.name == "env-var"
 
@@ -559,7 +557,7 @@ def test_reachability_scope_is_operator_declared_only(tmp_path: Path) -> None:
     assert any(name == "tailscale-auth-key" for name, _ in registry.iter_kind_items("secret"))
 
 
-def test_reachability_keying_is_would_attempt_readiness_blind(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_reachability_keying_is_candidate_readiness_blind(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Reachability preservation invariant (LLD d): the build-time check is
     keyed on WOULD-ATTEMPT (the frozen edges), READINESS-BLIND. A secret whose
     only opted-in source is team-op, whose onepassword backend is forced
@@ -628,8 +626,6 @@ def test_unreachable_secret_error_message_and_hint(tmp_path: Path) -> None:
     assert exc.value.hint is not None
     assert "active source chain" in exc.value.hint
     assert "env-var" in exc.value.hint
-    # The hint mentions the three remediation paths.
-    assert "attemptable secret-source" in exc.value.hint
     assert "remove" in exc.value.hint
 
 

@@ -9,7 +9,7 @@ from textwrap import dedent
 from typing import Annotated, Any, Literal
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 import agentworks.capabilities.config as capability_config
 from agentworks.bootstrap import build_registry
@@ -18,9 +18,9 @@ from agentworks.capabilities.config import (
     mapping_value_is_opt_out,
 )
 from agentworks.capabilities.descriptor import descriptor_for
-from agentworks.capabilities.secret_backend import SecretBackend
+from agentworks.capabilities.secret_backend import LookupDescription, SecretBackend
 from agentworks.config import load_config
-from agentworks.errors import ConfigError, StateError
+from agentworks.errors import ConfigError, StateError, UserAbort
 from agentworks.manifests import ManifestSet, load_manifests
 from agentworks.origin import Origin
 from agentworks.plugins import Plugin, seated_plugin
@@ -208,6 +208,127 @@ class _StringBackend(ConformingSecretBackend):
     name = "string-mapping"
     description = "accepts one string mapping"
     mapping_model = AgwRootModel[str]
+
+
+class _ThrowingDescriptionBackend(ConformingSecretBackend):
+    name = "throwing-description"
+    description = "throws while describing a lookup"
+
+    @classmethod
+    def describe_lookup(cls, secret_name: str, mapping: BaseModel | None) -> LookupDescription:
+        raise RuntimeError("provider-owned sentinel")
+
+
+class _WrongDescriptionBackend(ConformingSecretBackend):
+    name = "wrong-description"
+    description = "returns the wrong lookup-description type"
+
+    @classmethod
+    def describe_lookup(cls, secret_name: str, mapping: BaseModel | None) -> LookupDescription:
+        return object()  # type: ignore[return-value]
+
+
+class _ForgedDescriptionBackend(ConformingSecretBackend):
+    name = "forged-description"
+    description = "returns a forged lookup description"
+
+    @classmethod
+    def describe_lookup(cls, secret_name: str, mapping: BaseModel | None) -> LookupDescription:
+        forged = object.__new__(LookupDescription)
+        object.__setattr__(forged, "disposition", "candidate")
+        object.__setattr__(forged, "identifier", "fixture")
+        return forged
+
+
+_FINALIZE_ABORT = UserAbort("finalize abort")
+
+
+class _ProtectedDescriptionBackend(ConformingSecretBackend):
+    name = "protected-description"
+    description = "raises a protected exit while describing a lookup"
+
+    @classmethod
+    def describe_lookup(cls, secret_name: str, mapping: BaseModel | None) -> LookupDescription:
+        raise _FINALIZE_ABORT
+
+
+@pytest.mark.parametrize(
+    "backend",
+    [_ThrowingDescriptionBackend, _WrongDescriptionBackend, _ForgedDescriptionBackend],
+    ids=("ordinary-exception", "wrong-type", "forged-fields"),
+)
+def test_finalization_normalizes_invalid_lookup_descriptions_without_provider_text(
+    tmp_path: Path,
+    backend: type[ConformingSecretBackend],
+) -> None:
+    registry = Registry.empty()
+    origin = Origin.operator_declared(file=tmp_path / "resources.yaml", line=1)
+    source_name = "selected"
+    registry.add(
+        "secret-source",
+        source_name,
+        SecretSourceDecl(name=source_name, backend=CapabilityBlock.of(backend.name)),
+        origin,
+    )
+    registry.add(
+        "secret",
+        "fixture",
+        SecretDecl(name="fixture", description="fixture"),
+        origin,
+    )
+    plugin = Plugin(name=f"{backend.name}-plugin", capabilities={"secret-backend": (backend,)})
+    with seated_plugin(plugin):
+        descriptor = descriptor_for("secret-backend")
+        registry.add(
+            "secret-backend",
+            backend.name,
+            descriptor.entry_factory(backend.name, backend, origin),
+            origin,
+        )
+        with pytest.raises(ConfigError) as caught:
+            registry.finalize()
+
+    assert "provider-owned sentinel" not in str(caught.value)
+
+
+def test_finalization_preserves_lookup_description_protected_exit_by_identity(tmp_path: Path) -> None:
+    registry = Registry.empty()
+    origin = Origin.operator_declared(file=tmp_path / "resources.yaml", line=1)
+    registry.add(
+        "secret-source",
+        "selected",
+        SecretSourceDecl(
+            name="selected",
+            backend=CapabilityBlock.of(_ProtectedDescriptionBackend.name),
+        ),
+        origin,
+    )
+    registry.add(
+        "secret",
+        "fixture",
+        SecretDecl(name="fixture", description="fixture"),
+        origin,
+    )
+    plugin = Plugin(
+        name="protected-description-plugin",
+        capabilities={"secret-backend": (_ProtectedDescriptionBackend,)},
+    )
+    with seated_plugin(plugin):
+        descriptor = descriptor_for("secret-backend")
+        registry.add(
+            "secret-backend",
+            _ProtectedDescriptionBackend.name,
+            descriptor.entry_factory(
+                _ProtectedDescriptionBackend.name,
+                _ProtectedDescriptionBackend,
+                origin,
+            ),
+            origin,
+        )
+        with pytest.raises(UserAbort) as caught:
+            registry.finalize()
+
+    assert caught.value is _FINALIZE_ABORT
 
 
 class _NumberBackend(ConformingSecretBackend):

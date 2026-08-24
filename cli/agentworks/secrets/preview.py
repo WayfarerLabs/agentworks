@@ -1,159 +1,338 @@
-"""Pure, value-free prediction for secret inspection and preflight."""
+"""Provider-aware, value-free secret preview orchestration."""
 
 from __future__ import annotations
 
+import concurrent.futures
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
-from agentworks.errors import StateError
-from agentworks.secrets.outcomes import _safe_diagnostic_text
-from agentworks.secrets.policy import InteractionPolicy, require_exact_interaction_policy
-from agentworks.secrets.resolve import ActiveSource, _BackendProtocolError, _lookup_projection
+from agentworks.capabilities.secret_backend.client import (
+    BackendPreview,
+    BlockReason,
+    FailureReason,
+    InteractionBroker,
+    OperatorImpact,
+    PreviewAvailable,
+    PreviewBlocked,
+    PreviewFailed,
+    PreviewIndeterminate,
+    PreviewIntent,
+    PreviewMissing,
+    SecretLookupRequest,
+    TtyInteractionAccess,
+    safe_identity,
+)
+from agentworks.errors import StateError, UserAbort
+from agentworks.secrets.resolve import ActiveSource, _BackendProtocolError, _drive_source, _lookup_projection
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from .base import SecretDecl
+    from agentworks.machine_output import JsonObject, JsonValue
+    from agentworks.secrets.base import SecretDecl
 
 
-class PreviewCategory(StrEnum):
-    ATTEMPTABLE = "attemptable"
-    REFUSED_INTERACTION = "refused-interaction"
-    UNAVAILABLE = "unavailable"
+class PreviewStatus(StrEnum):
+    """Wire-safe aggregate preview statuses."""
+
+    AVAILABLE = "available"
+    MISSING = "missing"
+    INDETERMINATE = "indeterminate"
+    BLOCKED = "blocked"
+    FAILED = "failed"
 
 
 @dataclass(frozen=True, slots=True)
-class SkippedSource:
+class AggregateNoCandidate:
+    """No active source had an applicable runtime lookup."""
+
+
+type AggregatePreview = BackendPreview | AggregateNoCandidate
+
+
+@dataclass(frozen=True, slots=True)
+class SourcePreviewAttempt:
+    """One ordered, core-attributed preview attempt."""
+
     source: str
-    reason: str
+    identifier: str | None
+    result: BackendPreview
 
     def __post_init__(self) -> None:
-        # ``reason`` is screened like the names beside it, and registration is
-        # not what makes that unnecessary: registration vets a plugin's SHAPE
-        # (a non-empty, '/'-free name; types; call shapes), never the text it
-        # later produces. This field is a mixture. ``sources.py`` composes most
-        # of it from our own prose around a plugin-authored name that
-        # ``plugins/enablement.py`` baked in, and returns ``impl.not_ready()``
-        # wholesale in the remaining case.
-        #
-        # Escaping at the render sink, which is how the sibling plugin name on
-        # ``ResolutionOutcome.remediation_target`` is handled, cannot work here:
-        # that one survives as its own field so the sink can escape exactly it,
-        # while this one is already concatenated into first-party prose, so the
-        # sink would have to escape our punctuation along with it. Issue #545
-        # tracks escaping the name upstream, where it is still a separate token;
-        # until then this screen is what keeps a rendered row one row.
-        if not self.reason:
-            raise ValueError("a skipped source must say why it was skipped")
-        if not _safe_diagnostic_text(self.source):
-            raise ValueError("invalid skipped source name")
-        if not _safe_diagnostic_text(self.reason):
-            raise ValueError("invalid skipped source reason")
+        safe_identity(self.source)
+        if self.identifier is not None:
+            safe_identity(self.identifier)
+        if type(self.result) not in {
+            PreviewAvailable,
+            PreviewMissing,
+            PreviewIndeterminate,
+            PreviewBlocked,
+            PreviewFailed,
+        }:
+            raise ValueError("invalid source preview result")
+        if isinstance(self.result, PreviewBlocked) and self.result.reason in {
+            BlockReason.NO_ACTIVE_SOURCE,
+            BlockReason.NO_ATTEMPTABLE_SOURCE,
+            BlockReason.BATCH_DOOMED,
+        }:
+            raise ValueError("final-only block reason cannot appear in a preview attempt")
 
 
 @dataclass(frozen=True, slots=True)
 class ResolutionPreview:
+    """One value-free aggregate with ordered source evidence."""
+
     name: str
-    category: PreviewCategory
+    result: AggregatePreview
     source: str | None
     identifier: str | None
-    skipped_not_ready: tuple[SkippedSource, ...]
+    attempts: tuple[SourcePreviewAttempt, ...]
 
     def __post_init__(self) -> None:
-        if self.category in {PreviewCategory.ATTEMPTABLE, PreviewCategory.REFUSED_INTERACTION}:
-            if self.source is None:
-                raise ValueError("attemptable preview requires a source")
-        elif self.source is not None or self.identifier is not None:
-            raise ValueError("unavailable preview forbids source and identifier")
-        # Boundary: the same operator-authored text a resolution outcome
-        # carries. See ``_safe_diagnostic_text``. ``source`` and ``identifier``
-        # reach this row's own rendered surfaces (``secret describe``,
-        # ``doctor``). ``name`` reaches none of them, and is screened for a
-        # different reason: ``describe_secret`` builds a preview before its
-        # renderer prints that same operator-chosen name in the header
-        # (``inspect.py``), so this is where a forged one is caught. Call
-        # order is what puts the catch here.
-        if not _safe_diagnostic_text(self.name):
-            raise ValueError("invalid preview name")
-        if self.source is not None and not _safe_diagnostic_text(self.source):
-            raise ValueError("invalid preview source")
-        if self.identifier is not None and not _safe_diagnostic_text(self.identifier):
-            raise ValueError("invalid preview identifier")
+        safe_identity(self.name)
+        if self.source is not None:
+            safe_identity(self.source)
+        if self.identifier is not None:
+            safe_identity(self.identifier)
+        if isinstance(self.result, AggregateNoCandidate):
+            if self.source is not None or self.identifier is not None or self.attempts:
+                raise ValueError("no-candidate preview cannot carry attempt identity")
+            return
+        if type(self.result) not in {
+            PreviewAvailable,
+            PreviewMissing,
+            PreviewIndeterminate,
+            PreviewBlocked,
+            PreviewFailed,
+        }:
+            raise ValueError("invalid aggregate preview result")
+        if not self.attempts or self.source is None:
+            raise ValueError("runtime preview result requires an attributed attempt")
+
+    @property
+    def status(self) -> PreviewStatus:
+        if isinstance(self.result, AggregateNoCandidate):
+            return PreviewStatus.BLOCKED
+        return {
+            PreviewAvailable: PreviewStatus.AVAILABLE,
+            PreviewMissing: PreviewStatus.MISSING,
+            PreviewIndeterminate: PreviewStatus.INDETERMINATE,
+            PreviewBlocked: PreviewStatus.BLOCKED,
+            PreviewFailed: PreviewStatus.FAILED,
+        }[type(self.result)]
+
+    @property
+    def reason(self) -> str | None:
+        if isinstance(self.result, AggregateNoCandidate):
+            return "no-candidate"
+        if isinstance(self.result, (PreviewIndeterminate, PreviewBlocked, PreviewFailed)):
+            return self.result.reason.value
+        return None
 
 
-def _preview(
-    secret: SecretDecl,
-    sources: Sequence[ActiveSource],
-    *,
-    interaction: InteractionPolicy | None,
-) -> ResolutionPreview:
-    skipped: list[SkippedSource] = []
-    first_refused: tuple[str, str | None] | None = None
-    for source in sources:
-        try:
-            request, identifier = _lookup_projection(secret, source)
-        except _BackendProtocolError:
-            raise StateError(f"secret source {source.name!r} violated the preview contract") from None
-        if request is None:
-            continue
-        if not source.readiness.is_ready:
-            reason = source.readiness.reason
-            if not reason:
-                raise StateError(f"secret source {source.name!r} has invalid readiness") from None
-            skipped.append(SkippedSource(source=source.name, reason=reason))
-            continue
-        if interaction is InteractionPolicy.REFUSE and source.interactive:
-            if first_refused is None:
-                first_refused = (source.name, identifier)
-            continue
-        return ResolutionPreview(
-            name=secret.name,
-            category=PreviewCategory.ATTEMPTABLE,
-            source=source.name,
-            identifier=identifier,
-            skipped_not_ready=tuple(skipped),
+def attempt_status(attempt: SourcePreviewAttempt) -> PreviewStatus:
+    """Return the wire status for one exact attempt variant."""
+    return {
+        PreviewAvailable: PreviewStatus.AVAILABLE,
+        PreviewMissing: PreviewStatus.MISSING,
+        PreviewIndeterminate: PreviewStatus.INDETERMINATE,
+        PreviewBlocked: PreviewStatus.BLOCKED,
+        PreviewFailed: PreviewStatus.FAILED,
+    }[type(attempt.result)]
+
+
+def attempt_reason(attempt: SourcePreviewAttempt) -> str | None:
+    """Return the conditional wire reason for one attempt."""
+    if isinstance(attempt.result, (PreviewIndeterminate, PreviewBlocked, PreviewFailed)):
+        return attempt.result.reason.value
+    return None
+
+
+def preview_data(preview: ResolutionPreview) -> JsonObject:
+    """Project a preview into its closed JSON-compatible tagged shape."""
+    data: JsonObject = {
+        "status": preview.status.value,
+        "source": preview.source,
+        "identifier": preview.identifier,
+        "attempts": [],
+    }
+    if preview.reason is not None:
+        data["reason"] = preview.reason
+    attempts: list[JsonValue] = []
+    for attempt in preview.attempts:
+        projected: JsonObject = {
+            "source": attempt.source,
+            "identifier": attempt.identifier,
+            "status": attempt_status(attempt).value,
+        }
+        reason = attempt_reason(attempt)
+        if reason is not None:
+            projected["reason"] = reason
+        attempts.append(projected)
+    data["attempts"] = attempts
+    return data
+
+
+def preview_hint(preview: ResolutionPreview, *, interaction_opt_in: bool) -> str:
+    """Render caller-aware guidance from a closed preview result."""
+    if preview.status is PreviewStatus.AVAILABLE:
+        return "available under the requested preview impact"
+    if preview.status is PreviewStatus.MISSING:
+        return "configure the value in this source or a later source"
+    reason = preview.reason
+    if reason == "operator-impact-limited":
+        return (
+            "retry with --allow-interaction for a definitive preview"
+            if interaction_opt_in
+            else "broader operator impact could produce a definitive preview"
         )
-    if first_refused is not None:
-        source_name, identifier = first_refused
+    if reason == BlockReason.TTY_UNAVAILABLE.value:
+        return "run with usable terminal input or inspect a non-TTY source"
+    if reason == BlockReason.TTY_INTERACTION_DISABLED.value:
+        return "global --non-interactive disabled terminal input only"
+    if reason == BlockReason.SOURCE_NOT_READY.value:
+        return "make the configured source ready and retry"
+    if reason == BlockReason.BACKEND_PLUGIN_DISABLED.value:
+        return "enable the configured secret-backend plugin"
+    if reason == "no-candidate":
+        return "configure an active source with an applicable mapping"
+    if isinstance(preview.result, PreviewFailed):
+        return {
+            FailureReason.INVALID_MAPPING: "check the configured secret mapping",
+            FailureReason.LOOKUP_REJECTED: "check the provider reference",
+            FailureReason.AUTHENTICATION: "authenticate the configured secret provider",
+            FailureReason.CONNECTIVITY: "check provider connectivity",
+            FailureReason.DEADLINE_EXCEEDED: "complete provider approval or increase the source timeout",
+            FailureReason.EXTERNAL: "check the provider and retry",
+            FailureReason.MALFORMED_VALUE: "remove NUL characters from the provider value",
+            FailureReason.BACKEND_PROTOCOL: "report the secret backend protocol violation",
+            FailureReason.UNEXPECTED: "report the unexpected secret backend failure",
+        }[preview.result.reason]
+    return "retry after correcting the blocked source"
+
+
+def _aggregate(name: str, attempts: list[SourcePreviewAttempt]) -> ResolutionPreview:
+    """Collapse an exhausted attempt chain using the fixed precedence."""
+    selected = next((attempt for attempt in attempts if isinstance(attempt.result, PreviewIndeterminate)), None)
+    if selected is None:
+        selected = next(
+            (
+                attempt
+                for attempt in attempts
+                if isinstance(attempt.result, PreviewBlocked)
+                and attempt.result.reason in {BlockReason.TTY_UNAVAILABLE, BlockReason.TTY_INTERACTION_DISABLED}
+            ),
+            None,
+        )
+    if selected is None:
+        selected = next((attempt for attempt in attempts if isinstance(attempt.result, PreviewMissing)), None)
+    if selected is None:
+        selected = next((attempt for attempt in attempts if isinstance(attempt.result, PreviewBlocked)), None)
+    if selected is not None:
         return ResolutionPreview(
-            name=secret.name,
-            category=PreviewCategory.REFUSED_INTERACTION,
-            source=source_name,
-            identifier=identifier,
-            skipped_not_ready=tuple(skipped),
+            name=name,
+            result=selected.result,
+            source=selected.source,
+            identifier=selected.identifier,
+            attempts=tuple(attempts),
         )
     return ResolutionPreview(
-        name=secret.name,
-        category=PreviewCategory.UNAVAILABLE,
+        name=name,
+        result=AggregateNoCandidate(),
         source=None,
         identifier=None,
-        skipped_not_ready=tuple(skipped),
+        attempts=(),
     )
 
 
-def preview_resolution(
-    secret: SecretDecl,
-    sources: Sequence[ActiveSource],
-) -> ResolutionPreview:
-    """Predict whether inspection has a source without applying operation refusal."""
-    return _preview(secret, sources, interaction=None)
-
-
-def preview_operation_resolution(
-    secret: SecretDecl,
+def preview_batch(
+    secrets: Sequence[SecretDecl],
     sources: Sequence[ActiveSource],
     *,
-    interaction: InteractionPolicy,
-) -> ResolutionPreview:
-    """Predict whether an operation has a source under an exact interaction policy.
+    impact: OperatorImpact,
+    tty_access: TtyInteractionAccess,
+    interaction_broker: InteractionBroker | None,
+) -> dict[str, ResolutionPreview]:
+    """Preview a deduplicated batch in one bounded source-first pass."""
+    if type(impact) is not OperatorImpact:
+        raise StateError("impact must be an exact OperatorImpact")
+    if type(tty_access) is not TtyInteractionAccess:
+        raise StateError("tty_access must be an exact TtyInteractionAccess")
+    names = list(dict.fromkeys(secret.name for secret in secrets))
+    declarations: dict[str, SecretDecl] = {}
+    for secret in secrets:
+        declarations.setdefault(secret.name, secret)
+    attempts: dict[str, list[SourcePreviewAttempt]] = {name: [] for name in names}
+    completed: dict[str, ResolutionPreview] = {}
 
-    Checks its own ``interaction`` because this is a published entry point
-    that consumes the value and builds no ``ResolutionPolicy``, so the
-    constructor's totality never reaches it. ``_preview`` compares it by
-    identity, and a plain ``"refuse"`` predicts attemptable where the
-    operation would refuse. The check is first, before any source walk, so a
-    rejection costs nothing.
-    """
-    require_exact_interaction_policy(interaction)
-    return _preview(secret, sources, interaction=interaction)
+    for source in sources:
+        pending = [declarations[name] for name in names if name not in completed]
+        if not pending:
+            break
+        projected: list[tuple[SecretLookupRequest, str | None]] = []
+        for secret in pending:
+            try:
+                request, description = _lookup_projection(secret, source)
+            except _BackendProtocolError:
+                protocol_result = PreviewFailed(FailureReason.BACKEND_PROTOCOL)
+                attempt = SourcePreviewAttempt(source.name, None, protocol_result)
+                attempts[secret.name].append(attempt)
+                completed[secret.name] = ResolutionPreview(
+                    name=secret.name,
+                    result=protocol_result,
+                    source=source.name,
+                    identifier=None,
+                    attempts=tuple(attempts[secret.name]),
+                )
+                continue
+            if request is not None:
+                projected.append((request, description.identifier))
+        if not projected:
+            continue
+        block_reason: BlockReason | None = None
+        if source.disabled_backend_plugin is not None:
+            block_reason = BlockReason.BACKEND_PLUGIN_DISABLED
+        elif not source.readiness.is_ready:
+            block_reason = BlockReason.SOURCE_NOT_READY
+        if block_reason is not None:
+            for request, identifier in projected:
+                attempts[request.name].append(
+                    SourcePreviewAttempt(source.name, identifier, PreviewBlocked(block_reason))
+                )
+            continue
+
+        requests = tuple(request for request, _identifier in projected)
+        identifiers = {request.name: identifier for request, identifier in projected}
+        returned: object
+        try:
+            returned = _drive_source(
+                source,
+                requests,
+                intent=PreviewIntent(impact),
+                tty_access=tty_access,
+                interaction_broker=interaction_broker,
+            )
+        except (UserAbort, concurrent.futures.CancelledError):
+            raise
+        except _BackendProtocolError:
+            returned = {request.name: PreviewFailed(FailureReason.BACKEND_PROTOCOL) for request in requests}
+        except Exception:
+            returned = {request.name: PreviewFailed(FailureReason.UNEXPECTED) for request in requests}
+        for request in requests:
+            result = cast("BackendPreview", returned[request.name])
+            attempt = SourcePreviewAttempt(source.name, identifiers[request.name], result)
+            attempts[request.name].append(attempt)
+            if isinstance(result, (PreviewAvailable, PreviewFailed)):
+                completed[request.name] = ResolutionPreview(
+                    name=request.name,
+                    result=result,
+                    source=source.name,
+                    identifier=identifiers[request.name],
+                    attempts=tuple(attempts[request.name]),
+                )
+
+    for name in names:
+        if name not in completed:
+            completed[name] = _aggregate(name, attempts[name])
+    return {name: completed[name] for name in names}

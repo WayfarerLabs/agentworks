@@ -1086,6 +1086,17 @@ def test_a_yaml_11_float_spelling_is_not_a_source_schema_error(tmp_path: Path) -
     assert source.backend.config["timeout"] == 1000.5
 
 
+def test_onepassword_preview_impact_is_in_the_emitted_source_schema() -> None:
+    schema = document_schema("secret-source")
+    definitions = schema["$defs"]
+    config = definitions["OnePasswordSourceConfig"]
+    impact = config["properties"]["app_authentication_impact"]
+
+    assert impact["default"] == "operator-action"
+    assert impact["$ref"] == "#/$defs/AppAuthenticationImpact"
+    assert definitions["AppAuthenticationImpact"]["enum"] == ["operator-action", "none"]
+
+
 def _a_vm_template(memory: str) -> str:
     return f"apiVersion: {API_VERSION}\nkind: vm-template\nmetadata:\n  name: dev\nspec:\n  memory: {memory}\n"
 

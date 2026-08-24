@@ -18,7 +18,7 @@ from agentworks.workspaces.manager._common import _guard_vm_status, _resolve_vm,
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
 
 
 def copy_workspace(
@@ -28,7 +28,7 @@ def copy_workspace(
     *,
     dest_name: str,
     vm_name: str | None = None,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Copy a workspace to a new VM workspace.
 

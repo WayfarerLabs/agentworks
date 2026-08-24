@@ -4,6 +4,11 @@ This reference documents the Agentworks command surface, operational JSON v1 con
 internals that affect operator behavior. Installation and configuration guidance remains in the
 [CLI README](README.md).
 
+Global `--non-interactive` means only "do not use the TTY for interactions, even if one is present."
+It does not disable color or other presentation and does not suppress biometric, app, browser,
+device, or other out-of-band provider work. It is not an unattended fail-fast mode; out-of-band
+authentication may request approval and wait for the configured source timeout.
+
 ## Commands
 
 ### Machine-readable output
@@ -140,15 +145,19 @@ agw graph show secret/npm-token --output json
 ```
 
 The top-level and per-secret source arrays preserve configured source precedence. Secrets sort by
-name. `identifier` and `not_ready_reason` are nullable. This is lookup prediction only, and never
-resolves or serializes a secret value.
+name. `identifier` and `not_ready_reason` are nullable. This is a static mapping projection only. A
+`would_attempt: true` compatibility field means the lookup disposition is a candidate; it is not a
+value-presence claim and never invokes provider preview.
 
 `agw secret describe NAME --output json` uses command `secret.describe` and data:
 
 ```text
 {secret: {
   name, kind, origin, description, hint, references, used_by, source_mappings,
-  resolution: {category, source, identifier, skipped_not_ready: [{source, reason}]}
+  resolution: {
+    category, source, identifier, skipped_not_ready: [{source, reason}],
+    preview: {status, source, identifier, reason?, attempts: [{source, identifier, status, reason?}]}
+  }
 }}
 ```
 
@@ -157,10 +166,14 @@ resolves or serializes a secret value.
 configured source instance and `backend` names its implementation. `provenance` is
 `synthesized-default`, `operator-override-of-synthesized-default`, or `declared`. `would_attempt` is
 boolean. `identifier` is null when a source has no static lookup identifier or will not attempt the
-secret. `not_ready_reason` is null when that source is ready. Resolution `category` is
-`attemptable`, `refused-interaction`, or `unavailable`; `source` and `identifier` are nullable.
-`source_mappings` retains configured source-chain ordering. References and `used_by` retain their
-service ordering.
+secret. `not_ready_reason` is null when that source is ready. Resolution `category` is `attemptable`
+or `unavailable`; `source` and `identifier` are nullable. `source_mappings` retains configured
+source-chain ordering. References and `used_by` retain their service ordering. The nested provider
+preview is value-free. `status` is `available`, `missing`, `indeterminate`, `blocked`, or `failed`.
+`reason` is absent for available and missing, and required for the other statuses; aggregate
+`blocked/no-candidate` has null source and identifier. Attempts retain source-chain ordering and
+omit static non-candidates. The default preview permits no backend-classified operator impact;
+`--allow-interaction` permits it and guarantees that the result is not indeterminate.
 
 #### VM JSON schemas
 
@@ -270,15 +283,19 @@ is configured database state, never live tmux state.
 
 ```text
 {
-  groups: [{name, checks: [{name, status, message, hint}]}],
+  groups: [{name, checks: [{name, status, message, hint, secret_preview?}]}],
   counts: {ok, info, warn, fail}
 }
 ```
 
 `status` is exactly `ok`, `info`, `warn`, or `fail`. Group and check arrays keep report construction
 order, and counts are integers from the complete report. `message` and `hint` are the same nullable
-facts used by the human renderer. A failing report is still written in full, then the command exits
-1:
+facts used by the human renderer. A secret check adds the optional, value-free `secret_preview`
+record `{status, source, identifier, reason?, attempts}`. Its status is `available`, `missing`,
+`indeterminate`, `blocked`, or `failed`; source and identifier are nullable; reason is present only
+for a result with a closed reason; and attempts retain source order as
+`{source, identifier, status, reason?}`. Non-secret checks omit the field. No secret value enters
+this projection. A failing report is still written in full, then the command exits 1:
 
 ```bash
 agw doctor --output json
@@ -362,18 +379,31 @@ release.
 
 | Command                                           | Description                                       |
 | ------------------------------------------------- | ------------------------------------------------- |
-| `agw secret list`                                 | Preview source applicability without reading      |
-| `agw secret describe NAME`                        | Describe one secret without reading               |
-| `agw secret verify NAME... [--allow-interaction]` | Verify one or more secrets without showing values |
+| `agw secret list`                                 | Show static source mappings                       |
+| `agw secret describe NAME [--allow-interaction]`  | Describe and preview one secret without its value |
+| `agw secret verify NAME... [--allow-interaction]` | Preview secrets without showing values            |
 
 The synthesized `env-var` and `prompt` sources work without declarations. Add a `secret-source`
 resource when a backend needs shared configuration or when you want another named source instance.
-`secret verify` resolves every unique requested name in one batch, prints one value-free outcome row
-per name, and exits nonzero when any name does not resolve. It refuses interactive sources by
-default; `--allow-interaction` opts into prompting or provider authentication for that invocation.
-Resolution preserves multiline strings and rejects NUL. A resolved row proves the source contract,
-not that a narrower line-oriented environment, credential, header, or stdin consumer accepts the
-value.
+`secret describe` and `secret verify` perform provider-aware, value-free previews. Their default
+impact is `NONE`; `--allow-interaction` opts into prompting or provider authentication and requires
+a definitive answer. The opt-in is valid with global `--non-interactive`: terminal prompts remain
+disabled while out-of-band provider work is permitted. Verification deduplicates names in request
+order, prints one row per name, and exits nonzero for every result other than `available`. An
+available row proves current provider presence under the requested impact, not that a narrower
+line-oriented environment, credential, header, or stdin consumer accepts the value.
+
+Actual resolution is separate. It performs one bounded source-first pass, preserves multiline
+strings, rejects NUL, falls through ordinary missing and blocked sources, and hard-stops a secret on
+invalid mapping, authentication, provider rejection, transport, timeout, or malformed-value
+failures. A complete batch that is already terminal stops before another provider source and gives
+other skipped names the core-only `batch-doomed-before-interaction` reason; explicit partial reveal
+continues independent names. For truly unattended operation, configure `env-var` or a provider
+authentication mode known to be unattended, such as supported 1Password service-account or Connect
+credentials. The static JSON v1 resolution-category vocabulary remains `attemptable`,
+`refused-interaction`, and `unavailable`; `refused-interaction` is retained for compatibility even
+when the current TTY-only path does not emit it. Do not rely on `--non-interactive` as a general
+provider-work prohibition.
 
 ### VMs
 

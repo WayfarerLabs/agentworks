@@ -39,7 +39,7 @@ indented terminal transcript (``TyperHandler``), as plain text
 future, as web markup, with the business logic unchanged. Set the handler
 once at the entry point via :func:`set_handler`. Color lives only in the
 terminal handler and only on an interactive TTY (suppressed under
-``NO_COLOR``, on a pipe/redirect, and under ``--non-interactive``).
+``NO_COLOR`` and on a pipe or redirect).
 """
 
 from __future__ import annotations
@@ -596,8 +596,8 @@ _non_interactive: bool = False
 def set_non_interactive(value: bool) -> None:
     """Seed the --non-interactive flag for this CLI invocation.
 
-    Called once from the Typer global-options callback at CLI entry. Service-layer
-    code reads via ``is_interactive()`` and does not import from ``cli/_app``.
+    Called once from the Typer global-options callback at CLI entry. It disables
+    TTY interaction only; it does not change output presentation.
     """
     global _non_interactive  # noqa: PLW0603
     _non_interactive = value
@@ -615,14 +615,7 @@ def is_interactive() -> bool:
 
 
 def non_interactive() -> bool:
-    """True iff --non-interactive was passed for this invocation.
-
-    Public accessor for the presentation layer (mirrors
-    :func:`deprecations_suppressed`), so a handler can gate color on the
-    flag without reaching the private module global across the package
-    boundary. Distinct from ``is_interactive()``, which also inspects
-    stdin; color depends only on the flag and the output stream.
-    """
+    """True iff --non-interactive disabled TTY use for this invocation."""
     return _non_interactive
 
 

@@ -7,10 +7,10 @@ from typing import Annotated
 import typer
 
 from agentworks import output
+from agentworks.capabilities.secret_backend import OperatorImpact
 from agentworks.cli._app import app
-from agentworks.cli._helpers import get_db
+from agentworks.cli._helpers import get_db, ordinary_tty_interaction_access
 from agentworks.machine_output import OutputFormat
-from agentworks.secrets.policy import InteractionPolicy
 
 secret_app = typer.Typer(
     name="secret",
@@ -36,12 +36,12 @@ def secret_list(
         ),
     ] = OutputFormat.HUMAN,
 ) -> None:
-    """Show declared secrets and how each active source would look them up.
+    """Show declared secrets and each active source's static lookup mapping.
 
     Rows are declared secrets; columns are the active sources in
     ``[secret_config].sources`` precedence order. Each cell says what that
-    source would do for the secret: its lookup identifier (env var name,
-    op:// URI, etc.), ``would attempt`` (no static key, e.g. prompt),
+    source declares for the secret: its lookup identifier (env var name,
+    op:// URI, etc.), ``candidate`` (no static key, e.g. prompt),
     ``not ready: <reason>`` (its host tool is missing), or ``won't attempt``
     (a ``false`` opt-out, or a mapping-required backend with no mapping).
     Values are never resolved.
@@ -49,7 +49,6 @@ def secret_list(
     if names_only and output_format is OutputFormat.JSON:
         raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
 
-    from agentworks import output
     from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
     from agentworks.secrets.inspect import build_secret_table, render_secret_table, secret_table_data
@@ -74,6 +73,11 @@ def secret_list(
 @secret_app.command("describe")
 def secret_describe(
     name: str = typer.Argument(..., help="Secret name to describe."),
+    allow_interaction: bool = typer.Option(
+        False,
+        "--allow-interaction",
+        help="Allow preview work that may prompt or require provider authentication.",
+    ),
     output_format: Annotated[
         OutputFormat,
         typer.Option(
@@ -91,8 +95,9 @@ def secret_describe(
     via the secret kind's ``instances`` hook -- same shape as
     the resource graph); ``Backend mappings:`` (per-active-source
     disposition with selected backend and provenance); ``Resolution preview:``
-    (which active source would attempt, or "not attemptable"). Does not prompt, does
-    not resolve values.
+    (provider-aware, value-free availability). The default may perform
+    non-disruptive provider work. ``--allow-interaction`` may prompt or
+    authenticate and guarantees a definitive preview disposition.
 
     The secret must be in the Resource Registry: either operator-declared
     as a ``secret`` manifest or auto-declared via a reference's miss policy.
@@ -106,7 +111,9 @@ def secret_describe(
     config = load_config(warn_issues=output_format is OutputFormat.HUMAN, workload_gated_issues_fatal=False)
     registry = load_request_registry(config, warn=output_format is OutputFormat.HUMAN)
     db = get_db()
-    desc = describe_secret(config, registry, name, db=db)
+    impact = OperatorImpact.ALLOW if allow_interaction else OperatorImpact.NONE
+    tty_access = ordinary_tty_interaction_access()
+    desc = describe_secret(config, registry, name, db=db, impact=impact, tty_access=tty_access)
     if output_format is OutputFormat.JSON:
         from click import get_binary_stream
 
@@ -131,18 +138,16 @@ def secret_verify(
     ),
 ) -> None:
     """Prove that declared secrets resolve without displaying their values."""
-    interaction = InteractionPolicy.ALLOW if allow_interaction else InteractionPolicy.REFUSE
     from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
-    from agentworks.errors import ValidationError
-    from agentworks.secrets.outcomes import ResolutionCategory
+    from agentworks.secrets.preview import PreviewStatus
     from agentworks.secrets.verification import render_verification, verify_secrets
 
-    if allow_interaction and output.non_interactive():
-        raise ValidationError("--allow-interaction cannot be used with --non-interactive")
     config = load_config()
     registry = load_request_registry(config)
-    outcomes = verify_secrets(config, registry, names, interaction=interaction)
+    impact = OperatorImpact.ALLOW if allow_interaction else OperatorImpact.NONE
+    tty_access = ordinary_tty_interaction_access()
+    outcomes = verify_secrets(config, registry, names, impact=impact, tty_access=tty_access)
     render_verification(outcomes)
-    if any(outcome.category is not ResolutionCategory.RESOLVED for outcome in outcomes):
+    if any(outcome.status is not PreviewStatus.AVAILABLE for outcome in outcomes):
         raise typer.Exit(1)

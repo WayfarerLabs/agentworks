@@ -19,7 +19,7 @@ import pytest
 from agentworks.db import VMStatus
 from agentworks.errors import ValidationError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from tests.conftest import ManifestDoc
 
@@ -121,7 +121,7 @@ def test_graph_derives_from_row_and_env_joins_via_targets(
     vm = db.get_vm("box")
     assert vm is not None
     registry = build_registry(config)
-    resolver = Resolver(config, registry, interaction=InteractionPolicy.REFUSE)
+    resolver = Resolver(config, registry, interaction=TtyInteractionPolicy.REFUSE)
 
     nodes = walk(live_vm_node(db, config, registry, vm))
 
@@ -201,7 +201,7 @@ def test_exec_copied_workspace_pin_no_longer_crashes(
     _reachable(monkeypatch, True)
 
     rc = vm_manager.exec_vm(
-        db, config, "box", ["echo", "hi"], workspace_name="copied-ws", interaction=InteractionPolicy.REFUSE
+        db, config, "box", ["echo", "hi"], workspace_name="copied-ws", interaction=TtyInteractionPolicy.REFUSE
     )
 
     assert rc == 0
@@ -231,7 +231,7 @@ def test_shell_reachable_vm_is_one_boundary_burst(
     _reachable(monkeypatch, True)
 
     # shell_vm returns the interactive exit code; the CLI owns process exit.
-    assert vm_manager.shell_vm(db, config, "box", interaction=InteractionPolicy.REFUSE) == 0
+    assert vm_manager.shell_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE) == 0
 
     assert len(resolve_counter) == 1
     assert sorted(resolve_counter[0]) == ["proxmox-token", "vm-env-secret"]
@@ -256,7 +256,7 @@ def test_shell_stopped_vm_gate_burst_then_boundary_burst(
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
 
-    assert vm_manager.shell_vm(db, config, "box", interaction=InteractionPolicy.REFUSE) == 0
+    assert vm_manager.shell_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE) == 0
 
     assert events == ["status", "start", "tailscale"]  # the gate ran
     assert resolve_counter == [["proxmox-token"], ["vm-env-secret"]]
@@ -275,7 +275,7 @@ def test_exec_reachable_vm_is_one_boundary_burst(
     _seed_vm(db)
     _reachable(monkeypatch, True)
 
-    rc = vm_manager.exec_vm(db, config, "box", ["echo", "hi"], interaction=InteractionPolicy.REFUSE)
+    rc = vm_manager.exec_vm(db, config, "box", ["echo", "hi"], interaction=TtyInteractionPolicy.REFUSE)
 
     assert rc == 0
     assert len(resolve_counter) == 1
@@ -298,7 +298,7 @@ def test_exec_stopped_vm_gate_burst_then_boundary_burst(
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
 
-    rc = vm_manager.exec_vm(db, config, "box", ["echo", "hi"], interaction=InteractionPolicy.REFUSE)
+    rc = vm_manager.exec_vm(db, config, "box", ["echo", "hi"], interaction=TtyInteractionPolicy.REFUSE)
 
     assert rc == 0
     assert events == ["status", "start", "tailscale"]
@@ -328,7 +328,7 @@ def test_exec_dash_prefixed_command_fails_with_zero_resolves_and_zero_gate(
     _no_gate(monkeypatch)
 
     with pytest.raises(ValidationError, match="cannot start with '-'") as exc_info:
-        vm_manager.exec_vm(db, config, "box", ["--workspace", "ws1", "pwd"], interaction=InteractionPolicy.REFUSE)
+        vm_manager.exec_vm(db, config, "box", ["--workspace", "ws1", "pwd"], interaction=TtyInteractionPolicy.REFUSE)
 
     # The hint names the real workaround: the `--` separator (and the
     # `sh -c` fallback), not the misleading "put agentworks args first".
@@ -354,7 +354,7 @@ def test_exec_double_dash_separator_runs_dash_led_command(
     _seed_vm(db)
     _reachable(monkeypatch, True)
 
-    rc = vm_manager.exec_vm(db, config, "box", ["--", "--version"], interaction=InteractionPolicy.REFUSE)
+    rc = vm_manager.exec_vm(db, config, "box", ["--", "--version"], interaction=TtyInteractionPolicy.REFUSE)
 
     assert rc == 0
     ((cmd, _env),) = target.streaming_calls
@@ -375,7 +375,9 @@ def test_exec_double_dash_separator_strips_only_the_first(
     _seed_vm(db)
     _reachable(monkeypatch, True)
 
-    rc = vm_manager.exec_vm(db, config, "box", ["--", "git", "log", "--", "path"], interaction=InteractionPolicy.REFUSE)
+    rc = vm_manager.exec_vm(
+        db, config, "box", ["--", "git", "log", "--", "path"], interaction=TtyInteractionPolicy.REFUSE
+    )
 
     assert rc == 0
     ((cmd, _env),) = target.streaming_calls
@@ -397,7 +399,7 @@ def test_exec_double_dash_separator_preserves_an_adjacent_second(
     _seed_vm(db)
     _reachable(monkeypatch, True)
 
-    rc = vm_manager.exec_vm(db, config, "box", ["--", "--", "x"], interaction=InteractionPolicy.REFUSE)
+    rc = vm_manager.exec_vm(db, config, "box", ["--", "--", "x"], interaction=TtyInteractionPolicy.REFUSE)
 
     assert rc == 0
     ((cmd, _env),) = target.streaming_calls
@@ -418,7 +420,7 @@ def test_exec_missing_command_after_double_dash_fails_pre_gate(
     _no_gate(monkeypatch)
 
     with pytest.raises(ValidationError, match="missing command after '--'"):
-        vm_manager.exec_vm(db, config, "box", ["--"], interaction=InteractionPolicy.REFUSE)
+        vm_manager.exec_vm(db, config, "box", ["--"], interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == []
     assert target.streaming_calls == []
@@ -438,7 +440,7 @@ def test_exec_bare_flag_after_command_word_still_works(
     _seed_vm(db)
     _reachable(monkeypatch, True)
 
-    rc = vm_manager.exec_vm(db, config, "box", ["free", "-m"], interaction=InteractionPolicy.REFUSE)
+    rc = vm_manager.exec_vm(db, config, "box", ["free", "-m"], interaction=TtyInteractionPolicy.REFUSE)
 
     assert rc == 0
     ((cmd, _env),) = target.streaming_calls
@@ -460,7 +462,7 @@ def test_cross_vm_workspace_mismatch_fails_with_zero_resolves_and_zero_gate(
 
     with pytest.raises(ValidationError, match="belongs to VM 'other', not 'box'"):
         vm_manager.exec_vm(
-            db, config, "box", ["echo", "hi"], workspace_name="ws-other", interaction=InteractionPolicy.REFUSE
+            db, config, "box", ["echo", "hi"], workspace_name="ws-other", interaction=TtyInteractionPolicy.REFUSE
         )
 
     assert resolve_counter == []
@@ -491,7 +493,7 @@ def test_vm_scope_reaches_node_readiness(
 
     monkeypatch.setattr(ProxmoxPlatform, "preflight", _recording)
 
-    vm_manager.exec_vm(db, config, "box", ["echo", "hi"], interaction=InteractionPolicy.REFUSE)
+    vm_manager.exec_vm(db, config, "box", ["echo", "hi"], interaction=TtyInteractionPolicy.REFUSE)
 
     (scope,) = scopes
     assert scope is not None
@@ -537,7 +539,7 @@ def test_shell_interactive_runs_inside_the_held_active_span(
 
     target.interactive = _tracking  # type: ignore[method-assign]
 
-    assert vm_manager.shell_vm(db, config, "box", interaction=InteractionPolicy.REFUSE) == 0
+    assert vm_manager.shell_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE) == 0
 
     assert events == ["hold-open", "interactive", "hold-close"]
 
@@ -558,7 +560,7 @@ def test_shell_no_tailscale_fails_before_any_resolve(
     _no_gate(monkeypatch)
 
     with pytest.raises(StateError, match="no Tailscale IP"):
-        vm_manager.shell_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+        vm_manager.shell_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
     assert resolve_counter == []
 
 
@@ -586,7 +588,7 @@ def test_shell_platform_transport_routes_through_the_node_platform(
 
     monkeypatch.setattr("agentworks.transports.transport", _no_transport)
 
-    assert vm_manager.shell_vm(db, config, "box", platform_transport=True, interaction=InteractionPolicy.REFUSE) == 0
+    assert vm_manager.shell_vm(db, config, "box", platform_transport=True, interaction=TtyInteractionPolicy.REFUSE) == 0
 
     (platform,) = seen
     assert isinstance(platform, ProxmoxPlatform)
@@ -624,7 +626,7 @@ def test_shell_platform_transport_hands_a_secret_bearing_ctx(
     monkeypatch.setattr("agentworks.transports.native_transport", _fake_native)
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: None)
 
-    assert vm_manager.shell_vm(db, config, "box", platform_transport=True, interaction=InteractionPolicy.REFUSE) == 0
+    assert vm_manager.shell_vm(db, config, "box", platform_transport=True, interaction=TtyInteractionPolicy.REFUSE) == 0
 
     (ctx,) = seen
     assert ctx.secret("proxmox-token") == "pve-token"

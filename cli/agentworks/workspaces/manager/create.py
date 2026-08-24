@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, WorkspaceRow
     from agentworks.machine_output import JsonObject
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
 
 # NAME-column truncation cap for ``workspace list``, derived from the
 # workspace-name cap so the two cannot drift: a valid name (<= 29) never
@@ -132,7 +132,7 @@ def create_workspace(
     vm_name: str | None = None,
     template_name: str | None = None,
     open_vscode: bool = False,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Create a workspace on a VM.
 

@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from agentworks.db import Database, VMRow
     from agentworks.resources import Registry
     from agentworks.secrets import SecretTarget
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import LiveVMNode
 
@@ -57,7 +57,7 @@ def gated_vm_boundary(
     *,
     targets: Sequence[SecretTarget] = (),
     scope: OperationScope | None = None,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> Iterator[tuple[LiveVMNode, Resolver, RunContext]]:
     """The gate-opening commands' shared composition root (vm/agent
     shell and exec, console attach, the workspace lifecycle ops):
@@ -132,7 +132,7 @@ def _live_vm_boundary(
     vm: VMRow,
     *,
     registry: Registry | None = None,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> tuple[LiveVMNode, RunContext]:
     """The no-gate commands' shared composition root (``start_vm`` /
     ``stop_vm`` / ``delete_vm`` / ``describe_vm``, whose graphs are

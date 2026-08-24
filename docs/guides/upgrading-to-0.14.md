@@ -408,8 +408,8 @@ Configuration:
   [ok]   Config is valid
 
 Secrets:
-  [ok]   Secret 'gh-pat' (auto): would attempt via env-var
-  [ok]   Secret 'npm-token': would attempt via env-var
+  [ok]   Secret 'gh-pat' (auto): available; source=env-var
+  [ok]   Secret 'npm-token': available; source=env-var
 
 Results: 18 ok, 11 info, 0 warn, 0 fail
 ```
@@ -477,6 +477,16 @@ system = ["azure", "proxmox", "onepassword", "claude"]  # only the ones you use
 Which of the four you actually need follows from what your resources reference, and the default
 local path needs no `[plugins]` entry at all; "System plugins" in the
 [resources guide](resources.md) has the mapping.
+
+## `--non-interactive` now controls TTY interaction only
+
+The global `--non-interactive` flag now means only: do not use the TTY for interactions, even when
+one is present. It no longer controls color or other presentation. It does not suppress biometric
+prompts, desktop app approval, browser or device flows, or other provider work outside the terminal,
+and that work may wait until the configured source timeout. The flag is not a general unattended
+fail-fast mode. For a truly unattended path, use an environment-variable source or provider
+authentication known to be unattended, such as a supported 1Password service-account or Connect
+configuration, and set an appropriate source timeout.
 
 ## Secret source precedence key
 

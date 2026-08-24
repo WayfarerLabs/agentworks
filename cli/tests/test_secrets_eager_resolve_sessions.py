@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 
 from agentworks.errors import SecretUnavailableError
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 
 from ._secrets_eager_support import _seed_basic_db, _stub_build_registry, _stub_session_prep
 from .conftest import stub_vm_gates
@@ -84,7 +84,7 @@ def test_session_create_eager_resolve_fires_before_db_insert(
             template_name=None,
             agent_name=None,
             admin=True,
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
 
     # State must be untouched.
@@ -147,7 +147,7 @@ def test_session_create_calls_resolve_with_session_target(
             template_name=None,
             agent_name=None,
             admin=True,
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
 
     assert len(calls) == 1, f"expected exactly one target registration, got {len(calls)}"
@@ -213,7 +213,7 @@ def test_session_resume_broken_no_force_bails_before_eager_resolve(
             name="s1",
             force=False,
             yes=True,
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
 
     assert resolve_calls == [], (
@@ -291,7 +291,7 @@ def test_session_resume_eager_resolve_fires_before_kill(
             config,  # type: ignore[arg-type]
             name="s1",
             yes=True,
-            interaction=InteractionPolicy.REFUSE,
+            interaction=TtyInteractionPolicy.REFUSE,
         )
 
     assert kill_calls == [], "eager-resolve must precede kill; kill ran anyway"
@@ -359,7 +359,7 @@ def test_session_attach_does_not_eager_resolve(
     config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key=None))
     # attach_session returns interactive()'s exit code (0, stubbed) and
     # does not sys.exit; the CLI owns the process exit.
-    assert session_manager.attach_session(db, config, name="s1", interaction=InteractionPolicy.REFUSE) == 0  # type: ignore[arg-type]
+    assert session_manager.attach_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE) == 0  # type: ignore[arg-type]
 
     assert resolve_called == [], "session attach joins existing shell; must not eager-resolve"
     db.close()
@@ -396,7 +396,7 @@ def test_session_list_does_not_eager_resolve(
         db,
         config,  # type: ignore[arg-type]
         no_status=True,  # avoid SSH liveness probes
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
 
     assert resolve_called == [], "session list reads DB only; must not eager-resolve secrets"
@@ -460,7 +460,7 @@ def test_session_describe_does_not_eager_resolve(
         db,
         config,
         name="s1",  # type: ignore[arg-type]
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
 
     assert resolve_called == [], "session describe must not eager-resolve secrets"

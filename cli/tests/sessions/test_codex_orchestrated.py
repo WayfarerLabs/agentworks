@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.db import Database, SessionMode, SessionStatus
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 
 from ..conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
 
@@ -190,7 +190,7 @@ def _resume(db: Database) -> None:
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),
         name="s1",
         yes=True,
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )  # type: ignore[arg-type]
 
 
@@ -222,7 +222,7 @@ def test_create_launches_fresh_without_probing_any_session_state(
         name="s1",
         workspace="ws1",
         admin=True,
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
 
     assert set(events) == {"probe", "tmux_create"}  # readiness only: no state probe
@@ -431,7 +431,7 @@ def test_substitution_leaves_the_generated_snippet_intact_and_substitutes_extra_
         name="s1",
         workspace="ws1",
         admin=True,
-        interaction=InteractionPolicy.REFUSE,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
 
     command = captured["command"]

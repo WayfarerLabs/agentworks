@@ -1,4 +1,4 @@
-"""The interactive ``prompt`` secret backend."""
+"""The terminal ``prompt`` secret backend."""
 
 from __future__ import annotations
 
@@ -9,10 +9,28 @@ from pydantic import BaseModel, model_validator
 
 from agentworks.capabilities.secret_backend.base import SecretBackend
 from agentworks.capabilities.secret_backend.client import (
+    BackendBlocked,
+    BackendFailed,
+    BackendPreview,
+    BackendResolution,
+    BackendResolved,
+    BlockReason,
+    FailureReason,
+    IndeterminateReason,
     InteractionBroker,
-    RemainingTime,
+    LookupDescription,
+    LookupDisposition,
+    OperatorImpact,
+    PreviewAvailable,
+    PreviewBlocked,
+    PreviewFailed,
+    PreviewIndeterminate,
+    PreviewIntent,
+    ResolutionIntent,
+    SecretClientIntent,
     SecretLookupRequest,
     SecretSourceClient,
+    TtyInteractionAccess,
 )
 from agentworks.errors import StateError
 from agentworks.schema import AgwModel, AgwRootModel
@@ -54,59 +72,97 @@ class PromptMapping(AgwRootModel[Any]):
 
 
 class _PromptClient:
-    def __init__(self, broker: InteractionBroker | None) -> None:
+    def __init__(
+        self,
+        *,
+        intent: SecretClientIntent,
+        tty_access: TtyInteractionAccess,
+        broker: InteractionBroker | None,
+    ) -> None:
+        self._intent = intent
+        self._tty_access = tty_access
         self._broker = broker
 
-    def prepare(
-        self,
-        requests: tuple[SecretLookupRequest, ...],
-        *,
-        remaining_time: RemainingTime,
-    ) -> None:
+    def _block_reason(self) -> BlockReason | None:
+        if self._tty_access is TtyInteractionAccess.UNAVAILABLE:
+            return BlockReason.TTY_UNAVAILABLE
+        if self._tty_access is TtyInteractionAccess.DISABLED:
+            return BlockReason.TTY_INTERACTION_DISABLED
         return None
 
-    def resolve(
-        self,
-        requests: tuple[SecretLookupRequest, ...],
-        *,
-        remaining_time: RemainingTime,
-    ) -> Mapping[str, str]:
+    def preview(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendPreview]:
+        if not isinstance(self._intent, PreviewIntent):
+            raise StateError("resolution client cannot perform preview")
+        block_reason = self._block_reason()
+        if block_reason is not None:
+            return {request.name: PreviewBlocked(block_reason) for request in requests}
+        if self._intent.impact is OperatorImpact.NONE:
+            return {
+                request.name: PreviewIndeterminate(IndeterminateReason.OPERATOR_IMPACT_LIMITED) for request in requests
+            }
         if self._broker is None:
-            raise StateError("the prompt source client requires an interaction broker")
-        resolved: dict[str, str] = {}
+            raise StateError("available prompt preview requires an interaction broker")
+        results: dict[str, BackendPreview] = {}
         for request in requests:
-            resolved[request.name] = self._broker.request_secret(request.name)
-        return resolved
+            value = self._broker.request_secret(request.name)
+            results[request.name] = (
+                PreviewFailed(FailureReason.MALFORMED_VALUE) if "\0" in value else PreviewAvailable()
+            )
+        return results
+
+    def resolve(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendResolution]:
+        if not isinstance(self._intent, ResolutionIntent):
+            raise StateError("preview client cannot perform resolution")
+        block_reason = self._block_reason()
+        if block_reason is not None:
+            return {request.name: BackendBlocked(block_reason) for request in requests}
+        if self._broker is None:
+            raise StateError("available prompt resolution requires an interaction broker")
+        results: dict[str, BackendResolution] = {}
+        for request in requests:
+            value = self._broker.request_secret(request.name)
+            results[request.name] = (
+                BackendFailed(FailureReason.MALFORMED_VALUE) if "\0" in value else BackendResolved(value)
+            )
+        return results
 
 
 class _PromptContext(AbstractContextManager[SecretSourceClient]):
-    def __init__(self, broker: InteractionBroker | None) -> None:
+    def __init__(
+        self,
+        *,
+        intent: SecretClientIntent,
+        tty_access: TtyInteractionAccess,
+        broker: InteractionBroker | None,
+    ) -> None:
+        self._intent = intent
+        self._tty_access = tty_access
         self._broker = broker
 
     def __enter__(self) -> SecretSourceClient:
-        return _PromptClient(self._broker)
+        return _PromptClient(intent=self._intent, tty_access=self._tty_access, broker=self._broker)
 
     def __exit__(self, *args: object) -> None:
         return None
 
 
 class PromptBackend(SecretBackend):
-    """Resolve secrets through a caller-authorized interactive prompt."""
+    """Resolve secrets through a caller-authorized terminal prompt."""
 
-    contract_version: ClassVar[int] = 2
+    contract_version: ClassVar[int] = 1
     config_model: ClassVar[type[AgwModel]] = PromptSourceConfig
     mapping_model: ClassVar[type[AgwRootModel[Any]]] = PromptMapping
     name: ClassVar[str] = "prompt"
-    description: ClassVar[str] = "prompts interactively at resolution time"
+    description: ClassVar[str] = "prompts through terminal input at resolution time"
     prose: ClassVar[TopicProse | None] = TopicProse(
-        title="Interactive prompt",
+        title="Terminal prompt",
         overview="""
         Asks the operator for a value at the moment a command needs it. It is the
         last source in the simple default chain, so only values no earlier source
         resolved are requested. Prompt has no per-secret mapping vocabulary.
         """,
     )
-    interactive: ClassVar[bool] = True
+    supports_tty_interaction: ClassVar[bool] = True
 
     @classmethod
     def backend_readiness(cls) -> Readiness:
@@ -115,20 +171,16 @@ class PromptBackend(SecretBackend):
         return Readiness.ready()
 
     @classmethod
-    def would_attempt(cls, secret_name: str, *, mapping_present: bool) -> bool:
-        return True
-
-    @classmethod
-    def describe_lookup(cls, secret_name: str, mapping: BaseModel | None) -> str | None:
-        return None
+    def describe_lookup(cls, secret_name: str, mapping: BaseModel | None) -> LookupDescription:
+        return LookupDescription(LookupDisposition.CANDIDATE, None)
 
     @classmethod
     def create_client(
         cls,
         *,
-        source_name: str,
         config: AgwModel,
+        intent: SecretClientIntent,
+        tty_access: TtyInteractionAccess,
         interaction_broker: InteractionBroker | None,
-        remaining_time: RemainingTime,
     ) -> AbstractContextManager[SecretSourceClient]:
-        return _PromptContext(interaction_broker)
+        return _PromptContext(intent=intent, tty_access=tty_access, broker=interaction_broker)

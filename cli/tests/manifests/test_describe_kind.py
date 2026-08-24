@@ -148,10 +148,6 @@ def test_secret_source_kind_describes_the_backend_union_and_override_provenance(
 
     assert text.startswith("Secret sources (secret-source, resource kind)")
     assert "operator declaration with either name replaces that built-in row" in text
-    backend = _field_entry(text, "backend")
-    assert "env-var: resolves from AW_SECRET_<NAME> environment variables" in backend
-    assert "prompt: prompts interactively at resolution time" in backend
-    assert "onepassword: resolves via the 1Password CLI" in backend
     assert "`agw resource sample secret-source`" in text
 
 

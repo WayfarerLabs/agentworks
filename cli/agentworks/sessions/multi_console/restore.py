@@ -35,7 +35,7 @@ from .tmux_build import PreserveEnvMemo, _resolve_workspace_path, _split_shell_p
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
 
 
 def restore_session(
@@ -44,7 +44,7 @@ def restore_session(
     *,
     console_name: str,
     session_name: str,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Reconcile a single session window's live tmux state against its configured
     shell list. Additive only: it rebuilds the window if it is gone entirely and

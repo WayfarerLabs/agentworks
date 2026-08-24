@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Annotated, cast
 import typer
 
 from agentworks.cli._app import app
-from agentworks.cli._helpers import get_db
+from agentworks.cli._helpers import get_db, ordinary_tty_interaction_access
 from agentworks.machine_output import OutputFormat
 
 # Module-level because three commands in this file render a host path and
@@ -186,7 +186,13 @@ def resource_show(
     # workload_gated_issues_fatal doc.
     config = load_config(warn_issues=warn, workload_gated_issues_fatal=False)
     registry = load_request_registry(config, warn=warn)
-    shown = show_resource(config, registry, identity, DatabaseLiveSource(db.DB_PATH))
+    shown = show_resource(
+        config,
+        registry,
+        identity,
+        DatabaseLiveSource(db.DB_PATH),
+        tty_access=ordinary_tty_interaction_access(),
+    )
 
     if output_format is OutputFormat.JSON:
         from click import get_binary_stream

@@ -12,12 +12,12 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from typer.testing import CliRunner
 
-from agentworks.capabilities.secret_backend import InteractionBroker
+from agentworks.capabilities.secret_backend import InteractionBroker, TtyInteractionAccess
 from agentworks.cli import app
 from agentworks.db import PID_STOPPED, SessionMode, SessionStatus, VMStatus
 from agentworks.resources.graph import Readiness
-from agentworks.secrets.policy import InteractionPolicy
-from agentworks.secrets.resolve import ActiveSource, ResolutionBatch, ResolutionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
+from agentworks.secrets.resolve import ActiveSource, ResolutionBatch
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -88,21 +88,21 @@ def _resolution_spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[tuple[str, ..
         secrets: Sequence[SecretDecl],
         sources: Sequence[ActiveSource],
         *,
-        policy: ResolutionPolicy,
+        tty_access: TtyInteractionAccess,
         interaction_broker: InteractionBroker | None,
     ) -> ResolutionBatch:
         calls.append(
             (
                 tuple(secret.name for secret in secrets),
                 tuple(source.name for source in sources),
-                policy.interaction.value,
+                tty_access.value,
                 interaction_broker is not None,
             )
         )
         return real_resolve_batch(
             secrets,
             sources,
-            policy=policy,
+            tty_access=tty_access,
             interaction_broker=interaction_broker,
         )
 
@@ -135,7 +135,6 @@ def test_vm_describe_json_suppresses_the_ordinary_resolver_presentation(
     _platform_fast_path(monkeypatch)
     _install_skipped_backend(monkeypatch)
     calls = _resolution_spy(monkeypatch)
-    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
 
     human = CliRunner().invoke(app, ["vm", "describe", "box", "--output", "human"])
     machine = CliRunner().invoke(app, ["vm", "describe", "box", "--output", "json"])
@@ -151,14 +150,14 @@ def test_vm_describe_json_suppresses_the_ordinary_resolver_presentation(
         (
             ("proxmox-token",),
             ("env-var", "env-var", "prompt"),
-            "allow",
-            True,
+            "unavailable",
+            False,
         ),
         (
             ("proxmox-token",),
             ("env-var", "env-var", "prompt"),
-            "allow",
-            True,
+            "unavailable",
+            False,
         ),
     ]
 
@@ -178,7 +177,6 @@ def test_session_describe_uses_the_same_real_gate_chain_for_both_formats(
     _wire_cli(monkeypatch, db, config)
     _platform_fast_path(monkeypatch)
     _install_skipped_backend(monkeypatch)
-    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
     monkeypatch.setattr(sessions, "_ensure_pid", lambda row, *, target, db: row)
     monkeypatch.setattr(sessions, "check_session_status", lambda row, *, target: SessionStatus.STOPPED)
 
@@ -247,7 +245,6 @@ def test_session_list_status_and_late_repair_use_the_same_resolution_path(
     _wire_cli(monkeypatch, db, config)
     _install_skipped_backend(monkeypatch)
     calls = _resolution_spy(monkeypatch)
-    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
     monkeypatch.setattr(vms, "_tailscale_rejoin_required", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.STOPPED)
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: None)
@@ -284,14 +281,14 @@ def test_session_list_status_and_late_repair_use_the_same_resolution_path(
         (
             ("proxmox-token",),
             ("env-var", "env-var", "prompt"),
-            "allow",
-            True,
+            "unavailable",
+            False,
         ),
         (
             ("tailscale-auth-key",),
             ("env-var", "env-var", "prompt"),
-            "allow",
-            True,
+            "unavailable",
+            False,
         ),
     ]
 
@@ -306,14 +303,14 @@ def test_session_list_status_and_late_repair_use_the_same_resolution_path(
         (
             ("proxmox-token",),
             ("env-var", "env-var", "prompt"),
-            "allow",
-            True,
+            "unavailable",
+            False,
         ),
         (
             ("tailscale-auth-key",),
             ("env-var", "env-var", "prompt"),
-            "allow",
-            True,
+            "unavailable",
+            False,
         ),
     ]
 
@@ -602,7 +599,7 @@ def test_vm_describe_propagates_operator_abort_in_service_and_both_cli_formats(
         monkeypatch.setattr("agentworks.secrets.resolver.Resolver.resolve", abort)
 
     with pytest.raises(UserAbort, match="operator declined"):
-        manager.vm_description(db, config, "box", interaction=InteractionPolicy.ALLOW)
+        manager.vm_description(db, config, "box", interaction=TtyInteractionPolicy.ALLOW)
 
     for output_format in ("human", "json"):
         result = CliRunner().invoke(app, ["vm", "describe", "box", "--output", output_format])

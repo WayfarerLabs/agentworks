@@ -45,7 +45,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, ShellEntry
     from agentworks.secrets import SecretTarget
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
 
 
 def create_console(
@@ -127,7 +127,7 @@ def add_sessions(
     *,
     console_name: str,
     session_specs: list[str],
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Append sessions to an existing console in argument order. Atomic at the
     DB layer; if the console's tmux session is live, also adds the windows
@@ -407,7 +407,7 @@ def add_shell(
     session_name: str,
     cwd: str | None = None,
     admin: bool = False,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Append a single shell entry to a session's window in a console. If the
     console is live, also splits the pane immediately (best-effort)."""

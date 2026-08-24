@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     )
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.sessions.tmux import RunCommand
     from agentworks.transports import Transport
 from ._constants import _STOP_GRACE_SECONDS
@@ -155,7 +155,7 @@ def stop_session(
     *,
     name: str,
     force: bool = False,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Stop a running session. Sends C-c first, then kills after a grace period."""
     from agentworks.sessions.tmux import force_kill_tmux_server
@@ -243,7 +243,7 @@ def resume_session(
     name: str,
     force: bool = False,
     yes: bool = False,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Resume a session. Prompts if running (--yes to skip). --force for BROKEN.
 
@@ -633,7 +633,7 @@ def stop_all_sessions(
     agent_name: str | list[str] | None = None,
     admin_only: bool = False,
     force: bool = False,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Stop all running sessions, optionally filtered by VM, workspace, agent, and/or mode.
 
@@ -726,7 +726,7 @@ def resume_all_sessions(
     admin_only: bool = False,
     include_running: bool = False,
     force: bool = False,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Resume sessions, optionally filtered by VM, workspace, agent, and/or mode.
 

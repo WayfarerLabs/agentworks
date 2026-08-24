@@ -9,7 +9,7 @@ import typer
 from agentworks.cli._app import app
 from agentworks.cli._helpers import (
     get_db,
-    ordinary_interaction_policy,
+    ordinary_tty_interaction_policy,
     parse_csv_filter,
     prompt_vm,
 )
@@ -34,7 +34,7 @@ def agent_create(
     ] = False,
 ) -> None:
     """Create an agent (isolated Linux user) on a VM."""
-    interaction = ordinary_interaction_policy()
+    interaction = ordinary_tty_interaction_policy()
     from agentworks.agents.manager import create_agent
     from agentworks.config import load_config
 
@@ -133,7 +133,7 @@ def agent_reinit(
     ] = None,
 ) -> None:
     """Re-run agent setup using the stored template."""
-    interaction = ordinary_interaction_policy()
+    interaction = ordinary_tty_interaction_policy()
     from agentworks.agents.manager import reinit_agent
     from agentworks.config import load_config
 
@@ -156,7 +156,7 @@ def agent_grant_workspaces(
     all_workspaces: Annotated[bool, typer.Option("--all", help="Grant access to all workspaces")] = False,
 ) -> None:
     """Grant an agent explicit access to workspaces."""
-    interaction = ordinary_interaction_policy()
+    interaction = ordinary_tty_interaction_policy()
     from agentworks.agents.grants import grant_workspaces
     from agentworks.config import load_config
 
@@ -180,7 +180,7 @@ def agent_revoke_workspaces(
     all_workspaces: Annotated[bool, typer.Option("--all", help="Remove all explicit grants")] = False,
 ) -> None:
     """Revoke explicit workspace grants from an agent."""
-    interaction = ordinary_interaction_policy()
+    interaction = ordinary_tty_interaction_policy()
     from agentworks.agents.grants import revoke_workspaces
     from agentworks.config import load_config
 
@@ -204,7 +204,7 @@ def agent_exec(
     ] = None,
 ) -> None:
     """Execute a command as an agent user."""
-    interaction = ordinary_interaction_policy()
+    interaction = ordinary_tty_interaction_policy()
     from agentworks.agents.manager import exec_agent
     from agentworks.config import load_config
 
@@ -229,7 +229,7 @@ def agent_shell(
     workspace: Annotated[str | None, typer.Option("--workspace", help="cd into a workspace")] = None,
 ) -> None:
     """Open a shell as an agent user."""
-    interaction = ordinary_interaction_policy()
+    interaction = ordinary_tty_interaction_policy()
     from agentworks.agents.manager import shell_agent
     from agentworks.config import load_config
 
@@ -251,7 +251,7 @@ def agent_delete(
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
 ) -> None:
     """Delete an agent."""
-    interaction = ordinary_interaction_policy()
+    interaction = ordinary_tty_interaction_policy()
     from agentworks.agents.manager import delete_agent
     from agentworks.config import load_config
 

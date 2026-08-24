@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks.db import Database
-from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.multi_console import add_sessions, create_console, describe_console, remove_sessions
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
 from tests.conftest import _FakeResult, _FakeTarget
@@ -69,7 +69,7 @@ def test_attach_console_builds_initial_tmux(db: Database, fake_target: _FakeTarg
         returncode=0, stdout="_PLACEHOLDER\nalpha\nbeta\n"
     )
 
-    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=InteractionPolicy.REFUSE)
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=TtyInteractionPolicy.REFUSE)
 
     cmds = fake_target.commands
     assert any("has-session -t aw-console-con" in c for c in cmds)
@@ -103,7 +103,7 @@ def test_attach_console_placeholder_name_cannot_collide_with_session(db: Databas
         returncode=0, stdout="_PLACEHOLDER\nplaceholder\nreal\n"
     )
 
-    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=InteractionPolicy.REFUSE)
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=TtyInteractionPolicy.REFUSE)
 
     kill_windows = [c for c in fake_target.commands if "kill-window" in c]
     # We kill exactly the build placeholder, never the user's window.
@@ -126,7 +126,7 @@ def test_attach_console_warns_when_list_windows_fails(
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
     fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(returncode=255, stderr="transport failure")
 
-    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=InteractionPolicy.REFUSE)
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert any("could not list windows" in w for w in captured_output.warnings)
     # No kill-window for the placeholder since we couldn't confirm cleanup.
@@ -179,7 +179,7 @@ def test_attach_console_builds_admin_shell_window_without_placeholder(db: Databa
     )
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
 
-    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=InteractionPolicy.REFUSE)
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=TtyInteractionPolicy.REFUSE)
 
     cmds = fake_target.commands
     new_sessions = [c for c in cmds if "new-session -d -s aw-console-con" in c]
@@ -227,7 +227,7 @@ def test_attach_console_keeps_placeholder_when_all_members_fail(
     fake_target.responses["new-window -t aw-console-con"] = _FakeResult(returncode=1, stderr="simulated failure")
     fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(returncode=0, stdout="_PLACEHOLDER\n")
 
-    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=InteractionPolicy.REFUSE)
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert not any("kill-window -t aw-console-con:_PLACEHOLDER" in c for c in fake_target.commands)
     assert any("placeholder kept" in w for w in captured_output.warnings)
@@ -246,7 +246,7 @@ def test_attach_console_announces_build_path(
     fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(returncode=0, stdout="_PLACEHOLDER\na\n")
 
     captured_output.info.clear()
-    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=InteractionPolicy.REFUSE)
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=TtyInteractionPolicy.REFUSE)
     assert any("Building console 'con' on first attach" in m for m in captured_output.info)
 
 
@@ -263,7 +263,7 @@ def test_attach_console_announces_attach_path(
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
 
     captured_output.info.clear()
-    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=InteractionPolicy.REFUSE)
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=TtyInteractionPolicy.REFUSE)
     assert any("Attaching to running console 'con'" in m for m in captured_output.info)
     assert not any("Building" in m or "Rebuilding" in m for m in captured_output.info)
 
@@ -282,7 +282,7 @@ def test_attach_console_announces_recreate_path(
 
     captured_output.info.clear()
     attach_console(
-        db, _StubConfig(), name="con", recreate=True, allow_nesting=True, interaction=InteractionPolicy.REFUSE
+        db, _StubConfig(), name="con", recreate=True, allow_nesting=True, interaction=TtyInteractionPolicy.REFUSE
     )
     assert any("Rebuilding console 'con' (--recreate)" in m for m in captured_output.info)
 
@@ -297,7 +297,7 @@ def test_attach_console_reuses_existing_tmux(db: Database, fake_target: _FakeTar
     # Console exists.
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
 
-    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=InteractionPolicy.REFUSE)
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=TtyInteractionPolicy.REFUSE)
 
     cmds = fake_target.commands
     assert not any("new-session" in c for c in cmds)
@@ -314,7 +314,7 @@ def test_attach_console_recreate_rebuilds_even_if_alive(db: Database, fake_targe
     fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(returncode=0, stdout="_PLACEHOLDER\nalpha\n")
 
     attach_console(
-        db, _StubConfig(), name="con", recreate=True, allow_nesting=True, interaction=InteractionPolicy.REFUSE
+        db, _StubConfig(), name="con", recreate=True, allow_nesting=True, interaction=TtyInteractionPolicy.REFUSE
     )
 
     cmds = fake_target.commands
@@ -334,14 +334,14 @@ def test_attach_console_iterates_in_position_order(db: Database, fake_target: _F
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
     create_console(db, name="con", vm_name="vm1", session_specs=["a", "b", "c"])
     remove_sessions(db, _StubConfig(), console_name="con", session_names=["b"])
-    add_sessions(db, _StubConfig(), console_name="con", session_specs=["d"], interaction=InteractionPolicy.REFUSE)
+    add_sessions(db, _StubConfig(), console_name="con", session_specs=["d"], interaction=TtyInteractionPolicy.REFUSE)
     # positions are now a=0, c=2, d=3.
 
     fake_target.commands.clear()
     fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
         returncode=0, stdout="_PLACEHOLDER\na\nc\nd\n"
     )
-    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=InteractionPolicy.REFUSE)
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=TtyInteractionPolicy.REFUSE)
 
     new_windows = [c for c in fake_target.commands if "new-window -t aw-console-con" in c]
     names = [c.split("-n ")[1].split()[0] for c in new_windows]
@@ -368,7 +368,7 @@ def test_attach_console_skips_missing_session_with_warning(
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
     fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(returncode=0, stdout="_PLACEHOLDER\nalpha\n")
 
-    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=InteractionPolicy.REFUSE)
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert any("ghost" in w and "no longer exists" in w for w in captured_output.warnings)
     new_windows = [c for c in fake_target.commands if "new-window -t aw-console-con" in c]
@@ -403,7 +403,7 @@ def test_attach_console_skips_window_when_agent_missing(
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
     fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(returncode=0, stdout="_PLACEHOLDER\ns\n")
 
-    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=InteractionPolicy.REFUSE)
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert any("agent for session 's' is missing" in w for w in captured_output.warnings)
     # The window itself was created (new-window happened before the agent check);
@@ -437,7 +437,7 @@ def test_attach_console_continues_when_one_shell_split_fails(
     fake_target.responses["split-window -t aw-console-con:beta"] = _FakeResult(stdout="%9\n")
 
     # Must not raise despite the failed shell in alpha.
-    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=InteractionPolicy.REFUSE)
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=TtyInteractionPolicy.REFUSE)
 
     new_windows = [c for c in fake_target.commands if "new-window -t aw-console-con" in c]
     assert len(new_windows) == 2  # both windows built despite alpha's shell failure

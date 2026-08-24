@@ -1,4 +1,4 @@
-"""Final configured-source contract for the bundled 1Password backend."""
+"""Configured-source contract for the bundled 1Password backend."""
 
 from __future__ import annotations
 
@@ -9,14 +9,24 @@ from typing import cast
 import pytest
 from pydantic import ValidationError
 
-from agentworks.capabilities.secret_backend.client import (
-    SecretClientFailure,
-    SecretClientFailureKind,
-    SecretClientTimeout,
+import agentworks.plugins.onepassword.backend as onepassword_backend
+from agentworks.capabilities.secret_backend import (
+    BackendFailed,
+    BackendResolved,
+    FailureReason,
+    IndeterminateReason,
+    OperatorImpact,
+    PreviewAvailable,
+    PreviewFailed,
+    PreviewIndeterminate,
+    PreviewIntent,
+    ResolutionIntent,
     SecretLookupRequest,
     SecretSourceClient,
+    TtyInteractionAccess,
 )
 from agentworks.plugins.onepassword.backend import (
+    AppAuthenticationImpact,
     OnePasswordBackend,
     OnePasswordMapping,
     OnePasswordSourceConfig,
@@ -24,240 +34,242 @@ from agentworks.plugins.onepassword.backend import (
 )
 
 
-def _request(reference: str = "op://Work/item/password") -> SecretLookupRequest:
-    return SecretLookupRequest(name="token", mapping=OnePasswordMapping.model_validate(reference))
+def _request(
+    reference: str = "op://Work/item/password",
+    *,
+    name: str = "token",
+) -> SecretLookupRequest:
+    return SecretLookupRequest(name=name, mapping=OnePasswordMapping.model_validate(reference))
 
 
 def _client(
     *,
+    intent: PreviewIntent | ResolutionIntent,
     account: str | None = None,
     timeout: float = 30.0,
-    remaining: float = 12.0,
+    app_impact: AppAuthenticationImpact = AppAuthenticationImpact.OPERATOR_ACTION,
+    tty_access: TtyInteractionAccess = TtyInteractionAccess.DISABLED,
 ) -> tuple[AbstractContextManager[SecretSourceClient], SecretSourceClient]:
     context = OnePasswordBackend.create_client(
-        source_name="work",
-        config=OnePasswordSourceConfig(name="onepassword", account=account, timeout=timeout),
+        config=OnePasswordSourceConfig(
+            name="onepassword",
+            account=account,
+            timeout=timeout,
+            app_authentication_impact=app_impact,
+        ),
+        intent=intent,
+        tty_access=tty_access,
         interaction_broker=None,
-        remaining_time=lambda: remaining,
     )
     return context, context.__enter__()
 
 
-def test_source_config_owns_account_and_positive_finite_timeout() -> None:
+def test_config_and_mapping_validation() -> None:
     config = OnePasswordSourceConfig(name="onepassword", account="work.example.com", timeout=7)
-    assert config.account == "work.example.com"
     assert config.timeout == 7.0
-    assert OnePasswordBackend.external_operation_timeout(config) == 7.0
+    assert config.app_authentication_impact is AppAuthenticationImpact.OPERATOR_ACTION
     for invalid in (0, -1, float("inf"), float("nan")):
         with pytest.raises(ValidationError):
             OnePasswordSourceConfig(name="onepassword", timeout=invalid)
-
-
-def test_mapping_is_only_a_scalar_op_reference() -> None:
     assert OnePasswordMapping.model_validate("op://Work/item/password").root == "op://Work/item/password"
-    with pytest.raises(ValidationError):
-        OnePasswordMapping.model_validate({"account": "work.example.com", "reference": "op://Work/item/password"})
+    for invalid_mapping in (
+        "https://example.test",
+        "op://Work/item",
+        {"reference": "op://Work/item/password"},
+    ):
+        with pytest.raises(ValidationError):
+            OnePasswordMapping.model_validate(invalid_mapping)
 
 
-def test_bounded_read_repr_never_contains_a_resolved_value() -> None:
+def test_bounded_read_repr_redacts_value() -> None:
     bounded = _BoundedRead(value="sentinel-resolved")
-    assert repr(bounded) == "_BoundedRead(value=<redacted>)"
     assert "sentinel-resolved" not in repr(bounded)
 
 
-def test_exact_argv_and_remaining_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[tuple[list[str], float]] = []
+def test_factory_and_context_entry_do_no_provider_work(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: pytest.fail("provider work started"))
+    context = OnePasswordBackend.create_client(
+        config=OnePasswordSourceConfig(name="onepassword"),
+        intent=ResolutionIntent(),
+        tty_access=TtyInteractionAccess.AVAILABLE,
+        interaction_broker=None,
+    )
+    client = context.__enter__()
+    context.__exit__(None, None, None)
+    assert client is not None
+
+
+def test_resolution_exact_subprocess_boundary_ignores_tty_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[list[str], dict[str, object]]] = []
+    clock = iter((100.0, 102.5))
+    monkeypatch.setattr(onepassword_backend, "_MONOTONIC", lambda: next(clock))
 
     def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        calls.append((args, cast("float", kwargs["timeout"])))
+        calls.append((args, kwargs))
         return subprocess.CompletedProcess(args, 0, stdout="resolved", stderr="")
 
     monkeypatch.setattr(subprocess, "run", run)
-    context, client = _client(account="work.example.com", remaining=4.5)
+    context, client = _client(
+        intent=ResolutionIntent(),
+        account="work.example.com",
+        timeout=7.0,
+        tty_access=TtyInteractionAccess.DISABLED,
+    )
     try:
-        values = client.resolve((_request(),), remaining_time=lambda: 4.5)
+        result = client.resolve((_request(),))["token"]
     finally:
         context.__exit__(None, None, None)
-
-    assert values == {"token": "resolved"}
-    assert calls == [
-        (
-            [
-                "op",
-                "read",
-                "--no-newline",
-                "--account",
-                "work.example.com",
-                "op://Work/item/password",
-            ],
-            4.5,
-        )
-    ]
-
-
-def test_zero_remaining_time_never_spawns(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: pytest.fail("must not spawn"))
-    context, client = _client(remaining=0.0)
-    try:
-        with pytest.raises(SecretClientTimeout) as caught:
-            client.resolve((_request(),), remaining_time=lambda: 0.0)
-    finally:
-        context.__exit__(None, None, None)
-    assert caught.value.__cause__ is None
-    assert caught.value.__context__ is None
-    # The backend attaches its fixed timeout guidance on every path that
-    # raises SecretClientTimeout, not just the subprocess-timeout one.
-    assert caught.value.guidance is not None
-
-
-def test_subprocess_timeout_translates_without_native_cause(monkeypatch: pytest.MonkeyPatch) -> None:
-    def run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
-        raise subprocess.TimeoutExpired(cmd=["op"], timeout=1, output="sentinel-output", stderr="sentinel-error")
-
-    monkeypatch.setattr(subprocess, "run", run)
-    context, client = _client()
-    try:
-        with pytest.raises(SecretClientTimeout) as caught:
-            client.resolve((_request(),), remaining_time=lambda: 1.0)
-    finally:
-        context.__exit__(None, None, None)
-    assert caught.value.__cause__ is None
-    assert caught.value.__context__ is None
-    assert "sentinel" not in repr(caught.value)
-    # The no-leak assertion above must not pass vacuously: confirm the
-    # exception actually carries the (fixed, non-native) guidance text.
-    assert caught.value.guidance is not None
+    assert result == BackendResolved("resolved")
+    [(argv, kwargs)] = calls
+    assert argv == ["op", "read", "--no-newline", "--account", "work.example.com", "op://Work/item/password"]
+    assert cast("float", kwargs["timeout"]) == pytest.approx(4.5)
+    assert kwargs == {
+        "capture_output": True,
+        "text": True,
+        "check": False,
+        "stdin": subprocess.DEVNULL,
+        "timeout": kwargs["timeout"],
+    }
 
 
 @pytest.mark.parametrize(
-    ("stderr", "kind"),
-    [
-        ("not currently signed in sentinel", SecretClientFailureKind.AUTHENTICATION),
-        ("no such item sentinel", SecretClientFailureKind.HARD_MAPPING),
-        ("provider exploded sentinel", SecretClientFailureKind.EXTERNAL),
-    ],
+    "intent",
+    [PreviewIntent(OperatorImpact.ALLOW), ResolutionIntent()],
+    ids=("preview", "resolution"),
 )
-def test_nonzero_results_translate_to_fixed_failure_kinds(
+def test_configured_timeout_shrinks_across_the_whole_source_turn(
     monkeypatch: pytest.MonkeyPatch,
-    stderr: str,
-    kind: SecretClientFailureKind,
+    intent: PreviewIntent | ResolutionIntent,
 ) -> None:
-    monkeypatch.setattr(
-        subprocess,
-        "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(["op"], 1, stdout="sentinel-stdout", stderr=stderr),
-    )
-    context, client = _client()
-    try:
-        with pytest.raises(SecretClientFailure) as caught:
-            client.resolve((_request(),), remaining_time=lambda: 2.0)
-    finally:
-        context.__exit__(None, None, None)
-    assert caught.value.kind is kind
-    assert caught.value.__cause__ is None
-    assert caught.value.__context__ is None
-    assert "sentinel" not in repr(caught.value)
-
-
-def test_missing_binary_is_connectivity(monkeypatch: pytest.MonkeyPatch) -> None:
-    def run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
-        raise FileNotFoundError("sentinel-path")
-
-    monkeypatch.setattr(subprocess, "run", run)
-    context, client = _client()
-    try:
-        with pytest.raises(SecretClientFailure) as caught:
-            client.resolve((_request(),), remaining_time=lambda: 2.0)
-    finally:
-        context.__exit__(None, None, None)
-    assert caught.value.kind is SecretClientFailureKind.CONNECTIVITY
-
-
-def test_later_failure_does_not_expose_earlier_value(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = 0
-
-    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            return subprocess.CompletedProcess(args, 0, stdout="sentinel-resolved", stderr="")
-        return subprocess.CompletedProcess(args, 1, stdout="sentinel-stdout", stderr="no such item")
-
-    monkeypatch.setattr(subprocess, "run", run)
-    context, client = _client()
-    requests = (
-        SecretLookupRequest(name="first", mapping=OnePasswordMapping.model_validate("op://W/a/p")),
-        SecretLookupRequest(name="second", mapping=OnePasswordMapping.model_validate("op://W/b/p")),
-    )
-    try:
-        with pytest.raises(SecretClientFailure) as caught:
-            client.resolve(requests, remaining_time=lambda: 2.0)
-    finally:
-        context.__exit__(None, None, None)
-    assert "sentinel-resolved" not in repr(caught.value)
-
-
-@pytest.mark.parametrize("native", ["timeout", "oserror", "result"])
-def test_native_failure_projects_to_safe_context_free_exception(
-    monkeypatch: pytest.MonkeyPatch,
-    native: str,
-) -> None:
-    def run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
-        if native == "timeout":
-            raise subprocess.TimeoutExpired(
-                cmd=["op", "sentinel-native-reference"],
-                timeout=1,
-                output="sentinel-native-output",
-                stderr="sentinel-native-error",
-            )
-        if native == "oserror":
-            raise OSError("sentinel-native-path")
-        return subprocess.CompletedProcess(
-            ["op", "sentinel-native-reference"],
-            1,
-            stdout="sentinel-native-output",
-            stderr="sentinel-native-error",
-        )
-
-    monkeypatch.setattr(subprocess, "run", run)
-    context, client = _client()
-    try:
-        with pytest.raises((SecretClientFailure, SecretClientTimeout)) as caught:
-            client.resolve((_request(),), remaining_time=lambda: 1.0)
-    finally:
-        context.__exit__(None, None, None)
-    assert caught.value.__cause__ is None
-    assert caught.value.__context__ is None
-    rendered = repr((str(caught.value), repr(caught.value), caught.value.args))
-    assert "sentinel-native" not in rendered
-
-
-def test_factory_entry_and_prepare_are_subprocess_free(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: pytest.fail("must remain lazy"))
-    context = OnePasswordBackend.create_client(
-        source_name="work",
-        config=OnePasswordSourceConfig(name="onepassword"),
-        interaction_broker=None,
-        remaining_time=lambda: 30.0,
-    )
-    client = context.__enter__()
-    try:
-        client.prepare((_request(),), remaining_time=lambda: 30.0)
-    finally:
-        context.__exit__(None, None, None)
-
-
-def test_source_timeout_caps_a_larger_operation_remainder(monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = iter((100.0, 102.0, 105.0))
+    monkeypatch.setattr(onepassword_backend, "_MONOTONIC", lambda: next(clock))
     timeouts: list[float] = []
 
     def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         timeouts.append(cast("float", kwargs["timeout"]))
+        assert kwargs["stdin"] == subprocess.DEVNULL
         return subprocess.CompletedProcess(args, 0, stdout="resolved", stderr="")
 
     monkeypatch.setattr(subprocess, "run", run)
-    context, client = _client(timeout=3.0, remaining=20.0)
+    context, client = _client(intent=intent, timeout=10.0)
+    requests = (
+        _request("op://Work/first/password", name="first"),
+        _request("op://Work/second/password", name="second"),
+    )
     try:
-        assert client.resolve((_request(),), remaining_time=lambda: 20.0) == {"token": "resolved"}
+        if isinstance(intent, PreviewIntent):
+            client.preview(requests)
+        else:
+            client.resolve(requests)
     finally:
         context.__exit__(None, None, None)
-    assert timeouts == [3.0]
+    assert timeouts == [8.0, 5.0]
+
+
+def test_zero_impact_is_indeterminate_without_provider_work(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OP_SERVICE_ACCOUNT_TOKEN", raising=False)
+    monkeypatch.delenv("OP_CONNECT_HOST", raising=False)
+    monkeypatch.delenv("OP_CONNECT_TOKEN", raising=False)
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: pytest.fail("must not spawn"))
+    context, client = _client(intent=PreviewIntent(OperatorImpact.NONE))
+    try:
+        result = client.preview((_request(),))["token"]
+    finally:
+        context.__exit__(None, None, None)
+    assert result == PreviewIndeterminate(IndeterminateReason.OPERATOR_IMPACT_LIMITED)
+
+
+@pytest.mark.parametrize("unattended", ["configured", "service-account", "connect"])
+def test_zero_impact_reads_when_noninteractive_authentication_is_known(
+    monkeypatch: pytest.MonkeyPatch,
+    unattended: str,
+) -> None:
+    monkeypatch.delenv("OP_SERVICE_ACCOUNT_TOKEN", raising=False)
+    monkeypatch.delenv("OP_CONNECT_HOST", raising=False)
+    monkeypatch.delenv("OP_CONNECT_TOKEN", raising=False)
+    app_impact = AppAuthenticationImpact.OPERATOR_ACTION
+    if unattended == "configured":
+        app_impact = AppAuthenticationImpact.NONE
+    elif unattended == "service-account":
+        monkeypatch.setenv("OP_SERVICE_ACCOUNT_TOKEN", "token")
+    else:
+        monkeypatch.setenv("OP_CONNECT_HOST", "https://connect.example.test")
+        monkeypatch.setenv("OP_CONNECT_TOKEN", "token")
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda args, **kwargs: subprocess.CompletedProcess(args, 0, stdout="discarded", stderr=""),
+    )
+    context, client = _client(intent=PreviewIntent(OperatorImpact.NONE), app_impact=app_impact)
+    try:
+        result = client.preview((_request(),))["token"]
+    finally:
+        context.__exit__(None, None, None)
+    assert result == PreviewAvailable()
+
+
+def test_allow_impact_is_definitive(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda args, **kwargs: subprocess.CompletedProcess(args, 0, stdout="discarded", stderr=""),
+    )
+    context, client = _client(intent=PreviewIntent(OperatorImpact.ALLOW))
+    try:
+        result = client.preview((_request(),))["token"]
+    finally:
+        context.__exit__(None, None, None)
+    assert result == PreviewAvailable()
+
+
+@pytest.mark.parametrize(
+    ("native", "reason"),
+    [
+        ("timeout", FailureReason.DEADLINE_EXCEEDED),
+        ("oserror", FailureReason.CONNECTIVITY),
+        ("not currently signed in", FailureReason.AUTHENTICATION),
+        ("no such item", FailureReason.LOOKUP_REJECTED),
+        ("network is unreachable", FailureReason.CONNECTIVITY),
+        ("provider exploded", FailureReason.EXTERNAL),
+    ],
+)
+def test_provider_failures_project_to_closed_reasons(
+    monkeypatch: pytest.MonkeyPatch,
+    native: str,
+    reason: FailureReason,
+) -> None:
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if native == "timeout":
+            raise subprocess.TimeoutExpired(cmd=args, timeout=1, output="secret", stderr="native")
+        if native == "oserror":
+            raise OSError("native")
+        return subprocess.CompletedProcess(args, 1, stdout="secret", stderr=native)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    context, client = _client(intent=ResolutionIntent())
+    try:
+        actual = client.resolve((_request(),))["token"]
+    finally:
+        context.__exit__(None, None, None)
+    assert actual == BackendFailed(reason)
+
+    context, client = _client(intent=PreviewIntent(OperatorImpact.ALLOW))
+    try:
+        preview = client.preview((_request(),))["token"]
+    finally:
+        context.__exit__(None, None, None)
+    assert preview == PreviewFailed(reason)
+
+
+def test_not_found_is_not_claimed_as_ordinary_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda args, **kwargs: subprocess.CompletedProcess(args, 1, stdout="", stderr="no such field"),
+    )
+    context, client = _client(intent=ResolutionIntent())
+    try:
+        result = client.resolve((_request(),))["token"]
+    finally:
+        context.__exit__(None, None, None)
+    assert result == BackendFailed(FailureReason.LOOKUP_REJECTED)

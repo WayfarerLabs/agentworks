@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from agentworks.db import Database, SessionRow, ShellEntry, VMRow
     from agentworks.machine_output import JsonObject
     from agentworks.resources.registry import Registry
-    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.transports import Transport
 
 # NAME-column truncation cap for ``console list``. Console names are freeform
@@ -241,7 +241,7 @@ def _prepare_vm_target_for_attach(
     vm_name: str,
     *,
     registry: Registry,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> Iterator[tuple[VMRow, Transport]]:
     """Ensure the VM is running (starting it if needed) and yield
     ``(vm, target)`` inside the activation gate's held-active span.
@@ -474,7 +474,7 @@ def attach_console(
     name: str,
     recreate: bool = False,
     allow_nesting: bool = False,
-    interaction: InteractionPolicy,
+    interaction: TtyInteractionPolicy,
 ) -> int:
     """Attach to a named console, building or rebuilding tmux state as needed.
 
