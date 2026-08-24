@@ -303,6 +303,75 @@ def test_session_describe_human_output_structures_console_associations(captured_
         assert str(console.position) in detail
 
 
+def test_session_describe_human_output_structures_empty_console_collection(captured_output) -> None:  # noqa: ANN001
+    from agentworks.output import Role
+    from agentworks.sessions.manager._queries import SessionDescription, render_session_description
+
+    render_session_description(
+        SessionDescription(
+            "s",
+            "ws",
+            "box",
+            "default",
+            None,
+            "admin",
+            None,
+            "stopped",
+            None,
+            "created",
+            "updated",
+            (),
+        )
+    )
+
+    assert [role for role, _level, _message in captured_output.lines[-2:]] == [
+        Role.BODY,
+        Role.DETAIL,
+    ]
+
+
+def test_session_describe_default_and_explicit_human_match_without_styling(monkeypatch) -> None:
+    from agentworks.cli.commands import session as command
+    from agentworks.sessions import manager as sessions
+    from agentworks.sessions.manager._queries import SessionDescription
+
+    description = SessionDescription(
+        "s",
+        "ws",
+        "box",
+        "default",
+        None,
+        "admin",
+        None,
+        "stopped",
+        None,
+        "created",
+        "updated",
+        (),
+    )
+    monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
+    monkeypatch.setattr(command, "get_db", lambda: object())
+    monkeypatch.setattr(
+        sessions,
+        "describe_session",
+        lambda *_args, **_kwargs: sessions.render_session_description(description),
+    )
+
+    default = CliRunner().invoke(app, ["--non-interactive", "session", "describe", "s"])
+    explicit = CliRunner().invoke(
+        app,
+        ["--non-interactive", "session", "describe", "s", "--output", "human"],
+    )
+
+    assert default.exit_code == explicit.exit_code == 0
+    assert default.stdout_bytes == explicit.stdout_bytes
+    assert default.stdout_bytes
+    assert default.stderr_bytes == explicit.stderr_bytes == b""
+    assert b"\x1b" not in default.stdout_bytes
+    assert b"\x7f" not in default.stdout_bytes
+    assert not any(byte < 0x20 and byte != 0x0A for byte in default.stdout_bytes)
+
+
 def test_operational_human_describe_commands_keep_literal_no_color_bytes(monkeypatch) -> None:
     """Pin default and explicit human streams for all new describe paths."""
     from agentworks.agents import manager as agents
