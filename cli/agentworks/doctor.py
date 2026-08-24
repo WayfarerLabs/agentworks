@@ -24,7 +24,6 @@ if TYPE_CHECKING:
     from agentworks.resources.registry import Registry
     from agentworks.secrets.base import SecretDecl
     from agentworks.secrets.preview import ResolutionPreview
-    from agentworks.secrets.resolve import ActiveSource
     from agentworks.secrets.sources import SecretSourceDecl, SourceProvenance
     from agentworks.vms.admin import AdminConfig
     from agentworks.vms.sites import VMSiteDecl
@@ -249,23 +248,13 @@ def _secret_source_check(status: SecretSourceStatus) -> HealthCheck:
 def _secret_check(
     name: str,
     decl: SecretDecl,
-    sources: tuple[ActiveSource, ...],
-    *,
-    tty_access: TtyInteractionAccess,
+    preview: ResolutionPreview,
 ) -> HealthCheck:
     """Build one value-free secret resolution preview row."""
-    from agentworks.capabilities.secret_backend import OperatorImpact
-    from agentworks.secrets.preview import PreviewStatus, preview_batch, preview_hint
+    from agentworks.secrets.preview import PreviewStatus, preview_hint
 
     auto = getattr(decl.origin, "variant", None) == "auto-declared"
     label = f"Secret {name!r} (auto)" if auto else f"Secret {name!r}"
-    preview = preview_batch(
-        [decl],
-        sources,
-        impact=OperatorImpact.NONE,
-        tty_access=tty_access,
-        interaction_broker=None,
-    )[decl.name]
     status = (
         Status.OK
         if preview.status is PreviewStatus.AVAILABLE
@@ -323,17 +312,21 @@ def checks_for_resource(
             raise AssertionError("secret-source published an unexpected row type")
         check = _secret_source_check(_secret_source_status(config, registry, identity.name, row))
     elif identity.kind == "secret":
+        from agentworks.capabilities.secret_backend import OperatorImpact
         from agentworks.secrets.base import SecretDecl
+        from agentworks.secrets.preview import preview_batch
         from agentworks.secrets.resolve import active_sources
 
         if not isinstance(row, SecretDecl):
             raise AssertionError("secret published an unexpected row type")
-        check = _secret_check(
-            identity.name,
-            row,
+        preview = preview_batch(
+            [row],
             active_sources(config, registry),
+            impact=OperatorImpact.NONE,
             tty_access=tty_access,
-        )
+            interaction_broker=None,
+        )[row.name]
+        check = _secret_check(identity.name, row, preview)
     elif identity == ResourceIdentity("admin-template", "default"):
         from agentworks.vms.admin import AdminConfig
 
@@ -890,7 +883,9 @@ def _check_secrets(
     tty_access: TtyInteractionAccess,
 ) -> HealthGroup:
     """Preview each declared secret under caller-supplied TTY access."""
+    from agentworks.capabilities.secret_backend import OperatorImpact
     from agentworks.resources.access import secret_decls
+    from agentworks.secrets.preview import preview_batch
 
     g = HealthGroup("Secrets")
 
@@ -901,10 +896,16 @@ def _check_secrets(
 
     from agentworks.secrets.resolve import active_sources
 
-    sources = active_sources(config, registry)
-
-    for name, decl in sorted(secrets.items()):
-        g.checks.append(_secret_check(name, decl, sources, tty_access=tty_access))
+    ordered = tuple(sorted(secrets.items()))
+    previews = preview_batch(
+        [decl for _name, decl in ordered],
+        active_sources(config, registry),
+        impact=OperatorImpact.NONE,
+        tty_access=tty_access,
+        interaction_broker=None,
+    )
+    for name, decl in ordered:
+        g.checks.append(_secret_check(name, decl, previews[decl.name]))
 
     return g
 

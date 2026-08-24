@@ -135,27 +135,34 @@ class _Broker:
 
 def test_hard_failure_dooms_complete_sibling_before_later_provider_and_broker() -> None:
     class First(_Client):
-        results = {"a": BackendFailed(FailureReason.LOOKUP_REJECTED), "b": BackendMissing()}
+        results = {
+            "a": BackendResolved("first-a"),
+            "b": BackendFailed(FailureReason.LOOKUP_REJECTED),
+            "c": BackendMissing(),
+        }
         calls = []
 
     class Later(_Client):
-        results = {"b": BackendResolved("second-b")}
+        results = {"c": BackendResolved("second-c")}
         calls = []
 
     later = _source("later", Later, supports_tty=True)
     broker = _Broker()
     batch = resolve_batch(
-        [_decl("a"), _decl("b")],
+        [_decl("a"), _decl("b"), _decl("c")],
         [_source("first", First), later],
         tty_access=TtyInteractionAccess.AVAILABLE,
         interaction_broker=broker,
     )
 
-    assert isinstance(batch.outcomes[0].result, ResolutionFailed)
-    assert batch.outcomes[0].result.reason is FailureReason.LOOKUP_REJECTED
-    assert isinstance(batch.outcomes[1].result, ResolutionBlocked)
-    assert batch.outcomes[1].result.reason is BlockReason.BATCH_DOOMED
-    assert batch.outcomes[1].source is None
+    assert batch.outcomes[0].status is ResolutionStatus.RESOLVED
+    assert batch._values == {"a": "first-a"}
+    assert isinstance(batch.outcomes[1].result, ResolutionFailed)
+    assert batch.outcomes[1].result.reason is FailureReason.LOOKUP_REJECTED
+    assert isinstance(batch.outcomes[2].result, ResolutionBlocked)
+    assert batch.outcomes[2].result.reason is BlockReason.BATCH_DOOMED
+    assert batch.outcomes[2].source is None
+    assert First.calls == [("a", "b", "c")]
     assert cast("type[_Backend]", later.backend_class).factory_calls == 0
     assert Later.calls == []
     assert broker.calls == []

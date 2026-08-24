@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import concurrent.futures
 from collections.abc import Iterator, Mapping
-from contextlib import AbstractContextManager, nullcontext
+from contextlib import AbstractContextManager
 from typing import ClassVar, Literal, cast
 
 import pytest
@@ -35,7 +35,7 @@ from agentworks.capabilities.secret_backend import (
     TtyInteractionAccess,
 )
 from agentworks.capabilities.secret_backend.base import SecretBackend
-from agentworks.errors import UserAbort
+from agentworks.errors import StateError, UserAbort
 from agentworks.resources.graph import Readiness
 from agentworks.schema import AgwModel, AgwRootModel, CapabilityBlock
 from agentworks.secrets import SecretDecl, SecretSourceDecl
@@ -57,6 +57,9 @@ class _Client:
     resolution_results: ClassVar[dict[str, BackendResolution]] = {}
     calls: ClassVar[list[tuple[str, ...]]] = []
 
+    def __init__(self, interaction_broker: InteractionBroker | None = None) -> None:
+        self.interaction_broker = interaction_broker
+
     def preview(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendPreview]:
         self.calls.append(tuple(request.name for request in requests))
         return {request.name: self.preview_results[request.name] for request in requests}
@@ -64,6 +67,31 @@ class _Client:
     def resolve(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendResolution]:
         self.calls.append(tuple(request.name for request in requests))
         return {request.name: self.resolution_results[request.name] for request in requests}
+
+
+class _BackendContext(AbstractContextManager[SecretSourceClient]):
+    def __init__(
+        self,
+        client: _Client,
+        broker: InteractionBroker | None,
+        phase: Literal["enter", "cleanup"] | None,
+    ) -> None:
+        self._client = client
+        self._broker = broker
+        self._phase = phase
+
+    def _request(self) -> None:
+        assert self._broker is not None
+        self._broker.request_secret("a")
+
+    def __enter__(self) -> SecretSourceClient:
+        if self._phase == "enter":
+            self._request()
+        return self._client
+
+    def __exit__(self, *_args: object) -> None:
+        if self._phase == "cleanup":
+            self._request()
 
 
 class _Backend(SecretBackend):
@@ -75,6 +103,8 @@ class _Backend(SecretBackend):
     supports_tty_interaction = False
     client_type: ClassVar[type[_Client]] = _Client
     factory_calls: ClassVar[list[tuple[SecretClientIntent, TtyInteractionAccess, InteractionBroker | None]]] = []
+    factory_error: ClassVar[Exception | None] = None
+    broker_lifecycle_phase: ClassVar[Literal["factory", "enter", "cleanup"] | None] = None
 
     @classmethod
     def backend_readiness(cls) -> Readiness:
@@ -94,7 +124,13 @@ class _Backend(SecretBackend):
         interaction_broker: InteractionBroker | None,
     ) -> AbstractContextManager[SecretSourceClient]:
         cls.factory_calls.append((intent, tty_access, interaction_broker))
-        return nullcontext(cls.client_type())
+        if cls.broker_lifecycle_phase == "factory":
+            assert interaction_broker is not None
+            interaction_broker.request_secret("a")
+        if cls.factory_error is not None:
+            raise cls.factory_error
+        context_phase = cls.broker_lifecycle_phase if cls.broker_lifecycle_phase in {"enter", "cleanup"} else None
+        return _BackendContext(cls.client_type(interaction_broker), interaction_broker, context_phase)
 
 
 def _source(
@@ -103,6 +139,8 @@ def _source(
     client_type: type[_Client],
     ready: bool = True,
     supports_tty: bool = False,
+    factory_error: Exception | None = None,
+    broker_lifecycle_phase: Literal["factory", "enter", "cleanup"] | None = None,
 ) -> ActiveSource:
     backend = cast(
         "type[_Backend]",
@@ -114,6 +152,8 @@ def _source(
                 "client_type": client_type,
                 "supports_tty_interaction": supports_tty,
                 "factory_calls": [],
+                "factory_error": factory_error,
+                "broker_lifecycle_phase": broker_lifecycle_phase,
             },
         ),
     )
@@ -277,8 +317,13 @@ def test_false_mapping_is_excluded_before_backend_call() -> None:
 
 
 class _Broker:
+    def __init__(self, value: str = "broker-value") -> None:
+        self.calls: list[str] = []
+        self.value = value
+
     def request_secret(self, name: str, /) -> str:
-        return name
+        self.calls.append(name)
+        return self.value
 
 
 @pytest.mark.parametrize(
@@ -302,8 +347,20 @@ def test_factory_receives_exact_intent_access_and_least_authority_broker(
         preview_results = {"a": PreviewAvailable()}
         resolution_results = {"a": BackendResolved("value")}
 
+        def _request_if_authorized(self) -> None:
+            if self.interaction_broker is not None:
+                self.interaction_broker.request_secret("a")
+
+        def preview(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendPreview]:
+            self._request_if_authorized()
+            return super().preview(requests)
+
+        def resolve(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendResolution]:
+            self._request_if_authorized()
+            return super().resolve(requests)
+
     source = _source("authority", client_type=Client, supports_tty=supports_tty)
-    broker = _Broker()
+    broker = _Broker("sentinel-provider-value")
     if isinstance(intent, PreviewIntent):
         preview_batch(
             [_decl("a")],
@@ -323,7 +380,163 @@ def test_factory_receives_exact_intent_access_and_least_authority_broker(
     assert received_intent == intent
     assert type(received_intent) is type(intent)
     assert received_access is access
-    assert (received_broker is broker) is broker_expected
+    assert (received_broker is not None) is broker_expected
+    assert broker.calls == (["a"] if broker_expected else [])
+    if received_broker is not None:
+        with pytest.raises(StateError) as error:
+            received_broker.request_secret("a")
+        assert broker.calls == ["a"]
+        assert "sentinel-provider-value" not in str(error.value)
+
+
+@pytest.mark.parametrize("preview", [False, True], ids=("resolution", "preview"))
+def test_source_turn_broker_rejects_cross_name_without_delegating(preview: bool) -> None:
+    class Client(_Client):
+        preview_results = {"a": PreviewAvailable()}
+        resolution_results = {"a": BackendResolved("unused")}
+
+        def _request_other_name(self) -> None:
+            assert self.interaction_broker is not None
+            self.interaction_broker.request_secret("other")
+
+        def preview(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendPreview]:
+            self._request_other_name()
+            return super().preview(requests)
+
+        def resolve(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendResolution]:
+            self._request_other_name()
+            return super().resolve(requests)
+
+    class Later(_Client):
+        preview_results = {"other": PreviewAvailable()}
+        resolution_results = {"other": BackendResolved("later")}
+
+    source = _source("scoped", client_type=Client, supports_tty=True)
+    later = _source("later", client_type=Later)
+    broker = _Broker("sentinel-provider-value")
+    declarations = [
+        _decl("a"),
+        SecretDecl(name="other", description="other", backend_mappings={"scoped": False}),
+    ]
+    if preview:
+        result = preview_batch(
+            declarations,
+            [source, later],
+            impact=OperatorImpact.ALLOW,
+            tty_access=TtyInteractionAccess.AVAILABLE,
+            interaction_broker=broker,
+        )["a"]
+        assert result.status is PreviewStatus.FAILED
+        assert result.reason == FailureReason.BACKEND_PROTOCOL.value
+        rendered = repr(result)
+    else:
+        outcome = resolve_batch(
+            declarations,
+            [source, later],
+            tty_access=TtyInteractionAccess.AVAILABLE,
+            interaction_broker=broker,
+        ).outcomes[0]
+        assert outcome.status is ResolutionStatus.FAILED
+        assert outcome.reason is FailureReason.BACKEND_PROTOCOL
+        rendered = repr(outcome)
+    assert broker.calls == []
+    assert "sentinel-provider-value" not in rendered
+
+
+@pytest.mark.parametrize("preview", [False, True], ids=("resolution", "preview"))
+def test_missing_required_broker_propagates_as_core_state_error(preview: bool) -> None:
+    class Client(_Client):
+        preview_results = {"a": PreviewAvailable()}
+        resolution_results = {"a": BackendResolved("unused")}
+
+    source = _source("broker-required", client_type=Client, supports_tty=True)
+    with pytest.raises(StateError):
+        if preview:
+            preview_batch(
+                [_decl("a")],
+                [source],
+                impact=OperatorImpact.ALLOW,
+                tty_access=TtyInteractionAccess.AVAILABLE,
+                interaction_broker=None,
+            )
+        else:
+            resolve_batch(
+                [_decl("a")],
+                [source],
+                tty_access=TtyInteractionAccess.AVAILABLE,
+                interaction_broker=None,
+            )
+
+
+@pytest.mark.parametrize("preview", [False, True], ids=("resolution", "preview"))
+def test_backend_state_error_is_normalized_and_retained_broker_is_revoked_after_failure(preview: bool) -> None:
+    class Client(_Client):
+        preview_results = {"a": PreviewAvailable()}
+        resolution_results = {"a": BackendResolved("unused")}
+
+    source = _source(
+        "factory-failure",
+        client_type=Client,
+        supports_tty=True,
+        factory_error=StateError("backend factory failed"),
+    )
+    broker = _Broker("sentinel-provider-value")
+    if preview:
+        result = preview_batch(
+            [_decl("a")],
+            [source],
+            impact=OperatorImpact.ALLOW,
+            tty_access=TtyInteractionAccess.AVAILABLE,
+            interaction_broker=broker,
+        )["a"]
+        assert result.reason == FailureReason.UNEXPECTED.value
+    else:
+        outcome = resolve_batch(
+            [_decl("a")],
+            [source],
+            tty_access=TtyInteractionAccess.AVAILABLE,
+            interaction_broker=broker,
+        ).outcomes[0]
+        assert outcome.reason is FailureReason.UNEXPECTED
+    [(_intent, _access, retained_broker)] = cast("type[_Backend]", source.backend_class).factory_calls
+    assert retained_broker is not None
+    with pytest.raises(StateError) as error:
+        retained_broker.request_secret("a")
+    assert broker.calls == []
+    assert "sentinel-provider-value" not in str(error.value)
+
+
+@pytest.mark.parametrize("phase", ["factory", "enter", "cleanup"])
+def test_broker_rejects_use_outside_the_selected_method(
+    phase: Literal["factory", "enter", "cleanup"],
+) -> None:
+    class Client(_Client):
+        resolution_results = {"a": BackendResolved("resolved")}
+
+    source = _source(
+        f"broker-{phase}",
+        client_type=Client,
+        supports_tty=True,
+        broker_lifecycle_phase=phase,
+    )
+    broker = _Broker("sentinel-provider-value")
+    outcome = resolve_batch(
+        [_decl("a")],
+        [source],
+        tty_access=TtyInteractionAccess.AVAILABLE,
+        interaction_broker=broker,
+    ).outcomes[0]
+
+    if phase == "cleanup":
+        assert outcome.status is ResolutionStatus.RESOLVED
+    else:
+        assert outcome.reason is FailureReason.BACKEND_PROTOCOL
+    [(_intent, _access, retained_broker)] = cast("type[_Backend]", source.backend_class).factory_calls
+    assert retained_broker is not None
+    with pytest.raises(StateError) as error:
+        retained_broker.request_secret("a")
+    assert broker.calls == []
+    assert "sentinel-provider-value" not in str(error.value)
 
 
 class _ExitContext(AbstractContextManager[SecretSourceClient]):

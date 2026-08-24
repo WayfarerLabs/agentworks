@@ -177,6 +177,25 @@ def _restore_agw_debug() -> Generator[None, None, None]:
             os.environ.pop("AGW_DEBUG", None)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_inherited_aw_secrets(
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Remove conventional host secrets from each non-integration test.
+
+    Integration-marked tests intentionally retain injected live credentials. This
+    covers the ``AW_SECRET_*`` convention only, not arbitrary environment names an
+    operator mapping may select. Tests may establish their own values with
+    ``monkeypatch`` after this autouse fixture runs.
+    """
+    if request.node.get_closest_marker("integration") is not None:
+        return
+    for name in tuple(os.environ):
+        if name.startswith("AW_SECRET_"):
+            monkeypatch.delenv(name, raising=False)
+
+
 @pytest.fixture
 def db(tmp_path: Path) -> Generator[Database, None, None]:
     """Provide a fresh database for each test, closed automatically."""

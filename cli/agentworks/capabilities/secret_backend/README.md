@@ -7,7 +7,25 @@ are nominal, class-registered capabilities: implementations subclass `SecretBack
 contribute the class itself, and registration never constructs one.
 
 This is the permanent authoring contract. The supported secret-backend contract version is exactly
-`1`; there is no adapter for an older shape.
+`1`; there is no adapter for an older shape. Version `2` shipped in Agentworks 0.14.0 and 0.14.1,
+when plugins could already contribute secret backends, although there are no known third-party
+implementations. Agentworks 0.15 intentionally renumbers the incompatible complete surface
+documented here to exact version `1`; that number does not claim compatibility with the former
+version-2 contract.
+
+## Migrating a 0.14 backend to 0.15
+
+Migrate the entire contract atomically; version 1 has no adapter for a version-2 implementation:
+
+- rename class attribute `interactive` to exact-boolean `supports_tty_interaction`;
+- remove `would_attempt` and derive static applicability through `describe_lookup`;
+- make `describe_lookup(secret_name, mapping)` return `LookupDescription`, not an identifier or
+  `None`;
+- remove `external_operation_timeout` and accept exactly four keyword-only factory inputs: `config`,
+  `intent`, `tty_access`, and `interaction_broker`;
+- add the value-free `preview(requests)` client method; and
+- return complete, exact-name maps of tagged preview or resolution results from `preview` and
+  `resolve`.
 
 ## Required class surface
 
@@ -85,6 +103,17 @@ must not inspect stdin, and cannot return a TTY block. A TTY-capable backend che
 broker read. `UNAVAILABLE` produces `TTY_UNAVAILABLE`; `DISABLED` produces
 `TTY_INTERACTION_DISABLED`.
 
+Every supplied broker is scoped to the exact request names routed to that source turn, and its
+authorization is active only while the selected client method is running. A backend may ask only for
+a name present in the `requests` tuple passed to that method. Core rejects any other, early, or late
+request before it reaches the operation broker. If the backend does not handle that rejection
+itself, core records an in-method attempt as failed with `BACKEND_PROTOCOL`.
+
+This is an in-process plugin boundary, not a plaintext provenance proof. Core enforces routed name
+authority and validates exact result keys, tags, and reason legality. The backend remains
+responsible for associating each result, including any resolved value, with the semantically correct
+request.
+
 ## Closed results and reason ownership
 
 `preview(requests)` returns one exact map whose values are:
@@ -150,14 +179,22 @@ mapping applicability, folded readiness, and plugin enablement. Core never inspe
 `supports_tty_interaction` to predict viability: it passes exact TTY access into the client, and the
 backend alone classifies whether that fact limits its attempt.
 
+Doctor sends the sorted declared-secret union through one preview batch. Each attempted source sees
+that batch as one operation source turn: its requests share the backend's configured source
+deadline, and an exceptional selected-method failure applies to that turn. A backend may still
+execute one provider subprocess per request; batching does not promise provider-call coalescing.
+
 ## Lifecycle and exception boundary
 
 `create_client(...)` returns an unentered, resource-free context manager. Factory construction and
 context entry perform no provider operation, authentication, browser launch, biometric request,
 broker call, or stdin read. The selected `preview` or `resolve` method performs the authorized work.
-Context exit always handles cleanup. A primary exception is never suppressed or masked by cleanup.
-With no primary exception, user abort, cancellation, and other protected cleanup exits propagate; an
-ordinary cleanup failure emits fixed source-only warning text and returns normally.
+Core passes the name-scoped broker view into the factory while inactive, activates it immediately
+before the selected method, and permanently revokes it as soon as that method returns or raises,
+before result validation and context cleanup. Context exit always handles cleanup. A primary
+exception is never suppressed or masked by cleanup. With no primary exception, user abort,
+cancellation, and other protected cleanup exits propagate; an ordinary cleanup failure emits fixed
+source-only warning text and returns normally.
 
 The client is operation-local and is never cached in a registry. Provider deadlines are
 backend-owned source configuration, not part of the generic factory contract. A backend that

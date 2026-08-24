@@ -329,7 +329,9 @@ agw secret describe tailscale-auth-key
 #   - prompt (prompt, synthesized default): (prompt at resolution time)
 #
 # Resolution preview:
-#   available via env-var (AW_SECRET_TAILSCALE_AUTH_KEY)
+#   available; source=env-var; identifier=AW_SECRET_TAILSCALE_AUTH_KEY
+#   Hint: available under the requested preview impact
+#   - env-var: available; identifier=AW_SECRET_TAILSCALE_AUTH_KEY
 ```
 
 By default, `describe` requests a provider-aware preview with no allowed operator impact. It may
@@ -345,10 +347,10 @@ Use `verify` for the same provider-aware preview over one or more named secrets:
 
 ```bash
 agw secret verify tailscale-auth-key deploy-token
-# NAME                 STATUS     SOURCE   IDENTIFIER                     REASON
-# --------------------------------------------------------------------------------
-# tailscale-auth-key   available  env-var  AW_SECRET_TAILSCALE_AUTH_KEY   -
-# deploy-token         available  work-op  op://Engineering/deploy/token  -
+# NAME                 STATUS     SOURCE   IDENTIFIER                     REASON  HINT
+# ---------------------------------------------------------------------------------------------------------------
+# tailscale-auth-key   available  env-var  AW_SECRET_TAILSCALE_AUTH_KEY   -       available under the requested preview impact
+# deploy-token         available  work-op  op://Engineering/deploy/token  -       available under the requested preview impact
 ```
 
 Verification deduplicates names in first-written order and prints one value-free row per name. Only

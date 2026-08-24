@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 
 from agentworks.capabilities.secret_backend import OperatorImpact, ResolutionIntent, TtyInteractionAccess
@@ -31,6 +36,53 @@ def _resolve(decl: SecretDecl) -> tuple[dict[str, str], str | None]:
         interaction_broker=None,
     )
     return batch.complete_or_raise(), batch.outcomes[0].identifier
+
+
+def test_pytest_isolates_nonintegration_secret_env_and_preserves_integration_injection(
+    tmp_path: Path,
+) -> None:
+    cli_root = Path(__file__).resolve().parents[1]
+    probe = tmp_path / "test_aw_secret_isolation_probe.py"
+    probe.write_text(
+        """\
+import os
+
+import pytest
+
+
+def test_nonintegration_isolated_then_test_can_set(monkeypatch):
+    assert "AW_SECRET_PRESET_PROBE" not in os.environ
+    monkeypatch.setenv("AW_SECRET_PRESET_PROBE", "test-value")
+    assert os.environ["AW_SECRET_PRESET_PROBE"] == "test-value"
+
+
+@pytest.mark.integration
+def test_integration_retains_injected_value():
+    assert os.environ["AW_SECRET_PRESET_PROBE"] == "preset-not-secret"
+"""
+    )
+    environment = dict(os.environ)
+    environment["AW_SECRET_PRESET_PROBE"] = "preset-not-secret"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-n",
+            "0",
+            "-c",
+            str(cli_root / "pyproject.toml"),
+            "-p",
+            "tests.conftest",
+            str(probe),
+        ],
+        cwd=cli_root,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_factory_and_context_entry_do_not_read_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:

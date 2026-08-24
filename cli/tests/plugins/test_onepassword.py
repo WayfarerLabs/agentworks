@@ -230,6 +230,7 @@ def test_allow_impact_is_definitive(monkeypatch: pytest.MonkeyPatch) -> None:
         ("not currently signed in", FailureReason.AUTHENTICATION),
         ("no such item", FailureReason.LOOKUP_REJECTED),
         ("network is unreachable", FailureReason.CONNECTIVITY),
+        ("dial tcp: lookup api.1password.com: no such host", FailureReason.CONNECTIVITY),
         ("provider exploded", FailureReason.EXTERNAL),
     ],
 )
