@@ -114,10 +114,10 @@ handoff in the ledger. The main agent coordinates any subagent reviews the proce
 including when the developer cannot delegate further.
 
 An attributable CI failure or conflict that can be repaired within blessed scope and recorded
-mutation bounds returns automatically to the retained developer. Delivery owns draft, validation,
-push, and re-handoff mechanics. These continuation repairs never start or consume a feedback-round
-budget. Anything unattributable or outside the bounds pauses for authenticated direction; never
-change unrelated code to make it pass.
+mutation bounds returns automatically to the retained developer. The loaded `integration-testing`
+and process contracts own validation and gates; delivery owns draft, push, and re-handoff. These
+continuation repairs never start or consume a feedback-round budget. Anything unattributable or
+outside the bounds pauses for authenticated direction; never change unrelated code to make it pass.
 
 Do not select another issue until the active issue is green or paused. Unless otherwise directed,
 stop intake when three ready, unmerged pull requests exist. At the cap, monitor existing work.
