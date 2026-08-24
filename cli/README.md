@@ -366,6 +366,10 @@ agw secret verify tailscale-auth-key --allow-interaction
 request biometric, app, browser, device, or other out-of-band work, while terminal prompts remain
 disabled. At the maximum impact level a backend must not return `indeterminate`.
 
+These secret surfaces changed shape in 0.15, including what `agw doctor` can exit with;
+[docs/guides/upgrading-to-0.15.md](../docs/guides/upgrading-to-0.15.md) covers what an operator or a
+CI job needs to do about it.
+
 `agw doctor` keeps three adjacent secret groups. `Secret backends` reports implementation readiness;
 `Secret sources` shows every declared source with its selected backend, active/inactive,
 enabled/disabled, provenance, and folded readiness; `Secrets` emits exactly one row per registry

@@ -9,6 +9,11 @@ Two sources can select the same backend with different accounts, timeouts, previ
 precedence. The complete backend-authoring contract is in the
 [secret-backend README](../capabilities/secret_backend/README.md).
 
+Operators crossing the 0.15 boundary should read
+[docs/guides/upgrading-to-0.15.md](../../../docs/guides/upgrading-to-0.15.md) first: preview became
+provider-aware in that release, which changes what `agw doctor` reports and can exit with, and
+changes `agw secret verify`'s output shape.
+
 ## Default sources
 
 Agentworks synthesizes `env-var` and `prompt`. The default chain is `['env-var', 'prompt']`.
