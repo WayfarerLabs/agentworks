@@ -20,8 +20,9 @@ loop adds only the bounded intake grants below.
 Before any issue, branch, content, pull request, check, or message mutation for a candidate, the
 operator must explicitly name or bless that issue and authorize the bounded GitHub mutation classes
 the loop may perform: vetted branch and content operations, issue and pull request state and
-messages, and check or Actions reruns. Repository configuration, secrets, and infrastructure require
-separate authenticated direction. The operator may interrupt at any time.
+messages, and check or Actions reruns. Repository configuration and protected policy, including
+branch-content changes to their definitions, require separate authenticated direction, as do secrets
+and infrastructure. The operator may interrupt at any time.
 
 The operator may start work in either mode:
 
@@ -127,7 +128,7 @@ stop intake when three ready, unmerged pull requests exist. At the cap, monitor 
 
 ## Monitor unmerged pull requests
 
-Use the active host's recurring-monitoring facility for 30-minute ledger sweeps and its wait
+Use the active harness's recurring-monitoring facility for 30-minute ledger sweeps and its wait
 mechanism while CI is pending. If persistent recurring monitoring is unavailable, report that
 limitation through the authenticated operator channel and stop after the current handoff. Never
 emulate recurrence with a blocking sleep or an ad hoc perpetual poll.
