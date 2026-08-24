@@ -35,6 +35,11 @@
   format exposes its public identity; otherwise report that the identity is unverifiable. Never
   substitute an adjacent public-key file for the private identity. How an ssh-agent-held identity
   participates remains deliberately unresolved.
+- **Instance specs follow template-setting lifecycle boundaries (authenticated operator channel to
+  the instance-model effort lead, 2026-08-24):** "Workspaces do not support idempotent reinit so
+  repair should not have --spec. And I don't think we should support resume --spec (yet) either.
+  There are a lot of sharp edges there. Basically, we should support --spec _exactly_ where you can
+  set/change the template. It's the same deal, right?"
 
 ## Why now
 
@@ -124,9 +129,16 @@ ssh-agent-held identity participates remains deliberately unresolved.
 
 ### R4: Instance spec overlays via the CLI
 
-An operator can attach a final configuration layer to a specific instance, applied after the
-template chain, through a CLI verb (and correspondingly visible in the declarative model). The
-overlay participates in the general layer-stack merge that wave 2's open door anticipated, never a
+An operator can supply a final configuration layer alongside a CLI operation that selects or changes
+an instance's template. At the current surface, that means the four direct creation commands and
+`agent reinit`, the sole existing-instance command that can repoint its owner to another template.
+There is no independent instance-spec mutation verb. VM reinit cannot change the VM template,
+workspace repair is not full idempotent convergence, and session resume has unresolved sharp edges,
+so none accepts an instance spec. An empty JSON object clears an agent's prior layer when passed to
+`agent reinit`; omitting the option retains it.
+
+The overlay is applied after the template chain and is correspondingly visible in the declarative
+model. It participates in the general layer-stack merge that wave 2's open door anticipated, never a
 bespoke instance-only merge. Price this honestly: that general merge does not exist at HEAD.
 `cli/agentworks/resources/inheritance.py` orders the template chain only, and the field-by-field
 merge is implemented separately for each kind (vms, agents, workspaces, sessions), so participating

@@ -111,12 +111,14 @@ implementation does not begin until the saga lead accepts this checkpoint.
       provenance.
 - [ ] Define typed per-kind overlay payloads and codecs over the shared store, with one final
       overlay layer after the template chain and no required ceremony when it is absent.
-- [ ] Add inline JSON `--spec JSON` to the four direct instance creation commands,
-      `--workspace-spec JSON` and `--agent-spec JSON` to compound session creation, and matching
-      `set-spec NAME SPEC` and `clear-spec NAME` verbs to all four instance groups, with
-      declaration-time effective-instance reference and capability validation matching template
-      error quality without publishing a fake template or creating instance manifests. Reject
-      copied-workspace specs while their synthetic `copied` template has no resolvable base.
+- [ ] Add inline JSON `--spec JSON` exactly where an instance template can be selected or changed:
+      the four direct creation commands and `agent reinit`. Add `--workspace-spec JSON` and
+      `--agent-spec JSON` to compound session creation for newly created child owners. Omit
+      standalone spec mutation verbs and do not add the option to VM reinit, workspace repair,
+      session resume, or workspace copy. Treat `{}` on `agent reinit` as clearing the prior layer
+      and omission as retaining it. Apply declaration-time effective-instance reference and
+      capability validation matching template error quality without publishing a fake template or
+      creating an instance manifest.
 - [ ] Prove scalar override, list/map merge behavior, defaults, provenance, invalid overlays, absent
       overlays, persistence, deletion, and parity across VM, workspace, agent, and session kinds.
 - [ ] Update command reference, completions, sample configuration or manifest teaching, and guide

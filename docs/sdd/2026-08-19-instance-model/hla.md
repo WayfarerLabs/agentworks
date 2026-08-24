@@ -146,9 +146,11 @@ is insufficient because a validly shaped overlay can still name a missing secret
 credential, install command, or harness integration.
 
 The database is the one desired-overlay authority. R4 does not add VM, workspace, agent, or session
-instance documents to the resource-manifest frontend. The supported CLI mutation and instance
-inspection surfaces make the persisted overlay visible as desired declaration. The exact argv,
-inline JSON input, replacement behavior, validation boundary, and no-implicit-remote-work rule are
+instance documents to the resource-manifest frontend. A spec can be supplied only at an existing
+template-setting lifecycle boundary: the four direct creation commands and `agent reinit`. The
+template selection and final partial layer form one effective declaration for validation,
+realization, persistence, and inspection. There is no desired-only spec mutation surface. The exact
+argv, inline JSON input, replacement behavior, validation boundary, and lifecycle-coupling rule are
 specified in `instance-spec-cli.md`.
 
 ## R3: applied state and SSH identity
@@ -241,9 +243,10 @@ JSON v1 retains every existing field and adds optional tagged objects. Human and
 the same structural facts. Resolved specs include configured secret references only, never resolved
 secret values.
 
-A missing or removed template is unresolved current declaration, not the built-in default. Desired
-hardware overlay values that VM reinit does not provision again remain visible drift; reinit must
-not record them as applied merely because other initialization steps succeeded.
+A missing or removed template is unresolved current declaration, not the built-in default. A later
+edit to the selected VM template can change currently resolved hardware while the applied record
+still describes provisioned hardware. VM reinit does not provision hardware again and must not
+record the newly resolved values as applied merely because other initialization steps succeeded.
 
 ## Failure and integrity behavior
 
@@ -256,8 +259,8 @@ not record them as applied merely because other initialization steps succeeded.
 | Current key differs from applied fingerprint       | Drift and clean preflight refusal                            |
 | Authorized-key reconciliation warns/fails          | No SSH applied slice written                                 |
 | Lifecycle remote success, database checkpoint fail | Conservative old/absent state; retry through lifecycle       |
-| Overlay validation or reference check fails        | No desired record written                                    |
-| Overlay write without lifecycle apply              | Desired/current change only; applied state remains unchanged |
+| Candidate spec validation or reference check fails | No desired record written                                    |
+| Agent declaration persisted, reinit later fails    | Desired retained; applied old/absent; lifecycle is retryable |
 
 ## Deliberate boundaries
 
