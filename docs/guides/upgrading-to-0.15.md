@@ -17,18 +17,16 @@ read the secrets README above.
 
 Pre-0.15, a secret check was `ok` or `warn`; it could never fail the run, because doctor's preview
 never contacted a secret provider. Now a secret check can be `FAIL`, and `agw doctor` exits 1
-whenever any check fails (`cli/agentworks/cli/commands/doctor.py:45-46` for `--output json`,
-`:97-98` for the default human render). A CI job that gates on `agw doctor`'s exit code can turn red
-from a provider hiccup with no code change on your side.
+whenever any check fails. A CI job that gates on `agw doctor`'s exit code can turn red from a
+provider hiccup with no code change on your side.
 
-This happens through the closed preview-status mapping in `cli/agentworks/doctor.py:269-273`:
-`available` is OK, `failed` is FAIL, everything else (`missing`, `indeterminate`, `blocked`) is
-WARN. `failed` is real: for the built-in `env-var` and `prompt` backends it only fires on a
-malformed value (a NUL byte), but for a provider backend like `onepassword` it fires on the
-provider's own failure modes when doctor's zero-impact preview is actually able to reach the
-provider (see the next section for when that happens): sign-out/authentication failure, the
-referenced item or field not found, connectivity or timeout, or an unrecognized non-zero exit from
-`op` (`cli/agentworks/plugins/onepassword/backend.py:90-122`).
+This happens through the closed preview-status mapping: `available` is OK, `failed` is FAIL,
+everything else (`missing`, `indeterminate`, `blocked`) is WARN. `failed` is real: for the built-in
+`env-var` and `prompt` backends it only fires on a malformed value (a NUL byte), but for a provider
+backend like `onepassword` it fires on the provider's own failure modes when doctor's zero-impact
+preview is actually able to reach the provider (see the next section for when that happens):
+sign-out/authentication failure, the referenced item or field not found, connectivity or timeout, or
+an unrecognized non-zero exit from `op`.
 
 **What to do:** treat a new `FAIL` in the Secrets group as a real signal, not noise. The row names
 the secret and, for JSON output, the check carries a `secret_preview` object with a closed `reason`.
@@ -43,8 +41,7 @@ upgrade. Pre-0.15, doctor's prediction for an unset secret falling through to th
 source always reported `ok: would attempt via prompt`, regardless of whether a TTY was actually
 available. Doctor's zero-impact preview now asks the `prompt` backend for real, and at zero operator
 impact prompt cannot give a definite answer (asking would BE the operator action), so it returns
-`indeterminate` when a TTY is available or `blocked` when it is not
-(`cli/agentworks/capabilities/secret_backend/prompt.py:99-102`); both map to WARN. The message
+`indeterminate` when a TTY is available or `blocked` when it is not ; both map to WARN. The message
 changes from `would attempt via prompt` to something like
 `indeterminate/operator-impact-limited; source=prompt` in an interactive shell, or
 `blocked/tty-unavailable; source=prompt` in CI.
@@ -59,9 +56,8 @@ provider mapping) to get back to `ok`, or accept the warning as informational: d
 
 Pre-0.15, none of these three ever opened a secret-backend client: doctor and preflight's prediction
 was documented as "never reads a value or opens a source client," and `secret describe` was
-documented as "no prompting and no resolution for display." All three now call the shared
-`preview_batch` (`cli/agentworks/secrets/preview.py:249-338`), which opens a real backend client per
-active source and calls its `preview()` method.
+documented as "no prompting and no resolution for display." All three now call the shared one shared
+preview path, which opens a real backend client per active source and calls its `preview()` method.
 
 Each caller's default operator impact:
 
@@ -92,10 +88,10 @@ WARN above is expected in that case.
 Pre-0.15, `secret verify` actually resolved each secret (discarding the value) and rendered
 `NAME, CATEGORY, SOURCE, IDENTIFIER, DETAIL, REMEDIATION`, with `CATEGORY` one of `resolved`,
 `unavailable`, `refused-interaction`, `timeout`, `resolution-failure`. It now previews instead of
-resolving, and renders `NAME, STATUS, SOURCE, IDENTIFIER, REASON, HINT`
-(`cli/agentworks/secrets/verification.py:26-44`), with `STATUS` one of `available`, `missing`,
-`indeterminate`, `blocked`, `failed`. The `REMEDIATION` enum is gone; `HINT` is free text. A script
-that greps a column name or a `CATEGORY`/`DETAIL` value will no longer match anything.
+resolving, and renders `NAME, STATUS, SOURCE, IDENTIFIER, REASON, HINT` , with `STATUS` one of
+`available`, `missing`, `indeterminate`, `blocked`, `failed`. The `REMEDIATION` enum is gone; `HINT`
+is free text. A script that greps a column name or a `CATEGORY`/`DETAIL` value will no longer match
+anything.
 
 **What to do:** update any script parsing this table to the new headers and status vocabulary, or
 switch it to the exit code alone: `agw secret verify` still exits 0 exactly when every named secret
