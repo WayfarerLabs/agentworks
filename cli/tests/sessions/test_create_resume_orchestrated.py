@@ -34,6 +34,7 @@ from agentworks.secrets.orchestration import (
     resolve_for_command as _real_resolve_for_command,
 )
 from agentworks.secrets.policy import TtyInteractionPolicy
+from agentworks.sessions.manager._scope import _regenerate_tmuxinator as _real_regenerate_tmuxinator
 
 from ..conftest import ManifestDoc, stub_build_registry, stub_session_resolvers, stub_vm_gates
 from ..orchestrated_fixtures import PLUGINS_ENABLED, proxmox_site, write_operator_config
@@ -63,10 +64,16 @@ class _Target:
         self._missing = missing or set()
 
     def run(self, cmd: str, **kwargs: object) -> _Result:
+        if cmd.startswith("rm -f ") and ".tmuxinator.yml" in cmd:
+            self._events.append("tmuxinator_remove")
+            return _Result()
         if "command -v" in cmd:
             self._events.append("probe")
             return _Result(ok=not any(f"command -v {m} " in cmd for m in self._missing))
         return _Result()
+
+    def write_file(self, remote_path: str, content: str, **kwargs: object) -> None:
+        self._events.append(f"tmuxinator_write:{remote_path}")
 
 
 def _seed_db(tmp_path: Path) -> Database:
@@ -320,6 +327,42 @@ def _create_stubs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, events: list[
     return db
 
 
+@pytest.mark.parametrize(
+    ("workspace_spec", "expected_event"),
+    [(None, "tmuxinator_write:/home/me/ws1/.tmuxinator.yml"), ('{"tmuxinator":false}', "tmuxinator_remove")],
+)
+def test_regenerate_tmuxinator_preserves_missing_base_compatibility_and_overlay(
+    tmp_path: Path,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    workspace_spec: str | None,
+    expected_event: str,
+) -> None:
+    from agentworks.instance_specs import parse_instance_spec
+    from agentworks.sessions import manager as session_manager
+
+    events: list[str] = []
+    db = _seed_db(tmp_path)
+    db._conn.execute("UPDATE workspaces SET template = 'copied' WHERE name = 'ws1'")
+    db._conn.commit()
+    if workspace_spec is not None:
+        overlay = parse_instance_spec("workspace", workspace_spec)
+        db.instance_state.put_desired_overlay("workspace", "ws1", overlay.payload)
+    monkeypatch.setattr(session_manager, "transport", lambda *args, **kwargs: _Target(events))
+    vm = db.get_vm("vm1")
+    ws = db.get_workspace("ws1")
+    assert vm is not None and ws is not None
+
+    _real_regenerate_tmuxinator(db, make_config(), vm, ws)
+
+    assert expected_event in events
+    if workspace_spec is None:
+        assert "tmuxinator_remove" not in events
+    else:
+        assert not any(event.startswith("tmuxinator_write:") for event in events)
+    db.close()
+
+
 def test_create_ephemeral_agent_defers_probe_until_realized(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The defer-then-probe fork through the real command: a pending
     agent target defers the probe at preflight; the probe fires exactly
@@ -387,7 +430,8 @@ def test_create_existing_agent_probes_at_preflight(tmp_path: Path, monkeypatch: 
 
 
 def test_create_failure_cleans_session_slice_then_unwinds_ephemerals(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The full rollback order end to end, reproducing the imperative
     shape: the session's partial-state cleanup (row delete, grant
@@ -398,16 +442,26 @@ def test_create_failure_cleans_session_slice_then_unwinds_ephemerals(
 
     events: list[str] = []
     db = _create_stubs(tmp_path, monkeypatch, events)
+    outcomes: list[object] = []
+    monkeypatch.setattr("agentworks.instance_specs.render_overlay_outcome", outcomes.append)
 
     def _realize_workspace(db_: Any, config: Any, registry: Any, **kwargs: Any) -> None:
+        assert kwargs["defer_overlay_report"] is True
         db_._conn.execute(
             "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, ?, '/tmp/ws', ?)",
             (kwargs["name"], kwargs["vm"].name, f"ws-{kwargs['name']}"),
         )
         db_._conn.commit()
+        from agentworks.instance_specs import persist_creation_overlay
+
+        persist_creation_overlay(db_, "workspace", kwargs["name"], kwargs["overlay"])
 
     def _realize_agent(db_: Any, config: Any, registry: Any, **kwargs: Any) -> None:
+        assert kwargs["defer_overlay_report"] is True
         db_.insert_agent(kwargs["name"], kwargs["vm"].name, f"agt-{kwargs['name']}")
+        from agentworks.instance_specs import persist_creation_overlay
+
+        persist_creation_overlay(db_, "agent", kwargs["name"], kwargs["overlay"])
 
     monkeypatch.setattr("agentworks.workspaces.realize.realize_workspace", _realize_workspace)
     monkeypatch.setattr("agentworks.agents.realize.realize_agent", _realize_agent)
@@ -423,14 +477,17 @@ def test_create_failure_cleans_session_slice_then_unwinds_ephemerals(
         "agentworks.agents.grants.remove_from_workspace_group",
         lambda *a, **k: events.append("remove_group"),
     )
-    monkeypatch.setattr(
-        "agentworks.agents.manager.delete_agent",
-        lambda *a, **k: events.append("delete_agent"),
-    )
-    monkeypatch.setattr(
-        "agentworks.workspaces.manager.delete_workspace",
-        lambda *a, **k: events.append("delete_workspace"),
-    )
+
+    def _delete_agent(db_: Database, config: object, *, name: str, **kwargs: object) -> None:
+        events.append("delete_agent")
+        db_.delete_agent(name)
+
+    def _delete_workspace(db_: Database, config: object, *, name: str, **kwargs: object) -> None:
+        events.append("delete_workspace")
+        db_.delete_workspace(name)
+
+    monkeypatch.setattr("agentworks.agents.manager.delete_agent", _delete_agent)
+    monkeypatch.setattr("agentworks.workspaces.manager.delete_workspace", _delete_workspace)
 
     def _explode(*a: object, **k: object) -> None:
         raise RuntimeError("tmux exploded")
@@ -445,8 +502,11 @@ def test_create_failure_cleans_session_slice_then_unwinds_ephemerals(
                 paths=SimpleNamespace(vm_workspaces="/srv"),
             ),
             name="s1",
+            spec='{"env":{"SESSION_SPEC":"set"}}',
             new_workspace=True,
+            workspace_spec='{"tmuxinator":false}',
             new_agent=True,
+            agent_spec='{"shell":"zsh"}',
             vm_name="vm1",
             interaction=TtyInteractionPolicy.REFUSE,
         )
@@ -459,7 +519,149 @@ def test_create_failure_cleans_session_slice_then_unwinds_ephemerals(
         "delete_workspace",
     ], f"session slice cleans first, then agent, then workspace; got {events}"
     assert db.get_session("s1") is None
+    assert db.instance_state.get_desired_overlay("session", "s1") is None
     assert not db.has_any_grant("s1", "s1")
+    assert outcomes == []
+    db.close()
+
+
+def test_compound_create_reports_each_retained_overlay_once_after_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.db.instance_state import VersionedPayload
+    from agentworks.instance_specs import OverlayDisposition, OverlayOutcome, persist_creation_overlay
+    from agentworks.sessions.manager import create_session
+
+    events: list[str] = []
+    db = _create_stubs(tmp_path, monkeypatch, events)
+    outcomes: list[OverlayOutcome] = []
+    monkeypatch.setattr("agentworks.instance_specs.render_overlay_outcome", outcomes.append)
+    monkeypatch.setattr("agentworks.sessions.manager._regenerate_tmuxinator", _real_regenerate_tmuxinator)
+    monkeypatch.setattr(
+        "agentworks.workspaces.manager.delete_workspace",
+        lambda db_, config, *, name, **kwargs: db_.delete_workspace(name),
+    )
+    monkeypatch.setattr(
+        "agentworks.agents.manager.delete_agent",
+        lambda db_, config, *, name, **kwargs: db_.delete_agent(name),
+    )
+
+    def _realize_workspace(db_: Any, config: Any, registry: Any, **kwargs: Any) -> None:
+        assert kwargs["defer_overlay_report"] is True
+        db_._conn.execute(
+            "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, ?, '/tmp/ws', ?)",
+            (kwargs["name"], kwargs["vm"].name, f"ws-{kwargs['name']}"),
+        )
+        db_._conn.commit()
+        persist_creation_overlay(db_, "workspace", kwargs["name"], kwargs["overlay"])
+
+    def _realize_agent(db_: Any, config: Any, registry: Any, **kwargs: Any) -> None:
+        assert kwargs["defer_overlay_report"] is True
+        db_.insert_agent(kwargs["name"], kwargs["vm"].name, f"agt-{kwargs['name']}")
+        persist_creation_overlay(db_, "agent", kwargs["name"], kwargs["overlay"])
+
+    monkeypatch.setattr("agentworks.workspaces.realize.realize_workspace", _realize_workspace)
+    monkeypatch.setattr("agentworks.agents.realize.realize_agent", _realize_agent)
+
+    create_session(
+        db,
+        SimpleNamespace(
+            session=SimpleNamespace(history_limit=1),
+            paths=SimpleNamespace(vm_workspaces="/srv"),
+        ),  # type: ignore[arg-type]
+        name="s1",
+        spec='{"env":{"SESSION_SPEC":"set"}}',
+        new_workspace=True,
+        workspace_spec='{"tmuxinator":false}',
+        new_agent=True,
+        agent_spec='{"shell":"zsh"}',
+        vm_name="vm1",
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    assert [(outcome.disposition, outcome.fields) for outcome in outcomes] == [
+        (OverlayDisposition.SET, ("tmuxinator",)),
+        (OverlayDisposition.SET, ("shell",)),
+        (OverlayDisposition.SET, ("env",)),
+    ]
+    stored = db.instance_state.get_desired_overlay("session", "s1")
+    assert stored is not None
+    assert stored.payload == VersionedPayload(1, {"env": {"SESSION_SPEC": {"value": "set"}}})
+    assert "tmuxinator_remove" in events
+    assert not any(event.startswith("tmuxinator_write:") for event in events)
+    db.close()
+
+
+@pytest.mark.parametrize("owner_kind", ["workspace", "agent"])
+def test_compound_child_post_commit_failure_unwinds_owner_and_overlay_without_outcome(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    owner_kind: str,
+) -> None:
+    from agentworks.instance_specs import OverlayOutcome, persist_creation_overlay
+    from agentworks.sessions.manager import create_session
+
+    events: list[str] = []
+    db = _create_stubs(tmp_path, monkeypatch, events)
+    outcomes: list[OverlayOutcome] = []
+    monkeypatch.setattr("agentworks.instance_specs.render_overlay_outcome", outcomes.append)
+    monkeypatch.setattr(
+        "agentworks.workspaces.manager.delete_workspace",
+        lambda db_, config, *, name, **kwargs: db_.delete_workspace(name),
+    )
+    monkeypatch.setattr(
+        "agentworks.agents.manager.delete_agent",
+        lambda db_, config, *, name, **kwargs: db_.delete_agent(name),
+    )
+
+    if owner_kind == "workspace":
+
+        def _fail_workspace(db_: Any, config: Any, registry: Any, **kwargs: Any) -> None:
+            db_._conn.execute(
+                "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, ?, '/tmp/ws', ?)",
+                (kwargs["name"], kwargs["vm"].name, f"ws-{kwargs['name']}"),
+            )
+            db_._conn.commit()
+            persist_creation_overlay(db_, "workspace", kwargs["name"], kwargs["overlay"])
+            raise RuntimeError("post-commit failure")
+
+        monkeypatch.setattr("agentworks.workspaces.realize.realize_workspace", _fail_workspace)
+        create_kwargs = {
+            "new_workspace": True,
+            "workspace_spec": '{"tmuxinator":false}',
+            "admin": True,
+        }
+    else:
+
+        def _fail_agent(db_: Any, config: Any, registry: Any, **kwargs: Any) -> None:
+            db_.insert_agent(kwargs["name"], kwargs["vm"].name, f"agt-{kwargs['name']}")
+            persist_creation_overlay(db_, "agent", kwargs["name"], kwargs["overlay"])
+            raise RuntimeError("post-commit failure")
+
+        monkeypatch.setattr("agentworks.agents.realize.realize_agent", _fail_agent)
+        create_kwargs = {
+            "workspace": "ws1",
+            "new_agent": True,
+            "agent_spec": '{"shell":"zsh"}',
+        }
+
+    with pytest.raises(RuntimeError, match="post-commit failure"):
+        create_session(
+            db,
+            SimpleNamespace(
+                session=SimpleNamespace(history_limit=1),
+                paths=SimpleNamespace(vm_workspaces="/srv"),
+            ),  # type: ignore[arg-type]
+            name="s1",
+            vm_name="vm1",
+            interaction=TtyInteractionPolicy.REFUSE,
+            **create_kwargs,  # type: ignore[arg-type]
+        )
+
+    assert {"workspace": db.get_workspace, "agent": db.get_agent}[owner_kind]("s1") is None
+    assert db.instance_state.get_desired_overlay(owner_kind, "s1") is None  # type: ignore[arg-type]
+    assert outcomes == []
     db.close()
 
 
@@ -846,12 +1048,15 @@ def test_resume_stopped_vm_gate_seeds_and_env_pass_is_the_only_other(
     pass runs at the boundary); the recorded post-confirm env-chain
     resolve is the only other pass, and nothing resolves after it."""
     from agentworks.db import SessionStatus
+    from agentworks.instance_specs import parse_instance_spec
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions.manager import resume_session
 
     config = make_config()
     _seed_stopped_proxmox_vm(db)
     db.insert_session("s1", "ws1", "default", SessionMode.ADMIN)
+    overlay = parse_instance_spec("session", '{"env":{"RESUME_SPEC":"set"}}')
+    db.instance_state.put_desired_overlay("session", "s1", overlay.payload)
     db.update_session_pid("s1", 4242, boot_id="boot-x")
     events: list[str] = []
     captured_env: dict[str, str] = {}
@@ -869,6 +1074,7 @@ def test_resume_stopped_vm_gate_seeds_and_env_pass_is_the_only_other(
     assert resolve_counter == [["proxmox-token"], ["api-key"]]
     assert events[:3] == ["status", "start", "tailscale"]  # the gate ran
     assert captured_env["API_KEY"] == "shhh"
+    assert captured_env["RESUME_SPEC"] == "set"
     assert "tmux_create" in events  # the command completed
 
     # Resume now reads as a structured plan mirroring create: the
@@ -886,6 +1092,36 @@ def test_resume_stopped_vm_gate_seeds_and_env_pass_is_the_only_other(
         role is Role.RESULT and level == 0 and msg == "Session 's1' resumed"
         for role, level, msg in captured_output.lines
     )
+
+
+def test_resume_validates_stored_overlay_references_before_lifecycle_work(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.errors import ConfigError
+    from agentworks.instance_specs import parse_instance_spec
+    from agentworks.sessions import manager as session_manager
+    from agentworks.sessions.manager import resume_session
+
+    config = make_config()
+    _seed_stopped_proxmox_vm(db)
+    db.insert_session("s1", "ws1", "default", SessionMode.ADMIN)
+    overlay = parse_instance_spec("session", '{"harness_integration":{"name":"missing"}}')
+    db.instance_state.put_desired_overlay("session", "s1", overlay.payload)
+    db.update_session_pid("s1", 4242, boot_id="boot-x")
+    events: list[str] = []
+    captured_env: dict[str, str] = {}
+    _stop_the_vm(monkeypatch, events)
+    _patch_session_ops(monkeypatch, events, captured_env)
+    monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, **k: session)
+    monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: SessionStatus.STOPPED)
+
+    with pytest.raises(ConfigError):
+        resume_session(db, config, name="s1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert events == []
+    assert captured_env == {}
 
 
 def test_resume_multiline_environment_secret_refuses_before_kill(

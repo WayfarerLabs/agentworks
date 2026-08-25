@@ -192,12 +192,12 @@ class LiveVMNode:
         # gate reader's authorization check and the node's own read
         # share one template resolution.
         if self._repair_refs is None:
-            from agentworks.vms.templates import resolve_template
+            from agentworks.vms.templates import resolve_live_template
 
             # One ref, always: the resolved template's auth-key name is
             # non-optional (the kind's default is "tailscale-auth-key"),
             # so there is no absent case to fold to an empty tuple.
-            tmpl = resolve_template(self._registry, self._row.template)
+            tmpl = resolve_live_template(self._db, self._registry, self._row.name, self._row.template)
             self._repair_refs = (tmpl.tailscale_auth_key,)
         return self._repair_refs
 

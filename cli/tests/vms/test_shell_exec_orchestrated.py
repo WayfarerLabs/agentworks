@@ -130,7 +130,7 @@ def test_graph_derives_from_row_and_env_joins_via_targets(
 
     for name in secret_union(nodes):
         resolver.register_name(name)
-    scopes = vm_manager._resolve_vm_admin_env_scopes(registry, vm)
+    scopes = vm_manager._resolve_vm_admin_env_scopes(db, registry, vm)
     resolver.register_targets([vm_manager._vm_secret_target(scopes, label="vm-shell=box")])
     resolver.resolve()
     assert set(resolver.values) == {"proxmox-token", "vm-env-secret"}
@@ -173,13 +173,13 @@ def test_copied_workspace_pin_resolves_env_scopes_without_a_template(
 
     # The copied marker resolves cleanly to an empty workspace scope; the
     # vm scope (its env-block secret ref) is untouched.
-    copied_scopes = vm_manager._resolve_vm_admin_env_scopes(registry, vm, ws=copied)
+    copied_scopes = vm_manager._resolve_vm_admin_env_scopes(db, registry, vm, ws=copied)
     assert copied_scopes.workspace == {}
     assert "API_KEY" in copied_scopes.vm
 
     # A real template still contributes its env: the fix does not swallow
     # resolvable templates.
-    proj_scopes = vm_manager._resolve_vm_admin_env_scopes(registry, vm, ws=proj)
+    proj_scopes = vm_manager._resolve_vm_admin_env_scopes(db, registry, vm, ws=proj)
     assert proj_scopes.workspace is not None
     assert "WS_VAR" in proj_scopes.workspace
 
@@ -283,6 +283,29 @@ def test_exec_reachable_vm_is_one_boundary_burst(
     ((cmd, env),) = target.streaming_calls
     assert cmd == "echo hi"
     assert env.get("API_KEY") == "env-val"
+
+
+def test_exec_resolves_a_stored_overlay_only_secret_through_the_runtime_boundary(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    from agentworks.instance_specs import parse_instance_spec
+
+    config = make_config()
+    _seed_vm(db)
+    overlay = parse_instance_spec("vm", '{"env":{"OVERLAY_TOKEN":{"secret":"overlay-only"}}}')
+    db.instance_state.put_desired_overlay("vm", "box", overlay.payload)
+    monkeypatch.setenv("AW_SECRET_OVERLAY_ONLY", "resolved")
+    _reachable(monkeypatch, True)
+
+    rc = vm_manager.exec_vm(db, config, "box", ["echo", "hi"], interaction=TtyInteractionPolicy.REFUSE)
+
+    assert rc == 0
+    ((_cmd, env),) = target.streaming_calls
+    assert env["OVERLAY_TOKEN"] == "resolved"
 
 
 def test_exec_stopped_vm_gate_burst_then_boundary_burst(

@@ -79,7 +79,7 @@ def shell_agent(
     from agentworks.bootstrap import load_request_registry
 
     registry = load_request_registry(config)
-    scopes = _mgr._resolve_agent_direct_env_scopes(registry, vm, agent, ws=ws)
+    scopes = _mgr._resolve_agent_direct_env_scopes(db, registry, vm, agent, ws=ws)
 
     with gated_vm_boundary(
         db,
@@ -188,7 +188,7 @@ def exec_agent(
     from agentworks.bootstrap import load_request_registry
 
     registry = load_request_registry(config)
-    scopes = _mgr._resolve_agent_direct_env_scopes(registry, vm, agent, ws=ws)
+    scopes = _mgr._resolve_agent_direct_env_scopes(db, registry, vm, agent, ws=ws)
 
     with gated_vm_boundary(
         db,

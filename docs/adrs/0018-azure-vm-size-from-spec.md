@@ -7,6 +7,9 @@ Date: 2026-07-16
 Accepted. Removes the `azure_vm_size` template field and the `vm create` hardware/admin override
 flags introduced in the earliest CLI. Implements issue #178.
 
+The later typed `--spec` instance layer does not restore those individual flags. It uses the
+vm-template schema and merge rules as one final, persisted VM-specific declaration.
+
 ### Amendment (2026-07-18)
 
 The `vm create` provisioning line now always names the selected SKU's spec (its cpus/memory), not
@@ -32,10 +35,10 @@ for Azure could not be reused on any other platform.
 
 ## Decision
 
-1. **Trim `vm create` to `name`, `--template`, and `--site`.** Hardware (`cpus`, `memory`, `disk`,
-   `swap`) comes from the vm-template; the admin username comes from the admin-template. There are
-   no per-create overrides. Deviation means a new template, matching `agent create`,
-   `workspace create`, and the rest of the surface.
+1. **Remove individual hardware and admin override flags from `vm create`.** Hardware (`cpus`,
+   `memory`, `disk`, `swap`) comes from the vm-template; the admin username comes from the
+   admin-template. A later typed `--spec` feature may add a final persisted VM-specific layer, but
+   does not reintroduce `--cpus`, `--memory`, `--disk`, or `--admin-username`.
 
 2. **Delete `azure_vm_size` entirely** from the vm-template schema, the resolved template, the
    config loader, and the `ProvisionRequest`. Azure is now sized from the same `cpus` + `memory`

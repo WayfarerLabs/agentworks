@@ -156,6 +156,9 @@ def _rehome_vm(
 
     _guard_vm_status(vm)
     registry = load_request_registry(config)
+    from agentworks.workspaces.templates import resolve_live_tmuxinator
+
+    tmuxinator_enabled = resolve_live_tmuxinator(db, registry, ws_name, ws.template)
     with gated_vm_boundary(
         db,
         config,
@@ -274,18 +277,21 @@ def _rehome_vm(
                 # side. The remote scp/sftp handler may still interpret the path
                 # per its own rules; if a future change funnels untrusted paths
                 # through here, revisit.
-                from agentworks.workspaces.tmuxinator import console_session_name, generate_config
+                from agentworks.workspaces.tmuxinator import console_session_name, generate_config, remove_config
 
-                tmux_config = generate_config(ws_name, new_path)
-                target.write_file(f"{new_path}/.tmuxinator.yml", tmux_config)
-                session = console_session_name(ws_name)
-                target.run("mkdir -p ~/.config/tmuxinator", timeout=10)
-                # Keep ~/.config/tmuxinator/ literal so tilde expansion still
-                # happens; quote just the filename for layered defense.
-                target.run(
-                    f"ln -sf {np}/.tmuxinator.yml ~/.config/tmuxinator/{shlex.quote(session)}.yml",
-                    timeout=10,
-                )
+                if tmuxinator_enabled:
+                    tmux_config = generate_config(ws_name, new_path)
+                    target.write_file(f"{new_path}/.tmuxinator.yml", tmux_config)
+                    session = console_session_name(ws_name)
+                    target.run("mkdir -p ~/.config/tmuxinator", timeout=10)
+                    # Keep ~/.config/tmuxinator/ literal so tilde expansion still
+                    # happens; quote just the filename for layered defense.
+                    target.run(
+                        f"ln -sf {np}/.tmuxinator.yml ~/.config/tmuxinator/{shlex.quote(session)}.yml",
+                        timeout=10,
+                    )
+                else:
+                    remove_config(target, ws_name, new_path)
 
                 # Update database
                 db.update_workspace_path(ws_name, new_path)

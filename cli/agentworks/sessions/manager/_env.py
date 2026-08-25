@@ -15,21 +15,38 @@ if TYPE_CHECKING:
     import re
     from collections.abc import Mapping
 
+    from agentworks.agents.templates import ResolvedAgentTemplate
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, VMRow, WorkspaceRow
     from agentworks.env import EnvEntry
     from agentworks.resources.registry import Registry
     from agentworks.secrets import SecretTarget
+    from agentworks.sessions.template import SessionTemplate
     from agentworks.sessions.templates import ResolvedSessionTemplate
+    from agentworks.workspaces.templates import ResolvedTemplate as ResolvedWorkspaceTemplate
 from ._constants import _KNOWN_TEMPLATE_VARS, _TEMPLATE_VAR_RE
 
 
-def _resolve_template(registry: Registry, template_name: str | None) -> ResolvedSessionTemplate:
+def _resolve_template(
+    registry: Registry,
+    template_name: str | None,
+    *,
+    db: Database | None = None,
+    instance_name: str | None = None,
+    overlay: SessionTemplate | None = None,
+) -> ResolvedSessionTemplate:
     """Resolve a session template by name, applying inheritance."""
-    from agentworks.sessions.templates import resolve_template
+    from agentworks.sessions.templates import resolve_live_template, resolve_template
 
     try:
-        return resolve_template(registry, template_name)
+        if db is not None and instance_name is not None:
+            return resolve_live_template(db, registry, instance_name, template_name)
+        return resolve_template(
+            registry,
+            template_name,
+            overlay=overlay,
+            instance_name=instance_name,
+        )
     except ValueError as e:
         raise ValidationError(
             str(e),
@@ -77,6 +94,23 @@ def _display_harness_integration(registry: Registry | None, template_name: str) 
 
     try:
         return resolve_template(registry, template_name).harness_integration
+    except AgentworksError:
+        return "-"
+
+
+def _display_live_harness_integration(
+    db: Database,
+    registry: Registry | None,
+    instance_name: str,
+    template_name: str,
+) -> str:
+    """Resolve a live session's integration for read-only display, or degrade."""
+    if registry is None:
+        return "-"
+    from agentworks.sessions.templates import resolve_live_template
+
+    try:
+        return resolve_live_template(db, registry, instance_name, template_name).harness_integration
     except AgentworksError:
         return "-"
 
@@ -158,13 +192,13 @@ def _resolve_session_env_scopes(
     mutation). Sharing this helper avoids duplicate template resolution
     and guarantees the two consumers see identical scope state.
     """
-    from agentworks.agents.templates import resolve_template as _resolve_agent_template
+    from agentworks.agents.templates import resolve_live_template as _resolve_agent_template
     from agentworks.resources.access import admin_template as _admin_template
-    from agentworks.vms.templates import resolve_template as _resolve_vm_template
-    from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
+    from agentworks.vms.templates import resolve_live_template as _resolve_vm_template
+    from agentworks.workspaces.templates import resolve_live_template as _resolve_ws_template
 
-    vm_template = _resolve_vm_template(registry, vm.template)
-    workspace_template = _resolve_ws_template(registry, ws.template)
+    vm_template = _resolve_vm_template(db, registry, vm.name, vm.template)
+    workspace_template = _resolve_ws_template(db, registry, ws.name, ws.template)
 
     admin_env: dict[str, EnvEntry] | None
     agent_env: dict[str, EnvEntry] | None
@@ -181,7 +215,7 @@ def _resolve_session_env_scopes(
                 entity_kind="agent",
                 entity_name=agent_name,
             )
-        resolved_agent_template = _resolve_agent_template(registry, agent_row.template)
+        resolved_agent_template = _resolve_agent_template(db, registry, agent_row.name, agent_row.template)
         agent_env = resolved_agent_template.env
 
     session_env = _substitute_template_vars_in_env(
@@ -199,6 +233,7 @@ def _resolve_session_env_scopes(
 
 
 def _session_secret_target_pre_create(
+    db: Database,
     registry: Registry,
     *,
     name: str,
@@ -206,10 +241,10 @@ def _session_secret_target_pre_create(
     vm: VMRow,
     session_template: ResolvedSessionTemplate,
     new_workspace: bool,
-    workspace_template: str | None,
+    resolved_workspace_template: ResolvedWorkspaceTemplate | None,
     existing_workspace: WorkspaceRow | None,
     new_agent: bool,
-    agent_template: str | None,
+    resolved_agent_template: ResolvedAgentTemplate | None,
     existing_agent: AgentRow | None,
     is_admin_mode: bool,
 ) -> SecretTarget:
@@ -221,28 +256,35 @@ def _session_secret_target_pre_create(
     once at the top of ``create_session`` so the eager-resolve runs before
     any of the optional ephemeral creates.
     """
-    from agentworks.agents.templates import resolve_template as _resolve_agent_tmpl
+    from agentworks.agents.templates import resolve_live_template as _resolve_live_agent_tmpl
     from agentworks.resources.access import admin_template as _admin_template
     from agentworks.secrets import SecretTarget
-    from agentworks.vms.templates import resolve_template as _resolve_vm_tmpl
-    from agentworks.workspaces.templates import resolve_template as _resolve_ws_tmpl
+    from agentworks.vms.templates import resolve_live_template as _resolve_vm_tmpl
+    from agentworks.workspaces.templates import resolve_live_template as _resolve_live_ws_tmpl
 
-    vm_template = _resolve_vm_tmpl(registry, vm.template)
+    vm_template = _resolve_vm_tmpl(db, registry, vm.name, vm.template)
 
     if new_workspace:
-        workspace_env = _resolve_ws_tmpl(registry, workspace_template).env
+        assert resolved_workspace_template is not None
+        workspace_env = resolved_workspace_template.env
     else:
         assert existing_workspace is not None
-        workspace_env = _resolve_ws_tmpl(registry, existing_workspace.template).env
+        workspace_env = _resolve_live_ws_tmpl(
+            db,
+            registry,
+            existing_workspace.name,
+            existing_workspace.template,
+        ).env
 
     agent_env: dict[str, EnvEntry] | None = None
     admin_scope: dict[str, EnvEntry] | None = None
     if is_admin_mode:
         admin_scope = _admin_template(registry, vm.admin_template or "default").env
     elif new_agent:
-        agent_env = _resolve_agent_tmpl(registry, agent_template).env
+        assert resolved_agent_template is not None
+        agent_env = resolved_agent_template.env
     elif existing_agent is not None:
-        agent_env = _resolve_agent_tmpl(registry, existing_agent.template).env
+        agent_env = _resolve_live_agent_tmpl(db, registry, existing_agent.name, existing_agent.template).env
 
     session_env = _substitute_template_vars_in_env(
         session_template.env,

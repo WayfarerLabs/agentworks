@@ -2,23 +2,24 @@
 
 <!-- cspell:ignore sdds -->
 
-- Status: R2 feedback correction complete; R4 design accepted
+- Status: R2 merged; R4 implementation complete; R3 and R5 pending
 - Date: 2026-08-23
-- Last revised: 2026-08-24
+- Last revised: 2026-08-25
 - Requirements: [frd.md](./frd.md)
 - R1 assessment: [database-assessment.md](./database-assessment.md)
 - R2 contract: [store-contract.md](./store-contract.md)
 - Instance-spec CLI: [instance-spec-cli.md](./instance-spec-cli.md)
-- Code basis: `333b70bf`, based on `main` with accepted R1 PR #632 merged
-- Delivery vehicle: merged R1 artifact PR #632; R2 store and accepted R4 design in PR #636;
+- Code basis: `96492ff4`, based on `main` with accepted R1 PR #632 and R2 PR #636 merged
+- Delivery vehicle: merged R1 artifact PR #632; merged R2 store and accepted R4 design PR #636;
   remaining phases as independently green PRs from `main`, stacked only for actual dependencies
 
 ## Delivery posture
 
 R1 is an independently reviewed coordination artifact merged through PR #632. R2 is an independently
-valuable, always-green persistence increment in PR #636: it establishes the store contract needed by
-this effort and wave 4 without exposing the later SSH, merge, CLI, and diagnostic risk in the same
-review. Its accepted R4 design artifacts remain response material for the later implementation.
+valuable, always-green persistence increment merged through PR #636: it establishes the store
+contract needed by this effort and wave 4 without exposing the later SSH, merge, CLI, and diagnostic
+risk in the same review. Its accepted R4 design artifacts remain response material for the later
+implementation.
 
 After PR #636 merges, each remaining delivery starts from `main` and is independently complete,
 reviewed, and green. Stack a PR only when its implementation actually depends on an unmerged
@@ -104,36 +105,42 @@ implementation does not begin until the saga lead accepts this checkpoint. Accep
 
 ## Phase 3: general layer stack and desired instance overlays
 
-- [ ] Finalize the R4 design from the four existing per-kind folds. Route a split for authenticated
+- [x] Finalize the R4 design from the four existing per-kind folds. Route a split for authenticated
       operator direction if one shared layer-stack mechanism cannot replace the four loops without a
       fifth instance-only merge.
-- [ ] Introduce one general ordered layer fold while retaining each domain's field merge semantics,
+- [x] Introduce one general ordered layer fold while retaining each domain's field merge semantics,
       defaulting rules, validation, and provenance.
-- [ ] Preserve current template clearing semantics: empty additive lists and maps do not invent a
+- [x] Preserve current template clearing semantics: empty additive lists and maps do not invent a
       removal tombstone, and an overlay cannot declare `name`, `inherits`, metadata, or framework
       provenance.
-- [ ] Define typed per-kind overlay payloads and codecs over the shared store, with one final
+- [x] Define typed per-kind overlay payloads and codecs over the shared store, with one final
       overlay layer after the template chain and no required ceremony when it is absent.
-- [ ] Reject JSON `null` at every depth and report each material layer decision as set, retained,
+- [x] Reject JSON `null` at every depth and report each material layer decision as set, retained,
       replaced, cleared, or explicitly absent using a value-safe field-name summary.
-- [ ] Add inline JSON `--spec JSON` exactly where an instance template can be selected or changed:
+- [x] Add inline JSON `--spec JSON` exactly where an instance template can be selected or changed:
       the four direct creation commands and `agent reinit`. Add `--workspace-spec JSON` and
       `--agent-spec JSON` to compound session creation for newly created child owners. Omit
       standalone spec mutation verbs and do not add the option to VM reinit, workspace repair,
-      session resume, or workspace copy. Treat `{}` on `agent reinit` as clearing the prior layer
-      and omission as retaining it. Apply declaration-time effective-instance reference and
-      capability validation matching template error quality without publishing a fake template or
-      creating an instance manifest.
-- [ ] Prove scalar override, list/map merge behavior, defaults, provenance, invalid overlays, absent
+      session resume, or workspace copy. Treat `{}` or the exact empty CLI value on `agent reinit`
+      as clearing the prior layer, whitespace-only input as invalid, and omission as retaining it.
+      Apply declaration-time effective-instance reference and capability validation matching
+      template error quality without publishing a fake template or creating an instance manifest.
+- [x] Prove scalar override, list/map merge behavior, defaults, provenance, invalid overlays, absent
       overlays, persistence, deletion, and parity across VM, workspace, agent, and session kinds.
-- [ ] Extend VM backup's exact snapshot and archive projection for desired overlays across the VM
+- [x] Extend VM backup's exact snapshot and archive projection for desired overlays across the VM
       owner tree, with explicit archive versioning and safe handling for plaintext environment
       values.
-- [ ] Update command reference, completions, sample configuration or manifest teaching, and guide
+- [x] Update command reference, completions, sample configuration or manifest teaching, and guide
       collateral in the same phase that makes each claim true.
 
 Definition of done: every instance kind resolves template declarations plus an optional final
 instance layer through one shared stack mechanism, and no fifth per-kind merger exists.
+
+Completed on 2026-08-25. Two independent review passes reported no findings after the feedback/fix
+loop. The final non-integration suite passed with 7,438 tests and 1 skip; Ruff, Mypy, file lint,
+Rulesync, locked-SDD, website, deterministic-build, and Typer-isolation gates passed. A bounded
+isolated-home shipped-CLI pass confirmed the option surface and strict validation boundaries without
+contacting a provider; no authorized live-provider inventory was present.
 
 ## Phase 4: R3 applied instance state and SSH proving slice
 

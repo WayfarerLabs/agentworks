@@ -112,7 +112,7 @@ def shell_vm(
     from agentworks.bootstrap import load_request_registry
 
     registry = load_request_registry(config)
-    scopes = _mgr._resolve_vm_admin_env_scopes(registry, vm, ws=ws)
+    scopes = _mgr._resolve_vm_admin_env_scopes(db, registry, vm, ws=ws)
 
     with contextlib.ExitStack() as stack:
         vm_node, resolver, ops_ctx = stack.enter_context(
@@ -219,7 +219,7 @@ def exec_vm(
     from agentworks.bootstrap import load_request_registry
 
     registry = load_request_registry(config)
-    scopes = _mgr._resolve_vm_admin_env_scopes(registry, vm, ws=ws)
+    scopes = _mgr._resolve_vm_admin_env_scopes(db, registry, vm, ws=ws)
 
     with gated_vm_boundary(
         db,

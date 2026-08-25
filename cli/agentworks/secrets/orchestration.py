@@ -110,6 +110,7 @@ def compute_needed_secrets(
     registry: Registry,
     *,
     extra_decls: Iterable[SecretDecl] = (),
+    allow_transient_auto_declare: bool = False,
 ) -> list[SecretDecl]:
     """Union of ``SecretDecl``s referenced across the candidate target set.
 
@@ -151,16 +152,19 @@ def compute_needed_secrets(
                 continue
             decl = decls.get(name)
             if decl is None:
-                # StateError, not ConfigError: the message is right that
-                # this is never an operator's config mistake (referenced
-                # secrets auto-declare at finalize), so it must not wear
-                # the operator-config error kind.
-                raise StateError(
-                    f"env var {key!r} ({target.label}) references secret "
-                    f"{name!r}, which has no declaration in the registry. "
-                    f"Referenced secrets auto-declare at finalize, so this "
-                    f"is a registry-construction bug, not an operator error.",
-                )
+                if allow_transient_auto_declare:
+                    decl = _transient_auto_declared_secret(name)
+                else:
+                    # StateError, not ConfigError: the message is right that
+                    # this is never an operator's config mistake (referenced
+                    # secrets auto-declare at finalize), so it must not wear
+                    # the operator-config error kind.
+                    raise StateError(
+                        f"env var {key!r} ({target.label}) references secret "
+                        f"{name!r}, which has no declaration in the registry. "
+                        f"Referenced secrets auto-declare at finalize, so this "
+                        f"is a registry-construction bug, not an operator error.",
+                    )
             seen.add(name)
             out.append(decl)
     for decl in extra_decls:
@@ -168,6 +172,19 @@ def compute_needed_secrets(
             seen.add(decl.name)
             out.append(decl)
     return out
+
+
+def _transient_auto_declared_secret(name: str) -> SecretDecl:
+    """Create an operation-local secret declaration under the kind's miss policy."""
+    from agentworks.resources.kind import KIND_REGISTRY
+    from agentworks.secrets.base import SecretDecl
+    from agentworks.secrets.kinds import SECRET_KIND_NAME
+
+    handler = KIND_REGISTRY[SECRET_KIND_NAME]
+    allowed = handler.auto_declare_names
+    if handler.miss_policy != "auto-declare" or (allowed is not None and name not in allowed):
+        raise StateError(f"secret {name!r} is not eligible for transient auto-declaration")
+    return SecretDecl(name=name, description="")
 
 
 def validate_target_values(
@@ -221,6 +238,7 @@ def resolve_for_command(
     registry: Registry,
     *,
     extra_decls: Iterable[SecretDecl] = (),
+    allow_transient_auto_declare: bool = False,
     interaction: TtyInteractionPolicy,
 ) -> dict[str, str]:
     """Resolve every secret referenced by the candidate targets: THE
@@ -250,7 +268,12 @@ def resolve_for_command(
     consume no secrets.
     """
     require_exact_tty_interaction_policy(interaction)
-    decls = compute_needed_secrets(targets, registry, extra_decls=extra_decls)
+    decls = compute_needed_secrets(
+        targets,
+        registry,
+        extra_decls=extra_decls,
+        allow_transient_auto_declare=allow_transient_auto_declare,
+    )
     if not decls:
         return {}
     import sys

@@ -705,6 +705,12 @@ class _StubRegistry:
             if name not in VM_PLATFORM_REGISTRY:
                 raise KeyError(name)
             return VMSiteDecl(name=name, platform=CapabilityBlock.of(name, **_STUB_PLATFORM_CONFIG.get(name, {})))
+        from agentworks.capabilities.descriptor import capability_descriptors
+
+        descriptor = next((item for item in capability_descriptors() if item.kind == kind), None)
+        if descriptor is not None:
+            implementation = descriptor.registry()[name]
+            return descriptor.entry_factory(name, implementation, None)
         if kind not in self._KIND_ATTRS:
             raise KeyError(kind)
         return self._kind_dict(kind)[name]

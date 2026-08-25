@@ -22,20 +22,26 @@ from agentworks import output
 from ._create_types import SessionGraph
 
 if TYPE_CHECKING:
+    from pydantic import BaseModel
+
     from agentworks.agents.nodes import (
         AgentTemplateNode,
         LiveAgentNode,
         PendingAgentNode,
     )
+    from agentworks.agents.template import AgentTemplate
     from agentworks.agents.templates import ResolvedAgentTemplate
     from agentworks.config import Config
     from agentworks.db import Database
+    from agentworks.instance_specs import InstanceOverlay
     from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.sessions.template import SessionTemplate
     from agentworks.workspaces.nodes import (
         LiveWorkspaceNode,
         PendingWorkspaceNode,
     )
+    from agentworks.workspaces.template import WorkspaceTemplate
     from agentworks.workspaces.templates import (
         ResolvedTemplate as ResolvedWorkspaceTemplate,
     )
@@ -50,6 +56,9 @@ def _build_session_graph(
     registry: Registry,
     plan: SessionPlan,
     template_name: str | None,
+    session_overlay: InstanceOverlay[BaseModel] | None,
+    workspace_overlay: InstanceOverlay[BaseModel] | None,
+    agent_overlay: InstanceOverlay[BaseModel] | None,
     interaction: TtyInteractionPolicy,
 ) -> SessionGraph:
     """Resolve the template and build the node graph, resolver union, and
@@ -68,7 +77,32 @@ def _build_session_graph(
 
     # ===== Template resolution (no SSH, no mutations) =======================
 
-    template = _mgr._resolve_template(registry, template_name)
+    from typing import cast
+
+    template = _mgr._resolve_template(
+        registry,
+        template_name,
+        overlay=None if session_overlay is None else cast("SessionTemplate", session_overlay.declaration),
+        instance_name=name,
+    )
+    if session_overlay is not None:
+        from agentworks.instance_specs import validate_effective_instance_references
+        from agentworks.sessions.template import effective_references as session_effective_references
+        from agentworks.sessions.template import validate_effective_harness
+        from agentworks.sessions.templates import resolve_template_with_provenance as resolve_session_with_provenance
+
+        layered_session = resolve_session_with_provenance(
+            registry,
+            template_name,
+            overlay=cast("SessionTemplate", session_overlay.declaration),
+            instance_name=name,
+        )
+        template = layered_session.value
+        validate_effective_instance_references(
+            registry,
+            session_effective_references(template, ("session", name), layered_session.provenance),
+        )
+        validate_effective_harness(template, ("session", name))
 
     # ===== Build: the derived node graph ====================================
     #
@@ -119,7 +153,34 @@ def _build_session_graph(
             resolve_template as _resolve_ws_tmpl,
         )
 
-        workspace_tmpl = _resolve_ws_tmpl(registry, workspace_template)
+        workspace_tmpl = _resolve_ws_tmpl(
+            registry,
+            workspace_template,
+            overlay=None if workspace_overlay is None else cast("WorkspaceTemplate", workspace_overlay.declaration),
+            instance_name=workspace_name,
+        )
+        if workspace_overlay is not None:
+            from agentworks.instance_specs import validate_effective_instance_references
+            from agentworks.workspaces.template import effective_references as workspace_effective_references
+            from agentworks.workspaces.templates import (
+                resolve_template_with_provenance as resolve_workspace_with_provenance,
+            )
+
+            layered_workspace = resolve_workspace_with_provenance(
+                registry,
+                workspace_template,
+                overlay=cast("WorkspaceTemplate", workspace_overlay.declaration),
+                instance_name=workspace_name,
+            )
+            workspace_tmpl = layered_workspace.value
+            validate_effective_instance_references(
+                registry,
+                workspace_effective_references(
+                    workspace_tmpl,
+                    ("workspace", workspace_name),
+                    layered_workspace.provenance,
+                ),
+            )
         if workspace_tmpl.repo:
             from agentworks.git_credentials import remote_advisories
 
@@ -156,7 +217,30 @@ def _build_session_graph(
         )
 
         assert agent_name is not None  # defaulted to ``name`` above
-        agent_tmpl = _resolve_agent_tmpl(registry, agent_template)
+        agent_tmpl = _resolve_agent_tmpl(
+            registry,
+            agent_template,
+            overlay=None if agent_overlay is None else cast("AgentTemplate", agent_overlay.declaration),
+            instance_name=agent_name,
+        )
+        if agent_overlay is not None:
+            from agentworks.agents.template import effective_references as agent_effective_references
+            from agentworks.agents.templates import (
+                resolve_template_with_provenance as resolve_agent_with_provenance,
+            )
+            from agentworks.instance_specs import validate_effective_instance_references
+
+            layered_agent = resolve_agent_with_provenance(
+                registry,
+                agent_template,
+                overlay=cast("AgentTemplate", agent_overlay.declaration),
+                instance_name=agent_name,
+            )
+            agent_tmpl = layered_agent.value
+            validate_effective_instance_references(
+                registry,
+                agent_effective_references(agent_tmpl, ("agent", agent_name), layered_agent.provenance),
+            )
         agent_tmpl_node = agent_template_node(registry, agent_tmpl)
         pending_agent = pending_agent_node(
             db,
@@ -214,20 +298,22 @@ def _build_session_graph(
     resolver.register_targets(
         [
             _mgr._session_secret_target_pre_create(
+                db,
                 registry,
                 name=name,
                 workspace_name=workspace_name,
                 vm=vm,
                 session_template=template,
                 new_workspace=new_workspace,
-                workspace_template=workspace_template,
+                resolved_workspace_template=workspace_tmpl,
                 existing_workspace=existing_ws,
                 new_agent=new_agent,
-                agent_template=agent_template,
+                resolved_agent_template=agent_tmpl,
                 existing_agent=existing_agent,
                 is_admin_mode=plan.is_admin_mode,
             ),
-        ]
+        ],
+        allow_transient_auto_declare=True,
     )
 
     scope = OperationScope(
@@ -254,4 +340,7 @@ def _build_session_graph(
         scope=scope,
         template=template,
         nodes=nodes,
+        session_overlay=session_overlay,
+        workspace_overlay=workspace_overlay,
+        agent_overlay=agent_overlay,
     )

@@ -1,8 +1,8 @@
 # HLA: Instance Model and State
 
-- Status: R2 accepted; R3 through R5 design in progress
+- Status: R2 accepted; R4 implemented; R3 and R5 design in progress
 - Date: 2026-08-23
-- Last revised: 2026-08-24
+- Last revised: 2026-08-25
 - FRD: [frd.md](./frd.md)
 - Assessment: [database-assessment.md](./database-assessment.md)
 - Store contract: [store-contract.md](./store-contract.md)

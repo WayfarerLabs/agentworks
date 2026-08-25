@@ -200,6 +200,7 @@ def add_sessions(
                 new_shell_targets,
                 config,
                 registry,
+                allow_transient_auto_declare=True,
                 interaction=interaction,
             )
 
@@ -477,6 +478,7 @@ def add_shell(
                 [pane_target],
                 config,
                 registry,
+                allow_transient_auto_declare=True,
                 interaction=interaction,
             )
 

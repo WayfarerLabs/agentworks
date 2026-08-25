@@ -20,17 +20,68 @@ from agentworks.schema import NonEmptyStr, ResourceRef, SecretRef
 from agentworks.schema.reference import RefRelationship
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentworks.resources.graph import FinalizeContext
+    from agentworks.resources.inheritance import LayerSource
     from agentworks.resources.reference import (
         ResourceReference,
         SecretReference,
     )
+    from agentworks.vms.templates import ResolvedVMTemplate
+
+
+def effective_references(
+    effective: ResolvedVMTemplate,
+    source: tuple[str, str],
+    provenance: Mapping[tuple[str, ...], tuple[LayerSource, ...]],
+) -> tuple[ResourceReference, ...]:
+    """References required by one effective VM declaration."""
+    from agentworks.resources.reference import ResourceReference as _ResourceReq
+
+    def owner(path: tuple[str, ...]) -> tuple[str, str] | None:
+        sources = provenance.get(path, ())
+        return None if not sources else (sources[-1].resource_kind, sources[-1].name)
+
+    by_env = {key: declared_by for key in effective.env if (declared_by := owner(("env", key))) is not None}
+    refs: list[ResourceReference] = list(env_references(effective.env, source, by_env))
+    refs.extend(
+        _ResourceReq(
+            name=name,
+            kind="apt-package",
+            usage="an apt package",
+            source=source,
+            declared_by=owner(("apt_packages", name)),
+        )
+        for name in effective.apt_packages
+    )
+    refs.extend(
+        _ResourceReq(
+            name=name,
+            kind="system-install-command",
+            usage="a system install command",
+            source=source,
+            declared_by=owner(("system_install_commands", name)),
+        )
+        for name in effective.system_install_commands
+    )
+    refs.append(
+        tailscale_secret_reference(
+            effective.tailscale_auth_key,
+            source[1],
+            owner(("tailscale_auth_key",)),
+            source_kind=source[0],
+        )
+    )
+    return tuple(refs)
 
 
 def tailscale_secret_reference(
     tailscale_auth_key: str,
     template_name: str,
     declared_by: tuple[str, str] | None = None,
+    *,
+    source_kind: str = "vm-template",
 ) -> SecretReference:
     """Build the ``SecretReference`` a VMTemplate publishes for its
     Tailscale auth key. Used by both ``VMTemplate.dependencies`` (the
@@ -47,7 +98,7 @@ def tailscale_secret_reference(
         name=tailscale_auth_key,
         kind="secret",
         usage="the Tailscale auth key",
-        source=("vm-template", template_name),
+        source=(source_kind, template_name),
         declared_by=declared_by,
     )
 
@@ -140,24 +191,15 @@ class VMTemplate(DeclaredResource):
         error about it names a file that contains the name rather than
         the row that merely publishes the edge.
         """
-        from agentworks.resources.inheritance import declarers, merge_layers
-        from agentworks.resources.reference import (
-            ResourceReference as _ResourceReq,
-        )
         from agentworks.resources.reference import (
             inherits_reference,
         )
-        from agentworks.vms.templates import effective_template
+        from agentworks.vms.templates import effective_template_with_provenance
 
         source = ("vm-template", self.name)
         rows = {**context.rows_of("vm-template"), self.name: self}
-        effective = effective_template(rows, self.name)
-        layers = merge_layers(rows, self.name)
-        by_env = declarers(layers, "vm-template", lambda t: t.env)
-        by_pkg = declarers(layers, "vm-template", lambda t: t.apt_packages or ())
-        by_cmd = declarers(layers, "vm-template", lambda t: t.system_install_commands or ())
-        by_key = declarers(layers, "vm-template", lambda t: (t.tailscale_auth_key,) if t.tailscale_auth_key else ())
-        refs: list[ResourceReference] = list(env_references(effective.env, source, by_env))
+        layered = effective_template_with_provenance(rows, self.name)
+        refs = list(effective_references(layered.value, source, layered.provenance))
         # Inherits: each parent template name in ``inherits = [...]`` is an
         # INHERITS edge (source composition, not a runtime need; FR17). The
         # framework's VMTemplateKind miss policy auto-declares "default"
@@ -165,38 +207,4 @@ class VMTemplate(DeclaredResource):
         # cycle detection catches inheritance loops. Per-template
         # field-merging stays in ``agentworks.vms.templates``.
         refs.extend(inherits_reference(parent, source) for parent in self.inherits)
-        # Apt / install-command references: each name in apt_packages /
-        # system_install_commands resolves to a declared Resource via
-        # the framework's miss policy (error on typo, citing the template
-        # that wrote the name).
-        for pkg in effective.apt_packages:
-            refs.append(
-                _ResourceReq(
-                    name=pkg,
-                    kind="apt-package",
-                    usage="an apt package",
-                    source=source,
-                    declared_by=by_pkg.get(pkg),
-                )
-            )
-        for cmd in effective.system_install_commands:
-            refs.append(
-                _ResourceReq(
-                    name=cmd,
-                    kind="system-install-command",
-                    usage="a system install command",
-                    source=source,
-                    declared_by=by_cmd.get(cmd),
-                )
-            )
-        # The effective auth key: the kind's default when nothing in the
-        # lineage sets one (nobody declared it, so nobody is named), the
-        # nearest declaration otherwise.
-        refs.append(
-            tailscale_secret_reference(
-                effective.tailscale_auth_key,
-                self.name,
-                by_key.get(effective.tailscale_auth_key),
-            )
-        )
         return refs

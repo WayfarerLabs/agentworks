@@ -135,8 +135,9 @@ an instance's template. At the current surface, that means the four direct creat
 `agent reinit`, the sole existing-instance command that can repoint its owner to another template.
 There is no independent instance-spec mutation verb. VM reinit cannot change the VM template,
 workspace repair is not full idempotent convergence, and session resume has unresolved sharp edges,
-so none accepts an instance spec. An empty JSON object clears an agent's prior layer when passed to
-`agent reinit`; omitting the option retains it.
+so none accepts an instance spec. An empty JSON object or the exact empty CLI value clears an
+agent's prior layer when passed to `agent reinit`; omitting the option retains it, and
+whitespace-only input is invalid.
 
 The overlay is applied after the template chain and is correspondingly visible in the declarative
 model. It participates in the general layer-stack merge that wave 2's open door anticipated, never a

@@ -33,8 +33,11 @@ from agentworks.path_rendering import format_host_path
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from pydantic import BaseModel
+
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
+    from agentworks.instance_specs import InstanceOverlay
     from agentworks.resources.registry import Registry
     from agentworks.workspaces.templates import ResolvedTemplate
 
@@ -47,6 +50,8 @@ def realize_workspace(
     name: str,
     vm: VMRow,
     template: ResolvedTemplate,
+    overlay: InstanceOverlay[BaseModel] | None = None,
+    defer_overlay_report: bool = False,
 ) -> Path:
     """Make workspace ``name`` real on ``vm``: create the on-VM
     directory from its RESOLVED template, generate the VS Code
@@ -117,13 +122,18 @@ def realize_workspace(
             vscode_path = generate_vscode_workspace(vm, config, name, workspace_path)
             output.detail(f"VS Code workspace: {format_host_path(vscode_path)}")
 
-            db.insert_workspace(
-                name,
-                workspace_path=workspace_path,
-                vm_name=vm.name,
-                template=template.name,
-                linux_group=workspace_group(name),
-            )
+            from agentworks.instance_specs import persist_creation_overlay, refuse_orphan_creation_state
+
+            with db.transaction():
+                refuse_orphan_creation_state(db, "workspace", name)
+                db.insert_workspace(
+                    name,
+                    workspace_path=workspace_path,
+                    vm_name=vm.name,
+                    template=template.name,
+                    linux_group=workspace_group(name),
+                )
+                overlay_outcome = persist_creation_overlay(db, "workspace", name, overlay)
         except KeyboardInterrupt:
             output.warn(f"Cancelling workspace create '{name}'... rolling back.")
             _safe_cleanup()
@@ -140,11 +150,14 @@ def realize_workspace(
                 hint=f"SSH log: {ssh_logger.display_path}",
             ) from e
 
-        # Materialize grant_all agents onto the new workspace: one explicit
-        # grant row plus the on-VM group membership per agent. Best-effort
-        # (per-agent failures warn, they do not abort); the invariant,
-        # ordering rationale, and KI handling live with the helper.
-        materialize_grant_all_agents(db, config, vm, name, logger=ssh_logger)
+        from agentworks.instance_specs import report_overlay_outcome
+
+        with report_overlay_outcome(None if defer_overlay_report else overlay_outcome):
+            # Materialize grant_all agents onto the new workspace: one explicit
+            # grant row plus the on-VM group membership per agent. Best-effort
+            # (per-agent failures warn, they do not abort); the invariant,
+            # ordering rationale, and KI handling live with the helper.
+            materialize_grant_all_agents(db, config, vm, name, logger=ssh_logger)
     finally:
         ssh_logger.close()
 

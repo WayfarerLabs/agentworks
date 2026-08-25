@@ -155,7 +155,7 @@ def test_vm_shell_env_target_joins_the_bind_boundary(
 
     from agentworks.secrets.resolver import Resolver
 
-    def _register_spy(self: Resolver, targets: object) -> None:
+    def _register_spy(self: Resolver, targets: object, **kwargs: object) -> None:
         bound_targets.append(list(targets))  # type: ignore[call-overload]
         raise _Stop
 
@@ -377,7 +377,7 @@ def test_agent_exec_env_target_joins_the_bind_boundary(
 
     from agentworks.secrets.resolver import Resolver
 
-    def _register_spy(self: Resolver, targets: object) -> None:
+    def _register_spy(self: Resolver, targets: object, **kwargs: object) -> None:
         bound_targets.append(list(targets))  # type: ignore[call-overload]
         raise _Stop
 
@@ -414,6 +414,7 @@ def test_shell_agent_passes_workspace_scope_to_secret_target(
     captured_scopes: dict[str, object] = {}
 
     def _spy_scopes(
+        db: object,
         registry: object,
         vm: object,
         agent: object,

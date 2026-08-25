@@ -69,14 +69,17 @@ def test_create_vm_request_shape_and_row(
 ) -> None:
     """The bound lima platform receives the provision request (bare-name
     hostname, null slug pre-Phase-4) and the returned platform_metadata
-    persists verbatim. Hardware is template-owned (no per-create
-    override): the request's cpus comes from the vm-template."""
+    persists verbatim. The request's cpus comes from the typed final
+    instance layer, which also persists with the owner."""
     from agentworks.capabilities.vm_platform import ProvisionRequest
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.instance_specs import OverlayDisposition, OverlayOutcome
 
     config = make_config(manifests=[ManifestDoc("vm-template", "default", {"cpus": 2})])
     captured_request: list[ProvisionRequest] = []
     captured_platform: list[LimaPlatform] = []
+    outcomes: list[OverlayOutcome] = []
+    monkeypatch.setattr("agentworks.instance_specs.render_overlay_outcome", outcomes.append)
 
     def _fake_create(self: LimaPlatform, request: ProvisionRequest, ctx: object) -> ProvisionResult:
         captured_platform.append(self)
@@ -97,13 +100,19 @@ def test_create_vm_request_shape_and_row(
     )
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
 
-    vm_manager.create_vm(db, config, name="dvm", interaction=TtyInteractionPolicy.REFUSE)
+    vm_manager.create_vm(
+        db,
+        config,
+        name="dvm",
+        spec='{"cpus":6}',
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
 
     (request,) = captured_request
     assert request.vm_name == "dvm"
     assert request.hostname == "dvm"  # no slug: the bare name
     assert request.system_slug is None
-    assert request.cpus == 2  # from the vm-template, not a CLI override
+    assert request.cpus == 6
     assert request.ssh_public_key == "public ssh key"
     (bound,) = captured_platform
     assert bound.site_name == "lima-local"
@@ -114,6 +123,127 @@ def test_create_vm_request_shape_and_row(
     assert vm.hostname == "dvm"
     assert vm.platform_metadata == {"instance_name": "dvm"}
     assert vm.operator_stopped is False
+    stored = db.instance_state.get_desired_overlay("vm", "dvm")
+    assert stored is not None and stored.payload.value == {"cpus": 6}
+    assert [(outcome.disposition, outcome.fields) for outcome in outcomes] == [(OverlayDisposition.SET, ("cpus",))]
+
+
+def test_create_vm_request_build_failure_unwinds_owner_and_overlay_without_outcome(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: object,
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.instance_specs import OverlayOutcome
+
+    config = make_config()
+    config.operator.ssh_public_key.unlink()
+    outcomes: list[OverlayOutcome] = []
+    monkeypatch.setattr("agentworks.instance_specs.render_overlay_outcome", outcomes.append)
+    monkeypatch.setattr(
+        LimaPlatform,
+        "create",
+        lambda *args, **kwargs: pytest.fail("platform create reached after request construction failed"),
+    )
+
+    with pytest.raises(FileNotFoundError):
+        vm_manager.create_vm(
+            db,
+            config,
+            name="request-fail",
+            spec='{"cpus":6}',
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert db.get_vm("request-fail") is None
+    assert db.instance_state.get_desired_overlay("vm", "request-fail") is None
+    assert outcomes == []
+
+
+def test_create_vm_metadata_failure_retains_owner_and_reports_once(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: object,
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.instance_specs import OverlayDisposition, OverlayOutcome
+
+    config = make_config()
+    outcomes: list[OverlayOutcome] = []
+    monkeypatch.setattr("agentworks.instance_specs.render_overlay_outcome", outcomes.append)
+    monkeypatch.setattr(
+        LimaPlatform,
+        "create",
+        lambda *args, **kwargs: ProvisionResult(
+            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
+            platform_metadata={"instance_name": "metadata-fail"},
+            tailscale_ip="100.64.0.7",
+        ),
+    )
+    monkeypatch.setattr(
+        db,
+        "update_vm_platform_metadata",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("metadata write failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="metadata write failed"):
+        vm_manager.create_vm(
+            db,
+            config,
+            name="metadata-fail",
+            spec='{"cpus":6}',
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert db.get_vm("metadata-fail") is not None
+    assert db.instance_state.get_desired_overlay("vm", "metadata-fail") is not None
+    assert [(outcome.disposition, outcome.fields) for outcome in outcomes] == [(OverlayDisposition.SET, ("cpus",))]
+
+
+def test_create_vm_logger_close_failure_retains_owner_and_reports_once(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: object,
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.instance_specs import OverlayDisposition, OverlayOutcome
+    from agentworks.ssh import SSHLogger
+
+    config = make_config()
+    outcomes: list[OverlayOutcome] = []
+    monkeypatch.setattr("agentworks.instance_specs.render_overlay_outcome", outcomes.append)
+    monkeypatch.setattr(
+        LimaPlatform,
+        "create",
+        lambda *args, **kwargs: ProvisionResult(
+            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
+            platform_metadata={"instance_name": "close-fail"},
+            tailscale_ip="100.64.0.7",
+        ),
+    )
+    monkeypatch.setattr(
+        vm_manager,
+        "bootstrap_vm",
+        lambda *args, **kwargs: (SimpleNamespace(), "/home/agentworks"),
+    )
+    monkeypatch.setattr(vm_manager, "run_initialization", lambda *args, **kwargs: None)
+    monkeypatch.setattr(SSHLogger, "close", lambda self: (_ for _ in ()).throw(RuntimeError("close failed")))
+
+    with pytest.raises(RuntimeError, match="close failed"):
+        vm_manager.create_vm(
+            db,
+            config,
+            name="close-fail",
+            spec='{"cpus":6}',
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert db.get_vm("close-fail") is not None
+    assert db.instance_state.get_desired_overlay("vm", "close-fail") is not None
+    assert [(outcome.disposition, outcome.fields) for outcome in outcomes] == [(OverlayDisposition.SET, ("cpus",))]
 
 
 def test_create_vm_stores_and_provisions_selected_admin_template(

@@ -261,8 +261,15 @@ def test_realize_bodies_take_domain_shaped_kwargs_only(tmp_path: Path, monkeypat
     # Allowlist, not denylist: the seam contract is domain-shaped args
     # and NOTHING else, so any smuggled kwarg (values, resolver,
     # platform, ...) trips this regardless of its name.
-    assert seam_kwargs["realize_workspace"] == {"name", "vm", "template"}
-    assert seam_kwargs["realize_agent"] == {"name", "vm", "template", "git_tokens"}
+    assert seam_kwargs["realize_workspace"] == {"name", "vm", "template", "overlay", "defer_overlay_report"}
+    assert seam_kwargs["realize_agent"] == {
+        "name",
+        "vm",
+        "template",
+        "overlay",
+        "git_tokens",
+        "defer_overlay_report",
+    }
     db.close()
 
 

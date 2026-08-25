@@ -20,7 +20,7 @@ either phase to the same operator-facing outcome.
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from agentworks import output
 from agentworks.capabilities.base import RunContext
@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
     from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.vms.template import VMTemplate
 
 # NOTE on the initializer imports (``verify_tailscale_available``,
 # ``announce_git_credentials``, ``bootstrap_vm``, ``run_initialization``):
@@ -117,15 +118,17 @@ def create_vm(
     *,
     name: str,
     template: str | None = None,
+    spec: str | None = None,
     admin_template: str | None = None,
     site: str | None = None,
     interaction: TtyInteractionPolicy,
 ) -> None:
     """Create a new VM: provision + initialize.
 
-    Hardware and the admin username are template-owned: the vm-template
-    supplies cpus/memory/disk/swap and the admin-template the username.
-    There are no per-create overrides; deviations are new templates.
+    Hardware and the admin username are template-derived: the vm-template
+    supplies cpus/memory/disk/swap and the admin-template the username. A
+    typed final ``spec`` layer may override VM-template fields for this VM;
+    there are no individual per-hardware flags.
 
     ``admin_template`` selects which admin-template provisions the admin
     user (None = the reserved ``default``). A non-default name must be a
@@ -134,14 +137,30 @@ def create_vm(
     """
     import agentworks.vms.manager as _mgr
     from agentworks.bootstrap import load_request_registry
-    from agentworks.vms.templates import resolve_template
+    from agentworks.vms.templates import resolve_template_with_provenance
 
     # build_registry runs first so framework miss-policies (typo'd git
     # credential, future TemplateReference typos on inherits, etc.)
     # surface before any template / DB / VM business logic.
     registry = load_request_registry(config)
 
-    vm_tmpl = resolve_template(registry, template)
+    from agentworks.instance_specs import parse_instance_spec
+
+    overlay = None if spec is None else parse_instance_spec("vm", spec)
+    layered_vm_tmpl = resolve_template_with_provenance(
+        registry,
+        template,
+        overlay=None if overlay is None else cast("VMTemplate", overlay.declaration),
+        instance_name=name,
+    )
+    vm_tmpl = layered_vm_tmpl.value
+    from agentworks.instance_specs import validate_effective_instance_references
+    from agentworks.vms.template import effective_references
+
+    validate_effective_instance_references(
+        registry,
+        effective_references(vm_tmpl, ("vm", name), layered_vm_tmpl.provenance),
+    )
 
     # Refuse a vm-template recipe that draws on a disabled plugin's declarable
     # resource (a bundled install-command / apt entry / inherited template)
@@ -173,9 +192,12 @@ def create_vm(
             entity_kind="vm",
             entity_name=vm_name,
         )
+    from agentworks.instance_specs import refuse_orphan_creation_state
 
-    # Resource settings are template-owned (no per-create overrides): the
-    # vm-template carries hardware, the admin-template the username.
+    refuse_orphan_creation_state(db, "vm", vm_name)
+
+    # Resource settings come from the already-resolved template plus its
+    # optional final instance layer; the admin-template owns the username.
     resolved_cpus = vm_tmpl.cpus
     resolved_memory = vm_tmpl.memory
     resolved_disk = vm_tmpl.disk
@@ -344,21 +366,26 @@ def create_vm(
             # below unwinds exactly the row (today's rollback, relocated onto
             # the node), and nothing past provisioning is rollback-tracked (an
             # initialized-but-partial VM is kept, debuggable, reinit-able).
-            db.insert_vm(
-                vm_name,
-                site=site,
-                hostname=hostname,
-                template=vm_tmpl.name,
-                # Store the canonical NULL for the reserved default (whether the
-                # operator omitted the flag or passed it explicitly), so the
-                # column has one encoding per semantic state.
-                admin_template=None if selected_admin_template == "default" else selected_admin_template,
-                cpus=resolved_cpus,
-                memory_gib=resolved_memory,
-                disk_gib=resolved_disk,
-                swap_gib=vm_tmpl.swap,
-                admin_username=resolved_admin_username,
-            )
+            from agentworks.instance_specs import persist_creation_overlay
+
+            with db.transaction():
+                refuse_orphan_creation_state(db, "vm", vm_name)
+                db.insert_vm(
+                    vm_name,
+                    site=site,
+                    hostname=hostname,
+                    template=vm_tmpl.name,
+                    # Store the canonical NULL for the reserved default (whether the
+                    # operator omitted the flag or passed it explicitly), so the
+                    # column has one encoding per semantic state.
+                    admin_template=None if selected_admin_template == "default" else selected_admin_template,
+                    cpus=resolved_cpus,
+                    memory_gib=resolved_memory,
+                    disk_gib=resolved_disk,
+                    swap_gib=vm_tmpl.swap,
+                    admin_username=resolved_admin_username,
+                )
+                overlay_outcome = persist_creation_overlay(db, "vm", vm_name, overlay)
             log = RealizationLog()
             log.mark_realized(pending_vm)
 
@@ -397,6 +424,9 @@ def create_vm(
                     logger.close()
                 except BaseException as close_error:
                     if active_primary is None:
+                        from agentworks.instance_specs import render_retained_creation_overlay
+
+                        render_retained_creation_overlay(db, "vm", vm_name)
                         raise
                     try:  # noqa: SIM105 - warning failure must not replace the active primary
                         output.warn(f"could not close provisioning log {logger.display_path}: {close_error}")
@@ -405,29 +435,33 @@ def create_vm(
 
             init_stack.callback(_close_create_logger)
 
-            request = ProvisionRequest(
-                vm_name=vm_name,
-                hostname=hostname,
-                system_slug=slug,
-                admin_username=resolved_admin_username,
-                ssh_public_key=config.operator.ssh_public_key.read_text().strip(),
-                ssh_private_key=config.operator.ssh_private_key,
-                tailscale_auth_key=tailscale_auth_key,
-                progress=logger,
-                cpus=resolved_cpus,
-                memory_gib=resolved_memory,
-                disk_gib=resolved_disk,
-                swap_gib=vm_tmpl.swap,
-            )
+            try:
+                request = ProvisionRequest(
+                    vm_name=vm_name,
+                    hostname=hostname,
+                    system_slug=slug,
+                    admin_username=resolved_admin_username,
+                    ssh_public_key=config.operator.ssh_public_key.read_text().strip(),
+                    ssh_private_key=config.operator.ssh_private_key,
+                    tailscale_auth_key=tailscale_auth_key,
+                    progress=logger,
+                    cpus=resolved_cpus,
+                    memory_gib=resolved_memory,
+                    disk_gib=resolved_disk,
+                    swap_gib=vm_tmpl.swap,
+                )
 
-            # The op-start context for the platform's create op: secrets scoped
-            # to the site's declared names.
-            platform_ctx = scoped_ctx(site_node.secret_refs())
+                # The op-start context for the platform's create op: secrets scoped
+                # to the site's declared names.
+                platform_ctx = scoped_ctx(site_node.secret_refs())
 
-            # The primary provisioning step: promoted to info so it sits at
-            # the section body level (the platform's own sub-steps render as
-            # detail one notch deeper).
-            output.info(f"Creating VM '{vm_name}' on vm-site '{site}'...")
+                # The primary provisioning step: promoted to info so it sits at
+                # the section body level (the platform's own sub-steps render as
+                # detail one notch deeper).
+                output.info(f"Creating VM '{vm_name}' on vm-site '{site}'...")
+            except BaseException:
+                log.unwind()
+                raise
             try:
                 result = platform_obj.create(request, platform_ctx)
             except KeyboardInterrupt:
@@ -460,10 +494,15 @@ def create_vm(
             # The unwind window closes here: provisioning succeeded, the VM
             # exists, and initialization failures keep it (with recovery
             # guidance), exactly as before.
+            from agentworks.instance_specs import render_overlay_outcome
 
             # Persist the platform's opaque identifiers verbatim; the owning
             # platform is the column's only reader.
-            db.update_vm_platform_metadata(vm_name, result.platform_metadata)
+            try:
+                db.update_vm_platform_metadata(vm_name, result.platform_metadata)
+            except BaseException:
+                render_overlay_outcome(overlay_outcome)
+                raise
 
             # -- Phase A: record + verify connectivity (the tail of Provisioning) --
             # Past the unwind window: if anything below fails, the VM exists on
@@ -496,8 +535,10 @@ def create_vm(
                 # Provisioning/External error; re-raise as itself after the
                 # recovery-guidance warning.
                 _warn_init_cancel(vm_name)
+                render_overlay_outcome(overlay_outcome)
                 raise
             except Exception as e:
+                render_overlay_outcome(overlay_outcome)
                 _raise_init_failure(db, vm_name, e)
 
         # -- Initialization (Phase B) --
@@ -521,8 +562,10 @@ def create_vm(
             )
         except (KeyboardInterrupt, UserAbort):
             _warn_init_cancel(vm_name)
+            render_overlay_outcome(overlay_outcome)
             raise
         except Exception as e:
+            render_overlay_outcome(overlay_outcome)
             _raise_init_failure(db, vm_name, e)
 
     # -- Post-init: SSH config re-sync --
@@ -542,6 +585,7 @@ def create_vm(
     # terminal outcome line renders at column 0 via result().
     vm = db.get_vm(vm_name)
     assert vm is not None
+    render_overlay_outcome(overlay_outcome)
     if vm.init_status == InitStatus.PARTIAL.value:
         output.result(f"VM '{vm_name}' is ready (with warnings, see above)")
     else:
@@ -598,10 +642,23 @@ def reinit_vm(
     vm_node = live_vm_node(db, config, registry, vm)
 
     # Resolve the VM's template so init uses the right values
+    from agentworks.instance_specs import get_instance_overlay, validate_effective_instance_references
     from agentworks.resources.access import admin_template
-    from agentworks.vms.templates import resolve_template
+    from agentworks.vms.template import effective_references
+    from agentworks.vms.templates import resolve_template_with_provenance
 
-    reinit_vm_tmpl = resolve_template(registry, vm.template)
+    stored_overlay = get_instance_overlay(db, "vm", vm.name)
+    layered_reinit_vm_tmpl = resolve_template_with_provenance(
+        registry,
+        vm.template,
+        overlay=None if stored_overlay is None else cast("VMTemplate", stored_overlay.declaration),
+        instance_name=vm.name,
+    )
+    reinit_vm_tmpl = layered_reinit_vm_tmpl.value
+    validate_effective_instance_references(
+        registry,
+        effective_references(reinit_vm_tmpl, ("vm", vm.name), layered_reinit_vm_tmpl.provenance),
+    )
 
     # Refuse a recipe drawing on a disabled plugin's declarable resource before
     # the reinit realize (Phase 7, LLD b). Drift guard:

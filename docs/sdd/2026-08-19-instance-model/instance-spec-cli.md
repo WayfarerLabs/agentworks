@@ -1,6 +1,6 @@
 # Instance Spec CLI Contract
 
-- Status: Revised for R4 acceptance
+- Status: Implemented in R4
 - Date: 2026-08-24
 - Requirements: R4 and R5 in `frd.md`
 
@@ -38,9 +38,10 @@ lifecycle operation that can also change its template. This is deliberate.
 ## Input value
 
 The input is one inline JSON object. Its fields are the declarable spec fields for that instance
-kind. The top level must be an object; arrays, scalars, `null`, and an empty string are rejected.
-There is no wrapper, and the object cannot declare `kind`, `name`, `inherits`, description, source
-metadata, or framework provenance.
+kind. The top level must be an object; arrays, scalars, and `null` are rejected. The exact empty CLI
+value is accepted only by `agent reinit` as a convenience spelling for `{}`; whitespace-only input
+remains invalid. There is no wrapper, and the object cannot declare `kind`, `name`, `inherits`,
+description, source metadata, or framework provenance.
 
 Parsing is strict JSON at the service boundary. Duplicate object member names, non-finite numbers
 such as `NaN` or `Infinity`, trailing content, and JSON `null` at any depth are rejected with the
@@ -77,10 +78,12 @@ the database.
 
 Supplying `--spec` declares the complete instance layer, not a field patch. On `agent reinit`, it
 atomically replaces the prior stored layer. Omitting `--spec` retains that layer. Supplying the
-empty JSON object clears it, so this command returns the agent to its template-derived declaration:
+empty JSON object or the exact empty CLI value clears it, so this command returns the agent to its
+template-derived declaration:
 
 ```console
 agw agent reinit coder-01 --spec '{}'
+agw agent reinit coder-01 --spec ''
 ```
 
 An empty object on a creation command is equivalent to omitting `--spec`. Agentworks canonicalizes

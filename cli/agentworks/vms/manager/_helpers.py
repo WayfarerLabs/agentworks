@@ -43,6 +43,7 @@ class _VmAdminEnvScopes(NamedTuple):
 
 
 def _resolve_vm_admin_env_scopes(
+    db: Database,
     registry: Registry,
     vm: VMRow,
     *,
@@ -60,19 +61,23 @@ def _resolve_vm_admin_env_scopes(
     When ``ws`` is supplied (``vm shell --workspace`` / ``vm exec
     --workspace``), the workspace template's env enters the chain.
     """
-    from agentworks.vms.templates import resolve_template as _resolve_vm_template
+    from agentworks.vms.templates import resolve_live_template as _resolve_vm_template
 
-    vm_env = _resolve_vm_template(registry, vm.template).env
+    vm_env = _resolve_vm_template(db, registry, vm.name, vm.template).env
 
     ws_env: dict[str, EnvEntry] | None = None
     if ws is not None:
-        from agentworks.workspaces.templates import resolve_ws_template_env_or_empty
-
         # A copied workspace's synthetic ``template="copied"`` marker (or a
         # template later removed from config) resolves to an empty env scope
         # rather than raising: the pinned workspace stays in the ladder and
         # contributes nothing, and the vm/site/admin scopes are unaffected.
-        ws_env = resolve_ws_template_env_or_empty(registry, ws.template)
+        from agentworks.errors import ConfigError, NotFoundError
+        from agentworks.workspaces.templates import resolve_live_template
+
+        try:
+            ws_env = resolve_live_template(db, registry, ws.name, ws.template).env
+        except (ValueError, ConfigError, NotFoundError):
+            ws_env = {}
 
     from agentworks.resources.access import admin_template
 

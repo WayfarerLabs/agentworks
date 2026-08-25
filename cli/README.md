@@ -515,10 +515,11 @@ VM creation follows a two-phase lifecycle tracked by separate status columns:
    credentials, sync dotfiles, fetch mise lockfile, run mise install, run user install commands for
    the admin user
 
-Initialization is fully declarative, driven entirely by config. `vm create` only accepts a name,
-`--template`, `--admin-template`, and `--site`; the immutable provisioning parameters (resources,
-admin username) come from the selected templates. `vm reinit` takes only the VM name and re-runs
-initialization using the current config.
+Initialization is fully declarative. `vm create` accepts a name, `--template`, `--spec`,
+`--admin-template`, and `--site`; immutable hardware starts with the VM template and may be refined
+by `--spec`, while the admin username comes from the selected admin template. `vm reinit` takes only
+the VM name and re-runs initialization using the current config and any stored instance spec. See
+[Instance specs](command-reference.md#instance-specs) for the exact create and agent-reinit surface.
 
 Non-fatal initialization failures (packages, dotfiles) produce a `partial` status rather than
 aborting. Fatal failures prompt for deletion or reinit. Use `vm describe` to view the full event

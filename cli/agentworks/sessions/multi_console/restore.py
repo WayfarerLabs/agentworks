@@ -167,6 +167,7 @@ def restore_session(
                     ),
                     config,
                     registry,
+                    allow_transient_auto_declare=True,
                     interaction=interaction,
                 )
             result = _mc._add_session_window(
@@ -356,6 +357,7 @@ def restore_session(
             ),
             config,
             registry,
+            allow_transient_auto_declare=True,
             interaction=interaction,
         )
 

@@ -59,6 +59,24 @@ def test_register_name_synthesizes_when_registry_is_sparse(env) -> None:
     assert decl.name == "never-declared"
 
 
+def test_register_targets_can_transiently_auto_declare_overlay_only_secret(
+    env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config, registry = env()
+    monkeypatch.setenv("AW_SECRET_OVERLAY_ONLY", "resolved")
+    resolver = Resolver(config, registry, interaction=TtyInteractionPolicy.REFUSE)
+    resolver.register_targets(
+        [SecretTarget(vm={"TOKEN": EnvEntry({"secret": "overlay-only"})})],
+        allow_transient_auto_declare=True,
+    )
+
+    resolver.resolve()
+
+    assert resolver.get("overlay-only") == "resolved"
+    with pytest.raises(KeyError):
+        registry.lookup("secret", "overlay-only")
+
+
 def test_resolve_is_one_pass_and_idempotent(env, monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks.secrets import resolve as secrets_resolve
 

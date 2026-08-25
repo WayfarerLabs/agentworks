@@ -25,6 +25,8 @@ reachable.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, NoReturn, Protocol
 
 from agentworks.errors import inheritance_cycle_error
@@ -32,6 +34,111 @@ from agentworks.traversal import iter_post_order
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
+
+
+class LayerSourceKind(StrEnum):
+    """The honest origin of one declaration folded into an effective value."""
+
+    DEFAULT = "default"
+    TEMPLATE = "template"
+    INSTANCE = "instance"
+
+
+@dataclass(frozen=True)
+class LayerSource:
+    """Stable provenance identity for one ordered declaration layer."""
+
+    kind: LayerSourceKind
+    resource_kind: str
+    name: str
+
+
+@dataclass(frozen=True)
+class DeclarationLayer[T]:
+    """One typed declaration and the source that supplied it."""
+
+    source: LayerSource
+    declaration: T
+
+
+@dataclass(frozen=True)
+class LayeredResolution[T]:
+    """A resolved value plus the contributing source for each preserved path.
+
+    Paths are domain-owned tuples. Scalar fields use ``(field,)``, maps use
+    ``(field, key)``, and append-deduplicated lists use ``(field, item)``.
+    A path may retain multiple sources when more than one layer contributed
+    to a combined value.
+    """
+
+    value: T
+    provenance: Mapping[tuple[str, ...], tuple[LayerSource, ...]]
+
+
+class LayerContributionKind(StrEnum):
+    REPLACEMENT = "replacement"
+    CONTRIBUTION = "contribution"
+    RESET_PREFIX = "reset-prefix"
+
+
+@dataclass(frozen=True)
+class LayerContribution:
+    """How one declaration affects provenance for one resolved path."""
+
+    path: tuple[str, ...]
+    kind: LayerContributionKind = LayerContributionKind.REPLACEMENT
+
+    @classmethod
+    def replacement(cls, *path: str) -> LayerContribution:
+        return cls(path)
+
+    @classmethod
+    def contribution(cls, *path: str) -> LayerContribution:
+        return cls(path, LayerContributionKind.CONTRIBUTION)
+
+    @classmethod
+    def reset_prefix(cls, *path: str) -> LayerContribution:
+        return cls(path, LayerContributionKind.RESET_PREFIX)
+
+
+def run_layer_fold[A, D](
+    seed: A,
+    layers: Iterable[DeclarationLayer[D]],
+    reducer: Callable[[A, D, LayerSource], tuple[A, Iterable[LayerContribution]]],
+    *,
+    default_paths: Iterable[tuple[str, ...]] = (),
+    default_resource_kind: str,
+    default_name: str = "built-in",
+) -> LayeredResolution[A]:
+    """Fold ordered declarations once and retain truthful value provenance.
+
+    Domain reducers remain authoritative for merge policy. They return the
+    paths whose resulting values the current declaration contributed to; the
+    runner owns ordering and provenance accumulation. A replacement path is
+    represented by returning the same path from a later layer. A combined
+    value is represented by distinct item paths, or by a domain reducer
+    returning a path whose earlier contributors it deliberately preserves.
+    """
+    default_source = LayerSource(LayerSourceKind.DEFAULT, default_resource_kind, default_name)
+    provenance: dict[tuple[str, ...], tuple[LayerSource, ...]] = {path: (default_source,) for path in default_paths}
+    result = seed
+    for layer in layers:
+        result, paths = reducer(result, layer.declaration, layer.source)
+        for contribution in paths:
+            if contribution.kind is LayerContributionKind.RESET_PREFIX:
+                provenance = {
+                    path: sources
+                    for path, sources in provenance.items()
+                    if path[: len(contribution.path)] != contribution.path
+                }
+                continue
+            if contribution.kind is LayerContributionKind.REPLACEMENT:
+                provenance[contribution.path] = (layer.source,)
+                continue
+            prior = provenance.get(contribution.path, ())
+            if layer.source not in prior:
+                provenance[contribution.path] = (*prior, layer.source)
+    return LayeredResolution(result, provenance)
 
 
 class Inheriting(Protocol):

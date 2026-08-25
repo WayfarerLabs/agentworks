@@ -137,16 +137,19 @@ def create_session(
     *,
     name: str,
     template_name: str | None = None,
+    spec: str | None = None,
     # Workspace selection (CLI-flag-shaped; service consolidates):
     workspace: str | None = None,
     new_workspace: bool = False,
     workspace_name: str | None = None,
     workspace_template: str | None = None,
+    workspace_spec: str | None = None,
     # Agent / admin selection (CLI-flag-shaped; service consolidates):
     agent: str | None = None,
     new_agent: bool = False,
     agent_name: str | None = None,
     agent_template: str | None = None,
+    agent_spec: str | None = None,
     admin: bool = False,
     # VM anchor (validated against workspace/agent VMs when both specified):
     vm_name: str | None = None,
@@ -196,6 +199,27 @@ def create_session(
     # consistent with create_vm / create_agent / reinit_*.
     registry = load_request_registry(config)
 
+    if workspace_spec is not None and not new_workspace:
+        from agentworks.errors import ValidationError
+
+        raise ValidationError("--workspace-spec requires --new-workspace", entity_kind="session", entity_name=name)
+    if agent_spec is not None and not new_agent:
+        from agentworks.errors import ValidationError
+
+        raise ValidationError("--agent-spec requires --new-agent", entity_kind="session", entity_name=name)
+
+    from agentworks.instance_specs import parse_instance_spec, refuse_orphan_creation_state
+
+    session_overlay = None if spec is None else parse_instance_spec("session", spec)
+    workspace_overlay = None if workspace_spec is None else parse_instance_spec("workspace", workspace_spec)
+    agent_overlay = None if agent_spec is None else parse_instance_spec("agent", agent_spec)
+
+    refuse_orphan_creation_state(db, "session", name)
+    if new_workspace:
+        refuse_orphan_creation_state(db, "workspace", workspace_name or name)
+    if new_agent:
+        refuse_orphan_creation_state(db, "agent", agent_name or name)
+
     # ===== Resolve the plan (S1-S8: flags, prompts, anchors, VM) ============
     #
     # All flag-shape validation, canonicalization, VM-anchor narrowing,
@@ -228,6 +252,9 @@ def create_session(
         registry=registry,
         plan=plan,
         template_name=template_name,
+        session_overlay=session_overlay,
+        workspace_overlay=workspace_overlay,
+        agent_overlay=agent_overlay,
         interaction=interaction,
     )
 

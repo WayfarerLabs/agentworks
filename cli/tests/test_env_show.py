@@ -19,6 +19,7 @@ from agentworks.config import load_config
 from agentworks.db import Database
 from agentworks.env.show import ResolvedEnvRow, show_env
 from agentworks.errors import StateError, ValidationError
+from agentworks.instance_specs import parse_instance_spec
 from agentworks.secrets.policy import TtyInteractionPolicy
 from tests.conftest import ManifestDoc, write_manifests
 
@@ -147,6 +148,30 @@ def test_session_flag_auto_resolves_workspace_agent_vm(
     # output: it comes from the on-disk profile fragment, same shape as
     # the VM-stable vars (AGENTWORKS_VM etc.).
     assert "AGENTWORKS_AGENT" not in keys
+
+
+def test_session_context_reads_stored_instance_overlays_at_every_live_scope(
+    db: Database,
+    tmp_path: Path,
+) -> None:
+    config = load_config(_write_config(tmp_path), warn_issues=False)
+    _seed_db(db, with_workspace=True, with_agent=True, with_session=True)
+    for kind, name, key in (
+        ("vm", "vm-1", "VM_SPEC"),
+        ("workspace", "ws-a", "WORKSPACE_SPEC"),
+        ("agent", "claude", "AGENT_SPEC"),
+        ("session", "s1", "SESSION_SPEC"),
+    ):
+        payload = parse_instance_spec(kind, f'{{"env":{{"{key}":"set"}}}}').payload  # type: ignore[arg-type]
+        db.instance_state.put_desired_overlay(kind, name, payload)  # type: ignore[arg-type]
+
+    rows = show_env(db, config, session_name="s1", interaction=TtyInteractionPolicy.REFUSE)
+
+    by_key = {row.key: row for row in rows}
+    assert by_key["VM_SPEC"].scope == "vm"
+    assert by_key["WORKSPACE_SPEC"].scope == "workspace"
+    assert by_key["AGENT_SPEC"].scope == "agent"
+    assert by_key["SESSION_SPEC"].scope == "session"
 
 
 def test_workspace_flag_auto_resolves_vm(db: Database, tmp_path: Path) -> None:

@@ -23,8 +23,75 @@ from agentworks.schema.reference import RefRelationship
 from agentworks.sessions.layouts import AW_SESSION_VERTICAL_LAYOUT, TmuxLayout
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentworks.resources.graph import FinalizeContext
+    from agentworks.resources.inheritance import LayerSource
     from agentworks.resources.reference import ResourceReference
+    from agentworks.sessions.templates import EffectiveSessionTemplate, ResolvedSessionTemplate
+
+
+def effective_references(
+    effective: ResolvedSessionTemplate | EffectiveSessionTemplate,
+    source: tuple[str, str],
+    provenance: Mapping[tuple[str, ...], tuple[LayerSource, ...]],
+) -> tuple[ResourceReference, ...]:
+    """References required by one effective session declaration."""
+    from agentworks.capabilities.config import capability_config_references
+    from agentworks.resources.reference import ResourceReference as _ResourceRef
+    from agentworks.resources.reference import sourced_references
+    from agentworks.sessions.templates import EffectiveSessionTemplate
+
+    def owner(path: tuple[str, ...]) -> tuple[str, str] | None:
+        sources = provenance.get(path, ())
+        return None if not sources else (sources[-1].resource_kind, sources[-1].name)
+
+    if isinstance(effective, EffectiveSessionTemplate):
+        resolved = effective.resolved
+        integration = effective.harness.name
+        integration_config = effective.harness.config
+    else:
+        resolved = effective
+        integration = effective.harness_integration
+        integration_config = effective.harness_integration_config
+
+    by_env = {key: declared_by for key in resolved.env if (declared_by := owner(("env", key))) is not None}
+    refs: list[ResourceReference] = list(env_references(resolved.env, source, by_env))
+    if integration is None:
+        return tuple(refs)
+    selector_owner = owner(("harness_integration",))
+    refs.append(
+        _ResourceRef(
+            name=integration,
+            kind="harness-integration",
+            usage="the session harness integration",
+            source=source,
+            declared_by=selector_owner,
+        )
+    )
+    refs.extend(
+        sourced_references(
+            capability_config_references(
+                kind="harness-integration",
+                config={"name": integration, **integration_config},
+                owner=RefOwner(kind=source[0], name=source[1]),
+            ),
+            source,
+            selector_owner,
+        )
+    )
+    return tuple(refs)
+
+
+def validate_effective_harness(effective: ResolvedSessionTemplate, source: tuple[str, str]) -> None:
+    """Validate the merged instance harness block through its capability model."""
+    from agentworks.capabilities.config import validate_capability_config
+
+    validate_capability_config(
+        kind="harness-integration",
+        config={"name": effective.harness_integration, **effective.harness_integration_config},
+        owner=RefOwner(kind=source[0], name=source[1]),
+    )
 
 
 class NamedConsoleConfig(DeclaredResource):
@@ -96,57 +163,16 @@ class SessionTemplate(DeclaredResource):
         field its edge came from; no shipped integration marks a reference
         field, so no live edge turns on it.
         """
-        from agentworks.resources.inheritance import declarers, merge_layers
-        from agentworks.resources.reference import (
-            ResourceReference as _ResourceRef,
-        )
         from agentworks.resources.reference import (
             inherits_reference,
-            sourced_references,
         )
-        from agentworks.sessions.templates import effective_template
+        from agentworks.sessions.templates import effective_template_with_provenance
 
         source = ("session-template", self.name)
         rows = {**context.rows_of("session-template"), self.name: self}
-        effective = effective_template(rows, self.name)
-        integration = effective.harness.name
-        declared_by = effective.harness.declared_by
-        by_env = declarers(merge_layers(rows, self.name), "session-template", lambda t: t.env)
-        refs: list[ResourceReference] = list(env_references(effective.resolved.env, source, by_env))
+        layered = effective_template_with_provenance(rows, self.name)
+        refs = list(effective_references(layered.value, source, layered.provenance))
         refs.extend(inherits_reference(parent, source) for parent in self.inherits)
-        if integration is not None:
-            # The selector edge: a declared harness_integration references the
-            # capability row, so a typo is a finalize-time miss-policy
-            # error naming the template that wrote the name, and the harness
-            # graph's incoming typed edge names its template (FRD R2).
-            refs.append(
-                _ResourceRef(
-                    name=integration,
-                    kind="harness-integration",
-                    usage="the session harness integration",
-                    source=source,
-                    declared_by=declared_by,
-                )
-            )
-            # Plus whatever the selected harness integration's config block
-            # implies, read structurally off its declared model by the core
-            # (a future secret-declaring integration gets auto-declaration
-            # and reachability for free; every built-in implies nothing).
-            # Total and non-throwing; an unknown name contributes nothing
-            # and the miss policy reports it.
-            from agentworks.capabilities.config import capability_config_references
-
-            refs.extend(
-                sourced_references(
-                    capability_config_references(
-                        kind="harness-integration",
-                        config={"name": integration, **effective.harness.config},
-                        owner=RefOwner(kind="session-template", name=self.name),
-                    ),
-                    source,
-                    declared_by,
-                )
-            )
         return refs
 
     def validate_config(self, context: FinalizeContext) -> None:

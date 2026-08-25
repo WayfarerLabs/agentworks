@@ -84,9 +84,9 @@ def start_vm(
         ):
             from agentworks.orchestration.secrets import ScopedSecrets
             from agentworks.secrets import resolve_for_command
-            from agentworks.vms.templates import resolve_template
+            from agentworks.vms.templates import resolve_live_template
 
-            template = resolve_template(registry, vm.template)
+            template = resolve_live_template(db, registry, vm.name, vm.template)
             auth_key_name = template.tailscale_auth_key
             declaration = _lookup_or_synthesize_secret(registry, auth_key_name)
             values = resolve_for_command(
@@ -352,7 +352,7 @@ def rekey_vm(
     from agentworks.ssh_config import sync_ssh_config
     from agentworks.transports import native_transport, transport, wait_for_reconnect
     from agentworks.vms.nodes import live_vm_node, vm_template_node
-    from agentworks.vms.templates import resolve_template
+    from agentworks.vms.templates import resolve_live_template
 
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
@@ -373,7 +373,7 @@ def rekey_vm(
     registry = load_request_registry(config)
     resolver = Resolver(config, registry, interaction=interaction)
     vm_node = live_vm_node(db, config, registry, vm)
-    rekey_vm_tmpl = resolve_template(registry, vm.template)
+    rekey_vm_tmpl = resolve_live_template(db, registry, vm.name, vm.template)
     tmpl_node = vm_template_node(rekey_vm_tmpl)
     nodes = walk(tmpl_node, vm_node)
     for secret_name in secret_union(nodes):

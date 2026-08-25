@@ -112,16 +112,17 @@ def test_secret_target_pre_create_parity_with_session_secret_target(tmp_path: Pa
         agent_name="agt1" if mode == "agent" else None,
     )
     pre = _session_secret_target_pre_create(
+        db,
         registry,
         name="s1",
         workspace_name="ws1",
         vm=vm,
         session_template=session_template,
         new_workspace=False,
-        workspace_template=None,
+        resolved_workspace_template=None,
         existing_workspace=ws,
         new_agent=False,
-        agent_template=None,
+        resolved_agent_template=None,
         existing_agent=agent,
         is_admin_mode=(mode == "admin"),
     )

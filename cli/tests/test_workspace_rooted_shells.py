@@ -586,6 +586,7 @@ def test_shell_vm_passes_workspace_scope_to_secret_target(
     captured_scopes: dict[str, object] = {}
 
     def _spy_scopes(
+        db: object,
         registry: object,
         vm: object,
         *,

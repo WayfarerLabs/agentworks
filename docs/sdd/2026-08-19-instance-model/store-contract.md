@@ -1,6 +1,6 @@
 # Instance State Store Contract
 
-- Status: Draft for R2 implementation
+- Status: Accepted and implemented by R2
 - Date: 2026-08-23
 - Requirements: R2 and the storage boundary required by R3 through R5 in `frd.md`
 - Basis: `database-assessment.md`

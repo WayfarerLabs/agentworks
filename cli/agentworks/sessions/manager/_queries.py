@@ -11,6 +11,7 @@ from agentworks import output
 from agentworks.db import PID_STOPPED, SessionStatus
 from agentworks.db.projections import project_session_mode, project_session_status
 from agentworks.errors import (
+    AgentworksError,
     BrokenStateError,
     ExternalError,
     StateError,
@@ -448,7 +449,12 @@ def session_description(
     # needs a valid registry to probe live status, so a truly broken
     # registry aborts describe there regardless. The "-" fallback here
     # is thus defensive, not a graceful-degrade path describe can reach.
-    harness_integration = _mgr._display_harness_integration(_mgr._display_registry(config), session.template)
+    harness_integration = _mgr._display_live_harness_integration(
+        db,
+        _mgr._display_registry(config),
+        session.name,
+        session.template,
+    )
     with _mgr._prepare_vm(
         db,
         config,
@@ -628,6 +634,16 @@ def session_listing(
         label = harness_by_template[template_name]
         return None if label == "-" else label
 
+    def live_harness_for(session: SessionRow) -> str | None:
+        try:
+            stored = db.instance_state.get_desired_overlay("session", session.name)
+        except AgentworksError:
+            return None
+        if stored is None:
+            return harness_for(session.template)
+        label = _mgr._display_live_harness_integration(db, registry, session.name, session.template)
+        return None if label == "-" else label
+
     facts: list[SessionListRow] = []
     for session in sessions:
         workspace = db.get_workspace(session.workspace_name)
@@ -653,7 +669,7 @@ def session_listing(
                 workspace_name=session.workspace_name,
                 vm_name=resolved_vm_name,
                 template=session.template,
-                harness_integration=harness_for(session.template),
+                harness_integration=live_harness_for(session),
                 mode=project_session_mode(session.mode),
                 agent_name=session.agent_name,
                 status=status,

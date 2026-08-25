@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-    from agentworks.db.instance_state import InstanceStateRepository
+    from agentworks.db.instance_state import DesiredOverlayRecord, InstanceKind, InstanceStateRepository
     from agentworks.db.models import (
         AgentGrantRow,
         AgentRow,
@@ -333,7 +333,7 @@ class Database:
                 admin_username,
             ),
         )
-        self._conn.commit()
+        self._commit_unless_in_tx()
         result = self.get_vm(name)
         assert result is not None
         return result
@@ -456,7 +456,7 @@ class Database:
             "INSERT INTO workspaces (name, vm_name, template, workspace_path, linux_group) VALUES (?, ?, ?, ?, ?)",
             (name, vm_name, template, workspace_path, linux_group),
         )
-        self._conn.commit()
+        self._commit_unless_in_tx()
         result = self.get_workspace(name)
         assert result is not None
         return result
@@ -528,7 +528,7 @@ class Database:
             "INSERT INTO agents (name, vm_name, linux_user, template, grant_all) VALUES (?, ?, ?, ?, ?)",
             (name, vm_name, linux_user, template, int(grant_all)),
         )
-        self._conn.commit()
+        self._commit_unless_in_tx()
         result = self.get_agent(name)
         assert result is not None
         return result
@@ -565,7 +565,7 @@ class Database:
             "UPDATE agents SET template = ? WHERE name = ?",
             (template, name),
         )
-        self._conn.commit()
+        self._commit_unless_in_tx()
 
     def list_agents_on_vm_with_grant_all(self, vm_name: str) -> list[AgentRow]:
         """List agents on a VM that have grant_all enabled."""
@@ -735,7 +735,7 @@ class Database:
                 json.dumps(harness_integration_state or {}),
             ),
         )
-        self._conn.commit()
+        self._commit_unless_in_tx()
         result = self.get_session(name)
         assert result is not None
         return result
@@ -1099,6 +1099,23 @@ class Database:
         ).fetchall()
         return [_to_vm_event(r) for r in rows]
 
+    def vm_owner_tree_has_desired_overlay(self, vm_name: str) -> bool:
+        """Whether the VM or any current descendant has a desired overlay."""
+        row = self._conn.execute(
+            "SELECT 1 FROM instance_records WHERE record_type = 'desired-overlay' AND ("
+            "(instance_kind = 'vm' AND instance_name = ?) OR "
+            "(instance_kind = 'workspace' AND instance_name IN "
+            " (SELECT name FROM workspaces WHERE vm_name = ?)) OR "
+            "(instance_kind = 'agent' AND instance_name IN "
+            " (SELECT name FROM agents WHERE vm_name = ?)) OR "
+            "(instance_kind = 'session' AND instance_name IN "
+            " (SELECT sessions.name FROM sessions JOIN workspaces "
+            "  ON sessions.workspace_name = workspaces.name WHERE workspaces.vm_name = ?))"
+            ") LIMIT 1",
+            (vm_name, vm_name, vm_name, vm_name),
+        ).fetchone()
+        return row is not None
+
     def snapshot_vm_backup_data(
         self,
         vm_name: str,
@@ -1109,11 +1126,12 @@ class Database:
         list[SessionRow],
         list[VMEventRow],
         dict[str, list[AgentGrantRow]],
+        tuple[DesiredOverlayRecord, ...],
     ]:
         """Read the currently exported VM backup rows in one transaction.
 
-        Returns (vm, agents, workspaces, sessions, events, grants_by_agent).
-        Instance records are not part of this export tuple.
+        Returns (vm, agents, workspaces, sessions, events,
+        grants_by_agent, desired_overlays).
         """
         self._conn.execute("BEGIN")
         try:
@@ -1127,6 +1145,18 @@ class Database:
             grants_by_agent: dict[str, list[AgentGrantRow]] = {}
             for agent in agents:
                 grants_by_agent[agent.name] = self.list_agent_grants(agent.name)
+            owner_names: tuple[tuple[InstanceKind, set[str]], ...] = (
+                ("vm", {vm_name}),
+                ("workspace", {workspace.name for workspace in workspaces}),
+                ("agent", {agent.name for agent in agents}),
+                ("session", {session.name for session in sessions}),
+            )
+            desired_overlays = tuple(
+                record
+                for kind, names in owner_names
+                for record in self.instance_state.list_desired_overlays(kind)
+                if record.instance_name in names
+            )
         finally:
             self._conn.execute("COMMIT")
-        return vm, agents, workspaces, sessions, events, grants_by_agent
+        return vm, agents, workspaces, sessions, events, grants_by_agent, desired_overlays

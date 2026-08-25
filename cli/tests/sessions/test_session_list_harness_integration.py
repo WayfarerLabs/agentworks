@@ -84,6 +84,28 @@ def test_list_shows_harness_integration_column_between_template_and_mode(
     assert "claude-code" in by_name["s-claude"]
 
 
+def test_listing_uses_the_live_session_overlay_harness_integration(
+    db: Database,
+    make_config,  # noqa: ANN001
+) -> None:
+    from agentworks.instance_specs import parse_instance_spec
+
+    config = make_config(manifests=[CLAUDE_TEMPLATE])
+    _seed_vm(db, "box", "ws-box")
+    _seed_session(db, "s1", "ws-box", "claude")
+    overlay = parse_instance_spec("session", '{"harness_integration":{"name":"shell"}}')
+    db.instance_state.put_desired_overlay("session", "s1", overlay.payload)
+
+    listing = session_manager.session_listing(
+        db,
+        config,
+        no_status=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    assert listing.sessions[0].harness_integration == "shell"
+
+
 def test_list_unresolvable_template_shows_dash_and_still_renders(
     db: Database,
     make_config,  # noqa: ANN001

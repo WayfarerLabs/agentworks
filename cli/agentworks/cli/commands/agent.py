@@ -28,6 +28,7 @@ def agent_create(
     name: Annotated[str, typer.Argument(help="Agent name")],
     vm: Annotated[str | None, typer.Option("--vm", help="Target VM")] = None,
     template: Annotated[str | None, typer.Option("--template", help="Agent template")] = None,
+    spec: Annotated[str | None, typer.Option("--spec", help="Inline JSON instance spec")] = None,
     grant_all_workspaces: Annotated[
         bool,
         typer.Option("--grant-all-workspaces", help="Grant access to all workspaces"),
@@ -47,6 +48,7 @@ def agent_create(
         name=name,
         vm_name=resolved_vm.name,
         template=template,
+        spec=spec,
         grant_all_workspaces=grant_all_workspaces,
         interaction=interaction,
     )
@@ -131,8 +133,15 @@ def agent_reinit(
             help="Re-point this agent to a different template, then reinit to apply it",
         ),
     ] = None,
+    spec: Annotated[
+        str | None,
+        typer.Option(
+            "--spec",
+            help="Inline JSON instance spec; '{}' or an exact empty string clears it (whitespace is invalid)",
+        ),
+    ] = None,
 ) -> None:
-    """Re-run agent setup using the stored template."""
+    """Re-run agent setup using the stored template and final instance spec."""
     interaction = ordinary_tty_interaction_policy()
     from agentworks.agents.manager import reinit_agent
     from agentworks.config import load_config
@@ -142,6 +151,7 @@ def agent_reinit(
         load_config(),
         name=name,
         update_template=update_template,
+        spec=spec,
         interaction=interaction,
     )
 

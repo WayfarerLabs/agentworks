@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import subprocess
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from agentworks import output
 from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from agentworks.db import Database, WorkspaceRow
     from agentworks.machine_output import JsonObject
     from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.workspaces.template import WorkspaceTemplate
 
 # NAME-column truncation cap for ``workspace list``, derived from the
 # workspace-name cap so the two cannot drift: a valid name (<= 29) never
@@ -131,6 +132,7 @@ def create_workspace(
     name: str,
     vm_name: str | None = None,
     template_name: str | None = None,
+    spec: str | None = None,
     open_vscode: bool = False,
     interaction: TtyInteractionPolicy,
 ) -> None:
@@ -164,15 +166,33 @@ def create_workspace(
             entity_kind="workspace",
             entity_name=ws_name,
         )
+    from agentworks.instance_specs import refuse_orphan_creation_state
+
+    refuse_orphan_creation_state(db, "workspace", ws_name)
 
     # Cheap validation FIRST, before the gate and before any secret is
     # touched: template resolution, the repo advisories (config-only,
     # no tokens), and the VM init-status guard all fail with zero
     # prompts and zero VM starts, the same bail-early precedence every
     # migrated sibling keeps.
-    from agentworks.workspaces.templates import resolve_template
+    from agentworks.instance_specs import parse_instance_spec
+    from agentworks.workspaces.templates import resolve_template_with_provenance
 
-    template = resolve_template(registry, template_name)
+    overlay = None if spec is None else parse_instance_spec("workspace", spec)
+    layered_template = resolve_template_with_provenance(
+        registry,
+        template_name,
+        overlay=None if overlay is None else cast("WorkspaceTemplate", overlay.declaration),
+        instance_name=name,
+    )
+    template = layered_template.value
+    from agentworks.instance_specs import validate_effective_instance_references
+    from agentworks.workspaces.template import effective_references
+
+    validate_effective_instance_references(
+        registry,
+        effective_references(template, ("workspace", name), layered_template.provenance),
+    )
 
     # Advise if the resolved template's repo remote will not resolve
     # cleanly against the declared git credentials (config-only, no
@@ -250,6 +270,7 @@ def create_workspace(
             name=ws_name,
             vm=vm,
             template=template,
+            overlay=overlay,
         )
         # Bookkeeping only, deliberately not via a realization log:
         # this command never unwinds a realized workspace (a failure

@@ -253,6 +253,15 @@ class InstanceStateRepository:
         ).fetchone()
         return None if row is None else self._to_desired(row)
 
+    def has_instance_records(self, instance_kind: InstanceKind, instance_name: str) -> bool:
+        """Whether any current or future state record exists for this identity."""
+        _validate_identity(instance_kind, instance_name)
+        row = self._connection.execute(
+            "SELECT 1 FROM instance_records WHERE instance_kind = ? AND instance_name = ? LIMIT 1",
+            (instance_kind, instance_name),
+        ).fetchone()
+        return row is not None
+
     def put_desired_overlay(
         self,
         instance_kind: InstanceKind,

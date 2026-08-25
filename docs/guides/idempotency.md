@@ -32,10 +32,22 @@ The re-point is persisted before the on-VM convergence, so it is deliberately no
 fails partway through, the agent stays bound to the new template and a plain `agent reinit <name>`
 (no flag) re-converges toward it.
 
+The same boundary accepts an inline `--spec` as the final instance-specific layer. Omitting the
+option retains the prior layer, supplying a JSON object replaces it, and `--spec '{}'` or
+`--spec ''` clears it. The empty-value shorthand is specific to `agent reinit`; create commands
+still require a JSON object.
+
+When `--update-template` and `--spec` are supplied together, Agentworks validates and stores the new
+template binding and instance layer as one desired-state change before convergence. A later plain
+reinit reads both stored inputs again.
+
 ## VM reinit
 
 `vm reinit` re-runs Phase B (initialization) using the current config. All steps are non-fatal:
 failures produce warnings and a `partial` status.
+
+If the VM was created with an instance spec, reinit consumes that stored final layer. It does not
+accept a flag to change or clear it.
 
 ### Fully idempotent
 

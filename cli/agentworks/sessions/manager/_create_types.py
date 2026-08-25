@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from pydantic import BaseModel
+
     from agentworks.agents.nodes import (
         AgentTemplateNode,
         LiveAgentNode,
@@ -31,6 +33,7 @@ if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
     from agentworks.capabilities.base import OperationScope
     from agentworks.db import AgentRow, VMRow, WorkspaceRow
+    from agentworks.instance_specs import InstanceOverlay
     from agentworks.orchestration.node import Node
     from agentworks.resources.registry import Registry
     from agentworks.secrets.resolver import Resolver
@@ -103,3 +106,6 @@ class SessionGraph:
     scope: OperationScope
     template: ResolvedSessionTemplate
     nodes: tuple[Node, ...]
+    session_overlay: InstanceOverlay[BaseModel] | None
+    workspace_overlay: InstanceOverlay[BaseModel] | None
+    agent_overlay: InstanceOverlay[BaseModel] | None

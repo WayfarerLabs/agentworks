@@ -526,6 +526,7 @@ def attach_console(
                 _mc._console_build_secret_targets(db, registry, console=console, vm=vm),
                 config,
                 registry,
+                allow_transient_auto_declare=True,
                 interaction=interaction,
             )
 
