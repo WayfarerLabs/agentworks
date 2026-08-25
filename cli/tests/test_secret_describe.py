@@ -10,8 +10,14 @@ import pytest
 from agentworks.bootstrap import build_registry
 from agentworks.capabilities.secret_backend import IndeterminateReason, OperatorImpact, TtyInteractionAccess
 from agentworks.config import load_config
-from agentworks.secrets.inspect import StaticResolutionCategory, describe_secret, secret_description_data
-from agentworks.secrets.preview import PreviewStatus
+from agentworks.secrets.inspect import (
+    SecretDescription,
+    StaticResolution,
+    StaticResolutionCategory,
+    describe_secret,
+    secret_description_data,
+)
+from agentworks.secrets.preview import AggregateNoCandidate, PreviewStatus, ResolutionPreview
 from tests.conftest import ManifestDoc, write_manifests
 
 
@@ -21,6 +27,35 @@ def test_json_v1_static_resolution_categories_remain_frozen() -> None:
         "refused-interaction",
         "unavailable",
     )
+
+
+def test_secret_description_rejects_unsafe_name_independently_of_preview() -> None:
+    preview = ResolutionPreview(
+        name="safe-preview-name",
+        result=AggregateNoCandidate(),
+        source=None,
+        identifier=None,
+        attempts=(),
+    )
+
+    with pytest.raises(ValueError):
+        SecretDescription(
+            name="unsafe\nname",
+            kind="secret",
+            origin=None,
+            description="test secret",
+            hint=None,
+            references=(),
+            used_by=None,
+            source_mappings=(),
+            resolution=StaticResolution(
+                category=StaticResolutionCategory.UNAVAILABLE,
+                source=None,
+                identifier=None,
+                skipped_not_ready=(),
+            ),
+            preview=preview,
+        )
 
 
 def _configured_secret(tmp_path: Path) -> tuple[object, object]:
