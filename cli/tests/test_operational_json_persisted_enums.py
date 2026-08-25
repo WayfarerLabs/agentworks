@@ -234,6 +234,6 @@ def test_projection_boundaries_close_manual_invalid_facts() -> None:
     projected_list = cast("list[dict[str, object]]", session_listing_data(SessionListing((listed,)))["sessions"])[0]
     assert projected_list["mode"] == "unknown"
     assert projected_list["status"] == "unavailable"
-    description = SessionDescription("s", "ws", "box", "default", None, _RAW_TEXT, None, _RAW_TEXT, None, "c", "u")
+    description = SessionDescription("s", "ws", "box", "default", None, _RAW_TEXT, None, _RAW_TEXT, None, "c", "u", ())
     projected_description = cast("dict[str, object]", session_description_data(description)["session"])
     assert projected_description["mode"] == projected_description["status"] == "unknown"

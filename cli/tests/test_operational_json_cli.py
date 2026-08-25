@@ -197,7 +197,7 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
     from agentworks.cli.commands import agent, console, session, vm, workspace
     from agentworks.sessions import manager as sessions
     from agentworks.sessions import multi_console
-    from agentworks.sessions.manager._queries import SessionDescription
+    from agentworks.sessions.manager._queries import SessionConsole, SessionDescription
     from agentworks.sessions.multi_console.attach import ConsoleDescription, ConsoleMember, ConsoleShell
     from agentworks.vms import manager as vms
     from agentworks.vms.manager.inspect import (
@@ -310,6 +310,7 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
         4242,
         "2026-01-07",
         "2026-01-08",
+        (SessionConsole("console-z", 5), SessionConsole("console-a", 2)),
     )
     console_description = ConsoleDescription(
         "console-a",
@@ -432,6 +433,10 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
             "pid": 4242,
             "created_at": "2026-01-07",
             "updated_at": "2026-01-08",
+            "consoles": [
+                {"console_name": "console-z", "position": 5},
+                {"console_name": "console-a", "position": 2},
+            ],
         }
     }
     expected_console = {
@@ -558,6 +563,11 @@ def test_session_describe_json_positive_and_stopped_pid_with_degraded_template(
     from agentworks.sessions import manager
 
     _seed_session_rows(db)
+    db.insert_console("zeta", "box")
+    db.insert_console("alpha", "box")
+    db.add_console_session("zeta", "stopped", [])
+    db.add_console_session("zeta", "live", [])
+    db.add_console_session("alpha", "live", [])
     config = object()
     marker = "unresolvable-template-sensitive-error"
     monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: config)
@@ -602,6 +612,10 @@ def test_session_describe_json_positive_and_stopped_pid_with_degraded_template(
     )
     assert marker.encode() not in live.stdout_bytes
     assert b"secret-boot-describe" not in live.stdout_bytes
+    assert live_record["consoles"] == [
+        {"console_name": "alpha", "position": 0},
+        {"console_name": "zeta", "position": 1},
+    ]
 
     monkeypatch.setattr(manager, "_ensure_pid", lambda row, *, target, db: row)
     monkeypatch.setattr(manager, "check_session_status", lambda row, *, target: SessionStatus.STOPPED)
@@ -611,6 +625,7 @@ def test_session_describe_json_positive_and_stopped_pid_with_degraded_template(
     assert stopped_record["pid"] is None
     assert stopped_record["status"] == "stopped"
     assert stopped_record["harness_integration"] is None
+    assert stopped_record["consoles"] == [{"console_name": "zeta", "position": 0}]
 
 
 @pytest.mark.parametrize("failure", ["broken-registry", "unresolvable-template"])

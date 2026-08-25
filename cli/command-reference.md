@@ -263,11 +263,14 @@ Rows retain workspace then session name order. `agw session describe NAME --outp
 
 ```text
 {name, workspace_name, vm_name, template, harness_integration, mode, agent_name,
- status, pid, created_at, updated_at}
+ status, pid, created_at, updated_at, consoles}
 ```
 
 `pid` is a positive integer or null. Opaque harness state, socket paths, and boot identifiers are
-never serialized.
+never serialized. `consoles` is the additive optional v1 field `[{console_name, position}]`. Entries
+retain deterministic console-name order, and `position` is the console membership's stored
+zero-based position. Current producers emit `[]` when the session has no console associations; older
+v1 producers may omit this additive field under the compatibility contract below.
 
 `agw console list --output json` uses `console.list` and
 `{consoles: [{name, vm_name, session_count}]}` in configured name order after filtering.

@@ -1013,6 +1013,14 @@ class Database:
         ).fetchall()
         return [_to_console(r) for r in rows]
 
+    def list_console_memberships_for_session(self, session_name: str) -> list[tuple[str, int]]:
+        """Return a session's console memberships ordered by console name."""
+        rows = self._conn.execute(
+            "SELECT console_name, position FROM console_sessions WHERE session_name = ? ORDER BY console_name",
+            (session_name,),
+        ).fetchall()
+        return [(str(row["console_name"]), int(row["position"])) for row in rows]
+
     def update_console_shells(
         self,
         console_name: str,

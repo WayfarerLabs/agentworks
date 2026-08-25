@@ -169,7 +169,7 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
         sessions,
         "session_description",
         lambda *_args, **_kwargs: SessionDescription(
-            "s", "ws", "box", "t", None, "admin", None, "stopped", None, "2026-01-01", "2026-01-02"
+            "s", "ws", "box", "t", None, "admin", None, "stopped", None, "2026-01-01", "2026-01-02", ()
         ),
     )
     monkeypatch.setattr(
@@ -239,6 +239,7 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
                 "pid",
                 "created_at",
                 "updated_at",
+                "consoles",
             ],
         ),
         (
@@ -261,17 +262,123 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
     session_data = _json_document(CliRunner().invoke(app, ["session", "describe", "s", "--output", "json"]))["data"]
     session_record = cast("dict[str, object]", cast("dict[str, object]", session_data)["session"])
     assert session_record["pid"] is None
+    assert session_record["consoles"] == []
+
+
+def test_session_describe_human_output_structures_console_associations(captured_output) -> None:  # noqa: ANN001
+    from agentworks.output import Role
+    from agentworks.sessions.manager._queries import (
+        SessionConsole,
+        SessionDescription,
+        render_session_description,
+    )
+
+    consoles = (SessionConsole("alpha", 17), SessionConsole("zeta", 42))
+    render_session_description(
+        SessionDescription(
+            "s",
+            "ws",
+            "box",
+            "default",
+            None,
+            "admin",
+            None,
+            "stopped",
+            None,
+            "created",
+            "updated",
+            consoles,
+        )
+    )
+
+    assert [role for role, _level, _message in captured_output.lines[-3:]] == [
+        Role.BODY,
+        Role.DETAIL,
+        Role.DETAIL,
+    ]
+    details = [message for role, _level, message in captured_output.lines if role is Role.DETAIL]
+    assert len(details) == len(consoles)
+    for detail, console in zip(details, consoles, strict=True):
+        assert console.console_name in detail
+        assert str(console.position) in detail
+
+
+def test_session_describe_human_output_structures_empty_console_collection(captured_output) -> None:  # noqa: ANN001
+    from agentworks.output import Role
+    from agentworks.sessions.manager._queries import SessionDescription, render_session_description
+
+    render_session_description(
+        SessionDescription(
+            "s",
+            "ws",
+            "box",
+            "default",
+            None,
+            "admin",
+            None,
+            "stopped",
+            None,
+            "created",
+            "updated",
+            (),
+        )
+    )
+
+    assert [role for role, _level, _message in captured_output.lines[-2:]] == [
+        Role.BODY,
+        Role.DETAIL,
+    ]
+
+
+def test_session_describe_default_and_explicit_human_match_without_styling(monkeypatch) -> None:
+    from agentworks.cli.commands import session as command
+    from agentworks.sessions import manager as sessions
+    from agentworks.sessions.manager._queries import SessionDescription
+
+    description = SessionDescription(
+        "s",
+        "ws",
+        "box",
+        "default",
+        None,
+        "admin",
+        None,
+        "stopped",
+        None,
+        "created",
+        "updated",
+        (),
+    )
+    monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
+    monkeypatch.setattr(command, "get_db", lambda: object())
+    monkeypatch.setattr(
+        sessions,
+        "describe_session",
+        lambda *_args, **_kwargs: sessions.render_session_description(description),
+    )
+
+    default = CliRunner().invoke(app, ["--non-interactive", "session", "describe", "s"])
+    explicit = CliRunner().invoke(
+        app,
+        ["--non-interactive", "session", "describe", "s", "--output", "human"],
+    )
+
+    assert default.exit_code == explicit.exit_code == 0
+    assert default.stdout_bytes == explicit.stdout_bytes
+    assert default.stdout_bytes
+    assert default.stderr_bytes == explicit.stderr_bytes == b""
+    assert b"\x1b" not in default.stdout_bytes
+    assert b"\x7f" not in default.stdout_bytes
+    assert not any(byte < 0x20 and byte != 0x0A for byte in default.stdout_bytes)
 
 
 def test_operational_human_describe_commands_keep_literal_no_color_bytes(monkeypatch) -> None:
     """Pin default and explicit human streams for all new describe paths."""
     from agentworks.agents import manager as agents
     from agentworks.agents.manager.inspect import AgentDescription
-    from agentworks.cli.commands import agent, console, session, vm, workspace
+    from agentworks.cli.commands import agent, console, vm, workspace
     from agentworks.db import VMRow, WorkspaceRow
-    from agentworks.sessions import manager as sessions
     from agentworks.sessions import multi_console
-    from agentworks.sessions.manager._queries import SessionDescription
     from agentworks.sessions.multi_console.attach import ConsoleDescription
     from agentworks.vms import manager as vms
     from agentworks.vms.manager.inspect import VMDescription, VMDetailFacts, render_vm_description
@@ -298,7 +405,7 @@ def test_operational_human_describe_commands_keep_literal_no_color_bytes(monkeyp
     )
     ws_row = WorkspaceRow("ws", "box", None, "/work/ws", "2026-01-01", "ws-ws")
     monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
-    for module in (agent, console, session, vm, workspace):
+    for module in (agent, console, vm, workspace):
         monkeypatch.setattr(module, "get_db", lambda: object())
     monkeypatch.setattr(
         vms,
@@ -318,13 +425,6 @@ def test_operational_human_describe_commands_keep_literal_no_color_bytes(monkeyp
         lambda *_args, **_kwargs: AgentDescription("a", "box", "agent-a", None, False, "2026-01-01", (), ()),
     )
     monkeypatch.setattr(
-        sessions,
-        "session_description",
-        lambda *_args, **_kwargs: SessionDescription(
-            "s", "ws", "box", "t", None, "admin", None, "stopped", None, "2026-01-01", "2026-01-02"
-        ),
-    )
-    monkeypatch.setattr(
         multi_console,
         "console_description",
         lambda *_args, **_kwargs: ConsoleDescription("c", "box", False, "2026-01-01", "2026-01-02", ()),
@@ -333,11 +433,6 @@ def test_operational_human_describe_commands_keep_literal_no_color_bytes(monkeyp
         vms,
         "describe_vm",
         lambda *_args, **_kwargs: render_vm_description(vms.vm_description(*_args, **_kwargs)),
-    )
-    monkeypatch.setattr(
-        sessions,
-        "describe_session",
-        lambda *_args, **_kwargs: sessions.render_session_description(sessions.session_description(*_args, **_kwargs)),
     )
 
     expected = {
@@ -356,11 +451,6 @@ def test_operational_human_describe_commands_keep_literal_no_color_bytes(monkeyp
             "describe",
             "a",
         ): b"Name:       a\nVM:         box\nLinux user: agent-a\nTemplate:   -\nGrant all:  no\nCreated:    2026-01-01\n\nExplicit grants (0):\n  (none)\n\nSessions (0):\n  (none)\n",  # noqa: E501
-        (
-            "session",
-            "describe",
-            "s",
-        ): b"Name:       s\nWorkspace:  ws\nVM:         box\nTemplate:   t\nHarness integration: -\nMode:       admin\nStatus:     stopped\nCreated:    2026-01-01\nUpdated:    2026-01-02\n",  # noqa: E501
         (
             "console",
             "describe",
