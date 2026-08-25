@@ -621,6 +621,35 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
     # -- crash window: seeing only the new column means the rename already -
     # -- committed and v31 only needs its schema-version record. -----------
     31: _rename_harness_integration_state,
+    # -- Cross-kind desired and applied instance state. The envelope stays -
+    # -- stable as domain codecs add record payload versions. Existing VM --
+    # -- hardware values lack the required operation provenance, so this ---
+    # -- migration creates structure only and performs no backfill. --------
+    32: """
+        CREATE TABLE instance_records (
+            instance_kind  TEXT NOT NULL
+                CHECK (instance_kind IN ('vm', 'workspace', 'agent', 'session')),
+            instance_name  TEXT NOT NULL CHECK (length(instance_name) > 0),
+            record_type    TEXT NOT NULL CHECK (length(record_type) > 0),
+            record_key     TEXT NOT NULL CHECK (length(record_key) > 0),
+            payload_version INTEGER NOT NULL
+                CHECK (typeof(payload_version) = 'integer' AND payload_version > 0),
+            value_json     TEXT NOT NULL CHECK (typeof(value_json) = 'text'),
+            recorded_at    TEXT NOT NULL,
+            operation      TEXT,
+            PRIMARY KEY (instance_kind, instance_name, record_type, record_key),
+            CHECK (
+                record_type != 'desired-overlay'
+                OR (record_key = 'spec' AND operation IS NULL)
+            ),
+            CHECK (
+                record_type != 'applied-state'
+                OR (typeof(operation) = 'text' AND length(operation) > 0)
+            )
+        );
+        CREATE INDEX idx_instance_records_kind_type
+            ON instance_records (instance_kind, record_type, instance_name, record_key);
+    """,
 }
 
 LATEST_VERSION = max(MIGRATIONS)
@@ -717,6 +746,18 @@ _SCHEMA_SENTINEL_ADDITIONS: dict[int, dict[str, tuple[str, ...]]] = {
     29: {"sessions": ("harness_state",)},
     30: {"vms": ("admin_template",)},
     31: {"sessions": ("harness_integration_state",)},
+    32: {
+        "instance_records": (
+            "instance_kind",
+            "instance_name",
+            "record_type",
+            "record_key",
+            "payload_version",
+            "value_json",
+            "recorded_at",
+            "operation",
+        )
+    },
 }
 
 _SCHEMA_SENTINEL_REMOVED_TABLES: dict[int, tuple[str, ...]] = {

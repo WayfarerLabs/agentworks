@@ -423,8 +423,11 @@ larger than:
 - get, put, clear, and list desired overlays;
 - get an instance's applied slices;
 - replace the applied slices established by one operation atomically;
-- list applied slices or summaries for one instance kind; and
-- delete all records for an instance as part of owner deletion.
+- list applied slices or summaries for one instance kind.
+
+Owner deletion is `Database`-owned infrastructure rather than a consumer operation. Its typed delete
+paths use a private repository helper so record cleanup stays in the same transaction without
+exposing state-only deletion as a public capability.
 
 The concrete repository shares `Database`'s connection, read snapshot, migration gate, and
 transaction. The repository owns SQL, the persistence envelope, record-type registration, and
