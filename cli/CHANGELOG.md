@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.15.0](https://github.com/WayfarerLabs/agentworks/compare/v0.14.1...v0.15.0) (2026-08-25)
+
+**Operators: read the [0.15 upgrade guide](https://github.com/WayfarerLabs/agentworks/blob/main/docs/guides/upgrading-to-0.15.md) before upgrading.** The breaking-change note below is addressed to secret-backend authors. This release also changes behavior you may be relying on without touching a backend: `agw doctor` can now exit nonzero from a provider or network condition, which turns a CI job that gates on it red; doctor, `agw secret describe`, and preflight now perform provider work where they previously performed none; `agw secret verify`'s output columns and vocabulary changed, so scripts parsing it will break; and global `--non-interactive` now means terminal input only, no longer controlling presentation and no longer implying an unattended fail-fast. The guide covers each with what to do about it.
+
+### ⚠ BREAKING CHANGES
+
+* **secrets:** Secret backends must declare contract_version 1, implement preview and resolve with tagged results, and declare exact TTY support. Replace prepare, would_attempt, external_operation_timeout, backend exceptions, and legacy runtime outcomes before upgrading.
+
+### Features
+
+* **console:** support indexed session reordering ([2f99d63](https://github.com/WayfarerLabs/agentworks/commit/2f99d630011a064d2fd787d3892994d667320ec6))
+* **console:** support indexed session reordering ([a94c6cb](https://github.com/WayfarerLabs/agentworks/commit/a94c6cb9fa182e65e9d05b54daeb402892b654ac))
+* **secrets:** rewrite backend preview contract ([b8f94fd](https://github.com/WayfarerLabs/agentworks/commit/b8f94fdace77324e613a40c92d340639ae23e9d9))
+* **sessions:** list console associations in describe ([0a44b56](https://github.com/WayfarerLabs/agentworks/commit/0a44b569fd38def7d6bee7d3a86f856df6ffebb9))
+* **sessions:** list console associations in describe ([252e749](https://github.com/WayfarerLabs/agentworks/commit/252e7498089d0cfcf6e32c0ba9bd4fab8e84049f))
+
+
+### Bug Fixes
+
+* **console:** make reorder placement explicit ([2c2a82e](https://github.com/WayfarerLabs/agentworks/commit/2c2a82edf778af1f3d32152a4d0f4493c1eb9cce))
+* **doctor:** deduplicate indeterminate secret notes ([673d780](https://github.com/WayfarerLabs/agentworks/commit/673d780fbd210c6eb9601b7d7ced25a9842ffa03))
+* **doctor:** distinguish prompt and skipped secret previews ([ac9b578](https://github.com/WayfarerLabs/agentworks/commit/ac9b578f025a00152d6f1ed6fe44f983c7e97a08))
+* **doctor:** distinguish prompt from skipped previews ([3e90ab4](https://github.com/WayfarerLabs/agentworks/commit/3e90ab40608c47cec94468a2e13676994c3e3f9e))
+* **doctor:** lead with secret source mapping ([b28adec](https://github.com/WayfarerLabs/agentworks/commit/b28adec82d2aadd05c4f1b790b5c8e4fa18b47ce))
+* **doctor:** treat indeterminate secrets as healthy ([76cc2d2](https://github.com/WayfarerLabs/agentworks/commit/76cc2d268172ed46a6f17e72412f45e711692af3))
+* **init:** make safe directory setup convergent ([3809beb](https://github.com/WayfarerLabs/agentworks/commit/3809bebdc6ab3150c572da4a8b0d0613839c456b))
+* **init:** make safe directory setup convergent ([c56a865](https://github.com/WayfarerLabs/agentworks/commit/c56a865fe4bb2eb18bd86c7f21051d4347ab6bfb))
+* **onboarding:** close integration review gaps ([8fbf71a](https://github.com/WayfarerLabs/agentworks/commit/8fbf71a4dc5b8b5932934537c55d0940d10d28c9))
+* **secrets:** align preview contract invariants ([542a905](https://github.com/WayfarerLabs/agentworks/commit/542a90506e24d18e202cfb0a057167f11379ed71))
+* **secrets:** clarify doctor mapping and parse app impact ([b2e8f74](https://github.com/WayfarerLabs/agentworks/commit/b2e8f74ec7505d23ac5768e9a3efc8c251bb97d4))
+* **secrets:** close broker dispatch boundary ([0751b7c](https://github.com/WayfarerLabs/agentworks/commit/0751b7c0e705f999163ae69e553591af67e121a9))
+* **secrets:** harden lazy backend boundaries ([504a151](https://github.com/WayfarerLabs/agentworks/commit/504a151879d1dfe8191b2603cd34089f1b5aa937))
+* **secrets:** harden preview boundaries ([9bcc1bf](https://github.com/WayfarerLabs/agentworks/commit/9bcc1bf851475bf1180acd81234814bb3a4c8f3e))
+* **secrets:** harden preview boundaries ([f8fa3d3](https://github.com/WayfarerLabs/agentworks/commit/f8fa3d31df6e9c745eeee0c024413b4afd06ba88))
+* **secrets:** harden preview contract boundaries ([658ea81](https://github.com/WayfarerLabs/agentworks/commit/658ea8194d1cbb335cb394ed7e235a6fcd20d187))
+* **secrets:** parse explicit app authentication impact ([061337a](https://github.com/WayfarerLabs/agentworks/commit/061337a87620a70be5b601a43fcc641eac4c4a04))
+* **secrets:** preserve protected warning exits ([2a0b47f](https://github.com/WayfarerLabs/agentworks/commit/2a0b47feb26be2187507df6f6f4db7fd8cdfca9f))
+* **secrets:** restore complete batch doom ([dda1f05](https://github.com/WayfarerLabs/agentworks/commit/dda1f055b5857a29cf45505d87ea984f857401d0))
+
+
+### Documentation
+
+* **cli:** correct Click dependency rationale ([c0d10bd](https://github.com/WayfarerLabs/agentworks/commit/c0d10bdfe68ea9167f50fc5612c2d3f1f49ffef9))
+* **cli:** correct Click dependency rationale ([c292dfc](https://github.com/WayfarerLabs/agentworks/commit/c292dfcb801ef767df20c334a750504d420769d7))
+* **guides:** add the 0.15 operator upgrade guide ([ed49ae3](https://github.com/WayfarerLabs/agentworks/commit/ed49ae3bebca56498ea8052db1ccc8dd5e9ac5b6))
+* link the 0.15 upgrade guide from the surfaces it explains ([d01506b](https://github.com/WayfarerLabs/agentworks/commit/d01506ba610e4809532792d36b9abb75edc5bd34))
+
 ## [0.14.1](https://github.com/WayfarerLabs/agentworks/compare/v0.14.0...v0.14.1) (2026-08-19)
 
 
