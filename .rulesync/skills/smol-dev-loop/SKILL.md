@@ -62,18 +62,20 @@ issue, claim, and unmerged pull request with:
 
 - authenticated direction reference and exact vetted title and body snapshot;
 - issue, deterministic branch, and pull request identifiers and URLs;
-- head SHA, workflow state, CI status, and conflict status;
+- head SHA, last published head SHA, workflow state, CI status, and conflict status;
 - last-check time and durable cursors for comments, reviews, checks, and head changes;
 - per-PR delivery authorization reference, total budget, and amount spent; and
-- owning developer handle, dedicated worktree absolute path, and latest recovery handoff.
+- owning developer handle, dedicated worktree absolute path, distinct resource namespace, and latest
+  recovery handoff.
 
-The recovery handoff records the exact branch and head, dedicated worktree absolute path, completed
-work and gates, remaining work, and context needed for a replacement developer. Agent lifetime is
-not guaranteed. A replacement developer inherits the existing worktree; do not create a second
-mutable checkout for the claim. Rebuild factual server state from GitHub and the session harness,
-but never reconstruct the authenticated direction reference or vetted snapshot from GitHub. Recover
-those only from the authenticated channel or its session harness; if unavailable, preserve the work,
-pause, and request direction. Never commit runtime ledger state.
+The recovery handoff records the exact branch and head, dedicated worktree absolute path, resource
+namespace, any claim-attributable stash reference, completed work and gates, remaining work, and
+context needed for a replacement developer. Agent lifetime is not guaranteed. A replacement
+developer inherits the existing worktree and its resource namespace; do not create a second mutable
+checkout or allocate a new namespace for the claim. Rebuild factual server state from GitHub and the
+session harness, but never reconstruct the authenticated direction reference or vetted snapshot from
+GitHub. Recover those only from the authenticated channel or its session harness; if unavailable,
+preserve the work, pause, and request direction. Never commit runtime ledger state.
 
 `smol-dev` is a discovery hint only; its absence never blocks named or blessed work. Delivery owns
 `awaiting-direction`. Do not create or alter labels without authenticated authorization. If delivery
@@ -107,20 +109,22 @@ direction.
 
 After vetting succeeds, refresh the issue, perform the required snapshot comparison, and confirm no
 competing branch, human assignment, or pull request appeared. Record the claim in the ledger, then
-create a dedicated worktree containing the deterministic branch from fresh `main`. Record its
-absolute path before delegating. The loop's primary checkout remains separate and is never the
-developer's mutation workspace. If a race is detected, create no duplicate work and report it.
+create a dedicated worktree containing the deterministic branch from fresh `main` and allocate a
+distinct resource namespace. Record its absolute path and the namespace before delegating. The
+loop's primary checkout remains separate and is never the developer's mutation workspace. If a race
+is detected, create no duplicate work and report it.
 
 ## Build and privately validate
 
 For each claim, load and follow the current protected-base `agentic-dev-process` and the references
 it requires for delegation, integration testing, and delivery. Delegate implementation to one
-isolated `agentworks-dev`, explicitly hand it the dedicated worktree's absolute path, keep that
-developer addressable until merge, and keep its recovery handoff in the ledger. Implementation,
-attributable CI repairs, conflict repairs, and authorized feedback rounds all mutate through that
-same worktree. Reviewers inspect the exact head and receive no mutation authority. The main agent
-coordinates any subagent reviews the process requires, including when the developer cannot delegate
-further.
+isolated `agentworks-dev`, explicitly hand it the dedicated worktree's absolute path and resource
+namespace, keep that developer addressable until merge, and keep its recovery handoff in the ledger.
+A worktree isolates Git only. Under the loaded delegation and `agw-test-env` contracts, scratch,
+fixture, and live-test resources remain independently namespaced. Implementation, attributable CI
+repairs, conflict repairs, and authorized feedback rounds all mutate through that same worktree.
+Reviewers inspect the exact head and receive no mutation authority. The main agent coordinates any
+subagent reviews the process requires, including when the developer cannot delegate further.
 
 An attributable CI failure or conflict that can be repaired within blessed scope and recorded
 mutation bounds returns automatically to the retained developer. The loaded `integration-testing`
@@ -156,8 +160,13 @@ artifact owner; delivery owns collection, round, response, state-transition, and
 
 ## Retire or recover entries
 
-Only after verifying the pull request merged and its `Fixes` link closed the issue, release the
-developer, remove its dedicated worktree, and retire the ledger entry.
+Only after verifying the pull request merged and its `Fixes` link closed the issue, confirm the
+claim has no unpublished state: the worktree has no tracked or untracked changes, its branch has no
+commits ahead of the ledger's last published head SHA, and no stash is attributable to the claim.
+Git stashes are repository-wide, so treat one as claim state only when the recovery handoff or other
+evidence attributes it. If unpublished state appears or stash attribution is uncertain, preserve the
+worktree and investigate rather than discard it. Otherwise release the developer, remove its
+dedicated worktree, and retire the ledger entry.
 
 A closed-unmerged pull request never disappears silently. Preserve its dedicated worktree and
 recovery evidence, pause the issue, and request authenticated direction. Do not resume, recycle, or
