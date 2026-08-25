@@ -153,6 +153,32 @@ def test_delete_removes_only_its_workspace_artifacts(
     assert db.get_workspace("untouched") is not None
 
 
+def test_delete_skips_workspace_artifacts_outside_the_managed_directory(
+    db: Database,
+    tmp_path: Path,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    _seed(db)
+    # A direct DB insert models legacy or corrupt persisted state that bypassed
+    # the workspace manager's write-time name validation.
+    db.insert_workspace("../sentinel", "/srv/corrupt", "dvm", "ws-corrupt")
+    vscode_dir = tmp_path / "vscode"
+    vscode_dir.mkdir()
+    sentinel = tmp_path / "sentinel.code-workspace"
+    sentinel.write_text("outside")
+    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir}"\n')
+    _fake_backend(monkeypatch)
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
+
+    vm_manager.delete_vm(db, config, "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert sentinel.read_text() == "outside"
+    assert captured_output.warnings
+    assert db.get_vm("dvm") is None
+
+
 def test_hold_failure_does_not_skip_delete(
     db: Database,
     make_config,  # noqa: ANN001
