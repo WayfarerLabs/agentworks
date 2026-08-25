@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import MIGRATIONS, Database, MigrationContext, SessionMode
+from agentworks.db import LATEST_VERSION, MIGRATIONS, Database, MigrationContext, SessionMode
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -127,7 +127,7 @@ def test_v31_resumes_after_rename_before_version_record(tmp_path: Path) -> None:
 
     db = Database(db_path)
     try:
-        assert db._conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] == 31
+        assert db._conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] == LATEST_VERSION
         columns = _session_columns(db._conn)
         assert columns & {"harness_state", "harness_integration_state"} == {"harness_integration_state"}
         raw = db._conn.execute("SELECT harness_integration_state FROM sessions WHERE name = 's1'").fetchone()[0]
