@@ -7,6 +7,7 @@ import pytest
 from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH, WS_GROUP_PREFIX, workspace_group
 from agentworks.agents.manager import AGENT_PREFIX, MAX_AGENT_NAME_LENGTH
 from agentworks.agents.manager._common import derive_linux_user
+from agentworks.config import validate_admin_username
 from agentworks.naming import (
     AZURE_VNET_NAME_MAX_LENGTH,
     LINUX_GROUPNAME_MAX_LENGTH,
@@ -80,10 +81,17 @@ def test_valid_names(name: str) -> None:
         ("my workspace", "contains space"),
         ("my@vm", "contains special character"),
         ("a/b", "contains slash"),
+        ("abc\n", "contains trailing newline"),
     ],
 )
 def test_invalid_names(name: str, reason: str) -> None:
     assert not _is_valid(name), f"Expected '{name}' to be invalid ({reason})"
+
+
+@pytest.mark.parametrize("username", ["agentworks\n", "agentworks\nroot"])
+def test_admin_username_rejects_content_outside_the_valid_name(username: str) -> None:
+    with pytest.raises(ValidationError):
+        validate_admin_username(username)
 
 
 # -- Single character edge cases -------------------------------------------

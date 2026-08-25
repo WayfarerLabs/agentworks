@@ -76,6 +76,20 @@ def test_load_valid_config(config_dir: Path) -> None:
     assert load_config(config_dir).database.auto_backup_before_migration is True
 
 
+@pytest.mark.parametrize("field", ["ssh_host_prefix", "ssh_agent_host_prefix"])
+@pytest.mark.parametrize("value", ["aw-prefix\\n", "aw-prefix\\nforged-host"])
+def test_ssh_host_prefix_rejects_content_outside_the_valid_name(
+    config_dir: Path,
+    field: str,
+    value: str,
+) -> None:
+    text = config_dir.read_text().replace("\n[defaults]", f'\n{field} = "{value}"\n\n[defaults]')
+    config_dir.write_text(text)
+
+    with pytest.raises(ConfigError):
+        load_config(config_dir)
+
+
 def test_database_config_is_strict_and_focused(tmp_path: Path) -> None:
     config_path = tmp_path / "config.toml"
     config_path.write_text(
