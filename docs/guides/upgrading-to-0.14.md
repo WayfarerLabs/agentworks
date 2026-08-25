@@ -408,7 +408,7 @@ Configuration:
   [ok]   Config is valid
 
 Secrets:
-  [ok]   Secret 'gh-pat' (auto): available; source=env-var
+  [ok]   Secret 'gh-pat': available; source=env-var
   [ok]   Secret 'npm-token': available; source=env-var
 
 Results: 18 ok, 11 info, 0 warn, 0 fail
@@ -416,9 +416,11 @@ Results: 18 ok, 11 info, 0 warn, 0 fail
 
 Read the **Secrets** group rather than skimming it. Every secret your manifests reference appears
 there, including the ones nothing declared explicitly: a git credential's `token` and a platform's
-token secret are auto-declared, and they are marked `(auto)`. A secret you expected to be named and
-described appearing as `(auto)` instead usually means a `spec` key did not move where you thought it
-did. `info` rows are not failures; a not-ready site whose plugin is off is reported there by design.
+token secret are auto-declared. Doctor reports health without descriptions or origin markers. Use
+`agw secret list` or `agw secret describe NAME` to inspect those details. A secret you expected to
+be named and described appearing as auto-declared there usually means a `spec` key did not move
+where you thought it did. `info` rows are not failures; a not-ready site whose plugin is off is
+reported there by design.
 
 ### Handing the rewrite to an agent
 

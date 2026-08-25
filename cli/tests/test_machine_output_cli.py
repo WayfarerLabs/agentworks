@@ -777,6 +777,7 @@ def test_doctor_json_adds_value_free_preview_only_to_secret_checks(monkeypatch) 
         ],
     }
     assert "secret_preview" not in checks[1]
+    assert "note" not in checks[1]
 
 
 def test_malformed_config_doctor_json_and_human_share_structured_facts(

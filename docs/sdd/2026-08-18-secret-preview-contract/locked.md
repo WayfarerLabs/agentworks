@@ -96,3 +96,25 @@ in this contract rewrite. No in-scope implementation or review finding remains.
 The operator owns merging PR #619. The effort lead does not merge it.
 
 -- agw-ns-secrets (lead)
+
+## Post-lock amendment: 2026-08-24
+
+Authenticated operator direction for PR #644 corrects the single indeterminate reason and doctor's
+flat status mapping. `operator-input-required` now identifies the prompt case where usable terminal
+input exists and actual resolution will request the value if it reaches that source.
+`operator-impact-limited` remains the provider case where zero-impact preview skipped work that
+might require operator action, so availability was not checked. Core accepts the new prompt reason
+only from a TTY-capable backend at zero impact with terminal input available; every other
+combination is a backend-protocol failure.
+
+Doctor maps available and operator-input-required results to `OK`, operator-impact-limited to
+`INFO`, missing and blocked to `WARN`, and failed to `FAIL`. Prompt rows state directly that the
+value will be provided interactively when needed, while skipped provider rows state directly that
+availability was not checked. The proposed generic numbered-note mechanism was removed rather than
+added to shared health, JSON, and focused resource diagnostics. Secret descriptions and origin
+markers remain absent from doctor and available through the dedicated secret inspection commands.
+
+This amendment supersedes the earlier locked doctor table and completed plan statement that mapped
+every indeterminate result to `WARN`. Those historical artifacts remain unchanged as the record of
+what PR #619 originally delivered; this dated lockfile amendment records the operator-authorized
+contract now implemented by PR #644.

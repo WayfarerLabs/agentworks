@@ -298,7 +298,9 @@ record `{status, source, identifier, reason?, attempts}`. Its status is `availab
 `indeterminate`, `blocked`, or `failed`; source and identifier are nullable; reason is present only
 for a result with a closed reason; and attempts retain source order as
 `{source, identifier, status, reason?}`. Non-secret checks omit the field. No secret value enters
-this projection. A failing report is still written in full, then the command exits 1:
+this projection. An indeterminate prompt that can receive terminal input uses reason
+`operator-input-required`; a provider lookup skipped because broader operator impact might be needed
+uses `operator-impact-limited`. A failing report is still written in full, then the command exits 1:
 
 ```bash
 agw doctor --output json

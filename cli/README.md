@@ -373,12 +373,14 @@ CI job needs to do about it.
 `agw doctor` keeps three adjacent secret groups. `Secret backends` reports implementation readiness;
 `Secret sources` shows every declared source with its selected backend, active/inactive,
 enabled/disabled, provenance, and folded readiness; `Secrets` emits exactly one row per registry
-secret -- operator-declared and auto-declared alike (auto-declared rows, e.g. `tailscale-auth-key`
-and the `git-token-*` family, carry an `(auto)` marker; they are exactly the secrets most likely to
-prompt at command time):
+secret, operator-declared and auto-declared alike. Doctor keeps these health rows compact; use
+`agw secret list` or `agw secret describe` for descriptions and origin details.
 
-- **OK** for an aggregate `available` preview.
-- **WARN** for `missing`, `indeterminate`, or `blocked`.
+- **OK** for `available`, and for an `indeterminate/operator-input-required` prompt path that can
+  collect the value when a command needs it.
+- **INFO** for `indeterminate/operator-impact-limited`, where doctor deliberately skipped a provider
+  lookup that might require operator action and therefore did not establish availability.
+- **WARN** for `missing` or `blocked`.
 - **FAIL** for a hard provider or mapping failure.
 
 Source-applicability detail (per-source soft-skip reasons, inactive mappings, per-secret references)

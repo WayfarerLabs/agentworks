@@ -270,16 +270,19 @@ def test_preview_uses_later_definitive_result_and_retains_attempt_evidence(
     assert [attempt.source for attempt in preview.attempts] == ["first", "second"]
 
 
-def test_allow_preview_rejects_indeterminate_as_backend_protocol_failure() -> None:
+@pytest.mark.parametrize("reason", list(IndeterminateReason))
+def test_allow_preview_rejects_every_indeterminate_reason_as_backend_protocol_failure(
+    reason: IndeterminateReason,
+) -> None:
     class Client(_Client):
-        preview_results = {"a": PreviewIndeterminate(IndeterminateReason.OPERATOR_IMPACT_LIMITED)}
+        preview_results = {"a": PreviewIndeterminate(reason)}
 
     preview = preview_batch(
         [_decl("a")],
-        [_source("fixture", client_type=Client)],
+        [_source("fixture", client_type=Client, supports_tty=True)],
         impact=OperatorImpact.ALLOW,
         tty_access=TtyInteractionAccess.AVAILABLE,
-        interaction_broker=None,
+        interaction_broker=_Broker(),
     )["a"]
     assert preview.status is PreviewStatus.FAILED
     assert preview.reason == FailureReason.BACKEND_PROTOCOL.value
@@ -324,6 +327,31 @@ class _Broker:
     def request_secret(self, name: str, /) -> str:
         self.calls.append(name)
         return self.value
+
+
+@pytest.mark.parametrize(
+    ("supports_tty", "access"),
+    [(supports_tty, access) for supports_tty in (False, True) for access in TtyInteractionAccess],
+)
+def test_operator_input_required_is_accepted_only_with_available_tty_capability(
+    supports_tty: bool,
+    access: TtyInteractionAccess,
+) -> None:
+    class Client(_Client):
+        preview_results = {"a": PreviewIndeterminate(IndeterminateReason.OPERATOR_INPUT_REQUIRED)}
+
+    preview = preview_batch(
+        [_decl("a")],
+        [_source("fixture", client_type=Client, supports_tty=supports_tty)],
+        impact=OperatorImpact.NONE,
+        tty_access=access,
+        interaction_broker=None,
+    )["a"]
+    accepted = supports_tty and access is TtyInteractionAccess.AVAILABLE
+    assert preview.status is (PreviewStatus.INDETERMINATE if accepted else PreviewStatus.FAILED)
+    assert preview.reason == (
+        IndeterminateReason.OPERATOR_INPUT_REQUIRED.value if accepted else FailureReason.BACKEND_PROTOCOL.value
+    )
 
 
 @pytest.mark.parametrize(

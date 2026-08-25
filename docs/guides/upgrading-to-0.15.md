@@ -20,13 +20,15 @@ never contacted a secret provider. Now a secret check can be `FAIL`, and `agw do
 whenever any check fails. A CI job that gates on `agw doctor`'s exit code can turn red from a
 provider hiccup with no code change on your side.
 
-This happens through the closed preview-status mapping: `available` is OK, `failed` is FAIL,
-everything else (`missing`, `indeterminate`, `blocked`) is WARN. `failed` is real: for the built-in
-`env-var` and `prompt` backends it only fires on a malformed value (a NUL byte), but for a provider
-backend like `onepassword` it fires on the provider's own failure modes when doctor's zero-impact
-preview is actually able to reach the provider (see the next section for when that happens):
-sign-out/authentication failure, the referenced item or field not found, connectivity or timeout, or
-an unrecognized non-zero exit from `op`.
+This happens through the closed preview mapping: `available` and an
+`indeterminate/operator-input-required` prompt path are OK; an
+`indeterminate/operator-impact-limited` provider path is INFO; `missing` and `blocked` are WARN; and
+`failed` is FAIL. `failed` is real: for the built-in `env-var` and `prompt` backends it only fires
+on a malformed value (a NUL byte), but for a provider backend like `onepassword` it fires on the
+provider's own failure modes when doctor's zero-impact preview is actually able to reach the
+provider (see the next section for when that happens): sign-out/authentication failure, the
+referenced item or field not found, connectivity or timeout, or an unrecognized non-zero exit from
+`op`.
 
 **What to do:** treat a new `FAIL` in the Secrets group as a real signal, not noise. The row names
 the secret and, for JSON output, the check carries a `secret_preview` object with a closed `reason`.
@@ -34,23 +36,22 @@ Run `agw secret describe NAME --allow-interaction` for a definitive read on what
 doing. If your CI only needs a pass/fail signal, the exit code is still exactly that; if it parses
 the human table, the `[FAIL]` label and the `Results: ... fail` line are unchanged in shape.
 
-## `agw doctor` now WARNs on an unset secret that used to read as `ok`
+## `agw doctor` identifies an unset prompt secret without warning
 
-Independent of the FAIL case above, a healthy default install can show new warnings after the
-upgrade. Pre-0.15, doctor's prediction for an unset secret falling through to the default `prompt`
-source always reported `ok: would attempt via prompt`, regardless of whether a TTY was actually
-available. Doctor's zero-impact preview now asks the `prompt` backend for real, and at zero operator
-impact prompt cannot give a definite answer (asking would BE the operator action), so it returns
-`indeterminate` when a TTY is available or `blocked` when it is not ; both map to WARN. The message
-changes from `would attempt via prompt` to something like
-`indeterminate/operator-impact-limited; source=prompt` in an interactive shell, or
-`blocked/tty-unavailable; source=prompt` in CI.
+Pre-0.15, doctor's prediction for an unset secret falling through to the default `prompt` source
+reported `ok: would attempt via prompt`, regardless of whether a TTY was actually available.
+Doctor's zero-impact preview now asks the `prompt` backend for real, and at zero operator impact
+prompt cannot give a definite answer because asking would be the operator action. It returns
+`indeterminate/operator-input-required` when a TTY is available, and doctor reports that the value
+will be provided interactively when needed. With no usable TTY it returns
+`blocked/tty-unavailable; source=prompt`, which is a warning because command-time prompting is not
+possible in that environment.
 
-**What to do:** this is not a regression, it is a more honest answer, but a script or dashboard that
-alerted on "0 warn" will need to accept this new baseline warning for every secret that relies on
-the prompt fallback. Configure the value in an earlier source (an environment variable, or a
-provider mapping) to get back to `ok`, or accept the warning as informational: doctor has no
-`--allow-interaction` flag to force a definitive answer here.
+**What to do:** no action is needed for an operator-input-required row. Doctor deliberately avoids
+asking for a value during a health check, and a usable prompt source is healthy. A blocked row still
+means the current environment cannot use the prompt fallback; configure the value in an earlier
+non-TTY source if the command must run there. Doctor has no `--allow-interaction` flag to force a
+definitive answer.
 
 ## `agw doctor`, `agw secret describe`, and preflight now perform provider I/O
 
@@ -73,15 +74,17 @@ operator action: `env-var` reads and discards a value to validate it; `onepasswo
 `op read` at `NONE` impact whenever it already knows authentication is unattended (an
 `OP_SERVICE_ACCOUNT_TOKEN` or `OP_CONNECT_HOST`/`OP_CONNECT_TOKEN` pair in the environment, or the
 source's `app_authentication_impact: none`); otherwise it returns `indeterminate` rather than
-starting app authentication under `NONE`. See "Preview and actual resolution" in the secrets README
-for the complete rule.
+starting app authentication under `NONE`. That provider result carries reason
+`operator-impact-limited`, distinct from prompt's `operator-input-required`. See "Preview and actual
+resolution" in the secrets README for the complete rule.
 
 **What to do:** if you configured 1Password (or another provider backend) for unattended auth, know
 that `agw doctor` and every command's preflight now make a real provider call on that path as a
 matter of routine, which adds latency and a new failure surface (see the FAIL section above) to
 operations that used to be pure and local. If that is unwanted, do not set unattended auth (or set
 `app_authentication_impact: operator-action`, the default) purely to make doctor look clean; the
-WARN above is expected in that case.
+INFO row saying availability was not checked is expected in that case. Use
+`agw secret describe NAME --allow-interaction` when you want a definitive provider answer.
 
 ## `agw secret verify`'s output vocabulary and columns changed wholesale
 

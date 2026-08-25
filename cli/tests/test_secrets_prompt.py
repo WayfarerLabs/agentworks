@@ -7,8 +7,10 @@ import pytest
 from agentworks import output
 from agentworks.capabilities.secret_backend import (
     BlockReason,
+    IndeterminateReason,
     InteractionBroker,
     OperatorImpact,
+    PreviewIndeterminate,
     ResolutionIntent,
     TtyInteractionAccess,
 )
@@ -65,7 +67,7 @@ def test_factory_and_context_entry_do_not_call_the_broker() -> None:
             OperatorImpact.NONE,
             TtyInteractionAccess.AVAILABLE,
             PreviewStatus.INDETERMINATE,
-            "operator-impact-limited",
+            "operator-input-required",
             0,
         ),
         (OperatorImpact.NONE, TtyInteractionAccess.UNAVAILABLE, PreviewStatus.BLOCKED, "tty-unavailable", 0),
@@ -93,6 +95,20 @@ def test_preview_matrix(
     assert preview.status is status
     assert preview.reason == reason
     assert len(broker.names) == broker_calls
+
+
+def test_zero_impact_preview_with_available_tty_reports_required_operator_input() -> None:
+    broker = _Broker()
+    preview = preview_batch(
+        [_decl()],
+        [_source()],
+        impact=OperatorImpact.NONE,
+        tty_access=TtyInteractionAccess.AVAILABLE,
+        interaction_broker=broker,
+    )["token"]
+    assert isinstance(preview.result, PreviewIndeterminate)
+    assert preview.result.reason is IndeterminateReason.OPERATOR_INPUT_REQUIRED
+    assert broker.names == []
 
 
 def test_resolution_uses_broker_only_with_available_tty() -> None:

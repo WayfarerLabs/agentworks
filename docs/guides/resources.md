@@ -666,11 +666,12 @@ Enable the `onepassword` plugin, add `work-op` to the chain, and map a secret wi
 with no compatibility row or legacy parser. When rewriting the old OnePassword mapping table, move
 its account to the source. The timeout bounds the complete source turn and defaults to 30 seconds.
 
-`app_authentication_impact` is conservative by default: zero-impact preview returns indeterminate
-when app authentication may require operator action. Set it to `none` only if app authentication is
-acceptable during zero-impact preview. Supported service-account and Connect environment facts are
-recognized as unattended. This field affects preview only; actual resolution always attempts the
-bounded provider read.
+`app_authentication_impact` is conservative by default: zero-impact preview returns
+`indeterminate/operator-impact-limited` without checking availability when app authentication may
+require operator action. Set it to `none` only if app authentication is acceptable during
+zero-impact preview. Supported service-account and Connect environment facts are recognized as
+unattended. This field affects preview only; actual resolution always attempts the bounded provider
+read.
 
 ### The words the surfaces use
 
@@ -712,8 +713,11 @@ be blocked or failed.
 `agw secret list` is static and shows lookup identifiers, candidates, readiness, and opt-outs.
 `agw secret describe <name>` adds provider-aware zero-impact preview; add `--allow-interaction` for
 maximum-impact preview. `agw doctor` has a **Secret backends** readiness group and one zero-impact
-preview row per secret. Preview may read a provider and safely discard the value; it never returns a
-value.
+preview row per secret. A prompt path with usable terminal input is
+`indeterminate/operator-input-required` and remains OK because the value will be requested when
+needed. A provider lookup skipped as `indeterminate/operator-impact-limited` is INFO because doctor
+did not establish availability. Descriptions and origins remain on the dedicated secret inspection
+commands. Preview may read a provider and safely discard the value; it never returns a value.
 
 `agw secret verify NAME...` uses the same preview contract, deduplicates names in first-written
 order, and renders one value-free row per unique name. It exits 0 only when all are `available`.

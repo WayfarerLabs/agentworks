@@ -36,7 +36,11 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-def _shown(*, declaration: JsonObject | None = None) -> ResourceShow:
+def _shown(
+    *,
+    declaration: JsonObject | None = None,
+    diagnostics: tuple[HealthCheck, ...] = (),
+) -> ResourceShow:
     return ResourceShow(
         summary=ResourceSummary(
             kind="secret",
@@ -52,7 +56,7 @@ def _shown(*, declaration: JsonObject | None = None) -> ResourceShow:
         readiness=Readiness.blocked("backend unavailable"),
         relationships=FocusedRelationships((), ()),
         used_by=(),
-        diagnostics=(),
+        diagnostics=diagnostics,
         declaration=declaration,
     )
 

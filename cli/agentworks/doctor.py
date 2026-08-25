@@ -12,7 +12,7 @@ import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, assert_never
 
 from agentworks.path_rendering import format_host_path
 from agentworks.resources.access import ResourceIdentity
@@ -22,7 +22,6 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.machine_output import JsonObject
     from agentworks.resources.registry import Registry
-    from agentworks.secrets.base import SecretDecl
     from agentworks.secrets.preview import ResolutionPreview
     from agentworks.secrets.sources import SecretSourceDecl, SourceProvenance
     from agentworks.vms.admin import AdminConfig
@@ -247,19 +246,45 @@ def _secret_source_check(status: SecretSourceStatus) -> HealthCheck:
 
 def _secret_check(
     name: str,
-    decl: SecretDecl,
     preview: ResolutionPreview,
 ) -> HealthCheck:
     """Build one value-free secret resolution preview row."""
-    from agentworks.secrets.preview import PreviewStatus, preview_hint
-
-    auto = getattr(decl.origin, "variant", None) == "auto-declared"
-    label = f"Secret {name!r} (auto)" if auto else f"Secret {name!r}"
-    status = (
-        Status.OK
-        if preview.status is PreviewStatus.AVAILABLE
-        else (Status.FAIL if preview.status is PreviewStatus.FAILED else Status.WARN)
+    from agentworks.capabilities.secret_backend import (
+        IndeterminateReason,
+        PreviewAvailable,
+        PreviewBlocked,
+        PreviewFailed,
+        PreviewIndeterminate,
+        PreviewMissing,
     )
+    from agentworks.secrets.preview import AggregateNoCandidate, preview_hint
+
+    label = f"Secret {name!r}"
+    result = preview.result
+    if isinstance(result, PreviewIndeterminate):
+        if result.reason is IndeterminateReason.OPERATOR_INPUT_REQUIRED:
+            return HealthCheck(
+                label,
+                Status.OK,
+                "provided interactively when needed",
+                secret_preview=preview,
+            )
+        if result.reason is IndeterminateReason.OPERATOR_IMPACT_LIMITED:
+            return HealthCheck(
+                label,
+                Status.INFO,
+                f"availability not checked through {preview.source}",
+                secret_preview=preview,
+            )
+        assert_never(result.reason)
+    if isinstance(result, PreviewAvailable):
+        status = Status.OK
+    elif isinstance(result, (PreviewMissing, PreviewBlocked, AggregateNoCandidate)):
+        status = Status.WARN
+    elif isinstance(result, PreviewFailed):
+        status = Status.FAIL
+    else:
+        assert_never(result)
     reason = f"/{preview.reason}" if preview.reason is not None else ""
     return HealthCheck(
         label,
@@ -326,7 +351,7 @@ def checks_for_resource(
             tty_access=tty_access,
             interaction_broker=None,
         )[row.name]
-        check = _secret_check(identity.name, row, preview)
+        check = _secret_check(identity.name, preview)
     elif identity == ResourceIdentity("admin-template", "default"):
         from agentworks.vms.admin import AdminConfig
 
@@ -905,7 +930,7 @@ def _check_secrets(
         interaction_broker=None,
     )
     for name, decl in ordered:
-        g.checks.append(_secret_check(name, decl, previews[decl.name]))
+        g.checks.append(_secret_check(name, previews[decl.name]))
 
     return g
 

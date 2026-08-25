@@ -184,7 +184,11 @@ def test_secret_checks_use_only_explicit_tty_access(
     assert unavailable_row.secret_preview is not None
     assert available_row.secret_preview is not None
     assert unavailable_row.secret_preview.status is PreviewStatus.BLOCKED
+    assert unavailable_row.status is Status.WARN
     assert available_row.secret_preview.status is PreviewStatus.INDETERMINATE
+    assert available_row.secret_preview.reason == "operator-input-required"
+    assert available_row.status is Status.OK
+    assert available_row.hint is None
 
 
 def test_secret_checks_preview_the_sorted_declared_union_once(
@@ -223,10 +227,10 @@ def test_auto_declared_secrets_are_reported(tmp_path: Path, monkeypatch: pytest.
     so hiding them made doctor unable to predict the next command.
     A bare config still carries the framework-auto-declared
     ``tailscale-auth-key`` (vm-template requirement); it shows with an
-    ``(auto)`` marker and an honest would-resolve-via-prompt heads-up.
+    honest provider preview like every other secret.
     """
     # Hosts that operate real VMs export this; clear it so the
-    # would-resolve-via-prompt assertion reflects the bare config, not the
+    # provider outcome reflects the bare config, not the
     # test host's environment (mirrors the sibling tests' delenv discipline).
     monkeypatch.delenv("AW_SECRET_TAILSCALE_AUTH_KEY", raising=False)
     cfg = _write_config(tmp_path)

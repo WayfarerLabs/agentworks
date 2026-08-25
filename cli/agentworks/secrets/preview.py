@@ -5,12 +5,13 @@ from __future__ import annotations
 import concurrent.futures
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, assert_never, cast
 
 from agentworks.capabilities.secret_backend.client import (
     BackendPreview,
     BlockReason,
     FailureReason,
+    IndeterminateReason,
     InteractionBroker,
     OperatorImpact,
     PreviewAvailable,
@@ -187,13 +188,22 @@ def preview_hint(preview: ResolutionPreview, *, interaction_opt_in: bool) -> str
         return "available under the requested preview impact"
     if preview.status is PreviewStatus.MISSING:
         return "configure the value in this source or a later source"
+    if isinstance(preview.result, PreviewIndeterminate):
+        indeterminate_reason = preview.result.reason
+        if indeterminate_reason is IndeterminateReason.OPERATOR_IMPACT_LIMITED:
+            return (
+                "retry with --allow-interaction for a definitive preview"
+                if interaction_opt_in
+                else "broader operator impact could produce a definitive preview"
+            )
+        if indeterminate_reason is IndeterminateReason.OPERATOR_INPUT_REQUIRED:
+            return (
+                "retry with --allow-interaction to provide the secret"
+                if interaction_opt_in
+                else "the secret will be requested through terminal input when needed"
+            )
+        assert_never(indeterminate_reason)
     reason = preview.reason
-    if reason == "operator-impact-limited":
-        return (
-            "retry with --allow-interaction for a definitive preview"
-            if interaction_opt_in
-            else "broader operator impact could produce a definitive preview"
-        )
     if reason == BlockReason.TTY_UNAVAILABLE.value:
         return "run with usable terminal input or inspect a non-TTY source"
     if reason == BlockReason.TTY_INTERACTION_DISABLED.value:
