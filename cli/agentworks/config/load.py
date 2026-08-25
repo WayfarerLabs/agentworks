@@ -15,7 +15,7 @@ import sys
 import tomllib
 from typing import TYPE_CHECKING
 
-from agentworks.config.loaders_core import _load_defaults, _load_operator, _load_paths
+from agentworks.config.loaders_core import _load_defaults, _load_operator, _load_paths, _load_terminal
 from agentworks.config.loaders_database import _load_database_config
 from agentworks.config.loaders_secrets import _load_plugins, _load_secret_config
 from agentworks.config.loaders_sessions import _load_session_config
@@ -31,6 +31,7 @@ EXPECTED_TOP_LEVEL_KEYS = {
     "operator",
     "paths",
     "defaults",
+    "terminal",
     "database",
     "session",
     "secret_config",
@@ -152,6 +153,7 @@ def load_config(
         operator=_load_operator(data, issues, workload_gated_issues_fatal=workload_gated_issues_fatal),
         paths=_load_paths(data),
         defaults=_load_defaults(data),
+        terminal=_load_terminal(data, issues),
         source_path=config_path,
         session=session_config,
         database=_load_database_config(data),

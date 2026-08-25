@@ -40,6 +40,20 @@ class OperatorConfig:
 
 
 @dataclass(frozen=True)
+class TerminalConfig:
+    """Local terminal (workstation) behavior. A home for client-side terminal
+    preferences, distinct from the operator's SSH identity in ``[operator]``."""
+
+    # Whether to clear the local screen when a full-screen attach (session /
+    # console) detaches. "auto" (default) clears only on Windows, where the
+    # alt-screen cursor restore is unreliable (ConPTY + Windows Terminal leave
+    # the next prompt overwriting earlier lines); elsewhere it preserves.
+    # "always" / "never" force it regardless of platform. See
+    # agentworks.terminal.clear_screen_on_detach.
+    clear_on_detach: str = "auto"
+
+
+@dataclass(frozen=True)
 class PathsConfig:
     vm_workspaces: str = "/opt/agentworks/workspaces"
     vscode_workspaces: Path = field(default_factory=lambda: Path.home() / "aw-vscode-workspaces")
@@ -81,6 +95,8 @@ class Config:
     source_path: Path
     session: SessionConfig
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
+    # Local terminal (workstation) behavior; empty [terminal] uses the defaults.
+    terminal: TerminalConfig = field(default_factory=TerminalConfig)
     # config.toml is settings only now (ADR 0022): every resource is a YAML
     # manifest, so Config carries no resource dicts. Resources are read from
     # the registry (built from the bundled + operator manifests), never from

@@ -76,6 +76,36 @@ def test_load_valid_config(config_dir: Path) -> None:
     assert load_config(config_dir).database.auto_backup_before_migration is True
 
 
+def test_clear_on_detach_defaults_to_auto_when_section_absent() -> None:
+    from agentworks.config.loaders_core import _load_terminal
+
+    assert _load_terminal({}, []).clear_on_detach == "auto"
+
+
+@pytest.mark.parametrize("value", ["auto", "always", "never"])
+def test_clear_on_detach_accepts_valid_values(value: str) -> None:
+    from agentworks.config.loaders_core import _load_terminal
+
+    assert _load_terminal({"terminal": {"clear_on_detach": value}}, []).clear_on_detach == value
+
+
+def test_clear_on_detach_rejects_unknown_value() -> None:
+    from agentworks.config.loaders_core import _load_terminal
+
+    with pytest.raises(ConfigError, match="clear_on_detach must be one of"):
+        _load_terminal({"terminal": {"clear_on_detach": "sometimes"}}, [])
+
+
+def test_terminal_unknown_key_is_a_soft_issue() -> None:
+    """Unknown keys in [terminal] warn (soft issue), matching the other
+    settings sections, rather than hard-failing."""
+    from agentworks.config.loaders_core import _load_terminal
+
+    issues: list[str] = []
+    _load_terminal({"terminal": {"bogus": 1}}, issues)
+    assert any("terminal" in issue for issue in issues)
+
+
 def test_database_config_is_strict_and_focused(tmp_path: Path) -> None:
     config_path = tmp_path / "config.toml"
     config_path.write_text(

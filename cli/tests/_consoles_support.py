@@ -70,6 +70,12 @@ class _StubAdminConfig:
     env: dict[str, object] = {}  # noqa: RUF012 - stub class attr
 
 
+class _StubTerminalConfig:
+    # Only the field the attach path reads (clear_on_detach policy); "auto"
+    # resolves to preserve off-Windows, matching the suite's default platform.
+    clear_on_detach: str = "auto"
+
+
 class _StubConfig:
     """A no-op Config stand-in.
 
@@ -95,6 +101,7 @@ class _StubConfig:
     workspace_templates: dict[str, object] = {}  # noqa: RUF012
     session_templates: dict[str, object] = {}  # noqa: RUF012
     admin: _StubAdminConfig = _StubAdminConfig()
+    terminal: _StubTerminalConfig = _StubTerminalConfig()
 
 
 class _StubVerticalLayoutConfig(_StubConfig):

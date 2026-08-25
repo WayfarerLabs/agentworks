@@ -29,7 +29,11 @@ import pytest
 
 from agentworks.terminal import (
     MOUSE_TRACKING_DISABLE,
+    TERMINAL_CLEAR,
     TERMINAL_SANITIZE,
+    TERMINAL_SANITIZE_CLEAN_EXIT,
+    clear_screen_on_detach,
+    emit_clear,
     guarded_terminal,
 )
 
@@ -148,6 +152,89 @@ def test_sanitize_does_not_hard_reset() -> None:
 
 
 # ---------------------------------------------------------------------------
+# the clean-exit sanitize variant
+# ---------------------------------------------------------------------------
+
+# The alt-screen buffer switches: the only sanitize sequences that move the
+# cursor, and the ones the clean-exit variant drops.
+_ALT_SCREEN_SWITCHES = ("\x1b[?47l", "\x1b[?1047l", "\x1b[?1049l")
+
+
+@pytest.mark.parametrize("switch", _ALT_SCREEN_SWITCHES)
+def test_clean_exit_variant_omits_the_alt_screen_switches(switch: str) -> None:
+    """A clean detach already left the alt screen; re-sending the switches
+    is redundant on a spec terminal and, on Windows Terminal, `?1049l`
+    restores a saved cursor and jerks the next prompt up. The clean-exit
+    payload drops them (while the full payload keeps them)."""
+    assert switch in TERMINAL_SANITIZE
+    assert switch not in TERMINAL_SANITIZE_CLEAN_EXIT
+
+
+@pytest.mark.parametrize(
+    ("escape", "what"),
+    [
+        (MOUSE_TRACKING_DISABLE, "the mouse reset"),
+        ("\x1b[?2004l", "bracketed paste"),
+        ("\x1b7", "the DECSC cursor save"),
+        ("\x1b8", "the DECRC cursor restore"),
+        ("\x1b[?25h", "cursor visibility"),
+        ("\x1b[0m", "colors and attributes"),
+    ],
+)
+def test_clean_exit_variant_keeps_the_cursor_safe_resets(escape: str, what: str) -> None:
+    """Dropping the alt-screen switches must not drop the idempotent,
+    cursor-safe resets: they still run on a clean exit."""
+    assert escape in TERMINAL_SANITIZE_CLEAN_EXIT, f"clean-exit payload dropped {what}"
+
+
+# ---------------------------------------------------------------------------
+# the detach clear (untrusted-terminal fallback)
+# ---------------------------------------------------------------------------
+
+
+def test_clear_homes_and_clears_but_keeps_scrollback() -> None:
+    """The detach clear homes the cursor and clears the visible screen, but
+    must NOT send `\x1b[3J`: that drops the scrollback buffer the operator can
+    still scroll back to after a clear."""
+    assert "\x1b[H" in TERMINAL_CLEAR
+    assert "\x1b[2J" in TERMINAL_CLEAR
+    assert "\x1b[3J" not in TERMINAL_CLEAR
+
+
+@pytest.mark.parametrize(
+    ("setting", "platform", "expected"),
+    [
+        ("always", "linux", True),
+        ("always", "win32", True),
+        ("never", "linux", False),
+        ("never", "win32", False),
+        # auto is the only platform-sensitive value: Windows clears, others preserve.
+        ("auto", "win32", True),
+        ("auto", "linux", False),
+        ("auto", "darwin", False),
+    ],
+)
+def test_clear_screen_on_detach_policy(
+    monkeypatch: pytest.MonkeyPatch, setting: str, platform: str, expected: bool
+) -> None:
+    monkeypatch.setattr("sys.platform", platform)
+    assert clear_screen_on_detach(setting) is expected
+
+
+def test_emit_clear_writes_the_clear_when_stdout_is_a_tty(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _install_stdout(monkeypatch)
+    emit_clear()
+    assert fake.getvalue() == TERMINAL_CLEAR
+
+
+def test_emit_clear_is_silent_when_stdout_is_not_a_tty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Same tty gate as the sanitize path: no escapes into a redirected stream."""
+    fake = _install_stdout(monkeypatch, tty=False)
+    emit_clear()
+    assert fake.getvalue() == ""
+
+
+# ---------------------------------------------------------------------------
 # guarded_terminal(): the escape half
 # ---------------------------------------------------------------------------
 
@@ -161,6 +248,30 @@ def test_guard_sanitizes_on_entry_and_on_exit(monkeypatch: pytest.MonkeyPatch) -
     with guarded_terminal():
         fake.write("body")
     assert fake.getvalue() == TERMINAL_SANITIZE + "body" + TERMINAL_SANITIZE
+
+
+def test_guard_uses_the_clean_variant_when_the_body_reports_a_clean_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Entry always emits the full reset (prior state unknown); a body that
+    sets clean_exit selects the alt-screen-free variant for the exit pass,
+    so the cursor is not jerked after a clean detach."""
+    fake = _install_stdout(monkeypatch)
+    with guarded_terminal() as guard:
+        guard.clean_exit = True
+    assert fake.getvalue() == TERMINAL_SANITIZE + TERMINAL_SANITIZE_CLEAN_EXIT
+
+
+def test_guard_defaults_to_the_full_reset_when_the_body_says_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A body that never sets clean_exit (or one that raised) is treated as
+    a drop: the exit pass keeps the alt-screen switches, since a drop is the
+    case that most needs them."""
+    fake = _install_stdout(monkeypatch)
+    with guarded_terminal():
+        pass
+    assert fake.getvalue() == TERMINAL_SANITIZE * 2
 
 
 def test_guard_sanitizes_when_the_body_raises(monkeypatch: pytest.MonkeyPatch) -> None:

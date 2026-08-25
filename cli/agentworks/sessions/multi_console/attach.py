@@ -554,8 +554,15 @@ def attach_console(
         else:
             output.info(f"Attaching to running console '{name}'.")
 
+        from agentworks.terminal import clear_screen_on_detach
+
         tmux_name = tmux_session_name(name)
-        return target.interactive(f"tmux attach -t {shlex.quote(tmux_name)}")
+        # A console attach is a full-screen tmux; clear the local screen on
+        # detach where we don't trust the terminal to restore cleanly.
+        return target.interactive(
+            f"tmux attach -t {shlex.quote(tmux_name)}",
+            clear_screen_on_exit=clear_screen_on_detach(config.terminal.clear_on_detach),
+        )
 
 
 def delete_console(

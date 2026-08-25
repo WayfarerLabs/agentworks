@@ -413,7 +413,7 @@ def test_dropped_connection_notice_is_written_after_the_terminal_guard(
     from agentworks import terminal
 
     events: list[str] = []
-    monkeypatch.setattr(terminal, "_emit_sanitize", lambda: events.append("sanitize"))
+    monkeypatch.setattr(terminal, "_emit_to_terminal", lambda _payload: events.append("sanitize"))
     monkeypatch.setattr(
         "agentworks.output.warn",
         lambda message: events.append(f"warn:{message}"),

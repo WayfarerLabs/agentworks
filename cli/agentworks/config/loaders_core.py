@@ -23,11 +23,12 @@ from __future__ import annotations
 import ipaddress
 from pathlib import Path
 
-from agentworks.config.models import DefaultsConfig, OperatorConfig, PathsConfig
+from agentworks.config.models import DefaultsConfig, OperatorConfig, PathsConfig, TerminalConfig
 from agentworks.config.validation import validate_vm_workspaces
 from agentworks.errors import ConfigError
 from agentworks.naming import SSH_HOST_PREFIX_RE
 from agentworks.path_rendering import format_host_path
+from agentworks.terminal import CLEAR_ON_DETACH_CHOICES
 
 
 def _expand(path_str: str) -> Path:
@@ -97,6 +98,8 @@ _OPERATOR_KEYS = {
     "extra_ssh_public_keys",
     "ssh_allow_cidrs",
 }
+
+_TERMINAL_KEYS = {"clear_on_detach"}
 
 _SSH_KEY_HINT = "Point it at a key you already use, or create one with `ssh-keygen -t ed25519`."
 """Remedy for the missing-key errors below.
@@ -214,6 +217,29 @@ def _load_operator(
         extra_ssh_public_keys=extra_keys,
         ssh_allow_cidrs=allow_cidrs,
     )
+
+
+def _load_terminal(data: dict[str, object], issues: list[str]) -> TerminalConfig:
+    """Load ``[terminal]``: local (workstation) terminal behavior.
+
+    Absent section uses the defaults. The section is optional and shape-only
+    (no workload-gated checks), so an unknown key is a soft issue, matching the
+    other settings sections.
+    """
+    raw = data.get("terminal")
+    if raw is None:
+        return TerminalConfig()
+    if not isinstance(raw, dict):
+        raise ConfigError("[terminal] section must be a table")
+
+    _warn_unexpected_keys(raw, _TERMINAL_KEYS, "terminal", issues)
+
+    clear_on_detach = str(raw.get("clear_on_detach", "auto"))
+    if clear_on_detach not in CLEAR_ON_DETACH_CHOICES:
+        choices = ", ".join(CLEAR_ON_DETACH_CHOICES)
+        raise ConfigError(f"terminal.clear_on_detach must be one of: {choices}; got: {clear_on_detach!r}")
+
+    return TerminalConfig(clear_on_detach=clear_on_detach)
 
 
 def _load_paths(data: dict[str, object]) -> PathsConfig:

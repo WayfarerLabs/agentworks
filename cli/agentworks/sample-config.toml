@@ -53,6 +53,20 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #    "198.51.100.0/24",
 #]
 
+# --- Local terminal behavior ---
+
+[terminal]
+# Whether to clear your local screen when a full-screen attach (session or
+# console) detaches. "auto" (default) clears only on Windows, where the
+# alternate-screen cursor restore is unreliable (ConPTY + Windows Terminal
+# leave the next prompt overwriting earlier lines); everywhere else it
+# preserves your scrollback and cursor. "always" clears on every platform;
+# "never" keeps the screen everywhere (on Windows Terminal a nested console
+# detach may then still show the cursor glitch the clear works around).
+# Clearing keeps scrollback (scroll up to see prior history); the attached
+# session's own output is on the alternate screen and is gone on detach either way.
+#clear_on_detach = "auto"                    # auto | always | never
+
 # --- Paths ---
 
 [paths]
