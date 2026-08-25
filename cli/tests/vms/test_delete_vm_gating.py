@@ -164,10 +164,15 @@ def test_delete_skips_workspace_artifacts_outside_the_managed_directory(
     # A direct DB insert models legacy or corrupt persisted state that bypassed
     # the workspace manager's write-time name validation.
     db.insert_workspace("../sentinel", "/srv/corrupt", "dvm", "ws-corrupt")
+    db.insert_workspace("../vscode/untouched", "/srv/reentry", "dvm", "ws-reentry")
+    db.insert_vm("other", site="proxmox", hostname="other")
+    db.insert_workspace("untouched", "/srv/untouched", "other", "ws-untouched")
     vscode_dir = tmp_path / "vscode"
     vscode_dir.mkdir()
     sentinel = tmp_path / "sentinel.code-workspace"
     sentinel.write_text("outside")
+    other_artifact = vscode_dir / "untouched.code-workspace"
+    other_artifact.write_text("other")
     config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir}"\n')
     _fake_backend(monkeypatch)
     monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
@@ -175,7 +180,35 @@ def test_delete_skips_workspace_artifacts_outside_the_managed_directory(
     vm_manager.delete_vm(db, config, "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert sentinel.read_text() == "outside"
+    assert other_artifact.read_text() == "other"
     assert captured_output.warnings
+    assert db.get_vm("dvm") is None
+    assert db.get_workspace("untouched") is not None
+
+
+def test_delete_unlinks_an_in_directory_symlink_without_touching_its_referent(
+    db: Database,
+    tmp_path: Path,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    _seed(db)
+    db.insert_workspace("linked", "/srv/linked", "dvm", "ws-linked")
+    vscode_dir = tmp_path / "vscode"
+    vscode_dir.mkdir()
+    referent = tmp_path / "outside.code-workspace"
+    referent.write_text("outside")
+    artifact = vscode_dir / "linked.code-workspace"
+    artifact.symlink_to(referent)
+    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir}"\n')
+    _fake_backend(monkeypatch)
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
+
+    vm_manager.delete_vm(db, config, "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert not artifact.is_symlink()
+    assert referent.read_text() == "outside"
     assert db.get_vm("dvm") is None
 
 

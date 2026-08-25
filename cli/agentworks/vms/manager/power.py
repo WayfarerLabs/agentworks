@@ -291,10 +291,10 @@ def delete_vm(
         output.info(f"Cleaned up {len(vm_logs)} log(s)")
 
     for workspace in db.list_workspaces(vm_name=name):
-        vscode_root = config.paths.vscode_workspaces.resolve()
-        vscode_path = config.paths.vscode_workspaces / f"{workspace.name}.code-workspace"
-        if not vscode_path.resolve().is_relative_to(vscode_root):
-            output.warn("skipping VS Code workspace artifact outside the configured directory")
+        vscode_root = config.paths.vscode_workspaces
+        vscode_path = vscode_root / f"{workspace.name}.code-workspace"
+        if vscode_path.parent != vscode_root:
+            output.warn("skipping VS Code workspace artifact that is not a direct child of the configured directory")
             continue
         vscode_path.unlink(missing_ok=True)
 
