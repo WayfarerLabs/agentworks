@@ -34,8 +34,8 @@ PLUGIN = Plugin(
 Fields:
 
 - **`name`** (required): the plugin's identity. It uses lowercase ASCII letters, digits, and
-  hyphens, with a letter at each end. It is the name an operator writes in `[plugins].system` and
-  the name the surfaces attribute rows to (`from plugin example-cloud`).
+  hyphens, starts with a letter, and ends with a letter or digit. It is the name an operator writes
+  in `[plugins].system` and the name the surfaces attribute rows to (`from plugin example-cloud`).
 - **`description`**: shown in the doctor roster.
 - **`capabilities`**: a mapping keyed by capability kind, each value a tuple of impl **classes**.
   Every capability registry stores that exact class under its `name`; registration, graph

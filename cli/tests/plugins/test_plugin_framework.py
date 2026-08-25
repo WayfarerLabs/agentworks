@@ -92,7 +92,7 @@ def test_capabilities_normalized_to_immutable_mapping_of_tuples() -> None:
 # ``capabilities={"not-a-kind": ...}`` between them cover both halves.
 
 
-@pytest.mark.parametrize("valid_name", ["a", "plugin", "plugin-name", "plugin2name", "plugin--name"])
+@pytest.mark.parametrize("valid_name", ["a", "a1", "plugin", "plugin-name", "plugin2name", "plugin--name"])
 def test_accepts_valid_plugin_name(valid_name: str) -> None:
     register_plugin(Plugin(name=valid_name))
 
@@ -102,7 +102,6 @@ def test_accepts_valid_plugin_name(valid_name: str) -> None:
     [
         "",
         "1plugin",
-        "plugin1",
         "-plugin",
         "plugin-",
         "has/slash",
