@@ -239,6 +239,35 @@ def test_delete_skips_an_absolute_workspace_name_targeting_another_vm_artifact(
     assert captured_output.warnings
 
 
+def test_delete_skips_a_trailing_separator_through_a_directory_symlink(
+    db: Database,
+    tmp_path: Path,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    _seed(db)
+    db.insert_workspace("link/", "/srv/corrupt", "dvm", "ws-corrupt")
+    vscode_dir = tmp_path / "vscode"
+    vscode_dir.mkdir()
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir()
+    outside_artifact = outside_dir / ".code-workspace"
+    outside_artifact.write_text("outside")
+    directory_link = vscode_dir / "link"
+    directory_link.symlink_to(outside_dir, target_is_directory=True)
+    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir}"\n')
+    _fake_backend(monkeypatch)
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
+
+    vm_manager.delete_vm(db, config, "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert outside_artifact.read_text() == "outside"
+    assert directory_link.is_symlink()
+    assert db.get_vm("dvm") is None
+    assert captured_output.warnings
+
+
 def test_hold_failure_does_not_skip_delete(
     db: Database,
     make_config,  # noqa: ANN001
