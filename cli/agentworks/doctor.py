@@ -273,7 +273,7 @@ def _secret_check(
             return HealthCheck(
                 label,
                 Status.INFO,
-                f"availability not checked through {preview.source}",
+                f"mapped to {preview.source} (availability not checked)",
                 secret_preview=preview,
             )
         assert_never(result.reason)
