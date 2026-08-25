@@ -1,7 +1,7 @@
 # Target State
 
 - Status: North star, accumulating settled rulings
-- Last updated: 2026-08-21
+- Last updated: 2026-08-24
 
 This document describes where Agentworks is going across this saga effort, synthesized from the
 perspectives in `inputs/`. It is the target of these waves, not a forever vision: when
@@ -324,6 +324,29 @@ assessment-first, and the repository layer is "something in that direction, not 
 is judged by the queries its consumers actually make, never by generality. Seeded as the
 `2026-08-19-instance-model` child, which walks through the four open doors above rather than
 reopening them; its store contract is what wave 4's applied-state slice depends on.
+
+**Doctor's treatment of an indeterminate secret preview (open operator decision, 2026-08-24):** the
+`2026-08-18-secret-preview-contract` lock maps `indeterminate` to WARN, stated in that SDD's
+`operator-surfaces-lld.md` and pinned by a checked plan deliverable. PR #644 proposes OK with the
+hint suppressed, on the reasoning that doctor deliberately declines operator interaction so
+uncertainty caused solely by that ceiling is expected health, and a warning nobody can clear teaches
+operators to ignore warnings. The lock is in force and no amendment is recorded, so the reversal
+needs the operator's ruling; `check-locked-sdds.sh` structurally cannot catch this shape, because it
+guards edits _to_ locked artifacts rather than code contradicting one, and its green must not be
+read as coverage.
+
+The merits are separately unresolved, and the saga lead's finding is that the flat mapping cannot
+express what is needed: `prompt` returns `indeterminate` only after ruling out a block, so a TTY
+genuinely exists and OK is honest, while `onepassword` returns it _before attempting any read_
+whenever impact is `NONE`, app authentication is `operator-action`, and no unattended mode is
+ambiently detectable; with a service-account or Connect configuration it proceeds to a real read.
+Both emit the same reason code, so OK for the second reports health for a secret nothing ever
+checked. Recommended shape if the operator reopens the decision: split `IndeterminateReason`, today
+a closed core-owned enum with one member, so "would ask at command time" and "declined to look" are
+distinct; the prompt case becomes a clean OK and the provider case keeps its actionable hint. That
+resolution would also remove the need for the generic doctor-notes mechanism #644's later round
+added to convey what suppressing the hint had hidden, which is why display machinery should wait on
+the ruling rather than accrete ahead of it.
 
 ### Harness scopes (destination 4)
 

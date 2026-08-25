@@ -1,6 +1,6 @@
 # Current State
 
-- Snapshot date: 2026-08-19, post-0.14.0 (update at wave boundaries)
+- Snapshot date: 2026-08-24, post-0.14.1 with 0.15.0 cut and pending (update at wave boundaries)
 - Baseline: released Agentworks 0.14.0 (2026-08-18, live on PyPI; see `phasing.md`'s release map for
   the cut's trail) plus post-release `main`. The release itself carries everything the previous
   baseline enumerated (the phase 1 TOML sunset, the 0.14 expired-compat removals, declarative-schema
@@ -9,6 +9,22 @@
   grammar rewrite and the resource-show child. The 0.14.0 field-evidence fixes (PRs #604 through
   #607) shipped as patch release 0.14.1 (2026-08-19, live on PyPI; the `Release-As` override
   reframed release-please's minor bump, PR #617)
+- 0.15.0 is cut but **not yet released**: the release PR (#630) is open and has been waiting on the
+  secret-preview and doctor work. Its changelog carries a hand-applied operator callout pointing at
+  `docs/guides/upgrading-to-0.15.md`, which release-please destroys whenever it rewrites the release
+  branch. Verified 2026-08-24 across four merges: the bot rewrites that branch only when a merge
+  changes what it would generate, so `docs`, `chore`, and `test` merges and anything outside the
+  `cli/` component leave the callout intact, and only a `feat`, `fix`, or breaking commit under
+  `cli/` wipes it. The durable fix is to carry operator-facing text in a commit footer, which is
+  generated content, written as a single unbroken paragraph because the trailer parser stops at a
+  continuation line beginning `word:` and fragments on blank lines (this truncated the 0.14.0 entry,
+  issue #589). The published GitHub Release body is editable and is not regenerated once the release
+  exists, so it is the fallback for correcting notes after a cut. Two entries are duplicated in the
+  0.15.0 notes because we merge with merge commits whose GitHub-default body repeats the PR title
+  while release-please parses merge bodies expecting a squash workflow; there is no config switch
+  for this (the schema's only `merge` key concerns combining release PRs), so the remedy is either
+  squash-merging, which would destroy the always-green phased commits inside one PR that this repo
+  deliberately uses, or correcting the published Release body
 
 This document records where the system actually is, verified by code reconnaissance rather than
 assumed from the perspectives. It is the ground truth the phasing rests on; when a wave lands,

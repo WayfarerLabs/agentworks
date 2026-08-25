@@ -282,8 +282,21 @@ item shrinks to a verification sweep.
       independently re-derived the rebuilt map (1,215 rows, the 664-site estate owned once with none
       unowned or double-owned, and the 117-row subtraction reconciling in both directions), the
       post-#573 charter items are discharged, and a screen script that dies with the SDD now backs
-      the accounting. The integration lane's order-dependent-verdict blocker was taken and fixed.
-      Group 1 unblocks at merge
+      the accounting. Group 1 unblocks at merge
+- [ ] **Both PRs are stalled on live blockers, and this entry previously recorded the first as
+      fixed. It is not.** The saga lead reproduced it on 2026-08-24 at #625's head `88343757`, four
+      days after it was raised: `sweep-screen.py` adds a function to `seen` keyed on identity before
+      the depth gate and pops depth-first, so a function first reached at `MAX_DEPTH` is marked
+      permanently visited and never re-expanded when it later becomes reachable more shallowly.
+      Running the committed script unmodified at two bounds flips three sites between
+      `multi-handle-discriminates` and `single-raise-path`, which is exactly the distinction
+      deciding whether a `match=` can be dropped, so the verdicts are order-dependent rather than
+      conservative. Fix shape: make the frontier breadth-first so first arrival is shallowest, then
+      re-derive the numbers. #626 carries a smaller one, a `findings.md` citation naming principle
+      14 for rules it does not restate; cite by name rather than number, per #624
+- [ ] **Open operator decision:** the sweep was re-scoped around the live efforts after this pair
+      was raised, so whether #625 and #626 are still the right vehicle or are superseded by the
+      restart is unresolved. No lane should spend a re-derivation that a re-scope may discard
 - [ ] Reassessment delivered; surviving findings proposed individually or dropped
 - [ ] Locked
 
@@ -489,6 +502,26 @@ tracked by the open boxes below until each has a delivered recipient-side artifa
       now cleans up records inside one transaction, closing the torn-write gap R1 identified. Ruling
       recorded: the `instance_kind` CHECK stays closed, since a future one-line widening is the
       correct cost rather than loosening a live invariant for a consumer with no requirements
+- [x] That acceptance was **withdrawn and then restored**, and the arc is the useful record.
+      `replace_applied_slices` took `Mapping[str, VersionedPayload]` with only a non-empty key
+      check, so a closed method roster still fronted an open key space and the cheapest path for the
+      next consumer was the unsanctioned one. Closed at head `81f76093` by a closed
+      `AppliedStateKey` plus a per-owner-kind matrix enforced on writes _and_ on persisted reads, so
+      a row predating the change or edited by hand cannot decode into a valid slice. The runtime
+      `isinstance` guard is load-bearing and must not be read as redundant type re-validation:
+      `StrEnum` members hash and compare as their string values, so a raw string passes a
+      `frozenset` membership test outright. The exposure is boundary durability rather than data
+      integrity, since a literal spelling a valid key writes an identical row, but if literals work
+      the enum is optional in practice
+- [x] Forward-compatibility ruling (saga lead, 2026-08-24, accepted by the effort lead): an unknown
+      but well-formed applied key is **data this older release does not consume, not corruption**.
+      Reads skip it, partial replacement already preserves it, and no repair hint is emitted. Known
+      keys on invalid owner kinds and malformed envelopes remain errors. Rejected the alternative of
+      requiring a `schema_version` bump per key addition: that version means "not safe for older
+      code to read", additive evidence is not that, and spending a migration on every key trains
+      reflexive bumps until the signal stops meaning anything. The ruling depends on partial
+      replacement continuing to preserve unrelated facts, and the permanent contract must state that
+      dependency
 - [ ] Correction round on the assessment before it becomes the factual base: the integration lane
       found that `insert_vm` already persists resolved cpus, memory, and disk and nothing rewrites
       them, so the VM hardware slice is applied state on the row today. R3 must decide whether its
@@ -530,6 +563,14 @@ tracked by the open boxes below until each has a delivered recipient-side artifa
       the gap is that a future refactor of that loop can break it silently, in the case where the
       cost is an already-fetched secret value. Whoever next touches `secrets/resolve.py`'s batch
       loop should add it
+- [ ] Convention worth writing down rather than fixing twice by coincidence (observed 2026-08-24):
+      two unrelated PRs produced the same defect shape within an afternoon, an enum-keyed `dict` or
+      `frozenset` used as a closed mapping whose totality is not type-enforced, so a future enum
+      member yields a bare `KeyError` from a path whose contract says it raises something else
+      (#636's `_APPLIED_KEYS_BY_KIND`, #644's doctor status mapping). `match` plus
+      `typing.assert_never` gets the exhaustiveness checked by mypy instead of at runtime and is
+      already this codebase's pattern, in `machine_output.py` and `resources/show.py`. Needs an
+      owner to decide whether it belongs in a rule or in the development principles
 
 ### Not yet spawned
 
