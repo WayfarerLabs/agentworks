@@ -1,4 +1,4 @@
-"""Azure identifiers and the AWS access-key ID reject blanks without trimming."""
+"""Selected Azure fields and the AWS access-key ID reject blanks without trimming."""
 
 from __future__ import annotations
 
