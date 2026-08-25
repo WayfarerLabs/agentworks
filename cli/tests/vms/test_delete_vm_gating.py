@@ -268,6 +268,33 @@ def test_delete_skips_a_trailing_separator_through_a_directory_symlink(
     assert captured_output.warnings
 
 
+def test_delete_skips_a_dot_prefixed_name_targeting_another_vm_artifact(
+    db: Database,
+    tmp_path: Path,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    _seed(db)
+    db.insert_workspace("./untouched", "/srv/corrupt", "dvm", "ws-corrupt")
+    db.insert_vm("other", site="proxmox", hostname="other")
+    db.insert_workspace("untouched", "/srv/untouched", "other", "ws-untouched")
+    vscode_dir = tmp_path / "vscode"
+    vscode_dir.mkdir()
+    other_artifact = vscode_dir / "untouched.code-workspace"
+    other_artifact.write_text("other")
+    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir}"\n')
+    _fake_backend(monkeypatch)
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
+
+    vm_manager.delete_vm(db, config, "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert other_artifact.read_text() == "other"
+    assert db.get_workspace("untouched") is not None
+    assert db.get_vm("dvm") is None
+    assert captured_output.warnings
+
+
 def test_hold_failure_does_not_skip_delete(
     db: Database,
     make_config,  # noqa: ANN001

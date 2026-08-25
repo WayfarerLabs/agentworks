@@ -295,7 +295,7 @@ def delete_vm(
         artifact_name = f"{workspace.name}.code-workspace"
         artifact_component = Path(artifact_name)
         # An anchor also rejects Windows drive-relative paths such as C:foo.
-        if artifact_component.anchor or len(artifact_component.parts) != 1:
+        if artifact_component.anchor or artifact_component.parts != (artifact_name,):
             output.warn("skipping VS Code workspace artifact that is not a direct child of the configured directory")
             continue
         vscode_root = config.paths.vscode_workspaces
