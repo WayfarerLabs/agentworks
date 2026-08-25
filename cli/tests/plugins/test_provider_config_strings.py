@@ -1,4 +1,4 @@
-"""Provider identifiers share literal, non-blank validation."""
+"""Azure identifiers and the AWS access-key ID reject blanks without trimming."""
 
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ def _with_value(config: Mapping[str, object], path: tuple[str, ...], value: str)
 
 @pytest.mark.parametrize(("model", "config", "path"), _IDENTIFIERS)
 @pytest.mark.parametrize("invalid", ["", " \t\n"], ids=["empty", "whitespace-only"])
-def test_required_provider_identifiers_reject_blank_values(
+def test_selected_azure_fields_and_aws_access_key_id_reject_blanks(
     model: type[AgwModel],
     config: Mapping[str, object],
     path: tuple[str, ...],
@@ -71,7 +71,7 @@ def test_required_provider_identifiers_reject_blank_values(
 
 
 @pytest.mark.parametrize(("model", "config", "path"), _IDENTIFIERS)
-def test_required_provider_identifiers_preserve_literal_values(
+def test_selected_azure_fields_and_aws_access_key_id_preserve_literals(
     model: type[AgwModel],
     config: Mapping[str, object],
     path: tuple[str, ...],
