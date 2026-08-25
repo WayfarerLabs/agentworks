@@ -9,8 +9,6 @@
     --shell: #262522;
     --shell-ink: #f7f5ef;
     --shell-muted: #c9c5ba;
-    --hot: #f7ded5;
-    --status: #7de2c5;
     color: var(--ink);
     background: var(--canvas);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
