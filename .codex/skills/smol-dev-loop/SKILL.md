@@ -80,11 +80,14 @@ session harness, but never reconstruct the authenticated direction reference or 
 GitHub. Recover those only from the authenticated channel or its session harness; if unavailable,
 preserve the work, pause, and request direction. Never commit runtime ledger state.
 
-`smol-dev` is a discovery hint only; its absence never blocks named or blessed work. Delivery owns
-`awaiting-direction`. Do not create or alter labels without authenticated authorization. If delivery
-requires `awaiting-direction` but the label is absent or outside the mutation bounds, report the
-failure and request direction or repository configuration rather than substituting ledger state.
-Only fresh authenticated operator direction resumes or requeues paused work.
+On issues, `smol-dev` is a discovery hint only; its absence never blocks named or blessed work.
+Every pull request this loop creates carries the existing `smol-dev` label, applied when the pull
+request is opened. The pull request label identifies the process that created the output; it does
+not bless or select issue work. Delivery owns `awaiting-direction`. Do not create a missing label or
+make any other label change outside the recorded mutation bounds without separate authenticated
+authorization. If a required label is absent or outside the mutation bounds, report the failure and
+request direction or repository configuration rather than substituting ledger state. Only fresh
+authenticated operator direction resumes or requeues paused work.
 
 Reconcile orphaned claims before intake. Reconstruct their ledger state and replace a lost developer
 in the recorded worktree from the recovery handoff. When ownership or recovery evidence is
