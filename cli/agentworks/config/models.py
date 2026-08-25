@@ -18,6 +18,7 @@ from agentworks.source_location import SourceLocation
 
 if TYPE_CHECKING:
     from agentworks.resources.registry import Registry
+    from agentworks.terminal import ClearOnDetach
 
 # -- Data classes ----------------------------------------------------------
 
@@ -37,6 +38,20 @@ class OperatorConfig:
     # whose SSH traffic egresses somewhere detection cannot see (VPN
     # split tunnels, proxies, CGNAT).
     ssh_allow_cidrs: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class TerminalConfig:
+    """Local terminal (workstation) behavior. A home for client-side terminal
+    preferences, distinct from the operator's SSH identity in ``[operator]``."""
+
+    # Whether to clear the local screen when a full-screen attach (session /
+    # console) detaches. "auto" (default) clears only on Windows, where the
+    # alt-screen cursor restore is unreliable (ConPTY + Windows Terminal leave
+    # the next prompt overwriting earlier lines); elsewhere it preserves.
+    # "always" / "never" force it regardless of platform. See
+    # agentworks.terminal.clear_screen_on_detach.
+    clear_on_detach: ClearOnDetach = "auto"
 
 
 @dataclass(frozen=True)
@@ -81,6 +96,8 @@ class Config:
     source_path: Path
     session: SessionConfig
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
+    # Local terminal (workstation) behavior; empty [terminal] uses the defaults.
+    terminal: TerminalConfig = field(default_factory=TerminalConfig)
     # config.toml is settings only now (ADR 0022): every resource is a YAML
     # manifest, so Config carries no resource dicts. Resources are read from
     # the registry (built from the bundled + operator manifests), never from

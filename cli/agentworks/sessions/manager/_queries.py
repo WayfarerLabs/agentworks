@@ -742,5 +742,12 @@ def attach_session(
                 entity_name=name,
             )
 
+        from agentworks.terminal import clear_screen_on_detach
+
         q_session = shlex.quote(name)
-        return target.interactive(tmux_cmd(f"attach -t {q_session}", session.socket_path))
+        # A session attach is a full-screen tmux; clear the local screen on
+        # detach where we don't trust the terminal to restore cleanly.
+        return target.interactive(
+            tmux_cmd(f"attach -t {q_session}", session.socket_path),
+            clear_screen_on_exit=clear_screen_on_detach(config.terminal.clear_on_detach),
+        )

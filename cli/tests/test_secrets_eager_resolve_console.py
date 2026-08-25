@@ -201,6 +201,7 @@ def test_attach_console_build_path_eager_resolves_before_tmux(
 
     config = SimpleNamespace(
         named_console=SimpleNamespace(tmux_layout="aw-session-vertical"),
+        terminal=SimpleNamespace(clear_on_detach="auto"),
     )
 
     monkeypatch.delenv("TMUX", raising=False)
@@ -319,6 +320,7 @@ def test_attach_console_existing_tmux_session_skips_eager_resolve(
 
     config = SimpleNamespace(
         named_console=SimpleNamespace(tmux_layout="aw-session-vertical"),
+        terminal=SimpleNamespace(clear_on_detach="auto"),
     )
 
     monkeypatch.delenv("TMUX", raising=False)
@@ -382,6 +384,7 @@ def test_console_add_sessions_does_not_eager_resolve_live_branch(
 
     config = SimpleNamespace(
         named_console=SimpleNamespace(tmux_layout="aw-session-vertical"),
+        terminal=SimpleNamespace(clear_on_detach="auto"),
     )
     multi_console.add_sessions(
         db,
@@ -466,6 +469,7 @@ def test_console_add_sessions_with_shells_eager_resolves(
 
     config = SimpleNamespace(
         named_console=SimpleNamespace(tmux_layout="aw-session-vertical"),
+        terminal=SimpleNamespace(clear_on_detach="auto"),
     )
 
     with pytest.raises(SecretUnavailableError, match="api-key"):
@@ -587,6 +591,7 @@ def test_restore_session_window_missing_branch_eager_resolves(
 
     config = SimpleNamespace(
         named_console=SimpleNamespace(tmux_layout="aw-session-vertical"),
+        terminal=SimpleNamespace(clear_on_detach="auto"),
     )
 
     with pytest.raises(SecretUnavailableError, match="api-key"):

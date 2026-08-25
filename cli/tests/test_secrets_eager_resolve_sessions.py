@@ -356,7 +356,10 @@ def test_session_attach_does_not_eager_resolve(
         lambda *a, **k: SessionStatus.OK,
     )
 
-    config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key=None))
+    config = SimpleNamespace(
+        operator=SimpleNamespace(ssh_private_key=None),
+        terminal=SimpleNamespace(clear_on_detach="auto"),
+    )
     # attach_session returns interactive()'s exit code (0, stubbed) and
     # does not sys.exit; the CLI owns the process exit.
     assert session_manager.attach_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE) == 0  # type: ignore[arg-type]
@@ -454,7 +457,10 @@ def test_session_describe_does_not_eager_resolve(
         lambda *a, **k: SessionStatus.UNKNOWN,
     )
 
-    config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key=None))
+    config = SimpleNamespace(
+        operator=SimpleNamespace(ssh_private_key=None),
+        terminal=SimpleNamespace(clear_on_detach="auto"),
+    )
     # describe_session has `name` as a keyword-only arg.
     session_manager.describe_session(
         db,

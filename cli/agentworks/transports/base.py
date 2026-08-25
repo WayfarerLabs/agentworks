@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentworks.ssh import SSHError, SSHResult
-from agentworks.terminal import guarded_terminal
+from agentworks.terminal import emit_clear, guarded_terminal
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -94,6 +94,7 @@ class Transport(abc.ABC):
         command: str,
         *,
         env: dict[str, str] | None = None,
+        clear_screen_on_exit: bool = False,
     ) -> int:
         """Run an interactive session with a TTY.
 
@@ -102,6 +103,15 @@ class Transport(abc.ABC):
         drop it (``limactl shell`` and ``wsl.exe`` don't expose env
         injection on their interactive APIs). Returns the process exit
         code; does not raise on remote-command failure.
+
+        ``clear_screen_on_exit`` clears the visible screen after the
+        attach ends (see :func:`agentworks.terminal.emit_clear`). Only
+        full-screen attaches (session / console) pass it, and only after
+        the caller has resolved the ``[terminal] clear_on_detach`` policy
+        to a concrete decision; command-output paths (``vm exec``, a plain
+        shell) leave it False so their output survives. It fires BEFORE
+        the post-attach notice so a dropped-connection message lands on
+        the cleared screen rather than being wiped by it.
 
         Concrete on the ABC, delegating the transport-specific part to
         ``_interactive``, so that every interactive path is wrapped in
@@ -112,8 +122,28 @@ class Transport(abc.ABC):
         agent/VM shells; putting the guard here means none of them can
         forget it. See :mod:`agentworks.terminal`.
         """
-        with guarded_terminal():
+        with guarded_terminal() as guard:
             code = self._interactive(command, env=env)
+            # A clean exit (0, e.g. a tmux detach) means the remote already
+            # left the alt screen, so the guard's exit pass can skip the
+            # alt-screen buffer switches that would otherwise jerk the cursor
+            # on Windows Terminal. A non-zero exit, or an exception (which
+            # leaves clean_exit at its default False), keeps the full reset.
+            guard.clean_exit = code == 0
+        if clear_screen_on_exit:
+            # Two complementary mechanisms restore the terminal on exit. The
+            # guard's exit-code gate (above) keeps the cursor clean for EVERY
+            # interactive path, including the ones that do NOT clear (vm/agent
+            # shell, vm exec) -- which is why it is gated on the exit code
+            # rather than on "is this a tmux attach". This clear is an
+            # additional, deterministic fallback that only full-screen attaches
+            # (session / console) request, and only on terminals we don't trust
+            # to restore cleanly (Windows), where the gate alone proved
+            # unreliable on the nested-tmux console path. Emitted after the
+            # guard's mode resets (which clearing does not cover) and before the
+            # notice (so a dropped-connection message survives on the cleared
+            # screen).
+            emit_clear()
         self._note_interactive_exit(code)
         return code
 
