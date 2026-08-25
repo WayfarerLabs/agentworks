@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import contextlib
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.capabilities.base import RunContext
 from agentworks.db import VMStatus
 from agentworks.errors import StateError, UserAbort
+from agentworks.naming import NAME_RE
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
 from ._helpers import (
@@ -292,14 +292,11 @@ def delete_vm(
         output.info(f"Cleaned up {len(vm_logs)} log(s)")
 
     for workspace in db.list_workspaces(vm_name=name):
-        artifact_name = f"{workspace.name}.code-workspace"
-        artifact_component = Path(artifact_name)
-        # An anchor also rejects Windows drive-relative paths such as C:foo.
-        if artifact_component.anchor or artifact_component.parts != (artifact_name,):
-            output.warn("skipping VS Code workspace artifact that is not a direct child of the configured directory")
+        if NAME_RE.fullmatch(workspace.name) is None:
+            output.warn("skipping VS Code workspace artifact for an invalid persisted workspace name")
             continue
         vscode_root = config.paths.vscode_workspaces
-        vscode_path = vscode_root / artifact_name
+        vscode_path = vscode_root / f"{workspace.name}.code-workspace"
         vscode_path.unlink(missing_ok=True)
 
     # Remove from DB (cascades workspaces and agents), then rebuild SSH config

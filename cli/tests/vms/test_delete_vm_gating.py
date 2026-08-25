@@ -19,6 +19,7 @@ suites above and ``test_azure_delete_verify.py`` pin separately.
 from __future__ import annotations
 
 import contextlib
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -33,8 +34,6 @@ from tests.conftest import ManifestDoc
 from tests.orchestrated_fixtures import write_operator_config
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from agentworks.db import Database, VMRow
     from tests.conftest import CapturedOutput
 
@@ -132,6 +131,7 @@ def test_delete_removes_only_its_workspace_artifacts(
 ) -> None:
     _seed(db)
     db.insert_workspace("first", "/srv/first", "dvm", "ws-first")
+    db.insert_workspace("legacy--name", "/srv/legacy", "dvm", "ws-legacy")
     db.insert_workspace("missing", "/srv/missing", "dvm", "ws-missing")
     db.insert_vm("other", site="proxmox", hostname="other")
     db.insert_workspace("untouched", "/srv/untouched", "other", "ws-untouched")
@@ -139,6 +139,8 @@ def test_delete_removes_only_its_workspace_artifacts(
     vscode_dir.mkdir()
     target_artifact = vscode_dir / "first.code-workspace"
     target_artifact.write_text("target")
+    legacy_artifact = vscode_dir / "legacy--name.code-workspace"
+    legacy_artifact.write_text("legacy")
     other_artifact = vscode_dir / "untouched.code-workspace"
     other_artifact.write_text("other")
     config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir}"\n')
@@ -148,6 +150,7 @@ def test_delete_removes_only_its_workspace_artifacts(
     vm_manager.delete_vm(db, config, "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert not target_artifact.exists()
+    assert not legacy_artifact.exists()
     assert other_artifact.read_text() == "other"
     assert db.get_vm("dvm") is None
     assert db.get_workspace("untouched") is not None
@@ -286,6 +289,40 @@ def test_delete_skips_a_dot_prefixed_name_targeting_another_vm_artifact(
     config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir}"\n')
     _fake_backend(monkeypatch)
     monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
+
+    vm_manager.delete_vm(db, config, "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert other_artifact.read_text() == "other"
+    assert db.get_workspace("untouched") is not None
+    assert db.get_vm("dvm") is None
+    assert captured_output.warnings
+
+
+def test_delete_skips_an_uppercase_name_that_case_folds_to_another_vm_artifact(
+    db: Database,
+    tmp_path: Path,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    _seed(db)
+    db.insert_workspace("Untouched", "/srv/corrupt", "dvm", "ws-corrupt")
+    db.insert_vm("other", site="proxmox", hostname="other")
+    db.insert_workspace("untouched", "/srv/untouched", "other", "ws-untouched")
+    vscode_dir = tmp_path / "vscode"
+    vscode_dir.mkdir()
+    other_artifact = vscode_dir / "untouched.code-workspace"
+    other_artifact.write_text("other")
+    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir}"\n')
+    _fake_backend(monkeypatch)
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
+    # Model case-insensitive host behavior deterministically on Linux CI.
+    real_unlink = Path.unlink
+
+    def _case_insensitive_unlink(path: Path, *, missing_ok: bool = False) -> None:
+        real_unlink(path.with_name(path.name.casefold()), missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", _case_insensitive_unlink)
 
     vm_manager.delete_vm(db, config, "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
 
