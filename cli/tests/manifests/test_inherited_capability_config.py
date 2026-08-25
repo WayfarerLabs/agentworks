@@ -135,7 +135,7 @@ def test_a_standalone_template_still_gets_the_missing_field_diagnostic() -> None
     missing required field IS an error, and today the schema reports it.
     Relaxing ``required`` for the inheriting case would take this away.
     """
-    with seated_plugin(Plugin(name="demanding-two", capabilities={"harness-integration": (DemandingHarness,)})):
+    with seated_plugin(Plugin(name="demanding-2", capabilities={"harness-integration": (DemandingHarness,)})):
         document = _a_child_document({"harness_integration": {"name": "demanding"}})
         errors = [e.message for e in Draft202012Validator(document_schema("session-template")).iter_errors(document)]
         assert errors

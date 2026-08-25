@@ -384,7 +384,7 @@ def test_seating_a_capability_changes_the_union_with_no_invalidation_call(seated
     impossible by construction rather than by every mutator remembering to
     invalidate."""
     before = _arm_names()
-    with seated_plugin(Plugin(name="fixtures-two", capabilities={"vm-platform": (ThirdPlatform,)})):
+    with seated_plugin(Plugin(name="fixtures-2", capabilities={"vm-platform": (ThirdPlatform,)})):
         during = _arm_names()
     after = _arm_names()
 
