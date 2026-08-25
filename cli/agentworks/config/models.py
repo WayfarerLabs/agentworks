@@ -18,6 +18,7 @@ from agentworks.source_location import SourceLocation
 
 if TYPE_CHECKING:
     from agentworks.resources.registry import Registry
+    from agentworks.terminal import ClearOnDetach
 
 # -- Data classes ----------------------------------------------------------
 
@@ -50,7 +51,7 @@ class TerminalConfig:
     # the next prompt overwriting earlier lines); elsewhere it preserves.
     # "always" / "never" force it regardless of platform. See
     # agentworks.terminal.clear_screen_on_detach.
-    clear_on_detach: str = "auto"
+    clear_on_detach: ClearOnDetach = "auto"
 
 
 @dataclass(frozen=True)

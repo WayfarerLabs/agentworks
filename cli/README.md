@@ -187,6 +187,7 @@ Settings sections (`config.toml`, permanent):
 
 - `[operator]` -- SSH keys (required), additional authorized keys, SSH config management
 - `[paths]` -- VM workspace, VS Code workspace file, and backup directories
+- `[terminal]`: local screen behavior on detach (`clear_on_detach`: `auto` / `always` / `never`)
 - `[defaults]`: `site`, the default vm-site for `vm create`
 - `[database]`: automatic pre-migration backup policy (safe default: enabled)
 - `[session.config]` -- session defaults (history limit)

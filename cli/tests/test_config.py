@@ -92,7 +92,9 @@ def test_clear_on_detach_accepts_valid_values(value: str) -> None:
 def test_clear_on_detach_rejects_unknown_value() -> None:
     from agentworks.config.loaders_core import _load_terminal
 
-    with pytest.raises(ConfigError, match="clear_on_detach must be one of"):
+    # Anchor on the setting identifier, not the message prose: it names the
+    # thing the code branches on and cannot drift without the code changing.
+    with pytest.raises(ConfigError, match="clear_on_detach"):
         _load_terminal({"terminal": {"clear_on_detach": "sometimes"}}, [])
 
 
@@ -103,7 +105,9 @@ def test_terminal_unknown_key_is_a_soft_issue() -> None:
 
     issues: list[str] = []
     _load_terminal({"terminal": {"bogus": 1}}, issues)
-    assert any("terminal" in issue for issue in issues)
+    # The offending key is what an operator depends on being named; it also
+    # survives someone rewording the section-name in the message.
+    assert any("bogus" in issue for issue in issues)
 
 
 def test_database_config_is_strict_and_focused(tmp_path: Path) -> None:

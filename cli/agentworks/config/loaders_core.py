@@ -66,7 +66,7 @@ def _warn_unexpected_keys(
     that says it did.** FR12 flipped an unknown key in a KIND's spec from
     a soft issue to a hard pydantic error, and the kind callers went with
     the decoders they lived in. Every caller left is something else: the
-    three settings sections ([operator], [secret_config],
+    settings sections ([operator], [terminal], [secret_config],
     [session.config]), where the soft convention is the deliberate one
     (doctor wants every issue in the file, not the first). [plugins]
     departs from it on purpose and says why at ``_load_plugins``.
@@ -239,6 +239,8 @@ def _load_terminal(data: dict[str, object], issues: list[str]) -> TerminalConfig
         choices = ", ".join(CLEAR_ON_DETACH_CHOICES)
         raise ConfigError(f"terminal.clear_on_detach must be one of: {choices}; got: {clear_on_detach!r}")
 
+    # The membership guard above narrows str -> ClearOnDetach for the typed
+    # interior, since CLEAR_ON_DETACH_CHOICES is the Literal tuple; no cast needed.
     return TerminalConfig(clear_on_detach=clear_on_detach)
 
 

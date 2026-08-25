@@ -65,7 +65,7 @@ import contextlib
 import io
 import re
 import sys
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -193,22 +193,26 @@ TERMINAL_SANITIZE_CLEAN_EXIT = _SANITIZE_HEAD + _SANITIZE_TAIL
 # never a substitute for it.
 TERMINAL_CLEAR = "\x1b[H\x1b[2J"
 
-# Valid values for the [terminal] clear_on_detach setting.
-CLEAR_ON_DETACH_CHOICES = ("auto", "always", "never")
+# The [terminal] clear_on_detach setting's closed value set. The Literal is the
+# interior type carried on TerminalConfig; the tuple is the same members in a
+# form the config loader can membership-check operator input against.
+ClearOnDetach = Literal["auto", "always", "never"]
+CLEAR_ON_DETACH_CHOICES: tuple[ClearOnDetach, ...] = ("auto", "always", "never")
 
 
-def clear_screen_on_detach(setting: str) -> bool:
+def clear_screen_on_detach(setting: ClearOnDetach) -> bool:
     """Resolve the ``[terminal] clear_on_detach`` policy to a decision for this
     platform.
 
     ``"always"`` and ``"never"`` force the choice regardless of OS. ``"auto"``
-    (the default) clears only on Windows, where the alt-screen cursor restore
-    is unreliable (ConPTY + Windows Terminal leave the next prompt jumping onto
-    existing scrollback); elsewhere it preserves. This is the single place the
-    platform check lives: a future terminal that needs the same treatment is a
-    one-line change here. An unrecognized value (config load validates the
-    setting, so this is unreachable in normal flow) falls back to the auto
-    policy.
+    (the default) clears only on Windows. The exit-code gate above already
+    removes agentworks' own redundant ``?1049l``, which fixes the flat (session)
+    and non-clearing paths there; but the nested-tmux console path stays
+    unreliable on Windows Terminal even so (the outer tmux's own alt-screen
+    leave is enough to trigger the bad cursor restore), so full-screen attaches
+    clear as a deterministic fallback. Elsewhere it preserves. This is the
+    single place the platform check lives: a future terminal that needs the
+    same treatment is a one-line change here.
     """
     if setting == "always":
         return True
