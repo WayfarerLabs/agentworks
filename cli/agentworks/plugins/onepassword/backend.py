@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 
-from pydantic import AfterValidator, BaseModel, Field
+from pydantic import AfterValidator, BaseModel, BeforeValidator, Field
 
 from agentworks.capabilities.secret_backend.base import SecretBackend
 from agentworks.capabilities.secret_backend.client import (
@@ -72,6 +72,11 @@ class AppAuthenticationImpact(StrEnum):
 
     OPERATOR_ACTION = "operator-action"
     NONE = "none"
+
+
+def _parse_app_authentication_impact(value: object) -> object:
+    """Convert an exact operator-authored string into the strict internal enum."""
+    return AppAuthenticationImpact(value) if type(value) is str else value
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -145,7 +150,10 @@ class OnePasswordSourceConfig(AgwModel):
     """Optional 1Password account shorthand passed to ``op read``."""
     timeout: float = Field(default=30.0, gt=0, allow_inf_nan=False)
     """Maximum seconds for the complete source turn."""
-    app_authentication_impact: AppAuthenticationImpact = AppAuthenticationImpact.OPERATOR_ACTION
+    app_authentication_impact: Annotated[
+        AppAuthenticationImpact,
+        BeforeValidator(_parse_app_authentication_impact),
+    ] = AppAuthenticationImpact.OPERATOR_ACTION
     """Whether app authentication counts as operator action during preview."""
 
 

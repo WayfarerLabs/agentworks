@@ -81,6 +81,28 @@ def test_config_and_mapping_validation() -> None:
             OnePasswordMapping.model_validate(invalid_mapping)
 
 
+@pytest.mark.parametrize(
+    ("written", "expected"),
+    [
+        ("operator-action", AppAuthenticationImpact.OPERATOR_ACTION),
+        ("none", AppAuthenticationImpact.NONE),
+    ],
+)
+def test_operator_authored_app_authentication_impact_values_parse(
+    written: str,
+    expected: AppAuthenticationImpact,
+) -> None:
+    config = OnePasswordSourceConfig.model_validate({"name": "onepassword", "app_authentication_impact": written})
+
+    assert config.app_authentication_impact is expected
+
+
+@pytest.mark.parametrize("written", [b"none", bytearray(b"none")])
+def test_app_authentication_impact_rejects_binary_inputs(written: bytes | bytearray) -> None:
+    with pytest.raises(ValidationError):
+        OnePasswordSourceConfig.model_validate({"name": "onepassword", "app_authentication_impact": written})
+
+
 def test_bounded_read_repr_redacts_value() -> None:
     bounded = _BoundedRead(value="sentinel-resolved")
     assert "sentinel-resolved" not in repr(bounded)
