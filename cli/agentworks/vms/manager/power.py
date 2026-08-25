@@ -292,6 +292,8 @@ def delete_vm(
         output.info(f"Cleaned up {len(vm_logs)} log(s)")
 
     for workspace in db.list_workspaces(vm_name=name):
+        # Check the character grammar directly. validate_name's creation-time
+        # double-hyphen rule would strand safe legacy artifacts.
         if NAME_RE.fullmatch(workspace.name) is None:
             output.warn("skipping VS Code workspace artifact for an invalid persisted workspace name")
             continue
