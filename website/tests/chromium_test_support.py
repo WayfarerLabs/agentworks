@@ -19,14 +19,30 @@ from typing import Callable
 DEVTOOLS_STARTUP_TIMEOUT = 20.0
 
 
+def _remaining(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("Chromium exhausted its DevTools deadline")
+    return remaining
+
+
 class DevToolsConnection:
     """Minimal bounded WebSocket client for one Chromium page target."""
 
-    def __init__(self, url: str, *, timeout: float = 10.0) -> None:
+    def __init__(
+        self,
+        url: str,
+        *,
+        timeout: float = 10.0,
+        deadline: float | None = None,
+    ) -> None:
+        deadline = time.monotonic() + timeout if deadline is None else deadline
         parsed = urllib.parse.urlsplit(url)
         self.socket = socket.create_connection(
-            (parsed.hostname or "127.0.0.1", parsed.port or 80), timeout=timeout
+            (parsed.hostname or "127.0.0.1", parsed.port or 80),
+            timeout=_remaining(deadline),
         )
+        self.operation_timeout = timeout
         key = base64.b64encode(os.urandom(16)).decode("ascii")
         target = parsed.path + (f"?{parsed.query}" if parsed.query else "")
         request = (
@@ -37,18 +53,18 @@ class DevToolsConnection:
             "Origin: http://127.0.0.1\r\n\r\n"
         )
         try:
+            self._apply_deadline(deadline)
             self.socket.sendall(request.encode("ascii"))
             response = bytearray()
             while b"\r\n\r\n" not in response:
+                self._apply_deadline(deadline)
                 block = self.socket.recv(4096)
                 if not block:
                     raise ConnectionError("Chromium closed the DevTools handshake before sending headers")
                 response.extend(block)
                 if len(response) > 65536:
                     raise ConnectionError("Chromium DevTools handshake headers exceeded 64 KiB")
-            expected = base64.b64encode(
-                hashlib.sha1(f"{key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11".encode()).digest()
-            )
+            expected = base64.b64encode(hashlib.sha1(f"{key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11".encode()).digest())
             if b" 101 " not in response.split(b"\r\n", 1)[0] or expected not in response:
                 raise ConnectionError(f"Chromium rejected DevTools WebSocket: {response[:500]!r}")
         except BaseException:
@@ -56,64 +72,86 @@ class DevToolsConnection:
             raise
         self.identifier = 0
 
-    def close(self) -> None:
+    def _apply_deadline(self, deadline: float) -> None:
+        self.socket.settimeout(_remaining(deadline))
+
+    def close(self, *, deadline: float | None = None) -> None:
         try:
-            self._send(b"", opcode=8)
+            self._send(b"", opcode=8, deadline=deadline)
         finally:
             self.socket.close()
 
-    def _read_exact(self, length: int) -> bytes:
+    def _read_exact(self, length: int, deadline: float) -> bytes:
         chunks = bytearray()
         while len(chunks) < length:
+            self._apply_deadline(deadline)
             block = self.socket.recv(length - len(chunks))
             if not block:
                 raise ConnectionError("Chromium closed the DevTools WebSocket")
             chunks.extend(block)
         return bytes(chunks)
 
-    def _send(self, payload: bytes, opcode: int = 1) -> None:
+    def _send(self, payload: bytes, opcode: int = 1, deadline: float | None = None) -> None:
         mask = os.urandom(4)
         length = len(payload)
-        header = bytearray((0x80 | opcode, 0x80 | (length if length < 126 else 126 if length <= 0xFFFF else 127)))
+        header = bytearray(
+            (
+                0x80 | opcode,
+                0x80 | (length if length < 126 else 126 if length <= 0xFFFF else 127),
+            )
+        )
         if length >= 126:
             header.extend(struct.pack(">H" if length <= 0xFFFF else ">Q", length))
         header.extend(mask)
         header.extend(value ^ mask[index % 4] for index, value in enumerate(payload))
+        if deadline is not None:
+            self._apply_deadline(deadline)
         self.socket.sendall(header)
 
-    def _receive(self) -> dict[str, object]:
+    def _receive(self, deadline: float) -> dict[str, object]:
         payload = bytearray()
         while True:
-            first, second = self._read_exact(2)
+            first, second = self._read_exact(2, deadline)
             final = bool(first & 0x80)
             opcode = first & 0x0F
             length = second & 0x7F
             if length == 126:
-                length = struct.unpack(">H", self._read_exact(2))[0]
+                length = struct.unpack(">H", self._read_exact(2, deadline))[0]
             elif length == 127:
-                length = struct.unpack(">Q", self._read_exact(8))[0]
-            mask = self._read_exact(4) if second & 0x80 else b""
-            frame = self._read_exact(length)
+                length = struct.unpack(">Q", self._read_exact(8, deadline))[0]
+            mask = self._read_exact(4, deadline) if second & 0x80 else b""
+            frame = self._read_exact(length, deadline)
             if mask:
                 frame = bytes(value ^ mask[index % 4] for index, value in enumerate(frame))
             if opcode == 8:
                 raise ConnectionError("Chromium closed the DevTools WebSocket")
             if opcode == 9:
-                self._send(frame, opcode=10)
+                self._send(frame, opcode=10, deadline=deadline)
                 continue
             if opcode in {0, 1}:
                 payload.extend(frame)
                 if final:
                     return json.loads(payload)
 
-    def call(self, method: str, params: dict[str, object] | None = None) -> dict[str, object]:
+    def call(
+        self,
+        method: str,
+        params: dict[str, object] | None = None,
+        *,
+        deadline: float | None = None,
+    ) -> dict[str, object]:
+        deadline = time.monotonic() + self.operation_timeout if deadline is None else deadline
         self.identifier += 1
         identifier = self.identifier
         self._send(
-            json.dumps({"id": identifier, "method": method, "params": params or {}}, separators=(",", ":")).encode()
+            json.dumps(
+                {"id": identifier, "method": method, "params": params or {}},
+                separators=(",", ":"),
+            ).encode(),
+            deadline=deadline,
         )
         while True:
-            response = self._receive()
+            response = self._receive(deadline)
             if response.get("id") != identifier:
                 continue
             if "error" in response:
@@ -153,21 +191,18 @@ def devtools_target(
             browser_path = lines[1]
             if not 0 < port < 65536 or not browser_path.startswith("/"):
                 raise ValueError("Chromium published an invalid DevTools endpoint")
-            connection = connection_factory(
-                f"ws://127.0.0.1:{port}{browser_path}", timeout=min(0.25, remaining)
-            )
+            connection = connection_factory(f"ws://127.0.0.1:{port}{browser_path}", deadline=deadline)
             try:
-                result = connection.call("Target.getTargets")
+                result = connection.call("Target.getTargets", deadline=deadline)
             finally:
-                connection.close()
+                try:
+                    connection.close(deadline=deadline)
+                except TimeoutError:
+                    pass
             targets = result.get("targetInfos")
             if isinstance(targets, list):
                 target_id = next(
-                    (
-                        item.get("targetId")
-                        for item in targets
-                        if isinstance(item, dict) and item.get("type") == "page"
-                    ),
+                    (item.get("targetId") for item in targets if isinstance(item, dict) and item.get("type") == "page"),
                     None,
                 )
                 if isinstance(target_id, str):
