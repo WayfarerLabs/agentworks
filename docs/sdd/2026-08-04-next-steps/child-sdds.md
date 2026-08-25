@@ -1,7 +1,7 @@
 # Child SDDs
 
 - Status: Active ledger
-- Last updated: 2026-08-24
+- Last updated: 2026-08-25
 
 This is the saga's tracking document, the analog of an ordinary SDD's `plan.md`. Completed
 checkboxes are immutable records, per the standard rule. The saga SDD locks when every entry here is
@@ -583,7 +583,19 @@ Planned children, seeded when their prerequisites land (see `phasing.md`):
   tester's factual corrections incorporated as a recipient's note per operator direction), carrying
   the `config_at(level)` shape sketch, the three preserved `base.py` constraints, the
   who-constructs-versus-who-calls-in caution, and the pre-design call-site discovery walk. The
-  capability-API reevaluation is chartered into this wave's seed, not scheduled sooner
+  capability-API reevaluation is chartered into this wave's seed, not scheduled sooner. **Routed
+  here by operator direction, 2026-08-25:**
+  [issue #516](https://github.com/WayfarerLabs/agentworks/issues/516), resolved secret values
+  reaching `SSHError` messages. Session env values are interpolated into the tmux command as
+  `-e KEY=VAL` argv, and the SSH transport embeds the full command string in its exception text, so
+  any failure of those invocations puts the value in an error message. This wave owns session and
+  tmux delivery, which is why it lands here rather than staying an unowned issue. It is the mirror
+  of what the secret-preview contract settled: that effort made the preview and resolution side
+  rigorous about never letting a value cross a boundary, and this is the same class of leak on the
+  delivery side, which it never covered. The fix touches the shared SSH transport contract, so it
+  was filed rather than fixed in passing under Scope discipline, and the smol-dev loop later
+  declined it for the same reason, that resolving it means choosing a security contract across
+  secret delivery, SSH command errors, and command logging. Wave 4's seed owes that choice
 - Wave 5: session observability phase 1
 - Wave 6: agentic artifacts and distillation
 - Wave 7: structured control
