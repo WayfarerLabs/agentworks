@@ -62,11 +62,14 @@ issue, claim, and unmerged pull request with:
 
 - authenticated direction reference and exact vetted title and body snapshot;
 - issue, deterministic branch, and pull request identifiers and URLs;
-- head SHA, last published head SHA, workflow state, CI status, and conflict status;
+- current head SHA, last handed-off head SHA, workflow state, CI status, and conflict status;
 - last-check time and durable cursors for comments, reviews, checks, and head changes;
 - per-PR delivery authorization reference, total budget, and amount spent; and
 - owning developer handle, dedicated worktree absolute path, distinct resource namespace, and latest
   recovery handoff.
+
+Current head SHA records the worktree branch tip; last handed-off head SHA advances only when
+delivery's complete handoff contract is satisfied.
 
 The recovery handoff records the exact branch and head, dedicated worktree absolute path, resource
 namespace, any claim-attributable stash reference, completed work and gates, remaining work, and
@@ -162,7 +165,7 @@ artifact owner; delivery owns collection, round, response, state-transition, and
 
 Only after verifying the pull request merged and its `Fixes` link closed the issue, confirm the
 claim has no unpublished state: the worktree has no tracked or untracked changes, its branch has no
-commits ahead of the ledger's last published head SHA, and no stash is attributable to the claim.
+commits ahead of the ledger's last handed-off head SHA, and no stash is attributable to the claim.
 Git stashes are repository-wide, so treat one as claim state only when the recovery handoff or other
 evidence attributes it. If unpublished state appears or stash attribution is uncertain, preserve the
 worktree and investigate rather than discard it. Otherwise release the developer, remove its
