@@ -16,8 +16,8 @@ The offer/report logic lives in ``_cleanup_now_empty_workspace`` /
 ``delete_session`` SSH machinery is orthogonal to the branch logic), with a
 handful of admin-session integration tests through ``delete_session`` to
 prove the wiring. The reusable ``workspace_has_sessions`` /
-``agent_is_unused`` predicates (shared with the #268 prune command) are
-unit-tested on their own.
+``agent_has_sessions`` / ``agent_has_grants`` / ``agent_is_unused`` predicates
+are unit-tested on their own.
 """
 
 from __future__ import annotations
@@ -25,9 +25,12 @@ from __future__ import annotations
 import functools
 from typing import TYPE_CHECKING
 
+import pytest
+
 from agentworks.agents.manager import agent_has_grants, agent_has_sessions, agent_is_unused
 from agentworks.db import PID_STOPPED, Database, SessionRow
 from agentworks.errors import ConnectivityError
+from agentworks.output import Role
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.manager._queries import (
     _cleanup_now_empty_agent,
@@ -37,8 +40,6 @@ from agentworks.workspaces.manager import workspace_external_explicit_granters, 
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
 
 if TYPE_CHECKING:
-    import pytest
-
     from tests.conftest import CapturedOutput, _FakeTarget
 
 
@@ -71,7 +72,7 @@ def _seed_agent(db: Database, name: str = "bot") -> None:
 
 
 # ---------------------------------------------------------------------------
-# Reusable "is unused" predicates (shared with the #268 prune command)
+# Reusable live-state predicates
 # ---------------------------------------------------------------------------
 
 
@@ -527,7 +528,42 @@ def test_admin_session_skips_agent_cleanup(
     assert not captured_output.warnings
 
 
-def test_agent_with_remaining_sessions_not_touched(
+@pytest.mark.parametrize("yes", [False, True])
+def test_created_agent_with_remaining_sessions_reports_and_stays(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+    *,
+    yes: bool,
+) -> None:
+    _seed_vm(db)
+    _seed_agent(db)
+    _seed_agent(db, "other-bot")
+    db._conn.executemany(
+        "INSERT INTO sessions (name, workspace_name, template, mode, agent_name, socket_path) "
+        "VALUES (?, 'ws-vm1', 'default', 'agent', ?, ?)",
+        [
+            ("zulu", "bot", "/tmp/zulu.sock"),
+            ("alpha", "bot", "/tmp/alpha.sock"),
+            ("unrelated", "other-bot", "/tmp/unrelated.sock"),
+        ],
+    )
+    db._conn.commit()
+    calls = _spy_delete_agent(db, monkeypatch)
+    prompts = _record_confirm(monkeypatch, answer=True)
+
+    session = _session_snapshot("s", "ws-vm1", agent_name="bot", created_agent=True)
+    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=yes, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert prompts == []
+    assert calls == []
+    assert not captured_output.warnings
+    assert [role for role, _level, _message in captured_output.lines] == [Role.BODY, Role.DETAIL, Role.DETAIL]
+    assert [message for role, _level, message in captured_output.lines if role is Role.DETAIL] == ["alpha", "zulu"]
+    assert db.get_agent("bot") is not None
+
+
+def test_noncreated_agent_with_remaining_sessions_stays_silent(
     db: Database, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
 ) -> None:
     _seed_vm(db)
@@ -540,13 +576,12 @@ def test_agent_with_remaining_sessions_not_touched(
     calls = _spy_delete_agent(db, monkeypatch)
     prompts = _record_confirm(monkeypatch, answer=True)
 
-    session = _session_snapshot("s", "ws-vm1", agent_name="bot", created_agent=True)
+    session = _session_snapshot("s", "ws-vm1", agent_name="bot", created_agent=False)
     _cleanup_now_empty_agent(db, _StubConfig(), session, yes=False, interaction=TtyInteractionPolicy.REFUSE)
-    _cleanup_now_empty_agent(db, _StubConfig(), session, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert prompts == []
     assert calls == []
-    assert not captured_output.warnings
+    assert captured_output.lines == []
     assert db.get_agent("bot") is not None
 
 
