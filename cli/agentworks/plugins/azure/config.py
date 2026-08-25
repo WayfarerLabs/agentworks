@@ -7,7 +7,7 @@ from typing import Annotated, Literal, NamedTuple
 from pydantic import Field
 
 from agentworks.errors import ConfigError
-from agentworks.schema import AgwModel, NonEmptyStr, PositiveInt, SecretRef
+from agentworks.schema import AgwModel, NonBlankStr, NonEmptyStr, PositiveInt, SecretRef
 
 
 class AzureAmbientAuth(AgwModel):
@@ -29,10 +29,10 @@ class AzureServicePrincipalAuth(AgwModel):
     """
 
     mode: Literal["service-principal"]
-    tenant_id: NonEmptyStr
+    tenant_id: NonBlankStr
     """The Entra ID tenant the principal lives in."""
 
-    client_id: NonEmptyStr
+    client_id: NonBlankStr
     """The principal's application (client) id."""
 
     secret: Annotated[
@@ -65,13 +65,13 @@ class AzureVMConfig(AgwModel):
     name: Literal["azure-vm"]
     """The platform this config is for."""
 
-    subscription_id: NonEmptyStr = Field(examples=["00000000-0000-0000-0000-000000000000"])
+    subscription_id: NonBlankStr = Field(examples=["00000000-0000-0000-0000-000000000000"])
     """The subscription new VMs are created in."""
 
-    resource_group: NonEmptyStr = Field(examples=["agw-dev"])
+    resource_group: NonBlankStr = Field(examples=["agw-dev"])
     """The resource group new VMs are created in."""
 
-    region: NonEmptyStr = Field(examples=["eastus"])
+    region: NonBlankStr = Field(examples=["eastus"])
     """The Azure region new VMs are created in."""
 
     vm_sizes: Annotated[list[AzureVMSize], Field(min_length=1)] | None = None

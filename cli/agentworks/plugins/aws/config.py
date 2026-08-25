@@ -8,7 +8,7 @@ import yaml
 from pydantic import Field
 
 from agentworks.errors import ConfigError
-from agentworks.schema import AgwModel, NonEmptyStr, PositiveInt, SecretRef
+from agentworks.schema import AgwModel, NonBlankStr, NonEmptyStr, PositiveInt, SecretRef
 
 
 class AwsAmbientAuth(AgwModel):
@@ -29,7 +29,7 @@ class AwsAccessKeyAuth(AgwModel):
     """
 
     mode: Literal["access-key"]
-    access_key_id: NonEmptyStr
+    access_key_id: NonBlankStr
     """The access key id, plain config."""
 
     access_key_secret: Annotated[

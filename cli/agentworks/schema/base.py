@@ -32,7 +32,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Final
 from weakref import WeakKeyDictionary
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, RootModel, model_validator
 
 from agentworks.errors import StateError
 from agentworks.schema._shape import (
@@ -250,6 +250,21 @@ of the two dozen fields that want it, because a floor that drifts is a
 floor nobody notices drifting. The bridge renders its violation as
 "must not be empty" (only at a floor of 1, where that paraphrase is
 true)."""
+
+
+def _reject_whitespace_only(value: str) -> str:
+    """Keep literal strings intact while rejecting blank-looking input."""
+    if not value.strip():
+        raise ValueError("must contain a non-whitespace character")
+    return value
+
+
+NonBlankStr = Annotated[NonEmptyStr, AfterValidator(_reject_whitespace_only)]
+"""A non-empty string containing at least one non-whitespace character.
+
+The original value is preserved, so this validates presence without
+normalizing the supplied string."""
+
 
 PositiveInt = Annotated[int, Field(gt=0)]
 """A count or size that must be at least one.
