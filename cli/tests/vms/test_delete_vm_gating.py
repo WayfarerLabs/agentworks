@@ -123,6 +123,36 @@ def test_delete_never_gates(
     assert db.get_vm("dvm") is None
 
 
+def test_delete_removes_only_its_workspace_artifacts(
+    db: Database,
+    tmp_path: Path,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    _seed(db)
+    db.insert_workspace("first", "/srv/first", "dvm", "ws-first")
+    db.insert_workspace("missing", "/srv/missing", "dvm", "ws-missing")
+    db.insert_vm("other", site="proxmox", hostname="other")
+    db.insert_workspace("untouched", "/srv/untouched", "other", "ws-untouched")
+    vscode_dir = tmp_path / "vscode"
+    vscode_dir.mkdir()
+    target_artifact = vscode_dir / "first.code-workspace"
+    target_artifact.write_text("target")
+    other_artifact = vscode_dir / "untouched.code-workspace"
+    other_artifact.write_text("other")
+    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir}"\n')
+    _fake_backend(monkeypatch)
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
+
+    vm_manager.delete_vm(db, config, "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert not target_artifact.exists()
+    assert other_artifact.read_text() == "other"
+    assert db.get_vm("dvm") is None
+    assert db.get_workspace("untouched") is not None
+
+
 def test_hold_failure_does_not_skip_delete(
     db: Database,
     make_config,  # noqa: ANN001
@@ -205,6 +235,7 @@ def _failing_backend_delete(monkeypatch: pytest.MonkeyPatch, counts: dict[str, i
 
 def test_backend_delete_failure_keeps_the_row(
     db: Database,
+    tmp_path: Path,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
@@ -215,16 +246,24 @@ def test_backend_delete_failure_keeps_the_row(
     the operator can fix the cause and retry; warning past it would
     orphan the surviving VM with nothing left to target it."""
     _seed(db)
+    db.insert_workspace("kept", "/srv/kept", "dvm", "ws-kept")
+    vscode_dir = tmp_path / "vscode"
+    vscode_dir.mkdir()
+    artifact = vscode_dir / "kept.code-workspace"
+    artifact.write_text("keep")
+    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir}"\n')
     counts = _fake_backend(monkeypatch)
     monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
     error = _failing_backend_delete(monkeypatch, counts)
 
     with pytest.raises(AuthorizationError) as exc:
-        vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+        vm_manager.delete_vm(db, config, "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert exc.value is error
     assert counts["delete"] == 1
     assert db.get_vm("dvm") is not None
+    assert db.get_workspace("kept") is not None
+    assert artifact.read_text() == "keep"
 
 
 def test_force_does_not_suppress_backend_delete_failure(

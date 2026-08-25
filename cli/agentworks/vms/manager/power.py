@@ -290,6 +290,10 @@ def delete_vm(
     if vm_logs:
         output.info(f"Cleaned up {len(vm_logs)} log(s)")
 
+    for workspace in db.list_workspaces(vm_name=name):
+        vscode_path = config.paths.vscode_workspaces / f"{workspace.name}.code-workspace"
+        vscode_path.unlink(missing_ok=True)
+
     # Remove from DB (cascades workspaces and agents), then rebuild SSH config
     db.delete_vm(name)
 
