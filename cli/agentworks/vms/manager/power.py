@@ -295,8 +295,7 @@ def delete_vm(
         if NAME_RE.fullmatch(workspace.name) is None:
             output.warn("skipping VS Code workspace artifact for an invalid persisted workspace name")
             continue
-        vscode_root = config.paths.vscode_workspaces
-        vscode_path = vscode_root / f"{workspace.name}.code-workspace"
+        vscode_path = config.paths.vscode_workspaces / f"{workspace.name}.code-workspace"
         vscode_path.unlink(missing_ok=True)
 
     # Remove from DB (cascades workspaces and agents), then rebuild SSH config
