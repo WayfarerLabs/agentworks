@@ -167,15 +167,10 @@ def test_delete_skips_workspace_artifacts_outside_the_managed_directory(
     # A direct DB insert models legacy or corrupt persisted state that bypassed
     # the workspace manager's write-time name validation.
     db.insert_workspace("../sentinel", "/srv/corrupt", "dvm", "ws-corrupt")
-    db.insert_workspace("../vscode/untouched", "/srv/reentry", "dvm", "ws-reentry")
-    db.insert_vm("other", site="proxmox", hostname="other")
-    db.insert_workspace("untouched", "/srv/untouched", "other", "ws-untouched")
     vscode_dir = tmp_path / "vscode"
     vscode_dir.mkdir()
     sentinel = tmp_path / "sentinel.code-workspace"
     sentinel.write_text("outside")
-    other_artifact = vscode_dir / "untouched.code-workspace"
-    other_artifact.write_text("other")
     config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir}"\n')
     _fake_backend(monkeypatch)
     monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
@@ -183,10 +178,8 @@ def test_delete_skips_workspace_artifacts_outside_the_managed_directory(
     vm_manager.delete_vm(db, config, "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert sentinel.read_text() == "outside"
-    assert other_artifact.read_text() == "other"
     assert captured_output.warnings
     assert db.get_vm("dvm") is None
-    assert db.get_workspace("untouched") is not None
 
 
 def test_delete_unlinks_an_in_directory_symlink_without_touching_its_referent(
@@ -213,33 +206,6 @@ def test_delete_unlinks_an_in_directory_symlink_without_touching_its_referent(
     assert not artifact.is_symlink()
     assert referent.read_text() == "outside"
     assert db.get_vm("dvm") is None
-
-
-def test_delete_skips_an_absolute_workspace_name_targeting_another_vm_artifact(
-    db: Database,
-    tmp_path: Path,
-    make_config,  # noqa: ANN001
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output: CapturedOutput,
-) -> None:
-    _seed(db)
-    vscode_dir = tmp_path / "vscode"
-    vscode_dir.mkdir()
-    db.insert_workspace(str(vscode_dir / "untouched"), "/srv/corrupt", "dvm", "ws-corrupt")
-    db.insert_vm("other", site="proxmox", hostname="other")
-    db.insert_workspace("untouched", "/srv/untouched", "other", "ws-untouched")
-    other_artifact = vscode_dir / "untouched.code-workspace"
-    other_artifact.write_text("other")
-    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir}"\n')
-    _fake_backend(monkeypatch)
-    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
-
-    vm_manager.delete_vm(db, config, "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
-
-    assert other_artifact.read_text() == "other"
-    assert db.get_workspace("untouched") is not None
-    assert db.get_vm("dvm") is None
-    assert captured_output.warnings
 
 
 def test_delete_skips_a_trailing_separator_through_a_directory_symlink(
@@ -271,52 +237,37 @@ def test_delete_skips_a_trailing_separator_through_a_directory_symlink(
     assert captured_output.warnings
 
 
-def test_delete_skips_a_dot_prefixed_name_targeting_another_vm_artifact(
+@pytest.mark.parametrize(
+    "stored_name_template",
+    [
+        pytest.param("../vscode/untouched", id="reentry"),
+        pytest.param("{vscode_dir}/untouched", id="absolute"),
+        pytest.param("./untouched", id="dot-prefix"),
+        pytest.param("Untouched", id="case-fold"),
+    ],
+)
+def test_delete_skips_a_name_alias_targeting_another_vm_artifact(
     db: Database,
     tmp_path: Path,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
+    stored_name_template: str,
 ) -> None:
     _seed(db)
-    db.insert_workspace("./untouched", "/srv/corrupt", "dvm", "ws-corrupt")
-    db.insert_vm("other", site="proxmox", hostname="other")
-    db.insert_workspace("untouched", "/srv/untouched", "other", "ws-untouched")
     vscode_dir = tmp_path / "vscode"
     vscode_dir.mkdir()
+    stored_name = stored_name_template.format(vscode_dir=vscode_dir)
+    db.insert_workspace(stored_name, "/srv/corrupt", "dvm", "ws-corrupt")
+    db.insert_vm("other", site="proxmox", hostname="other")
+    db.insert_workspace("untouched", "/srv/untouched", "other", "ws-untouched")
     other_artifact = vscode_dir / "untouched.code-workspace"
     other_artifact.write_text("other")
     config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir}"\n')
     _fake_backend(monkeypatch)
     monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
-
-    vm_manager.delete_vm(db, config, "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
-
-    assert other_artifact.read_text() == "other"
-    assert db.get_workspace("untouched") is not None
-    assert db.get_vm("dvm") is None
-    assert captured_output.warnings
-
-
-def test_delete_skips_an_uppercase_name_that_case_folds_to_another_vm_artifact(
-    db: Database,
-    tmp_path: Path,
-    make_config,  # noqa: ANN001
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output: CapturedOutput,
-) -> None:
-    _seed(db)
-    db.insert_workspace("Untouched", "/srv/corrupt", "dvm", "ws-corrupt")
-    db.insert_vm("other", site="proxmox", hostname="other")
-    db.insert_workspace("untouched", "/srv/untouched", "other", "ws-untouched")
-    vscode_dir = tmp_path / "vscode"
-    vscode_dir.mkdir()
-    other_artifact = vscode_dir / "untouched.code-workspace"
-    other_artifact.write_text("other")
-    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir}"\n')
-    _fake_backend(monkeypatch)
-    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
-    # Model case-insensitive host behavior deterministically on Linux CI.
+    # This is inert for lowercase cases and models a case-insensitive host for
+    # the uppercase case deterministically on Linux CI.
     real_unlink = Path.unlink
 
     def _case_insensitive_unlink(path: Path, *, missing_ok: bool = False) -> None:
