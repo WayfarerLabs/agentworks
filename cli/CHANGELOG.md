@@ -2,6 +2,7 @@
 
 ## [0.15.0](https://github.com/WayfarerLabs/agentworks/compare/v0.14.1...v0.15.0) (2026-08-25)
 
+**Operators: read the [0.15 upgrade guide](https://github.com/WayfarerLabs/agentworks/blob/main/docs/guides/upgrading-to-0.15.md) before upgrading.** The breaking-change note below is addressed to secret-backend authors. This release also changes behavior you may be relying on without touching a backend: `agw doctor` can now exit nonzero from a provider or network condition, which turns a CI job that gates on it red; doctor, `agw secret describe`, and preflight now perform provider work where they previously performed none; `agw secret verify`'s output columns and vocabulary changed, so scripts parsing it will break; and global `--non-interactive` now means terminal input only, no longer controlling presentation and no longer implying an unattended fail-fast. The guide covers each with what to do about it.
 
 ### ⚠ BREAKING CHANGES
 
