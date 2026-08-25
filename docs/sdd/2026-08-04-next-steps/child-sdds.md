@@ -593,9 +593,9 @@ Planned children, seeded when their prerequisites land (see `phasing.md`):
   of what the secret-preview contract settled: that effort made the preview and resolution side
   rigorous about never letting a value cross a boundary, and this is the same class of leak on the
   delivery side, which it never covered. The fix touches the shared SSH transport contract, so it
-  was filed rather than fixed in passing under Scope discipline, and the smol-dev loop later
-  declined it for the same reason, that resolving it means choosing a security contract across
-  secret delivery, SSH command errors, and command logging. Wave 4's seed owes that choice
+  was filed rather than fixed in passing under Scope discipline: resolving it means choosing a
+  security contract across secret delivery, SSH command errors, and command logging. Wave 4's seed
+  owes that choice
 - Wave 5: session observability phase 1
 - Wave 6: agentic artifacts and distillation
 - Wave 7: structured control
