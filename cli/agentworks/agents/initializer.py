@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.transports import transport
 
 if TYPE_CHECKING:
@@ -233,7 +234,7 @@ def create_agent_on_vm(
 
     if _admin_template(registry, vm.admin_template or "default").git_force_safe_directory:
         try:
-            agent_target.run("git config --global --add safe.directory '*'")
+            ensure_safe_directory_wildcard(agent_target)
             output.info("Git safe.directory configured for agent")
         except Exception as e:
             output.warn(f"agent git safe.directory setup failed: {e}")
