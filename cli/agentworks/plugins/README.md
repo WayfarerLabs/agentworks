@@ -33,9 +33,9 @@ PLUGIN = Plugin(
 
 Fields:
 
-- **`name`** (required): the plugin's identity. Non-empty and `/`-free. It is the name an operator
-  writes in `[plugins].system` and the name the surfaces attribute rows to
-  (`from plugin example-cloud`).
+- **`name`** (required): the plugin's identity. It uses lowercase ASCII letters, digits, and
+  hyphens, with a letter at each end. It is the name an operator writes in `[plugins].system` and
+  the name the surfaces attribute rows to (`from plugin example-cloud`).
 - **`description`**: shown in the doctor roster.
 - **`capabilities`**: a mapping keyed by capability kind, each value a tuple of impl **classes**.
   Every capability registry stores that exact class under its `name`; registration, graph
@@ -101,13 +101,13 @@ roster is what a given build actually ships. On import the index:
   traceback that kills the CLI), and
 - rejects a duplicate plugin name as a typed error.
 
-`register_plugin` validates the **whole** descriptor first (name shape; every capability kind has an
-adapter; every impl is a class with a non-empty, `/`-free `name`; every impl **conforms to its
-kind's contract**, see below; no intra-descriptor name collisions), then seats every impl
-**atomically**: no capability registry is touched until every impl across the descriptor is known
-seatable, so a mid-descriptor failure can never leave orphaned impls behind. Registration is
-idempotent per impl name; a cross-plugin or plugin-versus-built-in name clash on the same capability
-is a typed error naming the occupant's real origin.
+`register_plugin` validates the **whole** descriptor first (the plugin name follows the identifier
+shape above; every capability kind has an adapter; every impl is a class with a non-empty, `/`-free
+`name`; every impl **conforms to its kind's contract**, see below; no intra-descriptor name
+collisions), then seats every impl **atomically**: no capability registry is touched until every
+impl across the descriptor is known seatable, so a mid-descriptor failure can never leave orphaned
+impls behind. Registration is idempotent per impl name; a cross-plugin or plugin-versus-built-in
+name clash on the same capability is a typed error naming the occupant's real origin.
 
 ### Contract conformance
 
