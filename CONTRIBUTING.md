@@ -37,7 +37,7 @@ Three targets are shared, declared in `rulesync.jsonc`, and their generated outp
 in:
 
 - **GitHub Copilot** (`.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`,
-  `.github/skills/`) so Copilot Code Review sees the project's rules and subagents on every PR.
+  `.github/skills/`) so Copilot Code Review sees the project's rules and subagents whenever it runs.
 - **Claude Code** (`CLAUDE.md`, `.claude/agents/`, `.claude/rules/`, `.claude/skills/`) and **Codex
   CLI** (`AGENTS.md`, `.codex/`) so those agents have full context on a fresh clone with no setup.
   Only the rulesync-generated directories are committed; personal files such as
