@@ -437,6 +437,7 @@ class AzureVMPlatform(VMPlatform):
             SshPublicKey,
             StorageProfile,
             VirtualMachine,
+            VirtualMachineProperties,
         )
         from azure.mgmt.network.models import (
             AddressSpace,
@@ -562,47 +563,49 @@ class AzureVMPlatform(VMPlatform):
                     vm_name,
                     VirtualMachine(
                         location=az.region,
-                        hardware_profile=HardwareProfile(vm_size=azure_vm_size),
-                        storage_profile=StorageProfile(
-                            image_reference=ImageReference(
-                                publisher=IMAGE_PUBLISHER,
-                                offer=IMAGE_OFFER,
-                                sku=IMAGE_SKU,
-                                version=IMAGE_VERSION,
-                            ),
-                            os_disk=OSDisk(
-                                create_option="FromImage",
-                                disk_size_gb=disk,
-                                # Azure deletes the disk with the VM. This does
-                                # not replace the tag-based sweep in
-                                # cleanup_vm_resources: that covers the rollback
-                                # window where create fails before a VM exists
-                                # to carry the disk away (#334), and it is what
-                                # deletes the disks of VMs created before this
-                                # option was set (their disks default to
-                                # Detach).
-                                delete_option="Delete",
-                                managed_disk=ManagedDiskParameters(storage_account_type="StandardSSD_LRS"),
-                            ),
-                        ),
-                        os_profile=OSProfile(
-                            computer_name=vm_name,
-                            admin_username=admin_username,
-                            custom_data=cloud_init_b64,
-                            linux_configuration=LinuxConfiguration(
-                                disable_password_authentication=True,
-                                ssh=SshConfiguration(
-                                    public_keys=[
-                                        SshPublicKey(
-                                            path=f"/home/{admin_username}/.ssh/authorized_keys",
-                                            key_data=ssh_pub_key,
-                                        )
-                                    ]
+                        properties=VirtualMachineProperties(
+                            hardware_profile=HardwareProfile(vm_size=azure_vm_size),
+                            storage_profile=StorageProfile(
+                                image_reference=ImageReference(
+                                    publisher=IMAGE_PUBLISHER,
+                                    offer=IMAGE_OFFER,
+                                    sku=IMAGE_SKU,
+                                    version=IMAGE_VERSION,
+                                ),
+                                os_disk=OSDisk(
+                                    create_option="FromImage",
+                                    disk_size_gb=disk,
+                                    # Azure deletes the disk with the VM. This does
+                                    # not replace the tag-based sweep in
+                                    # cleanup_vm_resources: that covers the rollback
+                                    # window where create fails before a VM exists
+                                    # to carry the disk away (#334), and it is what
+                                    # deletes the disks of VMs created before this
+                                    # option was set (their disks default to
+                                    # Detach).
+                                    delete_option="Delete",
+                                    managed_disk=ManagedDiskParameters(storage_account_type="StandardSSD_LRS"),
                                 ),
                             ),
-                        ),
-                        network_profile=NetworkProfile(
-                            network_interfaces=[NetworkInterfaceReference(id=nic_result.id)],
+                            os_profile=OSProfile(
+                                computer_name=vm_name,
+                                admin_username=admin_username,
+                                custom_data=cloud_init_b64,
+                                linux_configuration=LinuxConfiguration(
+                                    disable_password_authentication=True,
+                                    ssh=SshConfiguration(
+                                        public_keys=[
+                                            SshPublicKey(
+                                                path=f"/home/{admin_username}/.ssh/authorized_keys",
+                                                key_data=ssh_pub_key,
+                                            )
+                                        ]
+                                    ),
+                                ),
+                            ),
+                            network_profile=NetworkProfile(
+                                network_interfaces=[NetworkInterfaceReference(id=nic_result.id)],
+                            ),
                         ),
                         tags={"owner": "agentworks"},
                     ),
