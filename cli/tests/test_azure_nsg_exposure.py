@@ -127,6 +127,50 @@ def _assert_allow_shape(rule: Any, prefixes: list[str], *, name: str, priority: 
     assert rule.description.startswith(ALLOW_RULE_DESCRIPTION_MARKER)
 
 
+def test_public_ip_lookup_reads_nested_sdk_response() -> None:
+    from azure.mgmt.network.models import (
+        NetworkInterface,
+        NetworkInterfaceIPConfiguration,
+        NetworkInterfaceIPConfigurationPropertiesFormat,
+        NetworkInterfacePropertiesFormat,
+        PublicIPAddress,
+        PublicIPAddressPropertiesFormat,
+    )
+
+    public_ip_id = "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/vm1-ip"
+    network: Any = SimpleNamespace(
+        network_interfaces=SimpleNamespace(
+            get=lambda resource_group, name: NetworkInterface(
+                properties=NetworkInterfacePropertiesFormat(
+                    ip_configurations=[
+                        NetworkInterfaceIPConfiguration(
+                            properties=NetworkInterfaceIPConfigurationPropertiesFormat(
+                                public_ip_address=PublicIPAddress(id=public_ip_id)
+                            )
+                        )
+                    ]
+                )
+            )
+        ),
+        public_ip_addresses=SimpleNamespace(
+            get=lambda resource_group, name: PublicIPAddress(
+                properties=PublicIPAddressPropertiesFormat(ip_address="203.0.113.10")
+            )
+        ),
+    )
+    vm_info = SimpleNamespace(
+        network_profile=SimpleNamespace(
+            network_interfaces=[
+                SimpleNamespace(
+                    id="/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/networkInterfaces/vm1-nic"
+                )
+            ]
+        )
+    )
+
+    assert azure_network.get_vm_public_ip(network, vm_info) == "203.0.113.10"
+
+
 class TestCreate:
     def _request(self) -> ProvisionRequest:
         return ProvisionRequest(

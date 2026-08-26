@@ -422,11 +422,8 @@ class AzureVMPlatform(VMPlatform):
         cloud_init_b64 = base64.b64encode(cloud_init.encode()).decode()
 
         # SDK model classes are imported function-locally like the SDK
-        # clients so azure modules never load at CLI startup. They are what
-        # make the ARM request bodies serialize correctly: the models map
-        # flattened snake_case attributes (e.g. public_ip_allocation_method)
-        # into the nested ``properties`` envelope ARM expects, which raw
-        # dicts do not.
+        # clients so azure modules never load at CLI startup. SDK 32's typed
+        # signatures put request fields inside ``properties`` envelopes.
         from azure.mgmt.compute.models import (
             HardwareProfile,
             ImageReference,
@@ -445,11 +442,17 @@ class AzureVMPlatform(VMPlatform):
             AddressSpace,
             NetworkInterface,
             NetworkInterfaceIPConfiguration,
+            NetworkInterfaceIPConfigurationPropertiesFormat,
+            NetworkInterfacePropertiesFormat,
             NetworkSecurityGroup,
+            NetworkSecurityGroupPropertiesFormat,
             PublicIPAddress,
+            PublicIPAddressPropertiesFormat,
             PublicIPAddressSku,
             Subnet,
+            SubnetPropertiesFormat,
             VirtualNetwork,
+            VirtualNetworkPropertiesFormat,
         )
 
         # Rollback arms: the OUTER try is the interrupt arm (#338) and spans
@@ -471,7 +474,7 @@ class AzureVMPlatform(VMPlatform):
                     PublicIPAddress(
                         location=az.region,
                         sku=PublicIPAddressSku(name="Standard"),
-                        public_ip_allocation_method="Static",
+                        properties=PublicIPAddressPropertiesFormat(public_ip_allocation_method="Static"),
                         tags={"owner": "agentworks"},
                     ),
                 )
@@ -493,7 +496,9 @@ class AzureVMPlatform(VMPlatform):
                     f"{vm_name}-nsg",
                     NetworkSecurityGroup(
                         location=az.region,
-                        security_rules=initial_security_rules(ssh_allow_prefixes),
+                        properties=NetworkSecurityGroupPropertiesFormat(
+                            security_rules=initial_security_rules(ssh_allow_prefixes)
+                        ),
                         tags={"owner": "agentworks"},
                     ),
                 )
@@ -510,13 +515,15 @@ class AzureVMPlatform(VMPlatform):
                     vnet_name,
                     VirtualNetwork(
                         location=az.region,
-                        address_space=AddressSpace(address_prefixes=["10.0.0.0/16"]),
-                        subnets=[
-                            Subnet(
-                                name=subnet_name,
-                                address_prefix="10.0.0.0/24",
-                            )
-                        ],
+                        properties=VirtualNetworkPropertiesFormat(
+                            address_space=AddressSpace(address_prefixes=["10.0.0.0/16"]),
+                            subnets=[
+                                Subnet(
+                                    name=subnet_name,
+                                    properties=SubnetPropertiesFormat(address_prefix="10.0.0.0/24"),
+                                )
+                            ],
+                        ),
                         tags={"owner": "agentworks"},
                     ),
                 )
@@ -531,14 +538,18 @@ class AzureVMPlatform(VMPlatform):
                     f"{vm_name}-nic",
                     NetworkInterface(
                         location=az.region,
-                        ip_configurations=[
-                            NetworkInterfaceIPConfiguration(
-                                name="default",
-                                subnet=Subnet(id=subnet_id),
-                                public_ip_address=PublicIPAddress(id=ip_result.id),
-                            )
-                        ],
-                        network_security_group=NetworkSecurityGroup(id=nsg_result.id),
+                        properties=NetworkInterfacePropertiesFormat(
+                            ip_configurations=[
+                                NetworkInterfaceIPConfiguration(
+                                    name="default",
+                                    properties=NetworkInterfaceIPConfigurationPropertiesFormat(
+                                        subnet=Subnet(id=subnet_id),
+                                        public_ip_address=PublicIPAddress(id=ip_result.id),
+                                    ),
+                                )
+                            ],
+                            network_security_group=NetworkSecurityGroup(id=nsg_result.id),
+                        ),
                         tags={"owner": "agentworks"},
                     ),
                 )
