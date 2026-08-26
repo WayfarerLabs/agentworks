@@ -424,8 +424,8 @@ recording off (yours wins, because `extra_args` follows generated options), whic
 relying on that fallback.
 
 Its config is all optional, and `agw resource explain harness-integration/codex` documents every
-field. It omits the following behavior because it belongs to Codex rather than the fields
-themselves:
+field. The field reference omits these details because they describe Codex behavior rather than the
+fields themselves:
 
 - **Codex sandboxes network access OFF by default**, even under `workspace-write`. A coding session
   that needs `npm install` or `git push` has to turn it on.
