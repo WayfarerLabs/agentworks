@@ -13,9 +13,22 @@ Onboarding is a repeatable path, not a one-time wizard. Start with
 `agw guide show concept-core-model` and `agw guide show concept-prerequisites`, then work through
 the sections below. On an existing installation, skip anything that is already ready.
 
+## Plan the installation
+
+Before editing configuration, establish the intended shape of the installation:
+
+- where VMs should run, expressed as a platform and site;
+- how secrets and provider credentials should be supplied;
+- which coding harnesses sessions should run; and
+- whether managed workspaces need authenticated Git access and, if so, which credential integration
+  they should use.
+
+These choices do not all require custom resources. The shipped defaults may already fit. Inspect the
+available options first, then use the sections below to configure only what the installation needs.
+
 <!-- agw:agent-only -->
 
-Use CLI introspection to narrow choices as they become relevant.
+Use CLI introspection to help the operator make these choices before configuration begins.
 `agw resource list --include-disabled` shows installed resources, including disabled or not-ready
 entries, while `agw resource explain KIND/NAME` describes one capability's configuration. If the
 operator has not already selected an option, summarize the meaningful choices and ask. If they have,
