@@ -85,13 +85,20 @@ index, list, show, and topic-completion paths from returning a partial catalog.
 
 The installed index (`plugins/__init__.py`) uses **inverted registration**: it imports each shipped
 plugin module and calls `register_plugin(module.PLUGIN)` itself, rather than registration being an
-import side effect. To ship a plugin, add its module to `_INSTALLED_MODULES`:
+import side effect. To ship a plugin, import its module under an underscore alias and add it to
+`_INSTALLED_MODULES`:
 
 ```python
+from agentworks.plugins import azure as _azure
+from agentworks.plugins import claude as _claude
+
 _INSTALLED_MODULES: tuple[_PluginModule, ...] = (
-    agentworks_azure,
+    _claude,
+    _azure,
 )
 ```
+
+The shipped tuple lists every system plugin; the lines above are the two a new plugin adds.
 
 Every module listed there is registered and seated at import; `agw doctor`'s **System plugins**
 roster is what a given build actually ships. On import the index:
