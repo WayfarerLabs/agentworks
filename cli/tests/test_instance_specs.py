@@ -11,9 +11,15 @@ from agentworks.agents.templates import resolve_from_dict_with_provenance as res
 from agentworks.agents.templates import resolve_live_template_with_provenance as resolve_live_agent
 from agentworks.db import AppliedStateKey, VersionedPayload
 from agentworks.declared_resource import DeclaredResource
-from agentworks.errors import StateError, ValidationError
-from agentworks.instance_overlay_codec import OVERLAY_EXCLUDED_FIELDS
-from agentworks.instance_specs import parse_instance_spec, refuse_orphan_creation_state, replace_agent_overlay
+from agentworks.errors import NotFoundError, StateError, ValidationError
+from agentworks.instance_overlay_codec import OVERLAY_EXCLUDED_FIELDS, UnsupportedOverlayFieldsError
+from agentworks.instance_specs import (
+    UnsupportedStoredOverlayError,
+    decode_stored_overlay,
+    parse_instance_spec,
+    refuse_orphan_creation_state,
+    replace_agent_overlay,
+)
 from agentworks.resources.inheritance import LayerSourceKind
 from agentworks.resources.registry import Registry
 from agentworks.sessions.template import SessionTemplate
@@ -26,6 +32,7 @@ from agentworks.workspaces.template import WorkspaceTemplate
 from agentworks.workspaces.templates import resolve_from_dict_with_provenance as resolve_workspace
 from agentworks.workspaces.templates import resolve_live_template_with_provenance as resolve_live_workspace
 from agentworks.workspaces.templates import resolve_live_tmuxinator
+from agentworks.workspaces.templates import resolve_template as resolve_workspace_template
 
 if TYPE_CHECKING:
     from agentworks.db import Database
@@ -115,6 +122,63 @@ def test_validation_error_does_not_echo_plaintext_environment_value() -> None:
     with pytest.raises(ValidationError) as caught:
         parse_instance_spec("agent", f'{{"env":{{"TOKEN":{{"unexpected":"{plaintext}"}}}}}}')
 
+    assert plaintext not in str(caught.value)
+
+
+def test_unknown_desired_field_is_strict_and_classified_as_unsupported() -> None:
+    plaintext = "do-not-print-this-value"
+
+    with pytest.raises(UnsupportedOverlayFieldsError) as caught:
+        parse_instance_spec("agent", f'{{"future_field":"{plaintext}"}}')
+
+    assert plaintext not in str(caught.value)
+
+
+def test_stored_unknown_field_and_payload_version_are_unsupported_state(db: Database) -> None:
+    records = (
+        db.instance_state.put_desired_overlay("agent", "future-field", VersionedPayload(1, {"future_field": True})),
+        db.instance_state.put_desired_overlay(
+            "agent",
+            "future-and-invalid",
+            VersionedPayload(1, {"future_field": True, "env": {"TOKEN": {"unexpected": "value"}}}),
+        ),
+        db.instance_state.put_desired_overlay(
+            "agent",
+            "future-and-invalid-root-sibling",
+            VersionedPayload(1, {"future_field": True, "shell": 5}),
+        ),
+        db.instance_state.put_desired_overlay("agent", "future-version", VersionedPayload(2, {"shell": "zsh"})),
+    )
+
+    for record in records:
+        with pytest.raises(UnsupportedStoredOverlayError) as caught:
+            decode_stored_overlay(record)
+        assert caught.value.hint is not None
+
+
+def test_stored_nested_unknown_field_is_unsupported_state(db: Database) -> None:
+    record = db.instance_state.put_desired_overlay(
+        "workspace",
+        "future-nested-field",
+        VersionedPayload(1, {"env": {"TOKEN": {"secret": "token", "future_option": True}}}),
+    )
+
+    with pytest.raises(UnsupportedStoredOverlayError):
+        decode_stored_overlay(record)
+
+
+def test_malformed_stored_overlay_remains_generic_broken_state(db: Database) -> None:
+    plaintext = "do-not-print-this-value"
+    record = db.instance_state.put_desired_overlay(
+        "agent",
+        "malformed",
+        VersionedPayload(1, {"env": {"TOKEN": {"unexpected": plaintext}}}),
+    )
+
+    with pytest.raises(StateError) as caught:
+        decode_stored_overlay(record)
+
+    assert type(caught.value) is StateError
     assert plaintext not in str(caught.value)
 
 
@@ -218,6 +282,23 @@ def test_live_tmuxinator_preserves_missing_base_compatibility_and_honors_explici
     assert resolve_live_tmuxinator(db, registry, "copied", "copied") is False
 
 
+def test_live_workspace_overlay_survives_a_missing_selected_base(db: Database) -> None:
+    overlay = parse_instance_spec("workspace", '{"env":{"OVERLAY_ONLY":"available"}}')
+    db.instance_state.put_desired_overlay("workspace", "copied", overlay.payload)
+
+    resolution = resolve_live_workspace(db, Registry.empty(), "copied", "removed-template")
+
+    assert resolution.value.env["OVERLAY_ONLY"].value == "available"
+    assert resolution.provenance[("env", "OVERLAY_ONLY")][-1].kind is LayerSourceKind.INSTANCE
+
+
+def test_new_workspace_overlay_does_not_hide_an_unknown_selected_template() -> None:
+    overlay = cast("WorkspaceTemplate", parse_instance_spec("workspace", '{"tmuxinator":false}').declaration)
+
+    with pytest.raises(NotFoundError):
+        resolve_workspace_template(Registry.empty(), "typo", overlay=overlay, instance_name="new-workspace")
+
+
 def test_owner_and_overlay_insert_rollback_together(db: Database) -> None:
     with pytest.raises(RuntimeError, match="rollback"), db.transaction():
         db.insert_vm("v1", site="lima-local", hostname="v1")
@@ -242,3 +323,48 @@ def test_agent_template_and_overlay_replacement_rollback_together(db: Database) 
 
     assert db.get_agent("a1").template == "old"  # type: ignore[union-attr]
     assert db.instance_state.get_desired_overlay("agent", "a1").payload == old.payload  # type: ignore[union-attr]
+
+
+@pytest.mark.parametrize("supplied", [False, True])
+def test_agent_overlay_retain_and_nonempty_replace_remain_strict_for_unsupported_state(
+    db: Database,
+    supplied: bool,
+) -> None:
+    db.instance_state.put_desired_overlay("agent", "a1", VersionedPayload(1, {"future_field": True}))
+    replacement = parse_instance_spec("agent", '{"shell":"zsh"}') if supplied else None
+
+    with pytest.raises(UnsupportedStoredOverlayError):
+        replace_agent_overlay(db, "a1", replacement, supplied=supplied)
+
+    stored = db.instance_state.get_desired_overlay("agent", "a1")
+    assert stored is not None and stored.payload.value == {"future_field": True}
+
+
+def test_agent_overlay_clear_reports_valid_fields_but_not_unsupported_keys(db: Database) -> None:
+    empty = parse_instance_spec("agent", "{}")
+    valid = parse_instance_spec("agent", '{"shell":"zsh"}')
+    db.instance_state.put_desired_overlay("agent", "a1", valid.payload)
+
+    valid_outcome = replace_agent_overlay(db, "a1", empty, supplied=True)
+
+    assert valid_outcome is not None and valid_outcome.fields == ("shell",)
+
+    db.instance_state.put_desired_overlay("agent", "a1", VersionedPayload(1, {"future_field": True}))
+
+    unsupported_outcome = replace_agent_overlay(db, "a1", empty, supplied=True)
+
+    assert unsupported_outcome is not None and unsupported_outcome.fields == ()
+
+
+def test_agent_overlay_clear_does_not_remove_generic_malformed_state(db: Database) -> None:
+    db.instance_state.put_desired_overlay(
+        "agent",
+        "a1",
+        VersionedPayload(1, {"env": {"TOKEN": {"unexpected": "value"}}}),
+    )
+
+    with pytest.raises(StateError) as caught:
+        replace_agent_overlay(db, "a1", parse_instance_spec("agent", "{}"), supplied=True)
+
+    assert type(caught.value) is StateError
+    assert db.instance_state.get_desired_overlay("agent", "a1") is not None

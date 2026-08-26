@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, cast
 
 from agentworks.db.instance_state import InstanceKind, JsonObject, VersionedPayload
 from agentworks.errors import StateError, ValidationError
-from agentworks.instance_overlay_codec import OVERLAY_EXCLUDED_FIELDS
+from agentworks.instance_overlay_codec import OVERLAY_EXCLUDED_FIELDS, UnsupportedOverlayFieldsError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -58,6 +58,10 @@ class OverlayOutcome:
     fields: tuple[str, ...] = ()
 
 
+class UnsupportedStoredOverlayError(StateError):
+    """Stored desired state was written for a declaration schema this release cannot read."""
+
+
 def parse_instance_spec(instance_kind: InstanceKind, value: str) -> InstanceOverlay[BaseModel]:
     """Parse strict inline JSON and validate it through the kind's spec model."""
     raw = _parse_json_object(value)
@@ -77,12 +81,12 @@ def parse_instance_spec(instance_kind: InstanceKind, value: str) -> InstanceOver
 def decode_stored_overlay(record: DesiredOverlayRecord) -> InstanceOverlay[BaseModel]:
     """Decode a persisted overlay at the state-database trust boundary."""
     if record.payload.payload_version != _PAYLOAD_VERSION:
-        raise StateError(
+        raise UnsupportedStoredOverlayError(
             f"stored {record.instance_kind} {record.instance_name!r} instance spec uses "
             f"unsupported payload version {record.payload.payload_version}",
             entity_kind=record.instance_kind,
             entity_name=record.instance_name,
-            hint="Upgrade Agentworks or restore state written by a compatible release.",
+            hint="Upgrade Agentworks to a compatible or newer release before applying this instance spec.",
         )
     try:
         encoded = json.dumps(
@@ -93,6 +97,13 @@ def decode_stored_overlay(record: DesiredOverlayRecord) -> InstanceOverlay[BaseM
             separators=(",", ":"),
         )
         return parse_instance_spec(record.instance_kind, encoded)
+    except UnsupportedOverlayFieldsError as error:
+        raise UnsupportedStoredOverlayError(
+            f"stored {record.instance_kind} {record.instance_name!r} instance spec uses unsupported fields: {error}",
+            entity_kind=record.instance_kind,
+            entity_name=record.instance_name,
+            hint="Upgrade Agentworks to a compatible or newer release before applying this instance spec.",
+        ) from error
     except ValidationError as error:
         raise StateError(
             f"stored {record.instance_kind} {record.instance_name!r} instance spec is invalid: {error}",
@@ -149,6 +160,17 @@ def replace_agent_overlay(
     supplied: bool,
 ) -> OverlayOutcome | None:
     """Apply agent-reinit retain, replace, and clear semantics in an outer transaction."""
+    if supplied and overlay is not None and not overlay.payload.value:
+        prior_record = db.instance_state.get_desired_overlay("agent", instance_name)
+        if prior_record is None:
+            return OverlayOutcome(OverlayDisposition.EXPLICITLY_ABSENT)
+        try:
+            prior_fields = decode_stored_overlay(prior_record).fields
+        except UnsupportedStoredOverlayError:
+            prior_fields = ()
+        db.instance_state.clear_desired_overlay("agent", instance_name)
+        return OverlayOutcome(OverlayDisposition.CLEARED, prior_fields)
+
     prior = get_instance_overlay(db, "agent", instance_name)
     if not supplied:
         if prior is None:
@@ -156,11 +178,6 @@ def replace_agent_overlay(
         return OverlayOutcome(OverlayDisposition.RETAINED, prior.fields)
     if overlay is None:
         raise TypeError("a supplied instance spec must be parsed")
-    if not overlay.payload.value:
-        db.instance_state.clear_desired_overlay("agent", instance_name)
-        if prior is None:
-            return OverlayOutcome(OverlayDisposition.EXPLICITLY_ABSENT)
-        return OverlayOutcome(OverlayDisposition.CLEARED, prior.fields)
     db.instance_state.put_desired_overlay("agent", instance_name, overlay.payload)
     disposition = OverlayDisposition.SET if prior is None else OverlayDisposition.REPLACED
     return OverlayOutcome(disposition, overlay.fields)

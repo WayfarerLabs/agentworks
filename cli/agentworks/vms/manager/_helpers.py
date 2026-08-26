@@ -67,15 +67,21 @@ def _resolve_vm_admin_env_scopes(
 
     ws_env: dict[str, EnvEntry] | None = None
     if ws is not None:
-        # A copied workspace's synthetic ``template="copied"`` marker (or a
-        # template later removed from config) resolves to an empty env scope
-        # rather than raising: the pinned workspace stays in the ladder and
-        # contributes nothing, and the vm/site/admin scopes are unaffected.
+        # A stored instance layer can keep contributing after its selected
+        # base disappears. A workspace without either still contributes an
+        # empty scope, preserving copied-workspace compatibility.
         from agentworks.errors import ConfigError, NotFoundError
-        from agentworks.workspaces.templates import resolve_live_template
+        from agentworks.instance_specs import UnsupportedStoredOverlayError
+        from agentworks.workspaces.templates import resolve_live_template, resolve_ws_template_env_or_empty
 
         try:
             ws_env = resolve_live_template(db, registry, ws.name, ws.template).env
+        except UnsupportedStoredOverlayError:
+            output.warn(
+                f"Stored workspace instance spec for {ws.name!r} requires a compatible or newer "
+                "Agentworks release; using its base template for this environment operation."
+            )
+            ws_env = resolve_ws_template_env_or_empty(registry, ws.template)
         except (ValueError, ConfigError, NotFoundError):
             ws_env = {}
 

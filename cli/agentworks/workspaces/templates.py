@@ -119,19 +119,7 @@ def resolve_live_template(
     template_name: str | None,
 ) -> ResolvedTemplate:
     """Resolve a persisted workspace's template chain plus its stored final layer."""
-    from typing import cast
-
-    from agentworks.instance_specs import get_instance_overlay
-
-    overlay = get_instance_overlay(db, "workspace", instance_name)
-    if overlay is None:
-        return resolve_template(registry, template_name)
-    return resolve_template(
-        registry,
-        template_name,
-        overlay=cast("WorkspaceTemplate", overlay.declaration),
-        instance_name=instance_name,
-    )
+    return resolve_live_template_with_provenance(db, registry, instance_name, template_name).value
 
 
 def resolve_live_template_with_provenance(
@@ -146,12 +134,23 @@ def resolve_live_template_with_provenance(
     from agentworks.instance_specs import get_instance_overlay
 
     overlay = get_instance_overlay(db, "workspace", instance_name)
-    return resolve_template_with_provenance(
-        registry,
-        template_name,
-        overlay=None if overlay is None else cast("WorkspaceTemplate", overlay.declaration),
-        instance_name=instance_name,
-    )
+    if overlay is None:
+        return resolve_template_with_provenance(registry, template_name)
+    declaration = cast("WorkspaceTemplate", overlay.declaration)
+    try:
+        return resolve_template_with_provenance(
+            registry,
+            template_name,
+            overlay=declaration,
+            instance_name=instance_name,
+        )
+    except NotFoundError:
+        return _resolve_with_provenance(
+            {},
+            template_name or "default",
+            overlay=declaration,
+            instance_name=instance_name,
+        )
 
 
 def resolve_live_tmuxinator(

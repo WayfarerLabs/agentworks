@@ -96,6 +96,13 @@ malformed row. Older readers omit it from typed results, and partial replacement
 Known keys attached to invalid owner kinds, malformed keys, and malformed envelopes still raise
 `StateError`.
 
+Desired overlays are stricter because they are operator declarations rather than additive evidence.
+An older release refuses an unknown desired field or payload version instead of realizing only the
+subset it understands. The error identifies version skew and recommends a compatible or newer
+release, not corruption repair. Lifecycle/application paths remain strict; a base-safe read or
+access path may explicitly warn and use the base declaration without claiming that the overlay was
+applied.
+
 Standalone writes commit before returning. Inside `Database.transaction()` they defer to the outer
 boundary. Applied-slice replacement encodes the complete input first, then inserts or replaces the
 supplied keys with one operation and timestamp in one transaction. It leaves unrelated slices

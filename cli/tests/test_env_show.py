@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.config import load_config
-from agentworks.db import Database
+from agentworks.db import Database, VersionedPayload
 from agentworks.env.show import ResolvedEnvRow, show_env
 from agentworks.errors import StateError, ValidationError
 from agentworks.instance_specs import parse_instance_spec
@@ -238,6 +238,87 @@ def test_copied_workspace_template_shows_no_workspace_env_and_does_not_crash(
     ws_var = next(r for r in proj_rows if r.key == "WS_VAR")
     assert ws_var.scope == "workspace"
     assert ws_var.rendered_value == "ws-val"
+
+
+def test_missing_workspace_base_keeps_stored_overlay_env(
+    db: Database,
+    tmp_path: Path,
+) -> None:
+    config = load_config(_write_config(tmp_path), warn_issues=False)
+    _seed_db(db, with_workspace=False)
+    db._conn.execute(
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group, template) "
+        "VALUES ('ws-overlay', 'vm-1', '/home/agentworks/ws-overlay', 'ws-ws-overlay', 'removed')"
+    )
+    db._conn.commit()
+    overlay = parse_instance_spec("workspace", '{"env":{"OVERLAY_ONLY":"available"}}')
+    db.instance_state.put_desired_overlay("workspace", "ws-overlay", overlay.payload)
+
+    rows = show_env(db, config, workspace_name="ws-overlay", interaction=TtyInteractionPolicy.REFUSE)
+
+    overlay_row = next(row for row in rows if row.key == "OVERLAY_ONLY")
+    assert overlay_row.scope == "workspace"
+    assert overlay_row.rendered_value == "available"
+
+
+def test_unsupported_workspace_overlay_warns_and_uses_base_env(
+    db: Database,
+    tmp_path: Path,
+    captured_output,  # noqa: ANN001
+) -> None:
+    config = load_config(
+        _write_config(
+            tmp_path,
+            manifests=[ManifestDoc("workspace-template", "proj", {"env": {"BASE_ONLY": "available"}})],
+        ),
+        warn_issues=False,
+    )
+    _seed_db(db, with_workspace=False)
+    db._conn.execute(
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group, template) "
+        "VALUES ('ws-future', 'vm-1', '/home/agentworks/ws-future', 'ws-ws-future', 'proj')"
+    )
+    db._conn.commit()
+    plaintext = "do-not-print-this-value"
+    db.instance_state.put_desired_overlay(
+        "workspace",
+        "ws-future",
+        VersionedPayload(1, {"future_field": plaintext}),
+    )
+
+    rows = show_env(db, config, workspace_name="ws-future", interaction=TtyInteractionPolicy.REFUSE)
+
+    base_row = next(row for row in rows if row.key == "BASE_ONLY")
+    assert base_row.scope == "workspace"
+    assert base_row.rendered_value == "available"
+    assert captured_output.warnings
+    assert plaintext not in repr(captured_output.lines)
+
+
+def test_malformed_workspace_overlay_remains_fatal_for_env_show(
+    db: Database,
+    tmp_path: Path,
+) -> None:
+    config = load_config(
+        _write_config(tmp_path, manifests=[ManifestDoc("workspace-template", "proj")]),
+        warn_issues=False,
+    )
+    _seed_db(db, with_workspace=False)
+    db._conn.execute(
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group, template) "
+        "VALUES ('ws-broken', 'vm-1', '/home/agentworks/ws-broken', 'ws-ws-broken', 'proj')"
+    )
+    db._conn.commit()
+    db.instance_state.put_desired_overlay(
+        "workspace",
+        "ws-broken",
+        VersionedPayload(1, {"env": {"TOKEN": {"unexpected": "value"}}}),
+    )
+
+    with pytest.raises(StateError) as caught:
+        show_env(db, config, workspace_name="ws-broken", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert type(caught.value) is StateError
 
 
 # ---------------------------------------------------------------------------

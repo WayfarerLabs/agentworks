@@ -31,16 +31,29 @@ composition belongs to the selected template.
 """
 
 
+class UnsupportedOverlayFieldsError(ValidationError):
+    """An overlay uses declaration fields this release does not understand."""
+
+
 def decode_overlay_model[T: BaseModel](model_type: type[T], instance_kind: str, raw: JsonObject) -> T:
     """Validate an overlay without exposing operator values in failures."""
     try:
         return model_type.model_validate({"name": "instance-overlay", **raw})
     except PydanticValidationError as error:
+        errors = error.errors(include_url=False, include_context=False, include_input=False)
         details = []
-        for item in error.errors(include_url=False, include_context=False, include_input=False):
+        errors_by_parent: dict[tuple[object, ...], set[str]] = {}
+        for item in errors:
             location = ".".join(str(part) for part in item["loc"] if part != "name") or "<root>"
             details.append(f"{location}: {item['msg']}")
-        raise ValidationError(
+            errors_by_parent.setdefault(item["loc"][:-1], set()).add(item["type"])
+        error_type = (
+            UnsupportedOverlayFieldsError
+            if any(item["type"] == "extra_forbidden" and len(item["loc"]) == 1 for item in errors)
+            or any(types == {"extra_forbidden"} for types in errors_by_parent.values())
+            else ValidationError
+        )
+        raise error_type(
             f"invalid {instance_kind} instance spec: {'; '.join(details)}",
             entity_kind=instance_kind,
         ) from None

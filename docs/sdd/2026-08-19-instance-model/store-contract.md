@@ -1,7 +1,8 @@
 # Instance State Store Contract
 
-- Status: Accepted and implemented by R2
+- Status: Accepted and implemented by R2; desired-overlay policy extended by R4
 - Date: 2026-08-23
+- Revised: 2026-08-26
 - Requirements: R2 and the storage boundary required by R3 through R5 in `frd.md`
 - Basis: `database-assessment.md`
 
@@ -56,6 +57,14 @@ repository omits that unconsumed slice from typed reads, while partial replaceme
 row. Known keys attached to invalid owner kinds, malformed keys, and malformed envelopes remain
 `StateError`.
 
+Desired overlays have the deliberately different forward-compatibility policy. They are operator
+declarations, not additive evidence, so an older release never drops an unknown field and realizes
+the remainder as though it were the requested declaration. An unknown field or unsupported payload
+version raises a typed version-skew `StateError` that recommends a compatible or newer release; it
+is not diagnosed as corruption and must not recommend lossy repair. Lifecycle and application paths
+remain strict. A read/access path may explicitly warn and use the base template when that is safe,
+but it must not claim that it applied the stored overlay.
+
 There is deliberately no polymorphic foreign key. Typed instance-deletion paths remove their owned
 records in the same transaction that removes the owner. This avoids a universal instance parent
 table while preserving lifecycle cleanup.
@@ -75,7 +84,8 @@ The repository boundary uses three frozen value records:
 The repository validates persisted JSON and envelope invariants on every read. A missing row returns
 `None` or an empty tuple according to the named method. A present malformed row raises `StateError`;
 it never degrades to absence, match, or drift. The consuming domain then selects the decoder by
-`payload_version` and validates the decoded object as its own persisted-data boundary.
+`payload_version` and validates the decoded object as its own persisted-data boundary,
+distinguishing unsupported desired declarations from malformed persisted data as described above.
 
 ## Closed repository surface
 

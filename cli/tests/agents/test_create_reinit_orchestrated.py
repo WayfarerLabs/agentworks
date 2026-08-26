@@ -18,6 +18,7 @@ from agentworks.agents import grants as agent_grants
 from agentworks.agents import initializer as agent_initializer
 from agentworks.agents import manager as agent_manager
 from agentworks.capabilities.base import RunContext
+from agentworks.db import VersionedPayload
 from agentworks.errors import ExternalError, NotFoundError, StateError
 from agentworks.output import Role
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
@@ -502,6 +503,42 @@ def test_reinit_retains_replaces_and_clears_the_stored_overlay(
         interaction=TtyInteractionPolicy.REFUSE,
     )
     assert db.instance_state.get_desired_overlay("agent", "dev") is None
+
+
+@pytest.mark.parametrize(
+    "stored_payload",
+    [
+        pytest.param(VersionedPayload(1, {"future_field": "do-not-print-this-value"}), id="future-field"),
+        pytest.param(VersionedPayload(2, {"opaque": "do-not-print-this-value"}), id="future-version"),
+    ],
+)
+def test_reinit_empty_spec_clears_an_unsupported_stored_overlay_without_exposing_it(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: dict[str, Any],
+    captured_output,  # noqa: ANN001
+    stored_payload: VersionedPayload,
+) -> None:
+    config = make_config()
+    _seed_vm(db)
+    db.insert_agent("dev", "box", "agt-dev", template="default")
+    db.instance_state.put_desired_overlay("agent", "dev", stored_payload)
+    _reachable(monkeypatch, True)
+
+    agent_manager.reinit_agent(
+        db,
+        config,
+        name="dev",
+        spec="",
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    assert db.instance_state.get_desired_overlay("agent", "dev") is None
+    assert mutation["agent_name"] == "dev"
+    assert "future_field" not in repr(captured_output.lines)
+    assert "opaque" not in repr(captured_output.lines)
+    assert "do-not-print-this-value" not in repr(captured_output.lines)
 
 
 def test_reinit_whitespace_spec_remains_invalid_and_retains_the_stored_overlay(

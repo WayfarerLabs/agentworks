@@ -9,7 +9,7 @@
 - R1 assessment: [database-assessment.md](./database-assessment.md)
 - R2 contract: [store-contract.md](./store-contract.md)
 - Instance-spec CLI: [instance-spec-cli.md](./instance-spec-cli.md)
-- Code basis: `0547f813`, based on `main` with accepted R1 PR #632 and R2 PR #636 merged
+- Code basis: `20e7b6e2`, based on `main` with accepted R1 PR #632 and R2 PR #636 merged
 - Delivery vehicle: merged R1 artifact PR #632; merged R2 store and accepted R4 design PR #636;
   remaining phases as independently green PRs from `main`, stacked only for actual dependencies
 

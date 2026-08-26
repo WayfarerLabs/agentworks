@@ -289,13 +289,12 @@ def _resolve_scope_envs(
 
     workspace_env: dict[str, EnvEntry] | None = None
     if ctx.workspace is not None:
-        # A copied workspace's synthetic ``template="copied"`` marker (or a
-        # template later removed from config) resolves to an empty env scope
-        # rather than raising ``unknown_template_error``. This keeps ``env
-        # show --workspace <copied>`` (and ``--session`` whose workspace is
-        # copied) working, consistent with exec/shell; the other scopes below
-        # are unaffected.
+        # A stored instance layer can keep contributing after its selected
+        # base disappears. A workspace without either still contributes an
+        # empty scope, preserving copied-workspace compatibility.
         from agentworks.errors import ConfigError, NotFoundError
+        from agentworks.instance_specs import UnsupportedStoredOverlayError
+        from agentworks.workspaces.templates import resolve_ws_template_env_or_empty
 
         try:
             workspace_env = _resolve_workspace_template(
@@ -304,6 +303,12 @@ def _resolve_scope_envs(
                 ctx.workspace.name,
                 ctx.workspace.template,
             ).env
+        except UnsupportedStoredOverlayError:
+            output.warn(
+                f"Stored workspace instance spec for {ctx.workspace.name!r} requires a compatible or newer "
+                "Agentworks release; using its base template for this environment inspection."
+            )
+            workspace_env = resolve_ws_template_env_or_empty(registry, ctx.workspace.template)
         except (ValueError, ConfigError, NotFoundError):
             workspace_env = {}
 

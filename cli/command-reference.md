@@ -37,8 +37,9 @@ work fails, the new desired state remains stored so a plain `agent reinit NAME` 
 
 For compound `session create`, `--spec` applies to the new session. `--workspace-spec` is accepted
 only with `--new-workspace`, and `--agent-spec` only with `--new-agent`; each applies to that
-matching new owner. The command reports only whether an instance layer was set, replaced, retained,
-cleared, or explicitly absent. It never prints the JSON or environment values.
+matching new owner. The command reports whether an instance layer was set, replaced, retained,
+cleared, or explicitly absent, along with recognized field names when available. It never prints the
+JSON or environment values.
 
 Instance specs use the fields and merge rules of their matching template kind. Scalars replace the
 template value, map keys use child-wins merge, and list fields use that kind's stable append and

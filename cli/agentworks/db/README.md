@@ -33,6 +33,14 @@ replaces only the supplied slice keys, with one operation and one timestamp, and
 unrelated facts. Empty replacement is a no-op. Existing instances have no synthesized records:
 absence means not recorded until a lifecycle operation establishes state.
 
+That declaration/evidence distinction controls forward compatibility. An older release refuses a
+desired overlay with an unknown field or unsupported payload version rather than silently realizing
+only the fields it understands. It reports version skew and points to a compatible or newer release,
+not to corruption repair. Lifecycle/application paths stay strict; a base-safe read or access path
+may explicitly warn and use the base template without claiming the overlay was applied. Applied
+state differs because an unknown well-formed key is additive evidence the older release does not
+consume, so omitting it from typed reads does not change an operator-authored declaration.
+
 An unknown applied key is well formed only when it is 1 to 64 ASCII characters in lower-kebab form:
 a lowercase letter followed by lowercase letters or digits, with single hyphens separating nonempty
 segments. A well-formed unknown key is evidence written by a newer release, not corruption. An older
