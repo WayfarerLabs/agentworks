@@ -19,7 +19,12 @@
   render; its two `docs(cli)` commits are in the published 0.15.0 Release body. An entry appears
   only when it passes three independent filters, none dominant. **Window:** its committer date sorts
   after the previous release commit in the default branch's date-ordered history, which is what
-  omitted twelve reachable commits from the 0.16.0 notes. **Component:** it touches `cli/`, which is
+  omitted twelve reachable commits from the 0.16.0 notes. **That omission is permanent and is not
+  repairable by scheduling** (established 2026-08-26 when a lane reasoned the opposite): both inputs
+  are already fixed, the boundary by the `v0.15.0` tag and the commits by their committer dates, so
+  holding the cut does not recover them and 0.17.0 is strictly worse because its window opens at the
+  `v0.16.0` tag. They are absent from every future generated surface. The hold on 0.16.0 rests on
+  release completeness rather than on recovering them. **Component:** it touches `cli/`, which is
   why `fix(website)` never appears despite being a rendering type. **Type:** `feat`, `fix`, and
   `docs` render; `chore`, `test`, and `refactor` do not. So a `docs` merge under `cli/` does rewrite
   the branch. The durable fix is to carry operator-facing text in a commit footer, which is
