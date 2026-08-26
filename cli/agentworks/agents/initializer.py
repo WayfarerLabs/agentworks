@@ -37,7 +37,7 @@ def create_agent_on_vm(
     agent_name: str,
     git_tokens: dict[str, str],
     logger: SSHLogger,
-    admin_git_force_safe_directory: bool | None = None,
+    admin_git_force_safe_directory: bool,
 ) -> None:
     """Create an agent Linux user on a VM and configure their environment.
 
@@ -227,18 +227,9 @@ def create_agent_on_vm(
     # via scp.
 
     # Git safe.directory wildcard (agents access repos owned by admin).
-    # Resolve the VM's own admin-template (NULL column = reserved
-    # ``default``): agents on a VM provisioned from a non-default
-    # admin-template must honor that template's git_force_safe_directory,
-    # the same value the admin user resolved at provisioning.
-    if admin_git_force_safe_directory is None:
-        from agentworks.resources.access import admin_template as _admin_template
-
-        admin_git_force_safe_directory = _admin_template(
-            registry,
-            vm.admin_template or "default",
-        ).git_force_safe_directory
-
+    # The caller passes the VM's effective admin declaration, including
+    # its stored final layer, so this path cannot silently fall back to a
+    # plain selected template.
     if admin_git_force_safe_directory:
         try:
             ensure_safe_directory_wildcard(agent_target)

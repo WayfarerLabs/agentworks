@@ -33,6 +33,12 @@ replaces only the supplied slice keys, with one operation and one timestamp, and
 unrelated facts. Empty replacement is a no-op. Existing instances have no synthesized records:
 absence means not recorded until a lifecycle operation establishes state.
 
+VM desired overlays use one owner record for the paired final VM and admin layers. New writes use
+payload version 2 with explicit `vm` and `admin` components. Readers retain compatibility with the
+legacy payload-version-1 flat VM layer, treating its admin component as absent. Other instance kinds
+continue to use their direct payload-version-1 layer. This payload evolution does not change the
+physical store or require a database migration.
+
 That declaration/evidence distinction controls forward compatibility. An older release refuses a
 desired overlay with an unknown field or unsupported payload version rather than silently realizing
 only the fields it understands. It reports version skew and points to a compatible or newer release,

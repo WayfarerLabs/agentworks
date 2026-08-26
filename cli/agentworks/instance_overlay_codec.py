@@ -71,7 +71,10 @@ def value_safe_model_validation_error(
     errors_by_parent: dict[tuple[object, ...], set[str]] = {}
     for item in errors:
         location = ".".join(str(part) for part in item["loc"] if part != "name") or "<root>"
-        details.append(f"{location}: {item['msg']}")
+        message = (
+            "Value failed domain validation" if item["type"] in {"value_error", "assertion_error"} else item["msg"]
+        )
+        details.append(f"{location}: {message}")
         errors_by_parent.setdefault(item["loc"][:-1], set()).add(item["type"])
     unsupported = classify_unsupported and (
         any(item["type"] == "extra_forbidden" and len(item["loc"]) == 1 for item in errors)

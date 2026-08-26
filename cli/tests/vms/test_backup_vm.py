@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from agentworks.db import VersionedPayload
 from agentworks.errors import BackupError, StateError
 from agentworks.instance_specs import parse_vm_instance_specs
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -75,20 +76,27 @@ def test_backup_json_refuses_existing_and_symlink_paths(tmp_path: Path) -> None:
     assert target.read_text(encoding="utf-8") == "preserve target"
 
 
+@pytest.mark.parametrize("legacy", [False, True], ids=("composite-v2", "legacy-flat-v1"))
 @pytest.mark.skipif(os.name == "nt", reason="native Windows intentionally refuses overlay-bearing backups")
 def test_vm_backup_exports_versioned_instance_specs(
     db: Database,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    legacy: bool,
 ) -> None:
     db.insert_vm("bvm", site="lima-local", hostname="bvm")
     db.update_vm_tailscale("bvm", "100.64.0.8")
-    overlays = parse_vm_instance_specs(
-        '{"env":{"TOKEN":"plaintext"}}',
-        '{"env":{"ADMIN_TOKEN":{"secret":"admin-token"}}}',
-    )
-    assert overlays is not None
-    db.instance_state.put_desired_overlay("vm", "bvm", overlays.payload)
+    if legacy:
+        payload = VersionedPayload(1, {"env": {"TOKEN": {"value": "plaintext"}}})
+    else:
+        overlays = parse_vm_instance_specs(
+            '{"env":{"TOKEN":"plaintext"}}',
+            '{"env":{"ADMIN_TOKEN":{"secret":"admin-token"}}}',
+        )
+        assert overlays is not None
+        payload = overlays.payload
+    db.instance_state.put_desired_overlay("vm", "bvm", payload)
 
     class _FakeSSHTransport:
         pass
@@ -118,15 +126,20 @@ def test_vm_backup_exports_versioned_instance_specs(
     specs = loads((destination / "instance-specs.json").read_text(encoding="utf-8"))
     assert manifest["version"] == 3
     assert manifest["instance_spec_count"] == 1
+    expected_value = (
+        {"env": {"TOKEN": {"value": "plaintext"}}}
+        if legacy
+        else {
+            "vm": {"env": {"TOKEN": {"value": "plaintext"}}},
+            "admin": {"env": {"ADMIN_TOKEN": {"secret": "admin-token"}}},
+        }
+    )
     assert specs == [
         {
             "instance_kind": "vm",
             "instance_name": "bvm",
-            "payload_version": 1,
-            "value": {
-                "vm": {"env": {"TOKEN": {"value": "plaintext"}}},
-                "admin": {"env": {"ADMIN_TOKEN": {"secret": "admin-token"}}},
-            },
+            "payload_version": 1 if legacy else 2,
+            "value": expected_value,
             "recorded_at": specs[0]["recorded_at"],
         }
     ]

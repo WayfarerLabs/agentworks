@@ -18,11 +18,13 @@ import pytest
 
 from agentworks.capabilities.vm_platform import ProvisionResult
 from agentworks.config import load_config
-from agentworks.db import VMStatus
+from agentworks.db import VersionedPayload, VMStatus
 from agentworks.errors import StateError
 from agentworks.output import Role
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
+from agentworks.vms.admin import AdminConfig
+from agentworks.vms.templates import ResolvedVMTemplate
 from tests.conftest import ManifestDoc, write_manifests
 from tests.orchestrated_fixtures import proxmox_site
 
@@ -827,7 +829,41 @@ def test_reinit_resolves_the_stored_admin_template(
 
     assert captured["git_tokens"] == {"gh": "ghtok"}
     assert list(captured["providers"]) == ["gh"]  # type: ignore[call-overload]
-    assert captured["admin"].shell == "zsh"  # type: ignore[union-attr]
+    assert isinstance(captured["admin"], AdminConfig)
+    assert captured["admin"].shell == "zsh"
+
+
+def test_reinit_applies_a_legacy_flat_vm_payload(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A VM desired layer written before paired admin layers still reapplies."""
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    config = make_config()
+    _seed_provisioned_vm(db)
+    db.instance_state.put_desired_overlay("vm", "rvm", VersionedPayload(1, {"cpus": 11}))
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
+
+    @contextlib.contextmanager
+    def _hold(self: LimaPlatform, vm: object, *, config: object | None = None):
+        yield
+
+    monkeypatch.setattr(LimaPlatform, "vm_active", _hold)
+    captured: dict[str, object] = {}
+
+    def _fake_init(*args: object, **kwargs: object) -> None:
+        captured["vm_template"] = args[3]
+
+    monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
+    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kw: SimpleNamespace())
+
+    vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
+
+    vm_template = captured["vm_template"]
+    assert isinstance(vm_template, ResolvedVMTemplate)
+    assert vm_template.cpus == 11
 
 
 def test_reinit_errors_cleanly_when_the_stored_admin_template_is_gone(

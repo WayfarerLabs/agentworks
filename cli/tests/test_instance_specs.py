@@ -11,6 +11,7 @@ from agentworks.agents.templates import resolve_from_dict_with_provenance as res
 from agentworks.agents.templates import resolve_live_template_with_provenance as resolve_live_agent
 from agentworks.db import AppliedStateKey, VersionedPayload
 from agentworks.declared_resource import DeclaredResource
+from agentworks.env.entry import EnvEntry
 from agentworks.errors import NotFoundError, StateError, ValidationError
 from agentworks.instance_overlay_codec import OVERLAY_EXCLUDED_FIELDS, UnsupportedOverlayFieldsError
 from agentworks.instance_specs import (
@@ -129,7 +130,7 @@ def test_vm_specs_canonicalize_two_independently_typed_components() -> None:
 
     assert overlays is not None
     assert overlays.payload == VersionedPayload(
-        1,
+        2,
         {
             "vm": {"cpus": 8},
             "admin": {"env": {"TOKEN": {"secret": "admin-token"}}, "shell": "zsh"},
@@ -138,14 +139,7 @@ def test_vm_specs_canonicalize_two_independently_typed_components() -> None:
     assert overlays.fields == ("admin.env", "admin.shell", "vm.cpus")
 
 
-def test_empty_vm_and_admin_specs_are_one_absent_desired_decision() -> None:
-    overlays = parse_vm_instance_specs("{}", "{}")
-
-    assert overlays is not None and overlays.is_empty
-    assert overlays.payload.value == {"vm": {}, "admin": {}}
-
-
-def test_empty_vm_and_admin_specs_are_not_persisted(db: Database) -> None:
+def test_empty_vm_and_admin_specs_do_not_create_desired_state(db: Database) -> None:
     overlays = parse_vm_instance_specs("{}", "{}")
 
     assert persist_vm_creation_overlays(db, "vm-1", overlays) is None
@@ -223,16 +217,36 @@ def test_malformed_stored_overlay_remains_generic_broken_state(db: Database) -> 
     [
         {"vm": {"future_vm_field": True}, "admin": {"shell": 5}},
         {"vm": {"cpus": "many"}, "admin": {"future_admin_field": True}},
+        {"vm": {"future_vm_field": True}, "admin": {"mise_lockfile": None}},
+        {"vm": {"cpus": None}, "admin": {"future_admin_field": True}},
     ],
 )
 def test_stored_vm_future_component_dominates_malformed_sibling(
     db: Database,
     value: dict[str, object],
 ) -> None:
-    record = db.instance_state.put_desired_overlay("vm", "mixed", VersionedPayload(1, value))  # type: ignore[arg-type]
+    record = db.instance_state.put_desired_overlay("vm", "mixed", VersionedPayload(2, value))  # type: ignore[arg-type]
 
     with pytest.raises(UnsupportedStoredOverlayError):
         decode_stored_vm_overlays(record)
+
+
+def test_legacy_flat_vm_payload_decodes_as_vm_only_and_normalizes_to_current_shape(db: Database) -> None:
+    record = db.instance_state.put_desired_overlay(
+        "vm",
+        "legacy",
+        VersionedPayload(1, {"cpus": 8, "env": {"MODE": {"value": "legacy"}}}),
+    )
+
+    overlays = decode_stored_vm_overlays(record)
+
+    assert overlays.vm is not None
+    assert overlays.vm.declaration.cpus == 8
+    assert overlays.admin is None
+    assert overlays.payload == VersionedPayload(
+        2,
+        {"vm": {"cpus": 8, "env": {"MODE": {"value": "legacy"}}}, "admin": {}},
+    )
 
 
 @pytest.mark.parametrize(
@@ -241,13 +255,15 @@ def test_stored_vm_future_component_dominates_malformed_sibling(
         {"vm": {}},
         {"vm": [], "admin": {}},
         {"vm": {}, "admin": "invalid"},
+        {"vm": {}, "admin": {"mise_lockfile": None}},
+        {"vm": {"env": {"MODE": None}}, "admin": {}},
     ],
 )
 def test_malformed_stored_vm_composite_is_broken_state(
     db: Database,
     value: dict[str, object],
 ) -> None:
-    record = db.instance_state.put_desired_overlay("vm", "malformed", VersionedPayload(1, value))  # type: ignore[arg-type]
+    record = db.instance_state.put_desired_overlay("vm", "malformed", VersionedPayload(2, value))  # type: ignore[arg-type]
 
     with pytest.raises(StateError) as caught:
         decode_stored_vm_overlays(record)
@@ -341,7 +357,10 @@ def test_admin_final_layer_uses_scalar_map_and_unique_append_semantics() -> None
                 shell="bash",
                 git_credentials=["base", "shared"],
                 user_install_commands=["base-command"],
-                env={"SHARED": "base", "BASE": "yes"},
+                env={
+                    "SHARED": EnvEntry.model_validate("base"),
+                    "BASE": EnvEntry.model_validate("yes"),
+                },
             )
         },
         "ops",
@@ -389,6 +408,39 @@ def test_admin_effective_validation_rejects_invalid_folded_declaration() -> None
 
     assert caught.value.entity_kind == "vm"
     assert caught.value.entity_name == "vm-1"
+
+
+def test_admin_effective_validation_does_not_echo_custom_validator_input() -> None:
+    marker = "operator-value-marker"
+    overlays = parse_vm_instance_specs(None, f'{{"mise_lockfile":"git::{marker}"}}')
+    assert overlays is not None and overlays.admin is not None
+
+    with pytest.raises(ValidationError) as caught:
+        resolve_admin({}, overlay=overlays.admin, instance_name="vm-1")
+
+    assert marker not in str(caught.value)
+
+
+def test_admin_scalar_defaults_have_default_provenance() -> None:
+    resolution = resolve_admin({})
+
+    for field in (
+        "username",
+        "shell",
+        "dotfiles_source",
+        "dotfiles_destination",
+        "dotfiles_install_cmd",
+        "mise_activate",
+        "mise_lockfile",
+        "mise_allow_unlocked",
+        "mise_install_before",
+        "mise_prune_on_reinit",
+        "git_force_safe_directory",
+    ):
+        source = resolution.provenance[(field,)][-1]
+        assert source.kind is LayerSourceKind.DEFAULT
+        assert source.resource_kind == "admin-template"
+        assert source.name == "default"
 
 
 def test_all_live_domain_resolvers_expose_stored_instance_provenance(db: Database) -> None:

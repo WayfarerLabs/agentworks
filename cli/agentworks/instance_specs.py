@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from agentworks.workspaces.template import WorkspaceTemplate
 
 _PAYLOAD_VERSION = 1
+_VM_PAYLOAD_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -58,10 +59,6 @@ class VMInstanceOverlays:
             () if self.admin is None else tuple(f"admin.{field}" for field in _admin_overlay_fields(self.admin))
         )
         return tuple(sorted((*vm_fields, *admin_fields)))
-
-    @property
-    def is_empty(self) -> bool:
-        return self.vm is None and self.admin is None
 
 
 class OverlayDisposition(StrEnum):
@@ -125,6 +122,8 @@ def parse_vm_instance_specs(
         if canonical_admin:
             admin = parsed_admin
 
+    if vm_overlay is None and admin is None:
+        return None
     return _vm_instance_overlays(vm_overlay, admin)
 
 
@@ -169,7 +168,9 @@ def decode_stored_vm_overlays(record: DesiredOverlayRecord) -> VMInstanceOverlay
     """Decode one persisted composite VM declaration at its trust boundary."""
     if record.instance_kind != "vm":
         raise TypeError("a VM desired declaration requires a VM record")
-    if record.payload.payload_version != _PAYLOAD_VERSION:
+    if record.payload.payload_version == _PAYLOAD_VERSION:
+        return _decode_legacy_stored_vm_overlay(record)
+    if record.payload.payload_version != _VM_PAYLOAD_VERSION:
         raise _unsupported_stored_overlay(record, f"unsupported payload version {record.payload.payload_version}")
 
     raw = record.payload.value
@@ -190,16 +191,7 @@ def decode_stored_vm_overlays(record: DesiredOverlayRecord) -> VMInstanceOverlay
         malformed.append(ValidationError("vm component must be a JSON object", entity_kind="vm"))
     else:
         try:
-            encoded_vm = json.dumps(
-                raw_vm,
-                ensure_ascii=False,
-                allow_nan=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-            parsed_vm = parse_instance_spec("vm", encoded_vm)
-            if parsed_vm.payload.value:
-                vm_overlay = cast("InstanceOverlay[VMTemplate]", parsed_vm)
+            vm_overlay = _decode_stored_vm_component(raw_vm)
         except UnsupportedOverlayFieldsError as error:
             unsupported.append(error)
         except ValidationError as error:
@@ -211,6 +203,8 @@ def decode_stored_vm_overlays(record: DesiredOverlayRecord) -> VMInstanceOverlay
         from agentworks.vms import instance_overlay as vm_codec
 
         try:
+            _validate_json_tree(raw_admin)
+            _refuse_framework_fields("VM admin", raw_admin)
             parsed_admin = vm_codec.decode_admin_overlay(raw_admin)
             if vm_codec.encode_admin_overlay(parsed_admin):
                 admin = parsed_admin
@@ -264,7 +258,7 @@ def persist_vm_creation_overlays(
     overlays: VMInstanceOverlays | None,
 ) -> OverlayOutcome | None:
     """Persist both nonempty VM layers inside the owner's transaction."""
-    if overlays is None or overlays.is_empty:
+    if overlays is None:
         return None
     db.instance_state.put_desired_overlay("vm", instance_name, overlays.payload)
     return OverlayOutcome(OverlayDisposition.SET, overlays.fields)
@@ -438,7 +432,31 @@ def _vm_instance_overlays(
         "vm": {} if vm is None else vm.payload.value,
         "admin": {} if admin is None else vm_codec.encode_admin_overlay(admin),
     }
-    return VMInstanceOverlays(vm, admin, VersionedPayload(_PAYLOAD_VERSION, value))
+    return VMInstanceOverlays(vm, admin, VersionedPayload(_VM_PAYLOAD_VERSION, value))
+
+
+def _decode_legacy_stored_vm_overlay(record: DesiredOverlayRecord) -> VMInstanceOverlays:
+    """Read the payload-v1 flat VM layer written before paired admin layers."""
+    try:
+        vm = _decode_stored_vm_component(record.payload.value)
+    except UnsupportedOverlayFieldsError as error:
+        raise _unsupported_stored_overlay(record, f"unsupported fields: {error}") from error
+    except ValidationError as error:
+        raise _malformed_stored_overlay(record, str(error)) from error
+    return _vm_instance_overlays(vm, None)
+
+
+def _decode_stored_vm_component(raw: JsonObject) -> InstanceOverlay[VMTemplate] | None:
+    """Strictly decode one stored VM component without text round-tripping."""
+    _validate_json_tree(raw)
+    _refuse_framework_fields("VM", raw)
+    from agentworks.vms import instance_overlay as vm_codec
+
+    declaration = vm_codec.decode_overlay(raw)
+    canonical = vm_codec.encode_overlay(declaration)
+    if not canonical:
+        return None
+    return InstanceOverlay("vm", declaration, VersionedPayload(_PAYLOAD_VERSION, canonical))
 
 
 def _unsupported_stored_overlay(record: DesiredOverlayRecord, detail: str) -> UnsupportedStoredOverlayError:

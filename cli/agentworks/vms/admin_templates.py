@@ -17,20 +17,19 @@ if TYPE_CHECKING:
     from agentworks.vms.admin import AdminConfig
 
 
-def resolve_template(
-    registry: Registry,
-    template_name: str | None = None,
-    *,
-    overlay: AdminConfig | None = None,
-    instance_name: str | None = None,
-) -> AdminConfig:
-    """Resolve one admin template and an optional final per-VM layer."""
-    return resolve_template_with_provenance(
-        registry,
-        template_name,
-        overlay=overlay,
-        instance_name=instance_name,
-    ).value
+_SCALAR_FIELDS = (
+    "username",
+    "shell",
+    "dotfiles_source",
+    "dotfiles_destination",
+    "dotfiles_install_cmd",
+    "mise_activate",
+    "mise_lockfile",
+    "mise_allow_unlocked",
+    "mise_install_before",
+    "mise_prune_on_reinit",
+    "git_force_safe_directory",
+)
 
 
 def resolve_template_with_provenance(
@@ -97,6 +96,7 @@ def resolve_from_dict_with_provenance(
         AdminConfig(name=selected),
         layers,
         _merge_template,
+        default_paths=((field,) for field in _SCALAR_FIELDS),
         default_resource_kind="admin-template",
         default_name=selected,
     )
@@ -132,16 +132,6 @@ def resolve_live_template(
     template_name: str | None,
 ) -> AdminConfig:
     """Resolve a VM's admin template plus its stored final admin layer."""
-    return resolve_live_template_with_provenance(db, registry, instance_name, template_name).value
-
-
-def resolve_live_template_with_provenance(
-    db: Database,
-    registry: Registry,
-    instance_name: str,
-    template_name: str | None,
-) -> LayeredResolution[AdminConfig]:
-    """Resolve a persisted VM admin declaration with layer provenance."""
     from agentworks.instance_specs import get_vm_instance_overlays
 
     overlays = get_vm_instance_overlays(db, instance_name)
@@ -150,7 +140,7 @@ def resolve_live_template_with_provenance(
         template_name,
         overlay=None if overlays is None else overlays.admin,
         instance_name=instance_name,
-    )
+    ).value
 
 
 def _append_dedupe(target: list[str], source: list[str]) -> list[str]:
@@ -174,19 +164,7 @@ def _merge_template(
     supplied = layer.model_fields_set
     touched: list[LayerContribution] = []
     updates: dict[str, object] = {}
-    for field in (
-        "username",
-        "shell",
-        "dotfiles_source",
-        "dotfiles_destination",
-        "dotfiles_install_cmd",
-        "mise_activate",
-        "mise_lockfile",
-        "mise_allow_unlocked",
-        "mise_install_before",
-        "mise_prune_on_reinit",
-        "git_force_safe_directory",
-    ):
+    for field in _SCALAR_FIELDS:
         if field in supplied:
             updates[field] = getattr(layer, field)
             touched.append(LayerContribution.replacement(field))
