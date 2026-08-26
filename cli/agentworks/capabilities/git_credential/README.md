@@ -234,10 +234,12 @@ class SecretToken(AgwModel):
         SecretRef(usage="the auth token", default_template="git-token-{owner_name}"),
     ]
 
+
 TokenAcquisition = Annotated[
     SecretToken,
     UnionScalarShorthand(discriminator="mode", arm=SecretToken),
 ]
+
 
 class TokenAcquiringConfig(AgwModel):
     token: TokenAcquisition = Field(default={"mode": "secret"})
