@@ -1,8 +1,9 @@
 """The ``claude-code`` harness integration: run Claude Code as the session workload,
 resuming its transcript when one exists and launching fresh otherwise.
 
-Config vocabulary (all optional): ``goal``, ``initial_prompt``, ``agent``,
-and ``append_system_prompt`` describe a fresh conversation's workload;
+Config vocabulary (all optional): ``goal`` and ``initial_prompt`` seed a fresh
+conversation; ``agent`` and ``append_system_prompt`` configure every launched
+Claude process, including a real resume;
 ``permission_mode``, ``model``, and
 ``reasoning_effort`` map to the ``--permission-mode`` / ``--model`` /
 ``--effort`` flags verbatim; ``remote_control`` enables Claude Code Remote
@@ -33,7 +34,7 @@ from typing import TYPE_CHECKING, ClassVar, Literal
 
 from pydantic import Field
 
-from agentworks.capabilities.harness_integration.base import HarnessIntegration, require_commands
+from agentworks.capabilities.harness_integration.base import HarnessIntegration, quote_literal_argv, require_commands
 from agentworks.errors import StateError
 from agentworks.schema import AgwModel
 from agentworks.topics import TopicProse
@@ -50,6 +51,8 @@ class ClaudeCodeConfig(AgwModel):
     Claude's own and drift between releases, so their values are forwarded
     unvalidated rather than mirrored here. The installed Claude version owns
     whether a value fails, falls back, or is interpreted for a specific model.
+    The native workload flags, positional parser behavior, and ``/goal``
+    composition were rechecked with Claude Code 2.1.231.
     """
 
     name: Literal["claude-code"]
@@ -75,12 +78,12 @@ class ClaudeCodeConfig(AgwModel):
     replayed on resume."""
 
     agent: str | None = None
-    """Forwarded as ``--agent`` when starting a fresh conversation. Claude
-    Code owns agent discovery and validation."""
+    """Forwarded as ``--agent`` on every process launch, including resume.
+    Claude Code owns agent discovery and validation."""
 
     append_system_prompt: str | None = None
-    """Forwarded as ``--append-system-prompt`` when starting a fresh
-    conversation."""
+    """Forwarded as ``--append-system-prompt`` on every process launch,
+    including resume."""
 
     remote_control: bool = False
     """When true, enable Claude Code Remote Control and use the Agentworks
@@ -218,11 +221,15 @@ class ClaudeCodeIntegration(HarnessIntegration):
         else:
             identity = ["--session-id", sid]
             msg = f"agentworks harness integration (claude-code): starting new session {self._session_name}"
-        tokens = [*identity, "--name", self._session_name, *self._managed_flags(fresh=not resume)]
-        tokens += self.config.extra_args
+        parts = [shlex.quote(token) for token in (*identity, "--name", self._session_name, *self._managed_flags())]
+        if self.config.agent is not None:
+            parts += ["--agent", quote_literal_argv(self.config.agent)]
+        if self.config.append_system_prompt is not None:
+            parts += ["--append-system-prompt", quote_literal_argv(self.config.append_system_prompt)]
+        parts += [shlex.quote(token) for token in self.config.extra_args]
         if not resume and (prompt := self._fresh_prompt()) is not None:
-            tokens += ["--", prompt]
-        argv = " ".join(shlex.quote(token) for token in tokens)
+            parts += ["--", quote_literal_argv(prompt)]
+        argv = " ".join(parts)
         # A single ``sh -c`` so the whole thing survives the ``exec``
         # wrapping the tmux pane applies (``exec`` takes one simple
         # command): the login shell execs this sh, which echoes then
@@ -251,12 +258,11 @@ class ClaudeCodeIntegration(HarnessIntegration):
             self._state["session_id"] = sid
         return sid
 
-    def _managed_flags(self, *, fresh: bool) -> list[str]:
+    def _managed_flags(self) -> list[str]:
         """Managed argv tokens for this launch.
 
-        Conversation workload controls apply only to a fresh upstream
-        conversation. Process preferences still apply whenever the process is
-        launched. The caller appends ``extra_args`` and then any separated
+        Process preferences apply whenever the process is launched. The caller
+        adds literal workload controls, then ``extra_args`` and any separated
         fresh prompt.
         """
         tokens: list[str] = []
@@ -271,11 +277,6 @@ class ClaudeCodeIntegration(HarnessIntegration):
             # later positional in extra_args from becoming the Remote Control
             # title accidentally.
             tokens += ["--remote-control", self._session_name]
-        harness_config = self.config
-        if fresh and harness_config.agent is not None:
-            tokens += ["--agent", harness_config.agent]
-        if fresh and self.config.append_system_prompt is not None:
-            tokens += ["--append-system-prompt", self.config.append_system_prompt]
         settings: dict[str, str] = {}
         if self.config.vim_mode:
             settings["editorMode"] = "vim"

@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from agentworks.capabilities.harness_integration.base import HarnessIntegration, require_commands
+from agentworks.capabilities.harness_integration.base import HarnessIntegration, quote_literal_argv, require_commands
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
 
 if TYPE_CHECKING:
@@ -37,6 +37,7 @@ __all__ = [
     "ensure_harness_integration_enabled",
     "harness_integration_for",
     "merged_config",
+    "quote_literal_argv",
     "require_commands",
 ]
 

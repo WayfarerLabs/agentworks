@@ -18,6 +18,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 import agentworks
 
 _AGENTWORKS_ROOT = Path(agentworks.__file__).parent
@@ -44,7 +46,21 @@ _RESOURCE_ATTRS = (
     "user_install_commands",
 )
 
-_READ_RE = re.compile(r"\b(?:config|cfg)\.(?:" + "|".join(_RESOURCE_ATTRS) + r")\b")
+_READ_RE = re.compile(r"(?<![\w.])(?:config|cfg)\.(?:" + "|".join(_RESOURCE_ATTRS) + r")\b")
+
+
+@pytest.mark.parametrize(
+    ("source", "matches"),
+    [
+        ("config.agent", True),
+        ("return cfg.vm", True),
+        ("self.config.agent", False),
+        ("harness_config.agent", False),
+        ("nested.cfg.agent", False),
+    ],
+)
+def test_resource_read_pattern_only_matches_bare_config_receivers(source: str, matches: bool) -> None:
+    assert (_READ_RE.search(source) is not None) is matches
 
 
 def test_no_config_resource_reads_outside_publishers() -> None:

@@ -66,24 +66,24 @@ definitive config for one.
   if found so that the operator experience is seamless and they can pick up right where they left
   off. Limited configuration is supported, expressed in Claude Code's own terms: its fields map to
   Claude Code CLI flags, with an `extra_args` escape hatch that passes arguments through verbatim.
-  Fresh conversations can also receive a native goal, initial prompt, custom agent, and appended
-  system prompt. Those workload inputs are not replayed on a real resume.
+  Fresh conversations can also receive a native goal and initial prompt. The custom agent and
+  appended system prompt configure each launched Claude process, including a real resume.
 - **`codex`** (via the `codex` system plugin) drives an interactive Codex session. Like
   `claude-code`, it launches the tool and, on resume, reattaches to the existing conversation
   instead of starting over when a Codex session exists, and offers limited configuration options.
   Because Codex mints its own session ids, it learns which conversation is this session's from Codex
   itself (Codex's `notify` hook), and when it genuinely cannot tell it opens Codex's own session
   picker in the pane rather than guessing or failing. Fresh conversations can receive a goal,
-  initial prompt, named custom-agent identity, and direct developer instructions. Goal and
-  primary-thread agent setup are prompt-mediated because Codex has no documented startup-goal flag
-  or primary-thread agent selector; direct developer instructions use Codex's native configuration,
+  initial prompt, and named custom-agent identity. Goal and primary-thread agent setup are
+  prompt-mediated because Codex has no documented startup-goal flag or primary-thread agent
+  selector. Direct developer instructions use Codex's native configuration on every process launch,
   while only the named agent's `developer_instructions` apply from its custom-agent definition.
 - **`grok-build`** (via the `grok` system plugin) drives an interactive Grok Build session.
   Agentworks assigns each session a conversation UUID, starts a new conversation with that UUID, and
   resumes it when Grok's persisted local session state exists. Its common CLI settings remain open
   strings owned by Grok, with `extra_args` for the rest of Grok's evolving flag surface. A fresh
-  conversation can also receive Grok's native goal, initial prompt, agent profile, and appended
-  rules. Those workload inputs are not replayed on a real resume.
+  conversation can also receive Grok's native goal and initial prompt. The agent and rules configure
+  every launched Grok process, including a real resume.
 
 ## Session Resume
 
@@ -444,26 +444,29 @@ sessions. Five rules, each earned:
   Never interpolate raw values into shell syntax.
 - **Generated pieces must not emit `{{word}}`.** The call-site substitution raises on unknown
   `{{word}}` tokens and substitutes known ones over the entire returned string. Operator-authored
-  slices (shell's commands, `extra_args` elements) carry `{{session_name}}` semantics on purpose;
-  the code-generated skeleton must stay clear of doubled-brace words. Single braces (`${VAR}`, JSON)
-  are untouched.
+  slices (shell's commands, `extra_args` elements) carry `{{session_name}}` semantics on purpose.
+  Free-form workload fields are literal harness input, so integrations use the shared argv quoting
+  seam that hides doubled opening braces from manager substitution while the target shell
+  reconstructs the exact token. Single braces (`${VAR}`, JSON) are untouched.
 - **Model the common flags; leave the rest to `extra_args`.** A small optional vocabulary
   (`permission_mode`, `model`, `reasoning_effort`, workload inputs, and session preferences) plus a
   verbatim `extra_args` list emitted after generated options keeps the integration useful without
   chasing the tool's whole flag surface. Session-local tool settings share one generated
   `--settings` JSON argument. Append `extra_args` after the managed options for deterministic
-  ordering, but let the upstream tool define repeated-flag behavior. If Claude or Codex also needs a
-  generated positional initial prompt, only the `--` parser boundary and prompt value follow those
-  raw option tokens. Claude treats repeated `--settings` flags as last-wins, so a raw one replaces
-  the generated session settings rather than extending them; Grok Build 1.0.4 rejects a repeated
-  managed flag, so its escape hatch adds unmodeled flags instead. Keep tool-owned choice fields open
-  strings rather than duplicating a fast-moving upstream vocabulary.
-- **Apply workload inputs only when the upstream conversation is fresh.** A missing Claude
-  transcript, missing Grok summary, or Codex decision with no resumable candidate is a fresh launch
-  even when it occurs during `session resume`, so it receives the effective goal, initial prompt,
-  and identity or instruction controls. A real upstream resume receives none of them. Native harness
-  controls own the behavior where they exist; a prompt-mediated compatibility layer must disclose
-  what it cannot apply and make missing identity input visible instead of silently falling back.
+  ordering, but let the upstream tool define repeated-flag behavior. If Claude, Codex, or Grok also
+  needs a generated positional initial prompt, only the `--` parser boundary and prompt value follow
+  those raw option tokens. Claude treats repeated `--settings` flags as last-wins, so a raw one
+  replaces the generated session settings rather than extending them; Grok Build 1.0.4 rejects a
+  repeated managed flag, so its escape hatch adds unmodeled flags instead. Keep tool-owned choice
+  fields open strings rather than duplicating a fast-moving upstream vocabulary.
+- **Separate conversation content from process controls.** A missing Claude transcript, missing Grok
+  summary, or Codex decision with no resumable candidate is a fresh conversation even when it occurs
+  during `session resume`, so it receives goal and initial-prompt content plus Codex's
+  prompt-mediated primary-thread agent. A real upstream resume receives none of that conversation
+  content. Native process controls apply whenever their harness process launches: Claude's agent and
+  appended system prompt, Grok's agent and rules, and Codex's developer instructions. A
+  prompt-mediated compatibility layer must disclose what it cannot apply and make missing identity
+  input visible instead of silently falling back.
 - **Use Grok's explicit conversation UUID on both branches.** Mint it once into the integration's
   state namespace, launch fresh with `--session-id`, and resume with `--resume` only when Grok's
   persisted `summary.json` exists. The summary file is Grok's own resume boundary; a bare UUID

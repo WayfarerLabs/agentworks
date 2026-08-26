@@ -391,7 +391,7 @@ def test_fresh_initial_prompt_cannot_be_parsed_as_a_command_or_option(initial_pr
     assert argv.index("opus") < argv.index("--")
 
 
-def test_workload_bootstrap_is_not_replayed_on_resume() -> None:
+def test_resume_reapplies_process_controls_but_not_fresh_conversation_content() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})
     argv = _claude_argv(
         _harness_integration(
@@ -403,10 +403,9 @@ def test_workload_bootstrap_is_not_replayed_on_resume() -> None:
             }
         ).resume(_op_ctx(target))
     )
-    assert "--agent" not in argv
-    assert "--append-system-prompt" not in argv
-    assert all(not token.startswith("/goal ") for token in argv)
-    assert "Fresh prompt" not in argv
+    assert argv[argv.index("--agent") + 1] == "reviewer"
+    assert argv[argv.index("--append-system-prompt") + 1] == "Fresh instructions"
+    assert all("Fresh goal" not in token and "Fresh prompt" not in token for token in argv)
 
 
 @pytest.mark.parametrize(

@@ -353,7 +353,7 @@ def test_resume_fresh_fallback_applies_workload_setup(state: dict[str, object], 
     assert any(goal in token for token in _raw_codex_argv(command))
 
 
-def test_workload_setup_is_not_replayed_on_real_resume() -> None:
+def test_real_resume_reapplies_native_instructions_but_not_fresh_prompt_setup() -> None:
     values = ("Fresh goal", "Fresh prompt", "reviewer", "Fresh developer instructions")
     command = _harness_integration(
         {
@@ -364,7 +364,8 @@ def test_workload_setup_is_not_replayed_on_real_resume() -> None:
         }
     ).resume(_op_ctx(_target(rollout=0)))
     argv = _raw_codex_argv(command)
-    assert all(all(value not in token for token in argv) for value in values)
+    assert all(all(value not in token for token in argv) for value in values[:3])
+    assert any(values[3] in token for token in argv)
 
 
 def test_fresh_developer_instructions_are_toml_quoted_and_not_prompt_mediated() -> None:
@@ -514,6 +515,12 @@ def test_picker_warns_only_when_esc_would_drop_fresh_workload_input() -> None:
     assert configured_note != plain_note
     assert _echo(configured_command) != _echo(plain_command)
     assert "Fresh prompt" not in _raw_codex_argv(configured_command)
+
+    native = _harness_integration({"developer_instructions": "Native instructions"}, state={})
+    native_command = native.resume(_op_ctx(_target(discovered=discovered)))
+    assert native.launch_note() == plain_note
+    assert _echo(native_command) == _echo(plain_command)
+    assert any("Native instructions" in token for token in _raw_codex_argv(native_command))
 
 
 def test_a_candidate_whose_filename_has_no_uuid_opens_the_picker() -> None:

@@ -24,6 +24,9 @@ source-filtered discovery probe) are stubbed.
 
 from __future__ import annotations
 
+import json
+import shlex
+import tomllib
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -408,13 +411,11 @@ def test_codex_and_claude_code_state_coexist_in_one_blob(tmp_path: Path, monkeyp
 # -- substitution-safety: the generated snippet is not mangled ----------------
 
 
-def test_substitution_leaves_the_generated_snippet_intact_and_substitutes_extra_args(
+def test_substitution_preserves_workload_values_and_substitutes_extra_args(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Parity with the claude-code pin: the relocated template-var
-    substitution must not mangle the generated ``sh -c`` skeleton (the
-    recorder provisioning and the notify override's quoting included),
-    while an operator ``extra_args`` var still substitutes."""
+    """Codex JSON setup and TOML developer instructions remain literal
+    across manager substitution, while ``extra_args`` still expands."""
     from agentworks.sessions.manager import create_session
 
     db = _seed_db(tmp_path)
@@ -422,7 +423,16 @@ def test_substitution_leaves_the_generated_snippet_intact_and_substitutes_extra_
     captured: dict[str, str] = {}
     _patch_transport(monkeypatch, _CodexTarget(events))
     _common_stubs(monkeypatch)
-    _harness_integration_template(monkeypatch, {"extra_args": ["-p", "profile-{{session_name}}"]})
+    _harness_integration_template(
+        monkeypatch,
+        {
+            "goal": "goal {{session_name}} {{component}}",
+            "initial_prompt": "prompt {{session_name}} {{component}}",
+            "agent": "agent {{session_name}} {{component}}",
+            "developer_instructions": 'developer {{session_name}} {{component}} "quoted"\nline',
+            "extra_args": ["-p", "profile-{{session_name}}"],
+        },
+    )
     _capture_pane_command(monkeypatch, events, captured)
 
     create_session(
@@ -442,7 +452,19 @@ def test_substitution_leaves_the_generated_snippet_intact_and_substitutes_extra_
     assert 'notify=["' in command
     assert '"$HOME"/.agentworks/codex/record-thread-v1.sh' in command
     assert "exec codex " in command
-    # The operator's extra_args var WAS substituted (parity with shell).
-    assert "profile-s1" in command
-    assert "{{session_name}}" not in command
+    inner = shlex.split(command)[2]
+    inner_argv = shlex.split(inner)
+    argv = inner_argv[inner_argv.index("codex") + 1 :]
+    developer = next(token for token in argv if token.startswith("developer_instructions="))
+    assert tomllib.loads(developer)["developer_instructions"] == (
+        'developer {{session_name}} {{component}} "quoted"\nline'
+    )
+    prompt = argv[-1]
+    setup_json = next(part for part in prompt.split("\n\n") if part.startswith("{"))
+    assert json.loads(setup_json) == {
+        "agent": "agent {{session_name}} {{component}}",
+        "goal": "goal {{session_name}} {{component}}",
+    }
+    assert "prompt {{session_name}} {{component}}" in prompt
+    assert argv[argv.index("-p") + 1] == "profile-s1"
     db.close()

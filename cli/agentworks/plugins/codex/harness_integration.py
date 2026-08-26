@@ -1,8 +1,9 @@
 """The ``codex`` harness integration: run Codex as the session workload, resuming its
 rollout when one exists and launching fresh otherwise.
 
-Config vocabulary (all optional): ``goal``, ``initial_prompt``, ``agent``,
-and ``developer_instructions`` describe a fresh conversation's workload;
+Config vocabulary (all optional): ``goal``, ``initial_prompt``, and ``agent``
+seed a fresh conversation; ``developer_instructions`` configures every Codex
+process launch, including explicit resume and the picker;
 ``model``, ``sandbox``, ``approval_policy``,
 and ``profile`` map to the ``-m`` / ``-s`` / ``-a`` / ``-p`` flags verbatim;
 ``network`` (bool) forwards to the ``sandbox_workspace_write.network_access``
@@ -108,7 +109,7 @@ from typing import TYPE_CHECKING, ClassVar, Literal, NamedTuple
 
 from pydantic import Field
 
-from agentworks.capabilities.harness_integration.base import HarnessIntegration, require_commands
+from agentworks.capabilities.harness_integration.base import HarnessIntegration, quote_literal_argv, require_commands
 from agentworks.errors import StateError
 from agentworks.plugins.codex.recorder import home_word, notify_value_word, provision_fragment, thread_tail
 from agentworks.schema import AgwModel
@@ -128,7 +129,9 @@ class CodexConfig(AgwModel):
     they forward unvalidated. Codex validates some values at startup, but
     not every set is an enum there (0.147.0 accepts arbitrary reasoning
     effort strings). The integration emits ``--strict-config`` by default
-    to catch unknown config keys and wrong value types.
+    to catch unknown config keys and wrong value types. Native
+    ``developer_instructions`` config and the positional ``--`` boundary were
+    rechecked with Codex CLI 0.149.1.
     """
 
     name: Literal["codex"]
@@ -174,9 +177,10 @@ class CodexConfig(AgwModel):
     no primary-thread agent selector, so this is prompt-mediated."""
 
     developer_instructions: str | None = None
-    """Additional model-readable instructions injected natively into a fresh
-    Codex conversation. This does not apply model, reasoning, sandbox, MCP,
-    skills, or other agent configuration."""
+    """Additional model-readable instructions injected natively on every
+    Codex process launch, including explicit resume and the picker. This does
+    not apply model, reasoning, sandbox, MCP, skills, or other agent
+    configuration."""
 
     vim_mode: bool = False
     """Start Codex's composer in Vim normal mode. Omitted when false, so
@@ -791,8 +795,8 @@ class CodexIntegration(HarnessIntegration):
 
     def _codex_argv(self, head: tuple[str, ...], *, fresh: bool = False) -> str:
         """The quoted argv text after ``codex``: the form's leading tokens,
-        managed flags, the ``notify`` override, a fresh-only developer
-        instruction override, ``extra_args``, then any separated fresh prompt.
+        managed flags, the ``notify`` and developer-instruction overrides,
+        ``extra_args``, then any separated fresh prompt.
 
         The ``notify`` override lands after every managed flag and before
         ``extra_args``, which is what makes an operator ``notify`` in
@@ -802,12 +806,12 @@ class CodexIntegration(HarnessIntegration):
         """
         parts = [shlex.quote(token) for token in (*head, *self._managed_flags())]
         parts += ["-c", notify_value_word(self._session_name)]
-        if fresh and self.config.developer_instructions is not None:
+        if self.config.developer_instructions is not None:
             value = _toml_basic_string(self.config.developer_instructions)
-            parts += ["-c", shlex.quote(f"developer_instructions={value}")]
+            parts += ["-c", quote_literal_argv(f"developer_instructions={value}")]
         parts += [shlex.quote(token) for token in self._extra_arg_tokens()]
         if fresh and (prompt := self._fresh_prompt()) is not None:
-            parts += ["--", shlex.quote(prompt)]
+            parts += ["--", quote_literal_argv(prompt)]
         return " ".join(parts)
 
     def _fresh_prompt(self) -> str | None:
@@ -819,7 +823,7 @@ class CodexIntegration(HarnessIntegration):
         gaps. Setup values are JSON data so arbitrary operator text stays
         distinct from the instructions that interpret it.
         """
-        agent = self._configured_agent()
+        agent = self.config.agent
         setup = {
             key: value
             for key, value in (
@@ -857,7 +861,7 @@ class CodexIntegration(HarnessIntegration):
     def _fresh_setup_disclosure(self) -> str | None:
         """An operator warning for fresh setup that Codex must interpret."""
         mediated: list[str] = []
-        if self._configured_agent() is not None:
+        if self.config.agent is not None:
             mediated.append("custom-agent identity")
         if self.config.goal is not None:
             mediated.append("goal creation")
@@ -873,21 +877,15 @@ class CodexIntegration(HarnessIntegration):
             for value in (
                 self.config.goal,
                 self.config.initial_prompt,
-                self._configured_agent(),
-                self.config.developer_instructions,
+                self.config.agent,
             )
         ):
             return None
         return (
             "Selecting an existing conversation resumes it normally. Pressing esc creates a fresh "
-            "Codex conversation without applying the configured goal, agent, developer instructions, "
-            "or initial prompt because Codex exposes no conditional picker input."
+            "Codex conversation without applying the configured goal, agent, or initial prompt "
+            "because Codex exposes no conditional picker input."
         )
-
-    def _configured_agent(self) -> str | None:
-        """The native harness field, distinct from retired root config resources."""
-        harness_config = self.config
-        return harness_config.agent
 
     def _managed_flags(self) -> list[str]:
         """The flags the harness integration models, as argv tokens, in emission order.
