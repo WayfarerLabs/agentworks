@@ -180,18 +180,20 @@ def _trim_message(message: str) -> str:
 
 def _deny_all_inbound_rule() -> SecurityRule:
     """The permanent baseline rule model (see the constants above)."""
-    from azure.mgmt.network.models import SecurityRule
+    from azure.mgmt.network.models import SecurityRule, SecurityRulePropertiesFormat
 
     return SecurityRule(
         name=DENY_ALL_INBOUND_RULE_NAME,
-        protocol="*",
-        source_port_range="*",
-        destination_port_range="*",
-        source_address_prefix="*",
-        destination_address_prefix="*",
-        access="Deny",
-        priority=DENY_ALL_INBOUND_RULE_PRIORITY,
-        direction="Inbound",
+        properties=SecurityRulePropertiesFormat(
+            protocol="*",
+            source_port_range="*",
+            destination_port_range="*",
+            source_address_prefix="*",
+            destination_address_prefix="*",
+            access="Deny",
+            priority=DENY_ALL_INBOUND_RULE_PRIORITY,
+            direction="Inbound",
+        ),
     )
 
 
@@ -201,20 +203,22 @@ def _allow_ssh_rule(rule_name: str, prefixes: list[str], priority: int) -> Secur
     doctor stale-rule sweep keys off."""
     from datetime import UTC, datetime
 
-    from azure.mgmt.network.models import SecurityRule
+    from azure.mgmt.network.models import SecurityRule, SecurityRulePropertiesFormat
 
     created_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     return SecurityRule(
         name=rule_name,
-        description=f"{ALLOW_RULE_DESCRIPTION_MARKER} (created {created_at})",
-        protocol="Tcp",
-        source_port_range="*",
-        destination_port_range="22",
-        source_address_prefixes=list(prefixes),
-        destination_address_prefix="*",
-        access="Allow",
-        priority=priority,
-        direction="Inbound",
+        properties=SecurityRulePropertiesFormat(
+            description=f"{ALLOW_RULE_DESCRIPTION_MARKER} (created {created_at})",
+            protocol="Tcp",
+            source_port_range="*",
+            destination_port_range="22",
+            source_address_prefixes=list(prefixes),
+            destination_address_prefix="*",
+            access="Allow",
+            priority=priority,
+            direction="Inbound",
+        ),
     )
 
 
@@ -414,7 +418,11 @@ def ensure_public_ip(
     the NIC has no public IP, one is created (idempotent
     ``begin_create_or_update``, same shape as create) and attached.
     """
-    from azure.mgmt.network.models import PublicIPAddress, PublicIPAddressSku
+    from azure.mgmt.network.models import (
+        PublicIPAddress,
+        PublicIPAddressPropertiesFormat,
+        PublicIPAddressSku,
+    )
 
     try:
         nic = network.network_interfaces.get(rg, f"{name}-nic")
@@ -428,7 +436,7 @@ def ensure_public_ip(
             PublicIPAddress(
                 location=_get_vm_location(compute, rg, name),
                 sku=PublicIPAddressSku(name="Standard"),
-                public_ip_allocation_method="Static",
+                properties=PublicIPAddressPropertiesFormat(public_ip_allocation_method="Static"),
                 tags={"owner": "agentworks"},
             ),
         )
@@ -476,8 +484,8 @@ def get_vm_public_ip(network: NetworkManagementClient, vm_info: object) -> str:
                 pip_rg = pip_parts[pip_rg_idx + 1]
                 pip_name = pip_parts[-1]
                 pip = network.public_ip_addresses.get(pip_rg, pip_name)
-                if pip.ip_address:
-                    return pip.ip_address
+                if pip.properties and pip.properties.ip_address:
+                    return pip.properties.ip_address
     return ""
 
 
