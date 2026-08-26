@@ -19,6 +19,7 @@ suites above and ``test_azure_delete_verify.py`` pin separately.
 from __future__ import annotations
 
 import contextlib
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -33,8 +34,6 @@ from tests.conftest import ManifestDoc
 from tests.orchestrated_fixtures import write_operator_config
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from agentworks.db import Database, VMRow
     from tests.conftest import CapturedOutput
 
@@ -123,6 +122,167 @@ def test_delete_never_gates(
     assert db.get_vm("dvm") is None
 
 
+def test_delete_removes_only_its_workspace_artifacts(
+    db: Database,
+    tmp_path: Path,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    _seed(db)
+    db.insert_workspace("first", "/srv/first", "dvm", "ws-first")
+    db.insert_workspace("legacy--name", "/srv/legacy", "dvm", "ws-legacy")
+    db.insert_workspace("missing", "/srv/missing", "dvm", "ws-missing")
+    db.insert_vm("other", site="proxmox", hostname="other")
+    db.insert_workspace("untouched", "/srv/untouched", "other", "ws-untouched")
+    vscode_dir = tmp_path / "vscode"
+    vscode_dir.mkdir()
+    target_artifact = vscode_dir / "first.code-workspace"
+    target_artifact.write_text("target")
+    legacy_artifact = vscode_dir / "legacy--name.code-workspace"
+    legacy_artifact.write_text("legacy")
+    other_artifact = vscode_dir / "untouched.code-workspace"
+    other_artifact.write_text("other")
+    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir}"\n')
+    _fake_backend(monkeypatch)
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
+
+    vm_manager.delete_vm(db, config, "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert not target_artifact.exists()
+    assert not legacy_artifact.exists()
+    assert other_artifact.read_text() == "other"
+    assert db.get_vm("dvm") is None
+    assert db.get_workspace("untouched") is not None
+
+
+def test_delete_skips_workspace_artifacts_outside_the_managed_directory(
+    db: Database,
+    tmp_path: Path,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    _seed(db)
+    # A direct DB insert models legacy or corrupt persisted state that bypassed
+    # the workspace manager's write-time name validation.
+    db.insert_workspace("../sentinel", "/srv/corrupt", "dvm", "ws-corrupt")
+    vscode_dir = tmp_path / "vscode"
+    vscode_dir.mkdir()
+    sentinel = tmp_path / "sentinel.code-workspace"
+    sentinel.write_text("outside")
+    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir}"\n')
+    _fake_backend(monkeypatch)
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
+
+    vm_manager.delete_vm(db, config, "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert sentinel.read_text() == "outside"
+    assert captured_output.warnings
+    assert db.get_vm("dvm") is None
+
+
+def test_delete_unlinks_an_in_directory_symlink_without_touching_its_referent(
+    db: Database,
+    tmp_path: Path,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    _seed(db)
+    db.insert_workspace("linked", "/srv/linked", "dvm", "ws-linked")
+    vscode_dir = tmp_path / "vscode"
+    vscode_dir.mkdir()
+    referent = tmp_path / "outside.code-workspace"
+    referent.write_text("outside")
+    artifact = vscode_dir / "linked.code-workspace"
+    artifact.symlink_to(referent)
+    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir}"\n')
+    _fake_backend(monkeypatch)
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
+
+    vm_manager.delete_vm(db, config, "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert not artifact.is_symlink()
+    assert referent.read_text() == "outside"
+    assert db.get_vm("dvm") is None
+
+
+def test_delete_skips_a_trailing_separator_through_a_directory_symlink(
+    db: Database,
+    tmp_path: Path,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    _seed(db)
+    db.insert_workspace("link/", "/srv/corrupt", "dvm", "ws-corrupt")
+    vscode_dir = tmp_path / "vscode"
+    vscode_dir.mkdir()
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir()
+    outside_artifact = outside_dir / ".code-workspace"
+    outside_artifact.write_text("outside")
+    directory_link = vscode_dir / "link"
+    directory_link.symlink_to(outside_dir, target_is_directory=True)
+    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir}"\n')
+    _fake_backend(monkeypatch)
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
+
+    vm_manager.delete_vm(db, config, "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert outside_artifact.read_text() == "outside"
+    assert directory_link.is_symlink()
+    assert db.get_vm("dvm") is None
+    assert captured_output.warnings
+
+
+@pytest.mark.parametrize(
+    "stored_name_template",
+    [
+        pytest.param("../vscode/untouched", id="reentry"),
+        pytest.param("{vscode_dir}/untouched", id="absolute"),
+        pytest.param("./untouched", id="dot-prefix"),
+        pytest.param("Untouched", id="case-fold"),
+    ],
+)
+def test_delete_skips_a_name_alias_targeting_another_vm_artifact(
+    db: Database,
+    tmp_path: Path,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+    stored_name_template: str,
+) -> None:
+    _seed(db)
+    vscode_dir = tmp_path / "vscode"
+    vscode_dir.mkdir()
+    stored_name = stored_name_template.format(vscode_dir=vscode_dir)
+    db.insert_workspace(stored_name, "/srv/corrupt", "dvm", "ws-corrupt")
+    db.insert_vm("other", site="proxmox", hostname="other")
+    db.insert_workspace("untouched", "/srv/untouched", "other", "ws-untouched")
+    other_artifact = vscode_dir / "untouched.code-workspace"
+    other_artifact.write_text("other")
+    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir}"\n')
+    _fake_backend(monkeypatch)
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
+    # This is inert for lowercase cases and models a case-insensitive host for
+    # the uppercase case deterministically on Linux CI.
+    real_unlink = Path.unlink
+
+    def _case_insensitive_unlink(path: Path, *, missing_ok: bool = False) -> None:
+        real_unlink(path.with_name(path.name.casefold()), missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", _case_insensitive_unlink)
+
+    vm_manager.delete_vm(db, config, "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert other_artifact.read_text() == "other"
+    assert db.get_workspace("untouched") is not None
+    assert db.get_vm("dvm") is None
+    assert captured_output.warnings
+
+
 def test_hold_failure_does_not_skip_delete(
     db: Database,
     make_config,  # noqa: ANN001
@@ -205,6 +365,7 @@ def _failing_backend_delete(monkeypatch: pytest.MonkeyPatch, counts: dict[str, i
 
 def test_backend_delete_failure_keeps_the_row(
     db: Database,
+    tmp_path: Path,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
@@ -215,16 +376,24 @@ def test_backend_delete_failure_keeps_the_row(
     the operator can fix the cause and retry; warning past it would
     orphan the surviving VM with nothing left to target it."""
     _seed(db)
+    db.insert_workspace("kept", "/srv/kept", "dvm", "ws-kept")
+    vscode_dir = tmp_path / "vscode"
+    vscode_dir.mkdir()
+    artifact = vscode_dir / "kept.code-workspace"
+    artifact.write_text("keep")
+    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir}"\n')
     counts = _fake_backend(monkeypatch)
     monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
     error = _failing_backend_delete(monkeypatch, counts)
 
     with pytest.raises(AuthorizationError) as exc:
-        vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+        vm_manager.delete_vm(db, config, "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert exc.value is error
     assert counts["delete"] == 1
     assert db.get_vm("dvm") is not None
+    assert db.get_workspace("kept") is not None
+    assert artifact.read_text() == "keep"
 
 
 def test_force_does_not_suppress_backend_delete_failure(

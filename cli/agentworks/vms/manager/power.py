@@ -9,6 +9,7 @@ from agentworks import output
 from agentworks.capabilities.base import RunContext
 from agentworks.db import VMStatus
 from agentworks.errors import StateError, UserAbort
+from agentworks.naming import NAME_RE
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
 from ._helpers import (
@@ -289,6 +290,15 @@ def delete_vm(
         log.unlink(missing_ok=True)
     if vm_logs:
         output.info(f"Cleaned up {len(vm_logs)} log(s)")
+
+    for workspace in db.list_workspaces(vm_name=name):
+        # Check the character grammar directly. validate_name's creation-time
+        # double-hyphen rule would strand safe legacy artifacts.
+        if NAME_RE.fullmatch(workspace.name) is None:
+            output.warn("skipping VS Code workspace artifact for an invalid persisted workspace name")
+            continue
+        vscode_path = config.paths.vscode_workspaces / f"{workspace.name}.code-workspace"
+        vscode_path.unlink(missing_ok=True)
 
     # Remove from DB (cascades workspaces and agents), then rebuild SSH config
     db.delete_vm(name)
