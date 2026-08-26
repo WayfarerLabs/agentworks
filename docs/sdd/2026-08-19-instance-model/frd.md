@@ -2,7 +2,7 @@
 
 - Status: Active (R1 and R2 accepted; R4 implemented; R3 and R5 pending)
 - Date: 2026-08-19
-- Last revised: 2026-08-25
+- Last revised: 2026-08-26
 - Parent: the `2026-08-04-next-steps` saga (destination 2 and the wave-4 enabling track)
 
 ## Rulings this seed rests on
@@ -41,6 +41,11 @@
   repair should not have --spec. And I don't think we should support resume --spec (yet) either.
   There are a lot of sharp edges there. Basically, we should support --spec _exactly_ where you can
   set/change the template. It's the same deal, right?"
+- **VM creation has two template-setting boundaries (authenticated operator channel to the
+  instance-model effort lead, 2026-08-26):** the unprefixed `--template` and `--spec` pair selects
+  and refines the VM declaration; `--admin-template` and `--admin-spec` do the same for the VM's
+  admin declaration. Do not add `--vm-template` or `--vm-spec`. Both pairs form one lifecycle
+  decision and are persisted atomically for later reinit.
 
 ## Why now
 
@@ -133,11 +138,14 @@ ssh-agent-held identity participates remains deliberately unresolved.
 An operator can supply a final configuration layer alongside a CLI operation that selects or changes
 an instance's template. At the current surface, that means the four direct creation commands and
 `agent reinit`, the sole existing-instance command that can repoint its owner to another template.
-There is no independent instance-spec mutation verb. VM reinit cannot change the VM template,
-workspace repair is not full idempotent convergence, and session resume has unresolved sharp edges,
-so none accepts an instance spec. An empty JSON object or the exact empty CLI value clears an
-agent's prior layer when passed to `agent reinit`; omitting the option retains it, and
-whitespace-only input is invalid.
+VM creation selects both a VM template and an admin template, so it accepts separate final VM and
+admin layers as `--spec` and `--admin-spec`. Either layer may accompany an explicit template
+selector or the corresponding default. The two template selections and two final layers are one
+candidate VM declaration and one atomic desired-state decision. There is no independent
+instance-spec mutation verb. VM reinit cannot change the VM template, workspace repair is not full
+idempotent convergence, and session resume has unresolved sharp edges, so none accepts an instance
+spec. An empty JSON object or the exact empty CLI value clears an agent's prior layer when passed to
+`agent reinit`; omitting the option retains it, and whitespace-only input is invalid.
 
 The overlay is applied after the template chain and is correspondingly visible in the declarative
 model. It participates in the shared layer stack introduced by R4, never a bespoke instance-only

@@ -2,7 +2,7 @@
 
 - Status: R2 accepted; R4 implemented; R3 and R5 design in progress
 - Date: 2026-08-23
-- Last revised: 2026-08-25
+- Last revised: 2026-08-26
 - FRD: [frd.md](./frd.md)
 - Assessment: [database-assessment.md](./database-assessment.md)
 - Store contract: [store-contract.md](./store-contract.md)
@@ -133,7 +133,7 @@ requirements.
 
 ## Shared resolution stack
 
-The four template kinds already share one inheritance linearization in
+The four inheriting template kinds already share one inheritance linearization in
 `agentworks.resources.inheritance`: parents depth-first and left-to-right, each declaration once at
 its earliest position, and the selected row last. They differ only in their typed reducers:
 
@@ -148,6 +148,12 @@ defaults, and a domain reducer. Existing template resolution supplies the inheri
 instance resolution appends one optional overlay layer. The same runner produces both, so an overlay
 does not create a fifth merge implementation.
 
+The VM owner has two declaration slots. Its VM slot resolves the selected `vm-template` chain plus
+the final VM layer. Its admin slot resolves the selected, non-inheriting `admin-template` plus the
+final admin layer through the same runner. The admin template's concrete defaults seed that fold;
+only fields explicitly supplied by the admin layer contribute. This models two declarations without
+inventing a second merge mechanism.
+
 The runner records provenance at the granularity the merge preserves:
 
 - scalar path for replacements;
@@ -159,9 +165,10 @@ Defaults originate in the seed and receive `defaulted` provenance. They are not 
 platform layer. The existing resolved dataclasses remain compatibility projections while consumers
 move to the resolved-value-plus-provenance result.
 
-Overlay payloads reuse each kind's strict template spec model but exclude `name`, `inherits`,
-metadata, and framework provenance. Their merge semantics match templates. In particular, an empty
-additive list or map does not invent a removal tombstone that template inheritance does not have.
+Overlay payloads reuse each declaration slot's strict template spec model but exclude `name`,
+`inherits`, metadata, and framework provenance. Their merge semantics match templates. In
+particular, an empty additive list or map does not invent a removal tombstone that template
+inheritance does not have.
 
 An effective-instance validator runs after the overlay fold. It reuses domain reference and
 capability rules without publishing the overlay as a fake registry template. Shape validation alone
@@ -170,19 +177,21 @@ credential, install command, or harness integration.
 
 The database is the one desired-overlay authority. R4 does not add VM, workspace, agent, or session
 instance documents to the resource-manifest frontend. A spec can be supplied only at an existing
-template-setting lifecycle boundary: the four direct creation commands and `agent reinit`. The
-template selection and final partial layer form one effective declaration for validation,
-realization, persistence, and inspection. There is no desired-only spec mutation surface. The exact
-argv, inline JSON input, replacement behavior, validation boundary, and lifecycle-coupling rule are
-specified in `instance-spec-cli.md`.
+template-setting lifecycle boundary: the four direct creation commands and `agent reinit`. Each
+template selection and final partial layer form one effective declaration for validation and
+realization. For a VM, its VM and admin declaration slots are persisted together as one versioned
+desired payload under the VM owner, so later reinit cannot observe or apply only half of the choice.
+There is no desired-only spec mutation surface. The exact argv, inline JSON input, replacement
+behavior, validation boundary, and lifecycle-coupling rule are specified in `instance-spec-cli.md`.
 
 JSON `null` is rejected at every depth because omission is the one spelling for no contribution from
 a field. It is not an alternate clear or inheritance operator.
 
 The mutation surface reports the final retained desired-state outcome after success or unwind:
-whether the layer was set, retained, replaced, cleared, or explicitly left absent. It names sorted
-top-level fields without echoing values, because declaration data may include plaintext environment
-values. This is desired-state feedback, not a claim that remote work applied the declaration.
+whether each layer was set, retained, replaced, cleared, or explicitly left absent. It identifies
+the declaration slot and names sorted top-level fields without echoing values, because declaration
+data may include plaintext environment values. This is desired-state feedback, not a claim that
+remote work applied the declaration.
 
 ## R3: applied state and SSH identity
 

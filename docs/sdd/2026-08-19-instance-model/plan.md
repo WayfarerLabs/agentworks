@@ -4,7 +4,7 @@
 
 - Status: R2 merged; R4 implementation complete; R3 and R5 pending
 - Date: 2026-08-23
-- Last revised: 2026-08-25
+- Last revised: 2026-08-26
 - Requirements: [frd.md](./frd.md)
 - R1 assessment: [database-assessment.md](./database-assessment.md)
 - R2 contract: [store-contract.md](./store-contract.md)
@@ -141,6 +141,28 @@ loop. The final non-integration suite passed with 7,438 tests and 1 skip; Ruff, 
 Rulesync, locked-SDD, website, deterministic-build, and Typer-isolation gates passed. A bounded
 isolated-home shipped-CLI pass confirmed the option surface and strict validation boundaries without
 contacting a provider; no authorized live-provider inventory was present.
+
+### R4 correction: paired VM and admin final layers
+
+- [x] Add `vm create --admin-spec JSON` beside `--admin-template`, retain unprefixed `--template`
+      and `--spec` for the primary VM declaration, and add no `--vm-*` aliases or VM-reinit spec
+      inputs.
+- [x] Fold and validate the VM and admin layers independently, then persist them atomically as one
+      typed VM desired payload that reinit and runtime access paths consume together.
+- [x] Prove strict input, field merge behavior, effective references, lifecycle ordering, rollback
+      and retention, backup projection, reinit reuse, value-safe reporting, and no schema migration.
+- [x] Update the SDD contracts and permanent CLI/store collateral, run the full R4 quality gates,
+      and repeat the private review and complexity passes for the corrected implementation.
+
+Completed on 2026-08-26. The correction keeps `--template` and `--spec` as the VM pair, adds
+`--admin-spec` beside `--admin-template`, and stores both final layers as one payload-version-2 VM
+declaration while retaining flat payload-version-1 reads without a database migration. The private
+project, fresh-eyes, and complexity loops finished clean after three feedback/fix rounds. Full
+Python, repository, and website gates passed. A 20-invocation isolated-home shipped-CLI pass proved
+the paired option surface, strict/value-safe input refusal, legacy reads, composite version-skew
+classification, admin-only consumption, and unchanged stored rows using a passphrase-protected
+scratch key. No authorized live-provider inventory was available, so provisioning, remote reinit,
+and SSH transport remain explicit live-test gaps.
 
 ## Phase 4: R3 applied instance state and SSH proving slice
 

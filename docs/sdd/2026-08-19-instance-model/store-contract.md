@@ -27,7 +27,7 @@ The additive `instance_records` table has this semantic shape:
 | `instance_kind`   | One of `vm`, `workspace`, `agent`, or `session`.                                      |
 | `instance_name`   | The stable name used by the owning instance table.                                    |
 | `record_type`     | A private repository discriminator, initially `desired-overlay` or `applied-state`.   |
-| `record_key`      | `spec` for the one desired overlay, or a repository-enumerated applied-slice key.     |
+| `record_key`      | `spec` for the one desired declaration record, or an enumerated applied-slice key.    |
 | `payload_version` | A positive version selected by the consuming domain's codec.                          |
 | `value_json`      | Canonical JSON object encoding of the domain payload.                                 |
 | `recorded_at`     | UTC time at which this value became authoritative.                                    |
@@ -65,6 +65,17 @@ is not diagnosed as corruption and must not recommend lossy repair. Lifecycle an
 remain strict. A read/access path may explicitly warn and use the base template when that is safe,
 but it must not claim that it applied the stored overlay.
 
+There is one desired record per instance owner even when the owner has more than one declaration
+slot. A VM payload carries independently typed VM and admin layers together. Their CLI inputs,
+validation, and folds remain distinct, while one versioned payload prevents persistence, backup,
+reinit, or deletion from observing only half of the VM's desired declaration. This composite domain
+payload changes no physical column, record key, repository method, or transaction rule.
+
+The corrected composite VM payload uses payload version 2. Readers continue to accept the earlier
+version 1 flat VM layer as the VM declaration slot with no admin layer. This is domain-codec
+compatibility, not a schema migration or eager database rewrite; existing rows and backup archives
+remain readable in place.
+
 There is deliberately no polymorphic foreign key. Typed instance-deletion paths remove their owned
 records in the same transaction that removes the owner. This avoids a universal instance parent
 table while preserving lifecycle cleanup.
@@ -76,7 +87,8 @@ The repository boundary uses three frozen value records:
 - `VersionedPayload(payload_version, value)` carries one already validated domain payload as a JSON
   object. The repository owns canonical encoding, not domain validation.
 - `DesiredOverlayRecord(instance_kind, instance_name, payload, recorded_at)` is desired declaration
-  only. Its absence means no instance overlay.
+  only. Its absence means no instance overlay. A payload may contain multiple typed declaration
+  slots when its owner lifecycle selects them together, as VM creation does for VM and admin.
 - `AppliedStateSlice(instance_kind, instance_name, key, payload, operation, recorded_at)` is
   evidence established by one completed lifecycle operation. Its key uses the closed
   `AppliedStateKey` type. Its absence means not recorded.
@@ -118,7 +130,8 @@ rows for the named VM and its current workspace, agent, and session descendants 
 payload is decoded. Malformed state in that selected owner tree therefore fails the backup snapshot,
 while malformed state belonging to another VM is outside the read and cannot block it. The
 repository owns the owner-tree SQL and desired-overlay discriminators; backup consumers receive only
-typed records or the narrow existence result.
+typed records or the narrow existence result. The VM's single composite desired record keeps its VM
+and admin declaration slots together through this projection.
 
 `replace_applied_slices` canonical-encodes every supplied payload before writing. It then inserts or
 replaces the supplied slice keys with one operation and one timestamp in a single transaction.
