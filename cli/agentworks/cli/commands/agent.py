@@ -28,7 +28,10 @@ def agent_create(
     name: Annotated[str, typer.Argument(help="Agent name")],
     vm: Annotated[str | None, typer.Option("--vm", help="Target VM")] = None,
     template: Annotated[str | None, typer.Option("--template", help="Agent template")] = None,
-    spec: Annotated[str | None, typer.Option("--spec", help="Inline JSON instance spec")] = None,
+    spec: Annotated[
+        str | None,
+        typer.Option("--spec", help="Inline JSON instance spec applied after the selected template"),
+    ] = None,
     grant_all_workspaces: Annotated[
         bool,
         typer.Option("--grant-all-workspaces", help="Grant access to all workspaces"),
@@ -137,7 +140,10 @@ def agent_reinit(
         str | None,
         typer.Option(
             "--spec",
-            help="Inline JSON instance spec; '{}' or an exact empty string clears it (whitespace is invalid)",
+            help=(
+                "Inline JSON instance spec applied after the selected template; "
+                "'{}' or an exact empty string clears it (whitespace is invalid)"
+            ),
         ),
     ] = None,
 ) -> None:

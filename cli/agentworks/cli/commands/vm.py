@@ -23,7 +23,10 @@ app.add_typer(vm_app)
 def vm_create(
     name: Annotated[str, typer.Argument(help="VM name")],
     template: Annotated[str | None, typer.Option("--template", help="VM template")] = None,
-    spec: Annotated[str | None, typer.Option("--spec", help="Inline JSON instance spec")] = None,
+    spec: Annotated[
+        str | None,
+        typer.Option("--spec", help="Inline JSON instance spec applied after the selected template"),
+    ] = None,
     admin_template: Annotated[
         str | None,
         typer.Option(

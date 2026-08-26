@@ -28,7 +28,10 @@ def workspace_create(
     name: Annotated[str, typer.Argument(help="Workspace name")],
     vm: Annotated[str | None, typer.Option("--vm", help="Target VM")] = None,
     template: Annotated[str | None, typer.Option("--template", help="Workspace template")] = None,
-    spec: Annotated[str | None, typer.Option("--spec", help="Inline JSON instance spec")] = None,
+    spec: Annotated[
+        str | None,
+        typer.Option("--spec", help="Inline JSON instance spec applied after the selected template"),
+    ] = None,
     open_vscode: Annotated[bool, typer.Option("--open-vscode", help="Open in VS Code")] = False,
 ) -> None:
     """Create a workspace on a VM."""

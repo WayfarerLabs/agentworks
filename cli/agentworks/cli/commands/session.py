@@ -26,7 +26,10 @@ def session_create(
     name: Annotated[str, typer.Argument(help="Session name")],
     workspace: Annotated[str | None, typer.Option("--workspace", help="Existing workspace")] = None,
     template: Annotated[str | None, typer.Option("--template", help="Session template")] = None,
-    spec: Annotated[str | None, typer.Option("--spec", help="Inline JSON session instance spec")] = None,
+    spec: Annotated[
+        str | None,
+        typer.Option("--spec", help="Inline JSON instance spec applied after the selected template"),
+    ] = None,
     admin: Annotated[bool, typer.Option("--admin", help="Run as the VM admin user")] = False,
     agent: Annotated[str | None, typer.Option("--agent", help="Agent name (agent mode)")] = None,
     new_workspace: Annotated[bool, typer.Option("--new-workspace", help="Create a new workspace")] = False,
@@ -36,7 +39,10 @@ def session_create(
     ] = None,
     workspace_spec: Annotated[
         str | None,
-        typer.Option("--workspace-spec", help="Inline JSON spec for --new-workspace"),
+        typer.Option(
+            "--workspace-spec",
+            help="Inline JSON workspace instance spec applied after its selected template",
+        ),
     ] = None,
     vm: Annotated[
         str | None,
@@ -57,7 +63,10 @@ def session_create(
     agent_template: Annotated[str | None, typer.Option("--agent-template", help="Template for new agent")] = None,
     agent_spec: Annotated[
         str | None,
-        typer.Option("--agent-spec", help="Inline JSON spec for --new-agent"),
+        typer.Option(
+            "--agent-spec",
+            help="Inline JSON agent instance spec applied after its selected template",
+        ),
     ] = None,
 ) -> None:
     """Create and start a session in a workspace."""
