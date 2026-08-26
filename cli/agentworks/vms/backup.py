@@ -63,7 +63,7 @@ def backup_vm(
             entity_kind="vm",
             entity_name=vm_name,
         )
-    if not _host_supports_private_backup_permissions() and db.vm_owner_tree_has_desired_overlay(vm_name):
+    if not _host_supports_private_backup_permissions() and db.instance_state.has_vm_owner_tree_desired_overlay(vm_name):
         _raise_windows_overlay_backup_error(vm_name)
     registry = load_request_registry(config)
 

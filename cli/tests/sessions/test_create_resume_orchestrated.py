@@ -668,6 +668,147 @@ def test_compound_child_post_commit_failure_unwinds_owner_and_overlay_without_ou
 # -- the operation scope reaches the harness integration ---------------------
 
 
+@pytest.mark.parametrize("name", ["", '""'])
+def test_service_create_rejects_empty_session_identity_as_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+) -> None:
+    from agentworks.sessions.manager import create_session
+
+    db = _create_stubs(tmp_path, monkeypatch, [])
+
+    with pytest.raises(ValidationError):
+        create_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),  # type: ignore[arg-type]
+            name=name,
+            workspace="ws1",
+            admin=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert db.list_sessions() == []
+    db.close()
+
+
+def test_service_create_rejects_orphan_session_state_before_prompts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.db import VersionedPayload
+    from agentworks.sessions.manager import create_session
+
+    db = _create_stubs(tmp_path, monkeypatch, [])
+    db.instance_state.put_desired_overlay("session", "orphan", VersionedPayload(1, {"env": {}}))
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._prompt_workspace_choice",
+        lambda *args, **kwargs: pytest.fail("workspace prompt ran before orphan-state refusal"),
+    )
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._prompt_mode_choice",
+        lambda *args, **kwargs: pytest.fail("mode prompt ran before orphan-state refusal"),
+    )
+
+    with pytest.raises(StateError):
+        create_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),  # type: ignore[arg-type]
+            name="orphan",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert db.list_sessions() == []
+    db.close()
+
+
+def test_service_create_rejects_known_orphan_workspace_before_mode_prompt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.db import VersionedPayload
+    from agentworks.sessions.manager import create_session
+
+    db = _create_stubs(tmp_path, monkeypatch, [])
+    db.instance_state.put_desired_overlay("workspace", "orphan-ws", VersionedPayload(1, {}))
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._prompt_mode_choice",
+        lambda *args, **kwargs: pytest.fail("mode prompt ran before workspace orphan-state refusal"),
+    )
+
+    with pytest.raises(StateError):
+        create_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),  # type: ignore[arg-type]
+            name="s1",
+            new_workspace=True,
+            workspace_name="orphan-ws",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert db.list_sessions() == []
+    db.close()
+
+
+def test_service_create_rejects_flag_new_orphan_agent_before_workspace_prompt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.db import VersionedPayload
+    from agentworks.sessions.manager import create_session
+
+    db = _create_stubs(tmp_path, monkeypatch, [])
+    db.instance_state.put_desired_overlay("agent", "orphan-agent", VersionedPayload(1, {}))
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._prompt_workspace_choice",
+        lambda *args, **kwargs: pytest.fail("workspace prompt ran before agent orphan-state refusal"),
+    )
+
+    with pytest.raises(StateError):
+        create_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),  # type: ignore[arg-type]
+            name="s1",
+            new_agent=True,
+            agent_name="orphan-agent",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert db.list_sessions() == []
+    db.close()
+
+
+def test_service_create_rejects_prompt_created_orphan_agent_before_vm_prompt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.db import VersionedPayload
+    from agentworks.sessions.manager import create_session
+
+    db = _create_stubs(tmp_path, monkeypatch, [])
+    db.instance_state.put_desired_overlay("agent", "s1", VersionedPayload(1, {}))
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._prompt_mode_choice",
+        lambda *args, **kwargs: (None, True, False),
+    )
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._prompt_vm",
+        lambda *args, **kwargs: pytest.fail("VM prompt ran before agent orphan-state refusal"),
+    )
+
+    with pytest.raises(StateError):
+        create_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),  # type: ignore[arg-type]
+            name="s1",
+            new_workspace=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert db.list_sessions() == []
+    db.close()
+
+
 def test_session_scope_reaches_the_harness_integration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks.capabilities.base import RunContext, ScopeLevel
     from agentworks.capabilities.harness_integration.base import HarnessIntegration

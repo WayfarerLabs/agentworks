@@ -209,16 +209,20 @@ def create_session(
         raise ValidationError("--agent-spec requires --new-agent", entity_kind="session", entity_name=name)
 
     from agentworks.instance_specs import parse_instance_spec, refuse_orphan_creation_state
+    from agentworks.naming import validate_name
+    from agentworks.sessions.tmux import MAX_SESSION_NAME_LENGTH
 
     session_overlay = None if spec is None else parse_instance_spec("session", spec)
     workspace_overlay = None if workspace_spec is None else parse_instance_spec("workspace", workspace_spec)
     agent_overlay = None if agent_spec is None else parse_instance_spec("agent", agent_spec)
 
+    # The session identity is already final at the service boundary. Validate
+    # it before consulting persisted orphan state, then reject that state
+    # before plan resolution can prompt for workspace or mode. Ephemeral child
+    # identities are not final until the plan canonicalizes/defaults them, so
+    # their probes remain below.
+    validate_name(name, max_length=MAX_SESSION_NAME_LENGTH)
     refuse_orphan_creation_state(db, "session", name)
-    if new_workspace:
-        refuse_orphan_creation_state(db, "workspace", workspace_name or name)
-    if new_agent:
-        refuse_orphan_creation_state(db, "agent", agent_name or name)
 
     # ===== Resolve the plan (S1-S8: flags, prompts, anchors, VM) ============
     #

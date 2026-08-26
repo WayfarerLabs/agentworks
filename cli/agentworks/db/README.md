@@ -12,6 +12,14 @@ type or caller-authored record key, provide raw JSON or SQL, or issue arbitrary 
 repository owns canonical JSON object encoding and treats a malformed persisted envelope as
 `StateError`, never as an absent record.
 
+Owner-existence guards use the narrow `has_instance_records` query before an insert so orphaned
+desired or applied state cannot silently acquire a new owner. VM backup uses the equally narrow
+`has_vm_owner_tree_desired_overlay` and `list_vm_owner_tree_desired_overlays` queries. Those methods
+select exactly the VM, its workspaces and agents, and those workspaces' sessions in SQL before any
+payload is decoded. A malformed selected row therefore fails the backup, while a malformed row for
+an unrelated owner cannot block it. These named predicates are part of the repository contract;
+callers do not recreate the polymorphic owner-tree query or filter a decoded global record list.
+
 Because the polymorphic table deliberately has no owner foreign key, a damaged or hand-edited
 database can contain identities that normal creation paths reject. Operator-facing errors retain a
 valid owner kind but include the owner name only when its representation is printable and bounded;

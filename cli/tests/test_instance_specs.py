@@ -10,7 +10,9 @@ from agentworks.agents.template import AgentTemplate
 from agentworks.agents.templates import resolve_from_dict_with_provenance as resolve_agent
 from agentworks.agents.templates import resolve_live_template_with_provenance as resolve_live_agent
 from agentworks.db import AppliedStateKey, VersionedPayload
+from agentworks.declared_resource import DeclaredResource
 from agentworks.errors import StateError, ValidationError
+from agentworks.instance_overlay_codec import OVERLAY_EXCLUDED_FIELDS
 from agentworks.instance_specs import parse_instance_spec, refuse_orphan_creation_state, replace_agent_overlay
 from agentworks.resources.inheritance import LayerSourceKind
 from agentworks.resources.registry import Registry
@@ -64,9 +66,36 @@ def test_huge_json_integer_is_a_typed_validation_error() -> None:
         parse_instance_spec("vm", '{"cpus":' + "1" * 5000 + "}")
 
 
+def test_deep_session_capability_config_is_a_typed_validation_error() -> None:
+    nested = "[" * 300 + "1" + "]" * 300
+
+    with pytest.raises(ValidationError) as caught:
+        parse_instance_spec("session", f'{{"harness_integration":{{"name":"shell","extra":{nested}}}}}')
+
+    assert caught.value.entity_kind == "session"
+
+
+def test_overlay_exclusions_follow_declared_resource_metadata() -> None:
+    assert frozenset(DeclaredResource.model_fields) <= OVERLAY_EXCLUDED_FIELDS
+    assert OVERLAY_EXCLUDED_FIELDS.isdisjoint({"cpus", "harness_integration", "shell", "tmuxinator"})
+
+
 @pytest.mark.parametrize(
     "field",
-    ["kind", "name", "inherits", "description", "framework", "metadata", "declared_at", "origin", "source"],
+    [
+        "apiVersion",
+        "kind",
+        "name",
+        "inherits",
+        "description",
+        "expires",
+        "framework",
+        "metadata",
+        "source",
+        "spec",
+        "declared_at",
+        "origin",
+    ],
 )
 def test_spec_refuses_framework_fields(field: str) -> None:
     with pytest.raises(ValidationError):

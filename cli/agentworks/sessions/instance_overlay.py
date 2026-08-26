@@ -10,4 +10,4 @@ def decode_overlay(raw: JsonObject) -> SessionTemplate:
 
 
 def encode_overlay(declaration: SessionTemplate) -> JsonObject:
-    return encode_overlay_model(declaration)
+    return encode_overlay_model(declaration, "session")

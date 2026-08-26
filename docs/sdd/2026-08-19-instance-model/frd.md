@@ -1,8 +1,8 @@
 # Instance Model and State: Functional Requirements
 
-- Status: Active (R1 and R2 accepted; R3 through R5 pending)
+- Status: Active (R1 and R2 accepted; R4 implemented; R3 and R5 pending)
 - Date: 2026-08-19
-- Last revised: 2026-08-24
+- Last revised: 2026-08-25
 - Parent: the `2026-08-04-next-steps` saga (destination 2 and the wave-4 enabling track)
 
 ## Rulings this seed rests on
@@ -140,13 +140,10 @@ agent's prior layer when passed to `agent reinit`; omitting the option retains i
 whitespace-only input is invalid.
 
 The overlay is applied after the template chain and is correspondingly visible in the declarative
-model. It participates in the general layer-stack merge that wave 2's open door anticipated, never a
-bespoke instance-only merge. Price this honestly: that general merge does not exist at HEAD.
-`cli/agentworks/resources/inheritance.py` orders the template chain only, and the field-by-field
-merge is implemented separately for each kind (vms, agents, workspaces, sessions), so participating
-in a general merge means first unifying those implementations. If that generalization proves too
-large for this effort, say so and route it rather than quietly adding a fifth per-kind merge; the
-resolved result is what R3 records on apply and R5 shows on demand. Validation matches template
+model. It participates in the shared layer stack introduced by R4, never a bespoke instance-only
+merge. The shared runner owns ordering and provenance while the four domain reducers retain their
+field semantics; this removes the duplicated fold without pretending the field policies are generic.
+The resolved result is what R3 records on apply and R5 shows on demand. Validation matches template
 validation: an overlay that would produce an invalid effective spec fails at declaration time with
 the same error quality templates get. One adjacent idea, recorded here so it is inheritable rather
 than remembered: a template field could be marked as one an instance must set, so the template

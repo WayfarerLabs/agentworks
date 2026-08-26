@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-    from agentworks.db.instance_state import DesiredOverlayRecord, InstanceKind, InstanceStateRepository
+    from agentworks.db.instance_state import DesiredOverlayRecord, InstanceStateRepository
     from agentworks.db.models import (
         AgentGrantRow,
         AgentRow,
@@ -1099,23 +1099,6 @@ class Database:
         ).fetchall()
         return [_to_vm_event(r) for r in rows]
 
-    def vm_owner_tree_has_desired_overlay(self, vm_name: str) -> bool:
-        """Whether the VM or any current descendant has a desired overlay."""
-        row = self._conn.execute(
-            "SELECT 1 FROM instance_records WHERE record_type = 'desired-overlay' AND ("
-            "(instance_kind = 'vm' AND instance_name = ?) OR "
-            "(instance_kind = 'workspace' AND instance_name IN "
-            " (SELECT name FROM workspaces WHERE vm_name = ?)) OR "
-            "(instance_kind = 'agent' AND instance_name IN "
-            " (SELECT name FROM agents WHERE vm_name = ?)) OR "
-            "(instance_kind = 'session' AND instance_name IN "
-            " (SELECT sessions.name FROM sessions JOIN workspaces "
-            "  ON sessions.workspace_name = workspaces.name WHERE workspaces.vm_name = ?))"
-            ") LIMIT 1",
-            (vm_name, vm_name, vm_name, vm_name),
-        ).fetchone()
-        return row is not None
-
     def snapshot_vm_backup_data(
         self,
         vm_name: str,
@@ -1145,18 +1128,7 @@ class Database:
             grants_by_agent: dict[str, list[AgentGrantRow]] = {}
             for agent in agents:
                 grants_by_agent[agent.name] = self.list_agent_grants(agent.name)
-            owner_names: tuple[tuple[InstanceKind, set[str]], ...] = (
-                ("vm", {vm_name}),
-                ("workspace", {workspace.name for workspace in workspaces}),
-                ("agent", {agent.name for agent in agents}),
-                ("session", {session.name for session in sessions}),
-            )
-            desired_overlays = tuple(
-                record
-                for kind, names in owner_names
-                for record in self.instance_state.list_desired_overlays(kind)
-                if record.instance_name in names
-            )
+            desired_overlays = self.instance_state.list_vm_owner_tree_desired_overlays(vm_name)
         finally:
             self._conn.execute("COMMIT")
         return vm, agents, workspaces, sessions, events, grants_by_agent, desired_overlays

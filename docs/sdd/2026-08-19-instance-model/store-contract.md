@@ -86,6 +86,9 @@ get_desired_overlay(instance_kind, instance_name) -> DesiredOverlayRecord | None
 put_desired_overlay(instance_kind, instance_name, payload) -> DesiredOverlayRecord
 clear_desired_overlay(instance_kind, instance_name) -> None
 list_desired_overlays(instance_kind) -> tuple[DesiredOverlayRecord, ...]
+has_instance_records(instance_kind, instance_name) -> bool
+has_vm_owner_tree_desired_overlay(vm_name) -> bool
+list_vm_owner_tree_desired_overlays(vm_name) -> tuple[DesiredOverlayRecord, ...]
 
 get_applied_slices(instance_kind, instance_name) -> tuple[AppliedStateSlice, ...]
 replace_applied_slices(instance_kind, instance_name, operation, slices: Mapping[AppliedStateKey, VersionedPayload]) -> tuple[AppliedStateSlice, ...]
@@ -95,6 +98,17 @@ list_applied_slices(instance_kind) -> tuple[AppliedStateSlice, ...]
 No public method accepts `record_type`, a caller-authored record key, raw JSON text, a SQL fragment,
 or an arbitrary filter. Future integration applied-state and artifact ownership consumers add named
 methods to this closed surface. They do not gain a generic escape hatch.
+
+`has_instance_records` is the creation guard for orphan state. It observes any current or future
+private record type for one exact typed identity without decoding a consumer payload, so creation
+cannot silently adopt state left behind without its owner.
+
+The two VM owner-tree operations are the closed backup query shapes. They select desired-overlay
+rows for the named VM and its current workspace, agent, and session descendants in SQL before any
+payload is decoded. Malformed state in that selected owner tree therefore fails the backup snapshot,
+while malformed state belonging to another VM is outside the read and cannot block it. The
+repository owns the owner-tree SQL and desired-overlay discriminators; backup consumers receive only
+typed records or the narrow existence result.
 
 `replace_applied_slices` canonical-encodes every supplied payload before writing. It then inserts or
 replaces the supplied slice keys with one operation and one timestamp in a single transaction.

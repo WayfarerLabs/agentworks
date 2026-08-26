@@ -10,4 +10,4 @@ def decode_overlay(raw: JsonObject) -> AgentTemplate:
 
 
 def encode_overlay(declaration: AgentTemplate) -> JsonObject:
-    return encode_overlay_model(declaration)
+    return encode_overlay_model(declaration, "agent")

@@ -13,11 +13,13 @@ from agentworks.errors import StateError
 from agentworks.resources.access import ensure_recipe_enabled
 from agentworks.resources.graph import Enablement
 from agentworks.resources.inspect import list_resources
+from agentworks.secrets.policy import TtyInteractionPolicy
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from agentworks.config import Config
+    from agentworks.db import Database
 
 
 _GCP_SITE = """
@@ -40,6 +42,16 @@ metadata:
   name: gcloud-tools
 spec:
   apt_packages: [gcloud-cli]
+"""
+
+_OVERLAY_ONLY_PACKAGE = """
+apiVersion: agentworks/v1
+kind: apt-package
+metadata:
+  name: overlay-cloud
+spec:
+  apt: [overlay-cloud]
+  apt_sources: [google-cloud-cli]
 """
 
 
@@ -113,6 +125,30 @@ def test_gcloud_recipe_is_gated_until_gcp_is_enabled(tmp_path: Path) -> None:
 
     enabled = build_registry(_config(tmp_path, _GCLOUD_TEMPLATE, enabled=True))
     ensure_recipe_enabled(enabled, "vm-template", "gcloud-tools")
+
+
+def test_overlay_only_package_gates_its_disabled_source_before_vm_lifecycle(
+    db: Database,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.vms.manager import create_vm
+
+    config = _config(tmp_path, _OVERLAY_ONLY_PACKAGE)
+    monkeypatch.setattr("agentworks.vms.sites.select_site", lambda *a, **k: pytest.fail("lifecycle reached"))
+
+    with pytest.raises(StateError) as caught:
+        create_vm(
+            db,
+            config,
+            name="overlay-vm",
+            spec='{"apt_packages":["overlay-cloud"]}',
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert caught.value.entity_kind == "apt-source"
+    assert caught.value.entity_name == "google-cloud-cli"
+    assert db.get_vm("overlay-vm") is None
 
 
 def test_operator_gcloud_override_wins_while_gcp_is_disabled(tmp_path: Path) -> None:

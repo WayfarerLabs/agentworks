@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, cast
 
 from pydantic import ValidationError as PydanticValidationError
 
+from agentworks.declared_resource import DeclaredResource
 from agentworks.errors import ValidationError
 
 if TYPE_CHECKING:
@@ -13,14 +14,21 @@ if TYPE_CHECKING:
 
     from agentworks.db.instance_state import JsonObject
 
-_MODEL_EXCLUDED_FIELDS = {
-    "name",
+OVERLAY_EXCLUDED_FIELDS = frozenset(DeclaredResource.model_fields) | {
+    "apiVersion",
+    "framework",
+    "kind",
     "inherits",
-    "description",
-    "expires",
-    "declared_at",
-    "origin",
+    "metadata",
+    "source",
+    "spec",
 }
+"""Fields that are framework or envelope surface, never an instance layer.
+
+The declared-resource base is the authority for model metadata. The remaining
+names are document wrappers that are not model fields, plus ``inherits``, whose
+composition belongs to the selected template.
+"""
 
 
 def decode_overlay_model[T: BaseModel](model_type: type[T], instance_kind: str, raw: JsonObject) -> T:
@@ -38,13 +46,19 @@ def decode_overlay_model[T: BaseModel](model_type: type[T], instance_kind: str, 
         ) from None
 
 
-def encode_overlay_model(model: BaseModel) -> JsonObject:
+def encode_overlay_model(model: BaseModel, instance_kind: str) -> JsonObject:
     """Project only explicitly supplied domain fields to canonical JSON data."""
-    return cast(
-        "JsonObject",
-        model.model_dump(
-            mode="json",
-            exclude=_MODEL_EXCLUDED_FIELDS,
-            exclude_unset=True,
-        ),
-    )
+    try:
+        return cast(
+            "JsonObject",
+            model.model_dump(
+                mode="json",
+                exclude=set(OVERLAY_EXCLUDED_FIELDS),
+                exclude_unset=True,
+            ),
+        )
+    except ValueError:
+        raise ValidationError(
+            f"invalid {instance_kind} instance spec: configuration is too deeply nested to serialize",
+            entity_kind=instance_kind,
+        ) from None

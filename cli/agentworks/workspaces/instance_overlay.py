@@ -10,4 +10,4 @@ def decode_overlay(raw: JsonObject) -> WorkspaceTemplate:
 
 
 def encode_overlay(declaration: WorkspaceTemplate) -> JsonObject:
-    return encode_overlay_model(declaration)
+    return encode_overlay_model(declaration, "workspace")

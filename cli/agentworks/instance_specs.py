@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, cast
 
 from agentworks.db.instance_state import InstanceKind, JsonObject, VersionedPayload
 from agentworks.errors import StateError, ValidationError
+from agentworks.instance_overlay_codec import OVERLAY_EXCLUDED_FIELDS
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -26,20 +27,6 @@ if TYPE_CHECKING:
     from agentworks.workspaces.template import WorkspaceTemplate
 
 _PAYLOAD_VERSION = 1
-_FORBIDDEN_FIELDS = frozenset(
-    {
-        "kind",
-        "name",
-        "inherits",
-        "description",
-        "expires",
-        "framework",
-        "metadata",
-        "declared_at",
-        "origin",
-        "source",
-    }
-)
 
 
 @dataclass(frozen=True)
@@ -74,7 +61,7 @@ class OverlayOutcome:
 def parse_instance_spec(instance_kind: InstanceKind, value: str) -> InstanceOverlay[BaseModel]:
     """Parse strict inline JSON and validate it through the kind's spec model."""
     raw = _parse_json_object(value)
-    forbidden = sorted(_FORBIDDEN_FIELDS.intersection(raw))
+    forbidden = sorted(OVERLAY_EXCLUDED_FIELDS.intersection(raw))
     if forbidden:
         names = ", ".join(forbidden)
         raise ValidationError(
@@ -225,7 +212,7 @@ def validate_effective_instance_references(
     references: tuple[ResourceReference, ...],
 ) -> None:
     """Validate and use-gate references added by an effective instance layer."""
-    from agentworks.resources.access import ensure_reference_enabled
+    from agentworks.resources.access import ensure_recipe_enabled
     from agentworks.resources.kind import KIND_REGISTRY
     from agentworks.resources.reference import validate_reference_targets
 
@@ -233,7 +220,7 @@ def validate_effective_instance_references(
     for reference in references:
         handler = KIND_REGISTRY[reference.kind]
         if handler.category == "declarable":
-            ensure_reference_enabled(registry, reference.kind, reference.name)
+            ensure_recipe_enabled(registry, reference.kind, reference.name)
 
 
 def _parse_json_object(value: str) -> JsonObject:
