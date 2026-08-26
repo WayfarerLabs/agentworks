@@ -1,7 +1,7 @@
 # Child SDDs
 
 - Status: Active ledger
-- Last updated: 2026-08-24
+- Last updated: 2026-08-25
 
 This is the saga's tracking document, the analog of an ordinary SDD's `plan.md`. Completed
 checkboxes are immutable records, per the standard rule. The saga SDD locks when every entry here is
@@ -584,6 +584,18 @@ Planned children, seeded when their prerequisites land (see `phasing.md`):
   the `config_at(level)` shape sketch, the three preserved `base.py` constraints, the
   who-constructs-versus-who-calls-in caution, and the pre-design call-site discovery walk. The
   capability-API reevaluation is chartered into this wave's seed, not scheduled sooner
+- Secret-delivery containment (own child, **operator ruling 2026-08-25**):
+  [issue #516](https://github.com/WayfarerLabs/agentworks/issues/516), resolved secret values
+  reaching `SSHError` messages. Session env values are interpolated into the tmux command as
+  `-e KEY=VAL` argv, and the SSH transport embeds the full command string in its exception text, so
+  any failure of those invocations puts the value in an error message. It is the mirror of what the
+  secret-preview contract settled: that effort made the preview and resolution side rigorous about
+  never letting a value cross a boundary, and this is the same class of leak on the delivery side,
+  which it never covered. Its own child rather than an existing wave's, because the decision spans
+  secret delivery, SSH command errors, and command logging, and because no current wave owns that
+  span: `phasing.md`'s wave 4 is the setup pipeline and one vertical integration, and it places
+  session runtime and tmux on the observability track rather than its own. The fix touches the
+  shared SSH transport contract, so it was filed rather than fixed in passing under Scope discipline
 - Wave 5: session observability phase 1
 - Wave 6: agentic artifacts and distillation
 - Wave 7: structured control
