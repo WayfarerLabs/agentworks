@@ -373,23 +373,35 @@ def _cleanup_now_empty_agent(
     """Handle the deleted session's agent when it becomes a cleanup candidate.
 
     An agent is a candidate only when it has NO remaining sessions AND NO
-    explicit workspace grants (``agent_is_unused``): a standing explicit
-    grant is operator intent to use the agent, so a granted-but-sessionless
-    agent is left alone rather than torn down (and its grants revoked) as a
-    side effect of a session delete. Admin sessions (``agent_name is None``)
-    have no agent to clean up and are skipped. Otherwise mirrors
+    standing workspace grants (``agent_has_grants``): a standing grant is
+    operator intent to use the agent, so a granted-but-sessionless agent is
+    left alone rather than torn down (and its grants revoked) as a side effect
+    of a session delete. When this session created the agent but other sessions
+    still use it, report why the agent is being kept. Admin sessions
+    (``agent_name is None``) have no agent to clean up and are skipped.
+    Otherwise mirrors
     ``_cleanup_now_empty_workspace`` through the shared
     :func:`cleanup_now_empty_resource` shape: offer interactively regardless of
     provenance, auto-delete only a session-created agent under --yes, and
     report-but-keep any other candidate agent. A follow-on ``delete_agent``
     failure warns rather than aborts.
     """
-    from agentworks.agents.manager import agent_is_unused, delete_agent
+    from agentworks.agents.manager import agent_has_grants, delete_agent
 
     name = session.agent_name
     if name is None:
         return
-    if not agent_is_unused(db, name):
+    remaining_sessions = db.list_sessions(agent_name=name)
+    if remaining_sessions:
+        if session.created_agent:
+            output.info(
+                f"Agent '{name}' was created with this session but remains in use by "
+                f"{output.count(len(remaining_sessions), 'other session')}:"
+            )
+            for remaining_session in remaining_sessions:
+                output.detail(remaining_session.name)
+        return
+    if agent_has_grants(db, name):
         return
     # Bind a non-optional local so the delete closure (which mypy widens
     # narrowed names back inside) still sees a plain str.

@@ -99,16 +99,11 @@ def agent_has_grants(db: Database, name: str) -> bool:
 
 
 def agent_is_unused(db: Database, name: str) -> bool:
-    """Whether the agent is a cleanup candidate: no sessions AND no standing
-    workspace grant (no explicit grant row and ``grant_all`` unset).
+    """Whether the agent has neither sessions nor standing workspace grants.
 
-    This is the shared "agent unused" definition for session delete's
-    now-empty cleanup (issue #266) and, going forward, the prune command
-    (issue #268). Requiring no grants (not just no sessions) preserves the
-    pre-#266 behavior: a granted-but-sessionless agent is left alone rather
-    than torn down (and its grants revoked) as a side effect of a session
-    delete. It reads live DB state, so a caller that wants the post-delete
-    answer must call it once the session delete has committed.
+    This public predicate composes :func:`agent_has_sessions` and
+    :func:`agent_has_grants` into the complete live-state definition of an
+    unused agent.
     """
     return not agent_has_sessions(db, name) and not agent_has_grants(db, name)
 
