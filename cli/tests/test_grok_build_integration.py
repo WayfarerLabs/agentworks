@@ -101,6 +101,10 @@ def test_validation_accepts_open_string_choices_and_empty_config() -> None:
             "model": "future-model",
             "reasoning_effort": "future-effort",
             "sandbox": "future-sandbox",
+            "goal": "Finish the migration",
+            "initial_prompt": "Start with the failing tests",
+            "agent_profile": "./agents/reviewer.md",
+            "rules": "Keep changes focused",
             "extra_args": ["--future-flag"],
         }
     )
@@ -112,7 +116,19 @@ def test_validation_rejects_unknown_field() -> None:
         _validate({"permision_mode": "typo"})
 
 
-@pytest.mark.parametrize("field", ["permission_mode", "model", "reasoning_effort", "sandbox"])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "permission_mode",
+        "model",
+        "reasoning_effort",
+        "sandbox",
+        "goal",
+        "initial_prompt",
+        "agent_profile",
+        "rules",
+    ],
+)
 def test_validation_rejects_non_string_choices(field: str) -> None:
     with pytest.raises(ConfigError):
         _validate({field: 3})
@@ -276,6 +292,56 @@ def test_managed_fields_map_to_canonical_flags() -> None:
 def test_empty_config_emits_only_the_fresh_session_identity() -> None:
     command = _integration().start(_op_ctx(_FakeTarget({"summary.json": _FakeResult(1)})))
     assert _grok_argv(command) == ["--session-id", _SID]
+
+
+def test_fresh_workload_uses_native_controls_before_extra_args() -> None:
+    goal = "Finish safely; printf 'done'"
+    initial = "Begin with the failing test"
+    command = _integration(
+        {
+            "goal": goal,
+            "initial_prompt": initial,
+            "agent_profile": "./agents/reviewer.md",
+            "rules": "Keep the diff focused",
+            "extra_args": ["--future-flag"],
+        }
+    ).start(_op_ctx(_FakeTarget({"summary.json": _FakeResult(1)})))
+    argv = _grok_argv(command)
+
+    assert argv[argv.index("--agent-profile") + 1] == "./agents/reviewer.md"
+    assert argv[argv.index("--rules") + 1] == "Keep the diff focused"
+    prompt = next(token for token in argv if token.startswith("/goal "))
+    assert prompt.index(goal) < prompt.index(initial)
+    assert argv[argv.index("--prompt") + 1] == prompt
+    assert argv[-1] == "--future-flag"
+    assert argv.index(prompt) < argv.index("--future-flag")
+
+
+def test_fresh_initial_prompt_uses_the_native_prompt_option() -> None:
+    argv = _grok_argv(
+        _integration({"initial_prompt": "--version", "extra_args": ["--future-flag"]}).start(
+            _op_ctx(_FakeTarget({"summary.json": _FakeResult(1)}))
+        )
+    )
+
+    assert argv[argv.index("--prompt") + 1] == "--version"
+    assert argv[-1] == "--future-flag"
+
+
+def test_workload_bootstrap_is_not_replayed_on_resume() -> None:
+    command = _integration(
+        {
+            "goal": "Fresh goal",
+            "initial_prompt": "Fresh prompt",
+            "agent_profile": "./agents/reviewer.md",
+            "rules": "Fresh rules",
+        }
+    ).resume(_op_ctx(_FakeTarget({"summary.json": _FakeResult(0)})))
+    argv = _grok_argv(command)
+    assert "--agent-profile" not in argv
+    assert "--rules" not in argv
+    assert all(not token.startswith("/goal ") for token in argv)
+    assert "Fresh prompt" not in argv
 
 
 def test_extra_args_are_quoted_and_appended_last() -> None:

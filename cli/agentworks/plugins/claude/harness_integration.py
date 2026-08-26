@@ -1,12 +1,14 @@
 """The ``claude-code`` harness integration: run Claude Code as the session workload,
 resuming its transcript when one exists and launching fresh otherwise.
 
-Config vocabulary (all optional): ``permission_mode``, ``model``, and
+Config vocabulary (all optional): ``goal``, ``initial_prompt``, ``agent``,
+and ``append_system_prompt`` describe a fresh conversation's workload;
+``permission_mode``, ``model``, and
 ``reasoning_effort`` map to the ``--permission-mode`` / ``--model`` /
 ``--effort`` flags verbatim; ``remote_control`` enables Claude Code Remote
 Control; ``vim_mode`` and ``terminal_bell`` become session-local settings; and
-``extra_args`` is a list of raw argv tokens appended last (the operator escape
-hatch for any flag the harness integration does not model). See
+``extra_args`` is a list of raw argv tokens emitted after generated options
+(the operator escape hatch for any flag the harness integration does not model). See
 ``claude-code-lld.md``.
 
 Addressing uses a stored per-session Claude session id (a v4 uuid) kept in
@@ -63,6 +65,23 @@ class ClaudeCodeConfig(AgwModel):
     """Forwarded as ``--effort`` without validating Claude's evolving choice
     set. A child template's declared value replaces its parent's."""
 
+    goal: str | None = None
+    """A Claude Code ``/goal`` condition submitted when this integration
+    starts a fresh conversation. It is not replayed on resume."""
+
+    initial_prompt: str | None = None
+    """The first prompt for a fresh conversation. When ``goal`` is also set,
+    it becomes initial guidance inside the native goal directive. It is not
+    replayed on resume."""
+
+    agent: str | None = None
+    """Forwarded as ``--agent`` when starting a fresh conversation. Claude
+    Code owns agent discovery and validation."""
+
+    append_system_prompt: str | None = None
+    """Forwarded as ``--append-system-prompt`` when starting a fresh
+    conversation."""
+
     remote_control: bool = False
     """When true, enable Claude Code Remote Control and use the Agentworks
     session name as its title. Remote Control requires a Claude subscription
@@ -83,9 +102,11 @@ class ClaudeCodeConfig(AgwModel):
     override. A child template's value replaces its parent's."""
 
     extra_args: list[str] = Field(default_factory=list)
-    """Appended to the command verbatim, last, so it can carry any flag
-    this integration does not model. Claude uses the last ``--settings``
-    occurrence, so a raw one here replaces all generated session settings."""
+    """Appended verbatim after every generated CLI option, so it can carry
+    any flag this integration does not model. Claude uses the last
+    ``--settings`` occurrence, so a raw one here replaces all generated
+    session settings. On a fresh launch with an initial input, only the
+    ``--`` prompt separator and prompt value follow these option tokens."""
 
 
 # The transcript's config root. ``CLAUDE_CONFIG_DIR`` is the CLI's own
@@ -197,7 +218,10 @@ class ClaudeCodeIntegration(HarnessIntegration):
         else:
             identity = ["--session-id", sid]
             msg = f"agentworks harness integration (claude-code): starting new session {self._session_name}"
-        tokens = [*identity, "--name", self._session_name, *self._config_flags()]
+        tokens = [*identity, "--name", self._session_name, *self._managed_flags(fresh=not resume)]
+        tokens += self.config.extra_args
+        if not resume and (prompt := self._fresh_prompt()) is not None:
+            tokens += ["--", prompt]
         argv = " ".join(shlex.quote(token) for token in tokens)
         # A single ``sh -c`` so the whole thing survives the ``exec``
         # wrapping the tmux pane applies (``exec`` takes one simple
@@ -227,11 +251,14 @@ class ClaudeCodeIntegration(HarnessIntegration):
             self._state["session_id"] = sid
         return sid
 
-    def _config_flags(self) -> list[str]:
-        """The managed flags and session-local settings, then
-        ``extra_args``, each an argv token. ``extra_args`` is appended
-        verbatim last so it can carry any flag the harness integration does
-        not model (FRD R4)."""
+    def _managed_flags(self, *, fresh: bool) -> list[str]:
+        """Managed argv tokens for this launch.
+
+        Conversation workload controls apply only to a fresh upstream
+        conversation. Process preferences still apply whenever the process is
+        launched. The caller appends ``extra_args`` and then any separated
+        fresh prompt.
+        """
         tokens: list[str] = []
         if self.config.permission_mode is not None:
             tokens += ["--permission-mode", self.config.permission_mode]
@@ -244,6 +271,11 @@ class ClaudeCodeIntegration(HarnessIntegration):
             # later positional in extra_args from becoming the Remote Control
             # title accidentally.
             tokens += ["--remote-control", self._session_name]
+        harness_config = self.config
+        if fresh and harness_config.agent is not None:
+            tokens += ["--agent", harness_config.agent]
+        if fresh and self.config.append_system_prompt is not None:
+            tokens += ["--append-system-prompt", self.config.append_system_prompt]
         settings: dict[str, str] = {}
         if self.config.vim_mode:
             settings["editorMode"] = "vim"
@@ -251,8 +283,25 @@ class ClaudeCodeIntegration(HarnessIntegration):
             settings["preferredNotifChannel"] = "terminal_bell"
         if settings:
             tokens += ["--settings", json.dumps(settings, separators=(",", ":"))]
-        tokens += self.config.extra_args
         return tokens
+
+    def _fresh_prompt(self) -> str | None:
+        """The single initial input Claude accepts for a fresh TUI session.
+
+        Claude's native ``/goal`` command starts the first turn itself. When
+        both fields are set, the initial prompt is therefore carried as
+        guidance in that goal directive rather than submitted as a second
+        turn that the CLI has no startup channel for. Without a goal, one
+        leading newline is a lexical transport guard: Claude dispatches an
+        exact subcommand name even after ``--``, while the prefixed value
+        remains prompt data without mirroring its evolving command set.
+        """
+        if self.config.goal is None:
+            return None if self.config.initial_prompt is None else f"\n{self.config.initial_prompt}"
+        prompt = f"/goal {self.config.goal}"
+        if self.config.initial_prompt is not None:
+            prompt += f"\n\nInitial guidance for this goal:\n{self.config.initial_prompt}"
+        return prompt
 
     def _transcript_exists(self, transport: Transport, sid: str) -> bool:
         """True iff the stored session's transcript (``<sid>.jsonl``) exists
