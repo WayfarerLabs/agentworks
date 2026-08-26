@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.capabilities.secret_backend import OperatorImpact, TtyInteractionAccess
+from agentworks.capabilities.secret_backend.client import safe_identity
 from agentworks.errors import StateError
 from agentworks.machine_output import (
     JsonObject,
@@ -346,8 +347,12 @@ class SecretDescription:
     name this secret); ``used_by`` is the live DB instances that
     depend on this secret per the current config (projected via the
     secret kind's ``instances`` hook). ``used_by`` is ``None`` when
-    ``describe_secret`` was called without a ``db`` -- the renderer
+    ``describe_secret`` was called without a ``db``; the renderer
     omits the "Used by:" section in that case.
+
+    ``name`` is retained by the independently rendered human and JSON
+    describe surfaces, so construction rejects unsafe identity text even
+    when the resolution preview was constructed separately.
     """
 
     name: str
@@ -360,6 +365,9 @@ class SecretDescription:
     source_mappings: tuple[SourceMapping, ...]
     resolution: StaticResolution
     preview: ResolutionPreview
+
+    def __post_init__(self) -> None:
+        safe_identity(self.name)
 
 
 def secret_description_data(description: SecretDescription) -> JsonObject:
