@@ -168,8 +168,7 @@ The Wave 2 process rewrite has four layers, each with one kind of information:
    `agentworks-reviewer` owns its rubric and consistency mode, `integration-testing` owns live
    validation, and the developer, tester, and saga-lead definitions own only role-specific duties.
 
-process-semantic-inventory.md (delivered in this directory as
-`message-2026-08-18-process-semantic-inventory.md`) is the rewrite checklist. Every operative
+`message-2026-08-18-process-semantic-inventory.md` is the rewrite checklist. Every operative
 contract has one future owner and named consumers; duplicated prose either collapses to that owner
 or remains only where a different actor needs a distinct consequence. Historical attributions, dated
 probes, model brands, and harness-specific agent type names are not durable process contracts and do

@@ -460,8 +460,7 @@ R3.2 requires the after number to be lower.
       unresolved material issue, so the original consolidation and review conditions are complete.
 
 - [x] Clean-slate `agentic-dev-process` rewrite (operator rulings 13 and 14; R3.3-R3.5). Start with
-      process-semantic-inventory.md (delivered in this directory as
-      `message-2026-08-18-process-semantic-inventory.md`), recording every operative contract in the
+      `message-2026-08-18-process-semantic-inventory.md`, recording every operative contract in the
       core skill and its immediate process references, its current sources, one future owner,
       consumers, and keep/move/merge/drop disposition. Then write the core as the end-to-end state
       machine, place conditional delegation and delivery mechanics in skill-local references, and
