@@ -39,7 +39,7 @@ class AwsAccessKeyAuth(AgwModel):
     """The secret containing the secret access key. The default maps to
     ``AW_SECRET_AWS_SECRET_ACCESS_KEY`` in the env-var backend."""
 
-    assume_role_arn: NonEmptyStr | None = None
+    assume_role_arn: NonBlankStr | None = None
     """An optional role to assume with the key through STS."""
 
 
@@ -55,7 +55,7 @@ class AwsInstanceType(AgwModel):
     memory: PositiveInt
     """The memory (GiB) the type provides."""
 
-    type: NonEmptyStr
+    type: NonBlankStr
     """The literal EC2 instance type (e.g. ``t4g.large``)."""
 
     arch: Literal["x86_64", "arm64"]
@@ -69,10 +69,10 @@ class AwsEC2Config(AgwModel):
     name: Literal["aws-ec2"]
     """The platform this config is for."""
 
-    region: NonEmptyStr = Field(examples=["us-east-1"])
+    region: NonBlankStr = Field(examples=["us-east-1"])
     """The region new instances are created in."""
 
-    subnet_id: NonEmptyStr | None = Field(default=None, examples=["subnet-00000000000000000"])
+    subnet_id: NonBlankStr | None = Field(default=None, examples=["subnet-00000000000000000"])
     """The subnet new instances attach to. Omit for the region's default
     VPC."""
 

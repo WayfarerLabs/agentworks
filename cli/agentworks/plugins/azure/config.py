@@ -55,7 +55,7 @@ class AzureVMSize(AgwModel):
     memory: PositiveInt
     """The memory (GiB) the SKU provides."""
 
-    size: NonEmptyStr
+    size: NonBlankStr
     """The Azure SKU name (e.g. ``Standard_B2ms``)."""
 
 

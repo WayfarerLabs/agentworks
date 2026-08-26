@@ -166,7 +166,7 @@ from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field
 
-from agentworks.schema import AgwModel, NonEmptyStr, SecretRef
+from agentworks.schema import AgwModel, NonBlankStr, NonEmptyStr, SecretRef
 
 
 class ExampleCloudConfig(AgwModel):
@@ -175,7 +175,7 @@ class ExampleCloudConfig(AgwModel):
     name: Literal["example-cloud"]
     """The platform this config is for."""
 
-    region: NonEmptyStr = Field(examples=["us-west-2"])
+    region: NonBlankStr = Field(examples=["us-west-2"])
     """The region new VMs are created in."""
 
     api_token: Annotated[
@@ -185,7 +185,7 @@ class ExampleCloudConfig(AgwModel):
     """The secret holding the API token's value. Never the value itself:
     the field NAMES a secret in the framework's secret system."""
 
-    instance_prefix: NonEmptyStr = "agw"
+    instance_prefix: NonBlankStr = "agw"
     """The name prefix new VMs are created under."""
 
 
