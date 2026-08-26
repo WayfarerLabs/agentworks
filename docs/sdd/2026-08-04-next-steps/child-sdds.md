@@ -586,8 +586,16 @@ Planned children, seeded when their prerequisites land (see `phasing.md`):
   capability-API reevaluation is chartered into this wave's seed, not scheduled sooner. **Operator
   ruling, 2026-08-26:** harness integration config knobs are being built now, ahead of the wave
   being chartered, and they are deliberately **not** an SDD effort: they are the obvious settings
-  that instance state makes possible, not a design question. They ship with the instance-spec work
-  in 0.16.0 (see `phasing.md`'s release map), which is why that cut is held. Two things follow for
+  that instance state makes possible, not a design question. The work is
+  [issue #674](https://github.com/WayfarerLabs/agentworks/issues/674), per-session workload inputs
+  (`goal`, `initial_prompt`, an agent selector, and one harness-native instruction field) across the
+  Claude Code, Codex, and Grok Build integrations. It is well specified there, with acceptance
+  criteria, which is what makes the no-SDD call sound: the issue is the spec. Two parts of it are
+  design rather than settings and are worth reviewing as such, namely the prompt-mediated Codex shim
+  for `goal` and `agent`, which carries a disclosure obligation about what it does not carry, and
+  the rule that fresh-conversation inputs are never replayed when resuming persisted harness state,
+  which is an invariant to enforce rather than document. They ship with the instance-spec work in
+  0.16.0 (see `phasing.md`'s release map), which is why that cut is held. Two things follow for
   whoever leads this wave. First, this work does not establish wave 4's scope: the setup pipeline,
   per-scope init methods, attachments, applied state, and the vertical integration remain the wave's
   own design problem, and knobs landing early is not a precedent for treating that as settled.
