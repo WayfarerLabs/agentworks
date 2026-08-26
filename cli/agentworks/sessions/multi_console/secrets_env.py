@@ -25,7 +25,6 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.multi_console as _mc
 from agentworks.errors import NotFoundError
-from agentworks.resources.access import admin_template
 
 from .attach import _session_linux_user
 
@@ -75,6 +74,7 @@ def _pane_secret_target(
     """
     from agentworks.agents.templates import resolve_live_template as _resolve_agent_template
     from agentworks.secrets import SecretTarget
+    from agentworks.vms.admin_templates import resolve_live_template as _resolve_admin_template
     from agentworks.vms.templates import resolve_live_template as _resolve_vm_template
     from agentworks.workspaces.templates import resolve_live_template as _resolve_ws_template
 
@@ -89,7 +89,7 @@ def _pane_secret_target(
         return SecretTarget(
             vm=vm_tmpl.env,
             workspace=ws_tmpl.env,
-            admin=admin_template(registry, vm.admin_template or "default").env,
+            admin=_resolve_admin_template(db, registry, vm.name, vm.admin_template).env,
             label=f"console-pane:{session.name}/admin",
         )
 
@@ -129,12 +129,13 @@ def _admin_only_secret_target(
     when it lands as a follow-up.
     """
     from agentworks.secrets import SecretTarget
+    from agentworks.vms.admin_templates import resolve_live_template as _resolve_admin_template
     from agentworks.vms.templates import resolve_live_template as _resolve_vm_template
 
     vm_tmpl = _resolve_vm_template(db, registry, vm.name, vm.template)
     return SecretTarget(
         vm=vm_tmpl.env,
-        admin=admin_template(registry, vm.admin_template or "default").env,
+        admin=_resolve_admin_template(db, registry, vm.name, vm.admin_template).env,
         label=label,
     )
 
@@ -299,12 +300,14 @@ def _resolve_pane_env(
     )
 
     if is_admin_pane:
+        from agentworks.vms.admin_templates import resolve_live_template as _resolve_admin_template
+
         return compose_env(
             values=values,
             ctx=ctx,
             vm=vm_tmpl.env,
             workspace=ws_tmpl.env,
-            admin=admin_template(registry, vm.admin_template or "default").env,
+            admin=_resolve_admin_template(db, registry, vm.name, vm.admin_template).env,
         )
 
     if session.agent_name is None:

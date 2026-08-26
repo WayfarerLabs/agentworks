@@ -16,7 +16,10 @@ from agentworks.instance_overlay_codec import OVERLAY_EXCLUDED_FIELDS, Unsupport
 from agentworks.instance_specs import (
     UnsupportedStoredOverlayError,
     decode_stored_overlay,
+    decode_stored_vm_overlays,
     parse_instance_spec,
+    parse_vm_instance_specs,
+    persist_vm_creation_overlays,
     refuse_orphan_creation_state,
     replace_agent_overlay,
 )
@@ -25,6 +28,8 @@ from agentworks.resources.registry import Registry
 from agentworks.sessions.template import SessionTemplate
 from agentworks.sessions.templates import resolve_from_dict_with_provenance as resolve_session
 from agentworks.sessions.templates import resolve_live_template_with_provenance as resolve_live_session
+from agentworks.vms.admin import AdminConfig
+from agentworks.vms.admin_templates import resolve_from_dict_with_provenance as resolve_admin
 from agentworks.vms.template import VMTemplate
 from agentworks.vms.templates import resolve_from_dict_with_provenance as resolve_vm
 from agentworks.vms.templates import resolve_live_template_with_provenance as resolve_live_vm
@@ -116,6 +121,37 @@ def test_spec_accepts_surrounding_whitespace_and_canonicalizes_fields() -> None:
     assert overlay.fields == ("cpus", "memory")
 
 
+def test_vm_specs_canonicalize_two_independently_typed_components() -> None:
+    overlays = parse_vm_instance_specs(
+        '{"cpus":8}',
+        '{"shell":"zsh","env":{"TOKEN":{"secret":"admin-token"}}}',
+    )
+
+    assert overlays is not None
+    assert overlays.payload == VersionedPayload(
+        1,
+        {
+            "vm": {"cpus": 8},
+            "admin": {"env": {"TOKEN": {"secret": "admin-token"}}, "shell": "zsh"},
+        },
+    )
+    assert overlays.fields == ("admin.env", "admin.shell", "vm.cpus")
+
+
+def test_empty_vm_and_admin_specs_are_one_absent_desired_decision() -> None:
+    overlays = parse_vm_instance_specs("{}", "{}")
+
+    assert overlays is not None and overlays.is_empty
+    assert overlays.payload.value == {"vm": {}, "admin": {}}
+
+
+def test_empty_vm_and_admin_specs_are_not_persisted(db: Database) -> None:
+    overlays = parse_vm_instance_specs("{}", "{}")
+
+    assert persist_vm_creation_overlays(db, "vm-1", overlays) is None
+    assert db.instance_state.get_desired_overlay("vm", "vm-1") is None
+
+
 def test_validation_error_does_not_echo_plaintext_environment_value() -> None:
     plaintext = "do-not-print-this-value"
 
@@ -180,6 +216,43 @@ def test_malformed_stored_overlay_remains_generic_broken_state(db: Database) -> 
 
     assert type(caught.value) is StateError
     assert plaintext not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {"vm": {"future_vm_field": True}, "admin": {"shell": 5}},
+        {"vm": {"cpus": "many"}, "admin": {"future_admin_field": True}},
+    ],
+)
+def test_stored_vm_future_component_dominates_malformed_sibling(
+    db: Database,
+    value: dict[str, object],
+) -> None:
+    record = db.instance_state.put_desired_overlay("vm", "mixed", VersionedPayload(1, value))  # type: ignore[arg-type]
+
+    with pytest.raises(UnsupportedStoredOverlayError):
+        decode_stored_vm_overlays(record)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {"vm": {}},
+        {"vm": [], "admin": {}},
+        {"vm": {}, "admin": "invalid"},
+    ],
+)
+def test_malformed_stored_vm_composite_is_broken_state(
+    db: Database,
+    value: dict[str, object],
+) -> None:
+    record = db.instance_state.put_desired_overlay("vm", "malformed", VersionedPayload(1, value))  # type: ignore[arg-type]
+
+    with pytest.raises(StateError) as caught:
+        decode_stored_vm_overlays(record)
+
+    assert type(caught.value) is StateError
 
 
 def test_empty_object_is_a_typed_but_unpersisted_layer() -> None:
@@ -249,15 +322,85 @@ def test_all_domain_folds_append_the_instance_layer() -> None:
     assert session.provenance[("env", "MODE")][-1].resource_kind == "session"
 
 
+def test_admin_final_layer_uses_scalar_map_and_unique_append_semantics() -> None:
+    overlays = parse_vm_instance_specs(
+        None,
+        """{
+          "shell":"zsh",
+          "git_credentials":["shared","instance"],
+          "user_install_commands":["instance-command"],
+          "env":{"SHARED":"instance","INSTANCE":"yes"}
+        }""",
+    )
+    assert overlays is not None and overlays.admin is not None
+
+    resolution = resolve_admin(
+        {
+            "ops": AdminConfig(
+                name="ops",
+                shell="bash",
+                git_credentials=["base", "shared"],
+                user_install_commands=["base-command"],
+                env={"SHARED": "base", "BASE": "yes"},
+            )
+        },
+        "ops",
+        overlay=overlays.admin,
+        instance_name="vm-1",
+    )
+
+    assert resolution.value.shell == "zsh"
+    assert resolution.value.git_credentials == ["base", "shared", "instance"]
+    assert resolution.value.user_install_commands == ["base-command", "instance-command"]
+    assert resolution.value.env["BASE"].value == "yes"
+    assert resolution.value.env["SHARED"].value == "instance"
+    assert resolution.provenance[("git_credentials", "shared")][-1].resource_kind == "vm"
+    assert resolution.provenance[("env", "SHARED")][-1].resource_kind == "vm"
+
+
+def test_admin_partial_validation_defers_until_after_template_fold(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.config import validation
+
+    def require_template_age(packages: list[str], lockfile: str | None, install_before: str) -> None:
+        if packages and install_before == "7d":
+            raise ValueError("template-specific install age required")
+
+    monkeypatch.setattr(validation, "check_mise_settings", require_template_age)
+    overlays = parse_vm_instance_specs(None, '{"mise_packages":["node@22"]}')
+    assert overlays is not None and overlays.admin is not None
+
+    resolution = resolve_admin(
+        {"ops": AdminConfig(name="ops", mise_install_before="30d")},
+        "ops",
+        overlay=overlays.admin,
+        instance_name="vm-1",
+    )
+
+    assert resolution.value.mise_packages == ["node@22"]
+    assert resolution.value.mise_install_before == "30d"
+
+
+def test_admin_effective_validation_rejects_invalid_folded_declaration() -> None:
+    overlays = parse_vm_instance_specs(None, '{"mise_install_before":"invalid"}')
+    assert overlays is not None and overlays.admin is not None
+
+    with pytest.raises(ValidationError) as caught:
+        resolve_admin({}, overlay=overlays.admin, instance_name="vm-1")
+
+    assert caught.value.entity_kind == "vm"
+    assert caught.value.entity_name == "vm-1"
+
+
 def test_all_live_domain_resolvers_expose_stored_instance_provenance(db: Database) -> None:
     registry = Registry.empty()
     overlays = {
-        "vm": parse_instance_spec("vm", '{"cpus":8}'),
+        "vm": parse_vm_instance_specs('{"cpus":8}', None),
         "workspace": parse_instance_spec("workspace", '{"tmuxinator":false}'),
         "agent": parse_instance_spec("agent", '{"shell":"zsh"}'),
         "session": parse_instance_spec("session", '{"env":{"MODE":"instance"}}'),
     }
     for kind, overlay in overlays.items():
+        assert overlay is not None
         db.instance_state.put_desired_overlay(kind, f"{kind}-1", overlay.payload)  # type: ignore[arg-type]
 
     resolutions = (
@@ -300,9 +443,11 @@ def test_new_workspace_overlay_does_not_hide_an_unknown_selected_template() -> N
 
 
 def test_owner_and_overlay_insert_rollback_together(db: Database) -> None:
+    overlays = parse_vm_instance_specs('{"cpus":8}', '{"shell":"zsh"}')
+    assert overlays is not None
     with pytest.raises(RuntimeError, match="rollback"), db.transaction():
         db.insert_vm("v1", site="lima-local", hostname="v1")
-        db.instance_state.put_desired_overlay("vm", "v1", VersionedPayload(1, {"cpus": 8}))
+        db.instance_state.put_desired_overlay("vm", "v1", overlays.payload)
         raise RuntimeError("rollback")
 
     assert db.get_vm("v1") is None

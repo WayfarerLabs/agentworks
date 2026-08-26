@@ -46,8 +46,9 @@ reinit reads both stored inputs again.
 `vm reinit` re-runs Phase B (initialization) using the current config. All steps are non-fatal:
 failures produce warnings and a `partial` status.
 
-If the VM was created with an instance spec, reinit consumes that stored final layer. It does not
-accept a flag to change or clear it.
+If the VM was created with `--spec` or `--admin-spec`, reinit consumes both stored final layers
+after their selected VM and admin templates. It does not accept a flag to change or clear either
+layer.
 
 ### Fully idempotent
 

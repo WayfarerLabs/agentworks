@@ -344,13 +344,18 @@ def test_exec_resolves_a_stored_overlay_only_secret_through_the_runtime_boundary
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
-    from agentworks.instance_specs import parse_instance_spec
+    from agentworks.instance_specs import parse_vm_instance_specs
 
     config = make_config()
     _seed_vm(db)
-    overlay = parse_instance_spec("vm", '{"env":{"OVERLAY_TOKEN":{"secret":"overlay-only"}}}')
-    db.instance_state.put_desired_overlay("vm", "box", overlay.payload)
+    overlays = parse_vm_instance_specs(
+        '{"env":{"OVERLAY_TOKEN":{"secret":"overlay-only"}}}',
+        '{"env":{"ADMIN_OVERLAY_TOKEN":{"secret":"admin-overlay-only"}}}',
+    )
+    assert overlays is not None
+    db.instance_state.put_desired_overlay("vm", "box", overlays.payload)
     monkeypatch.setenv("AW_SECRET_OVERLAY_ONLY", "resolved")
+    monkeypatch.setenv("AW_SECRET_ADMIN_OVERLAY_ONLY", "admin-resolved")
     _reachable(monkeypatch, True)
 
     rc = vm_manager.exec_vm(db, config, "box", ["echo", "hi"], interaction=TtyInteractionPolicy.REFUSE)
@@ -358,6 +363,7 @@ def test_exec_resolves_a_stored_overlay_only_secret_through_the_runtime_boundary
     assert rc == 0
     ((_cmd, env),) = target.streaming_calls
     assert env["OVERLAY_TOKEN"] == "resolved"
+    assert env["ADMIN_OVERLAY_TOKEN"] == "admin-resolved"
 
 
 def test_exec_stopped_vm_gate_burst_then_boundary_burst(

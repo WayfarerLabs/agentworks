@@ -15,7 +15,7 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionResult
 from agentworks.config import load_config
-from agentworks.errors import NotFoundError, ProvisioningError, ValidationError
+from agentworks.errors import ConfigError, NotFoundError, ProvisioningError, StateError, ValidationError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from tests.conftest import ManifestDoc, write_manifests
@@ -105,6 +105,7 @@ def test_create_vm_request_shape_and_row(
         config,
         name="dvm",
         spec='{"cpus":6}',
+        admin_spec='{"username":"operator","shell":"zsh"}',
         interaction=TtyInteractionPolicy.REFUSE,
     )
 
@@ -113,6 +114,7 @@ def test_create_vm_request_shape_and_row(
     assert request.hostname == "dvm"  # no slug: the bare name
     assert request.system_slug is None
     assert request.cpus == 6
+    assert request.admin_username == "operator"
     assert request.ssh_public_key == "public ssh key"
     (bound,) = captured_platform
     assert bound.site_name == "lima-local"
@@ -124,8 +126,13 @@ def test_create_vm_request_shape_and_row(
     assert vm.platform_metadata == {"instance_name": "dvm"}
     assert vm.operator_stopped is False
     stored = db.instance_state.get_desired_overlay("vm", "dvm")
-    assert stored is not None and stored.payload.value == {"cpus": 6}
-    assert [(outcome.disposition, outcome.fields) for outcome in outcomes] == [(OverlayDisposition.SET, ("cpus",))]
+    assert stored is not None and stored.payload.value == {
+        "vm": {"cpus": 6},
+        "admin": {"shell": "zsh", "username": "operator"},
+    }
+    assert [(outcome.disposition, outcome.fields) for outcome in outcomes] == [
+        (OverlayDisposition.SET, ("admin.shell", "admin.username", "vm.cpus"))
+    ]
 
 
 def test_create_vm_request_build_failure_unwinds_owner_and_overlay_without_outcome(
@@ -153,6 +160,7 @@ def test_create_vm_request_build_failure_unwinds_owner_and_overlay_without_outco
             config,
             name="request-fail",
             spec='{"cpus":6}',
+            admin_spec='{"shell":"zsh"}',
             interaction=TtyInteractionPolicy.REFUSE,
         )
 
@@ -194,12 +202,15 @@ def test_create_vm_metadata_failure_retains_owner_and_reports_once(
             config,
             name="metadata-fail",
             spec='{"cpus":6}',
+            admin_spec='{"shell":"zsh"}',
             interaction=TtyInteractionPolicy.REFUSE,
         )
 
     assert db.get_vm("metadata-fail") is not None
     assert db.instance_state.get_desired_overlay("vm", "metadata-fail") is not None
-    assert [(outcome.disposition, outcome.fields) for outcome in outcomes] == [(OverlayDisposition.SET, ("cpus",))]
+    assert [(outcome.disposition, outcome.fields) for outcome in outcomes] == [
+        (OverlayDisposition.SET, ("admin.shell", "vm.cpus"))
+    ]
 
 
 def test_create_vm_logger_close_failure_retains_owner_and_reports_once(
@@ -243,7 +254,7 @@ def test_create_vm_logger_close_failure_retains_owner_and_reports_once(
 
     assert db.get_vm("close-fail") is not None
     assert db.instance_state.get_desired_overlay("vm", "close-fail") is not None
-    assert [(outcome.disposition, outcome.fields) for outcome in outcomes] == [(OverlayDisposition.SET, ("cpus",))]
+    assert [(outcome.disposition, outcome.fields) for outcome in outcomes] == [(OverlayDisposition.SET, ("vm.cpus",))]
 
 
 def test_create_vm_stores_and_provisions_selected_admin_template(
@@ -253,9 +264,7 @@ def test_create_vm_stores_and_provisions_selected_admin_template(
     tmp_path: Path,
     captured_output: object,
 ) -> None:
-    """``--admin-template work`` (a declared, non-default admin-template)
-    is stored on the VM row and drives the provisioned admin user: the
-    request's admin_username comes from that template, not ``default``."""
+    """An admin final layer composes with an explicit non-default template."""
     from agentworks.capabilities.vm_platform import ProvisionRequest
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
@@ -291,14 +300,21 @@ def test_create_vm_stores_and_provisions_selected_admin_template(
     )
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
 
-    vm_manager.create_vm(db, config, name="wvm", admin_template="work", interaction=TtyInteractionPolicy.REFUSE)
+    vm_manager.create_vm(
+        db,
+        config,
+        name="wvm",
+        admin_template="work",
+        admin_spec='{"username":"instance-worker"}',
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
 
     (request,) = captured
-    assert request.admin_username == "worker"  # from the work admin-template
+    assert request.admin_username == "instance-worker"
     vm = db.get_vm("wvm")
     assert vm is not None
     assert vm.admin_template == "work"
-    assert vm.admin_username == "worker"
+    assert vm.admin_username == "instance-worker"
 
 
 def test_unknown_admin_template_errors_before_any_work(
@@ -328,6 +344,48 @@ def test_unknown_admin_template_errors_before_any_work(
     assert exc.value.entity_kind == "admin-template"
     assert exc.value.entity_name == "ghost"
     assert db.get_vm("nvm") is None
+
+
+def test_admin_spec_unknown_reference_errors_before_lifecycle(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: object,
+) -> None:
+    monkeypatch.setattr("agentworks.vms.sites.select_site", lambda *a, **k: pytest.fail("lifecycle reached"))
+
+    with pytest.raises(ConfigError):
+        vm_manager.create_vm(
+            db,
+            make_config(),
+            name="unknown-admin-ref",
+            admin_spec='{"user_install_commands":["missing-command"]}',
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert db.get_vm("unknown-admin-ref") is None
+
+
+def test_admin_spec_disabled_reference_errors_before_lifecycle(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: object,
+) -> None:
+    monkeypatch.setattr("agentworks.vms.sites.select_site", lambda *a, **k: pytest.fail("lifecycle reached"))
+
+    with pytest.raises(StateError) as caught:
+        vm_manager.create_vm(
+            db,
+            make_config(),
+            name="disabled-admin-ref",
+            admin_spec='{"user_install_commands":["claude"]}',
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert caught.value.entity_kind == "user-install-command"
+    assert caught.value.entity_name == "claude"
+    assert db.get_vm("disabled-admin-ref") is None
 
 
 def test_not_ready_site_errors_before_tailscale_and_slug_prompt(

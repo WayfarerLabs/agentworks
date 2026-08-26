@@ -193,7 +193,7 @@ def _resolve_session_env_scopes(
     and guarantees the two consumers see identical scope state.
     """
     from agentworks.agents.templates import resolve_live_template as _resolve_agent_template
-    from agentworks.resources.access import admin_template as _admin_template
+    from agentworks.vms.admin_templates import resolve_live_template as _resolve_admin_template
     from agentworks.vms.templates import resolve_live_template as _resolve_vm_template
     from agentworks.workspaces.templates import resolve_live_template as _resolve_ws_template
 
@@ -203,7 +203,7 @@ def _resolve_session_env_scopes(
     admin_env: dict[str, EnvEntry] | None
     agent_env: dict[str, EnvEntry] | None
     if mode == SessionMode.ADMIN:
-        admin_env = _admin_template(registry, vm.admin_template or "default").env
+        admin_env = _resolve_admin_template(db, registry, vm.name, vm.admin_template).env
         agent_env = None
     else:
         assert agent_name is not None  # caller enforces; agent mode requires an agent
@@ -257,8 +257,8 @@ def _session_secret_target_pre_create(
     any of the optional ephemeral creates.
     """
     from agentworks.agents.templates import resolve_live_template as _resolve_live_agent_tmpl
-    from agentworks.resources.access import admin_template as _admin_template
     from agentworks.secrets import SecretTarget
+    from agentworks.vms.admin_templates import resolve_live_template as _resolve_admin_template
     from agentworks.vms.templates import resolve_live_template as _resolve_vm_tmpl
     from agentworks.workspaces.templates import resolve_live_template as _resolve_live_ws_tmpl
 
@@ -279,7 +279,7 @@ def _session_secret_target_pre_create(
     agent_env: dict[str, EnvEntry] | None = None
     admin_scope: dict[str, EnvEntry] | None = None
     if is_admin_mode:
-        admin_scope = _admin_template(registry, vm.admin_template or "default").env
+        admin_scope = _resolve_admin_template(db, registry, vm.name, vm.admin_template).env
     elif new_agent:
         assert resolved_agent_template is not None
         agent_env = resolved_agent_template.env

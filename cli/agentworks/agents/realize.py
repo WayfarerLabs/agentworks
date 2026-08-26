@@ -106,6 +106,8 @@ def realize_agent(
     # rollback commands are logged BEFORE the footer, not after.
     try:
         try:
+            from agentworks.vms.admin_templates import resolve_live_template as resolve_admin_template
+
             create_agent_on_vm(
                 vm,
                 config,
@@ -115,6 +117,12 @@ def realize_agent(
                 agent_name=name,
                 git_tokens=git_tokens,
                 logger=ssh_logger,
+                admin_git_force_safe_directory=resolve_admin_template(
+                    db,
+                    registry,
+                    vm.name,
+                    vm.admin_template,
+                ).git_force_safe_directory,
             )
 
             from agentworks.instance_specs import persist_creation_overlay, refuse_orphan_creation_state

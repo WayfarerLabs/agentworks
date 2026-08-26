@@ -25,7 +25,7 @@ def vm_create(
     template: Annotated[str | None, typer.Option("--template", help="VM template")] = None,
     spec: Annotated[
         str | None,
-        typer.Option("--spec", help="Inline JSON instance spec applied after the selected template"),
+        typer.Option("--spec", help="Inline JSON VM spec applied after the selected VM template"),
     ] = None,
     admin_template: Annotated[
         str | None,
@@ -36,6 +36,13 @@ def vm_create(
                 "declared admin-template resource; default: the 'default' "
                 "admin-template)"
             ),
+        ),
+    ] = None,
+    admin_spec: Annotated[
+        str | None,
+        typer.Option(
+            "--admin-spec",
+            help="Inline JSON admin spec applied after the selected admin template",
         ),
     ] = None,
     site: Annotated[
@@ -53,11 +60,9 @@ def vm_create(
 ) -> None:
     """Create a new VM (provision + initialize).
 
-    Hardware (cpus, memory, disk, swap) and the admin username come from
-    the selected vm-template and admin-template. Use --admin-template to
-    provision the admin user from a declared, non-default admin-template.
-    To deviate otherwise, declare a new template rather than overriding on
-    the command line.
+    Hardware starts with the selected vm-template and the admin user starts
+    with the selected admin-template. The two inline spec options apply the
+    final VM-specific layers after those respective templates.
     """
     interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config
@@ -71,6 +76,7 @@ def vm_create(
         template=template,
         spec=spec,
         admin_template=admin_template,
+        admin_spec=admin_spec,
         site=site,
         interaction=interaction,
     )

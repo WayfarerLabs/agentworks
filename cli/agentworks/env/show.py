@@ -274,7 +274,6 @@ def _resolve_scope_envs(
     otherwise the admin scope.
     """
     from agentworks.agents.templates import resolve_live_template as _resolve_agent_template
-    from agentworks.resources.access import admin_template as _admin_template
     from agentworks.sessions.templates import resolve_live_template as _resolve_session_template
     from agentworks.vms.templates import resolve_live_template as _resolve_vm_template
     from agentworks.workspaces.templates import resolve_live_template as _resolve_workspace_template
@@ -323,7 +322,9 @@ def _resolve_scope_envs(
         )
         agent_env = agent_template.env
     else:
-        admin_env = _admin_template(registry, ctx.vm.admin_template or "default").env
+        from agentworks.vms.admin_templates import resolve_live_template as _resolve_admin_template
+
+        admin_env = _resolve_admin_template(db, registry, ctx.vm.name, ctx.vm.admin_template).env
 
     session_env: dict[str, EnvEntry] | None = None
     if ctx.session is not None:

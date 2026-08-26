@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
     from agentworks.sessions.template import SessionTemplate
+    from agentworks.vms.admin import AdminConfig
     from agentworks.vms.template import VMTemplate
     from agentworks.workspaces.template import WorkspaceTemplate
 
@@ -40,6 +41,27 @@ class InstanceOverlay[T: BaseModel]:
     @property
     def fields(self) -> tuple[str, ...]:
         return tuple(sorted(self.payload.value))
+
+
+@dataclass(frozen=True)
+class VMInstanceOverlays:
+    """The independently typed VM and admin layers stored as one decision."""
+
+    vm: InstanceOverlay[VMTemplate] | None
+    admin: AdminConfig | None
+    payload: VersionedPayload
+
+    @property
+    def fields(self) -> tuple[str, ...]:
+        vm_fields = () if self.vm is None else tuple(f"vm.{field}" for field in self.vm.fields)
+        admin_fields = (
+            () if self.admin is None else tuple(f"admin.{field}" for field in _admin_overlay_fields(self.admin))
+        )
+        return tuple(sorted((*vm_fields, *admin_fields)))
+
+    @property
+    def is_empty(self) -> bool:
+        return self.vm is None and self.admin is None
 
 
 class OverlayDisposition(StrEnum):
@@ -78,8 +100,38 @@ def parse_instance_spec(instance_kind: InstanceKind, value: str) -> InstanceOver
     return InstanceOverlay(instance_kind, declaration, VersionedPayload(_PAYLOAD_VERSION, canonical))
 
 
-def decode_stored_overlay(record: DesiredOverlayRecord) -> InstanceOverlay[BaseModel]:
+def parse_vm_instance_specs(
+    spec: str | None,
+    admin_spec: str | None,
+) -> VMInstanceOverlays | None:
+    """Parse the two independently typed final layers of a VM declaration."""
+    if spec is None and admin_spec is None:
+        return None
+
+    vm_overlay = None
+    if spec is not None:
+        parsed_vm = parse_instance_spec("vm", spec)
+        if parsed_vm.payload.value:
+            vm_overlay = cast("InstanceOverlay[VMTemplate]", parsed_vm)
+
+    admin = None
+    if admin_spec is not None:
+        raw_admin = _parse_json_object(admin_spec)
+        _refuse_framework_fields("VM admin", raw_admin)
+        from agentworks.vms import instance_overlay as vm_codec
+
+        parsed_admin = vm_codec.decode_admin_overlay(raw_admin)
+        canonical_admin = vm_codec.encode_admin_overlay(parsed_admin)
+        if canonical_admin:
+            admin = parsed_admin
+
+    return _vm_instance_overlays(vm_overlay, admin)
+
+
+def decode_stored_overlay(record: DesiredOverlayRecord) -> InstanceOverlay[BaseModel] | VMInstanceOverlays:
     """Decode a persisted overlay at the state-database trust boundary."""
+    if record.instance_kind == "vm":
+        return decode_stored_vm_overlays(record)
     if record.payload.payload_version != _PAYLOAD_VERSION:
         raise UnsupportedStoredOverlayError(
             f"stored {record.instance_kind} {record.instance_name!r} instance spec uses "
@@ -113,13 +165,84 @@ def decode_stored_overlay(record: DesiredOverlayRecord) -> InstanceOverlay[BaseM
         ) from error
 
 
+def decode_stored_vm_overlays(record: DesiredOverlayRecord) -> VMInstanceOverlays:
+    """Decode one persisted composite VM declaration at its trust boundary."""
+    if record.instance_kind != "vm":
+        raise TypeError("a VM desired declaration requires a VM record")
+    if record.payload.payload_version != _PAYLOAD_VERSION:
+        raise _unsupported_stored_overlay(record, f"unsupported payload version {record.payload.payload_version}")
+
+    raw = record.payload.value
+    supported = {"vm", "admin"}
+    unknown = sorted(set(raw) - supported)
+    if unknown:
+        raise _unsupported_stored_overlay(record, f"unsupported fields: {', '.join(unknown)}")
+    if set(raw) != supported:
+        raise _malformed_stored_overlay(record, "payload must contain both vm and admin components")
+    raw_vm = raw["vm"]
+    raw_admin = raw["admin"]
+    vm_overlay: InstanceOverlay[VMTemplate] | None = None
+    admin: AdminConfig | None = None
+    unsupported: list[ValidationError] = []
+    malformed: list[ValidationError] = []
+
+    if not isinstance(raw_vm, dict):
+        malformed.append(ValidationError("vm component must be a JSON object", entity_kind="vm"))
+    else:
+        try:
+            encoded_vm = json.dumps(
+                raw_vm,
+                ensure_ascii=False,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            parsed_vm = parse_instance_spec("vm", encoded_vm)
+            if parsed_vm.payload.value:
+                vm_overlay = cast("InstanceOverlay[VMTemplate]", parsed_vm)
+        except UnsupportedOverlayFieldsError as error:
+            unsupported.append(error)
+        except ValidationError as error:
+            malformed.append(error)
+
+    if not isinstance(raw_admin, dict):
+        malformed.append(ValidationError("admin component must be a JSON object", entity_kind="vm"))
+    else:
+        from agentworks.vms import instance_overlay as vm_codec
+
+        try:
+            parsed_admin = vm_codec.decode_admin_overlay(raw_admin)
+            if vm_codec.encode_admin_overlay(parsed_admin):
+                admin = parsed_admin
+        except UnsupportedOverlayFieldsError as error:
+            unsupported.append(error)
+        except ValidationError as error:
+            malformed.append(error)
+
+    if unsupported:
+        raise _unsupported_stored_overlay(record, f"unsupported fields: {unsupported[0]}") from unsupported[0]
+    if malformed:
+        raise _malformed_stored_overlay(record, str(malformed[0])) from malformed[0]
+    return _vm_instance_overlays(vm_overlay, admin)
+
+
 def get_instance_overlay(
     db: Database,
     instance_kind: InstanceKind,
     instance_name: str,
 ) -> InstanceOverlay[BaseModel] | None:
     record = db.instance_state.get_desired_overlay(instance_kind, instance_name)
-    return None if record is None else decode_stored_overlay(record)
+    if record is None:
+        return None
+    if instance_kind == "vm":
+        return cast("InstanceOverlay[BaseModel] | None", decode_stored_vm_overlays(record).vm)
+    return cast("InstanceOverlay[BaseModel]", decode_stored_overlay(record))
+
+
+def get_vm_instance_overlays(db: Database, instance_name: str) -> VMInstanceOverlays | None:
+    """Load both final VM declaration components from their one desired row."""
+    record = db.instance_state.get_desired_overlay("vm", instance_name)
+    return None if record is None else decode_stored_vm_overlays(record)
 
 
 def persist_creation_overlay(
@@ -133,6 +256,18 @@ def persist_creation_overlay(
         return None
     db.instance_state.put_desired_overlay(instance_kind, instance_name, overlay.payload)
     return OverlayOutcome(OverlayDisposition.SET, overlay.fields)
+
+
+def persist_vm_creation_overlays(
+    db: Database,
+    instance_name: str,
+    overlays: VMInstanceOverlays | None,
+) -> OverlayOutcome | None:
+    """Persist both nonempty VM layers inside the owner's transaction."""
+    if overlays is None or overlays.is_empty:
+        return None
+    db.instance_state.put_desired_overlay("vm", instance_name, overlays.payload)
+    return OverlayOutcome(OverlayDisposition.SET, overlays.fields)
 
 
 def refuse_orphan_creation_state(
@@ -200,6 +335,11 @@ def render_retained_creation_overlay(
 ) -> None:
     """Report a created layer only when its owner and desired row remain."""
     if _instance_owner(db, instance_kind, instance_name) is None:
+        return
+    if instance_kind == "vm":
+        overlays = get_vm_instance_overlays(db, instance_name)
+        if overlays is not None:
+            render_overlay_outcome(OverlayOutcome(OverlayDisposition.SET, overlays.fields))
         return
     overlay = get_instance_overlay(db, instance_kind, instance_name)
     if overlay is not None:
@@ -271,6 +411,52 @@ def _parse_json_object(value: str) -> JsonObject:
         raise ValidationError("instance spec must be a JSON object")
     _validate_json_tree(decoded)
     return cast("JsonObject", decoded)
+
+
+def _refuse_framework_fields(label: str, raw: JsonObject) -> None:
+    forbidden = sorted(OVERLAY_EXCLUDED_FIELDS.intersection(raw))
+    if forbidden:
+        raise ValidationError(
+            f"{label} instance spec cannot declare framework fields: {', '.join(forbidden)}",
+            entity_kind="vm",
+        )
+
+
+def _admin_overlay_fields(admin: AdminConfig) -> tuple[str, ...]:
+    from agentworks.vms import instance_overlay as vm_codec
+
+    return tuple(sorted(vm_codec.encode_admin_overlay(admin)))
+
+
+def _vm_instance_overlays(
+    vm: InstanceOverlay[VMTemplate] | None,
+    admin: AdminConfig | None,
+) -> VMInstanceOverlays:
+    from agentworks.vms import instance_overlay as vm_codec
+
+    value: JsonObject = {
+        "vm": {} if vm is None else vm.payload.value,
+        "admin": {} if admin is None else vm_codec.encode_admin_overlay(admin),
+    }
+    return VMInstanceOverlays(vm, admin, VersionedPayload(_PAYLOAD_VERSION, value))
+
+
+def _unsupported_stored_overlay(record: DesiredOverlayRecord, detail: str) -> UnsupportedStoredOverlayError:
+    return UnsupportedStoredOverlayError(
+        f"stored VM {record.instance_name!r} instance spec uses {detail}",
+        entity_kind="vm",
+        entity_name=record.instance_name,
+        hint="Upgrade Agentworks to a compatible or newer release before applying this instance spec.",
+    )
+
+
+def _malformed_stored_overlay(record: DesiredOverlayRecord, detail: str) -> StateError:
+    return StateError(
+        f"stored VM {record.instance_name!r} instance spec is invalid: {detail}",
+        entity_kind="vm",
+        entity_name=record.instance_name,
+        hint="Back up the state database before repairing it, or restore a known-good backup.",
+    )
 
 
 def _validate_json_tree(value: object) -> None:

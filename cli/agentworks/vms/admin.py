@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated
 
-from pydantic import Field, model_validator
+from pydantic import Field, ValidationInfo, model_validator
 from pydantic.json_schema import SkipJsonSchema
 
 from agentworks.declared_resource import DeclaredResource
@@ -20,8 +20,44 @@ from agentworks.git_credentials.credential import credential_references
 from agentworks.schema import ResourceRef
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentworks.resources.graph import FinalizeContext
+    from agentworks.resources.inheritance import LayerSource
     from agentworks.resources.reference import ResourceReference
+
+
+def effective_references(
+    effective: AdminConfig,
+    source: tuple[str, str],
+    provenance: Mapping[tuple[str, ...], tuple[LayerSource, ...]],
+) -> tuple[ResourceReference, ...]:
+    """References required by one effective VM admin declaration."""
+    from agentworks.resources.reference import ResourceReference as _ResourceReq
+
+    def owner(path: tuple[str, ...]) -> tuple[str, str] | None:
+        sources = provenance.get(path, ())
+        return None if not sources else (sources[-1].resource_kind, sources[-1].name)
+
+    by_env = {key: declared_by for key in effective.env if (declared_by := owner(("env", key))) is not None}
+    refs: list[ResourceReference] = list(env_references(effective.env, source, by_env))
+    by_credential = {
+        name: declared_by
+        for name in effective.git_credentials
+        if (declared_by := owner(("git_credentials", name))) is not None
+    }
+    refs.extend(credential_references(effective.git_credentials, source, by_credential))
+    refs.extend(
+        _ResourceReq(
+            name=name,
+            kind="user-install-command",
+            usage="a user install command",
+            source=source,
+            declared_by=owner(("user_install_commands", name)),
+        )
+        for name in effective.user_install_commands
+    )
+    return tuple(refs)
 
 
 class AdminConfig(DeclaredResource):
@@ -111,7 +147,9 @@ class AdminConfig(DeclaredResource):
     admin user."""
 
     @model_validator(mode="after")
-    def _check_mise(self) -> AdminConfig:
+    def _check_mise(self, info: ValidationInfo) -> AdminConfig:
+        if isinstance(info.context, dict) and info.context.get("partial_declaration") is True:
+            return self
         # Imported inside the validator: importing ``agentworks.config``
         # runs the whole config package, and this module is loaded from
         # the kind registry.

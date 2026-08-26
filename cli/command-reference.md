@@ -13,9 +13,10 @@ authentication may request approval and wait for the configured source timeout.
 
 ### Instance specs
 
-An instance spec is an inline JSON object applied as the final layer after the selected template's
-inheritance chain. Use `--spec JSON` on `vm create`, `workspace create`, `agent create`, and
-`session create`. `agent reinit` also accepts `--spec JSON` because it is the existing-instance
+An instance spec is an inline JSON object applied as the final layer after a selected template. Use
+`--spec JSON` on `vm create`, `workspace create`, `agent create`, and `session create`. A VM has two
+declarations: `--template` and `--spec` shape the VM, while `--admin-template` and `--admin-spec`
+shape its admin user. `agent reinit` also accepts `--spec JSON` because it is the existing-instance
 command that can change the bound template. No other reinit, repair, resume, or copy command accepts
 an instance spec.
 
@@ -25,7 +26,8 @@ and the template-only fields `name`, `inherits`, `metadata`, and `framework` are
 state or remote resources change. Quote the object for the current shell:
 
 ```bash
-agw vm create build-01 --template dev --spec '{"cpus":8,"memory":16}'
+agw vm create build-01 --template dev --spec '{"cpus":8,"memory":16}' \
+  --admin-template operator --admin-spec '{"shell":"zsh"}'
 agw agent create coder-01 --spec '{"shell":"/bin/bash","mise_activate":true}'
 ```
 
@@ -44,7 +46,8 @@ JSON or environment values.
 Instance specs use the fields and merge rules of their matching template kind. Scalars replace the
 template value, map keys use child-wins merge, and list fields use that kind's stable append and
 deduplication behavior. Run `agw resource explain vm-template`, `workspace-template`,
-`agent-template`, or `session-template` for the accepted fields.
+`agent-template`, or `session-template` for the accepted fields. Use
+`agw resource explain admin-template` for `--admin-spec` fields.
 
 ### Machine-readable output
 
@@ -498,20 +501,22 @@ stopped VM is in: its status reads `stopped (manual)` versus `stopped (idle)`.
 
 `vm create <name>` takes the VM name as a required positional. Optional flags: `--template` (a
 declared vm-template), `--admin-template` (a declared admin-template; defaults to the reserved
-`default` admin-template, which always exists), `--spec` (an inline instance spec), and `--site` (a
-declared vm-site; falls back to `defaults.site`, else the one ENABLED site is inferred when there is
-exactly one, several prompt interactively, and non-interactive runs error naming the options). The
-selected admin-template is stored on the VM row (NULL = `default`) and drives its admin user on
-every later `vm reinit`, `vm shell`, and admin-mode session. An unknown `--admin-template` name
-fails before any provisioning or DB work. Hardware (`cpus`, `memory`, `disk`, `swap`) starts with
-the vm-template and the admin username comes from the admin-template. `--spec` may supply a typed
-final VM-only layer for hardware or other VM-template fields; the removed individual hardware flags
-do not return. On Azure, `cpus` + `memory` select the smallest fitting VM size from the site's
-catalog (built-in B-series, or the site's `vm_sizes` platform key); an off-ratio request rounds up
-and warns. These are immutable provisioning parameters stored in the database. All initialization
-follows the effective VM declaration (template plus stored final instance spec), with config and
-registry resources backing referenced packages and install commands. Templates carry no `site`:
-placement is per-host, so it never travels inside a shared template.
+`default` admin-template, which always exists), `--spec` (an inline final VM layer), `--admin-spec`
+(an inline final admin layer), and `--site` (a declared vm-site; falls back to `defaults.site`, else
+the one ENABLED site is inferred when there is exactly one, several prompt interactively, and
+non-interactive runs error naming the options). The selected admin-template is stored on the VM row
+(NULL = `default`) and drives its admin user on every later `vm reinit`, `vm shell`, and admin-mode
+session. An unknown `--admin-template` name fails before any provisioning or DB work. Hardware
+(`cpus`, `memory`, `disk`, `swap`) starts with the vm-template and the admin username comes from the
+admin-template. `--spec` may supply a typed final VM layer for hardware or other VM-template fields,
+while `--admin-spec` may supply a typed final admin layer. The removed individual override flags do
+not return. On Azure, `cpus` + `memory` select the smallest fitting VM size from the site's catalog
+(built-in B-series, or the site's `vm_sizes` platform key); an off-ratio request rounds up and
+warns. These are immutable provisioning parameters stored in the database. All initialization
+follows the effective VM and admin declarations, with config and registry resources backing
+referenced packages, credentials, secrets, and install commands. Both final layers are stored in one
+desired VM record and reapplied by `vm reinit`. Templates carry no `site`: placement is per-host, so
+it never travels inside a shared template.
 
 The first interactive `vm create` asks once for an optional **system slug** (3-20 chars, lowercase
 alphanumeric plus dash, no leading/trailing dash): a short identifier for this Agentworks
@@ -522,7 +527,7 @@ ask again. Non-interactive runs never prompt (a later interactive create still a
 
 `vm reinit` re-runs the initialization phase using the current config without reprovisioning the VM.
 Changes to config (new packages, different install commands, etc.) are picked up automatically. It
-consumes any stored instance spec but cannot change or clear one.
+consumes both stored VM and admin instance specs but cannot change or clear either one.
 
 `vm delete` requires `--force` if the VM has workspaces, agents, or sessions. The confirmation
 message shows what will be deleted. Pass `--yes` to skip the prompt.

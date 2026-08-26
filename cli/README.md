@@ -516,9 +516,10 @@ VM creation follows a two-phase lifecycle tracked by separate status columns:
    the admin user
 
 Initialization is fully declarative. `vm create` accepts a name, `--template`, `--spec`,
-`--admin-template`, and `--site`; immutable hardware starts with the VM template and may be refined
-by `--spec`, while the admin username comes from the selected admin template. `vm reinit` takes only
-the VM name and re-runs initialization using the current config and any stored instance spec. See
+`--admin-template`, `--admin-spec`, and `--site`. Immutable hardware starts with the VM template and
+may be refined by `--spec`; the admin user starts with the selected admin template and may be
+refined by `--admin-spec`. `vm reinit` takes only the VM name and re-runs initialization using the
+current config and both stored final layers. See
 [Instance specs](command-reference.md#instance-specs) for the exact create and agent-reinit surface.
 
 Non-fatal initialization failures (packages, dotfiles) produce a `partial` status rather than

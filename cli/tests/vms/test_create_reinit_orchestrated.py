@@ -776,11 +776,7 @@ def test_reinit_resolves_the_stored_admin_template(
     tmp_path: Path,
     captured_output,
 ) -> None:
-    """Reinit reads the VM's stored admin-template column, not always
-    ``default``: a VM created on the ``work`` admin-template (whose only
-    git credential is ``gh``) reinitializes with that credential. The
-    default admin-template declares none, so seeing ``gh`` proves the
-    column, not the default, drove resolution."""
+    """Reinit reapplies the stored admin layer after its selected template."""
     from textwrap import dedent
 
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
@@ -794,13 +790,18 @@ def test_reinit_resolves_the_stored_admin_template(
         metadata:
           name: work
         spec:
-          git_credentials: ["gh"]
+          shell: bash
         """)
     )
     config = make_config(manifests=[GIT_CRED_GH])
     db.insert_vm("rvm", site="lima-local", hostname="rvm", admin_template="work")
     db.update_vm_tailscale("rvm", "100.64.0.9")
     db.update_vm_provisioning_status("rvm", ProvisioningStatus.COMPLETE)
+    from agentworks.instance_specs import parse_vm_instance_specs
+
+    overlays = parse_vm_instance_specs(None, '{"git_credentials":["gh"],"shell":"zsh"}')
+    assert overlays is not None
+    db.instance_state.put_desired_overlay("vm", "rvm", overlays.payload)
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
 
     import contextlib as _contextlib
@@ -815,6 +816,7 @@ def test_reinit_resolves_the_stored_admin_template(
     def _fake_init(*args: object, **kwargs: object) -> None:
         captured["git_tokens"] = kwargs["git_tokens"]
         captured["providers"] = args[7]
+        captured["admin"] = args[4]
 
     monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
     import agentworks.transports as transports
@@ -823,10 +825,9 @@ def test_reinit_resolves_the_stored_admin_template(
 
     vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
 
-    # The work admin-template's git credential flowed through: reinit
-    # resolved ``work``, not the credential-less ``default``.
     assert captured["git_tokens"] == {"gh": "ghtok"}
     assert list(captured["providers"]) == ["gh"]  # type: ignore[call-overload]
+    assert captured["admin"].shell == "zsh"  # type: ignore[union-attr]
 
 
 def test_reinit_errors_cleanly_when_the_stored_admin_template_is_gone(

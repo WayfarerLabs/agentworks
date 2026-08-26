@@ -35,28 +35,54 @@ class UnsupportedOverlayFieldsError(ValidationError):
     """An overlay uses declaration fields this release does not understand."""
 
 
-def decode_overlay_model[T: BaseModel](model_type: type[T], instance_kind: str, raw: JsonObject) -> T:
+def decode_overlay_model[T: BaseModel](
+    model_type: type[T],
+    instance_kind: str,
+    raw: JsonObject,
+    *,
+    validation_context: dict[str, bool] | None = None,
+    entity_kind: str | None = None,
+) -> T:
     """Validate an overlay without exposing operator values in failures."""
     try:
-        return model_type.model_validate({"name": "instance-overlay", **raw})
-    except PydanticValidationError as error:
-        errors = error.errors(include_url=False, include_context=False, include_input=False)
-        details = []
-        errors_by_parent: dict[tuple[object, ...], set[str]] = {}
-        for item in errors:
-            location = ".".join(str(part) for part in item["loc"] if part != "name") or "<root>"
-            details.append(f"{location}: {item['msg']}")
-            errors_by_parent.setdefault(item["loc"][:-1], set()).add(item["type"])
-        error_type = (
-            UnsupportedOverlayFieldsError
-            if any(item["type"] == "extra_forbidden" and len(item["loc"]) == 1 for item in errors)
-            or any(types == {"extra_forbidden"} for types in errors_by_parent.values())
-            else ValidationError
+        return model_type.model_validate(
+            {"name": "instance-overlay", **raw},
+            context=validation_context,
         )
-        raise error_type(
-            f"invalid {instance_kind} instance spec: {'; '.join(details)}",
-            entity_kind=instance_kind,
+    except PydanticValidationError as error:
+        raise value_safe_model_validation_error(
+            error,
+            f"invalid {instance_kind} instance spec",
+            entity_kind=entity_kind or instance_kind,
         ) from None
+
+
+def value_safe_model_validation_error(
+    error: PydanticValidationError,
+    label: str,
+    *,
+    entity_kind: str,
+    entity_name: str | None = None,
+    classify_unsupported: bool = True,
+) -> ValidationError:
+    """Translate Pydantic failures without including operator-supplied values."""
+    errors = error.errors(include_url=False, include_context=False, include_input=False)
+    details = []
+    errors_by_parent: dict[tuple[object, ...], set[str]] = {}
+    for item in errors:
+        location = ".".join(str(part) for part in item["loc"] if part != "name") or "<root>"
+        details.append(f"{location}: {item['msg']}")
+        errors_by_parent.setdefault(item["loc"][:-1], set()).add(item["type"])
+    unsupported = classify_unsupported and (
+        any(item["type"] == "extra_forbidden" and len(item["loc"]) == 1 for item in errors)
+        or any(types == {"extra_forbidden"} for types in errors_by_parent.values())
+    )
+    error_type = UnsupportedOverlayFieldsError if unsupported else ValidationError
+    return error_type(
+        f"{label}: {'; '.join(details)}",
+        entity_kind=entity_kind,
+        entity_name=entity_name,
+    )
 
 
 def encode_overlay_model(model: BaseModel, instance_kind: str) -> JsonObject:

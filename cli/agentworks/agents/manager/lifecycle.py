@@ -611,6 +611,8 @@ def reinit_agent(
             ssh_logger = SSHLogger(vm.name, "agent-reinit", redactions=tuple(git_tokens.values()))
             try:
                 try:
+                    from agentworks.vms.admin_templates import resolve_live_template as resolve_admin_template
+
                     create_agent_on_vm(
                         vm,
                         config,
@@ -620,6 +622,12 @@ def reinit_agent(
                         agent_name=agent.name,
                         git_tokens=git_tokens,
                         logger=ssh_logger,
+                        admin_git_force_safe_directory=resolve_admin_template(
+                            db,
+                            registry,
+                            vm.name,
+                            vm.admin_template,
+                        ).git_force_safe_directory,
                     )
 
                     # Reconcile the agent's recorded workspace grants onto the

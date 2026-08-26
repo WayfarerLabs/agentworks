@@ -162,7 +162,14 @@ def test_session_context_reads_stored_instance_overlays_at_every_live_scope(
         ("agent", "claude", "AGENT_SPEC"),
         ("session", "s1", "SESSION_SPEC"),
     ):
-        payload = parse_instance_spec(kind, f'{{"env":{{"{key}":"set"}}}}').payload  # type: ignore[arg-type]
+        if kind == "vm":
+            from agentworks.instance_specs import parse_vm_instance_specs
+
+            vm_overlays = parse_vm_instance_specs(f'{{"env":{{"{key}":"set"}}}}', None)
+            assert vm_overlays is not None
+            payload = vm_overlays.payload
+        else:
+            payload = parse_instance_spec(kind, f'{{"env":{{"{key}":"set"}}}}').payload  # type: ignore[arg-type]
         db.instance_state.put_desired_overlay(kind, name, payload)  # type: ignore[arg-type]
 
     rows = show_env(db, config, session_name="s1", interaction=TtyInteractionPolicy.REFUSE)

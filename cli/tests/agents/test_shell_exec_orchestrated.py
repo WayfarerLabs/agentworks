@@ -159,7 +159,14 @@ def test_direct_agent_scopes_compose_stored_vm_workspace_and_agent_overlays(
         ("workspace", "ws1", "WORKSPACE_SPEC"),
         ("agent", "a1", "AGENT_SPEC"),
     ):
-        payload = parse_instance_spec(kind, f'{{"env":{{"{key}":"set"}}}}').payload  # type: ignore[arg-type]
+        if kind == "vm":
+            from agentworks.instance_specs import parse_vm_instance_specs
+
+            vm_overlays = parse_vm_instance_specs(f'{{"env":{{"{key}":"set"}}}}', None)
+            assert vm_overlays is not None
+            payload = vm_overlays.payload
+        else:
+            payload = parse_instance_spec(kind, f'{{"env":{{"{key}":"set"}}}}').payload  # type: ignore[arg-type]
         db.instance_state.put_desired_overlay(kind, name, payload)  # type: ignore[arg-type]
 
     vm = db.get_vm("box")
@@ -198,7 +205,14 @@ def test_console_sidecar_env_composes_stored_live_overlays(
         ("workspace", "ws1", "WORKSPACE_SPEC"),
         ("agent", "a1", "AGENT_SPEC"),
     ):
-        payload = parse_instance_spec(kind, f'{{"env":{{"{key}":"set"}}}}').payload  # type: ignore[arg-type]
+        if kind == "vm":
+            from agentworks.instance_specs import parse_vm_instance_specs
+
+            vm_overlays = parse_vm_instance_specs(f'{{"env":{{"{key}":"set"}}}}', None)
+            assert vm_overlays is not None
+            payload = vm_overlays.payload
+        else:
+            payload = parse_instance_spec(kind, f'{{"env":{{"{key}":"set"}}}}').payload  # type: ignore[arg-type]
         db.instance_state.put_desired_overlay(kind, name, payload)  # type: ignore[arg-type]
 
     vm = db.get_vm("box")

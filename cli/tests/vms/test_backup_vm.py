@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.errors import BackupError, StateError
-from agentworks.instance_specs import parse_instance_spec
+from agentworks.instance_specs import parse_vm_instance_specs
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import backup as vm_backup
 
@@ -83,8 +83,12 @@ def test_vm_backup_exports_versioned_instance_specs(
 ) -> None:
     db.insert_vm("bvm", site="lima-local", hostname="bvm")
     db.update_vm_tailscale("bvm", "100.64.0.8")
-    overlay = parse_instance_spec("vm", '{"env":{"TOKEN":"plaintext"}}')
-    db.instance_state.put_desired_overlay("vm", "bvm", overlay.payload)
+    overlays = parse_vm_instance_specs(
+        '{"env":{"TOKEN":"plaintext"}}',
+        '{"env":{"ADMIN_TOKEN":{"secret":"admin-token"}}}',
+    )
+    assert overlays is not None
+    db.instance_state.put_desired_overlay("vm", "bvm", overlays.payload)
 
     class _FakeSSHTransport:
         pass
@@ -119,7 +123,10 @@ def test_vm_backup_exports_versioned_instance_specs(
             "instance_kind": "vm",
             "instance_name": "bvm",
             "payload_version": 1,
-            "value": {"env": {"TOKEN": {"value": "plaintext"}}},
+            "value": {
+                "vm": {"env": {"TOKEN": {"value": "plaintext"}}},
+                "admin": {"env": {"ADMIN_TOKEN": {"secret": "admin-token"}}},
+            },
             "recorded_at": specs[0]["recorded_at"],
         }
     ]
@@ -132,8 +139,9 @@ def test_windows_refuses_overlay_backup_before_any_json_write(
 ) -> None:
     db.insert_vm("bvm", site="lima-local", hostname="bvm")
     db.update_vm_tailscale("bvm", "100.64.0.8")
-    overlay = parse_instance_spec("vm", '{"env":{"TOKEN":"plaintext"}}')
-    db.instance_state.put_desired_overlay("vm", "bvm", overlay.payload)
+    overlays = parse_vm_instance_specs('{"env":{"TOKEN":"plaintext"}}', None)
+    assert overlays is not None
+    db.instance_state.put_desired_overlay("vm", "bvm", overlays.payload)
 
     class _FakeSSHTransport:
         pass

@@ -85,12 +85,12 @@ def _resolve_vm_admin_env_scopes(
         except (ValueError, ConfigError, NotFoundError):
             ws_env = {}
 
-    from agentworks.resources.access import admin_template
+    from agentworks.vms.admin_templates import resolve_live_template as resolve_admin_template
 
     return _VmAdminEnvScopes(
         vm=vm_env,
         workspace=ws_env,
-        admin=admin_template(registry, vm.admin_template or "default").env,
+        admin=resolve_admin_template(db, registry, vm.name, vm.admin_template).env,
     )
 
 
