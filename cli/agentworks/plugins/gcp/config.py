@@ -4,20 +4,10 @@ from __future__ import annotations
 
 from typing import Annotated, Literal, NamedTuple
 
-from pydantic import AfterValidator, Field
+from pydantic import Field
 
 from agentworks.errors import ConfigError
-from agentworks.schema import AgwModel, NonEmptyStr, PositiveInt, SecretRef
-
-
-def _reject_whitespace_only(value: str) -> str:
-    """Keep provider identifiers literal while rejecting blank-looking input."""
-    if not value.strip():
-        raise ValueError("must contain a non-whitespace character")
-    return value
-
-
-GcpNonBlankStr = Annotated[NonEmptyStr, AfterValidator(_reject_whitespace_only)]
+from agentworks.schema import AgwModel, NonBlankStr, PositiveInt, SecretRef
 
 
 class GcpAmbientAuth(AgwModel):
@@ -32,7 +22,7 @@ class GcpServiceAccountAuth(AgwModel):
     mode: Literal["service-account"]
 
     secret: Annotated[
-        GcpNonBlankStr,
+        NonBlankStr,
         SecretRef(
             usage="the complete Google service-account JSON document",
             default_template="gcp-service-account-key",
@@ -53,7 +43,7 @@ class GcpMachineType(AgwModel):
     memory: PositiveInt
     """The memory in GiB the type provides."""
 
-    type: GcpNonBlankStr
+    type: NonBlankStr
     """The literal Compute Engine machine type."""
 
     arch: Literal["x86_64", "arm64"]
@@ -66,13 +56,13 @@ class GcpGCEConfig(AgwModel):
     name: Literal["gcp-gce"]
     """The platform this config is for."""
 
-    project_id: GcpNonBlankStr = Field(examples=["agentworks-dev"])
+    project_id: NonBlankStr = Field(examples=["agentworks-dev"])
     """The target Google Cloud project."""
 
-    zone: GcpNonBlankStr = Field(examples=["us-central1-a"])
+    zone: NonBlankStr = Field(examples=["us-central1-a"])
     """The Compute Engine zone for new instances."""
 
-    subnet: GcpNonBlankStr | None = Field(default=None, examples=["app-subnet"])
+    subnet: NonBlankStr | None = Field(default=None, examples=["app-subnet"])
     """A subnetwork in the zone's region. Omit for the default network."""
 
     machine_types: Annotated[list[GcpMachineType], Field(min_length=1)] | None = None

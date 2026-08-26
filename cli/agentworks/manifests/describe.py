@@ -19,6 +19,7 @@ from agentworks.manifests.field_tree import worth_showing
 from agentworks.manifests.reference import plain_text
 from agentworks.manifests.yaml_value import render_value
 from agentworks.schema import MAPPING_KEY, SEQUENCE_ELEMENT
+from agentworks.schema.base import NON_BLANK_PATTERN
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -186,7 +187,10 @@ def _facts_of(entry: FieldEntry) -> str:
     if entry.doc.ref is not None:
         facts.append(f"names a {entry.doc.ref.kind}")
     for key, value in entry.doc.constraints.items():
-        facts.append(f"{key.replace('_', ' ')} {value}")
+        if key == "pattern" and value == NON_BLANK_PATTERN:
+            facts.append("non-blank")
+        else:
+            facts.append(f"{key.replace('_', ' ')} {value}")
     if entry.doc.examples:
         facts.append(f"e.g. {render_value(entry.doc.examples[0])}")
     return f"({', '.join(facts)})"

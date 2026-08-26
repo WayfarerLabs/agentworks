@@ -60,6 +60,7 @@ from agentworks.schema._shape import (
     shape_of,
     structural_arm_for,
 )
+from agentworks.schema.base import NON_BLANK_PATTERN
 from agentworks.source_location import SYNTHESIZED_PATH
 
 if TYPE_CHECKING:
@@ -537,11 +538,11 @@ def _contextual_message(detail: ErrorDetails, address: _Address) -> str | None:
             # is simply false, so pydantic's exact wording wins there.
             return "must not be empty" if ctx.get("min_length") == 1 else None
         case "string_pattern_mismatch":
-            # A constrained STRING shape. Rendered from the pattern rather
-            # than paraphrased, because only the field knows what its
-            # pattern MEANS and this module never invents phrasing: what
-            # it can do is spell the rule plainly instead of pydantic's
-            # "String should match pattern '...'". The intent belongs in
+            # The shared non-blank constraint has one framework-wide
+            # meaning, so it keeps the semantic error its former validator
+            # produced. Every other constrained STRING shape is rendered
+            # from its pattern rather than paraphrased, because only its
+            # field knows what that pattern means. The intent belongs in
             # the field's description, which the sample and explain
             # surfaces render beside it.
             #
@@ -550,6 +551,8 @@ def _contextual_message(detail: ErrorDetails, address: _Address) -> str | None:
             # slash, so slash delimiters would leave an operator unable to
             # see where the rule ends.
             pattern = ctx.get("pattern")
+            if pattern == NON_BLANK_PATTERN:
+                return "must contain a non-whitespace character"
             return f"must match `{pattern}`" if isinstance(pattern, str) else None
         case "literal_error":
             expected = ctx.get("expected")

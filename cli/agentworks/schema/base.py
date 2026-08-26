@@ -251,6 +251,19 @@ floor nobody notices drifting. The bridge renders its violation as
 "must not be empty" (only at a floor of 1, where that paraphrase is
 true)."""
 
+
+# Python's ``str.strip`` whitespace set, spelled out so Pydantic's Rust
+# regex and JSON Schema's ECMAScript regex agree. Their ``\s`` sets differ,
+# notably on U+001C through U+001F and U+FEFF.
+NON_BLANK_PATTERN: Final = r"[^\x09-\x0d\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]"
+
+NonBlankStr = Annotated[str, Field(min_length=1, pattern=NON_BLANK_PATTERN)]
+"""A non-empty string containing at least one non-whitespace character.
+
+The original value is preserved, so this validates presence without
+normalizing the supplied string."""
+
+
 PositiveInt = Annotated[int, Field(gt=0)]
 """A count or size that must be at least one.
 

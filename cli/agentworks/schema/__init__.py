@@ -63,6 +63,7 @@ from agentworks.schema._shape import (
 from agentworks.schema.base import (
     AgwModel,
     AgwRootModel,
+    NonBlankStr,
     NonEmptyStr,
     PositiveInt,
     reference_marker_error,
@@ -108,6 +109,7 @@ __all__ = [
     "CapabilityBlock",
     "FieldDoc",
     "ModelDoc",
+    "NonBlankStr",
     "NonEmptyStr",
     "PositiveInt",
     "RefMarker",
