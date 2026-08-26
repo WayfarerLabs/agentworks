@@ -231,6 +231,39 @@ def test_stored_vm_future_component_dominates_malformed_sibling(
         decode_stored_vm_overlays(record)
 
 
+@pytest.mark.parametrize(
+    ("payload_version", "value"),
+    [
+        (1, {"future_vm_field": "operator-value-marker", "cpus": None}),
+        (
+            2,
+            {"vm": {"future_vm_field": "operator-value-marker", "cpus": None}, "admin": {}},
+        ),
+        (2, {"vm": {"future_vm_field": "operator-value-marker"}}),
+        (
+            2,
+            {"vm": {}, "admin": {"future_admin_field": "operator-value-marker", "mise_lockfile": None}},
+        ),
+        (2, {"admin": {"future_admin_field": "operator-value-marker"}}),
+    ],
+)
+def test_stored_top_level_future_field_precedes_known_corruption_and_missing_sibling(
+    db: Database,
+    payload_version: int,
+    value: dict[str, object],
+) -> None:
+    record = db.instance_state.put_desired_overlay(
+        "vm",
+        "future",
+        VersionedPayload(payload_version, value),  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(UnsupportedStoredOverlayError) as caught:
+        decode_stored_vm_overlays(record)
+
+    assert "operator-value-marker" not in str(caught.value)
+
+
 def test_legacy_flat_vm_payload_decodes_as_vm_only_and_normalizes_to_current_shape(db: Database) -> None:
     record = db.instance_state.put_desired_overlay(
         "vm",
@@ -408,6 +441,7 @@ def test_admin_effective_validation_rejects_invalid_folded_declaration() -> None
 
     assert caught.value.entity_kind == "vm"
     assert caught.value.entity_name == "vm-1"
+    assert "mise_install_before" in str(caught.value)
 
 
 def test_admin_effective_validation_does_not_echo_custom_validator_input() -> None:
@@ -418,7 +452,18 @@ def test_admin_effective_validation_does_not_echo_custom_validator_input() -> No
     with pytest.raises(ValidationError) as caught:
         resolve_admin({}, overlay=overlays.admin, instance_name="vm-1")
 
+    assert "mise_lockfile" in str(caught.value)
     assert marker not in str(caught.value)
+
+
+def test_admin_effective_validation_preserves_safe_mise_error_category() -> None:
+    overlays = parse_vm_instance_specs(None, '{"mise_packages":["missing-version"]}')
+    assert overlays is not None and overlays.admin is not None
+
+    with pytest.raises(ValidationError) as caught:
+        resolve_admin({}, overlay=overlays.admin, instance_name="vm-1")
+
+    assert "mise_packages" in str(caught.value)
 
 
 def test_admin_scalar_defaults_have_default_provenance() -> None:

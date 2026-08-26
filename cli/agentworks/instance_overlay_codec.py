@@ -10,6 +10,8 @@ from agentworks.declared_resource import DeclaredResource
 from agentworks.errors import ValidationError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from pydantic import BaseModel
 
     from agentworks.db.instance_state import JsonObject
@@ -64,6 +66,7 @@ def value_safe_model_validation_error(
     entity_kind: str,
     entity_name: str | None = None,
     classify_unsupported: bool = True,
+    custom_message_sanitizer: Callable[[str], str | None] | None = None,
 ) -> ValidationError:
     """Translate Pydantic failures without including operator-supplied values."""
     errors = error.errors(include_url=False, include_context=False, include_input=False)
@@ -71,9 +74,10 @@ def value_safe_model_validation_error(
     errors_by_parent: dict[tuple[object, ...], set[str]] = {}
     for item in errors:
         location = ".".join(str(part) for part in item["loc"] if part != "name") or "<root>"
-        message = (
-            "Value failed domain validation" if item["type"] in {"value_error", "assertion_error"} else item["msg"]
-        )
+        message = item["msg"]
+        if item["type"] in {"value_error", "assertion_error"}:
+            sanitized = None if custom_message_sanitizer is None else custom_message_sanitizer(message)
+            message = sanitized or "Value failed domain validation"
         details.append(f"{location}: {message}")
         errors_by_parent.setdefault(item["loc"][:-1], set()).add(item["type"])
     unsupported = classify_unsupported and (

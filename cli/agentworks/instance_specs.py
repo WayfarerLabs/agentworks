@@ -178,10 +178,17 @@ def decode_stored_vm_overlays(record: DesiredOverlayRecord) -> VMInstanceOverlay
     unknown = sorted(set(raw) - supported)
     if unknown:
         raise _unsupported_stored_overlay(record, f"unsupported fields: {', '.join(unknown)}")
+    raw_vm = raw.get("vm")
+    raw_admin = raw.get("admin")
+    component_unknown: list[str] = []
+    if isinstance(raw_vm, dict):
+        component_unknown.extend(f"vm.{field}" for field in _unknown_vm_component_fields(raw_vm))
+    if isinstance(raw_admin, dict):
+        component_unknown.extend(f"admin.{field}" for field in _unknown_admin_component_fields(raw_admin))
+    if component_unknown:
+        raise _unsupported_stored_overlay(record, f"unsupported fields: {', '.join(component_unknown)}")
     if set(raw) != supported:
         raise _malformed_stored_overlay(record, "payload must contain both vm and admin components")
-    raw_vm = raw["vm"]
-    raw_admin = raw["admin"]
     vm_overlay: InstanceOverlay[VMTemplate] | None = None
     admin: AdminConfig | None = None
     unsupported: list[ValidationError] = []
@@ -448,6 +455,12 @@ def _decode_legacy_stored_vm_overlay(record: DesiredOverlayRecord) -> VMInstance
 
 def _decode_stored_vm_component(raw: JsonObject) -> InstanceOverlay[VMTemplate] | None:
     """Strictly decode one stored VM component without text round-tripping."""
+    unknown = _unknown_vm_component_fields(raw)
+    if unknown:
+        raise UnsupportedOverlayFieldsError(
+            f"VM instance spec has unsupported fields: {', '.join(unknown)}",
+            entity_kind="vm",
+        )
     _validate_json_tree(raw)
     _refuse_framework_fields("VM", raw)
     from agentworks.vms import instance_overlay as vm_codec
@@ -457,6 +470,18 @@ def _decode_stored_vm_component(raw: JsonObject) -> InstanceOverlay[VMTemplate] 
     if not canonical:
         return None
     return InstanceOverlay("vm", declaration, VersionedPayload(_PAYLOAD_VERSION, canonical))
+
+
+def _unknown_vm_component_fields(raw: JsonObject) -> tuple[str, ...]:
+    from agentworks.vms.template import VMTemplate
+
+    return tuple(sorted(set(raw) - set(VMTemplate.model_fields) - OVERLAY_EXCLUDED_FIELDS))
+
+
+def _unknown_admin_component_fields(raw: JsonObject) -> tuple[str, ...]:
+    from agentworks.vms.admin import AdminConfig
+
+    return tuple(sorted(set(raw) - set(AdminConfig.model_fields) - OVERLAY_EXCLUDED_FIELDS))
 
 
 def _unsupported_stored_overlay(record: DesiredOverlayRecord, detail: str) -> UnsupportedStoredOverlayError:

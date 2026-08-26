@@ -121,8 +121,22 @@ def resolve_from_dict_with_provenance(
             entity_kind="vm",
             entity_name=instance_name,
             classify_unsupported=False,
+            custom_message_sanitizer=_safe_mise_validation_message,
         ) from None
     return LayeredResolution(effective, layered.provenance)
+
+
+def _safe_mise_validation_message(message: str) -> str | None:
+    """Keep known static mise reasons while removing source-ref input."""
+    reason = message.removeprefix("Value error, ")
+    if reason in {
+        "mise_packages entries must use non-empty name@version syntax",
+        "mise_install_before must be a positive duration such as '7d' or an ISO date",
+    }:
+        return reason
+    if reason.startswith("mise_lockfile is invalid:"):
+        return "mise_lockfile is invalid"
+    return None
 
 
 def resolve_live_template(
