@@ -76,6 +76,18 @@ def test_load_valid_config(config_dir: Path) -> None:
     assert load_config(config_dir).database.auto_backup_before_migration is True
 
 
+@pytest.mark.parametrize("field", ["ssh_host_prefix", "ssh_agent_host_prefix"])
+def test_ssh_host_prefix_rejects_a_trailing_newline(
+    config_dir: Path,
+    field: str,
+) -> None:
+    text = config_dir.read_text().replace("\n[defaults]", f'\n{field} = "aw-prefix\\n"\n\n[defaults]')
+    config_dir.write_text(text)
+
+    with pytest.raises(ConfigError):
+        load_config(config_dir)
+
+
 def test_clear_on_detach_defaults_to_auto_when_section_absent() -> None:
     from agentworks.config.loaders_core import _load_terminal
 

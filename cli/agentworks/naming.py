@@ -19,11 +19,11 @@ from __future__ import annotations
 
 import re
 
-NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$")
+NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9_-]*[a-z0-9])?\Z")
 # Linux username: alphanumeric, hyphens, underscores; 1-32 chars
-VM_USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+VM_USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}\Z")
 # SSH host prefix: alphanumeric, hyphens, underscores, dots
-SSH_HOST_PREFIX_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
+SSH_HOST_PREFIX_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*\Z")
 
 # Hard OS limits the name-derived identifiers must fit inside. util-linux
 # ``useradd`` / ``groupadd`` cap the login name at 32 characters (the historic
