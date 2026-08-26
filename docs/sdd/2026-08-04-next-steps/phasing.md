@@ -177,6 +177,16 @@ off whenever bandwidth allows, on its own merits and its own schedule.
   post-merge pass verified reproducible builds and agreeing version surfaces on the exact release
   head.
 
+- **0.16.0 (held; operator ruling, 2026-08-26):** the release PR does not cut until the
+  `2026-08-19-instance-model` child's instance-spec overlays (PR #670) and the harness integration
+  config knobs are both on `main`. Instance specs and the knobs that configure them ship together,
+  because a release carrying the spec mechanism without the settings it exists to carry teaches half
+  a feature. The mechanics matter here: the release PR accumulates whatever is on `main` when it
+  merges, so cutting early does not delay those entries to a later release, it silently ships 0.16.0
+  without them and pushes them to 0.17.0. Everything already accumulated (the two Azure SDK
+  migrations and their raised floors, the cloud-identifier and name-grammar validation work, the
+  terminal-restore fix, the guide and plugin documentation corrections) rides the same cut.
+
 - **Later:** remaining waves map to releases as they prove out; no need to pin numbers now.
 
 ## Open ordering decisions

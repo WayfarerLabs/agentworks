@@ -583,7 +583,16 @@ Planned children, seeded when their prerequisites land (see `phasing.md`):
   tester's factual corrections incorporated as a recipient's note per operator direction), carrying
   the `config_at(level)` shape sketch, the three preserved `base.py` constraints, the
   who-constructs-versus-who-calls-in caution, and the pre-design call-site discovery walk. The
-  capability-API reevaluation is chartered into this wave's seed, not scheduled sooner
+  capability-API reevaluation is chartered into this wave's seed, not scheduled sooner. **Operator
+  ruling, 2026-08-26:** harness integration config knobs are being built now, ahead of the wave
+  being chartered, and they are deliberately **not** an SDD effort: they are the obvious settings
+  that instance state makes possible, not a design question. They ship with the instance-spec work
+  in 0.16.0 (see `phasing.md`'s release map), which is why that cut is held. Two things follow for
+  whoever leads this wave. First, this work does not establish wave 4's scope: the setup pipeline,
+  per-scope init methods, attachments, applied state, and the vertical integration remain the wave's
+  own design problem, and knobs landing early is not a precedent for treating that as settled.
+  Second, the saga lead reviews these PRs without an SDD to check them against, so the standard is
+  the always-on rules and this ledger rather than a plan document
 - Secret-delivery containment (own child, **operator ruling 2026-08-25**):
   [issue #516](https://github.com/WayfarerLabs/agentworks/issues/516), resolved secret values
   reaching `SSHError` messages. Session env values are interpolated into the tmux command as

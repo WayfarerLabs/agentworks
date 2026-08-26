@@ -12,25 +12,31 @@
 - **0.15.0 released 2026-08-25** (PR #630 merged, tag `v0.15.0`), carrying the secret-preview
   contract rewrite, the doctor indeterminate split, and the 0.15 upgrade guide. Its changelog
   carries a hand-applied operator callout pointing at `docs/guides/upgrading-to-0.15.md`, which
-  release-please destroys whenever it rewrites the release branch. Verified 2026-08-24 across four
-  merges: the bot rewrites that branch only when a merge changes what it would generate, so `docs`,
-  `chore`, and `test` merges and anything outside the `cli/` component leave the callout intact, and
-  only a `feat`, `fix`, or breaking commit under `cli/` wipes it. The durable fix is to carry
-  operator-facing text in a commit footer, which is generated content, written as a single unbroken
-  paragraph because the trailer parser stops at a continuation line beginning `word:` and fragments
-  on blank lines (this truncated the 0.14.0 entry, issue #589). The published GitHub Release body is
-  editable and is not regenerated once the release exists, so it is the fallback for correcting
-  notes after a cut. **The cut proved one thing the four-merge study could not:** the hand-applied
-  callout reached `cli/CHANGELOG.md` on `main` but **not the published GitHub Release body**,
-  because release-please builds that body from its own generated notes rather than from the file.
-  Protecting the file protects the wrong artifact if what matters is the page operators land on,
-  which makes the commit-footer approach the fix for both surfaces rather than merely the more
-  durable one. Two entries are duplicated in the 0.15.0 notes because we merge with merge commits
-  whose GitHub-default body repeats the PR title while release-please parses merge bodies expecting
-  a squash workflow; there is no config switch for this (the schema's only `merge` key concerns
-  combining release PRs), so the remedy is either squash-merging, which would destroy the
-  always-green phased commits inside one PR that this repo deliberately uses, or correcting the
-  published Release body
+  release-please destroys whenever it rewrites the release branch. **Correction, 2026-08-26:** an
+  earlier version of this entry said the branch is rewritten only by a `feat`, `fix`, or breaking
+  commit under `cli/`, and that `docs` merges leave the callout intact. That was wrong, and the saga
+  lead retracted it publicly on PR #630. It rested on a false observation, that PR #647 did not
+  render; its two `docs(cli)` commits are in the published 0.15.0 Release body. An entry appears
+  only when it passes three independent filters, none dominant. **Window:** its committer date sorts
+  after the previous release commit in the default branch's date-ordered history, which is what
+  omitted twelve reachable commits from the 0.16.0 notes. **Component:** it touches `cli/`, which is
+  why `fix(website)` never appears despite being a rendering type. **Type:** `feat`, `fix`, and
+  `docs` render; `chore`, `test`, and `refactor` do not. So a `docs` merge under `cli/` does rewrite
+  the branch. The durable fix is to carry operator-facing text in a commit footer, which is
+  generated content, written as a single unbroken paragraph because the trailer parser stops at a
+  continuation line beginning `word:` and fragments on blank lines (this truncated the 0.14.0 entry,
+  issue #589). The published GitHub Release body is editable and is not regenerated once the release
+  exists, so it is the fallback for correcting notes after a cut. **The cut proved one thing the
+  four-merge study could not:** the hand-applied callout reached `cli/CHANGELOG.md` on `main` but
+  **not the published GitHub Release body**, because release-please builds that body from its own
+  generated notes rather than from the file. Protecting the file protects the wrong artifact if what
+  matters is the page operators land on, which makes the commit-footer approach the fix for both
+  surfaces rather than merely the more durable one. Two entries are duplicated in the 0.15.0 notes
+  because we merge with merge commits whose GitHub-default body repeats the PR title while
+  release-please parses merge bodies expecting a squash workflow; there is no config switch for this
+  (the schema's only `merge` key concerns combining release PRs), so the remedy is either
+  squash-merging, which would destroy the always-green phased commits inside one PR that this repo
+  deliberately uses, or correcting the published Release body
 
 This document records where the system actually is, verified by code reconnaissance rather than
 assumed from the perspectives. It is the ground truth the phasing rests on; when a wave lands,
