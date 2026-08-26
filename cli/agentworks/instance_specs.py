@@ -27,8 +27,10 @@ if TYPE_CHECKING:
     from agentworks.vms.template import VMTemplate
     from agentworks.workspaces.template import WorkspaceTemplate
 
-_PAYLOAD_VERSION = 1
-_VM_PAYLOAD_VERSION = 2
+_NON_VM_RECORD_PAYLOAD_VERSION = 1
+_LEGACY_VM_RECORD_PAYLOAD_VERSION = 1
+_VM_RECORD_PAYLOAD_VERSION = 2
+_VM_COMPONENT_PAYLOAD_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -94,7 +96,8 @@ def parse_instance_spec(instance_kind: InstanceKind, value: str) -> InstanceOver
     codec = _codec(instance_kind)
     declaration = codec.decode(raw)
     canonical = codec.encode(declaration)
-    return InstanceOverlay(instance_kind, declaration, VersionedPayload(_PAYLOAD_VERSION, canonical))
+    payload_version = _VM_COMPONENT_PAYLOAD_VERSION if instance_kind == "vm" else _NON_VM_RECORD_PAYLOAD_VERSION
+    return InstanceOverlay(instance_kind, declaration, VersionedPayload(payload_version, canonical))
 
 
 def parse_vm_instance_specs(
@@ -131,7 +134,7 @@ def decode_stored_overlay(record: DesiredOverlayRecord) -> InstanceOverlay[BaseM
     """Decode a persisted overlay at the state-database trust boundary."""
     if record.instance_kind == "vm":
         return decode_stored_vm_overlays(record)
-    if record.payload.payload_version != _PAYLOAD_VERSION:
+    if record.payload.payload_version != _NON_VM_RECORD_PAYLOAD_VERSION:
         raise UnsupportedStoredOverlayError(
             f"stored {record.instance_kind} {record.instance_name!r} instance spec uses "
             f"unsupported payload version {record.payload.payload_version}",
@@ -168,9 +171,9 @@ def decode_stored_vm_overlays(record: DesiredOverlayRecord) -> VMInstanceOverlay
     """Decode one persisted composite VM declaration at its trust boundary."""
     if record.instance_kind != "vm":
         raise TypeError("a VM desired declaration requires a VM record")
-    if record.payload.payload_version == _PAYLOAD_VERSION:
+    if record.payload.payload_version == _LEGACY_VM_RECORD_PAYLOAD_VERSION:
         return _decode_legacy_stored_vm_overlay(record)
-    if record.payload.payload_version != _VM_PAYLOAD_VERSION:
+    if record.payload.payload_version != _VM_RECORD_PAYLOAD_VERSION:
         raise _unsupported_stored_overlay(record, f"unsupported payload version {record.payload.payload_version}")
 
     raw = record.payload.value
@@ -220,6 +223,8 @@ def decode_stored_vm_overlays(record: DesiredOverlayRecord) -> VMInstanceOverlay
         except ValidationError as error:
             malformed.append(error)
 
+    # Schema evolution wins over apparent corruption: an unknown component
+    # schema may make a sibling shape valid, so this release cannot repair it.
     if unsupported:
         raise _unsupported_stored_overlay(record, f"unsupported fields: {unsupported[0]}") from unsupported[0]
     if malformed:
@@ -252,7 +257,10 @@ def persist_creation_overlay(
     instance_name: str,
     overlay: InstanceOverlay[BaseModel] | None,
 ) -> OverlayOutcome | None:
-    """Persist a nonempty creation layer inside the caller's owner transaction."""
+    """Persist a nonempty non-VM layer inside the caller's owner transaction."""
+    if instance_kind == "vm":
+        # A VM component payload is not a complete VM record payload.
+        raise TypeError("VM creation overlays require persist_vm_creation_overlays")
     if overlay is None or not overlay.payload.value:
         return None
     db.instance_state.put_desired_overlay(instance_kind, instance_name, overlay.payload)
@@ -439,7 +447,7 @@ def _vm_instance_overlays(
         "vm": {} if vm is None else vm.payload.value,
         "admin": {} if admin is None else vm_codec.encode_admin_overlay(admin),
     }
-    return VMInstanceOverlays(vm, admin, VersionedPayload(_VM_PAYLOAD_VERSION, value))
+    return VMInstanceOverlays(vm, admin, VersionedPayload(_VM_RECORD_PAYLOAD_VERSION, value))
 
 
 def _decode_legacy_stored_vm_overlay(record: DesiredOverlayRecord) -> VMInstanceOverlays:
@@ -469,7 +477,7 @@ def _decode_stored_vm_component(raw: JsonObject) -> InstanceOverlay[VMTemplate] 
     canonical = vm_codec.encode_overlay(declaration)
     if not canonical:
         return None
-    return InstanceOverlay("vm", declaration, VersionedPayload(_PAYLOAD_VERSION, canonical))
+    return InstanceOverlay("vm", declaration, VersionedPayload(_VM_COMPONENT_PAYLOAD_VERSION, canonical))
 
 
 def _unknown_vm_component_fields(raw: JsonObject) -> tuple[str, ...]:

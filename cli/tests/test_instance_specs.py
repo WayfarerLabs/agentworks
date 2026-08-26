@@ -20,6 +20,7 @@ from agentworks.instance_specs import (
     decode_stored_vm_overlays,
     parse_instance_spec,
     parse_vm_instance_specs,
+    persist_creation_overlay,
     persist_vm_creation_overlays,
     refuse_orphan_creation_state,
     replace_agent_overlay,
@@ -144,6 +145,19 @@ def test_empty_vm_and_admin_specs_do_not_create_desired_state(db: Database) -> N
 
     assert persist_vm_creation_overlays(db, "vm-1", overlays) is None
     assert db.instance_state.get_desired_overlay("vm", "vm-1") is None
+
+
+def test_generic_creation_writer_refuses_a_vm_component_payload(db: Database) -> None:
+    overlays = parse_vm_instance_specs('{"cpus":8}', '{"shell":"zsh"}')
+    assert overlays is not None and overlays.vm is not None
+    db.instance_state.put_desired_overlay("vm", "vm-1", overlays.payload)
+
+    with pytest.raises(TypeError):
+        persist_creation_overlay(db, "vm", "vm-1", overlays.vm)
+
+    stored = db.instance_state.get_desired_overlay("vm", "vm-1")
+    assert stored is not None
+    assert decode_stored_vm_overlays(stored).admin is not None
 
 
 def test_validation_error_does_not_echo_plaintext_environment_value() -> None:
@@ -408,6 +422,14 @@ def test_admin_final_layer_uses_scalar_map_and_unique_append_semantics() -> None
     assert resolution.value.env["SHARED"].value == "instance"
     assert resolution.provenance[("git_credentials", "shared")][-1].resource_kind == "vm"
     assert resolution.provenance[("env", "SHARED")][-1].resource_kind == "vm"
+
+
+def test_admin_fold_partitions_every_declaration_field() -> None:
+    from agentworks.vms import admin_templates
+
+    partition = set(admin_templates._SCALAR_FIELDS) | set(admin_templates._APPEND_FIELDS) | {"env"}
+
+    assert partition == set(AdminConfig.model_fields) - OVERLAY_EXCLUDED_FIELDS
 
 
 def test_admin_partial_validation_defers_until_after_template_fold(monkeypatch: pytest.MonkeyPatch) -> None:

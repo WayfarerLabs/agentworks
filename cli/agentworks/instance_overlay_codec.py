@@ -66,17 +66,19 @@ def value_safe_model_validation_error(
     entity_kind: str,
     entity_name: str | None = None,
     classify_unsupported: bool = True,
-    custom_message_sanitizer: Callable[[str], str | None] | None = None,
+    custom_error_sanitizer: Callable[[object], str | None] | None = None,
 ) -> ValidationError:
     """Translate Pydantic failures without including operator-supplied values."""
-    errors = error.errors(include_url=False, include_context=False, include_input=False)
+    errors = error.errors(include_url=False, include_context=True, include_input=False)
     details = []
     errors_by_parent: dict[tuple[object, ...], set[str]] = {}
     for item in errors:
         location = ".".join(str(part) for part in item["loc"] if part != "name") or "<root>"
         message = item["msg"]
         if item["type"] in {"value_error", "assertion_error"}:
-            sanitized = None if custom_message_sanitizer is None else custom_message_sanitizer(message)
+            context = item.get("ctx")
+            cause = context.get("error") if isinstance(context, dict) else None
+            sanitized = None if custom_error_sanitizer is None else custom_error_sanitizer(cause)
             message = sanitized or "Value failed domain validation"
         details.append(f"{location}: {message}")
         errors_by_parent.setdefault(item["loc"][:-1], set()).add(item["type"])

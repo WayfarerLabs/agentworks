@@ -149,7 +149,7 @@ spec. An empty JSON object or the exact empty CLI value clears an agent's prior 
 
 The overlay is applied after the template chain and is correspondingly visible in the declarative
 model. It participates in the shared layer stack introduced by R4, never a bespoke instance-only
-merge. The shared runner owns ordering and provenance while the four domain reducers retain their
+merge. The shared runner owns ordering and provenance while the five domain reducers retain their
 field semantics; this removes the duplicated fold without pretending the field policies are generic.
 The resolved result is what R3 records on apply and R5 shows on demand. Validation matches template
 validation: an overlay that would produce an invalid effective spec fails at declaration time with

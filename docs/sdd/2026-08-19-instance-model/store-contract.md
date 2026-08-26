@@ -74,7 +74,9 @@ payload changes no physical column, record key, repository method, or transactio
 The corrected composite VM payload uses payload version 2. Readers continue to accept the earlier
 version 1 flat VM layer as the VM declaration slot with no admin layer. This is domain-codec
 compatibility, not a schema migration or eager database rewrite; existing rows and backup archives
-remain readable in place.
+remain readable in place. The compatibility is intentionally one-way: older releases refuse version
+2 rows, even when one or both components are empty. New VM writes always use version 2 so every
+current record has one explicit two-component shape and one complete-component invariant.
 
 There is deliberately no polymorphic foreign key. Typed instance-deletion paths remove their owned
 records in the same transaction that removes the owner. This avoids a universal instance parent

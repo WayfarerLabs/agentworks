@@ -130,23 +130,17 @@ def test_create_graph_derives_from_declared_resources(make_config, db: Database)
     assert "api-key" not in secret_union(nodes)
 
 
-def test_create_logger_precedes_dispatch_has_all_redactions_and_closes_once(
+def test_create_admin_spec_credential_joins_graph_and_logger_redactions(
     make_config,
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: object,
 ) -> None:
-    """The manager constructs one fully redacted log before platform create,
-    passes it as bootstrap progress, reuses it downstream, and closes it once."""
+    """An admin final layer contributes to the create graph and its log."""
     from agentworks.capabilities.vm_platform import ProvisionRequest
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
-    config = make_config(
-        manifests=[
-            GIT_CRED_GH,
-            ManifestDoc("admin-template", "default", {"git_credentials": ["gh"]}),
-        ]
-    )
+    config = make_config(manifests=[GIT_CRED_GH])
     events: list[str] = []
     captured_redactions: list[tuple[str, ...]] = []
     loggers: list[object] = []
@@ -184,10 +178,20 @@ def test_create_logger_precedes_dispatch_has_all_redactions_and_closes_once(
     def _phase_b(*args: object, **kwargs: object) -> None:
         events.append("phase-b")
         assert args[10] is loggers[0]
+        providers = args[7]
+        assert isinstance(providers, dict)
+        assert list(providers) == ["gh"]
+        assert kwargs["git_tokens"] == {"gh": "ghtok"}
 
     monkeypatch.setattr(vm_manager, "run_initialization", _phase_b)
 
-    vm_manager.create_vm(db, config, name="logvm", interaction=TtyInteractionPolicy.REFUSE)
+    vm_manager.create_vm(
+        db,
+        config,
+        name="logvm",
+        admin_spec='{"git_credentials":["gh"]}',
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
 
     assert captured_redactions == [("tskey-test", "ghtok")]
     assert events == ["logger", "create", "phase-a", "phase-b", "close"]

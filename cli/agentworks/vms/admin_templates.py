@@ -31,6 +31,14 @@ _SCALAR_FIELDS = (
     "git_force_safe_directory",
 )
 
+_APPEND_FIELDS = (
+    "git_credentials",
+    "user_install_commands",
+    "mise_packages",
+    "claude_marketplaces",
+    "claude_plugins",
+)
+
 
 def resolve_template_with_provenance(
     registry: Registry,
@@ -121,21 +129,23 @@ def resolve_from_dict_with_provenance(
             entity_kind="vm",
             entity_name=instance_name,
             classify_unsupported=False,
-            custom_message_sanitizer=_safe_mise_validation_message,
+            custom_error_sanitizer=_safe_mise_validation_message,
         ) from None
     return LayeredResolution(effective, layered.provenance)
 
 
-def _safe_mise_validation_message(message: str) -> str | None:
-    """Keep known static mise reasons while removing source-ref input."""
-    reason = message.removeprefix("Value error, ")
-    if reason in {
-        "mise_packages entries must use non-empty name@version syntax",
-        "mise_install_before must be a positive duration such as '7d' or an ISO date",
-    }:
-        return reason
-    if reason.startswith("mise_lockfile is invalid:"):
+def _safe_mise_validation_message(error: object) -> str | None:
+    """Map stable mise categories to value-safe operator reasons."""
+    from agentworks.config.validation import MiseSettingsError, MiseSettingsErrorKind
+
+    if not isinstance(error, MiseSettingsError):
+        return None
+    if error.kind is MiseSettingsErrorKind.PACKAGE_SYNTAX:
+        return "mise_packages entries must use non-empty name@version syntax"
+    if error.kind is MiseSettingsErrorKind.LOCKFILE:
         return "mise_lockfile is invalid"
+    if error.kind is MiseSettingsErrorKind.INSTALL_BEFORE:
+        return "mise_install_before must be a positive duration such as '7d' or an ISO date"
     return None
 
 
@@ -183,13 +193,7 @@ def _merge_template(
             updates[field] = getattr(layer, field)
             touched.append(LayerContribution.replacement(field))
 
-    for field in (
-        "git_credentials",
-        "user_install_commands",
-        "mise_packages",
-        "claude_marketplaces",
-        "claude_plugins",
-    ):
+    for field in _APPEND_FIELDS:
         if field in supplied:
             values = getattr(layer, field)
             updates[field] = _append_dedupe(getattr(target, field), values)
