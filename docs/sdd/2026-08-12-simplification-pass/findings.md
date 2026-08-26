@@ -433,8 +433,8 @@ deliberately narrow `cli-conventions.md`.
   across PR #521 (the rule copies) and PR #538 (the two testing-skill copies, which the wave 2
   skills item owned).
 - **PR4** `ask-questions`, `push-back`, `permission-to-fail` (2,090 B always-on) are fully restated
-  by `development-principles` sections 10 and 13. Unfinished migration; delete and fold the concrete
-  phrasings in.
+  by `development-principles`, **Ask questions; push back; then commit** and **Never silently
+  operate beyond your knowledge**. Unfinished migration; delete and fold the concrete phrasings in.
 - **PR5** Five always-on rules encode one convention (keep collateral in sync) with five objects;
   collapse to one rule with a five-row table, moving the completions mechanism explanation to a
   module README.
