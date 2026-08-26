@@ -445,6 +445,12 @@ def _vm_instance_overlays(
 def _decode_legacy_stored_vm_overlay(record: DesiredOverlayRecord) -> VMInstanceOverlays:
     """Read the payload-v1 flat VM layer written before paired admin layers."""
     try:
+        unknown = _unknown_vm_component_fields(record.payload.value)
+        if unknown:
+            raise UnsupportedOverlayFieldsError(
+                f"VM instance spec has unsupported fields: {', '.join(unknown)}",
+                entity_kind="vm",
+            )
         vm = _decode_stored_vm_component(record.payload.value)
     except UnsupportedOverlayFieldsError as error:
         raise _unsupported_stored_overlay(record, f"unsupported fields: {error}") from error
@@ -455,12 +461,6 @@ def _decode_legacy_stored_vm_overlay(record: DesiredOverlayRecord) -> VMInstance
 
 def _decode_stored_vm_component(raw: JsonObject) -> InstanceOverlay[VMTemplate] | None:
     """Strictly decode one stored VM component without text round-tripping."""
-    unknown = _unknown_vm_component_fields(raw)
-    if unknown:
-        raise UnsupportedOverlayFieldsError(
-            f"VM instance spec has unsupported fields: {', '.join(unknown)}",
-            entity_kind="vm",
-        )
     _validate_json_tree(raw)
     _refuse_framework_fields("VM", raw)
     from agentworks.vms import instance_overlay as vm_codec
