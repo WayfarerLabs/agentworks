@@ -15,6 +15,7 @@ caught here at registration, before any capability row is ever built.
 
 from __future__ import annotations
 
+import re
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -36,6 +37,7 @@ if TYPE_CHECKING:
 # name a collision's occupant as a core built-in vs another plugin, without
 # the descriptor self-declaring its origin.
 _PLUGIN_SEATED: dict[tuple[str, str], str] = {}
+_PLUGIN_NAME_RE = re.compile(r"[a-z](?:[a-z0-9-]*[a-z0-9])?")
 
 
 def register_plugin(plugin: Plugin) -> None:
@@ -74,8 +76,11 @@ def _validate_descriptor(plugin: Plugin) -> list[tuple[CapabilityAdapter, str, t
     and their messages name the specific mistake an author is most likely to
     have made.
     """
-    if not plugin.name or "/" in plugin.name:
-        raise PluginError(f"system plugin name {plugin.name!r} must be non-empty and '/'-free")
+    if not isinstance(plugin.name, str) or _PLUGIN_NAME_RE.fullmatch(plugin.name) is None:
+        raise PluginError(
+            f"system plugin name {plugin.name!r} must use lowercase ASCII letters, digits, and "
+            "hyphens, must start with a letter, and must end with a letter or digit"
+        )
 
     adapters = capability_adapters()
     planned: list[tuple[CapabilityAdapter, str, type]] = []
