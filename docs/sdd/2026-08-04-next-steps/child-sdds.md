@@ -594,10 +594,8 @@ Planned children, seeded when their prerequisites land (see `phasing.md`):
   which it never covered. Its own child rather than an existing wave's, because the decision spans
   secret delivery, SSH command errors, and command logging, and because no current wave owns that
   span: `phasing.md`'s wave 4 is the setup pipeline and one vertical integration, and it places
-  session runtime and tmux on the observability track rather than its own. The saga lead had
-  recommended wave 4 on the unverified claim that it owned session and tmux delivery; the charter
-  says otherwise, and the correction is what produced this ruling. The fix touches the shared SSH
-  transport contract, so it was filed rather than fixed in passing under Scope discipline
+  session runtime and tmux on the observability track rather than its own. The fix touches the
+  shared SSH transport contract, so it was filed rather than fixed in passing under Scope discipline
 - Wave 5: session observability phase 1
 - Wave 6: agentic artifacts and distillation
 - Wave 7: structured control
