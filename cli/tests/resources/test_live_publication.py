@@ -47,6 +47,7 @@ def _registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *manifests: Manif
 
 
 def _direct_live_dependents(registry: Registry, kind: str, name: str) -> set[tuple[str, str]]:
+    # Depth one preserves directness; LIVE_USAGE makes live-row misclassification observable.
     result = show_graph(
         registry,
         ResourceIdentity(kind, name),
