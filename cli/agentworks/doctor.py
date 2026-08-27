@@ -676,7 +676,7 @@ def _check_tailscale() -> HealthGroup:
 def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     """Return config and registry facts for the complete doctor report."""
     from agentworks.config import CONFIG_PATH, ConfigError
-    from agentworks.errors import ValidationError
+    from agentworks.errors import StateError, ValidationError
 
     g = HealthGroup("Configuration")
     config = None
@@ -773,7 +773,7 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
 
     try:
         registry = build_registry(config, manifests=manifests)
-    except ConfigError as e:
+    except (ConfigError, StateError) as e:
         g.fail(
             "Resource registry",
             str(e),

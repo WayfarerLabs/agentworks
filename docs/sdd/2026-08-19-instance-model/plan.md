@@ -2,7 +2,7 @@
 
 <!-- cspell:ignore sdds -->
 
-- Status: R2 merged; R4 implementation complete; R3 and R5 pending
+- Status: R2 merged; R4 correction complete pending merge; R3 and R5 pending
 - Date: 2026-08-23
 - Last revised: 2026-08-26
 - Requirements: [frd.md](./frd.md)
@@ -163,6 +163,42 @@ the paired option surface, strict/value-safe input refusal, legacy reads, compos
 classification, admin-only consumption, and unchanged stored rows using a passphrase-protected
 scratch key. No authorized live-provider inventory was available, so provisioning, remote reinit,
 and SSH transport remain explicit live-test gaps.
+
+### R4 correction: live and pending resource publication
+
+- [x] Add database-backed VMs, workspaces, agents, sessions, and consoles as typed live-resource
+      publishers in the ordinary Registry collection phase before its single finalization pass; keep
+      the Registry publisher-agnostic and retain one read snapshot for the publication.
+- [x] Publish each live resource's effective desired references through the existing per-domain
+      resolution and extraction contracts, including paired VM/admin state, without raw JSON
+      scanning, provider observation, or plaintext value exposure.
+- [x] Replace operation-local missing-target acceptance with prospective pending-resource
+      publication for direct and compound creation, so normal finalization validates and
+      auto-declares the candidate graph before mutation and a failed command leaves no publication.
+- [x] Route secret list, describe, verify, doctor, and graph/used-by projections through the one
+      finalized graph, removing transient fallbacks or post-finalize DB projections where the
+      unified graph now owns the answer.
+- [x] Prove explicit-over-auto precedence, multiple live owners, last-owner garbage collection,
+      deletion and overlay clearing, missing or unreadable desired state, paired VM atomicity,
+      snapshot consistency, failed-create non-publication, and the agent-env secret regression.
+- [x] Update permanent architecture and operator collateral, run the full code gates, repeat the
+      project/fresh-eyes/complexity review loop, and perform isolated shipped-CLI validation of
+      persisted and prospective publications.
+
+Definition of done: database-backed and pending resources enter through the same publish/collect
+boundary as every other resource, one finalization pass owns reference resolution and
+auto-declaration, and every inspection surface observes the same resulting graph.
+
+Completed on 2026-08-27. The database and pending candidates are peer Registry publishers before one
+finalization pass; durable absence recovery omits unavailable edges without inventing defaults, and
+JSON v1 `used_by` remains compatible while ordinary graph queries expose direct live relationships.
+The final project, fresh-eyes, and complexity reviews reported no findings, with Muntz at `SHIP`.
+The exact head passed 7,787 Python tests with one skip plus all repository and website gates. An
+isolated shipped-CLI pass proved durable overlay-only secret discovery, direct graph topology,
+session-oriented usage, clearing, last-owner removal, absent and unreadable completion fallback, and
+a pending disabled-resource refusal with no durable publication or provider work. No authorized
+provider inventory was available, so successful provider-backed creation remains covered by unit and
+review evidence rather than a live backend run.
 
 ## Phase 4: R3 applied instance state and SSH proving slice
 

@@ -155,7 +155,7 @@ def _rehome_vm(
         )
 
     _guard_vm_status(vm)
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
     from agentworks.workspaces.templates import resolve_live_tmuxinator
 
     tmuxinator_enabled = resolve_live_tmuxinator(db, registry, ws_name, ws.template)

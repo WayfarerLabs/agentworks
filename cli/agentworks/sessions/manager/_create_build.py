@@ -86,7 +86,7 @@ def _build_session_graph(
         instance_name=name,
     )
     if session_overlay is not None:
-        from agentworks.instance_specs import validate_effective_instance_references
+        from agentworks.instance_specs import ensure_effective_references_enabled
         from agentworks.sessions.template import effective_references as session_effective_references
         from agentworks.sessions.template import validate_effective_harness
         from agentworks.sessions.templates import resolve_template_with_provenance as resolve_session_with_provenance
@@ -98,7 +98,7 @@ def _build_session_graph(
             instance_name=name,
         )
         template = layered_session.value
-        validate_effective_instance_references(
+        ensure_effective_references_enabled(
             registry,
             session_effective_references(template, ("session", name), layered_session.provenance),
         )
@@ -160,7 +160,7 @@ def _build_session_graph(
             instance_name=workspace_name,
         )
         if workspace_overlay is not None:
-            from agentworks.instance_specs import validate_effective_instance_references
+            from agentworks.instance_specs import ensure_effective_references_enabled
             from agentworks.workspaces.template import effective_references as workspace_effective_references
             from agentworks.workspaces.templates import (
                 resolve_template_with_provenance as resolve_workspace_with_provenance,
@@ -173,7 +173,7 @@ def _build_session_graph(
                 instance_name=workspace_name,
             )
             workspace_tmpl = layered_workspace.value
-            validate_effective_instance_references(
+            ensure_effective_references_enabled(
                 registry,
                 workspace_effective_references(
                     workspace_tmpl,
@@ -228,7 +228,7 @@ def _build_session_graph(
             from agentworks.agents.templates import (
                 resolve_template_with_provenance as resolve_agent_with_provenance,
             )
-            from agentworks.instance_specs import validate_effective_instance_references
+            from agentworks.instance_specs import ensure_effective_references_enabled
 
             layered_agent = resolve_agent_with_provenance(
                 registry,
@@ -237,7 +237,7 @@ def _build_session_graph(
                 instance_name=agent_name,
             )
             agent_tmpl = layered_agent.value
-            validate_effective_instance_references(
+            ensure_effective_references_enabled(
                 registry,
                 agent_effective_references(agent_tmpl, ("agent", agent_name), layered_agent.provenance),
             )

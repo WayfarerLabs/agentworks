@@ -78,7 +78,7 @@ def shell_agent(
     # the two consumers can't drift.
     from agentworks.bootstrap import load_request_registry
 
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
     scopes = _mgr._resolve_agent_direct_env_scopes(db, registry, vm, agent, ws=ws)
 
     with gated_vm_boundary(
@@ -187,7 +187,7 @@ def exec_agent(
     # and compose_env below so the two consumers can't drift.
     from agentworks.bootstrap import load_request_registry
 
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
     scopes = _mgr._resolve_agent_direct_env_scopes(db, registry, vm, agent, ws=ws)
 
     with gated_vm_boundary(

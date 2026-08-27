@@ -19,7 +19,7 @@ from agentworks.db import Database
 from agentworks.declared_resource import FRAMEWORK_FIELDS, METADATA_FIELDS, DeclaredResource
 from agentworks.machine_output import JsonObject
 from agentworks.origin import Origin
-from agentworks.resources import KIND_REGISTRY, DatabaseLiveSource, Registry
+from agentworks.resources import KIND_REGISTRY, Registry
 from agentworks.resources.access import ResourceIdentity
 from agentworks.resources.graph import DisabledMark, Readiness
 from agentworks.resources.inspect import list_resources, resource_listing_data
@@ -94,11 +94,11 @@ def _request_context(tmp_path: Path) -> tuple[Config, Registry]:
 
 
 def _show(config: Config, registry: Registry, identity: ResourceIdentity, tmp_path: Path):
+    del tmp_path
     return show_resource(
         config,
         registry,
         identity,
-        DatabaseLiveSource(tmp_path / "absent.db"),
         tty_access=TtyInteractionAccess.UNAVAILABLE,
     )
 
@@ -214,7 +214,7 @@ def test_show_summary_is_the_exact_matching_list_row(tmp_path: Path) -> None:
     config, registry = _request_context(tmp_path)
     database_path = tmp_path / "state.db"
     database = Database(database_path)
-    listing = list_resources(registry, database, include_disabled=True)
+    listing = list_resources(registry, include_disabled=True)
     database.close()
     identity = ResourceIdentity("secret", "npm-token")
 
@@ -222,7 +222,6 @@ def test_show_summary_is_the_exact_matching_list_row(tmp_path: Path) -> None:
         config,
         registry,
         identity,
-        DatabaseLiveSource(database_path),
         tty_access=TtyInteractionAccess.UNAVAILABLE,
     )
     list_row = next(row for row in listing.rows if (row.kind, row.name) == (identity.kind, identity.name))
@@ -237,7 +236,7 @@ def test_show_summary_is_the_exact_matching_list_row(tmp_path: Path) -> None:
     assert list(show_data.items())[:8] == list(list_row_data.items())
     assert shown.summary.reference_count == len(shown.relationships.dependents)
     assert shown.used_by == ()
-    assert shown.summary.used_by_count == len(shown.used_by)
+    assert shown.summary.used_by_count == 0
 
 
 def test_service_does_not_resolve_secrets_or_create_a_vm_platform(
@@ -276,7 +275,6 @@ def test_enabled_rows_retain_stored_readiness_facts(
         cast("Config", object()),
         registry,
         ResourceIdentity("show-test", verdict),
-        DatabaseLiveSource(Path("/missing-show-test.db")),
         tty_access=TtyInteractionAccess.UNAVAILABLE,
     )
 
@@ -297,7 +295,6 @@ def test_disabled_row_projects_null_readiness(monkeypatch: pytest.MonkeyPatch) -
         cast("Config", object()),
         registry,
         ResourceIdentity("show-test", "blocked"),
-        DatabaseLiveSource(Path("/missing-show-test.db")),
         tty_access=TtyInteractionAccess.UNAVAILABLE,
     )
     data = resource_show_data(shown)["resource"]
@@ -359,7 +356,6 @@ def test_category_row_mismatch_fails_instead_of_projecting_partial_data(
             cast("Config", object()),
             registry,
             ResourceIdentity("show-test", "blocked"),
-            DatabaseLiveSource(Path("/missing-show-test.db")),
             tty_access=TtyInteractionAccess.UNAVAILABLE,
         )
 

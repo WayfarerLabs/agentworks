@@ -162,7 +162,7 @@ def _live_vm_boundary(
     from agentworks.vms.nodes import live_vm_node
 
     if registry is None:
-        registry = load_request_registry(config)
+        registry = load_request_registry(config, live_database=db)
     resolver = Resolver(config, registry, interaction=interaction)
     vm_node = live_vm_node(db, config, registry, vm)
     nodes = walk(vm_node)

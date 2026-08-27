@@ -1,7 +1,7 @@
 """Closed facts and renderers for ``agw resource show``.
 
 The service projects one finalized registry row with its direct graph facts,
-lazy read-only live usage, and attributable health checks. It does not traverse
+finalized live usage, and attributable health checks. It does not traverse
 beyond those direct edges, resolve secret values, or dispatch resource
 mutations. Declarable rows additionally expose the normalized manifest envelope
 represented by their loaded Pydantic model.
@@ -23,7 +23,6 @@ from agentworks.manifests.envelope import API_VERSION
 from agentworks.resources.access import ResourceIdentity, resolve_resource
 from agentworks.resources.graph import Enablement, Readiness
 from agentworks.resources.graph_query import (
-    DatabaseLiveSource,
     FocusedGraphFacts,
     GraphEdge,
     focused_graph_facts,
@@ -111,7 +110,6 @@ def show_resource(
     config: Config,
     registry: Registry,
     identity: ResourceIdentity,
-    live_source: DatabaseLiveSource,
     *,
     tty_access: TtyInteractionAccess,
 ) -> ResourceShow:
@@ -141,7 +139,7 @@ def show_resource(
     if enablement is Enablement.enabled:
         readiness = registry.graph.readiness_of(identity.kind, identity.name)
 
-    focused: FocusedGraphFacts = focused_graph_facts(registry, identity, live_source)
+    focused: FocusedGraphFacts = focused_graph_facts(registry, identity)
     summary = summarize_resource(registry, identity, focused.used_by)
     diagnostics = checks_for_resource(config, registry, identity, tty_access=tty_access)
 

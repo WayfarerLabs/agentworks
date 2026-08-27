@@ -102,7 +102,10 @@ def show_env(
     # template inheritance is already merged into the resolved templates).
     from agentworks.bootstrap import load_request_registry
 
-    registry = load_request_registry(config)
+    # This display owns an explicit base-safe overlay fallback below. It does
+    # not claim a complete live graph and must remain usable when a stored
+    # desired layer was written by a newer release.
+    registry = load_request_registry(config, include_live_resources=False)
     vm_env, workspace_env, admin_env, agent_env, session_env = _resolve_scope_envs(db, registry, ctx)
 
     # Build the resource context for identity vars.

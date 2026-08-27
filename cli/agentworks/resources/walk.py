@@ -3,10 +3,11 @@
 ``collect_secrets_for(registry, root)`` returns the ``SecretDecl`` Resources
 ``root`` needs at run time, following the retained dependency graph's
 runtime-need edges. It answers "which secrets does this subgraph call for",
-which is what the ``secret`` kind's ``instances`` projection asks per session
-to fill ``agw secret describe``'s "Used by (per current config)" section, and
-it covers the system-level secrets (Tailscale, git-credential tokens) an
-env-block walk does not reach.
+which is what runtime composition needs. Database-backed resource publication
+uses each domain's typed effective-reference extractor instead; the finalized
+graph then owns direct live-use facts for inspection. This walk still covers
+the system-level secrets (Tailscale, git-credential tokens) an env-block walk
+does not reach.
 
 The orchestrator's own union is a different computation and deliberately so:
 it comes off a plan's nodes (``orchestration.secrets.secret_union``), which

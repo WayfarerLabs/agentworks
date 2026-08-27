@@ -352,7 +352,7 @@ def test_admin_spec_unknown_reference_errors_before_lifecycle(
     monkeypatch: pytest.MonkeyPatch,
     captured_output: object,
 ) -> None:
-    monkeypatch.setattr("agentworks.vms.sites.select_site", lambda *a, **k: pytest.fail("lifecycle reached"))
+    monkeypatch.setattr(vm_manager, "verify_tailscale_available", lambda: pytest.fail("lifecycle reached"))
 
     with pytest.raises(ConfigError):
         vm_manager.create_vm(
@@ -372,7 +372,7 @@ def test_admin_spec_disabled_reference_errors_before_lifecycle(
     monkeypatch: pytest.MonkeyPatch,
     captured_output: object,
 ) -> None:
-    monkeypatch.setattr("agentworks.vms.sites.select_site", lambda *a, **k: pytest.fail("lifecycle reached"))
+    monkeypatch.setattr(vm_manager, "verify_tailscale_available", lambda: pytest.fail("lifecycle reached"))
 
     with pytest.raises(StateError) as caught:
         vm_manager.create_vm(

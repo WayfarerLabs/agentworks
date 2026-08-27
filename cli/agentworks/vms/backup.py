@@ -65,7 +65,7 @@ def backup_vm(
         )
     if not _host_supports_private_backup_permissions() and db.instance_state.has_vm_owner_tree_desired_overlay(vm_name):
         _raise_windows_overlay_backup_error(vm_name)
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
 
     with gated_vm_boundary(db, config, registry, vm, interaction=interaction):
         # Create backup directory first so the log goes inside it

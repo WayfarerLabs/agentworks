@@ -84,7 +84,7 @@ def repair_workspace(
 
     # build_registry runs first so framework miss-policies fire before
     # any DB / VM business logic.
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
 
     ws = db.get_workspace(name)
     if ws is None:

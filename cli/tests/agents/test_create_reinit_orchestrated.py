@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from agentworks import db as db_module
 from agentworks.agents import grants as agent_grants
 from agentworks.agents import initializer as agent_initializer
 from agentworks.agents import manager as agent_manager
@@ -71,6 +72,26 @@ def mutation(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 def _seed_vm(db: Database) -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
+
+
+def test_create_with_missing_vm_preserves_domain_error_and_state(
+    db: Database,
+    make_config,
+) -> None:
+    with pytest.raises(NotFoundError) as caught:
+        agent_manager.create_agent(
+            db,
+            make_config(),
+            name="dev",
+            vm_name="missing",
+            spec='{"env":{"TOKEN":{"secret":"overlay-token"}}}',
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert caught.value.entity_kind == "vm"
+    assert caught.value.entity_name == "missing"
+    assert db.get_agent("dev") is None
+    assert db.instance_state.get_desired_overlay("agent", "dev") is None
 
 
 def _reachable(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:
@@ -515,6 +536,7 @@ def test_reinit_retains_replaces_and_clears_the_stored_overlay(
 def test_reinit_empty_spec_clears_an_unsupported_stored_overlay_without_exposing_it(
     db: Database,
     make_config,  # noqa: ANN001
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     mutation: dict[str, Any],
     captured_output,  # noqa: ANN001
@@ -524,6 +546,7 @@ def test_reinit_empty_spec_clears_an_unsupported_stored_overlay_without_exposing
     _seed_vm(db)
     db.insert_agent("dev", "box", "agt-dev", template="default")
     db.instance_state.put_desired_overlay("agent", "dev", stored_payload)
+    monkeypatch.setattr(db_module, "DB_PATH", tmp_path / "test.db")
     _reachable(monkeypatch, True)
 
     agent_manager.reinit_agent(
@@ -751,6 +774,51 @@ def test_create_agent_on_disabled_plugin_recipe_refuses_before_any_work(
         )
 
     assert db.get_agent("dev") is None  # refused before any DB write
+
+
+def test_create_agent_overlay_only_disabled_reference_refuses_before_mutation(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config()
+    _seed_vm(db)
+    _install_disabled_fixture(monkeypatch)
+
+    with pytest.raises(StateError, match="enable plugin `decl-plugin`"):
+        agent_manager.create_agent(
+            db,
+            config,
+            name="dev",
+            vm_name="box",
+            spec='{"user_install_commands":["fixture-user-cmd"]}',
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert db.get_agent("dev") is None
+    assert db.instance_state.get_desired_overlay("agent", "dev") is None
+
+
+def test_reinit_agent_overlay_only_disabled_reference_refuses_before_persist(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config()
+    _seed_vm(db)
+    db.insert_agent("dev", "box", "dev")
+    _install_disabled_fixture(monkeypatch)
+
+    with pytest.raises(StateError, match="enable plugin `decl-plugin`"):
+        agent_manager.reinit_agent(
+            db,
+            config,
+            name="dev",
+            spec='{"user_install_commands":["fixture-user-cmd"]}',
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert db.instance_state.get_desired_overlay("agent", "dev") is None
 
 
 def test_reinit_update_template_to_disabled_recipe_refuses_before_persist(

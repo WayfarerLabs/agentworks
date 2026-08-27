@@ -27,7 +27,6 @@ from agentworks.resources.graph import (
     Readiness,
 )
 from agentworks.resources.graph_query import (
-    DatabaseLiveSource,
     FocusedGraphFacts,
     GraphDirection,
     GraphResult,
@@ -45,6 +44,7 @@ from agentworks.resources.kind import (
     NoUnreferencedDefaultError,
     ResourceKind,
 )
+from agentworks.resources.live import LiveResource
 from agentworks.resources.reference import (
     ReferenceEntry,
     ResourceReference,
@@ -57,12 +57,12 @@ from agentworks.resources.walk import collect_secrets_for
 __all__ = [
     "ALWAYS_MATERIALIZE_SOURCE",
     "DependencyGraph",
-    "DatabaseLiveSource",
     "FocusedGraphFacts",
     "Enablement",
     "GraphDirection",
     "GraphResult",
     "KIND_REGISTRY",
+    "LiveResource",
     "Readiness",
     "InstanceRef",
     "NoUnreferencedDefaultError",

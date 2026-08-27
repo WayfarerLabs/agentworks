@@ -160,14 +160,16 @@ def test_human_renderer_neutralizes_scalar_lines_and_preserves_yaml_values(
 
 def test_cli_wires_warning_loaders_and_human_renderer(monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks import bootstrap, config
+    from agentworks.cli.commands import resource as resource_command
     from agentworks.resources import show
-    from agentworks.resources.graph_query import DatabaseLiveSource
 
     loaded_config = object()
     registry = object()
+    database = object()
     expected = _shown()
     calls: list[tuple[object, ...]] = []
     monkeypatch.setattr(config, "load_config", lambda **kwargs: calls.append(("config", kwargs)) or loaded_config)
+    monkeypatch.setattr(resource_command, "get_db", lambda: calls.append(("db",)) or database)
     monkeypatch.setattr(
         bootstrap,
         "load_request_registry",
@@ -184,7 +186,8 @@ def test_cli_wires_warning_loaders_and_human_renderer(monkeypatch: pytest.Monkey
     assert result.exit_code == 0, result.output
     assert [call for call in calls if call[0] != "show"] == [
         ("config", {"warn_issues": True, "workload_gated_issues_fatal": False}),
-        ("registry", {"warn": True}),
+        ("db",),
+        ("registry", {"warn": True, "live_database": database}),
         ("render", expected),
     ]
     show_call = next(call for call in calls if call[0] == "show")
@@ -193,18 +196,20 @@ def test_cli_wires_warning_loaders_and_human_renderer(monkeypatch: pytest.Monkey
     identity = show_call[3]
     assert isinstance(identity, ResourceIdentity)
     assert (identity.kind, identity.name) == ("secret", "npm-token")
-    assert isinstance(show_call[4], DatabaseLiveSource)
-    show_kwargs = cast("dict[str, object]", show_call[5])
+    show_kwargs = cast("dict[str, object]", show_call[4])
     assert show_kwargs == {"tty_access": TtyInteractionAccess.UNAVAILABLE}
 
 
 def test_cli_json_uses_resource_show_identity_and_closed_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks import bootstrap, config
+    from agentworks.cli.commands import resource as resource_command
     from agentworks.resources import show
 
     expected = _shown(declaration=None)
+    database = object()
     calls: list[tuple[str, object]] = []
     monkeypatch.setattr(config, "load_config", lambda **kwargs: calls.append(("config", kwargs)) or object())
+    monkeypatch.setattr(resource_command, "get_db", lambda: calls.append(("db", database)) or database)
     monkeypatch.setattr(
         bootstrap,
         "load_request_registry",
@@ -247,7 +252,8 @@ def test_cli_json_uses_resource_show_identity_and_closed_shape(monkeypatch: pyte
     }
     assert calls == [
         ("config", {"warn_issues": False, "workload_gated_issues_fatal": False}),
-        ("registry", {"warn": False}),
+        ("db", database),
+        ("registry", {"warn": False, "live_database": database}),
     ]
 
 

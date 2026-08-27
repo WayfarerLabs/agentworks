@@ -13,7 +13,6 @@ from agentworks.cli import app
 from agentworks.errors import NotFoundError, StateError
 from agentworks.resources.access import ResourceIdentity
 from agentworks.resources.graph_query import (
-    DatabaseLiveSource,
     GraphDirection,
     GraphNode,
     GraphNodeType,
@@ -42,28 +41,30 @@ def test_graph_show_wires_one_query_with_closed_parsed_inputs(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from agentworks import bootstrap, config, db
+    from agentworks import bootstrap, config
+    from agentworks.cli.commands import graph as graph_command
     from agentworks.resources import graph_query, graph_render
 
     registry = object()
+    database = object()
     calls: list[tuple[object, ...]] = []
     expected = _result(depth_limit=None, direction=GraphDirection.DEPENDENCIES)
     monkeypatch.setattr(config, "load_config", lambda **kwargs: calls.append(("config", kwargs)) or object())
+    monkeypatch.setattr(graph_command, "get_db", lambda: calls.append(("db",)) or database)
     monkeypatch.setattr(
         bootstrap,
         "load_request_registry",
         lambda _config, **kwargs: calls.append(("registry", kwargs)) or registry,
     )
-    monkeypatch.setattr(db, "DB_PATH", tmp_path / "canonical.db")
+    del tmp_path
 
     def query(
         actual_registry: object,
         focus: ResourceIdentity,
         direction: GraphDirection,
         depth_limit: int | None,
-        source: DatabaseLiveSource,
     ) -> GraphResult:
-        calls.append(("query", actual_registry, focus, direction, depth_limit, source))
+        calls.append(("query", actual_registry, focus, direction, depth_limit))
         return expected
 
     monkeypatch.setattr(graph_query, "show_graph", query)
@@ -84,8 +85,12 @@ def test_graph_show_wires_one_query_with_closed_parsed_inputs(
 
     assert result.exit_code == 0, result.output
     assert calls[0] == ("config", {"warn_issues": True, "workload_gated_issues_fatal": False})
-    assert calls[1] == ("registry", {"warn": True, "probe_host_readiness": False})
-    query_call = calls[2]
+    assert calls[1] == ("db",)
+    assert calls[2] == (
+        "registry",
+        {"warn": True, "probe_host_readiness": False, "live_database": database},
+    )
+    query_call = calls[3]
     assert query_call[0:5] == (
         "query",
         registry,
@@ -93,10 +98,7 @@ def test_graph_show_wires_one_query_with_closed_parsed_inputs(
         GraphDirection.DEPENDENCIES,
         None,
     )
-    source = query_call[5]
-    assert isinstance(source, DatabaseLiveSource)
-    assert source.database_path == tmp_path / "canonical.db"
-    assert calls[3] == ("render", expected)
+    assert calls[4] == ("render", expected)
 
 
 def test_graph_show_json_projects_the_same_result(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -107,7 +107,7 @@ def test_verify_rejects_unknown_secret() -> None:
 def test_cli_keeps_operator_impact_separate_from_global_tty_policy(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
     monkeypatch.setattr("agentworks.config.load_config", lambda *args, **kwargs: SimpleNamespace())
-    monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda config: _Registry("token"))
+    monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda config, **_kwargs: _Registry("token"))
 
     def verify(config: object, registry: object, names: list[str], **kwargs: object) -> tuple[ResolutionPreview, ...]:
         captured.update(kwargs)
@@ -140,7 +140,7 @@ def test_cli_renders_every_technical_status_and_only_available_succeeds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("agentworks.config.load_config", lambda *args, **kwargs: SimpleNamespace())
-    monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda config: _Registry("token"))
+    monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda config, **_kwargs: _Registry("token"))
     monkeypatch.setattr("agentworks.secrets.verification.verify_secrets", lambda *args, **kwargs: (preview,))
 
     result = CliRunner().invoke(app, ["secret", "verify", "token"])
@@ -167,7 +167,7 @@ def test_cli_verify_drives_the_real_prompt_broker_without_exposing_the_value(
         readiness=Readiness.ready(),
     )
     monkeypatch.setattr("agentworks.config.load_config", lambda *args, **kwargs: SimpleNamespace())
-    monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda config: _Registry("token"))
+    monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda config, **_kwargs: _Registry("token"))
     monkeypatch.setattr("agentworks.secrets.resolve.active_sources", lambda config, registry: (source,))
     monkeypatch.setattr(
         "agentworks.cli._helpers.sys",

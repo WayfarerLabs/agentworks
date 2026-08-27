@@ -1,6 +1,6 @@
 """Kind registrations for the vms domain: ``vm-template``,
 ``admin-template`` (the admin user is a per-VM concept, provisioned by
-``vms/initializer``, one per VM; its ``instances()`` iterates VMs), and
+``vms/initializer``, one per VM), and
 ``vm-site`` (the declarable "configured place to create VMs").
 
 The ``vm-platform`` capability kind backing sites registers from
@@ -31,23 +31,17 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from agentworks.origin import Origin
-from agentworks.resources.kind import (
-    ALWAYS_MATERIALIZE_SOURCE,
-    KIND_REGISTRY,
-    InstanceRef,
-)
+from agentworks.resources.kind import ALWAYS_MATERIALIZE_SOURCE, KIND_REGISTRY
 from agentworks.topics import TopicProse
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.sites import VMSiteDecl
 from agentworks.vms.template import VMTemplate
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Sequence
 
-    from agentworks.db import Database
     from agentworks.declared_resource import DeclaredResource
     from agentworks.resources.reference import ResourceReference
-    from agentworks.resources.registry import Registry
 
 
 @dataclass(frozen=True)
@@ -99,17 +93,6 @@ class _VMTemplateKind:
         source = references[0].source if references else ALWAYS_MATERIALIZE_SOURCE
         return VMTemplate(name="default", origin=Origin.auto_declared(source=source))
 
-    def instances(self, db: Database, registry: Registry, resource: Any) -> Iterable[InstanceRef]:
-        """Every VM whose ``template`` column matches this VMTemplate's
-        name -- or whose ``template`` is NULL when the resource is the
-        reserved ``default`` (a NULL ``template`` column means "use the
-        framework's default template at provisioning time").
-        """
-        name = resource.name
-        for vm in db.list_vms():
-            if vm.template == name or (vm.template is None and name == "default"):
-                yield InstanceRef(instance_kind="vm", instance_name=vm.name)
-
 
 KIND_REGISTRY["vm-template"] = _VMTemplateKind()
 
@@ -155,18 +138,6 @@ class _AdminTemplateKind:
         source = references[0].source if references else ALWAYS_MATERIALIZE_SOURCE
         return AdminConfig(name="default", origin=Origin.auto_declared(source=source))
 
-    def instances(self, db: Database, registry: Registry, resource: Any) -> Iterable[InstanceRef]:
-        """The VMs provisioned from this admin-template. Each VM records
-        its selected admin-template in the ``vms.admin_template`` column
-        (NULL = the reserved ``default``); the admin template defines the
-        admin user on each VM, and there's one admin user per VM. Filter
-        every VM by that column the same way the other template kinds do.
-        """
-        name = resource.name
-        for vm in db.list_vms():
-            if (vm.admin_template or "default") == name:
-                yield InstanceRef(instance_kind="vm", instance_name=vm.name)
-
 
 KIND_REGISTRY["admin-template"] = _AdminTemplateKind()
 
@@ -209,13 +180,6 @@ class _VMSiteKind:
         raise NoUnreferencedDefaultError(
             "the vm-site kind has no reserved default name; synthesize is never invoked under the error miss policy"
         )
-
-    def instances(self, db: Database, registry: Registry, resource: Any) -> Iterable[InstanceRef]:
-        """Every VM whose ``site`` column names this site."""
-        name = resource.name
-        for vm in db.list_vms():
-            if vm.site == name:
-                yield InstanceRef(instance_kind="vm", instance_name=vm.name)
 
     # No per-kind readiness hook: a site's readiness verdict is folded at
     # finalize and read via ``graph.readiness_of`` (through

@@ -88,7 +88,7 @@ def copy_workspace(
                     entity_name=src_ws.vm_name,
                 )
             _guard_vm_status(src_vm)
-            registry = load_request_registry(config)
+            registry = load_request_registry(config, live_database=db)
             _keepalive_stack.enter_context(
                 gated_vm_boundary(
                     db,

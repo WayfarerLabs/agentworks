@@ -39,7 +39,7 @@ refactor.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from functools import cache
 from types import MappingProxyType
@@ -48,6 +48,7 @@ from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
+    from agentworks.resources.kind import InstanceRef
     from agentworks.resources.reference import ReferenceEntry, RefRelationship, ResourceReference
 
 
@@ -99,6 +100,21 @@ type EnablementSource = Callable[
     [Mapping[str, Mapping[str, object]]],
     Mapping[tuple[str, str], DisabledMark],
 ]
+
+
+USED_BY_SUPPORTED_KINDS = frozenset(
+    {
+        "admin-template",
+        "agent-template",
+        "named-console-template",
+        "secret",
+        "session-template",
+        "vm-site",
+        "vm-template",
+        "workspace-template",
+    }
+)
+"""Kinds whose shipped JSON v1 ``used_by`` field is non-null."""
 
 
 def compose_enablement(
@@ -197,6 +213,7 @@ class _Node:
     enablement: Enablement
     readiness: Readiness
     impl: object | None
+    live: bool
 
 
 @dataclass(frozen=True)
@@ -209,6 +226,7 @@ class DependencyGraph:
     """
 
     _nodes: Mapping[tuple[str, str], _Node]
+    _compatibility_live_users: Mapping[tuple[str, str], tuple[InstanceRef, ...]]
 
     def edges_of(self, kind: str, name: str) -> tuple[ResourceReference, ...]:
         """This node's outbound reference edges. Raises ``KeyError`` on an
@@ -225,6 +243,37 @@ class DependencyGraph:
         replacement for every ``getattr(resource, "references", ())`` reader.
         Raises ``KeyError`` on an unknown key."""
         return self._nodes[(kind, name)].inbound
+
+    def all_dependents_of(self, kind: str, name: str) -> tuple[ReferenceEntry, ...]:
+        """All inbound references, including live-resource publications."""
+        from agentworks.resources.reference import ReferenceEntry
+
+        return tuple(
+            ReferenceEntry(source=ref.source, usage=ref.usage, declared_by=ref.declared_by)
+            for ref in self._nodes[(kind, name)].incoming
+        )
+
+    def is_live(self, kind: str, name: str) -> bool:
+        """Whether this graph node is a database-backed or pending resource."""
+        node = self._nodes.get((kind, name))
+        return False if node is None else node.live
+
+    def live_dependents_of(self, kind: str, name: str) -> tuple[InstanceRef, ...]:
+        """Live resources whose effective desired state references this node."""
+        from agentworks.resources.kind import InstanceRef
+
+        refs = {
+            InstanceRef(reference.source[0], reference.source[1])
+            for reference in self._nodes[(kind, name)].incoming
+            if self._nodes[reference.source].live
+        }
+        return tuple(sorted(refs, key=lambda ref: (ref.instance_kind, ref.instance_name)))
+
+    def compatibility_live_users_of(self, kind: str, name: str) -> tuple[InstanceRef, ...] | None:
+        """Return the stable JSON v1 live-usage projection for one row."""
+        if kind not in USED_BY_SUPPORTED_KINDS:
+            return None
+        return self._compatibility_live_users.get((kind, name), ())
 
     def runtime_reachable_from(self, kind: str, name: str) -> list[tuple[str, str]]:
         """The transitive closure over RUNTIME-NEED edges: what this node
@@ -458,6 +507,8 @@ def build_graph(
     all_outbound: Mapping[tuple[str, str], Sequence[ResourceReference]],
     readiness: Mapping[tuple[str, str], Readiness] | None = None,
     enablement: Mapping[tuple[str, str], Enablement] | None = None,
+    *,
+    live_keys: set[tuple[str, str]] | frozenset[tuple[str, str]] = frozenset(),
 ) -> DependencyGraph:
     """Build the frozen ``DependencyGraph`` from the finalized resource map and
     the two accumulated edge maps.
@@ -480,6 +531,8 @@ def build_graph(
     never recomputes it); the finalize fold distributes a disabled dependency's
     state and its carried reason.
     """
+    from agentworks.resources.kind import InstanceRef
+    from agentworks.resources.live import LiveResource
     from agentworks.resources.reference import ReferenceEntry
 
     verdicts = readiness or {}
@@ -487,6 +540,8 @@ def build_graph(
     inbound: dict[tuple[str, str], list[ReferenceEntry]] = {}
     for target, refs in all_refs.items():
         for ref in refs:
+            if ref.source in live_keys:
+                continue
             inbound.setdefault(target, []).append(
                 ReferenceEntry(source=ref.source, usage=ref.usage, declared_by=ref.declared_by)
             )
@@ -503,9 +558,36 @@ def build_graph(
                 enablement=opt_in.get(key, Enablement.enabled),
                 readiness=verdicts.get(key, Readiness.ready()),
                 impl=_impl_for(kind, name),
+                live=key in live_keys,
             )
 
-    return DependencyGraph(_nodes=MappingProxyType(nodes))
+    compatibility_users: dict[tuple[str, str], set[InstanceRef]] = {}
+    for target, refs in all_refs.items():
+        if target[0] not in USED_BY_SUPPORTED_KINDS or target[0] == "secret":
+            continue
+        for ref in refs:
+            if ref.source in live_keys:
+                compatibility_users.setdefault(target, set()).add(InstanceRef(*ref.source))
+
+    graph = DependencyGraph(
+        _nodes=MappingProxyType(nodes),
+        _compatibility_live_users=MappingProxyType({}),
+    )
+
+    for session_name, resource in resources.get("session", {}).items():
+        if not isinstance(resource, LiveResource):
+            continue
+        user = InstanceRef("session", session_name)
+        for root in resource.environment_targets:
+            for target in (root, *graph.runtime_reachable_from(*root)):
+                if target[0] == "secret":
+                    compatibility_users.setdefault(target, set()).add(user)
+
+    frozen_users = {
+        key: tuple(sorted(users, key=lambda ref: (ref.instance_kind, ref.instance_name)))
+        for key, users in compatibility_users.items()
+    }
+    return replace(graph, _compatibility_live_users=MappingProxyType(frozen_users))
 
 
 # -- The readiness fold (LLD c) ---------------------------------------------

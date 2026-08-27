@@ -25,7 +25,7 @@ from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGI
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.manifests import load_manifests
-from agentworks.resources import DatabaseLiveSource, GraphDirection, show_graph
+from agentworks.resources import GraphDirection, show_graph
 from agentworks.resources.access import ResourceIdentity
 from agentworks.resources.graph import FinalizeContext
 from agentworks.resources.reference import RefRelationship
@@ -405,7 +405,6 @@ def test_harness_integration_row_lists_its_declaring_template(tmp_path: Path) ->
         ResourceIdentity("harness-integration", "shell"),
         GraphDirection.DEPENDENTS,
         1,
-        DatabaseLiveSource(tmp_path / "absent.db"),
     )
     assert any(
         edge.source.kind == "session-template"

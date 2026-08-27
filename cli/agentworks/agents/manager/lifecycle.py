@@ -76,7 +76,7 @@ def create_agent(
     # git_credentials list, future TemplateReference typos on
     # inherits) fire before any template / DB / VM business logic
     # surfaces its own NotFoundError.
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
 
     from agentworks.instance_specs import parse_instance_spec
 
@@ -88,13 +88,24 @@ def create_agent(
         instance_name=name,
     )
     agent_tmpl = layered_agent_tmpl.value
-    from agentworks.agents.template import effective_references
-    from agentworks.instance_specs import validate_effective_instance_references
+    vm = _require_vm(db, vm_name)
+    from agentworks.resources.live_publish import project_agent_live_resource
 
-    validate_effective_instance_references(
-        registry,
-        effective_references(agent_tmpl, ("agent", name), layered_agent_tmpl.provenance),
+    pending = project_agent_live_resource(
+        name=name,
+        vm_name=vm_name,
+        template_name=template or "default",
+        layered=layered_agent_tmpl,
     )
+    if db.get_agent(name) is None:
+        registry = load_request_registry(
+            config,
+            live_database=db,
+            pending_publishers=(lambda target: target.add_live(pending),),
+        )
+        from agentworks.instance_specs import ensure_effective_references_enabled
+
+        ensure_effective_references_enabled(registry, pending.outbound)
 
     # Refuse a recipe that draws on a disabled plugin's declarable resource
     # (an install-command / inherited template a not-enabled plugin bundled)
@@ -115,8 +126,6 @@ def create_agent(
     from agentworks.instance_specs import refuse_orphan_creation_state
 
     refuse_orphan_creation_state(db, "agent", name)
-
-    vm = _require_vm(db, vm_name)
 
     # BUILD: the command names its direct resources (the resolved
     # template, this VM) and constructs the pending agent node with its
@@ -303,7 +312,7 @@ def delete_agent(
         # The standalone composition root: build the boundary here.
         from agentworks.bootstrap import load_request_registry
 
-        registry = load_request_registry(config)
+        registry = load_request_registry(config, live_database=db)
         boundary: AbstractContextManager[object] = gated_vm_boundary(
             db,
             config,
@@ -451,9 +460,11 @@ def reinit_agent(
 
     require_exact_tty_interaction_policy(interaction)
 
-    # build_registry runs first so framework miss-policies fire before
-    # template / DB / VM business logic.
-    registry = load_request_registry(config)
+    # Resolve the candidate from declarations before publishing durable live
+    # rows. A supplied replacement (notably an empty spec that clears state)
+    # must remain able to supersede an unsupported stored overlay; the second
+    # prospective build below publishes that candidate before reading the DB.
+    registry = load_request_registry(config, include_live_resources=False)
 
     agent = db.get_agent(name)
     if agent is None:
@@ -494,13 +505,22 @@ def reinit_agent(
         instance_name=name,
     )
     agent_tmpl = layered_agent_tmpl.value
-    from agentworks.agents.template import effective_references
-    from agentworks.instance_specs import validate_effective_instance_references
+    from agentworks.resources.live_publish import project_agent_live_resource
 
-    validate_effective_instance_references(
-        registry,
-        effective_references(agent_tmpl, ("agent", name), layered_agent_tmpl.provenance),
+    pending = project_agent_live_resource(
+        name=name,
+        vm_name=agent.vm_name,
+        template_name=candidate_template or "default",
+        layered=layered_agent_tmpl,
     )
+    registry = load_request_registry(
+        config,
+        live_database=db,
+        pending_publishers=(lambda target: target.add_live(pending),),
+    )
+    from agentworks.instance_specs import ensure_effective_references_enabled
+
+    ensure_effective_references_enabled(registry, pending.outbound)
 
     # Refuse a recipe drawing on a disabled plugin's declarable resource before
     # the reinit realize (Phase 7, LLD b). A repoint already gated above

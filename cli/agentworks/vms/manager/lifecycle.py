@@ -142,7 +142,7 @@ def create_vm(
     # build_registry runs first so framework miss-policies (typo'd git
     # credential, future TemplateReference typos on inherits, etc.)
     # surface before any template / DB / VM business logic.
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
 
     from agentworks.instance_specs import parse_vm_instance_specs
 
@@ -155,14 +155,6 @@ def create_vm(
         instance_name=name,
     )
     vm_tmpl = layered_vm_tmpl.value
-    from agentworks.instance_specs import validate_effective_instance_references
-    from agentworks.vms.template import effective_references
-
-    validate_effective_instance_references(
-        registry,
-        effective_references(vm_tmpl, ("vm", name), layered_vm_tmpl.provenance),
-    )
-
     # Refuse a vm-template recipe that draws on a disabled plugin's declarable
     # resource (a bundled install-command / apt entry / inherited template)
     # BEFORE any DB or backend work, with the enable-plugin hint (Phase 7,
@@ -173,7 +165,6 @@ def create_vm(
     ensure_recipe_enabled(registry, "vm-template", vm_tmpl.name)
 
     selected_admin_template = admin_template or "default"
-    from agentworks.vms.admin import effective_references as admin_effective_references
     from agentworks.vms.admin_templates import resolve_template_with_provenance as resolve_admin_template
 
     layered_admin = resolve_admin_template(
@@ -183,10 +174,6 @@ def create_vm(
         instance_name=name,
     )
     admin = layered_admin.value
-    validate_effective_instance_references(
-        registry,
-        admin_effective_references(admin, ("vm", name), layered_admin.provenance),
-    )
     ensure_recipe_enabled(registry, "admin-template", selected_admin_template)
     resolved_admin_username = admin.username
     validate_admin_username(resolved_admin_username)
@@ -200,13 +187,33 @@ def create_vm(
     from agentworks.vms.sites import ensure_site_ready, lookup_site, select_site
 
     site = select_site(site, config.defaults.site, registry)
+    from agentworks.resources.live_publish import project_vm_live_resource
+
+    pending = project_vm_live_resource(
+        name=name,
+        site=site,
+        vm_template_name=template or "default",
+        admin_template_name=selected_admin_template,
+        layered_vm=layered_vm_tmpl,
+        layered_admin=layered_admin,
+    )
+    existing_vm = db.get_vm(name)
+    if existing_vm is None:
+        registry = load_request_registry(
+            config,
+            live_database=db,
+            pending_publishers=(lambda target: target.add_live(pending),),
+        )
+        from agentworks.instance_specs import ensure_effective_references_enabled
+
+        ensure_effective_references_enabled(registry, pending.outbound)
     site_decl = lookup_site(site, registry)
     ensure_site_ready(site_decl, registry)
 
     vm_name = name
     validate_name(vm_name, max_length=MAX_VM_NAME_LENGTH)
 
-    if db.get_vm(vm_name) is not None:
+    if existing_vm is not None:
         raise AlreadyExistsError(
             f"VM '{vm_name}' already exists",
             entity_kind="vm",
@@ -614,7 +621,7 @@ def reinit_vm(
 
     # build_registry runs first so framework miss-policies surface
     # before any template / DB / VM business logic.
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
 
     vm = _require_vm(db, name)
 
@@ -639,7 +646,7 @@ def reinit_vm(
     vm_node = live_vm_node(db, config, registry, vm)
 
     # Resolve the VM's template so init uses the right values
-    from agentworks.instance_specs import get_vm_instance_overlays, validate_effective_instance_references
+    from agentworks.instance_specs import ensure_effective_references_enabled, get_vm_instance_overlays
     from agentworks.vms.template import effective_references
     from agentworks.vms.templates import resolve_template_with_provenance
 
@@ -652,7 +659,7 @@ def reinit_vm(
         instance_name=vm.name,
     )
     reinit_vm_tmpl = layered_reinit_vm_tmpl.value
-    validate_effective_instance_references(
+    ensure_effective_references_enabled(
         registry,
         effective_references(reinit_vm_tmpl, ("vm", vm.name), layered_reinit_vm_tmpl.provenance),
     )
@@ -696,7 +703,7 @@ def reinit_vm(
         instance_name=vm.name,
     )
     admin = layered_admin.value
-    validate_effective_instance_references(
+    ensure_effective_references_enabled(
         registry,
         admin_effective_references(admin, ("vm", vm.name), layered_admin.provenance),
     )

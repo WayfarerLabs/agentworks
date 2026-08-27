@@ -109,7 +109,7 @@ def test_vm_backup_exports_versioned_instance_specs(
             pass
 
     monkeypatch.setattr(vm_backup, "gated_vm_boundary", lambda *a, **k: nullcontext())
-    monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda config: object())
+    monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda config, **_kwargs: object())
     monkeypatch.setattr("agentworks.ssh.SSHLogger", _FakeLogger)
     monkeypatch.setattr("agentworks.transports.SSHTransport", _FakeSSHTransport)
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: _FakeSSHTransport())

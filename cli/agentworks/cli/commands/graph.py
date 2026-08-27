@@ -8,6 +8,7 @@ import click
 import typer
 
 from agentworks.cli._app import app
+from agentworks.cli._helpers import get_db
 from agentworks.machine_output import OutputFormat
 
 graph_app = typer.Typer(
@@ -63,12 +64,10 @@ def show(
     ] = OutputFormat.HUMAN,
 ) -> None:
     """Show the resource graph reachable from one resource."""
-    from agentworks import db
     from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
     from agentworks.resources.access import parse_resource_identity
     from agentworks.resources.graph_query import (
-        DatabaseLiveSource,
         GraphDirection,
         graph_result_data,
         show_graph,
@@ -80,17 +79,18 @@ def show(
     # Never reads the operator's SSH key files; see load_config's
     # workload_gated_issues_fatal doc.
     config = load_config(warn_issues=output_format is OutputFormat.HUMAN, workload_gated_issues_fatal=False)
+    db = get_db()
     registry = load_request_registry(
         config,
         warn=output_format is OutputFormat.HUMAN,
         probe_host_readiness=False,
+        live_database=db,
     )
     result = show_graph(
         registry,
         identity,
         graph_direction,
         depth_limit,
-        DatabaseLiveSource(db.DB_PATH),
     )
 
     if output_format is OutputFormat.JSON:

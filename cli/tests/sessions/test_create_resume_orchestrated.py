@@ -1176,6 +1176,57 @@ def test_create_new_agent_on_disabled_plugin_recipe_refuses_before_any_work(
     assert "tmux_create" not in events  # refused before any transport work
 
 
+@pytest.mark.parametrize(
+    ("overlay_args", "expected_plugin"),
+    [
+        (
+            {"workspace": "ws1", "admin": True, "spec": '{"harness_integration":{"name":"codex"}}'},
+            "codex",
+        ),
+        (
+            {
+                "workspace": "ws1",
+                "new_agent": True,
+                "agent_name": "fresh-agent",
+                "agent_spec": '{"user_install_commands":["fixture-user-cmd"]}',
+            },
+            "decl-plugin",
+        ),
+    ],
+    ids=("session", "compound-agent"),
+)
+def test_create_overlay_only_disabled_reference_refuses_all_pending_paths(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+    overlay_args: dict[str, object],
+    expected_plugin: str,
+) -> None:
+    from agentworks.plugins import SYSTEM_PLUGINS, Plugin
+    from agentworks.sessions.manager import create_session
+
+    config = make_config()
+    _seed_stopped_proxmox_vm(db)
+    plugin = Plugin(
+        name="decl-plugin",
+        description="a manifest-parity fixture",
+        manifests="tests.plugins._manifest_declarable_fixture",
+    )
+    monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {**SYSTEM_PLUGINS, plugin.name: plugin})
+
+    with pytest.raises(StateError, match=rf"enable plugin `{expected_plugin}`"):
+        create_session(
+            db,
+            config,
+            name="s1",
+            interaction=TtyInteractionPolicy.REFUSE,
+            **overlay_args,
+        )
+
+    assert db.get_session("s1") is None
+    assert db.get_agent("fresh-agent") is None
+
+
 def test_resume_stopped_vm_gate_seeds_and_env_pass_is_the_only_other(
     db: Database,
     make_config,  # noqa: ANN001

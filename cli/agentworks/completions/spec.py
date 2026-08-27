@@ -23,9 +23,9 @@ COMPLETION_PROBE_OPTION = "--completion-probe"
 
 # Database-backed generated completers and the exact command path each runs.
 # This immutable inventory is the single source for shell parity checks and
-# the deliberately conservative pre-0.14 marker-free allow-list. ``secrets``
-# is intentionally absent because it is registry-backed rather than
-# database-backed.
+# the deliberately conservative pre-0.14 marker-free allow-list. Registry-backed
+# resource and secret callbacks use the bounded read-only opener inside their
+# commands, so they need no hidden probe marker and are intentionally absent.
 DATABASE_BACKED_DYNAMIC_COMPLETIONS: tuple[tuple[str, tuple[str, str]], ...] = (
     ("vms", ("vm", "list")),
     ("workspaces", ("workspace", "list")),

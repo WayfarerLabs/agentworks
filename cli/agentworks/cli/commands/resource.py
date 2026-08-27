@@ -75,9 +75,8 @@ def resource_list(
     """List every Resource in the Registry across all kinds.
 
     Columns: KIND, NAME, ORIGIN (with detail), REFS (static config
-    references count), USED BY (live DB instances depending on this
-    resource per current config; ``-`` for kinds with no instance
-    concept), DESCRIPTION. Description is reliably populated:
+    references count), USED BY (the stable current live-usage projection,
+    or ``-`` for kinds without one), DESCRIPTION. Description is reliably populated:
     operator-declared resources carry the operator's text, and
     auto-declared defaults get a framework-synthesized text (the
     registry's auto-declared polish). Every declarable kind carries a
@@ -106,16 +105,34 @@ def resource_list(
     # Never reads the operator's SSH key files; see load_config's
     # workload_gated_issues_fatal doc.
     config = load_config(warn_issues=output_format is OutputFormat.HUMAN, workload_gated_issues_fatal=False)
-    registry = load_request_registry(config, warn=output_format is OutputFormat.HUMAN)
-    db = None if names_only else get_db()
+    if names_only:
+        from agentworks import db as db_module
+        from agentworks.db import open_completion_database
+
+        completion_db = open_completion_database(db_module.DB_PATH)
+        try:
+            registry = load_request_registry(
+                config,
+                warn=output_format is OutputFormat.HUMAN,
+                include_live_resources=completion_db is not None,
+                live_database=completion_db,
+            )
+        finally:
+            if completion_db is not None:
+                completion_db.close()
+    else:
+        db = get_db()
+        registry = load_request_registry(
+            config,
+            warn=output_format is OutputFormat.HUMAN,
+            live_database=db,
+        )
     # ``list_resources`` validates ``origin_filter`` (typed
     # ``ValidationError`` from the service layer; see inspect.py); the
     # ``cast`` is purely a typing-layer bridge from typer's ``str | None``
-    # to the ``OriginFilter`` Literal. ``db`` lets the service populate
-    # each row's ``used_by_count`` via the kind's ``instances`` hook.
+    # to the ``OriginFilter`` Literal.
     listing = list_resources(
         registry,
-        db,
         kinds=kinds,
         origin_filter=cast("OriginFilter | None", origin_filter),
         include_disabled=include_disabled,
@@ -169,11 +186,9 @@ def resource_show(
     ] = OutputFormat.HUMAN,
 ) -> None:
     """Show complete focused facts for one loaded resource."""
-    import agentworks.db as db
     from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
     from agentworks.resources.access import parse_resource_identity
-    from agentworks.resources.graph_query import DatabaseLiveSource
     from agentworks.resources.show import (
         render_resource_show,
         resource_show_data,
@@ -185,12 +200,12 @@ def resource_show(
     # Never reads the operator's SSH key files; see load_config's
     # workload_gated_issues_fatal doc.
     config = load_config(warn_issues=warn, workload_gated_issues_fatal=False)
-    registry = load_request_registry(config, warn=warn)
+    db = get_db()
+    registry = load_request_registry(config, warn=warn, live_database=db)
     shown = show_resource(
         config,
         registry,
         identity,
-        DatabaseLiveSource(db.DB_PATH),
         tty_access=ordinary_tty_interaction_access(),
     )
 
@@ -253,7 +268,11 @@ def resource_kinds(
     # Never reads the operator's SSH key files; see load_config's
     # workload_gated_issues_fatal doc.
     config = load_config(warn_issues=output_format is OutputFormat.HUMAN, workload_gated_issues_fatal=False)
-    registry = load_request_registry(config, warn=output_format is OutputFormat.HUMAN)
+    registry = load_request_registry(
+        config,
+        warn=output_format is OutputFormat.HUMAN,
+        include_live_resources=False,
+    )
     rows = list_kinds(registry)
     if output_format is OutputFormat.JSON:
         from click import get_binary_stream
@@ -339,7 +358,7 @@ def resource_edit(
     # workload_gated_issues_fatal doc.
     config = load_config(workload_gated_issues_fatal=False)
     try:
-        registry = load_request_registry(config)
+        registry = load_request_registry(config, include_live_resources=False)
         path, line = edit_location(registry, kind, name)
     except ConfigError as exc:
         # The fix-it path: a manifest set failing validation is exactly when

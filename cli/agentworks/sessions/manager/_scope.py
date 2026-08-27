@@ -113,7 +113,7 @@ def _prepare_vm(
             entity_name=vm.name,
         )
 
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
     with gated_vm_boundary(
         db,
         config,
@@ -153,7 +153,7 @@ def _regenerate_tmuxinator(
     from agentworks.workspaces.templates import resolve_live_tmuxinator
     from agentworks.workspaces.tmuxinator import generate_config, remove_config
 
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
     target = _mgr.transport(vm, config, logger=logger)
     if not resolve_live_tmuxinator(db, registry, ws.name, ws.template):
         remove_config(target, ws.name, ws.workspace_path)
@@ -288,7 +288,7 @@ def _batch_vm_boundary(
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import VMSiteNode, live_vm_node
 
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
     resolver = Resolver(config, registry, interaction=interaction)
     site_nodes: dict[str, VMSiteNode] = {}
     vm_nodes = [live_vm_node(db, config, registry, vm, site_nodes=site_nodes) for vm in vms]

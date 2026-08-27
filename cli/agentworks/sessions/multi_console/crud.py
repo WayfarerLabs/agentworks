@@ -135,7 +135,7 @@ def add_sessions(
     from agentworks.bootstrap import load_request_registry
 
     console = _require_console(db, console_name)
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
     specs = [parse_session_spec(s) for s in session_specs]
     _dedupe_specs(specs)
 
@@ -435,7 +435,7 @@ def add_shell(
 
     _validate_cwd(cwd)
     console = _require_console(db, console_name)
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
     cs = db.get_console_session(console_name, session_name)
     if cs is None:
         raise NotFoundError(

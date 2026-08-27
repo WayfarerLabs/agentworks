@@ -1,8 +1,9 @@
 """The admin-template resource: the admin user's environment on VMs.
 
 Homed in ``vms/`` by lifecycle, not field shape: the admin user is a
-per-VM concept -- provisioned by ``vms/initializer``, exactly one per
-VM, and the kind's ``instances()`` iterates VMs. The field set happens
+per-VM concept, provisioned by ``vms/initializer`` exactly once per VM.
+Database-backed VMs publish their selected admin-template into the
+finalized Registry graph. The field set happens
 to mirror ``AgentTemplate`` (both describe a user environment), but
 ownership follows who provisions and consumes it.
 """

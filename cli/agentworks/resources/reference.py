@@ -66,8 +66,6 @@ from agentworks.schema.reference import ConfigReference, RefRelationship
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from agentworks.resources.registry import Registry
-
 
 @dataclass(frozen=True)
 class ResourceReference:
@@ -277,51 +275,6 @@ def sourced_references(
             )
         )
     return result
-
-
-def validate_reference_targets(registry: Registry, references: Iterable[ResourceReference]) -> None:
-    """Validate effective-instance references without mutating the Registry.
-
-    The finalized registry remains the declaration authority. A missing
-    target is accepted only when its kind's normal auto-declare policy would
-    accept that name; no row or graph edge is synthesized for an instance.
-    """
-    from agentworks.errors import ConfigError, StateError
-    from agentworks.resources.kind import KIND_REGISTRY
-
-    for reference in references:
-        try:
-            registry.lookup(reference.kind, reference.name)
-            continue
-        except KeyError:
-            pass
-        try:
-            handler = KIND_REGISTRY[reference.kind]
-        except KeyError as error:
-            raise StateError(f"reference targets unknown resource kind {reference.kind!r}") from error
-        blamed = reference.declarer
-        if handler.miss_policy == "auto-declare":
-            allowed = handler.auto_declare_names
-            if allowed is None or reference.name in allowed:
-                continue
-            raise ConfigError(
-                f"{reference.kind} kind only auto-declares the reserved name(s) {sorted(allowed)!r}; "
-                f"got {reference.name!r} (required by {blamed[0]}/{blamed[1]})"
-            )
-        if handler.miss_policy == "error":
-            missing_reference_error = getattr(handler, "missing_reference_error", None)
-            if missing_reference_error is not None:
-                domain_error = missing_reference_error(
-                    name=reference.name,
-                    registry=registry,
-                    referrer=reference,
-                )
-                if domain_error is not None:
-                    raise domain_error
-            raise ConfigError(
-                f"{blamed[0]} {blamed[1]!r} references unknown {reference.kind} {reference.name!r} ({reference.usage})"
-            )
-        raise StateError(f"unexpected miss_policy {handler.miss_policy!r} on KIND_REGISTRY[{reference.kind!r}]")
 
 
 __all__ = [

@@ -264,7 +264,7 @@ def resume_session(
         deploy_restricted_config,
     )
 
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
 
     session = _mgr._require_session(db, name)
     ws = _mgr._require_workspace(db, session.workspace_name)
@@ -277,7 +277,7 @@ def resume_session(
     )
     from typing import cast
 
-    from agentworks.instance_specs import get_instance_overlay, validate_effective_instance_references
+    from agentworks.instance_specs import ensure_effective_references_enabled, get_instance_overlay
     from agentworks.sessions.template import effective_references, validate_effective_harness
     from agentworks.sessions.templates import resolve_template_with_provenance
 
@@ -290,7 +290,7 @@ def resume_session(
             instance_name=session.name,
         )
         template = layered_template.value
-        validate_effective_instance_references(
+        ensure_effective_references_enabled(
             registry,
             effective_references(template, ("session", session.name), layered_template.provenance),
         )

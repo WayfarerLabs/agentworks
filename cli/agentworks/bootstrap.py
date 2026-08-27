@@ -9,9 +9,13 @@ is its legitimate home: it imports the publishers and orchestrates
 them. Registry stays publisher-agnostic; Config stays unaware of the
 others.
 
-``build_registry`` is a pure function: no memo, no cache. Each
-composition root calls it once and threads the registry down; the
-orchestrated ``session create --new-workspace/--new-agent`` realizes
+``build_registry`` is a fresh composition: no memo, no cache. Its standard
+path reads the current state-database snapshot as one of its publishers but
+does not mutate it. Ordinary composition roots call it once and thread the
+registry down. Prospective lifecycle commands may first build a declared-only
+registry to resolve a candidate, then perform one authoritative build with the
+pending candidate and database snapshot published together. The orchestrated
+``session create --new-workspace/--new-agent`` realizes
 its ephemeral workspace and agent through the shared realize bodies
 against the one registry it built, so no nested root builds a second
 one. Tests and multi-source orchestration can assemble
@@ -27,7 +31,10 @@ from typing import TYPE_CHECKING
 from agentworks.resources import Registry
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
     from agentworks.config import Config
+    from agentworks.db import Database
     from agentworks.manifests import ManifestSet
 
 
@@ -53,6 +60,9 @@ def build_registry(
     manifests: ManifestSet | None = None,
     *,
     probe_host_readiness: bool = True,
+    include_live_resources: bool = True,
+    live_database: Database | None = None,
+    pending_publishers: Sequence[Callable[[Registry], None]] = (),
 ) -> Registry:
     """Build a finalized ``Registry`` from the standard set of publishers.
 
@@ -118,6 +128,28 @@ def build_registry(
     secrets.publish_builtin_secret_sources(registry)
     config.publish_to(registry)
     manifests.publish_to(registry)
+    # Live publishers resolve selected default templates while collecting,
+    # so seed reserved framework defaults after every declared publisher has
+    # had its normal collision opportunity and before database publication.
+    registry.publish_reserved_defaults()
+    # A pending create or reinit claims its candidate identity before the
+    # durable publisher runs. This both prevents duplicate publication and
+    # lets a replacement validate independently of unsupported stored desired
+    # state that the successful operation will supersede.
+    for publisher in pending_publishers:
+        publisher(registry)
+    if include_live_resources:
+        from agentworks.resources.live_publish import (
+            publish_database_live_resources,
+            publish_open_database_live_resources,
+        )
+
+        if live_database is None:
+            from agentworks import db
+
+            publish_database_live_resources(registry, db.DB_PATH)
+        else:
+            publish_open_database_live_resources(registry, live_database)
     registry.finalize(
         enablement_sources=[plugins.plugin_enablement_source(config)],
         probe_host_readiness=probe_host_readiness,
@@ -152,13 +184,23 @@ def load_request_registry(
     *,
     warn: bool = True,
     probe_host_readiness: bool = True,
+    include_live_resources: bool = True,
+    live_database: Database | None = None,
+    pending_publishers: Sequence[Callable[[Registry], None]] = (),
 ) -> Registry:
     """Build a registry and render request-scoped warnings once."""
     from agentworks import output
     from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
 
     resolved = manifests if manifests is not None else load_manifests(config.source_path.parent / RESOURCES_DIRNAME)
-    registry = build_registry(config, resolved, probe_host_readiness=probe_host_readiness)
+    registry = build_registry(
+        config,
+        resolved,
+        probe_host_readiness=probe_host_readiness,
+        include_live_resources=include_live_resources,
+        live_database=live_database,
+        pending_publishers=pending_publishers,
+    )
     request_key = str(config.source_path)
     already_warned = request_key in _warned_request_configs.get()
     if warn and not already_warned:
@@ -170,4 +212,4 @@ def load_request_registry(
 
 def load_guide_registry(config: Config) -> Registry:
     """Build guide facts without inspecting host tools or backend availability."""
-    return load_request_registry(config, probe_host_readiness=False)
+    return load_request_registry(config, probe_host_readiness=False, include_live_resources=False)

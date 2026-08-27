@@ -73,7 +73,7 @@ def _display_registry(config: Config) -> Registry | None:
     from agentworks.bootstrap import load_request_registry
 
     try:
-        return load_request_registry(config)
+        return load_request_registry(config, include_live_resources=False)
     except AgentworksError:
         return None
 

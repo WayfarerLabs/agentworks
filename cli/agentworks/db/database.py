@@ -93,6 +93,7 @@ class Database:
                     raise BusyStateError() from error
                 raise StateError(
                     "state database is unavailable or malformed",
+                    entity_kind="database",
                     hint="Run a normal Agentworks command to initialize or repair the state database.",
                 ) from error
             current = row[0]
@@ -100,17 +101,19 @@ class Database:
                 current = 0
             elif type(current) is not int or current < 0:
                 connection.close()
-                raise StateError("state database schema version is invalid")
+                raise StateError("state database schema version is invalid", entity_kind="database")
             if current > LATEST_VERSION:
                 connection.close()
                 raise StateError(
                     f"state database schema is newer than this release ({current}/{LATEST_VERSION})",
+                    entity_kind="database",
                     hint="Use a release that understands this database schema.",
                 )
             if current != LATEST_VERSION:
                 connection.close()
                 raise StateError(
                     f"state database schema is outdated ({current}/{LATEST_VERSION})",
+                    entity_kind="database",
                     hint="Run a normal Agentworks command to initialize or migrate the state database.",
                 )
             self._conn = connection
@@ -185,6 +188,18 @@ class Database:
                 self._conn.rollback()
         finally:
             self._read_tx_active = False
+
+    @contextmanager
+    def snapshot(self) -> Iterator[None]:
+        """Hold one read snapshot on either writable or read-only facades.
+
+        Writable command-owned databases use the composable transaction
+        boundary; completion and path-owned read-only facades use the strict
+        read transaction. Callers need not inspect private connection mode.
+        """
+        context = self.read_transaction() if self._read_only else self.transaction()
+        with context:
+            yield
 
     def _commit_unless_in_tx(self) -> None:
         """Commit pending changes unless inside an explicit transaction()."""

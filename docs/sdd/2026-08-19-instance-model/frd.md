@@ -1,8 +1,8 @@
 # Instance Model and State: Functional Requirements
 
-- Status: Active (R1 and R2 accepted; R4 implemented; R3 and R5 pending)
+- Status: Active (R1 and R2 accepted; R4 correction complete pending merge; R3 and R5 pending)
 - Date: 2026-08-19
-- Last revised: 2026-08-26
+- Last revised: 2026-08-27
 - Parent: the `2026-08-04-next-steps` saga (destination 2 and the wave-4 enabling track)
 
 ## Rulings this seed rests on
@@ -25,6 +25,11 @@
   through those doors; it must not re-litigate them.
 - **Use the database, not its sidecars (operator, 2026-08-12):** state reads go through the database
   with the concurrency semantics it already provides.
+- **Database rows publish live resources (authenticated operator channel, 2026-08-26):** VMs,
+  workspaces, agents, sessions, and consoles in the database are resources of the live type,
+  independent of runtime liveness. The database publishes them during the ordinary Registry
+  collection phase before finalization; creating commands temporarily publish pending resources
+  through the same boundary.
 - **Existing applied state remains unknown (authenticated operator channel to the instance-model
   effort lead, 2026-08-21; reaffirmed 2026-08-23):** no migration reconstructs applied state from
   current declarations. A real lifecycle operation establishes only the slices it can prove it
@@ -158,6 +163,27 @@ than remembered: a template field could be marked as one an instance must set, s
 declares the requirement and the overlay satisfies it. That is input to price during design, not a
 requirement; it ships only if it falls out naturally.
 
+Database-backed VMs, workspaces, agents, sessions, and consoles are live resources whether or not
+they are currently running. The state database is another resource publisher: ordinary registry
+assembly collects those live resources and the references from their fully resolved desired
+declarations before the one existing finalization pass. A reference introduced only by a persisted
+instance spec therefore participates in normal miss handling and auto-declaration. In particular, a
+secret introduced by a live resource appears on the ordinary secret inspection surfaces for as long
+as at least one collected resource references it.
+
+A creation command applies the same rule prospectively. Its candidate effective declarations publish
+pending live resources into that command's otherwise ordinary pre-finalize collection. Failure
+leaves no durable publication; success persists the live resource and its desired state, so later
+commands reconstruct the same references from the database. This is graph reconstruction from
+durable publishers, not post-finalize graph mutation, and "live" means database-backed rather than
+currently active.
+
+Existing database rows can be stranded after a template, site, owner, or member is removed. Registry
+construction must retain those live nodes without inventing or defaulting the missing target, and
+must leave recovery/list/delete paths usable. The later resolved-spec surface reports a missing
+selection as unresolved. Prospective resources receive no such exception: their selected targets
+must exist before mutation.
+
 ### R5: Resolved-spec surfaces
 
 The CLI can show the fully resolved spec for a template (what an instance created from it would get
@@ -185,6 +211,10 @@ discipline: existing fields preserved, additions optional and tagged.
 - At every supported template-setting lifecycle boundary, an operator can supply the final inline
   instance layer and can tell from the command result whether that layer was set, retained,
   replaced, cleared, or explicitly absent, without the CLI echoing its values.
+- A resource referenced only by the fully resolved desired declaration of a database-backed live
+  resource is present on the same list, describe, verify, doctor, and graph surfaces as one
+  referenced by a YAML declaration. Candidate references participate during creation without
+  surviving a failed command.
 - The simple case does not get more verbose: an operator who never writes an overlay sees no new
   required ceremony.
 
@@ -194,6 +224,8 @@ discipline: existing fields preserved, additions optional and tagged.
 - Drift remediation (rotation operations, re-apply flows); wave 4 and later work own those.
 - Integration applied-state and artifact ownership records themselves (the store contract must
   accommodate them; shipping them is wave 4 and wave 6 work).
-- The living graph.
+- Incremental mutation of a finalized registry or graph, and provider-observed runtime liveness.
+  Registry construction remains collect-then-finalize and derives live resources from durable
+  database state.
 
 -- Seeded by the saga lead; the effort lead owns everything downstream of this FRD.

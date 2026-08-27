@@ -135,13 +135,14 @@ def test_overlay_only_package_gates_its_disabled_source_before_vm_lifecycle(
     from agentworks.vms.manager import create_vm
 
     config = _config(tmp_path, _OVERLAY_ONLY_PACKAGE)
-    monkeypatch.setattr("agentworks.vms.sites.select_site", lambda *a, **k: pytest.fail("lifecycle reached"))
+    monkeypatch.setattr("agentworks.vms.manager.verify_tailscale_available", lambda: pytest.fail("lifecycle reached"))
 
     with pytest.raises(StateError) as caught:
         create_vm(
             db,
             config,
             name="overlay-vm",
+            site="lima-local",
             spec='{"apt_packages":["overlay-cloud"]}',
             interaction=TtyInteractionPolicy.REFUSE,
         )

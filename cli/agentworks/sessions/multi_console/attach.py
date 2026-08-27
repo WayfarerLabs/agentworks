@@ -491,7 +491,7 @@ def attach_console(
     from agentworks.bootstrap import load_request_registry
 
     console = _require_console(db, name)
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
     # The gate's held-active span covers the build and the interactive
     # attach (the hold this caller used to open itself).
     with _mc._prepare_vm_target_for_attach(

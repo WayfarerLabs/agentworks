@@ -49,7 +49,7 @@ def start_vm(
 
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
     vm_node, ops_ctx = _live_vm_boundary(
         db,
         config,
@@ -370,7 +370,7 @@ def rekey_vm(
     # ``os.environ`` during preview and resolution, so removing the var
     # skips it cleanly across BOTH preflight and the
     # resolve, and the prompt backend takes over).
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
     resolver = Resolver(config, registry, interaction=interaction)
     vm_node = live_vm_node(db, config, registry, vm)
     rekey_vm_tmpl = resolve_live_template(db, registry, vm.name, vm.template)

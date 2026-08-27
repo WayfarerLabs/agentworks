@@ -90,7 +90,7 @@ def grant_workspaces(
 
     from agentworks.bootstrap import load_request_registry
 
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
     with gated_vm_boundary(
         db,
         config,
@@ -157,7 +157,7 @@ def revoke_workspaces(
 
     from agentworks.bootstrap import load_request_registry
 
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
     with gated_vm_boundary(
         db,
         config,

@@ -10,24 +10,18 @@ load.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 from agentworks.origin import Origin
-from agentworks.resources.kind import (
-    ALWAYS_MATERIALIZE_SOURCE,
-    KIND_REGISTRY,
-    InstanceRef,
-)
+from agentworks.resources.kind import ALWAYS_MATERIALIZE_SOURCE, KIND_REGISTRY
 from agentworks.topics import TopicProse
 from agentworks.workspaces.template import WorkspaceTemplate
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Sequence
 
-    from agentworks.db import Database
     from agentworks.declared_resource import DeclaredResource
     from agentworks.resources.reference import ResourceReference
-    from agentworks.resources.registry import Registry
 
 
 @dataclass(frozen=True)
@@ -65,16 +59,6 @@ class _WorkspaceTemplateKind:
         """
         source = references[0].source if references else ALWAYS_MATERIALIZE_SOURCE
         return WorkspaceTemplate(name="default", origin=Origin.auto_declared(source=source))
-
-    def instances(self, db: Database, registry: Registry, resource: Any) -> Iterable[InstanceRef]:
-        """Every workspace whose ``template`` column matches this
-        WorkspaceTemplate's name -- or whose ``template`` is NULL when
-        the resource is the reserved ``default``.
-        """
-        name = resource.name
-        for ws in db.list_workspaces():
-            if ws.template == name or (ws.template is None and name == "default"):
-                yield InstanceRef(instance_kind="workspace", instance_name=ws.name)
 
 
 KIND_REGISTRY["workspace-template"] = _WorkspaceTemplateKind()

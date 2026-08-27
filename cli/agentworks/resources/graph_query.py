@@ -5,20 +5,15 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
-from agentworks.db.database import Database
-from agentworks.errors import AgentworksError, StateError
+from agentworks.errors import NotFoundError, StateError
 from agentworks.resources.access import ResourceIdentity, resolve_resource
-from agentworks.resources.kind import KIND_REGISTRY, InstanceRef
 from agentworks.resources.reference import RefRelationship, ResourceReference
 
 if TYPE_CHECKING:
-    from contextlib import AbstractContextManager
-    from pathlib import Path
-    from types import TracebackType
-
     from agentworks.machine_output import JsonObject
+    from agentworks.resources.kind import InstanceRef
     from agentworks.resources.registry import Registry
 
 
@@ -36,13 +31,6 @@ class GraphNodeType(StrEnum):
 class GraphEdgeType(StrEnum):
     DECLARED = "declared"
     LIVE_USAGE = "live-usage"
-
-
-class LiveSourceState(StrEnum):
-    UNOPENED = "unopened"
-    ABSENT = "absent"
-    OPEN = "open"
-    CLOSED = "closed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,14 +76,12 @@ class GraphEdge:
         if self.edge_type is GraphEdgeType.DECLARED:
             valid = (
                 self.source.node_type is GraphNodeType.RESOURCE
-                and self.target.node_type is GraphNodeType.RESOURCE
                 and isinstance(self.relationship, RefRelationship)
                 and self.usage is not None
             )
         else:
             valid = (
                 self.source.node_type is GraphNodeType.LIVE_INSTANCE
-                and self.target.node_type is GraphNodeType.RESOURCE
                 and self.relationship is RefRelationship.USES
                 and self.usage is None
                 and self.declared_by is None
@@ -131,10 +117,6 @@ def resource_graph_identity(value: ResourceIdentity) -> GraphIdentity:
     return GraphIdentity(GraphNodeType.RESOURCE, value.kind, value.name)
 
 
-def live_graph_identity(ref: InstanceRef) -> GraphIdentity:
-    return GraphIdentity(GraphNodeType.LIVE_INSTANCE, ref.instance_kind, ref.instance_name)
-
-
 def node_type_rank(value: GraphNodeType) -> int:
     return 0 if value is GraphNodeType.RESOURCE else 1
 
@@ -162,14 +144,21 @@ def edge_fact_key(edge: GraphEdge) -> tuple[object, ...]:
     )
 
 
-def declared_graph_edge(ref: ResourceReference) -> GraphEdge:
+def reference_graph_edge(registry: Registry, ref: ResourceReference) -> GraphEdge:
+    """Project one retained reference with both nodes' public types."""
+    target_type = GraphNodeType.LIVE_INSTANCE if registry.graph.is_live(ref.kind, ref.name) else GraphNodeType.RESOURCE
+    if registry.graph.is_live(*ref.source):
+        return _live_usage_edge(
+            GraphIdentity(GraphNodeType.LIVE_INSTANCE, ref.source[0], ref.source[1]),
+            GraphIdentity(target_type, ref.kind, ref.name),
+        )
     declared_by = None
     if ref.declared_by is not None:
         declared_by = ResourceIdentity(ref.declared_by[0], ref.declared_by[1])
     return GraphEdge(
         edge_type=GraphEdgeType.DECLARED,
         source=GraphIdentity(GraphNodeType.RESOURCE, ref.source[0], ref.source[1]),
-        target=GraphIdentity(GraphNodeType.RESOURCE, ref.kind, ref.name),
+        target=GraphIdentity(target_type, ref.kind, ref.name),
         relationship=ref.relationship,
         usage=ref.usage,
         declared_by=declared_by,
@@ -192,145 +181,38 @@ def _neighbor_candidate_key(value: tuple[GraphIdentity, GraphEdge]) -> tuple[obj
     return (*identity_key(neighbor), *edge_fact_key(edge))
 
 
-class DatabaseLiveSource:
-    """Lazy, request-scoped projection of persisted live instance facts."""
-
-    def __init__(self, database_path: Path) -> None:
-        self.database_path = database_path
-        self.state = LiveSourceState.UNOPENED
-        self._db: Database | None = None
-        self._read_transaction_context: AbstractContextManager[None] | None = None
-        self._entered = False
-
-    def __enter__(self) -> DatabaseLiveSource:
-        if self._entered or self.state is LiveSourceState.CLOSED:
-            raise StateError("a live graph source is single-use", entity_kind="database")
-        self._entered = True
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_value: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> Literal[False]:
-        try:
-            if self._read_transaction_context is not None:
-                self._read_transaction_context.__exit__(exc_type, exc_value, traceback)
-        finally:
-            try:
-                if self._db is not None:
-                    self._db.close()
-            finally:
-                self.state = LiveSourceState.CLOSED
-        return False
-
-    def supports(self, kind: str) -> bool:
-        self._ensure_openable()
-        handler = KIND_REGISTRY.get(kind)
-        return handler is not None and callable(getattr(handler, "instances", None))
-
-    def instances_for(
-        self,
-        registry: Registry,
-        current: GraphIdentity,
-        row: object,
-    ) -> tuple[InstanceRef, ...]:
-        self._ensure_openable()
-        if self.state is LiveSourceState.UNOPENED:
-            self._open()
-        if self.state is LiveSourceState.ABSENT:
-            return ()
-
-        handler = KIND_REGISTRY.get(current.kind)
-        method = getattr(handler, "instances", None) if handler is not None else None
-        if not callable(method) or self._db is None:
-            raise StateError(
-                "the resource kind has no live-instance source",
-                entity_kind=current.kind,
-                entity_name=current.name,
-            )
-        try:
-            return tuple(method(self._db, registry, row))
-        except Exception as error:
-            raise StateError(
-                "live-instance projection failed",
-                entity_kind=current.kind,
-                entity_name=current.name,
-            ) from error
-
-    def _ensure_openable(self) -> None:
-        if self.state is LiveSourceState.CLOSED:
-            raise StateError("the live graph source is closed", entity_kind="database")
-
-    def _open(self) -> None:
-        try:
-            self.database_path.stat()
-        except FileNotFoundError:
-            self.state = LiveSourceState.ABSENT
-            return
-        except OSError as error:
-            raise StateError("state database inspection failed", entity_kind="database") from error
-
-        try:
-            database = Database(self.database_path, read_only=True)
-        except AgentworksError:
-            raise
-        except Exception as error:
-            raise StateError("state database open failed", entity_kind="database") from error
-
-        try:
-            transaction = database.read_transaction()
-            transaction.__enter__()
-        except BaseException as error:
-            database.close()
-            if isinstance(error, Exception) and not isinstance(error, AgentworksError):
-                raise StateError("state database transaction failed", entity_kind="database") from error
-            raise
-        self._db = database
-        self._read_transaction_context = transaction
-        self.state = LiveSourceState.OPEN
-
-
 def focused_graph_facts(
     registry: Registry,
     focus: ResourceIdentity,
-    live_source: DatabaseLiveSource,
 ) -> FocusedGraphFacts:
     """Return only declared edges touching ``focus`` and its current live users."""
-    with live_source:
-        if not registry.is_finalized:
-            raise StateError("graph queries require a finalized registry", entity_kind="registry")
-        resolved = resolve_resource(registry, focus)
-        focus_graph = resource_graph_identity(focus)
+    if not registry.is_finalized:
+        raise StateError("graph queries require a finalized registry", entity_kind="registry")
+    resolve_resource(registry, focus)
+    focus_graph = resource_graph_identity(focus)
 
-        dependencies = tuple(
-            sorted(
-                (declared_graph_edge(ref) for ref in registry.graph.edges_of(focus.kind, focus.name)),
-                key=edge_fact_key,
-            )
+    dependencies = tuple(
+        sorted(
+            (reference_graph_edge(registry, ref) for ref in registry.graph.edges_of(focus.kind, focus.name)),
+            key=edge_fact_key,
         )
-        dependents = tuple(
-            sorted(
-                (declared_graph_edge(ref) for ref in registry.graph.incoming_edges_of(focus.kind, focus.name)),
-                key=edge_fact_key,
-            )
+    )
+    dependents = tuple(
+        sorted(
+            (reference_graph_edge(registry, ref) for ref in registry.graph.incoming_edges_of(focus.kind, focus.name)),
+            key=edge_fact_key,
         )
-        if any(edge.source != focus_graph for edge in dependencies):
-            raise AssertionError("a focused dependency does not start at the focus")
-        if any(edge.target != focus_graph for edge in dependents):
-            raise AssertionError("a focused dependent does not end at the focus")
+    )
+    if any(edge.source != focus_graph for edge in dependencies):
+        raise AssertionError("a focused dependency does not start at the focus")
+    if any(edge.target != focus_graph for edge in dependents):
+        raise AssertionError("a focused dependent does not end at the focus")
 
-        used_by: tuple[InstanceRef, ...] | None = None
-        if live_source.supports(focus.kind):
-            used_by = tuple(
-                sorted(
-                    live_source.instances_for(registry, focus_graph, resolved.resource),
-                    key=lambda ref: identity_key(live_graph_identity(ref)),
-                )
-            )
-
-    return FocusedGraphFacts(dependencies, dependents, used_by)
+    return FocusedGraphFacts(
+        dependencies,
+        dependents,
+        registry.graph.compatibility_live_users_of(focus.kind, focus.name),
+    )
 
 
 def show_graph(
@@ -338,61 +220,71 @@ def show_graph(
     focus: ResourceIdentity,
     direction: GraphDirection,
     depth_limit: int | None,
-    live_source: DatabaseLiveSource,
 ) -> GraphResult:
     """Return the deterministic fact graph reachable from one resource."""
-    with live_source:
-        if not registry.is_finalized:
-            raise StateError("graph queries require a finalized registry", entity_kind="registry")
-        resolved_focus = resolve_resource(registry, focus)
-        query = GraphQuery(focus, direction, depth_limit)
-        focus_id = resource_graph_identity(focus)
-        distance = {focus_id: 0}
-        queue = deque([focus_id])
-        edges_by_key: dict[tuple[object, ...], GraphEdge] = {}
+    if not registry.is_finalized:
+        raise StateError("graph queries require a finalized registry", entity_kind="registry")
+    try:
+        registry.lookup(focus.kind, focus.name)
+    except KeyError:
+        from agentworks.resources.live import LIVE_RESOURCE_KINDS
 
-        while queue:
-            current = queue.popleft()
-            current_distance = distance[current]
-            if depth_limit is not None and current_distance >= depth_limit:
+        if focus.kind in LIVE_RESOURCE_KINDS:
+            raise NotFoundError(
+                f"{focus.kind} {focus.name!r} not found",
+                entity_kind=focus.kind,
+                entity_name=focus.name,
+            ) from None
+        resolve_resource(registry, focus)
+        raise AssertionError("resolve_resource returned for a missing graph focus") from None
+    focus_is_live = registry.graph.is_live(focus.kind, focus.name)
+    if not focus_is_live:
+        resolve_resource(registry, focus)
+    query = GraphQuery(focus, direction, depth_limit)
+    focus_id = GraphIdentity(
+        GraphNodeType.LIVE_INSTANCE if focus_is_live else GraphNodeType.RESOURCE,
+        focus.kind,
+        focus.name,
+    )
+    distance = {focus_id: 0}
+    queue = deque([focus_id])
+    edges_by_key: dict[tuple[object, ...], GraphEdge] = {}
+
+    while queue:
+        current = queue.popleft()
+        current_distance = distance[current]
+        if depth_limit is not None and current_distance >= depth_limit:
+            continue
+
+        candidates: list[tuple[GraphIdentity, GraphEdge]] = []
+
+        if direction in {GraphDirection.DEPENDENCIES, GraphDirection.BOTH}:
+            for ref in registry.graph.edges_of(current.kind, current.name):
+                if ref.relationship in GRAPH_TRAVERSED_RELATIONSHIPS:
+                    edge = reference_graph_edge(registry, ref)
+                    candidates.append((edge.target, edge))
+
+        if direction in {GraphDirection.DEPENDENTS, GraphDirection.BOTH}:
+            for ref in registry.graph.incoming_edges_of(current.kind, current.name):
+                if ref.relationship in GRAPH_TRAVERSED_RELATIONSHIPS:
+                    edge = reference_graph_edge(registry, ref)
+                    candidates.append((edge.source, edge))
+
+        for neighbor, edge in sorted(candidates, key=_neighbor_candidate_key):
+            edges_by_key.setdefault(edge_fact_key(edge), edge)
+            if neighbor in distance:
                 continue
+            distance[neighbor] = current_distance + 1
+            queue.append(neighbor)
 
-            row = resolved_focus.resource if current == focus_id else registry.lookup(current.kind, current.name)
-            candidates: list[tuple[GraphIdentity, GraphEdge]] = []
-
-            if direction in {GraphDirection.DEPENDENCIES, GraphDirection.BOTH}:
-                for ref in registry.graph.edges_of(current.kind, current.name):
-                    if ref.relationship in GRAPH_TRAVERSED_RELATIONSHIPS:
-                        edge = declared_graph_edge(ref)
-                        candidates.append((edge.target, edge))
-
-            if direction in {GraphDirection.DEPENDENTS, GraphDirection.BOTH}:
-                for ref in registry.graph.incoming_edges_of(current.kind, current.name):
-                    if ref.relationship in GRAPH_TRAVERSED_RELATIONSHIPS:
-                        edge = declared_graph_edge(ref)
-                        candidates.append((edge.source, edge))
-
-                if live_source.supports(current.kind):
-                    for instance in live_source.instances_for(registry, current, row):
-                        live = live_graph_identity(instance)
-                        candidates.append((live, _live_usage_edge(live, current)))
-
-            for neighbor, edge in sorted(candidates, key=_neighbor_candidate_key):
+    reached = set(distance)
+    for source in sorted(reached, key=identity_key):
+        for ref in registry.graph.edges_of(source.kind, source.name):
+            if ref.relationship not in GRAPH_TRAVERSED_RELATIONSHIPS:
+                continue
+            edge = reference_graph_edge(registry, ref)
+            if edge.target in reached:
                 edges_by_key.setdefault(edge_fact_key(edge), edge)
-                if neighbor in distance:
-                    continue
-                distance[neighbor] = current_distance + 1
-                if neighbor.node_type is GraphNodeType.RESOURCE:
-                    queue.append(neighbor)
-
-        reached_resources = {identity for identity in distance if identity.node_type is GraphNodeType.RESOURCE}
-        for source in sorted(reached_resources, key=identity_key):
-            for ref in registry.graph.edges_of(source.kind, source.name):
-                if ref.relationship not in GRAPH_TRAVERSED_RELATIONSHIPS:
-                    continue
-                edge = declared_graph_edge(ref)
-                if edge.target in reached_resources:
-                    edges_by_key.setdefault(edge_fact_key(edge), edge)
 
     nodes = tuple(
         sorted(

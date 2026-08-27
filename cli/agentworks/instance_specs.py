@@ -373,20 +373,23 @@ def report_overlay_outcome(outcome: OverlayOutcome | None) -> Iterator[None]:
         render_overlay_outcome(outcome)
 
 
-def validate_effective_instance_references(
+def ensure_effective_references_enabled(
     registry: Registry,
     references: tuple[ResourceReference, ...],
 ) -> None:
-    """Validate and use-gate references added by an effective instance layer."""
+    """Use-gate declarable references in an effective instance layer."""
     from agentworks.resources.access import ensure_recipe_enabled
     from agentworks.resources.kind import KIND_REGISTRY
-    from agentworks.resources.reference import validate_reference_targets
 
-    validate_reference_targets(registry, references)
     for reference in references:
-        handler = KIND_REGISTRY[reference.kind]
-        if handler.category == "declarable":
+        handler = KIND_REGISTRY.get(reference.kind)
+        if handler is not None and handler.category == "declarable":
             ensure_recipe_enabled(registry, reference.kind, reference.name)
+        if reference.declared_by is not None:
+            declared_kind, declared_name = reference.declared_by
+            declared_handler = KIND_REGISTRY.get(declared_kind)
+            if declared_handler is not None and declared_handler.category == "declarable":
+                ensure_recipe_enabled(registry, declared_kind, declared_name)
 
 
 def _parse_json_object(value: str) -> JsonObject:

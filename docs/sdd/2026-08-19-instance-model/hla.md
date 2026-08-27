@@ -1,8 +1,8 @@
 # HLA: Instance Model and State
 
-- Status: R2 accepted; R4 implemented; R3 and R5 design in progress
+- Status: R2 accepted; R4 correction complete pending merge; R3 and R5 design in progress
 - Date: 2026-08-23
-- Last revised: 2026-08-26
+- Last revised: 2026-08-27
 - FRD: [frd.md](./frd.md)
 - Assessment: [database-assessment.md](./database-assessment.md)
 - Store contract: [store-contract.md](./store-contract.md)
@@ -171,9 +171,60 @@ particular, an empty additive list or map does not invent a removal tombstone th
 inheritance does not have.
 
 An effective-instance validator runs after the overlay fold. It reuses domain reference and
-capability rules without publishing the overlay as a fake registry template. Shape validation alone
-is insufficient because a validly shaped overlay can still name a missing secret, recipe,
-credential, install command, or harness integration.
+capability rules by publishing the owning live or pending resource, without publishing the overlay
+as a fake registry template. Shape validation alone is insufficient because a validly shaped overlay
+can still name a missing secret, recipe, credential, install command, or harness integration.
+
+### Live and pending resource publication
+
+The Registry keeps its original collect-then-finalize lifecycle. Built-ins, capability rows,
+plugins, YAML manifests, and the state database are peer publishers into one mutable Registry;
+`Registry.finalize()` still runs exactly once after collection and produces the one retained frozen
+dependency graph. The Registry remains publisher-agnostic and does not open or interpret the
+database itself. Bootstrap owns publisher order and a database publisher projects typed, value-free
+live-resource rows from one read snapshot.
+
+Here, **declared resource** means a registry resource supplied by built-in, plugin, YAML, or
+auto-declaration machinery. **Live resource** means a database-backed VM, workspace, agent, session,
+or console, independent of current power or process state. **Pending live resource** means the
+candidate resource a creating command adds only to its prospective registry build. All are
+first-class graph nodes; capability implementation instances remain held implementation objects, not
+graph nodes.
+
+A live resource publishes both the intrinsic relationships recorded by its row and the references
+from its fully resolved current desired declaration: its selected template chain plus the persisted
+final instance layer. Intrinsic relationships include workspace and agent ownership by a VM, session
+ownership by a workspace and optional agent, and console membership. It does not publish provider
+observations or claim that desired state has been applied. The graph node is derived rather than
+separately persisted, just like a YAML-backed node: deleting or changing the durable source changes
+the next build, and an auto-declared target disappears when no collected reference requires it. An
+explicit declaration wins under the Registry's existing precedence rules.
+
+Creation uses the same assembly path with one extra publisher for pending resources. The candidate
+VM and admin declarations are one pending VM publication; compound session creation publishes each
+candidate child and the session. Pending publication precedes database publication so a reinit
+candidate can claim the live identity whose durable desired declaration it will replace; the
+database publisher skips that identity while publishing every other row from the same snapshot.
+Finalization validates references, performs normal miss handling, and synthesizes auto-declared
+targets before any lifecycle mutation. A failed command discards the prospective registry. After
+success, the database publisher reconstructs the equivalent live rows on the next command.
+
+The database publisher reads and decodes only typed desired declarations and emits references
+through each domain's existing `effective_references` function. It never scans raw JSON for names or
+exposes plaintext environment values. A stored declaration that cannot be decoded must produce the
+established typed unsupported-or-malformed state result; graph construction must not silently claim
+completeness after dropping that owner.
+
+Finalization derives the established JSON v1 `used_by` projection from this same published graph.
+That compatibility view keeps its existing per-kind semantics, including session-oriented secret
+reachability and null for kinds without a live-instance projection. Ordinary graph queries retain
+the complete direct live edges. Neither view reads the database after finalization.
+
+A durable row may outlive a selected template, site, owner, or member. Publication preserves that
+live node for recovery but emits an intrinsic edge only when its target is present; it never invents
+the target or falls back to a default. An absent selected declaration also means there is no honest
+effective declaration to project for that slot. R5 reports the selection as unresolved. Pending
+resources remain strict because a command must not create a new stranded row.
 
 The database is the one desired-overlay authority. R4 does not add VM, workspace, agent, or session
 instance documents to the resource-manifest frontend. A spec can be supplied only at an existing
@@ -276,9 +327,11 @@ combine:
 - row-backed applied hardware values plus applied slices from the same database snapshot; and
 - structural comparison states: not recorded, unverifiable, match, or drift.
 
-`resource show` already holds one lazy read-only database transaction for live facts. Any overlay or
-applied read added there uses that connection. Doctor reads applied SSH slices in one batch, derives
-the current configured private identity once per run, and reports per-VM state without an N+1 query.
+Registry assembly already publishes structural live facts from one read-only database transaction.
+Inspection reads those facts only from the retained graph rather than opening a second structural
+snapshot. Any overlay or applied-state projection added to `resource show` must use one explicit
+request snapshot. Doctor reads applied SSH slices in one batch, derives the current configured
+private identity once per run, and reports per-VM state without an N+1 query.
 
 JSON v1 retains every existing field and adds optional tagged objects. Human and JSON forms project
 the same structural facts. Resolved specs include configured secret references only, never resolved

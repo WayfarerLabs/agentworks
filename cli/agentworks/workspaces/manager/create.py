@@ -155,7 +155,7 @@ def create_workspace(
 
     # build_registry runs first so framework miss-policies fire before
     # any template / DB / VM business logic.
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
 
     ws_name = name
     validate_name(ws_name, max_length=MAX_WORKSPACE_NAME_LENGTH)
@@ -186,14 +186,6 @@ def create_workspace(
         instance_name=name,
     )
     template = layered_template.value
-    from agentworks.instance_specs import validate_effective_instance_references
-    from agentworks.workspaces.template import effective_references
-
-    validate_effective_instance_references(
-        registry,
-        effective_references(template, ("workspace", name), layered_template.provenance),
-    )
-
     # Advise if the resolved template's repo remote will not resolve
     # cleanly against the declared git credentials (config-only, no
     # tokens). Each credential judges the URL by its own host/scope
@@ -206,6 +198,22 @@ def create_workspace(
             output.warn(advisory)
 
     vm = _resolve_vm(db, vm_name)
+    from agentworks.resources.live_publish import project_workspace_live_resource
+
+    pending = project_workspace_live_resource(
+        name=name,
+        vm_name=vm.name,
+        template_name=template_name or "default",
+        layered=layered_template,
+    )
+    registry = load_request_registry(
+        config,
+        live_database=db,
+        pending_publishers=(lambda target: target.add_live(pending),),
+    )
+    from agentworks.instance_specs import ensure_effective_references_enabled
+
+    ensure_effective_references_enabled(registry, pending.outbound)
     _guard_vm_status(vm)
 
     # BUILD: the command names its direct resources (this VM, the

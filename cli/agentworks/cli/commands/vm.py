@@ -178,8 +178,9 @@ def vm_verify_connection(
     from agentworks.vms.manager import verify_vm_connection
 
     config = load_config()
-    registry = load_request_registry(config)
-    result = verify_vm_connection(get_db(), config, registry, name)
+    db = get_db()
+    registry = load_request_registry(config, live_database=db)
+    result = verify_vm_connection(db, config, registry, name)
     output.result(f"VM '{result.name}' connection verified via {result.transport}.")
 
 

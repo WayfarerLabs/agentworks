@@ -46,7 +46,7 @@ def test_secret_description_rejects_unsafe_name_independently_of_preview() -> No
             description="test secret",
             hint=None,
             references=(),
-            used_by=None,
+            used_by=(),
             source_mappings=(),
             resolution=StaticResolution(
                 category=StaticResolutionCategory.UNAVAILABLE,

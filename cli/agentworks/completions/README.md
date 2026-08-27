@@ -35,9 +35,10 @@ hashes it, and hands both to one of the three shell backends.
    recognizer on the completion-shaped stream pair (stdin a tty, stderr not) so an ordinary
    interactive run of the same command is never mistaken for a completion probe.
 
-   Resource-list completers are registry-backed instead. Their `agw resource list --names-only`
-   callback finalizes configuration but never opens state, so they stay available when the database
-   is absent or unusable and do not pass the probe marker.
+   Resource and secret completers are Registry-backed and may need database-published live
+   references. Their marker-free names-only callbacks use the same bounded read-only completion
+   opener directly, fall back to declared candidates when state is absent or unusable, and never
+   create or migrate state.
 
    `spec.py` drops `hidden=True` parameters from the tree, which is why `--completion-probe` itself
    never completes.
@@ -84,7 +85,8 @@ The tree itself needs nothing, but four things are hand-maintained and the tests
 - **A new database-backed completer** must join `DATABASE_BACKED_DYNAMIC_COMPLETIONS` and pass
   `--completion-probe` in its snippet, or completion can trip migration paths.
 - **A new resource-list completer** must join `RESOURCE_LIST_DYNAMIC_COMPLETIONS` and keep its
-  callback marker-free, because that names-only path is registry-only.
+  callback marker-free, because the resource and secret names-only commands own their bounded
+  read-only completion opener and safe declared-candidate fallback directly.
 
 Any ordinary list command backing a completer also owes `--names-only` per the `cli-conventions`
 rule: one name per line, no header, no formatting, and no round-trips that make pressing Tab slow. A
