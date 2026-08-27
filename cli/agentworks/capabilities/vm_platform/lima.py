@@ -248,8 +248,7 @@ class LimaPlatform(VMPlatform):
 
             proc = subprocess.run(
                 shlex.split(command),
-                # Byte-mode stdin: see agentworks.subprocess_io for why text
-                # mode would corrupt a line-oriented payload on Windows.
+                # Byte-mode stdin: text mode rewrites LF to CRLF on Windows (see agentworks.subprocess_io).
                 input=stdin_bytes(input_text),
                 capture_output=True,
             )

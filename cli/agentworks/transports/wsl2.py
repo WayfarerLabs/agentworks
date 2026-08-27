@@ -79,8 +79,7 @@ class WSL2Transport(Transport):
         try:
             result = subprocess.run(
                 args,
-                # Byte-mode stdin: see agentworks.subprocess_io for why text
-                # mode would corrupt a line-oriented payload on Windows.
+                # Byte-mode stdin: text mode rewrites LF to CRLF on Windows (see agentworks.subprocess_io).
                 input=stdin_bytes(input_text),
                 capture_output=True,
                 timeout=t,
@@ -144,7 +143,7 @@ class WSL2Transport(Transport):
             capture_output=True,
         )
         if result.returncode != 0:
-            raise SSHError(f"WSL2 copy failed: {result.stderr.decode().strip()}")
+            raise SSHError(f"WSL2 copy failed: {decode_stream(result.stderr).strip()}")
 
     def copy_from(
         self,
@@ -164,7 +163,7 @@ class WSL2Transport(Transport):
             capture_output=True,
         )
         if result.returncode != 0:
-            raise SSHError(f"WSL2 copy failed: {result.stderr.decode().strip()}")
+            raise SSHError(f"WSL2 copy failed: {decode_stream(result.stderr).strip()}")
         Path(local_path).write_bytes(result.stdout)
 
     def call_streaming(

@@ -80,7 +80,8 @@ class Transport(abc.ABC):
         it via ``-o SetEnv``, non-SSH transports prepend it as scoped
         assignments to the bash payload. ``input_text`` streams sensitive
         text to the command on stdin; transports omit it from argv, logs,
-        returned output, and failure diagnostics.
+        returned output, and failure diagnostics, and deliver it byte-exact,
+        so a guest ``read -r`` binds exactly the value that was sent.
 
         ``retries`` and ``on_retry`` are best-effort across transports:
         SSH retries on connection-level timeouts (default 1 attempt);
