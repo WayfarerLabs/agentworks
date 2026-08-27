@@ -31,6 +31,7 @@ from agentworks.errors import ProvisioningError, StateError
 from agentworks.schema import AgwModel, NonEmptyStr
 from agentworks.ssh import SSHError, SSHTarget
 from agentworks.ssh import run as ssh_run
+from agentworks.subprocess_io import decode_stream, stdin_bytes
 from agentworks.topics import TopicProse
 from agentworks.transports import LimaTransport, RemoteLimaTransport, SSHTransport
 
@@ -247,21 +248,20 @@ class LimaPlatform(VMPlatform):
 
             proc = subprocess.run(
                 shlex.split(command),
-                input=input_text,
+                # Byte-mode stdin: see agentworks.subprocess_io for why text
+                # mode would corrupt a line-oriented payload on Windows.
+                input=stdin_bytes(input_text),
                 capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
             )
             if check and proc.returncode != 0:
                 if input_text is not None:
                     # A parser may echo stdin to stderr, so this diagnostic
                     # exposes neither captured stream.
                     raise SSHError(f"limactl stdin command failed (exit {proc.returncode}): {command}")
-                raise SSHError(f"limactl failed: {proc.stderr.strip()}")
+                raise SSHError(f"limactl failed: {decode_stream(proc.stderr).strip()}")
             # Sensitive stdin commands do not expose their output either:
             # an arbitrary program can reflect stdin to either stream.
-            return "" if input_text is not None else proc.stdout
+            return "" if input_text is not None else decode_stream(proc.stdout)
 
     def preflight(self, ctx: RunContext) -> None:
         """Local sites: ``limactl`` must be on PATH. Remote sites defer

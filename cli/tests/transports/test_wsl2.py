@@ -9,8 +9,8 @@ import pytest
 
 from agentworks.ssh import SSHError, SSHResult
 from agentworks.transports import WSL2Transport
-from tests.transports.conftest import fail_completed as _fail_completed
-from tests.transports.conftest import ok_completed as _ok_completed
+from tests.transports.conftest import fail_binary_completed as _fail_binary_completed
+from tests.transports.conftest import ok_binary_completed as _ok_binary_completed
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 def test_run_invokes_wsl_with_distro_and_user() -> None:
     t = WSL2Transport(distro_name="my-distro", user="agentworks")
     with patch("agentworks.transports.wsl2.subprocess.run") as mock_run:
-        mock_run.return_value = _ok_completed()
+        mock_run.return_value = _ok_binary_completed()
         t.run("echo hi")
         argv = mock_run.call_args[0][0]
         assert argv[:7] == [
@@ -43,7 +43,7 @@ def test_run_invokes_wsl_with_distro_and_user() -> None:
 def test_run_env_injected_as_bash_assignment_prefix() -> None:
     t = WSL2Transport(distro_name="my-distro")
     with patch("agentworks.transports.wsl2.subprocess.run") as mock_run:
-        mock_run.return_value = _ok_completed()
+        mock_run.return_value = _ok_binary_completed()
         t.run("echo hi", env={"FOO": "bar"})
         argv = mock_run.call_args[0][0]
         assert argv[8].startswith("FOO=bar ")
@@ -53,7 +53,7 @@ def test_run_env_injected_as_bash_assignment_prefix() -> None:
 def test_run_sudo_wraps_with_bash_c() -> None:
     t = WSL2Transport(distro_name="my-distro")
     with patch("agentworks.transports.wsl2.subprocess.run") as mock_run:
-        mock_run.return_value = _ok_completed()
+        mock_run.return_value = _ok_binary_completed()
         t.run("cmd1 && cmd2", sudo=True)
         argv = mock_run.call_args[0][0]
         assert "sudo -n bash -c 'cmd1 && cmd2'" in argv[8]
@@ -62,7 +62,7 @@ def test_run_sudo_wraps_with_bash_c() -> None:
 def test_run_check_true_raises_on_nonzero() -> None:
     t = WSL2Transport(distro_name="my-distro")
     with patch("agentworks.transports.wsl2.subprocess.run") as mock_run:
-        mock_run.return_value = _fail_completed(returncode=5)
+        mock_run.return_value = _fail_binary_completed(returncode=5)
         with pytest.raises(SSHError, match="WSL2 command failed"):
             t.run("false")
 
@@ -70,7 +70,7 @@ def test_run_check_true_raises_on_nonzero() -> None:
 def test_run_check_false_returns_result() -> None:
     t = WSL2Transport(distro_name="my-distro")
     with patch("agentworks.transports.wsl2.subprocess.run") as mock_run:
-        mock_run.return_value = _fail_completed(returncode=5)
+        mock_run.return_value = _fail_binary_completed(returncode=5)
         result = t.run("false", check=False)
         assert isinstance(result, SSHResult)
         assert result.returncode == 5

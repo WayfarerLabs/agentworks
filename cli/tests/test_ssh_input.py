@@ -17,8 +17,8 @@ def test_ssh_run_streams_input_without_logging_it() -> None:
         process.return_value = subprocess.CompletedProcess(
             [],
             0,
-            stdout=f"stored {secret}",
-            stderr=f"diagnostic {secret}",
+            stdout=f"stored {secret}".encode(),
+            stderr=f"diagnostic {secret}".encode(),
         )
 
         result = run(
@@ -31,14 +31,15 @@ def test_ssh_run_streams_input_without_logging_it() -> None:
     assert result.stderr == ""
     argv = process.call_args.args[0]
     assert secret not in repr(argv)
-    assert process.call_args.kwargs["input"] == secret
+    # Byte-exact delivery: the payload crosses the pipe with no newline rewriting.
+    assert process.call_args.kwargs["input"] == secret.encode()
 
 
 def test_ssh_run_failure_diagnostic_omits_input() -> None:
     secret = "ssh-stdin-swordfish"
 
     with patch("agentworks.ssh.subprocess.run") as process:
-        process.return_value = subprocess.CompletedProcess([], 1, stdout="", stderr=f"remote echoed {secret}")
+        process.return_value = subprocess.CompletedProcess([], 1, stdout=b"", stderr=f"remote echoed {secret}".encode())
 
         with pytest.raises(SSHError) as caught:
             run(
@@ -58,8 +59,8 @@ def test_ssh_run_check_false_discards_input_reflections() -> None:
         process.return_value = subprocess.CompletedProcess(
             [],
             1,
-            stdout=f"stored {secret}",
-            stderr=f"diagnostic {secret}",
+            stdout=f"stored {secret}".encode(),
+            stderr=f"diagnostic {secret}".encode(),
         )
 
         result = run(
