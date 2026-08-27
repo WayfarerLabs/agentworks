@@ -13,6 +13,7 @@ import subprocess
 from typing import TYPE_CHECKING
 
 from agentworks.ssh import SSHError, SSHResult
+from agentworks.subprocess_io import decode_stream, stdin_bytes
 from agentworks.transports._shared import env_assignment_prefix
 from agentworks.transports.base import Transport
 
@@ -70,11 +71,9 @@ class LimaTransport(Transport):
         try:
             result = subprocess.run(
                 args,
-                input=input_text,
+                # Byte-mode stdin: text mode rewrites LF to CRLF on Windows (see agentworks.subprocess_io).
+                input=stdin_bytes(input_text),
                 capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
                 timeout=t,
             )
         except subprocess.TimeoutExpired as err:
@@ -87,8 +86,8 @@ class LimaTransport(Transport):
             raise SSHError(f"Lima stdin command could not be executed: {command}") from None
         ssh_result = SSHResult(
             returncode=result.returncode,
-            stdout="" if input_text is not None else result.stdout,
-            stderr="" if input_text is not None else result.stderr,
+            stdout="" if input_text is not None else decode_stream(result.stdout),
+            stderr="" if input_text is not None else decode_stream(result.stderr),
         )
         if self.logger is not None:
             self.logger.log_command(command, ssh_result)
@@ -96,7 +95,7 @@ class LimaTransport(Transport):
             if input_text is not None:
                 raise SSHError(f"Lima stdin command failed (exit {result.returncode}): {command}") from None
             raise SSHError(
-                f"Lima command failed (exit {result.returncode}): {command}\nstderr: {result.stderr.strip()}"
+                f"Lima command failed (exit {result.returncode}): {command}\nstderr: {ssh_result.stderr.strip()}"
             )
         return ssh_result
 

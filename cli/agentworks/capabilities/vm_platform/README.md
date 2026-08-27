@@ -544,11 +544,14 @@ and the operator-facing command banners that the rest of the codebase calls "pha
   installs Tailscale, `create()` sends the resolved key through one fixed guest command on the
   provisioning transport's stdin. The value is absent from provider-retained configuration and
   host-side argv; the guest `tailscale` process necessarily receives its `--auth-key` argument
-  transiently. Proxmox runs the key-bearing bootstrap from a private guest-agent staging file inside
-  `create()`. WSL2 runs its generated bootstrap from private local and guest staging inside
-  `create()`. Each staging file receives one verified removal attempt. `create()` returns only after
-  bootstrap succeeds and Tailscale joins, or it raises after rolling back partial backend resources.
-  **This stage runs once, at create.**
+  transiently. Delivery is byte-exact, so the guest `read -r` binds exactly the resolved value: the
+  stdin pipe runs in byte mode because a text-mode pipe rewrites LF to the host's line ending and
+  would append a carriage return to the key on Windows (see `agentworks/subprocess_io.py`). Proxmox
+  runs the key-bearing bootstrap from a private guest-agent staging file inside `create()`. WSL2
+  runs its generated bootstrap from private local and guest staging inside `create()`. Each staging
+  file receives one verified removal attempt. `create()` returns only after bootstrap succeeds and
+  Tailscale joins, or it raises after rolling back partial backend resources. **This stage runs
+  once, at create.**
 - **Phase A** receives only the returned optional Tailscale IP and the provisioning transport. If
   the platform could not discover an IP after joining, Phase A runs only `tailscale ip -4` over that
   transport. It then records the IP and provisioning state, verifies Tailscale SSH, closes temporary
