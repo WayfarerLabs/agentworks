@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 from agentworks.declared_resource import replace_fields
 from agentworks.errors import ConfigError, StateError
 from agentworks.resources.kind import KIND_REGISTRY
+from agentworks.resources.live import LiveResource
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping, Sequence
@@ -38,7 +39,6 @@ if TYPE_CHECKING:
         FinalizeContext,
         Readiness,
     )
-    from agentworks.resources.live import LiveResource
     from agentworks.resources.reference import ReferenceEntry, ResourceReference
 
 
@@ -88,10 +88,6 @@ class Registry:
         # only during ``add`` (the weak short-circuit) and once at ``finalize``
         # (the weak-implies-disabled guard); meaningless after finalize.
         self._weak: set[tuple[str, str]] = set()
-        # Database-backed and pending live resources share the dependency
-        # walk with declared resources, but remain a distinct public graph
-        # node type and never enter declared-resource list iteration.
-        self._live_keys: set[tuple[str, str]] = set()
 
     # -- Construction --------------------------------------------------
 
@@ -205,7 +201,6 @@ class Registry:
         """
         if self._frozen:
             raise RuntimeError("registry is frozen; add_live must precede finalize")
-        key = (resource.kind, resource.name)
         if resource.name in self._resources.get(resource.kind, {}):
             raise StateError(
                 "duplicate live-resource publication",
@@ -213,11 +208,10 @@ class Registry:
                 entity_name=resource.name,
             )
         self._resources.setdefault(resource.kind, {})[resource.name] = resource
-        self._live_keys.add(key)
 
     def has_live(self, kind: str, name: str) -> bool:
         """Return whether a publisher has already claimed a live identity."""
-        return (kind, name) in self._live_keys
+        return isinstance(self._resources.get(kind, {}).get(name), LiveResource)
 
     @staticmethod
     def _check_collision(kind: str, name: str, existing: Any, incoming: Origin) -> _CollisionDecision:
@@ -510,7 +504,6 @@ class Registry:
             all_outbound,
             readiness,
             enablement,
-            live_keys=self._live_keys,
         )
         for kind in list(self._resources.keys()):
             for name in list(self._resources[kind].keys()):
@@ -858,7 +851,7 @@ class Registry:
         it yet).
         """
         return (
-            resource for name, resource in self._resources.get(kind, {}).items() if (kind, name) not in self._live_keys
+            resource for resource in self._resources.get(kind, {}).values() if not isinstance(resource, LiveResource)
         )
 
     def iter_kind_items(self, kind: str) -> Iterator[tuple[str, Any]]:
@@ -872,7 +865,7 @@ class Registry:
         return (
             (name, resource)
             for name, resource in self._resources.get(kind, {}).items()
-            if (kind, name) not in self._live_keys
+            if not isinstance(resource, LiveResource)
         )
 
     def iter_kinds(self) -> Iterator[str]:
@@ -883,7 +876,7 @@ class Registry:
         return (
             kind
             for kind, resources in self._resources.items()
-            if any((kind, name) not in self._live_keys for name in resources)
+            if any(not isinstance(resource, LiveResource) for resource in resources.values())
         )
 
     @property

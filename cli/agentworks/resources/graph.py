@@ -258,17 +258,6 @@ class DependencyGraph:
         node = self._nodes.get((kind, name))
         return False if node is None else node.live
 
-    def live_dependents_of(self, kind: str, name: str) -> tuple[InstanceRef, ...]:
-        """Live resources whose effective desired state references this node."""
-        from agentworks.resources.kind import InstanceRef
-
-        refs = {
-            InstanceRef(reference.source[0], reference.source[1])
-            for reference in self._nodes[(kind, name)].incoming
-            if self._nodes[reference.source].live
-        }
-        return tuple(sorted(refs, key=lambda ref: (ref.instance_kind, ref.instance_name)))
-
     def compatibility_live_users_of(self, kind: str, name: str) -> tuple[InstanceRef, ...] | None:
         """Return the stable JSON v1 live-usage projection for one row."""
         if kind not in USED_BY_SUPPORTED_KINDS:
@@ -507,8 +496,6 @@ def build_graph(
     all_outbound: Mapping[tuple[str, str], Sequence[ResourceReference]],
     readiness: Mapping[tuple[str, str], Readiness] | None = None,
     enablement: Mapping[tuple[str, str], Enablement] | None = None,
-    *,
-    live_keys: set[tuple[str, str]] | frozenset[tuple[str, str]] = frozenset(),
 ) -> DependencyGraph:
     """Build the frozen ``DependencyGraph`` from the finalized resource map and
     the two accumulated edge maps.
@@ -537,6 +524,12 @@ def build_graph(
 
     verdicts = readiness or {}
     opt_in = enablement or {}
+    live_keys = frozenset(
+        (kind, name)
+        for kind, kind_resources in resources.items()
+        for name, resource in kind_resources.items()
+        if isinstance(resource, LiveResource)
+    )
     inbound: dict[tuple[str, str], list[ReferenceEntry]] = {}
     for target, refs in all_refs.items():
         for ref in refs:

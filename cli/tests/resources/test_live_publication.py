@@ -46,6 +46,16 @@ def _registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *manifests: Manif
     return path, config
 
 
+def _direct_live_dependents(registry: Registry, kind: str, name: str) -> set[tuple[str, str]]:
+    result = show_graph(
+        registry,
+        ResourceIdentity(kind, name),
+        GraphDirection.DEPENDENTS,
+        1,
+    )
+    return {(edge.source.kind, edge.source.name) for edge in result.edges if edge.edge_type is GraphEdgeType.LIVE_USAGE}
+
+
 def test_database_publisher_frames_path_inspection_failures(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -79,8 +89,6 @@ def test_agent_overlay_auto_declares_secret_and_live_graph_edge(
     assert secret.origin.variant == "auto-declared"
     assert secret.origin.source == ("agent", "dev")
     assert secret.description
-    assert registry.graph.live_dependents_of("secret", "instance-token") == (InstanceRef("agent", "dev"),)
-
     result = show_graph(
         registry,
         ResourceIdentity("secret", "instance-token"),
@@ -187,7 +195,7 @@ def test_secret_used_by_v1_projects_session_reachability_from_live_scopes(
         tty_access=TtyInteractionAccess.UNAVAILABLE,
     )
 
-    assert registry.graph.live_dependents_of("secret", "session-token") == (InstanceRef("agent", "dev"),)
+    assert _direct_live_dependents(registry, "secret", "session-token") == {("agent", "dev")}
     assert description.used_by == (InstanceRef("session", "run"),)
 
 
@@ -251,8 +259,8 @@ def test_secret_used_by_v1_preserves_mode_sensitive_effective_environment(
     assert users("session-token") == known_sessions
     assert users("admin-token") == (InstanceRef("session", "admin-run"),)
     assert users("agent-token") == (InstanceRef("session", "agent-run"),)
-    assert registry.graph.live_dependents_of("secret", "admin-token") == (InstanceRef("vm", "box"),)
-    assert registry.graph.live_dependents_of("secret", "agent-token") == (InstanceRef("agent", "dev"),)
+    assert _direct_live_dependents(registry, "secret", "admin-token") == {("vm", "box")}
+    assert _direct_live_dependents(registry, "secret", "agent-token") == {("agent", "dev")}
     db.close()
 
 
@@ -306,9 +314,10 @@ def test_live_auto_declaration_tracks_multiple_owners_and_last_owner_removal(
     _persist_agent(db, "two", "shared-token")
 
     registry = build_registry(config)
-    assert {
-        (ref.instance_kind, ref.instance_name) for ref in registry.graph.live_dependents_of("secret", "shared-token")
-    } == {("agent", "one"), ("agent", "two")}
+    assert _direct_live_dependents(registry, "secret", "shared-token") == {
+        ("agent", "one"),
+        ("agent", "two"),
+    }
 
     db.delete_agent("one")
     assert build_registry(config).lookup("secret", "shared-token")
@@ -445,7 +454,6 @@ def test_finalized_registry_queries_do_not_reinspect_mutated_database(
     registry = build_registry(config, live_database=db)
 
     db.delete_agent("dev")
-    assert registry.graph.live_dependents_of("secret", "snapshot-token") == (InstanceRef("agent", "dev"),)
     result = show_graph(
         registry,
         ResourceIdentity("secret", "snapshot-token"),
