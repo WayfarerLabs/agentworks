@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import multiprocessing
 import os
 import queue
@@ -33,7 +34,7 @@ from agentworks.db import (
     render_restore_command,
 )
 from agentworks.errors import BusyStateError, StateError
-from tests.conftest import CapturedOutput, held_exclusive_lock
+from tests.conftest import CapturedOutput, held_exclusive_lock, write_cfg
 
 
 def _build_schema(path: Path, target_version: int) -> None:
@@ -641,6 +642,45 @@ def test_get_db_initializes_version_zero_without_interaction_or_backup(
     assert _version(path) == LATEST_VERSION
     assert not backup_directory(path).exists()
     assert captured_output.notices == []
+
+
+def test_ordinary_command_migrates_before_publishing_live_resources(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The first ordinary command after an upgrade must not be blocked by
+    live publication's current-schema requirement. The command-owned
+    writable open migrates first, then gives that open database to the
+    Registry publisher.
+    """
+    from typer.testing import CliRunner
+
+    import agentworks.config as config_module
+    import agentworks.db as db_module
+    from agentworks.cli import app
+
+    path = tmp_path / "state.db"
+    _build_schema(path, LATEST_VERSION - 1)
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "INSERT INTO vms (name, site, hostname, template) VALUES (?, ?, ?, ?)",
+        ("upgrade-witness", "lima-local", "lima--upgrade-witness", None),
+    )
+    connection.commit()
+    connection.close()
+    config_path = write_cfg(tmp_path)
+    monkeypatch.setattr(config_module, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(db_module, "DB_PATH", path)
+
+    result = CliRunner().invoke(
+        app,
+        ["resource", "list", "--kind", "vm-template", "--output", "json"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert _version(path) == LATEST_VERSION
+    resources = json.loads(result.stdout)["data"]["resources"]
+    assert {row["name"]: row["used_by_count"] for row in resources} == {"default": 1}
 
 
 def test_safe_open_refuses_changed_but_still_stale_state(tmp_path: Path) -> None:
