@@ -6,15 +6,23 @@ inspect argv. They each need a way to spin up a ``CompletedProcess``
 mock for success and failure. Centralizing the helpers here keeps the
 per-transport tests focused on the argv they're asserting.
 
-Two pairs, because production runs child processes in two modes. A call
-that only captures output stays in text mode and yields ``str`` streams;
-use :func:`ok_completed` / :func:`fail_completed` for those (the ``copy``
-paths). A call that writes stdin runs in byte mode so no platform newline
-rewriting can touch the payload (see ``agentworks.subprocess_io``) and
-yields ``bytes`` streams; use :func:`ok_binary_completed` /
-:func:`fail_binary_completed` for those (the ``run`` paths). Handing a
-transport the wrong pair fails the way production would if the mode and
-the decoding disagreed.
+Two pairs, because production runs child processes in two modes, and the
+split is per call site rather than per method. A ``subprocess.run`` that
+writes stdin itself runs in byte mode, so no platform newline rewriting
+can touch the payload (see ``agentworks.subprocess_io``), and hands back
+``bytes``: that is ``LimaTransport.run`` and ``WSL2Transport.run``, which
+take :func:`ok_binary_completed` / :func:`fail_binary_completed`. Every
+other call stays in text mode and hands back ``str``, which takes
+:func:`ok_completed` / :func:`fail_completed`. ``SSHTransport.run`` and
+``RemoteLimaTransport.run`` belong to that second group despite running
+commands: they hand a sensitive payload to ``agentworks.ssh.run`` instead
+of writing stdin themselves, so their own call never leaves text mode.
+
+Picking the pair keeps a mock honest about what its transport will
+decode. It does not pin the mode, because a byte-mode stream fed to a
+text-mode transport still passes. What pins the mode is the
+``kwargs["input"] == ....encode()`` assertion in the sensitive-stdin
+tests, which fails as soon as a call site hands over ``str`` again.
 """
 
 from __future__ import annotations
