@@ -286,3 +286,48 @@ class TestColorGate:
         monkeypatch.delenv("NO_COLOR", raising=False)
         monkeypatch.setattr("agentworks.cli._typer_output.non_interactive", lambda: True)
         assert TyperHandler()._color_enabled(self._stream(is_a_tty=True)) is True
+
+
+# The defect this guards broke one prompt path while an identical fix sat eight
+# lines above it, so the invariant belongs to every path at once: a default that
+# is empty is never rendered. "[]" is click's own suffix, not wording of ours,
+# so pinning its absence survives any rewording of the labels themselves.
+_EMPTY_DEFAULT_PROMPTS = [
+    pytest.param("answer", lambda h: h.pause("Press enter to continue", 0), id="pause"),
+    pytest.param("answer", lambda h: h.prompt("Workspace name", 0), id="prompt"),
+    pytest.param("answer", lambda h: h.prompt_secret("Secret 'git-token': the auth token", 0), id="prompt_secret"),
+    pytest.param("1", lambda h: h.choose("Select a site", ["msm4", "wsl2"], 0), id="choose"),
+]
+
+
+@pytest.mark.parametrize(("answer", "call"), _EMPTY_DEFAULT_PROMPTS)
+def test_no_prompt_renders_an_empty_default_suffix(
+    answer: str,
+    call: object,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Both click's and typer's vendored copies: `prompt` and `choose` route
+    # through typer.prompt, `pause` and `prompt_secret` through click.prompt.
+    for module in ("click.termui", "typer._click.termui"):
+        monkeypatch.setattr(f"{module}.visible_prompt_func", lambda text: answer)
+        monkeypatch.setattr(f"{module}.hidden_prompt_func", lambda text: answer)
+
+    call(TyperHandler())  # type: ignore[operator]
+
+    rendered = capsys.readouterr()
+    assert "[]" not in rendered.out + rendered.err
+
+
+def test_prompt_still_renders_a_real_default(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Suppression is scoped to the empty case; a real default still guides."""
+    for module in ("click.termui", "typer._click.termui"):
+        monkeypatch.setattr(f"{module}.visible_prompt_func", lambda text: "")
+
+    assert TyperHandler().prompt("Workspace name", 0, default="wf") == "wf"
+
+    rendered = capsys.readouterr()
+    assert "[wf]" in rendered.out + rendered.err
