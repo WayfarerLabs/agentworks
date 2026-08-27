@@ -71,12 +71,13 @@ def create_agent(
     from agentworks.agents.templates import resolve_template_with_provenance
     from agentworks.bootstrap import load_request_registry
 
-    # build_registry runs first so framework miss-policies (e.g.
+    # A declaration-only registry runs first so framework miss-policies (e.g.
     # GitCredentialKind's error policy on agent template's
     # git_credentials list, future TemplateReference typos on
     # inherits) fire before any template / DB / VM business logic
-    # surfaces its own NotFoundError.
-    registry = load_request_registry(config, live_database=db)
+    # surfaces its own NotFoundError. The pending-plus-durable registry
+    # built below is the authoritative graph for mutation.
+    registry = load_request_registry(config, include_live_resources=False)
 
     from agentworks.instance_specs import parse_instance_spec
 

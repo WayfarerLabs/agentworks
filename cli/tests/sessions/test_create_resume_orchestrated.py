@@ -116,6 +116,31 @@ def _patch_transports(monkeypatch: pytest.MonkeyPatch, admin: _Target, agent: _T
     monkeypatch.setattr("agentworks.transports.agent_transport", agent_factory)
 
 
+def test_create_flag_validation_precedes_unrelated_unsupported_live_overlay(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.db import VersionedPayload
+    from agentworks.sessions.manager import create_session
+
+    monkeypatch.setattr("agentworks.bootstrap.load_request_registry", _real_load_request_registry)
+    _seed_stopped_proxmox_vm(db)
+    db.instance_state.put_desired_overlay("vm", "box", VersionedPayload(2, {"future": True}))
+
+    with pytest.raises(ValidationError) as caught:
+        create_session(
+            db,
+            make_config(),
+            name="s1",
+            workspace_spec="{}",
+            admin=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert (caught.value.entity_kind, caught.value.entity_name) == ("session", "s1")
+
+
 # -- resume: the pre-kill probe carry ----------------------------------------
 
 

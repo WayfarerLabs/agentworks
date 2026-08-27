@@ -36,9 +36,9 @@ hashes it, and hands both to one of the three shell backends.
    interactive run of the same command is never mistaken for a completion probe.
 
    Resource and secret completers are Registry-backed and may need database-published live
-   references. Their marker-free names-only callbacks use the same bounded read-only completion
-   opener directly, fall back to declared candidates when state is absent or unusable, and never
-   create or migrate state.
+   references. Their marker-free names-only callbacks use the shared `load_completion_registry`
+   helper, which owns the bounded read-only opener and declared-candidate fallback when state is
+   absent or unusable; the callbacks never create or migrate state.
 
    `spec.py` drops `hidden=True` parameters from the tree, which is why `--completion-probe` itself
    never completes.
@@ -71,7 +71,7 @@ edited.
 
 ## Changing a CLI command
 
-The tree itself needs nothing, but four things are hand-maintained and the tests in
+The tree itself needs nothing, but five things are hand-maintained and the tests in
 `cli/tests/test_completions.py` are what catch them:
 
 - **A new or renamed top-level group** must be reflected in that test module's `EXPECTED_GROUPS`.
@@ -85,8 +85,9 @@ The tree itself needs nothing, but four things are hand-maintained and the tests
 - **A new database-backed completer** must join `DATABASE_BACKED_DYNAMIC_COMPLETIONS` and pass
   `--completion-probe` in its snippet, or completion can trip migration paths.
 - **A new resource-list completer** must join `RESOURCE_LIST_DYNAMIC_COMPLETIONS` and keep its
-  callback marker-free, because the resource and secret names-only commands own their bounded
-  read-only completion opener and safe declared-candidate fallback directly.
+  callback marker-free. Resource and secret names-only commands load candidates through the shared
+  `load_completion_registry` helper, which owns the bounded read-only opener and safe
+  declared-candidate fallback.
 
 Any ordinary list command backing a completer also owes `--names-only` per the `cli-conventions`
 rule: one name per line, no header, no formatting, and no round-trips that make pressing Tab slow. A

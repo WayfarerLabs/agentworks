@@ -153,9 +153,10 @@ def create_workspace(
     """
     from agentworks.bootstrap import load_request_registry
 
-    # build_registry runs first so framework miss-policies fire before
-    # any template / DB / VM business logic.
-    registry = load_request_registry(config, live_database=db)
+    # A declaration-only registry runs first so framework miss-policies fire
+    # before any template / DB / VM business logic. The pending-plus-durable
+    # registry built below is the authoritative graph for mutation.
+    registry = load_request_registry(config, include_live_resources=False)
 
     ws_name = name
     validate_name(ws_name, max_length=MAX_WORKSPACE_NAME_LENGTH)

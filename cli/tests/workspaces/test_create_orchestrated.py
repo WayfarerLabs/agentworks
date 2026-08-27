@@ -217,6 +217,9 @@ def test_create_bad_template_bails_before_any_prompt_or_start(
     VM. Validation relocated behind the gate would trip this."""
     config = make_config()
     _seed_vm(db)
+    from agentworks.db import VersionedPayload
+
+    db.instance_state.put_desired_overlay("vm", "box", VersionedPayload(2, {"future": True}))
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
 

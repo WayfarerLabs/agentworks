@@ -74,6 +74,27 @@ def _no_tailscale_check(monkeypatch: pytest.MonkeyPatch) -> None:
 # -- vm create: the derived graph --------------------------------------------
 
 
+def test_create_unknown_template_precedes_unrelated_unsupported_live_overlay(
+    make_config,
+    db: Database,
+) -> None:
+    from agentworks.errors import NotFoundError
+
+    db.insert_vm("unrelated", site="lima-local", hostname="unrelated")
+    db.instance_state.put_desired_overlay("vm", "unrelated", VersionedPayload(2, {"future": True}))
+
+    with pytest.raises(NotFoundError) as caught:
+        vm_manager.create_vm(
+            db,
+            make_config(),
+            name="new-vm",
+            template="missing",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert (caught.value.entity_kind, caught.value.entity_name) == ("vm-template", "missing")
+
+
 def test_create_graph_derives_from_declared_resources(make_config, db: Database) -> None:
     """The pending VM's graph: its edges are the resolved template, the
     chosen site, and the admin template's declared credentials, all

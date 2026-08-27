@@ -78,6 +78,9 @@ def test_create_with_missing_vm_preserves_domain_error_and_state(
     db: Database,
     make_config,
 ) -> None:
+    db.insert_vm("unrelated", site="proxmox", hostname="unrelated")
+    db.instance_state.put_desired_overlay("vm", "unrelated", VersionedPayload(2, {"future": True}))
+
     with pytest.raises(NotFoundError) as caught:
         agent_manager.create_agent(
             db,
