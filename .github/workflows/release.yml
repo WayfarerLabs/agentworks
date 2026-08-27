@@ -14,25 +14,41 @@ permissions:
   id-token: write # Required for trusted publishing via OIDC
 
 jobs:
-  verify-tag-on-main:
+  verify-tag-on-release-branch:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - name: Verify tag is reachable from main
+      - name: Verify tag is reachable from a release branch
+        # A published tag must sit on a release line rather than anywhere a
+        # tag can be pushed. `main` is protected by the `protect-default`
+        # ruleset; maintenance branches (0.15.x, 0.16.x, ...) are NOT, as of
+        # 2026-08-27, because that ruleset targets `~DEFAULT_BRANCH` only.
+        # So this accepts them on convention rather than on enforcement, and
+        # anyone with write access could create `9.9.x`, push to it directly,
+        # and tag it. Extending the ruleset to `[0-9]+.[0-9]+.x` with the same
+        # pull_request and required_status_checks rules is what would make
+        # this an enforced boundary; until then the honest description is that
+        # a maintenance branch is trusted, not verified.
         run: |
-          git fetch origin main
+          git fetch --quiet origin '+refs/heads/*:refs/remotes/origin/*'
           TAG="${{ inputs.tag || github.ref_name }}"
           SHA="$(git rev-parse "refs/tags/${TAG}^{commit}")"
-          if ! git merge-base --is-ancestor "$SHA" origin/main; then
-            echo "Error: tag ${TAG} is not an ancestor of main"
-            exit 1
-          fi
+          BRANCHES="origin/main $(git for-each-ref --format='%(refname:short)' refs/remotes/origin \
+            | grep -E '^origin/[0-9]+\.[0-9]+\.x$' || true)"
+          for ref in $BRANCHES; do
+            if git merge-base --is-ancestor "$SHA" "$ref"; then
+              echo "tag ${TAG} is reachable from ${ref}"
+              exit 0
+            fi
+          done
+          echo "Error: tag ${TAG} is not reachable from main or any maintenance branch"
+          exit 1
 
   test:
-    needs: verify-tag-on-main
+    needs: verify-tag-on-release-branch
     runs-on: ubuntu-latest
     defaults:
       run:
