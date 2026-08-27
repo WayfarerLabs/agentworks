@@ -126,6 +126,10 @@ same snapshot.
 - Registry construction that promises a complete resource graph must include an available,
   compatible state snapshot. Deliberately state-free surfaces may omit the database publisher only
   when their contract does not claim live-resource completeness.
+- Doctor remains non-migrating and diagnostic. When database publication is unavailable, it builds a
+  fresh declared-only registry, marks live-resource coverage unavailable, and continues the checks
+  that are truthful over declarations. It never continues with the mutable Registry on which a
+  publisher failed or describes the declared-only result as a complete graph.
 - No database migration or standalone row for an auto-declared target is required.
 - Database publication adds bounded decode and resolution work proportional to stored live
   resources. It performs no provider, network, secret-value, or SSH-key operation.

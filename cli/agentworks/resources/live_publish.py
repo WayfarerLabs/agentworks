@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from functools import partial
 from typing import TYPE_CHECKING, cast
 
 from agentworks.resources.live import LiveResource
 from agentworks.resources.reference import ResourceReference
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
+    from typing import NoReturn
 
     from agentworks.agents.template import AgentTemplate
     from agentworks.agents.templates import ResolvedAgentTemplate
@@ -35,6 +38,26 @@ def _selected(
 
 def _targets(references: tuple[ResourceReference, ...]) -> tuple[tuple[str, str], ...]:
     return tuple(dict.fromkeys((ref.kind, ref.name) for ref in references))
+
+
+def _raise_malformed_database(error: BaseException) -> NoReturn:
+    from agentworks.errors import StateError
+
+    raise StateError(
+        "state database is unavailable or malformed",
+        entity_kind="database",
+        hint="Restore a valid state database backup before retrying.",
+    ) from error
+
+
+def _read_database[T](read: Callable[[], T]) -> T:
+    """Run one persisted read, translating only its malformed-data failures."""
+    from agentworks.db import DatabaseDriverError
+
+    try:
+        return read()
+    except (DatabaseDriverError, IndexError, RecursionError, TypeError, ValueError) as error:
+        _raise_malformed_database(error)
 
 
 def _is_published(registry: Registry, kind: str, name: str) -> bool:
@@ -210,7 +233,7 @@ def agent_live_resource(db: Database, registry: Registry, row: AgentRow) -> Live
     from agentworks.instance_specs import get_instance_overlay
 
     selected = row.template or "default"
-    overlay = get_instance_overlay(db, "agent", row.name)
+    overlay = _read_database(lambda: get_instance_overlay(db, "agent", row.name))
     if not _is_published(registry, "agent-template", selected):
         return project_agent_live_resource(
             name=row.name,
@@ -238,7 +261,7 @@ def workspace_live_resource(db: Database, registry: Registry, row: WorkspaceRow)
     from agentworks.workspaces.templates import resolve_template_with_provenance
 
     selected = row.template or "default"
-    overlay = get_instance_overlay(db, "workspace", row.name)
+    overlay = _read_database(lambda: get_instance_overlay(db, "workspace", row.name))
     if not _is_published(registry, "workspace-template", selected):
         return project_workspace_live_resource(
             name=row.name,
@@ -265,7 +288,7 @@ def session_live_resource(db: Database, registry: Registry, row: SessionRow) -> 
     from agentworks.instance_specs import get_instance_overlay
     from agentworks.sessions.templates import resolve_template_with_provenance
 
-    overlay = get_instance_overlay(db, "session", row.name)
+    overlay = _read_database(lambda: get_instance_overlay(db, "session", row.name))
     if not _is_published(registry, "session-template", row.template):
         projected = project_session_live_resource(
             name=row.name,
@@ -318,7 +341,7 @@ def vm_live_resource(db: Database, registry: Registry, row: VMRow) -> LiveResour
 
     selected_vm = row.template or "default"
     selected_admin = row.admin_template or "default"
-    overlays = get_vm_instance_overlays(db, row.name)
+    overlays = _read_database(lambda: get_vm_instance_overlays(db, row.name))
     vm_template_name = _published_name(registry, "vm-template", selected_vm)
     admin_template_name = _published_name(registry, "admin-template", selected_admin)
     layered_vm = (
@@ -352,33 +375,33 @@ def vm_live_resource(db: Database, registry: Registry, row: VMRow) -> LiveResour
 
 
 def _publish_database_rows(registry: Registry, db: Database) -> None:
-    for vm in db.list_vms():
+    for vm in _read_database(db.list_vms):
         if registry.has_live("vm", vm.name):
             continue
         registry.add_live(vm_live_resource(db, registry, vm))
-    for workspace in db.list_workspaces():
+    for workspace in _read_database(db.list_workspaces):
         if registry.has_live("workspace", workspace.name):
             continue
         registry.add_live(workspace_live_resource(db, registry, workspace))
-    for agent in db.list_agents():
+    for agent in _read_database(db.list_agents):
         if registry.has_live("agent", agent.name):
             continue
         registry.add_live(agent_live_resource(db, registry, agent))
-    for session in db.list_sessions():
+    for session in _read_database(db.list_sessions):
         if registry.has_live("session", session.name):
             continue
         registry.add_live(session_live_resource(db, registry, session))
-    for console in db.list_consoles():
+    for console in _read_database(db.list_consoles):
         if registry.has_live("console", console.name):
             continue
+        console_name = console.name
+        members = _read_database(partial(db.list_console_sessions, console_name))
         registry.add_live(
             project_console_live_resource(
-                name=console.name,
+                name=console_name,
                 vm_name=_published_name(registry, "vm", console.vm_name),
                 session_names=tuple(
-                    member.session_name
-                    for member in db.list_console_sessions(console.name)
-                    if _is_published(registry, "session", member.session_name)
+                    member.session_name for member in members if _is_published(registry, "session", member.session_name)
                 ),
             )
         )
@@ -386,8 +409,18 @@ def _publish_database_rows(registry: Registry, db: Database) -> None:
 
 def publish_open_database_live_resources(registry: Registry, db: Database) -> None:
     """Publish from a caller-owned writable or read-only database snapshot."""
-    with db.snapshot():
-        _publish_database_rows(registry, db)
+    _publish_database_snapshot(registry, db)
+
+
+def _publish_database_snapshot(registry: Registry, db: Database) -> None:
+    """Publish one snapshot, translating malformed driver state at the boundary."""
+    from agentworks.db import DatabaseDriverError
+
+    try:
+        with db.snapshot():
+            _publish_database_rows(registry, db)
+    except DatabaseDriverError as error:
+        _raise_malformed_database(error)
 
 
 def publish_database_live_resources(registry: Registry, database_path: Path) -> None:
@@ -411,7 +444,6 @@ def publish_database_live_resources(registry: Registry, database_path: Path) -> 
 
     db = Database(database_path, read_only=True)
     try:
-        with db.snapshot():
-            _publish_database_rows(registry, db)
+        _publish_database_snapshot(registry, db)
     finally:
         db.close()

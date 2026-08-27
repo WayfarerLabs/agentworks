@@ -406,7 +406,11 @@ When the config or a resource manifest fails to load, the groups that depend on 
 Secrets) do not vanish: each renders a single
 `[info] ... skipped (config or manifests unavailable; see the Configuration group)` row, so a
 degraded run keeps the same section skeleton as a healthy one and the Configuration group carries
-the actual failure.
+the actual failure. If only database-backed resource publication is unavailable, doctor still runs
+those groups over the finalized declared-resource graph. The Configuration group marks live-resource
+coverage as unavailable and reports publication failures, while the Database group separately
+reports schema and storage health. Doctor neither presents that view as complete nor migrates the
+database.
 
 ### Secret Sources and Backends
 

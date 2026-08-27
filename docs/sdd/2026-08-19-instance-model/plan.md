@@ -198,7 +198,10 @@ isolated shipped-CLI pass proved durable overlay-only secret discovery, direct g
 session-oriented usage, clearing, last-owner removal, absent and unreadable completion fallback, and
 a pending disabled-resource refusal with no durable publication or provider work. No authorized
 provider inventory was available, so successful provider-backed creation remains covered by unit and
-review evidence rather than a live backend run.
+review evidence rather than a live backend run. A post-handoff correction keeps doctor non-migrating
+while preserving its declared-resource checks when database publication is unavailable; the report
+explicitly marks the missing live-resource coverage instead of treating the partial view as
+complete.
 
 ## Phase 4: R3 applied instance state and SSH proving slice
 

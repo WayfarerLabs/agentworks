@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,7 @@ from agentworks import db as db_module
 from agentworks.bootstrap import build_registry
 from agentworks.capabilities.secret_backend import OperatorImpact, TtyInteractionAccess
 from agentworks.config import load_config
-from agentworks.db import Database, SessionMode, VersionedPayload
+from agentworks.db import LATEST_VERSION, Database, SessionMode, VersionedPayload
 from agentworks.doctor import _check_secrets
 from agentworks.errors import NotFoundError, StateError
 from agentworks.resources import InstanceRef, LiveResource, Registry
@@ -72,6 +73,38 @@ def test_database_publisher_frames_path_inspection_failures(
     monkeypatch.setattr(Path, "stat", fail_selected_path)
     with pytest.raises(StateError, match="state database inspection failed") as caught:
         publish_database_live_resources(Registry(), path)
+    assert caught.value.entity_kind == "database"
+
+
+def test_database_publisher_translates_malformed_current_schema_reads(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "state.db"
+    connection = sqlite3.connect(path)
+    connection.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
+    connection.execute("INSERT INTO schema_version (version) VALUES (?)", (LATEST_VERSION,))
+    connection.commit()
+    connection.close()
+
+    with pytest.raises(StateError) as caught:
+        publish_database_live_resources(Registry(), path)
+
+    assert caught.value.entity_kind == "database"
+
+
+def test_database_publisher_translates_malformed_current_row_shapes(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "state.db"
+    database = Database(path)
+    database.insert_vm("box", "lima-local", "box")
+    database._conn.execute("ALTER TABLE vms DROP COLUMN admin_template")
+    database._conn.commit()
+    database.close()
+
+    with pytest.raises(StateError) as caught:
+        publish_database_live_resources(Registry(), path)
+
     assert caught.value.entity_kind == "database"
 
 

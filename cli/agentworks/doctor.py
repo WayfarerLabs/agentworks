@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.secret_backend import TtyInteractionAccess
     from agentworks.config import Config
     from agentworks.machine_output import JsonObject
+    from agentworks.manifests import ManifestSet
     from agentworks.resources.registry import Registry
     from agentworks.secrets.preview import ResolutionPreview
     from agentworks.secrets.sources import SecretSourceDecl, SourceProvenance
@@ -676,7 +677,7 @@ def _check_tailscale() -> HealthGroup:
 def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     """Return config and registry facts for the complete doctor report."""
     from agentworks.config import CONFIG_PATH, ConfigError
-    from agentworks.errors import StateError, ValidationError
+    from agentworks.errors import ValidationError
 
     g = HealthGroup("Configuration")
     config = None
@@ -763,22 +764,13 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     _check_ssh_key(g, config.operator.ssh_public_key, "public")
     _check_ssh_key(g, config.operator.ssh_private_key, "private")
 
-    # Resource registry (framework validation: references, miss
-    # policies, cycles). A failure here is a config problem, reported
-    # like any other; the resource-dependent checks below are skipped.
-    from agentworks.bootstrap import build_registry
-
     if manifests is None:
         return g, config, None
 
-    try:
-        registry = build_registry(config, manifests=manifests)
-    except (ConfigError, StateError) as e:
-        g.fail(
-            "Resource registry",
-            str(e),
-            hint=e.hint,
-        )
+    registry, registry_check = _build_doctor_registry(config, manifests)
+    if registry_check is not None:
+        g.checks.append(registry_check)
+    if registry is None:
         return g, config, None
 
     # Dotfiles
@@ -800,6 +792,61 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     # readiness on where a secret comes from: the asymmetry we reject.
 
     return g, config, registry
+
+
+def _build_doctor_registry(
+    config: Config,
+    manifests: ManifestSet,
+) -> tuple[Registry | None, HealthCheck | None]:
+    """Build the fullest registry doctor can inspect without changing state.
+
+    The ordinary build remains the healthy fast path. If it fails, build a
+    fresh declared-only Registry rather than continuing with the partially
+    mutated object that failed. A declaration failure still makes the registry
+    unavailable, exactly as before. If only the database-backed build fails,
+    return the finalized declared view and an explicit coverage row so the
+    remaining checks can run without claiming to cover live resources.
+    """
+    from agentworks.bootstrap import build_registry
+    from agentworks.config import ConfigError
+    from agentworks.errors import StateError, ValidationError
+
+    caught_errors = (ConfigError, StateError, ValidationError)
+    try:
+        return build_registry(config, manifests=manifests), None
+    except caught_errors as error:
+        live_failure = error
+
+    try:
+        declared_registry = build_registry(
+            config,
+            manifests=manifests,
+            include_live_resources=False,
+        )
+    except caught_errors as error:
+        return None, HealthCheck(
+            "Resource registry",
+            Status.FAIL,
+            str(error),
+            hint=error.hint,
+        )
+
+    from agentworks import db
+    from agentworks.db import SchemaState, inspect_schema
+
+    inspection = inspect_schema(db.DB_PATH)
+    if inspection.state is not SchemaState.CURRENT:
+        return declared_registry, HealthCheck(
+            "Live resource coverage",
+            Status.INFO,
+            "not checked (database publication unavailable; see the Database group)",
+        )
+    return declared_registry, HealthCheck(
+        "Live resource coverage",
+        Status.FAIL,
+        str(live_failure),
+        hint=live_failure.hint,
+    )
 
 
 def _check_ssh_key(g: HealthGroup, path: object, label: str) -> None:
