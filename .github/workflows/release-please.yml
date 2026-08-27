@@ -2,7 +2,10 @@ name: Release Please
 
 on:
   push:
-    branches: [main]
+    # Maintenance branches (0.15.x, 0.16.x, ...) release alongside main. Each
+    # branch carries its own manifest, so each computes its own next version:
+    # a branch cut from a release tag with only fix commits produces a patch.
+    branches: [main, "[0-9]+.[0-9]+.x"]
 
 jobs:
   release-please:
@@ -25,6 +28,9 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          # Release against the branch that triggered this run, so one workflow
+          # serves main and every maintenance branch without further edits.
+          target-branch: ${{ github.ref_name }}
 
       - name: Extract release PR branch
         id: extract
