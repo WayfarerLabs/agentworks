@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentworks.ssh import SSHError, SSHResult
+from agentworks.subprocess_io import decode_stream, stdin_bytes
 from agentworks.transports._shared import env_assignment_prefix
 from agentworks.transports.base import Transport
 
@@ -78,11 +79,10 @@ class WSL2Transport(Transport):
         try:
             result = subprocess.run(
                 args,
-                input=input_text,
+                # Byte-mode stdin: see agentworks.subprocess_io for why text
+                # mode would corrupt a line-oriented payload on Windows.
+                input=stdin_bytes(input_text),
                 capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
                 timeout=t,
             )
         except subprocess.TimeoutExpired:
@@ -97,8 +97,8 @@ class WSL2Transport(Transport):
             raise SSHError(f"WSL2 command timed out after {t}s: {command}") from None
         ssh_result = SSHResult(
             returncode=result.returncode,
-            stdout="" if input_text is not None else result.stdout,
-            stderr="" if input_text is not None else result.stderr,
+            stdout="" if input_text is not None else decode_stream(result.stdout),
+            stderr="" if input_text is not None else decode_stream(result.stderr),
         )
         if self.logger is not None:
             self.logger.log_command(command, ssh_result)
@@ -106,7 +106,7 @@ class WSL2Transport(Transport):
             if input_text is not None:
                 raise SSHError(f"WSL2 stdin command failed (exit {result.returncode}): {command}") from None
             raise SSHError(
-                f"WSL2 command failed (exit {result.returncode}): {command}\nstderr: {result.stderr.strip()}"
+                f"WSL2 command failed (exit {result.returncode}): {command}\nstderr: {ssh_result.stderr.strip()}"
             )
         return ssh_result
 

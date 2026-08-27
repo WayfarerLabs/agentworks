@@ -165,7 +165,7 @@ def test_local_stdin_io_failure_refuses_start_without_persistent_file(
 
     def _fail_stdin(command: list[str], **kwargs: object) -> SimpleNamespace:
         commands.append(command)
-        assert kwargs["input"] == _PROVIDER_YAML
+        assert kwargs["input"] == _PROVIDER_YAML.encode()
         raise failure
 
     monkeypatch.setattr("subprocess.run", _fail_stdin)
@@ -184,11 +184,11 @@ def test_local_lima_sensitive_stdin_failure_omits_reflected_key(monkeypatch: pyt
 
     def _reflect_stdin(*args: object, **kwargs: object) -> SimpleNamespace:
         del args
-        assert kwargs["input"] == actual_auth_key
+        assert kwargs["input"] == actual_auth_key.encode()
         return SimpleNamespace(
             returncode=1,
-            stdout=f"reflected {actual_auth_key}",
-            stderr=f"rejected {actual_auth_key}",
+            stdout=f"reflected {actual_auth_key}".encode(),
+            stderr=f"rejected {actual_auth_key}".encode(),
         )
 
     monkeypatch.setattr("subprocess.run", _reflect_stdin)
@@ -208,13 +208,13 @@ def test_remote_lima_failure_omits_sensitive_input_and_raw_results(
 ) -> None:
     actual_auth_key = "tskey-remote-stdin-sentinel"
 
-    def _reflect_stdin(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
-        assert kwargs["input"] == actual_auth_key
+    def _reflect_stdin(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        assert kwargs["input"] == actual_auth_key.encode()
         return subprocess.CompletedProcess(
             args[0],
             1,
-            stdout=f"reflected {actual_auth_key}",
-            stderr=f"rejected {actual_auth_key}",
+            stdout=f"reflected {actual_auth_key}".encode(),
+            stderr=f"rejected {actual_auth_key}".encode(),
         )
 
     monkeypatch.setattr("agentworks.ssh.subprocess.run", _reflect_stdin)

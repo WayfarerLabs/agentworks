@@ -368,7 +368,7 @@ def test_real_wsl_timeout_drops_reflected_output_and_removes_both_stages(
         command = str(args[-1])
         if "install -m 600" in command:
             guest_files[guest_path] = b""
-            return SimpleNamespace(returncode=0, stdout="", stderr="")
+            return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
         if command == f"cat > {guest_path}":
             content = kwargs["input"]
             assert isinstance(content, bytes)
@@ -383,7 +383,7 @@ def test_real_wsl_timeout_drops_reflected_output_and_removes_both_stages(
             )
         if "rm -f --" in command:
             guest_files.pop(guest_path, None)
-            return SimpleNamespace(returncode=0, stdout="", stderr="")
+            return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
         raise AssertionError(f"unexpected subprocess command: {args}")
 
     monkeypatch.setattr("agentworks.transports.wsl2.subprocess.run", _run)
