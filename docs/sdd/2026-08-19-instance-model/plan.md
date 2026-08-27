@@ -4,7 +4,7 @@
 
 - Status: R2 merged; R4 correction complete pending merge; R3 and R5 pending
 - Date: 2026-08-23
-- Last revised: 2026-08-26
+- Last revised: 2026-08-27
 - Requirements: [frd.md](./frd.md)
 - R1 assessment: [database-assessment.md](./database-assessment.md)
 - R2 contract: [store-contract.md](./store-contract.md)
@@ -192,16 +192,21 @@ auto-declaration, and every inspection surface observes the same resulting graph
 Completed on 2026-08-27. The database and pending candidates are peer Registry publishers before one
 finalization pass; durable absence recovery omits unavailable edges without inventing defaults, and
 JSON v1 `used_by` remains compatible while ordinary graph queries expose direct live relationships.
-The final project, fresh-eyes, and complexity reviews reported no findings, with Muntz at `SHIP`.
-The exact head passed 7,787 Python tests with one skip plus all repository and website gates. An
-isolated shipped-CLI pass proved durable overlay-only secret discovery, direct graph topology,
-session-oriented usage, clearing, last-owner removal, absent and unreadable completion fallback, and
-a pending disabled-resource refusal with no durable publication or provider work. No authorized
-provider inventory was available, so successful provider-backed creation remains covered by unit and
-review evidence rather than a live backend run. A post-handoff correction keeps doctor non-migrating
-while preserving its declared-resource checks when database publication is unavailable; the report
-explicitly marks the missing live-resource coverage instead of treating the partial view as
-complete.
+A post-handoff correction keeps doctor non-migrating while preserving its declared-resource checks
+when database publication is unavailable; the report explicitly marks the missing live-resource
+coverage instead of treating the partial view as complete. Feedback round one then preserved empty
+selectors as unresolved across durable, pending, runtime, and rendering paths; restored
+declared-only completion fallback for typed live-publication failures; replaced authored-prose
+assertions with structural checks; and pinned runtime-closure secret usage plus the database
+publisher's live-kind vocabulary. Correction code head `6ad9bf2e` passed 7,813 non-integration
+Python tests with one skip, and the full local suite passed 7,816 tests with one skip; Ruff,
+formatting, Mypy, file lint, Rulesync, locked-SDD, website, and deterministic-build gates also
+passed. The greenfield project re-review found no remaining code or test issue, the final fresh-eyes
+review was clean, and Muntz reported `SHIP`. An isolated shipped-CLI pass proved durable
+overlay-only secret discovery, direct graph topology, session-oriented usage, clearing, last-owner
+removal, absent and unreadable completion fallback, and a pending disabled-resource refusal with no
+durable publication or provider work. No authorized provider inventory was available, so successful
+provider-backed creation remains covered by unit and review evidence rather than a live backend run.
 
 ## Phase 4: R3 applied instance state and SSH proving slice
 
