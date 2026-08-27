@@ -9,7 +9,7 @@ import typer
 from agentworks import output
 from agentworks.capabilities.secret_backend import OperatorImpact
 from agentworks.cli._app import app
-from agentworks.cli._helpers import get_db, ordinary_tty_interaction_access
+from agentworks.cli._helpers import get_db, load_completion_registry, ordinary_tty_interaction_access
 from agentworks.machine_output import OutputFormat
 
 secret_app = typer.Typer(
@@ -55,20 +55,7 @@ def secret_list(
 
     config = load_config(warn_issues=output_format is OutputFormat.HUMAN, workload_gated_issues_fatal=False)
     if names_only:
-        from agentworks import db as db_module
-        from agentworks.db import open_completion_database
-
-        completion_db = open_completion_database(db_module.DB_PATH)
-        try:
-            registry = load_request_registry(
-                config,
-                warn=output_format is OutputFormat.HUMAN,
-                include_live_resources=completion_db is not None,
-                live_database=completion_db,
-            )
-        finally:
-            if completion_db is not None:
-                completion_db.close()
+        registry = load_completion_registry(config)
     else:
         db = get_db()
         registry = load_request_registry(

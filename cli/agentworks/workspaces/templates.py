@@ -147,7 +147,7 @@ def resolve_live_template_with_provenance(
     except NotFoundError:
         return _resolve_with_provenance(
             {},
-            template_name or "default",
+            "default" if template_name is None else template_name,
             overlay=declaration,
             instance_name=instance_name,
         )

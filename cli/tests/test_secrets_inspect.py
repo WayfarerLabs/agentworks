@@ -244,7 +244,10 @@ def test_names_only_lists_every_registry_secret(tmp_path: Path, monkeypatch) -> 
     assert not database_path.exists()
 
 
-@pytest.mark.parametrize("database_state", ["stale", "newer", "malformed", "busy", "unreadable"])
+@pytest.mark.parametrize(
+    "database_state",
+    ["stale", "newer", "malformed", "busy", "unreadable", "unsupported-overlay", "stranded-overlay"],
+)
 def test_secret_names_only_falls_back_when_database_is_unusable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -254,7 +257,7 @@ def test_secret_names_only_falls_back_when_database_is_unusable(
 
     from agentworks import db
     from agentworks.cli import app
-    from agentworks.db import LATEST_VERSION, Database
+    from agentworks.db import LATEST_VERSION, Database, VersionedPayload
 
     cfg_file = tmp_path / "config.toml"
     _write_base(cfg_file, manifests=[ManifestDoc("secret", "declared", description="declared")])
@@ -275,8 +278,23 @@ def test_secret_names_only_falls_back_when_database_is_unusable(
     elif database_state == "busy":
         lock = sqlite3.connect(database_path)
         lock.execute("BEGIN EXCLUSIVE")
-    else:
+    elif database_state == "unreadable":
         database_path.mkdir()
+    else:
+        database = Database(database_path)
+        database.insert_vm("box", "lima-local", "box")
+        database.insert_agent("dev", "box", "dev")
+        payload = (
+            VersionedPayload(2, {"future_field": True})
+            if database_state == "unsupported-overlay"
+            else VersionedPayload(1, {"user_install_commands": ["gone"]})
+        )
+        database.instance_state.put_desired_overlay(
+            "agent",
+            "dev",
+            payload,
+        )
+        database.close()
 
     monkeypatch.setattr(db, "DB_PATH", database_path)
     try:

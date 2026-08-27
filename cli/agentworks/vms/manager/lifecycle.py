@@ -164,7 +164,7 @@ def create_vm(
 
     ensure_recipe_enabled(registry, "vm-template", vm_tmpl.name)
 
-    selected_admin_template = admin_template or "default"
+    selected_admin_template = "default" if admin_template is None else admin_template
     from agentworks.vms.admin_templates import resolve_template_with_provenance as resolve_admin_template
 
     layered_admin = resolve_admin_template(
@@ -192,7 +192,7 @@ def create_vm(
     pending = project_vm_live_resource(
         name=name,
         site=site,
-        vm_template_name=template or "default",
+        vm_template_name="default" if template is None else template,
         admin_template_name=selected_admin_template,
         layered_vm=layered_vm_tmpl,
         layered_admin=layered_admin,
@@ -692,7 +692,7 @@ def reinit_vm(
     # dropped admin-template surfaces as a typed error naming the selector
     # rather than a raw KeyError traceback. This cheap row + registry
     # check bails before the Tailscale probe below.
-    selected_admin_template = vm.admin_template or "default"
+    selected_admin_template = "default" if vm.admin_template is None else vm.admin_template
     from agentworks.vms.admin import effective_references as admin_effective_references
     from agentworks.vms.admin_templates import resolve_template_with_provenance as resolve_admin_template
 

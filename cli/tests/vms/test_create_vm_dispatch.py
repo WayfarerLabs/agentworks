@@ -317,11 +317,13 @@ def test_create_vm_stores_and_provisions_selected_admin_template(
     assert vm.admin_username == "instance-worker"
 
 
+@pytest.mark.parametrize("admin_template", ["", "ghost"])
 def test_unknown_admin_template_errors_before_any_work(
     db: Database,
     make_config,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: object,
+    admin_template: str,
 ) -> None:
     """An undeclared ``--admin-template`` name fails with the typed
     unknown-template error before any slug prompt, secret resolve, DB row,
@@ -340,9 +342,15 @@ def test_unknown_admin_template_errors_before_any_work(
     monkeypatch.setattr(vm_manager, "_resolve_system_slug", _no_slug)
 
     with pytest.raises(NotFoundError) as exc:
-        vm_manager.create_vm(db, config, name="nvm", admin_template="ghost", interaction=TtyInteractionPolicy.REFUSE)
+        vm_manager.create_vm(
+            db,
+            config,
+            name="nvm",
+            admin_template=admin_template,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
     assert exc.value.entity_kind == "admin-template"
-    assert exc.value.entity_name == "ghost"
+    assert exc.value.entity_name == admin_template
     assert db.get_vm("nvm") is None
 
 

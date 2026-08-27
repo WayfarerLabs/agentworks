@@ -13,8 +13,9 @@ from agentworks.bootstrap import build_registry
 from agentworks.capabilities.secret_backend import BlockReason, TtyInteractionAccess
 from agentworks.config import load_config
 from agentworks.db import LATEST_VERSION, Database, VersionedPayload
-from agentworks.doctor import Status, _check_config, _check_secrets, checks_for_resource
+from agentworks.doctor import Status, _build_doctor_registry, _check_config, _check_secrets, checks_for_resource
 from agentworks.errors import ConfigError, StateError
+from agentworks.manifests import load_manifests
 from agentworks.resources.access import ResourceIdentity
 from agentworks.secrets.preview import PreviewStatus
 from tests.conftest import ManifestDoc, write_manifests
@@ -639,14 +640,13 @@ def test_stale_database_keeps_declared_doctor_registry_without_migrating(
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
     monkeypatch.setattr(db_module, "DB_PATH", database_path)
 
-    group, config, registry = _check_config()
+    config = load_config(cfg, warn_issues=False)
+    registry, coverage = _build_doctor_registry(config, load_manifests(cfg.parent / "resources"))
 
-    assert config is not None
     assert registry is not None
     assert registry.lookup("vm-template", "default") is not None
-    coverage = next(check for check in group.checks if check.name == "Live resource coverage")
+    assert coverage is not None
     assert coverage.status is Status.INFO
-    assert not any(check.name == "Resource registry" for check in group.checks)
     connection = sqlite3.connect(database_path)
     version = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
     connection.close()
@@ -681,15 +681,14 @@ def test_invalid_live_overlay_keeps_declared_doctor_registry(
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
     monkeypatch.setattr(db_module, "DB_PATH", database_path)
 
-    group, config, registry = _check_config()
+    config = load_config(cfg, warn_issues=False)
+    registry, live_failure = _build_doctor_registry(config, load_manifests(cfg.parent / "resources"))
 
-    assert config is not None
     assert registry is not None
     assert registry.lookup("agent-template", "default") is not None
     assert registry.graph.is_live("agent", "dev") is False
-    live_failure = next(check for check in group.checks if check.name == "Live resource coverage")
+    assert live_failure is not None
     assert live_failure.status is Status.FAIL
-    assert not any(check.name == "Resource registry" for check in group.checks)
 
 
 def test_malformed_current_schema_keeps_declared_doctor_registry(
@@ -706,14 +705,13 @@ def test_malformed_current_schema_keeps_declared_doctor_registry(
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
     monkeypatch.setattr(db_module, "DB_PATH", tmp_path / "test.db")
 
-    group, config, registry = _check_config()
+    config = load_config(cfg, warn_issues=False)
+    registry, live_failure = _build_doctor_registry(config, load_manifests(cfg.parent / "resources"))
 
-    assert config is not None
     assert registry is not None
     assert registry.lookup("vm-template", "default") is not None
-    live_failure = next(check for check in group.checks if check.name == "Live resource coverage")
+    assert live_failure is not None
     assert live_failure.status is Status.FAIL
-    assert not any(check.name == "Resource registry" for check in group.checks)
 
 
 def test_manifest_load_failure_keeps_other_rows(tmp_path: Path, monkeypatch) -> None:

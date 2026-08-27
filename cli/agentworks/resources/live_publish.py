@@ -232,7 +232,7 @@ def agent_live_resource(db: Database, registry: Registry, row: AgentRow) -> Live
     from agentworks.agents.templates import resolve_template_with_provenance
     from agentworks.instance_specs import get_instance_overlay
 
-    selected = row.template or "default"
+    selected = "default" if row.template is None else row.template
     overlay = _read_database(lambda: get_instance_overlay(db, "agent", row.name))
     if not _is_published(registry, "agent-template", selected):
         return project_agent_live_resource(
@@ -260,7 +260,7 @@ def workspace_live_resource(db: Database, registry: Registry, row: WorkspaceRow)
     from agentworks.instance_specs import get_instance_overlay
     from agentworks.workspaces.templates import resolve_template_with_provenance
 
-    selected = row.template or "default"
+    selected = "default" if row.template is None else row.template
     overlay = _read_database(lambda: get_instance_overlay(db, "workspace", row.name))
     if not _is_published(registry, "workspace-template", selected):
         return project_workspace_live_resource(
@@ -339,8 +339,8 @@ def vm_live_resource(db: Database, registry: Registry, row: VMRow) -> LiveResour
     from agentworks.vms.admin_templates import resolve_template_with_provenance as resolve_admin
     from agentworks.vms.templates import resolve_template_with_provenance as resolve_vm
 
-    selected_vm = row.template or "default"
-    selected_admin = row.admin_template or "default"
+    selected_vm = "default" if row.template is None else row.template
+    selected_admin = "default" if row.admin_template is None else row.admin_template
     overlays = _read_database(lambda: get_vm_instance_overlays(db, row.name))
     vm_template_name = _published_name(registry, "vm-template", selected_vm)
     admin_template_name = _published_name(registry, "admin-template", selected_admin)

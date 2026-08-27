@@ -291,7 +291,19 @@ def test_registry_list_order_is_stable(tmp_path: Path) -> None:
     assert tuple((row.kind, row.name) for row in first.rows) == tuple((row.kind, row.name) for row in second.rows)
 
 
-@pytest.mark.parametrize("database_state", ["absent", "stale", "newer", "malformed", "busy", "unreadable"])
+@pytest.mark.parametrize(
+    "database_state",
+    [
+        "absent",
+        "stale",
+        "newer",
+        "malformed",
+        "busy",
+        "unreadable",
+        "unsupported-overlay",
+        "stranded-overlay",
+    ],
+)
 def test_names_only_ignores_unusable_database_states(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -301,7 +313,7 @@ def test_names_only_ignores_unusable_database_states(
 
     from agentworks import db
     from agentworks.cli import app
-    from agentworks.db import LATEST_VERSION, Database
+    from agentworks.db import LATEST_VERSION, Database, VersionedPayload
 
     cfg_file = tmp_path / "config.toml"
     _write_base(cfg_file, manifests=[_VM_DEFAULT])
@@ -324,6 +336,21 @@ def test_names_only_ignores_unusable_database_states(
         lock.execute("BEGIN EXCLUSIVE")
     elif database_state == "unreadable":
         database_path.mkdir()
+    elif database_state in {"unsupported-overlay", "stranded-overlay"}:
+        database = Database(database_path)
+        database.insert_vm("box", "lima-local", "box")
+        database.insert_agent("dev", "box", "dev")
+        payload = (
+            VersionedPayload(2, {"future_field": True})
+            if database_state == "unsupported-overlay"
+            else VersionedPayload(1, {"user_install_commands": ["gone"]})
+        )
+        database.instance_state.put_desired_overlay(
+            "agent",
+            "dev",
+            payload,
+        )
+        database.close()
 
     monkeypatch.setattr(db, "DB_PATH", database_path)
     try:

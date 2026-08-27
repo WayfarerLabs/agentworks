@@ -75,7 +75,7 @@ def resolve_from_dict_with_provenance(
     )
     from agentworks.vms.admin import AdminConfig
 
-    selected = template_name or "default"
+    selected = "default" if template_name is None else template_name
     declared = templates.get(selected)
     if declared is None and selected != "default":
         raise unknown_template_error(

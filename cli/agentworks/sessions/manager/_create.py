@@ -50,7 +50,7 @@ def _publish_pending_plan(
     if plan.new_workspace:
         from agentworks.workspaces.templates import resolve_template_with_provenance as resolve_workspace
 
-        selected = plan.workspace_template or "default"
+        selected = "default" if plan.workspace_template is None else plan.workspace_template
         workspace_layered = resolve_workspace(
             registry,
             selected,
@@ -70,7 +70,7 @@ def _publish_pending_plan(
         from agentworks.agents.templates import resolve_template_with_provenance as resolve_agent
 
         assert plan.agent_name is not None
-        selected = plan.agent_template or "default"
+        selected = "default" if plan.agent_template is None else plan.agent_template
         agent_layered = resolve_agent(
             registry,
             selected,
@@ -88,7 +88,7 @@ def _publish_pending_plan(
 
     from agentworks.sessions.templates import resolve_template_with_provenance as resolve_session
 
-    selected = template_name or "default"
+    selected = "default" if template_name is None else template_name
     session_layered = resolve_session(
         registry,
         selected,

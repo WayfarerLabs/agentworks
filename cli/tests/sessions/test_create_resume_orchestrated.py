@@ -28,7 +28,7 @@ import pytest
 from agentworks.bootstrap import build_registry as _real_build_registry
 from agentworks.bootstrap import load_request_registry as _real_load_request_registry
 from agentworks.db import Database, InitStatus, SessionMode, SessionStatus
-from agentworks.errors import StateError, ValidationError
+from agentworks.errors import NotFoundError, StateError, ValidationError
 from agentworks.output import Role
 from agentworks.secrets.orchestration import (
     resolve_for_command as _real_resolve_for_command,
@@ -1161,7 +1161,7 @@ def test_create_new_agent_on_disabled_plugin_recipe_refuses_before_any_work(
     captured_env: dict[str, str] = {}
     _patch_session_ops(monkeypatch, events, captured_env)  # transports must never be reached
 
-    with pytest.raises(StateError, match="enable plugin `decl-plugin`"):
+    with pytest.raises(StateError) as caught:
         create_session(
             db,
             config,
@@ -1172,16 +1172,17 @@ def test_create_new_agent_on_disabled_plugin_recipe_refuses_before_any_work(
             interaction=TtyInteractionPolicy.REFUSE,
         )
 
+    assert (caught.value.entity_kind, caught.value.entity_name) == ("agent-template", "fixture-agent-tmpl")
     assert db.get_session("s1") is None  # refused before any session-row write
     assert "tmux_create" not in events  # refused before any transport work
 
 
 @pytest.mark.parametrize(
-    ("overlay_args", "expected_plugin"),
+    ("overlay_args", "expected_identity"),
     [
         (
             {"workspace": "ws1", "admin": True, "spec": '{"harness_integration":{"name":"codex"}}'},
-            "codex",
+            ("harness-integration", "codex"),
         ),
         (
             {
@@ -1190,7 +1191,7 @@ def test_create_new_agent_on_disabled_plugin_recipe_refuses_before_any_work(
                 "agent_name": "fresh-agent",
                 "agent_spec": '{"user_install_commands":["fixture-user-cmd"]}',
             },
-            "decl-plugin",
+            ("user-install-command", "fixture-user-cmd"),
         ),
     ],
     ids=("session", "compound-agent"),
@@ -1200,7 +1201,7 @@ def test_create_overlay_only_disabled_reference_refuses_all_pending_paths(
     make_config,
     monkeypatch: pytest.MonkeyPatch,
     overlay_args: dict[str, object],
-    expected_plugin: str,
+    expected_identity: tuple[str, str],
 ) -> None:
     from agentworks.plugins import SYSTEM_PLUGINS, Plugin
     from agentworks.sessions.manager import create_session
@@ -1214,7 +1215,7 @@ def test_create_overlay_only_disabled_reference_refuses_all_pending_paths(
     )
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {**SYSTEM_PLUGINS, plugin.name: plugin})
 
-    with pytest.raises(StateError, match=rf"enable plugin `{expected_plugin}`"):
+    with pytest.raises(StateError) as caught:
         create_session(
             db,
             config,
@@ -1223,7 +1224,60 @@ def test_create_overlay_only_disabled_reference_refuses_all_pending_paths(
             **overlay_args,
         )
 
+    assert (caught.value.entity_kind, caught.value.entity_name) == expected_identity
     assert db.get_session("s1") is None
+    assert db.get_agent("fresh-agent") is None
+
+
+@pytest.mark.parametrize(
+    ("create_args", "expected_kind"),
+    [
+        ({"workspace": "ws1", "admin": True, "template_name": ""}, "session-template"),
+        (
+            {
+                "new_workspace": True,
+                "workspace_name": "fresh-work",
+                "workspace_template": "",
+                "admin": True,
+                "vm_name": "box",
+            },
+            "workspace-template",
+        ),
+        (
+            {
+                "workspace": "ws1",
+                "new_agent": True,
+                "agent_name": "fresh-agent",
+                "agent_template": "",
+            },
+            "agent-template",
+        ),
+    ],
+    ids=("session", "workspace", "agent"),
+)
+def test_create_rejects_empty_pending_template_selectors(
+    db: Database,
+    make_config,
+    create_args: dict[str, object],
+    expected_kind: str,
+) -> None:
+    from agentworks.sessions.manager import create_session
+
+    config = make_config()
+    _seed_stopped_proxmox_vm(db)
+
+    with pytest.raises(NotFoundError) as caught:
+        create_session(
+            db,
+            config,
+            name="s1",
+            interaction=TtyInteractionPolicy.REFUSE,
+            **create_args,
+        )
+
+    assert (caught.value.entity_kind, caught.value.entity_name) == (expected_kind, "")
+    assert db.get_session("s1") is None
+    assert db.get_workspace("fresh-work") is None
     assert db.get_agent("fresh-agent") is None
 
 

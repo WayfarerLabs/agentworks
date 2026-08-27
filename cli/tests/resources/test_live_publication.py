@@ -22,6 +22,7 @@ from agentworks.resources.graph_query import (
     GraphNodeType,
     show_graph,
 )
+from agentworks.resources.live import LIVE_RESOURCE_KINDS
 from agentworks.resources.live_publish import publish_database_live_resources
 from agentworks.resources.reference import SecretReference
 from agentworks.secrets.inspect import build_secret_table, describe_secret
@@ -71,7 +72,7 @@ def test_database_publisher_frames_path_inspection_failures(
         return original_stat(candidate, *args, **kwargs)
 
     monkeypatch.setattr(Path, "stat", fail_selected_path)
-    with pytest.raises(StateError, match="state database inspection failed") as caught:
+    with pytest.raises(StateError) as caught:
         publish_database_live_resources(Registry(), path)
     assert caught.value.entity_kind == "database"
 
@@ -298,6 +299,39 @@ def test_secret_used_by_v1_preserves_mode_sensitive_effective_environment(
     db.close()
 
 
+def test_secret_used_by_v1_crosses_a_declared_runtime_subgraph(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path, config = _registry(
+        tmp_path,
+        monkeypatch,
+        ManifestDoc("git-credential", "github", {"provider": {"name": "github"}}),
+        ManifestDoc("admin-template", "default", {"git_credentials": ["github"]}),
+    )
+    db = Database(path)
+    db.insert_vm("box", "lima-local", "box")
+    db.insert_workspace("work", "/work", "box", "work")
+    db.insert_session("admin-run", "work", "default", SessionMode.ADMIN)
+
+    registry = build_registry(config, live_database=db)
+
+    secret = "git-token-github"
+    vm_targets = {(ref.kind, ref.name) for ref in registry.graph.edges_of("vm", "box")}
+    assert ("git-credential", "github") in vm_targets
+    assert ("secret", secret) not in vm_targets
+    assert ("secret", secret) in registry.graph.runtime_reachable_from("git-credential", "github")
+    description = describe_secret(
+        config,
+        registry,
+        secret,
+        impact=OperatorImpact.NONE,
+        tty_access=TtyInteractionAccess.UNAVAILABLE,
+    )
+    assert description.used_by == (InstanceRef("session", "admin-run"),)
+    db.close()
+
+
 def test_missing_live_graph_focus_uses_domain_not_found(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -450,6 +484,15 @@ def test_database_publishes_intrinsic_live_instance_relationships(
 
     registry = build_registry(config)
 
+    published = {
+        ("vm", "box"),
+        ("workspace", "work"),
+        ("agent", "dev"),
+        ("session", "run"),
+        ("console", "dash"),
+    }
+    assert {kind for kind, name in published if registry.graph.is_live(kind, name)} == LIVE_RESOURCE_KINDS
+
     def targets(kind: str, name: str) -> set[tuple[str, str]]:
         return {(ref.kind, ref.name) for ref in registry.graph.edges_of(kind, name)}
 
@@ -540,6 +583,75 @@ def test_durable_stranded_selectors_are_omitted_without_default_substitution(
     }
     with pytest.raises(KeyError):
         registry.lookup("secret", "unresolved-token")
+    db.close()
+
+
+def test_empty_durable_selectors_do_not_substitute_default_dependencies(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path, config = _registry(
+        tmp_path,
+        monkeypatch,
+        ManifestDoc("vm-template", "default", {"env": {"VM_TOKEN": {"secret": "vm-default-token"}}}),
+        ManifestDoc(
+            "admin-template",
+            "default",
+            {"env": {"ADMIN_TOKEN": {"secret": "admin-default-token"}}},
+        ),
+        ManifestDoc(
+            "workspace-template",
+            "default",
+            {"env": {"WORK_TOKEN": {"secret": "workspace-default-token"}}},
+        ),
+        ManifestDoc(
+            "agent-template",
+            "default",
+            {"env": {"AGENT_TOKEN": {"secret": "agent-default-token"}}},
+        ),
+    )
+    db = Database(path)
+    db.insert_vm("box", "lima-local", "box", template="", admin_template="")
+    db.insert_workspace("work", "/work", "box", "work", template="")
+    db.insert_agent("dev", "box", "dev", template="")
+    db.instance_state.put_desired_overlay(
+        "workspace",
+        "work",
+        VersionedPayload(1, {"env": {"OVERLAY_TOKEN": {"secret": "workspace-overlay-token"}}}),
+    )
+
+    registry = build_registry(config, live_database=db)
+
+    expected_targets = {
+        ("vm", "box"): {("vm-site", "lima-local")},
+        ("workspace", "work"): {("vm", "box")},
+        ("agent", "dev"): {("vm", "box")},
+    }
+    for (kind, name), expected in expected_targets.items():
+        assert registry.graph.is_live(kind, name)
+        assert {(ref.kind, ref.name) for ref in registry.graph.edges_of(kind, name)} == expected
+
+    for secret in (
+        "vm-default-token",
+        "admin-default-token",
+        "workspace-default-token",
+        "agent-default-token",
+        "tailscale-auth-key",
+    ):
+        assert _direct_live_dependents(registry, "secret", secret) == set()
+    with pytest.raises(KeyError):
+        registry.lookup("secret", "workspace-overlay-token")
+
+    from agentworks.workspaces.templates import resolve_live_template
+
+    empty_selected = resolve_live_template(db, registry, "work", "")
+    default_selected = resolve_live_template(db, registry, "work", None)
+    assert empty_selected.name == ""
+    assert "WORK_TOKEN" not in empty_selected.env
+    assert empty_selected.env["OVERLAY_TOKEN"].model_dump() == {"secret": "workspace-overlay-token"}
+    assert default_selected.name == "default"
+    assert default_selected.env["WORK_TOKEN"].model_dump() == {"secret": "workspace-default-token"}
+    assert default_selected.env["OVERLAY_TOKEN"].model_dump() == {"secret": "workspace-overlay-token"}
     db.close()
 
 

@@ -870,23 +870,20 @@ def test_reinit_applies_a_legacy_flat_vm_payload(
     assert vm_template.cpus == 11
 
 
-def test_reinit_errors_cleanly_when_the_stored_admin_template_is_gone(
+@pytest.mark.parametrize("admin_template", ["", "work"])
+def test_reinit_errors_cleanly_for_an_unresolved_stored_admin_template(
     make_config,
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,
+    admin_template: str,
 ) -> None:
-    """A VM whose stored admin-template was since removed from config
-    reinitializes into a clean typed error naming the selector, not a raw
-    ``KeyError`` traceback (parity with create's unknown-template error).
-    The error fires before any initialization work."""
+    """An unresolved stored selector produces a typed error before work."""
     from agentworks.db import ProvisioningStatus
     from agentworks.errors import NotFoundError
 
-    # No admin manifest declares ``work``; the column points at a name the
-    # registry no longer knows.
     config = make_config()
-    db.insert_vm("rvm", site="lima-local", hostname="rvm", admin_template="work")
+    db.insert_vm("rvm", site="lima-local", hostname="rvm", admin_template=admin_template)
     db.update_vm_tailscale("rvm", "100.64.0.9")
     db.update_vm_provisioning_status("rvm", ProvisioningStatus.COMPLETE)
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
@@ -899,8 +896,10 @@ def test_reinit_errors_cleanly_when_the_stored_admin_template_is_gone(
 
     monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
 
-    with pytest.raises(NotFoundError, match="work"):
+    with pytest.raises(NotFoundError) as caught:
         vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
+    assert caught.value.entity_kind == "admin-template"
+    assert caught.value.entity_name == admin_template
     assert not called  # errored before initialization
 
 

@@ -94,7 +94,7 @@ def create_agent(
     pending = project_agent_live_resource(
         name=name,
         vm_name=vm_name,
-        template_name=template or "default",
+        template_name="default" if template is None else template,
         layered=layered_agent_tmpl,
     )
     if db.get_agent(name) is None:
@@ -497,7 +497,7 @@ def reinit_agent(
         # template (mirrors create's "gate before any DB / VM / realize work").
         # require_declared_template only checks the name is DECLARED, not enabled.
         ensure_recipe_enabled(registry, "agent-template", update_template)
-    candidate_template = update_template or agent.template
+    candidate_template = agent.template if update_template is None else update_template
     layered_agent_tmpl = resolve_template_with_provenance(
         registry,
         candidate_template,
@@ -510,7 +510,7 @@ def reinit_agent(
     pending = project_agent_live_resource(
         name=name,
         vm_name=agent.vm_name,
-        template_name=candidate_template or "default",
+        template_name="default" if candidate_template is None else candidate_template,
         layered=layered_agent_tmpl,
     )
     registry = load_request_registry(

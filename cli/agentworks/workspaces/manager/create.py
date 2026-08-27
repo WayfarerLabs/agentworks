@@ -203,7 +203,7 @@ def create_workspace(
     pending = project_workspace_live_resource(
         name=name,
         vm_name=vm.name,
-        template_name=template_name or "default",
+        template_name="default" if template_name is None else template_name,
         layered=layered_template,
     )
     registry = load_request_registry(
@@ -323,7 +323,8 @@ def render_workspace_description(description: WorkspaceDescription) -> None:
     ws = description.workspace
     output.info(f"Name:       {ws.name}")
     output.info(f"VM:         {ws.vm_name}")
-    output.info(f"Template:   {ws.template or 'default'}")
+    template_name = "default" if ws.template is None else ws.template
+    output.info(f"Template:   {template_name}")
     output.info(f"Path:       {ws.path}")
     output.info(f"Created:    {ws.created_at}")
 

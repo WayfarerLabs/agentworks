@@ -763,7 +763,7 @@ def test_create_agent_on_disabled_plugin_recipe_refuses_before_any_work(
 
     monkeypatch.setattr(agent_initializer, "create_agent_on_vm", _boom)
 
-    with pytest.raises(StateError, match="enable plugin `decl-plugin`"):
+    with pytest.raises(StateError) as caught:
         agent_manager.create_agent(
             db,
             config,
@@ -773,6 +773,7 @@ def test_create_agent_on_disabled_plugin_recipe_refuses_before_any_work(
             interaction=TtyInteractionPolicy.REFUSE,
         )
 
+    assert (caught.value.entity_kind, caught.value.entity_name) == ("agent-template", "fixture-agent-tmpl")
     assert db.get_agent("dev") is None  # refused before any DB write
 
 
@@ -785,7 +786,7 @@ def test_create_agent_overlay_only_disabled_reference_refuses_before_mutation(
     _seed_vm(db)
     _install_disabled_fixture(monkeypatch)
 
-    with pytest.raises(StateError, match="enable plugin `decl-plugin`"):
+    with pytest.raises(StateError) as caught:
         agent_manager.create_agent(
             db,
             config,
@@ -795,6 +796,7 @@ def test_create_agent_overlay_only_disabled_reference_refuses_before_mutation(
             interaction=TtyInteractionPolicy.REFUSE,
         )
 
+    assert (caught.value.entity_kind, caught.value.entity_name) == ("user-install-command", "fixture-user-cmd")
     assert db.get_agent("dev") is None
     assert db.instance_state.get_desired_overlay("agent", "dev") is None
 
@@ -809,7 +811,7 @@ def test_reinit_agent_overlay_only_disabled_reference_refuses_before_persist(
     db.insert_agent("dev", "box", "dev")
     _install_disabled_fixture(monkeypatch)
 
-    with pytest.raises(StateError, match="enable plugin `decl-plugin`"):
+    with pytest.raises(StateError) as caught:
         agent_manager.reinit_agent(
             db,
             config,
@@ -818,6 +820,7 @@ def test_reinit_agent_overlay_only_disabled_reference_refuses_before_persist(
             interaction=TtyInteractionPolicy.REFUSE,
         )
 
+    assert (caught.value.entity_kind, caught.value.entity_name) == ("user-install-command", "fixture-user-cmd")
     assert db.instance_state.get_desired_overlay("agent", "dev") is None
 
 
@@ -841,11 +844,12 @@ def test_reinit_update_template_to_disabled_recipe_refuses_before_persist(
 
     monkeypatch.setattr(agent_initializer, "create_agent_on_vm", _boom)
 
-    with pytest.raises(StateError, match="enable plugin `decl-plugin`"):
+    with pytest.raises(StateError) as caught:
         agent_manager.reinit_agent(
             db, config, name="dev", update_template="fixture-agent-tmpl", interaction=TtyInteractionPolicy.REFUSE
         )
 
+    assert (caught.value.entity_kind, caught.value.entity_name) == ("agent-template", "fixture-agent-tmpl")
     row = db.get_agent("dev")
     assert row is not None and row.template == "default"  # the refused repoint was NOT persisted
 
