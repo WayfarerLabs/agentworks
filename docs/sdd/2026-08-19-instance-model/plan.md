@@ -202,11 +202,17 @@ publisher's live-kind vocabulary. Correction code head `6ad9bf2e` passed 7,813 n
 Python tests with one skip, and the full local suite passed 7,816 tests with one skip; Ruff,
 formatting, Mypy, file lint, Rulesync, locked-SDD, website, and deterministic-build gates also
 passed. The greenfield project re-review found no remaining code or test issue, the final fresh-eyes
-review was clean, and Muntz reported `SHIP`. An isolated shipped-CLI pass proved durable
-overlay-only secret discovery, direct graph topology, session-oriented usage, clearing, last-owner
-removal, absent and unreadable completion fallback, and a pending disabled-resource refusal with no
-durable publication or provider work. No authorized provider inventory was available, so successful
-provider-backed creation remains covered by unit and review evidence rather than a live backend run.
+review was clean, and Muntz reported `SHIP`. Final feedback-round code head `f1e36ed4` then made the
+four create-command validation registries declaration-only while retaining their later authoritative
+pending-plus-durable builds, and corrected the completion helper guidance. Its four precedence
+regressions and affected suites passed; the exact CI selection passed 7,815 tests with one skip,
+alongside clean static, file, Rulesync, locked-SDD, website, and deterministic-build gates. The
+greenfield reviewer and Muntz reported `SHIP`, and fresh-eyes review was clean. An isolated
+shipped-CLI pass proved durable overlay-only secret discovery, direct graph topology,
+session-oriented usage, clearing, last-owner removal, absent and unreadable completion fallback, and
+a pending disabled-resource refusal with no durable publication or provider work. No authorized
+provider inventory was available, so successful provider-backed creation remains covered by unit and
+review evidence rather than a live backend run.
 
 ## Phase 4: R3 applied instance state and SSH proving slice
 
