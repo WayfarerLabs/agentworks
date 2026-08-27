@@ -22,10 +22,16 @@ jobs:
           fetch-depth: 0
 
       - name: Verify tag is reachable from a release branch
-        # The guard is that a published tag must sit on a reviewed, protected
-        # line rather than anywhere someone can push a tag. `main` is one such
-        # line; a maintenance branch (0.15.x, 0.16.x, ...) is another, and a
-        # tag cut there is never an ancestor of main by construction.
+        # A published tag must sit on a release line rather than anywhere a
+        # tag can be pushed. `main` is protected by the `protect-default`
+        # ruleset; maintenance branches (0.15.x, 0.16.x, ...) are NOT, as of
+        # 2026-08-27, because that ruleset targets `~DEFAULT_BRANCH` only.
+        # So this accepts them on convention rather than on enforcement, and
+        # anyone with write access could create `9.9.x`, push to it directly,
+        # and tag it. Extending the ruleset to `[0-9]+.[0-9]+.x` with the same
+        # pull_request and required_status_checks rules is what would make
+        # this an enforced boundary; until then the honest description is that
+        # a maintenance branch is trusted, not verified.
         run: |
           git fetch --quiet origin '+refs/heads/*:refs/remotes/origin/*'
           TAG="${{ inputs.tag || github.ref_name }}"
