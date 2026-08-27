@@ -8,7 +8,9 @@ import pytest
 
 from agentworks.ssh import SSHError, SSHResult
 from agentworks.transports import LimaTransport
+from tests.transports.conftest import fail_binary_completed as _fail_binary_completed
 from tests.transports.conftest import fail_completed as _fail_completed
+from tests.transports.conftest import ok_binary_completed as _ok_binary_completed
 from tests.transports.conftest import ok_completed as _ok_completed
 
 # ---------------------------------------------------------------------------
@@ -19,7 +21,7 @@ from tests.transports.conftest import ok_completed as _ok_completed
 def test_run_invokes_limactl_shell_with_bash_lc() -> None:
     t = LimaTransport(vm_name="my-vm")
     with patch("agentworks.transports.lima.subprocess.run") as mock_run:
-        mock_run.return_value = _ok_completed()
+        mock_run.return_value = _ok_binary_completed()
         t.run("echo hi")
         argv = mock_run.call_args[0][0]
         assert argv[:4] == ["limactl", "shell", "my-vm", "bash"]
@@ -32,7 +34,7 @@ def test_run_env_injected_as_bash_assignment_prefix() -> None:
     assignments at the head of the payload."""
     t = LimaTransport(vm_name="my-vm")
     with patch("agentworks.transports.lima.subprocess.run") as mock_run:
-        mock_run.return_value = _ok_completed()
+        mock_run.return_value = _ok_binary_completed()
         t.run("echo hi", env={"FOO": "bar baz"})
         argv = mock_run.call_args[0][0]
         # Bash payload is index 5; should start with the env prefix.
@@ -43,7 +45,7 @@ def test_run_env_injected_as_bash_assignment_prefix() -> None:
 def test_run_sudo_wraps_with_bash_c() -> None:
     t = LimaTransport(vm_name="my-vm")
     with patch("agentworks.transports.lima.subprocess.run") as mock_run:
-        mock_run.return_value = _ok_completed()
+        mock_run.return_value = _ok_binary_completed()
         t.run("cmd1 && cmd2", sudo=True)
         argv = mock_run.call_args[0][0]
         assert "sudo -n bash -c 'cmd1 && cmd2'" in argv[5]
@@ -52,7 +54,7 @@ def test_run_sudo_wraps_with_bash_c() -> None:
 def test_run_check_true_raises_on_nonzero() -> None:
     t = LimaTransport(vm_name="my-vm")
     with patch("agentworks.transports.lima.subprocess.run") as mock_run:
-        mock_run.return_value = _fail_completed(returncode=2, stderr="nope")
+        mock_run.return_value = _fail_binary_completed(returncode=2, stderr="nope")
         with pytest.raises(SSHError, match="Lima command failed"):
             t.run("false")
 
@@ -60,7 +62,7 @@ def test_run_check_true_raises_on_nonzero() -> None:
 def test_run_check_false_returns_result() -> None:
     t = LimaTransport(vm_name="my-vm")
     with patch("agentworks.transports.lima.subprocess.run") as mock_run:
-        mock_run.return_value = _fail_completed(returncode=2)
+        mock_run.return_value = _fail_binary_completed(returncode=2)
         result = t.run("false", check=False)
         assert isinstance(result, SSHResult)
         assert result.returncode == 2

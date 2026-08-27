@@ -27,7 +27,8 @@ def _reconfigure_std_streams() -> None:
 
     stdout additionally gets bare-LF newlines: machine-readable listings are
     iterated by shells and agents, and Windows text-mode CRLF rides a stray
-    carriage return into the consumer's next argument. stderr keeps platform
+    carriage return into the consumer's next argument. The same trap on the
+    way into a child process is handled in ``agentworks/subprocess_io.py``. stderr keeps platform
     newline translation; it is human-facing only.
 
     The isinstance guard skips StringIO-like stand-ins without reconfigure()

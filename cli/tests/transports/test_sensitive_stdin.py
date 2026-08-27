@@ -15,8 +15,11 @@ _SENTINEL = "transport-stdin-swordfish"
 _COMMAND = 'IFS= read -r VALUE && printf "%s" "$VALUE"'
 
 
-def _completed() -> subprocess.CompletedProcess[str]:
-    return subprocess.CompletedProcess([], 0, stdout=f"reflected {_SENTINEL}", stderr=f"error {_SENTINEL}")
+def _completed() -> subprocess.CompletedProcess[bytes]:
+    """A byte-mode result, matching how these transports run a stdin command."""
+    return subprocess.CompletedProcess(
+        [], 0, stdout=f"reflected {_SENTINEL}".encode(), stderr=f"error {_SENTINEL}".encode()
+    )
 
 
 def test_ssh_transport_streams_sensitive_input_without_exposing_it(monkeypatch) -> None:  # noqa: ANN001
@@ -27,7 +30,7 @@ def test_ssh_transport_streams_sensitive_input_without_exposing_it(monkeypatch) 
     result = SSHTransport("vm-host", logger=logger).run(_COMMAND, input_text=f"{_SENTINEL}\n")
 
     assert (result.stdout, result.stderr) == ("", "")
-    assert process.call_args.kwargs["input"] == f"{_SENTINEL}\n"
+    assert process.call_args.kwargs["input"] == f"{_SENTINEL}\n".encode()
     assert _SENTINEL not in repr(process.call_args.args[0])
     logger.log_command.assert_called_once_with(_COMMAND, result)
 
@@ -40,7 +43,7 @@ def test_lima_transport_streams_sensitive_input_and_logs_only_empty_output(monke
     result = LimaTransport("vm1", logger=logger).run(_COMMAND, input_text=f"{_SENTINEL}\n")
 
     assert (result.stdout, result.stderr) == ("", "")
-    assert process.call_args.kwargs["input"] == f"{_SENTINEL}\n"
+    assert process.call_args.kwargs["input"] == f"{_SENTINEL}\n".encode()
     assert _SENTINEL not in repr(process.call_args.args[0])
     logger.log_command.assert_called_once_with(_COMMAND, result)
 
@@ -53,7 +56,7 @@ def test_wsl2_transport_streams_sensitive_input_and_logs_only_empty_output(monke
     result = WSL2Transport("Debian", logger=logger).run(_COMMAND, input_text=f"{_SENTINEL}\n")
 
     assert (result.stdout, result.stderr) == ("", "")
-    assert process.call_args.kwargs["input"] == f"{_SENTINEL}\n"
+    assert process.call_args.kwargs["input"] == f"{_SENTINEL}\n".encode()
     assert _SENTINEL not in repr(process.call_args.args[0])
     logger.log_command.assert_called_once_with(_COMMAND, result)
 

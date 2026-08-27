@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import ConnectivityError
 from agentworks.path_rendering import format_host_path
+from agentworks.subprocess_io import decode_stream, stdin_bytes
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -368,7 +369,9 @@ def run(
             Cannot be combined with ``logger``. The input value is never
             serialized into argv or an error diagnostic. The returned stdout
             and stderr are empty because an arbitrary command may reflect the
-            input through either stream.
+            input through either stream. Delivery is byte-exact: the value
+            crosses the pipe as UTF-8 with no newline rewriting, so a
+            line-oriented consumer receives exactly the line it was sent.
 
     Returns:
         SSHResult with exit code, stdout, and stderr.
@@ -395,11 +398,9 @@ def run(
         try:
             result = subprocess.run(
                 args,
-                input=input_text,
+                # Byte-mode stdin: text mode rewrites LF to CRLF on Windows (see agentworks.subprocess_io).
+                input=stdin_bytes(input_text),
                 capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
                 timeout=timeout,
             )
         except subprocess.TimeoutExpired as err:
@@ -418,8 +419,8 @@ def run(
 
         ssh_result = SSHResult(
             returncode=result.returncode,
-            stdout="" if sensitive_input else result.stdout,
-            stderr="" if sensitive_input else result.stderr,
+            stdout="" if sensitive_input else decode_stream(result.stdout),
+            stderr="" if sensitive_input else decode_stream(result.stderr),
         )
         if logger is not None:
             logger.log_command(command, ssh_result)
@@ -427,7 +428,9 @@ def run(
             if sensitive_input:
                 # Remote output can reflect stdin for an arbitrary command.
                 raise SSHError(f"SSH stdin command failed (exit {result.returncode}): {command}") from None
-            raise SSHError(f"SSH command failed (exit {result.returncode}): {command}\nstderr: {result.stderr.strip()}")
+            raise SSHError(
+                f"SSH command failed (exit {result.returncode}): {command}\nstderr: {ssh_result.stderr.strip()}"
+            )
         return ssh_result
 
     msg = f"SSH command timed out after {retries} attempts ({timeout}s each): {command}"
