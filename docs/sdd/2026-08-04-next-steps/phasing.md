@@ -177,6 +177,39 @@ off whenever bandwidth allows, on its own merits and its own schedule.
   post-merge pass verified reproducible builds and agreeing version surfaces on the exact release
   head.
 
+  **0.15.1 cut 2026-08-27, published 2026-08-28:** the first release from a maintenance branch. PR
+  #677, the fix for a Windows regression that broke `vm create` on that platform across every cloud
+  provider, was cherry-picked onto a new `0.15.x` branch cut from `v0.15.0` instead of being pulled
+  forward, so the fix could reach operators without waiting on the 0.16.0 hold. Two workflow changes
+  have landed toward making that path repeatable: release-please runs on maintenance branches with
+  `target-branch` set to the triggering ref, so each computes its own next version from its own
+  manifest (PR #679), and the publish workflow's tag guard on `main` accepts any tag reachable from
+  `main` or a maintenance branch (PR #681). **The path is not yet repeatable on `0.15.x` itself.** A
+  tag push resolves its workflow from the tag rather than from the default branch, so that branch
+  needs its own copy of the guard, and until PR #689 merges a `v0.15.2` cut there would fail exactly
+  as `v0.15.1` did. **`agentworks-cli` 0.15.1 went live on PyPI 2026-08-28**, verified by installing
+  from the index and confirming the shipped `agentworks.ssh.run` uses `stdin_bytes()` on its stdin
+  path, so the fix reaches operators rather than merely producing a green run.
+
+  Maintenance branches are protected as of 2026-08-28: the `protect-maintenance` ruleset mirrors
+  `protect-default`'s rules against every `*.*.x` branch, and `protect-release-tags` makes published
+  `v*` tags undeletable and immovable. Until then `release.yml` treated `0.15.x` as a release line
+  while nothing stopped a direct push to it.
+
+- **0.16.0 (held; operator ruling, 2026-08-26):** the release PR does not cut until the
+  `2026-08-19-instance-model` child's instance-spec overlays (PR #670, **merged 2026-08-28**) and
+  the harness integration config knobs
+  ([issue #674](https://github.com/WayfarerLabs/agentworks/issues/674), per-session workload inputs
+  across the Claude Code, Codex, and Grok Build integrations) are both on `main`. The first gate is
+  satisfied; the knobs are the only one left. Instance specs and the knobs that configure them ship
+  together, because a release carrying the spec mechanism without the settings it exists to carry
+  teaches half a feature. The mechanics matter here: the release PR accumulates whatever is on
+  `main` when it merges, so cutting early does not delay those entries to a later release, it
+  silently ships 0.16.0 without them and pushes them to 0.17.0. Everything already accumulated (the
+  two Azure SDK migrations and their raised floors, the cloud-identifier and name-grammar validation
+  work, the terminal-restore fix, the guide and plugin documentation corrections) rides the same
+  cut.
+
 - **Later:** remaining waves map to releases as they prove out; no need to pin numbers now.
 
 ## Open ordering decisions
