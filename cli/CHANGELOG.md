@@ -1,5 +1,72 @@
 # Changelog
 
+## [0.16.0](https://github.com/WayfarerLabs/agentworks/compare/v0.15.0...v0.16.0) (2026-08-28)
+
+
+### Features
+
+* **cli:** add instance-specific spec overlays ([56f9687](https://github.com/WayfarerLabs/agentworks/commit/56f9687bf479454023009b6463616d3cef28d848))
+* **cli:** add instance-specific spec overlays ([c3dcad6](https://github.com/WayfarerLabs/agentworks/commit/c3dcad66cdc9f72da31eae7c45218e8c0cbe8189))
+* **db:** add typed instance state store ([97c3a76](https://github.com/WayfarerLabs/agentworks/commit/97c3a76de365feb9f2fd074c8e63c46752465063))
+* **harnesses:** add fresh session workload inputs ([fa54d51](https://github.com/WayfarerLabs/agentworks/commit/fa54d517d75db0842248377d130196b57d49873b))
+* **harnesses:** add fresh session workload inputs ([01f35f0](https://github.com/WayfarerLabs/agentworks/commit/01f35f0d81e7c25c866420a6563317bfe7e44ff2))
+* **vm:** support admin instance specs ([75f3056](https://github.com/WayfarerLabs/agentworks/commit/75f3056ca0fbc233a833cfc5f0d6bf3de28cab22))
+
+
+### Bug Fixes
+
+* **azure:** adopt nested compute model properties ([88b2039](https://github.com/WayfarerLabs/agentworks/commit/88b20396ea0f0f1592a7058d7e3f39b708d5f5dc))
+* **azure:** adopt nested compute model properties ([2f279d6](https://github.com/WayfarerLabs/agentworks/commit/2f279d6df0db0786448794d567815b4e2e3999c6))
+* **azure:** adopt nested network model properties ([b1a835b](https://github.com/WayfarerLabs/agentworks/commit/b1a835b20cc81d8435b61052d464dc1e24f3e54b))
+* **azure:** require the compute SDK that declares nested properties ([51fb120](https://github.com/WayfarerLabs/agentworks/commit/51fb12068843759c30e3a36df1f554b716538aa6))
+* **cli:** address instance overlay review findings ([1eff589](https://github.com/WayfarerLabs/agentworks/commit/1eff5895ca74848a89d25b7e549ee23eeb45096b))
+* **cli:** adjust session list column sizing ([fe3dd49](https://github.com/WayfarerLabs/agentworks/commit/fe3dd4982b9bb7ab9a1ccf229bed138529e175b9))
+* **cli:** complete cloud identifier validation ([d9b26dd](https://github.com/WayfarerLabs/agentworks/commit/d9b26ddf9e43d6e79dbcda045207ab0653f27876))
+* **cli:** explain instance spec layering ([7e795c9](https://github.com/WayfarerLabs/agentworks/commit/7e795c9701b4623728f4ce679f4c665846e6a876))
+* **cli:** honor host separators in home paths ([1bdbb03](https://github.com/WayfarerLabs/agentworks/commit/1bdbb03d6fc16f360203f811ef8f9251144a03ea))
+* **cli:** preserve instance overlay intent ([7e871da](https://github.com/WayfarerLabs/agentworks/commit/7e871da173290bc0b28c839b048e4a18570ac7ce))
+* **cli:** reject blank cloud identifiers ([3bd58c3](https://github.com/WayfarerLabs/agentworks/commit/3bd58c32524d021410bade1cd87a795f59e93169))
+* **cli:** reject trailing newlines in names ([5372bff](https://github.com/WayfarerLabs/agentworks/commit/5372bffa3d8d09d3a142e102a32f590c1e2fd211))
+* **cli:** require name regexes to consume full input ([c5b8368](https://github.com/WayfarerLabs/agentworks/commit/c5b8368cc5ff8057a483d83845ddbc6f43d8c3f8))
+* **cli:** stop offering an empty default at a secret prompt ([20b0808](https://github.com/WayfarerLabs/agentworks/commit/20b080804629948e63465a7c559c089b875fd16a))
+* **cli:** stop offering an empty default at a secret prompt ([43a4e6b](https://github.com/WayfarerLabs/agentworks/commit/43a4e6b3191d036fc2906b41caf1b20392b7f089))
+* **cli:** use platform separators in displayed host paths ([4c0a51f](https://github.com/WayfarerLabs/agentworks/commit/4c0a51fabf26174237dda4554f57ad43c08dd6d0))
+* **cli:** widen session list mode column ([59f3079](https://github.com/WayfarerLabs/agentworks/commit/59f3079f0d251ef9b3b296cf8fb4a2abecd1eedc))
+* **config:** reject blank cloud identifiers ([35cdf44](https://github.com/WayfarerLabs/agentworks/commit/35cdf44cb9371fef322bea65c265ed61e8454a00))
+* **doctor:** retain declared checks without live state ([d22cb38](https://github.com/WayfarerLabs/agentworks/commit/d22cb38166a18c2f115189d497e2a0a985300462))
+* **harnesses:** preserve workload inputs across launches ([4b60f27](https://github.com/WayfarerLabs/agentworks/commit/4b60f27b085348701a1d329d4995b345881a6f2e))
+* **plugins:** allow trailing digits in plugin names ([681148b](https://github.com/WayfarerLabs/agentworks/commit/681148b75f1c42a7c9e216d683e286118319b44e))
+* **plugins:** validate plugin identifiers ([9257461](https://github.com/WayfarerLabs/agentworks/commit/925746135b146733e7a6a5cd01319469d2c858d6))
+* **resources:** keep create prechecks declaration-only ([f1e36ed](https://github.com/WayfarerLabs/agentworks/commit/f1e36ed470a46b000ab2ef12f83b65eae3e7dcbb))
+* **resources:** preserve incomplete live state semantics ([6ad9bf2](https://github.com/WayfarerLabs/agentworks/commit/6ad9bf2e41e44ebd287b8ee641f3b9835ad1db1e))
+* **resources:** publish live state before finalization ([b20a486](https://github.com/WayfarerLabs/agentworks/commit/b20a48657a8ad68b97af66d7b9527d1f5ee359d7))
+* **secrets:** validate described secret names ([20e7b6e](https://github.com/WayfarerLabs/agentworks/commit/20e7b6e2740d0bde533ba31648a974f6e925ba2e))
+* **secrets:** validate described secret names ([ce86b84](https://github.com/WayfarerLabs/agentworks/commit/ce86b843a73d132367429d8e493887e17154b4c5))
+* **sessions:** explain retained created agents ([0547f81](https://github.com/WayfarerLabs/agentworks/commit/0547f8138272d320a45a4eb8adef713d5a69dfcb))
+* **ssh:** refuse sensitive stdin over a forced TTY ([23a7419](https://github.com/WayfarerLabs/agentworks/commit/23a741954ca71e17c7b702b54186a779d6fee14f))
+* **ssh:** refuse sensitive stdin over a forced TTY ([151be2d](https://github.com/WayfarerLabs/agentworks/commit/151be2d3c355c07ed46687520969a7279fc6cbe7))
+* **ssh:** stop forwarding the Windows TTY default into stdin writes ([27abb9f](https://github.com/WayfarerLabs/agentworks/commit/27abb9fa07f7318dad93654410b7b3bb8b005941))
+* **transports:** clean terminal restore on interactive detach ([dcc4eb7](https://github.com/WayfarerLabs/agentworks/commit/dcc4eb786feccfaed0b6277ab6824630307bbfa6))
+* **transports:** clean terminal restore on interactive detach ([80c813d](https://github.com/WayfarerLabs/agentworks/commit/80c813db47f7d53818619710f8ffbcc54e51ce73))
+* **transports:** decode child output as text mode did, and contain encode failures ([ea4a3a9](https://github.com/WayfarerLabs/agentworks/commit/ea4a3a9b1d631836da286ea734969c77385c551e))
+* **transports:** deliver stdin to child processes byte-exact ([3d7c213](https://github.com/WayfarerLabs/agentworks/commit/3d7c213a811ea33cac0eb76ce86b9b809f54fad0))
+* **transports:** deliver stdin to child processes byte-exact ([d1c614e](https://github.com/WayfarerLabs/agentworks/commit/d1c614e7efb2e1cf46ce971e46e0d1674d6f8433))
+* **transports:** triage saga-lead review on terminal-restore ([69bcfde](https://github.com/WayfarerLabs/agentworks/commit/69bcfde9ed7764e31152a415c88d0c5ae1966957))
+* **vm:** address paired overlay feedback ([d032e9f](https://github.com/WayfarerLabs/agentworks/commit/d032e9fbfefb7c4d1c080d671f9703d1c676e5fc))
+* **vm:** evolve paired instance overlays ([cc47322](https://github.com/WayfarerLabs/agentworks/commit/cc47322f5e91072512975b3304d9d507d06e93e4))
+* **vm:** prioritize stored schema evolution ([7883a89](https://github.com/WayfarerLabs/agentworks/commit/7883a8980e73c8d5822d29c6e00b11f486a2416f))
+* **vms:** remove workspace files on VM delete ([96492ff](https://github.com/WayfarerLabs/agentworks/commit/96492ff4af938cb747dfb449554a116ae7dc36d3))
+
+
+### Documentation
+
+* **cli:** correct the plugin registration example and unblock ruff 0.16 ([1977739](https://github.com/WayfarerLabs/agentworks/commit/19777392357f488f995f12d4e8956f14a6f6e8e5))
+* **git-credential:** separate top-level statements in the example ([a0c206f](https://github.com/WayfarerLabs/agentworks/commit/a0c206f250a7406cc9f0c9f06c28f585148c5a58))
+* **guide:** plan onboarding choices up front ([e1db802](https://github.com/WayfarerLabs/agentworks/commit/e1db8029378f0d617788ea78f198a62c76b361ee))
+* **guide:** plan onboarding choices up front ([c4116b9](https://github.com/WayfarerLabs/agentworks/commit/c4116b99eac45d862cb50b917e8a73d2b28d560d))
+* **plugins:** show the real installed-module registration ([63fd298](https://github.com/WayfarerLabs/agentworks/commit/63fd298f77bb82bf5302f3444e05546a940de886))
+* **vm:** explain artifact name grammar ([3f09201](https://github.com/WayfarerLabs/agentworks/commit/3f09201763ca73fdc11efc65f55f50468a2c6e38))
+
 ## [0.15.0](https://github.com/WayfarerLabs/agentworks/compare/v0.14.1...v0.15.0) (2026-08-25)
 
 **Operators: read the [0.15 upgrade guide](https://github.com/WayfarerLabs/agentworks/blob/main/docs/guides/upgrading-to-0.15.md) before upgrading.** The breaking-change note below is addressed to secret-backend authors. This release also changes behavior you may be relying on without touching a backend: `agw doctor` can now exit nonzero from a provider or network condition, which turns a CI job that gates on it red; doctor, `agw secret describe`, and preflight now perform provider work where they previously performed none; `agw secret verify`'s output columns and vocabulary changed, so scripts parsing it will break; and global `--non-interactive` now means terminal input only, no longer controlling presentation and no longer implying an unattended fail-fast. The guide covers each with what to do about it.
