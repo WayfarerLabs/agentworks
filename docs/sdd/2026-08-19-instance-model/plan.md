@@ -224,11 +224,12 @@ review evidence rather than a live backend run.
       nesting depth.
 - [ ] Define and registration-validate one closed strategy vocabulary with object merge,
       append-deduplicated list, and scalar replacement defaults plus field-level and model-level
-      overrides, mapping-value annotations, and rejection of decorative or invalid placements.
+      overrides, mapping-value annotations, and rejection of duplicate or shape-incompatible
+      placements.
 - [ ] Implement recursive object merge, whole-node replacement, stable list append-deduplication,
-      type-sensitive structural JSON equality, union-arm replacement, shallow child-wins unknown
-      conflicts, cycle-safe malformed-input totality, and value-safe nested provenance in one schema
-      walker used by template inheritance and final instance layers.
+      type-sensitive structural JSON equality, union-arm replacement, later raw replacement for
+      unknown conflicts, cycle-safe malformed-input totality, and value-safe nested provenance in
+      one schema walker used by template inheritance and final instance layers.
 - [ ] Reduce VM, admin, workspace, agent, and session reducers to authored-field and seed adapters;
       replace same-integration capability callbacks with registered config-model policy while
       retaining complete config reset when the integration selector changes. Increment the
@@ -239,12 +240,15 @@ review evidence rather than a live backend run.
 - [ ] Prove nested core and capability behavior, explicit empty replacement, union safety,
       registration refusal, invalid-input preservation, typed equality, normalized validation
       locations, result-index list references, inherited contributors at newly materialized paths,
-      merger-path alias refusal, unsafe append-dedupe-schema refusal, non-string merge-key refusal
-      with replacement escape, explosive equality objects and keys, cyclic items, and the absence of
-      persistence or CLI schema changes. Mutation-test exactly object replacement, list replacement,
-      union reset, and longest-prefix attribution.
+      uniform validation-alias refusal, unsafe append-dedupe-schema refusal, non-string merge-key
+      refusal with replacement escape, an unsupported Python object whose equality raises,
+      non-finite floats, cyclic items, and the absence of persistence or CLI schema changes.
+      Mutation-test exactly object replacement, list replacement, union reset, and longest-prefix
+      attribution.
 - [ ] Update permanent schema, capability, harness-integration, ADR, and active upgrade collateral
-      in the same implementation range that removes the imperative hook and increments its contract.
+      in the same implementation range that removes the imperative hook and increments its contract;
+      document shipped atomic list-item behavior in the schema README and preserve model-declared
+      list-item identity as unsupported future direction in ADR 0023.
 - [ ] Complete the SDD-only checkpoint review, then the implementation private review, fresh-eyes,
       complexity, test-quality, full-gate, and isolated shipped-CLI passes before merge intent.
 

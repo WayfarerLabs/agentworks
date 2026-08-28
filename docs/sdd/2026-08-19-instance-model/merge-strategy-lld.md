@@ -25,25 +25,21 @@ not add an instance-only patch language.
 
 ## Model contract
 
-The schema package owns one closed vocabulary and one frozen Pydantic annotation marker:
+The schema package owns one closed vocabulary. Its enum values are also the Pydantic annotation
+metadata, so field and model policy use the same concept:
 
 ```python
 class MergeStrategy(StrEnum):
     MERGE = "merge"
     APPEND_DEDUPE = "append-dedupe"
     REPLACE = "replace"
-
-
-@dataclass(frozen=True)
-class Merge:
-    strategy: MergeStrategy
 ```
 
 A field override is metadata on the outer field annotation:
 
 ```python
-extra_args: Annotated[list[str], Merge(MergeStrategy.REPLACE)]
-auth: Annotated[AuthConfig, Merge(MergeStrategy.REPLACE)]
+extra_args: Annotated[list[str], MergeStrategy.REPLACE]
+auth: Annotated[AuthConfig, MergeStrategy.REPLACE]
 ```
 
 Mapping-shaped schema models also expose a class policy for uses where no containing field exists or
@@ -56,7 +52,7 @@ class SecretEnvEntry(AgwModel):
 
 Policy precedence is:
 
-1. the containing field's `Merge` marker;
+1. the containing field's `MergeStrategy` metadata;
 2. the selected structured model's class policy; and
 3. the schema shape default.
 
@@ -74,9 +70,9 @@ input, or operator-configurable extension point.
 | Scalar                  | `replace`       | Use the later authored value.                                  |
 
 `replace` is valid for every node and is the useful override for objects and lists. `merge` requires
-an object-like node. `append-dedupe` requires a list node. A marker must change the effective policy
-at its location. Registration rejects a decorative marker that merely restates the inherited model
-policy or shape default.
+an object-like node. `append-dedupe` requires a list node. Explicit metadata may restate an
+inherited model policy or shape default; it still names the effective policy without another
+validation rule.
 
 A strategy annotates the node as a whole. Sequence elements do not independently receive merge
 policy because append-deduplication has equality but no element key through which two authored items
@@ -84,7 +80,7 @@ could recursively conflict. Mapping keys likewise have no policy; mapping value 
 valid because the map key supplies the identity for a conflict at arbitrary depth:
 
 ```python
-services: dict[str, Annotated[ServiceConfig, Merge(MergeStrategy.REPLACE)]]
+services: dict[str, Annotated[ServiceConfig, MergeStrategy.REPLACE]]
 ```
 
 ## Layer inputs and absence
@@ -151,18 +147,18 @@ descendants inherit that source through longest-prefix lookup; later child merge
 records. List replacement also records each resulting position because a later equal item may add a
 distinct contributor.
 
-List identity uses a closed structural, type-sensitive JSON-carrier equality rather than Python
+List equality uses a closed structural, type-sensitive JSON-carrier comparison rather than Python
 equality or hashing. Exact `None`, `bool`, `int`, finite `float`, and `str` values receive distinct
 type tags. Lists compare in order recursively. Dictionaries compare the same string keys and
 recursive values without regard to key order. Subclasses are outside the carrier, so `true` does not
 deduplicate `1` and no authored equality method runs.
 
-The equality helper remains total over the broader Pydantic/Python raw boundary. If either candidate
-contains an unsupported Python node, a non-string mapping key, a non-finite float, or a cycle, the
-candidates are not equal and the incoming item is retained. This rule applies even when both
-references point to the same unsupported object. An active pair-identity guard makes cyclic
-comparisons terminate. Provenance identifies result positions rather than embedding item values in
-paths.
+The equality helper remains total over the deliberately open `CapabilityBlock.config` raw boundary.
+YAML aliases can supply cycles before capability-model validation, and YAML can also supply
+non-string keys or non-finite floats. If either candidate contains one of those values or another
+node outside the closed carrier, the candidates are not equal and the incoming item is retained. An
+active pair-identity guard makes cyclic comparisons terminate. Provenance identifies result
+positions rather than embedding item values in paths.
 
 ### Unknown and malformed values
 
@@ -176,17 +172,17 @@ fail. The walker therefore follows these rules:
   and
 - `null` is never interpreted as an empty object or list.
 
-A wholly unknown harness-integration config has no child schema, so it uses one shallow child-wins
-mapping fallback while Registry miss handling remains the authoritative selector error. That
-fallback preserves previous-only and incoming-only keys and replaces every conflict when both maps
-have exact string keys. Otherwise the incoming config replaces the complete node without inspecting
-its keys. The fallback never recurses by runtime shape.
+A wholly unknown harness integration has no schema and cannot produce a usable effective config. The
+later declared config therefore replaces the complete prior config without inspecting it, while
+Registry miss handling remains the authoritative selector error. This keeps the total finalize walk
+without inventing an untyped merge policy for a value no consumer can use.
 
 A later valid layer may replace an earlier invalid value at the same node, exactly as it may correct
 any earlier declaration. Invalid surviving data is never silently repaired by the merge itself.
-Normal JSON, YAML, and persisted JSON sources are acyclic. The public merge boundary nevertheless
-tracks active container identities and stops descent with the incoming raw node on a cycle, so an
-untyped extension caller cannot cause recursion overflow before final validation reports the value.
+Strict inline JSON and persisted JSON sources are acyclic, but YAML aliases and Python-domain
+capability input need not be. The walker tracks active container identities and stops descent with
+the incoming raw node on a cycle, so registry construction cannot recurse indefinitely before final
+validation receives and decides the value.
 
 ## Union and subtree boundaries
 
@@ -273,21 +269,22 @@ and rejects an invalid third-party contract. First-party core declaration and ca
 covered by exhaustive, registry-derived conformance tests rather than a new import-time core
 rejection path. The pass rejects:
 
-- more than one `Merge` marker at a node;
+- more than one `MergeStrategy` metadata value at a node;
 - `merge` on a non-object node;
 - `append-dedupe` on a non-list node;
 - a model-level strategy on anything except a mapping-shaped model;
-- a marker on an individual sequence element or mapping key; and
-- a marker that does not change the effective policy at that location.
+- strategy metadata on an individual sequence element or mapping key.
 
 Every list whose effective policy is `append-dedupe` must have an element annotation recursively
 confined to that closed JSON carrier: exact JSON scalar types and literals, lists, string-keyed
-mappings, unions of allowed arms, and mapping-shaped models composed only from those forms. `Any`,
-`object`, non-string mapping keys, sets, tuples, Python-specific scalar types, and opaque custom
-types fail conformance with guidance to mark that list `replace`. This is deliberately narrower than
-the harness-integration kind's general Pydantic/Python input domain. It makes append-deduplication
-honest for every valid v2 model while the unsupported-as-unequal rule remains only a malformed
-raw-input defense.
+mappings, unions of allowed arms, and mapping-shaped models composed only from those forms. A float
+annotation qualifies only when it carries Pydantic's recognized `AllowInfNan(False)` constraint,
+such as `FiniteFloat`; custom validators and model configuration do not establish merge conformance.
+`Any`, `object`, an unconstrained float, non-string mapping keys, sets, tuples, Python-specific
+scalar types, and opaque custom types fail conformance with guidance to mark that list `replace`.
+This is deliberately narrower than the harness-integration kind's general Pydantic/Python input
+domain. It makes append-deduplication honest for every valid v2 model while the
+unsupported-as-unequal rule remains only a malformed raw-input defense.
 
 Every mapping whose effective policy is `merge` likewise requires an exact-string key annotation.
 Any other key schema fails conformance with guidance to mark the complete mapping `replace`. At
@@ -296,13 +293,11 @@ incoming mapping replaces the node without copying, hashing, comparing, or recor
 keeps ordinary mapping merge within its provenance and conflict-identity contract while allowing a
 Python-domain mapping with arbitrary keys behind a whole-node replacement boundary.
 
-The v2 merge contract refuses a validation alias wherever the merger reads authored keys: fields in
-a recursively merged object and every nested field contributing raw structural identity inside an
-append-deduped item. That includes string and generated aliases, alias choices, and alias paths. The
-walk stops below a whole-node `replace` boundary, where final Pydantic validation may still accept
-aliases because the merger copies the subtree without interpreting its children. Serialization-only
-aliases do not affect raw validation-key lookup and remain allowed. If a reusable model is reached
-by both paths, its merging use still triggers refusal.
+The v2 merge contract uniformly refuses validation aliases in every participating model. That
+includes string and generated aliases, alias choices, and alias paths, even below a whole-node
+`replace` boundary where copying could technically remain safe. The broader refusal keeps one
+authored field name throughout the public plugin contract and avoids context-dependent registration.
+Serialization-only aliases do not affect raw validation-key lookup and remain allowed.
 
 Mapping value annotations are traversed and validated. The dynamic session merger reads the
 registered integration's config model directly, so capability projection metadata is not a merge
@@ -319,7 +314,9 @@ no model-declared policy.
 The absence of a data migration does not make the plugin API backward compatible. The
 harness-integration contract version moves to 2 because version 1 promised `merge_config`; old
 third-party implementations are refused at registration until their merge behavior is expressed on
-their config model.
+their config model. Version 2 also requires participating models to use their field names for
+validation, including below replacement boundaries; serialization-only aliases remain available. The
+upgrade guidance names that constraint explicitly.
 
 An empty unmarked map or list remains additive and changes nothing. Empty replacement values clear
 only fields whose model explicitly chose replacement. There is still no key-removal tombstone,
@@ -335,18 +332,18 @@ The implementation must prove:
 - default append-deduplication, explicit list replacement, empty-list clearing, stable order, and
   duplicate contributors;
 - same-arm union recursion, arm-change replacement, and whole-entry environment parity;
-- total handling of unknown keys, unknown arms, `null`, wrong shapes, and invalid list items until
-  final validation, including shallow child-wins unknown conflicts and cycle refusal;
+- total handling of unknown keys, unknown arms, unknown integrations, `null`, wrong shapes, and
+  invalid list items until final validation, including later raw replacement and cycle refusal;
 - type-sensitive list equality, including `true` versus `1`, `1` versus `1.0`, nested objects,
-  object key order, scalar and container subclasses, non-finite-float defense, an object whose
-  equality raises, and a cyclic list item;
+  object key order, non-finite-float defense, an unsupported Python object whose equality raises,
+  and a cyclic list item;
 - no input mutation and deterministic output;
-- registration refusal for every invalid metadata placement or strategy, including decorative
-  markers, aliases on merger-read paths, non-string keys on merged mappings, and append-dedupe
-  element types outside the comparable carrier, with exhaustive first-party model coverage and
-  third-party registration coverage;
-- acceptance of aliases and arbitrary mapping keys below a replacement boundary, plus malformed
-  non-string and hostile-hash raw keys replacing at the parent without merge-time execution;
+- registration refusal for every invalid metadata placement or strategy, including uniform
+  validation-alias refusal, non-string keys on merged mappings, and append-dedupe element types
+  outside the comparable carrier, with exhaustive first-party model coverage and third-party
+  registration coverage;
+- acceptance of arbitrary mapping keys below a replacement boundary and malformed non-string raw
+  keys replacing at the parent without merge-time interpretation;
 - core template-to-template and template-to-instance parity across every owning kind;
 - capability same-integration recursion, list policies, selector-change reset, and error
   attribution, plus a version-1 registration failure and migrated version-2 shipped integrations;
@@ -363,15 +360,35 @@ provenance attribution.
 ## Permanent collateral shipped with implementation
 
 The implementation PR updates the schema README, capability authoring README, harness-integration
-README, ADR 0020, and the active upgrade guidance in the same commit range that removes the
-imperative hook and increments the contract version. No permanent artifact will depend on this SDD
-path.
+README, ADR 0020, ADR 0023, and the active upgrade guidance in the same commit range that removes
+the imperative hook and increments the contract version. The schema README describes shipped atomic
+list-item behavior; ADR 0023 preserves the unsupported future identity direction below. No permanent
+artifact will depend on this SDD path.
+
+## Future extension: model identity for list items
+
+This correction treats append-deduplicated list items as atomic values. A future object-item model
+may optionally declare a stable identity through model metadata. That declaration would extend list
+comparison to three outcomes without adding a callback or a second merge language:
+
+- equal values contribute provenance but do not append;
+- different identities append in stable order; and
+- the same identity with unequal values recursively merges through the item model's existing field-,
+  model-, and shape-directed strategies.
+
+No identity declaration, or an identity that cannot be read safely from malformed input, retains the
+current atomic equality-and-append behavior so the merger does not launder invalid data. A matched
+item's root policy still controls the conflict: ordinary object policy recurses, while `replace`
+replaces the complete matched item. Any future implementation must settle duplicate identities
+within one layer, union-arm identity, identity-field mutation, provenance for matched positions, and
+registration validation before exposing the metadata.
 
 ## Out of scope
 
 - Operator-authored merge strategies in YAML or inline JSON.
 - Key or list-item deletion tombstones beyond replacing a complete annotated node.
 - Custom capability merge callbacks or a general transform language.
-- List merge by identity key, sorting, or set semantics beyond stable equality deduplication.
+- List-item identity merging described above, sorting, or set semantics beyond stable equality
+  deduplication.
 - The separate idea that a template may require an instance layer to supply a field.
 - R3 applied-state capture and R5 resolved-spec presentation.

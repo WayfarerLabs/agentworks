@@ -172,11 +172,14 @@ strategy on an object replaces the whole subtree, including with an empty object
 including an empty list, replaces the complete prior list; an unmarked list keeps stable
 append-deduplication. A discriminated or structural union recurses only while both values select the
 same arm. An arm change replaces the complete union value, preventing invalid hybrids such as an
-environment entry containing both secret and plaintext arms. An unknown schema key is preserved;
-when two layers supply that same unknown key, the later raw value replaces the earlier one rather
-than creating a second runtime-shape merge language. The engine preserves malformed input for the
-existing final typed validation boundary rather than filtering, coercing, or laundering it, and it
-must terminate on a cyclic Python value presented through an untyped extension boundary.
+environment entry containing both secret and plaintext arms. An unknown key within a known schema is
+preserved; when two layers supply that same unknown key, the later raw value replaces the earlier
+one rather than creating a second runtime-shape merge language. A wholly unknown harness integration
+has no schema or usable effective config, so its later raw config replaces its complete prior config
+and the Registry reports the selector miss. The engine preserves malformed input for the existing
+final typed validation boundary rather than filtering, coercing, or laundering it, and it must
+terminate on a cyclic Python value reaching the deliberately open capability config boundary,
+including through a YAML alias.
 
 Model-directed merging replaces the public `HarnessIntegration.merge_config` customization point.
 That is an intentional hard cutover of the harness-integration capability contract from version 1 to

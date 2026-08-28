@@ -155,26 +155,28 @@ vocabulary is closed and registration-validated:
   discards the complete prior value at that node. An empty replaced object or list therefore clears
   that subtree or list without adding a general removal language.
 
-A field declares an effective non-default override with typed Pydantic annotation metadata. A
-mapping-shaped structured model can declare its own root strategy for every use; a containing field
-override takes precedence over that model policy, and the shape default applies last. A marker that
-merely restates the effective policy is rejected as decorative. Strategy metadata is code-owned
-model policy, not a manifest key, serialized desired state, or second operator-facing type system.
-Registration also rejects duplicate markers, strategies incompatible with the annotated shape, and
-markers placed where the merge engine has no conflict identity. Mapping value annotations are valid;
-mapping keys and individual sequence elements are not. A merge-by-key mapping requires exact-string
-keys or must choose whole-node replacement. Fields use their authored names wherever the merger
-reads them; validation aliases remain valid below a replacement boundary but are refused on
-recursively merged paths and inside append-deduped item identity.
+A field declares its strategy directly as typed Pydantic annotation metadata. A mapping-shaped
+structured model can declare its own root strategy for every use; a containing field override takes
+precedence over that model policy, and the shape default applies last. Explicit metadata may restate
+an inherited policy without creating a second validation rule. Strategy metadata is code-owned model
+policy, not a manifest key, serialized desired state, or second operator-facing type system.
+Registration rejects duplicate strategy metadata, strategies incompatible with the annotated shape,
+and strategy metadata placed where the merge engine has no conflict identity. Mapping value
+annotations are valid; mapping keys and individual sequence elements are not. A merge-by-key mapping
+requires exact-string keys or must choose whole-node replacement. The v2 contract uniformly refuses
+validation aliases in participating models, including below replacement boundaries, so registration
+never depends on the path by which a model is reached. Serialization-only aliases remain valid.
 
 For discriminated and structural unions, a containing-field replacement wins before arm selection.
 Otherwise equal selected arms apply the selected model's root policy and recurse when it permits;
 different arms, or arms that cannot be selected, replace the complete union node. An unknown schema
 key survives, but a later conflict at that key replaces the earlier raw value instead of recursively
-merging by runtime shape. A wholly unknown integration config uses the same shallow child-wins
-fallback. The merge engine never filters an invalid list item, converts `null`, or otherwise turns
+merging by runtime shape. A wholly unknown integration config has no usable schema, so a later
+declaration replaces its complete prior config and the Registry's miss policy reports the selector
+error. The merge engine never filters an invalid list item, converts `null`, or otherwise turns
 invalid authored or persisted data into a valid effective declaration. An active-identity guard
-makes the walk terminate if an untyped Python caller supplies a cyclic container.
+makes the walk terminate if the deliberately open `CapabilityBlock` boundary supplies a cyclic
+container.
 
 The VM owner has two declaration slots. Its VM slot resolves the selected `vm-template` chain plus
 the final VM layer. Its admin slot resolves the selected, non-inheriting `admin-template` plus the
