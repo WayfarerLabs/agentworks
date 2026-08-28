@@ -107,6 +107,20 @@ def test_render_table_over_cap_column_pads_short_cells_to_cap() -> None:
     assert lines[3].startswith("short" + " " * 15 + "  ")
 
 
+def test_render_table_selected_column_cap_overrides_default() -> None:
+    over_default = "a" * 45
+    lines = output.render_table(
+        ["FIRST", "SECOND"],
+        [[over_default, over_default]],
+        max_col_widths={1: 40},
+    )
+
+    first, second = lines[2].split()
+    assert len(first) == 20
+    assert len(second) == 40
+    assert second.endswith("...")
+
+
 # -- Section state model -----------------------------------------------------
 
 
