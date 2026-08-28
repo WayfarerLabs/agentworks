@@ -180,15 +180,14 @@ off whenever bandwidth allows, on its own merits and its own schedule.
   **0.15.1 cut 2026-08-27, published 2026-08-28:** the first release from a maintenance branch. PR
   #677, the fix for a Windows regression that broke `vm create` on that platform across every cloud
   provider, was cherry-picked onto a new `0.15.x` branch cut from `v0.15.0` instead of being pulled
-  forward, so the fix could reach operators without waiting on the 0.16.0 hold. Three workflow
-  changes make that path repeatable rather than a one-off: release-please runs on maintenance
-  branches with `target-branch` set to the triggering ref, so each computes its own next version
-  from its own manifest (PR #679); the publish workflow's tag guard accepts any tag reachable from
-  `main` or a maintenance branch (PR #681 on `main`, and PR #689 on `0.15.x`, which needs its own
-  copy because a tag push resolves its workflow from the tag rather than from the default branch);
-  and `release.yml` now documents the three gates a publish must pass, including the `release`
-  environment's deployment policy, which is why this cut took three attempts (PR #688 owns that
-  explanation). **`agentworks-cli` 0.15.1 went live on PyPI 2026-08-28**, verified by installing
+  forward, so the fix could reach operators without waiting on the 0.16.0 hold. Two workflow changes
+  have landed toward making that path repeatable: release-please runs on maintenance branches with
+  `target-branch` set to the triggering ref, so each computes its own next version from its own
+  manifest (PR #679), and the publish workflow's tag guard on `main` accepts any tag reachable from
+  `main` or a maintenance branch (PR #681). **The path is not yet repeatable on `0.15.x` itself.** A
+  tag push resolves its workflow from the tag rather than from the default branch, so that branch
+  needs its own copy of the guard, and until PR #689 merges a `v0.15.2` cut there would fail exactly
+  as `v0.15.1` did. **`agentworks-cli` 0.15.1 went live on PyPI 2026-08-28**, verified by installing
   from the index and confirming the shipped `agentworks.ssh.run` uses `stdin_bytes()` on its stdin
   path, so the fix reaches operators rather than merely producing a green run.
 
