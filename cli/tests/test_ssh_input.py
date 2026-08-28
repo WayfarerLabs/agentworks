@@ -90,6 +90,20 @@ def test_ssh_run_rejects_logging_sensitive_input_before_subprocess() -> None:
     assert secret not in str(caught.value)
 
 
+def test_ssh_run_rejects_a_forced_tty_before_subprocess() -> None:
+    secret = "ssh-stdin-swordfish"
+
+    with patch("agentworks.ssh.subprocess.run") as process, pytest.raises(ValueError) as caught:
+        run(
+            SSHTarget(host="vm-host", force_tty=True),
+            "read -r token",
+            input_text=secret,
+        )
+
+    process.assert_not_called()
+    assert secret not in str(caught.value)
+
+
 def test_ssh_run_translates_sensitive_native_failure_without_exception_link() -> None:
     secret = "ssh-native-failure-swordfish"
     native_failure = OSError(f"write reflected {secret}")
