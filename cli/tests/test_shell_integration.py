@@ -8,6 +8,7 @@ imports neither ``sessions`` nor ``orchestration``.
 
 from __future__ import annotations
 
+import shlex
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -15,7 +16,7 @@ import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.capabilities.config import capability_config_references, validate_capability_config
-from agentworks.capabilities.harness_integration import ShellIntegration
+from agentworks.capabilities.harness_integration import ShellIntegration, quote_literal_argv
 from agentworks.errors import ConfigError, StateError
 from agentworks.schema import RefOwner
 
@@ -34,6 +35,16 @@ class _Probe:
         self.commands.append(cmd)
         ok = not any(f"command -v {m} " in cmd for m in self._missing)
         return SimpleNamespace(ok=ok)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["", "plain", "{{session_name}}", "before {{component}} after", "{{{triple}}}", "quote ' and newline\n"],
+)
+def test_quote_literal_argv_hides_template_syntax_and_reconstructs_exact_value(value: str) -> None:
+    encoded = quote_literal_argv(value)
+    assert "{{" not in encoded
+    assert shlex.split(encoded) == [value]
 
 
 def _harness_integration(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -58,10 +59,12 @@ def _seed_db(tmp_path: Path) -> Database:
     return db
 
 
-def _template(monkeypatch: pytest.MonkeyPatch) -> None:
+def _template(monkeypatch: pytest.MonkeyPatch, config: dict[str, object] | None = None) -> None:
     from agentworks.sessions import manager as session_manager
 
-    resolved = SimpleNamespace(name="grok", harness_integration="grok-build", harness_integration_config={}, env={})
+    resolved = SimpleNamespace(
+        name="grok", harness_integration="grok-build", harness_integration_config=config or {}, env={}
+    )
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *args, **kwargs: resolved)
 
 
@@ -116,6 +119,53 @@ def test_create_persists_minted_uuid_and_launches_fresh(tmp_path: Path, monkeypa
     sid = namespace["session_id"]
     assert isinstance(sid, str) and len(sid) == 36
     assert f"--session-id {sid}" in captured["command"]
+    db.close()
+
+
+def test_substitution_preserves_workload_values_and_substitutes_extra_args(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agentworks.sessions.manager import create_session
+
+    db = _seed_db(tmp_path)
+    events: list[str] = []
+    captured: dict[str, str] = {}
+    target = _GrokTarget(events, session_present=False)
+    _common_stubs(monkeypatch, target)
+    _template(
+        monkeypatch,
+        {
+            "goal": "goal {{session_name}} {{component}}",
+            "initial_prompt": "prompt {{session_name}} {{component}}",
+            "agent": "profile {{session_name}} {{component}}",
+            "rules": "rules {{session_name}} {{component}}",
+            "extra_args": ["--future-flag", "extra-{{session_name}}"],
+        },
+    )
+    _capture_tmux(monkeypatch, events, captured)
+
+    create_session(
+        db,
+        SimpleNamespace(session=SimpleNamespace(history_limit=1)),  # type: ignore[arg-type]
+        name="s1",
+        workspace="ws1",
+        admin=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    inner = shlex.split(captured["command"])[2]
+    inner_argv = shlex.split(inner)
+    argv = inner_argv[inner_argv.index("grok") + 1 :]
+    assert argv[argv.index("--agent") + 1] == "profile {{session_name}} {{component}}"
+    assert argv[argv.index("--rules") + 1] == "rules {{session_name}} {{component}}"
+    assert "--prompt" not in argv
+    assert "--agent-profile" not in argv
+    assert argv[-2] == "--"
+    prompt = argv[-1]
+    assert "goal {{session_name}} {{component}}" in prompt
+    assert "prompt {{session_name}} {{component}}" in prompt
+    assert argv[argv.index("--future-flag") + 1] == "extra-s1"
+    assert argv.index("--future-flag") < argv.index("--")
     db.close()
 
 

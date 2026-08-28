@@ -101,6 +101,10 @@ def test_validation_accepts_the_optional_fields_and_empty_config() -> None:
             "permission_mode": "acceptEdits",
             "model": "opus",
             "reasoning_effort": "high",
+            "goal": "Finish the migration",
+            "initial_prompt": "Start with the failing tests",
+            "agent": "reviewer",
+            "append_system_prompt": "Keep changes focused",
             "remote_control": True,
             "vim_mode": True,
             "terminal_bell": True,
@@ -115,7 +119,10 @@ def test_validation_rejects_unknown_field() -> None:
         _validate({"permision_mode": "typo"})
 
 
-@pytest.mark.parametrize("field", ["model", "reasoning_effort"])
+@pytest.mark.parametrize(
+    "field",
+    ["model", "reasoning_effort", "goal", "initial_prompt", "agent", "append_system_prompt"],
+)
 def test_validation_rejects_non_string_flag_values(field: str) -> None:
     with pytest.raises(ConfigError):
         _validate({field: 3})
@@ -345,6 +352,60 @@ def test_remote_control_uses_the_session_name_as_its_title() -> None:
     )
     index = argv.index("--remote-control")
     assert argv[index + 1] == "my-session"
+
+
+def test_fresh_workload_uses_native_controls_and_separates_the_prompt() -> None:
+    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
+    goal = "Finish safely; printf 'done'"
+    initial = "Begin with the failing test"
+    argv = _claude_argv(
+        _harness_integration(
+            {
+                "goal": goal,
+                "initial_prompt": initial,
+                "agent": "reviewer",
+                "append_system_prompt": "Keep the diff focused",
+                "extra_args": ["--future-flag"],
+            }
+        ).start(_op_ctx(target))
+    )
+
+    assert argv[argv.index("--agent") + 1] == "reviewer"
+    assert argv[argv.index("--append-system-prompt") + 1] == "Keep the diff focused"
+    prompt = next(token for token in argv if token.startswith("/goal "))
+    assert prompt.index(goal) < prompt.index(initial)
+    assert argv[argv.index("--") - 1] == "--future-flag"
+    assert argv[-1] == prompt
+
+
+@pytest.mark.parametrize("initial_prompt", ["doctor", "--version"])
+def test_fresh_initial_prompt_cannot_be_parsed_as_a_command_or_option(initial_prompt: str) -> None:
+    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
+    argv = _claude_argv(
+        _harness_integration({"initial_prompt": initial_prompt, "extra_args": ["--model", "opus"]}).start(
+            _op_ctx(target)
+        )
+    )
+
+    assert argv[-2:] == ["--", f"\n{initial_prompt}"]
+    assert argv.index("opus") < argv.index("--")
+
+
+def test_resume_reapplies_process_controls_but_not_fresh_conversation_content() -> None:
+    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})
+    argv = _claude_argv(
+        _harness_integration(
+            {
+                "goal": "Fresh goal",
+                "initial_prompt": "Fresh prompt",
+                "agent": "reviewer",
+                "append_system_prompt": "Fresh instructions",
+            }
+        ).resume(_op_ctx(target))
+    )
+    assert argv[argv.index("--agent") + 1] == "reviewer"
+    assert argv[argv.index("--append-system-prompt") + 1] == "Fresh instructions"
+    assert all("Fresh goal" not in token and "Fresh prompt" not in token for token in argv)
 
 
 @pytest.mark.parametrize(

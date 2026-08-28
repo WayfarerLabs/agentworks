@@ -7,10 +7,13 @@ UUID selects ``--resume``; when no persisted session exists, the same UUID
 starts a new conversation. The probe scans every encoded workspace directory
 under Grok's session root, so it does not duplicate Grok's cwd encoding.
 
-Config vocabulary is deliberately small and open. ``permission_mode``,
+Config vocabulary is deliberately small and open. ``goal`` and
+``initial_prompt`` seed a fresh conversation; ``agent`` and ``rules`` configure
+every Grok process launch, including a real resume. ``permission_mode``,
 ``model``, ``reasoning_effort``, and ``sandbox`` forward to Grok-owned CLI
 choice sets without mirroring their values. ``extra_args`` appends raw argv
-tokens last, so new upstream flags do not require an Agentworks release.
+tokens after generated options and before any fresh positional prompt, so new
+upstream flags do not require an Agentworks release.
 """
 
 from __future__ import annotations
@@ -21,7 +24,11 @@ from typing import TYPE_CHECKING, ClassVar, Literal
 
 from pydantic import Field
 
-from agentworks.capabilities.harness_integration.base import HarnessIntegration, require_commands
+from agentworks.capabilities.harness_integration.base import (
+    HarnessIntegration,
+    quote_literal_argv,
+    require_commands,
+)
 from agentworks.errors import StateError
 from agentworks.schema import AgwModel
 from agentworks.topics import TopicProse
@@ -36,7 +43,11 @@ class GrokBuildConfig(AgwModel):
 
     Every string choice belongs to Grok Build and forwards unvalidated. The
     installed CLI owns accepted values, warnings, errors, and model-specific
-    interpretation.
+    interpretation. The top-level ``--agent`` and ``--rules`` flags,
+    positional startup prompt, and ``/goal`` claims here were checked against
+    official Grok Build 1.0.10 source at commit ``77cd7eb`` and its
+    documentation. No 1.0.10 binary was installed for this recheck, so runtime
+    observations below remain explicitly pinned to 1.0.4.
     """
 
     name: Literal["grok-build"]
@@ -59,11 +70,28 @@ class GrokBuildConfig(AgwModel):
     unknown profile rather than falling back. A child template's declared
     value replaces its parent's."""
 
+    goal: str | None = None
+    """A Grok Build ``/goal`` objective submitted when this integration
+    starts a fresh conversation. It is not replayed on resume."""
+
+    initial_prompt: str | None = None
+    """The first prompt for a fresh conversation. When ``goal`` is also set,
+    it becomes initial guidance inside the native goal directive. It is not
+    replayed on resume."""
+
+    agent: str | None = None
+    """Forwarded as top-level ``--agent`` on every process launch, including
+    resume. Grok Build owns identity lookup and validation."""
+
+    rules: str | None = None
+    """Forwarded as ``--rules`` on every process launch, including resume."""
+
     extra_args: list[str] = Field(default_factory=list)
-    """Raw argv tokens appended verbatim after every managed flag. Grok
-    Build 1.0.4 rejects repeated managed flags, so use this for unmodeled flags
-    rather than overriding a modeled field. A child template's declared list
-    replaces its parent's instead of accumulating."""
+    """Raw argv tokens appended verbatim after every managed flag and before
+    any fresh positional prompt. Grok Build 1.0.4 rejects repeated managed
+    flags, so use this for unmodeled flags rather than overriding a modeled
+    field. A child template's declared list replaces its parent's instead of
+    accumulating."""
 
 
 # Grok Build 1.0.4 resolves its user-state root through the official
@@ -128,7 +156,15 @@ class GrokBuildIntegration(HarnessIntegration):
             identity = ["--session-id", sid]
             message = f"agentworks harness integration (grok-build): starting new session {self._session_name}"
 
-        argv = " ".join(shlex.quote(token) for token in [*identity, *self._config_flags()])
+        parts = [shlex.quote(token) for token in (*identity, *self._managed_flags())]
+        if self.config.agent is not None:
+            parts += ["--agent", quote_literal_argv(self.config.agent)]
+        if self.config.rules is not None:
+            parts += ["--rules", quote_literal_argv(self.config.rules)]
+        parts += [shlex.quote(token) for token in self.config.extra_args]
+        if not resume and (prompt := self._fresh_prompt()) is not None:
+            parts += ["--", quote_literal_argv(prompt)]
+        argv = " ".join(parts)
         inner = f"echo {shlex.quote(message)}; exec grok {argv}"
         return f"sh -c {shlex.quote(inner)}"
 
@@ -158,7 +194,7 @@ class GrokBuildIntegration(HarnessIntegration):
             ) from None
         return sid
 
-    def _config_flags(self) -> list[str]:
+    def _managed_flags(self) -> list[str]:
         tokens: list[str] = []
         if self.config.permission_mode is not None:
             tokens += ["--permission-mode", self.config.permission_mode]
@@ -168,8 +204,22 @@ class GrokBuildIntegration(HarnessIntegration):
             tokens += ["--reasoning-effort", self.config.reasoning_effort]
         if self.config.sandbox is not None:
             tokens += ["--sandbox", self.config.sandbox]
-        tokens += self.config.extra_args
         return tokens
+
+    def _fresh_prompt(self) -> str | None:
+        """The single initial input Grok accepts for a fresh TUI session.
+
+        Grok's native ``/goal`` command starts the first turn itself. When
+        both fields are set, the initial prompt is therefore carried as
+        guidance in that goal directive rather than submitted as a second
+        turn that the CLI has no startup channel for.
+        """
+        if self.config.goal is None:
+            return self.config.initial_prompt
+        prompt = f"/goal {self.config.goal}"
+        if self.config.initial_prompt is not None:
+            prompt += f"\n\nInitial guidance for this goal:\n{self.config.initial_prompt}"
+        return prompt
 
     def _session_exists(self, transport: Transport, sid: str) -> bool:
         """Check Grok's own persisted-session boundary for ``sid``.

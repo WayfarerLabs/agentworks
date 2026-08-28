@@ -1,7 +1,10 @@
 """The ``codex`` harness integration: run Codex as the session workload, resuming its
 rollout when one exists and launching fresh otherwise.
 
-Config vocabulary (all optional): ``model``, ``sandbox``, ``approval_policy``,
+Config vocabulary (all optional): ``goal``, ``initial_prompt``, and ``agent``
+seed a fresh conversation; ``developer_instructions`` configures every Codex
+process launch, including explicit resume and the picker;
+``model``, ``sandbox``, ``approval_policy``,
 and ``profile`` map to the ``-m`` / ``-s`` / ``-a`` / ``-p`` flags verbatim;
 ``network`` (bool) forwards to the ``sandbox_workspace_write.network_access``
 config key via ``-c``; ``approvals_reviewer`` (str) forwards to the
@@ -16,7 +19,7 @@ risk-based reviewer subagent); ``reasoning_effort`` (str) and ``vim_mode``
 emitting no override;
 ``disable_strict_config`` (bool, default false) suppresses the
 ``--strict-config`` the harness integration otherwise always emits; and ``extra_args`` is
-a list of raw argv tokens appended last (the operator escape hatch for any
+a list of raw argv tokens emitted after generated options (the operator escape hatch for any
 flag the harness integration does not model). ``extra_args`` lands after the
 generated ``-c notify`` override, so an operator who sets their own ``notify``
 there deliberately disables the id binding below (documented on the field, and
@@ -99,13 +102,14 @@ own is lost, and the picker plus notify rebinding recover it.
 
 from __future__ import annotations
 
+import json
 import re
 import shlex
 from typing import TYPE_CHECKING, ClassVar, Literal, NamedTuple
 
 from pydantic import Field
 
-from agentworks.capabilities.harness_integration.base import HarnessIntegration, require_commands
+from agentworks.capabilities.harness_integration.base import HarnessIntegration, quote_literal_argv, require_commands
 from agentworks.errors import StateError
 from agentworks.plugins.codex.recorder import home_word, notify_value_word, provision_fragment, thread_tail
 from agentworks.schema import AgwModel
@@ -125,7 +129,9 @@ class CodexConfig(AgwModel):
     they forward unvalidated. Codex validates some values at startup, but
     not every set is an enum there (0.147.0 accepts arbitrary reasoning
     effort strings). The integration emits ``--strict-config`` by default
-    to catch unknown config keys and wrong value types.
+    to catch unknown config keys and wrong value types. Native
+    ``developer_instructions`` config and the positional ``--`` boundary were
+    rechecked with Codex CLI 0.149.1.
     """
 
     name: Literal["codex"]
@@ -157,6 +163,25 @@ class CodexConfig(AgwModel):
     0.147.0 does not reject an unknown effort string at config load. A
     child template's declared value replaces its parent's."""
 
+    goal: str | None = None
+    """A native persistent goal requested through the first prompt of a fresh
+    conversation. Codex exposes ``/goal`` but no documented startup flag."""
+
+    initial_prompt: str | None = None
+    """The operator's first prompt for a fresh conversation. It follows any
+    generated setup and is not replayed on resume."""
+
+    agent: str | None = None
+    """The declared ``name`` of a Codex custom agent whose
+    ``developer_instructions`` should guide a fresh primary thread. Codex has
+    no primary-thread agent selector, so this is prompt-mediated."""
+
+    developer_instructions: str | None = None
+    """Additional model-readable instructions injected natively on every
+    Codex process launch, including explicit resume and the picker. This does
+    not apply model, reasoning, sandbox, MCP, skills, or other agent
+    configuration."""
+
     vim_mode: bool = False
     """Start Codex's composer in Vim normal mode. Omitted when false, so
     the target's own configuration remains authoritative by default. A
@@ -178,12 +203,13 @@ class CodexConfig(AgwModel):
     ``config.toml`` a newer codex wrote."""
 
     extra_args: list[str] = Field(default_factory=list)
-    """Raw argv tokens appended verbatim, last, so they can add unmodeled
-    arguments or override managed ``-c`` configuration values. Codex
-    0.147.0 takes the last value for a repeated ``-c`` key. Overriding
-    ``notify`` disables deterministic id binding, leaving discovery and the
-    picker as fallbacks. A child template's declared list replaces its
-    parent's."""
+    """Raw argv tokens appended verbatim after every generated CLI option,
+    so they can add unmodeled arguments or override managed ``-c`` values.
+    Codex 0.147.0 takes the last value for a repeated ``-c`` key. On a fresh
+    launch with an initial input, only the ``--`` prompt separator and prompt
+    value follow these option tokens. Overriding ``notify`` disables
+    deterministic id binding, leaving discovery and the picker as fallbacks.
+    A child template's declared list replaces its parent's."""
 
 
 # Config field -> the codex flag it forwards to, in emission order. The
@@ -466,8 +492,8 @@ class CodexIntegration(HarnessIntegration):
         follow-up in the decisions doc rather than guessed at here.
 
         This is the correct semantics for deferred discovery rather than an
-        asymmetry to apologize for, and it matches the 2026-08-01 decision
-        that a fresh launch carries no seed prompt and resumes nothing.
+        asymmetry to apologize for: a fresh launch resumes nothing, while its
+        effective workload config may provide initial input.
         """
         self._decision = "fresh"
         return self._fresh_command(
@@ -511,14 +537,21 @@ class CodexIntegration(HarnessIntegration):
             )
             return f"{dropped}Identified {which} from Codex's own on-disk state: {self._adopted_id}. Resuming..."
         if self._decision == "picker":
-            return (
+            note = (
                 f"{dropped}Could not identify this session's Codex conversation with confidence. "
                 f"Codex's session picker is opening in the pane; picking one binds this session to "
                 f"that conversation from its next turn, and esc starts a fresh conversation instead."
             )
+            if disclosure := self._picker_workload_disclosure():
+                note = f"{note} {disclosure}"
+            return note
         if self._decision == "stale":
-            return "Previous Codex session is archived or gone. Starting a new one..."
-        return "No existing Codex session. Starting a new one..."
+            note = "Previous Codex session is archived or gone. Starting a new one..."
+        else:
+            note = "No existing Codex session. Starting a new one..."
+        if disclosure := self._fresh_setup_disclosure():
+            note = f"{note} {disclosure}"
+        return note
 
     def _resume_or_launch(self, ctx: RunContext) -> str:
         """The RESUME decision, from codex's own durable state on the launch
@@ -605,11 +638,13 @@ class CodexIntegration(HarnessIntegration):
             )
         if found.ids or found.unnamed:
             self._decision = "picker"
+            picker_disclosure = self._picker_workload_disclosure()
+            warning = f" {picker_disclosure}" if picker_disclosure is not None else ""
             return self._picker_command(
                 msg=f"agentworks harness integration (codex): {dropped}could not identify this "
                 f"session's codex conversation with confidence; opening codex's session picker. "
                 f"Pick one to bind session {self._session_name} to it from its next turn, or press "
-                f"esc to start a fresh conversation.",
+                f"esc to start a fresh conversation.{warning}",
                 legacy_marker=legacy_marker,
             )
         if self._dropped_stale:
@@ -685,6 +720,7 @@ class CodexIntegration(HarnessIntegration):
         head: tuple[str, ...],
         legacy_marker: str | None,
         clear_binding: bool = False,
+        fresh: bool = False,
     ) -> str:
         """The pane command shared by all three launch forms: echo the
         visible decision, clean up after the retired marker scheme,
@@ -704,7 +740,7 @@ class CodexIntegration(HarnessIntegration):
             # recording must not outlive it and re-report a dead id.
             parts.append(f"rm -f {home_word(thread_tail(self._session_name))}")
         parts.append(provision_fragment())
-        parts.append(f"exec codex {self._codex_argv(head)}".rstrip())
+        parts.append(f"exec codex {self._codex_argv(head, fresh=fresh)}".rstrip())
         return f"sh -c {shlex.quote('; '.join(parts))}"
 
     def _resume_command(self, sid: str, *, msg: str, legacy_marker: str | None) -> str:
@@ -737,9 +773,8 @@ class CodexIntegration(HarnessIntegration):
         )
 
     def _fresh_command(self, *, msg: str, legacy_marker: str | None) -> str:
-        """The fresh-launch pane command: ``exec codex`` with no
-        positional prompt, so no wrapper-authored turn ever appears in the
-        conversation and nothing is durable until the human submits.
+        """The fresh-launch pane command, with a positional prompt only when
+        this instance declares fresh-conversation workload input.
 
         It also removes any leftover recording (``clear_binding``). A fresh
         launch means nothing is bound yet, so a stale ``.thread`` file must
@@ -748,16 +783,20 @@ class CodexIntegration(HarnessIntegration):
         (see :meth:`start`): create adopts nothing, and it also clears a
         dead namesake's recording so no FOLLOWING ``resume`` can bind it
         either."""
+        if disclosure := self._fresh_setup_disclosure():
+            msg = f"{msg}; {disclosure}"
         return self._pane_command(
             msg=msg,
             head=(),
             legacy_marker=legacy_marker,
             clear_binding=True,
+            fresh=True,
         )
 
-    def _codex_argv(self, head: tuple[str, ...]) -> str:
+    def _codex_argv(self, head: tuple[str, ...], *, fresh: bool = False) -> str:
         """The quoted argv text after ``codex``: the form's leading tokens,
-        the managed flags, the ``notify`` override, then ``extra_args``.
+        managed flags, the ``notify`` and developer-instruction overrides,
+        ``extra_args``, then any separated fresh prompt.
 
         The ``notify`` override lands after every managed flag and before
         ``extra_args``, which is what makes an operator ``notify`` in
@@ -767,8 +806,86 @@ class CodexIntegration(HarnessIntegration):
         """
         parts = [shlex.quote(token) for token in (*head, *self._managed_flags())]
         parts += ["-c", notify_value_word(self._session_name)]
+        if self.config.developer_instructions is not None:
+            value = _toml_basic_string(self.config.developer_instructions)
+            parts += ["-c", quote_literal_argv(f"developer_instructions={value}")]
         parts += [shlex.quote(token) for token in self._extra_arg_tokens()]
+        if fresh and (prompt := self._fresh_prompt()) is not None:
+            parts += ["--", quote_literal_argv(prompt)]
         return " ".join(parts)
+
+    def _fresh_prompt(self) -> str | None:
+        """The operator prompt, optionally preceded by compatibility setup.
+
+        Codex has a native persistent goal but no documented startup flag,
+        and its custom-agent selection applies to spawned agents rather than
+        the primary thread. The first prompt asks Codex to bridge those two
+        gaps. Setup values are JSON data so arbitrary operator text stays
+        distinct from the instructions that interpret it.
+        """
+        agent = self.config.agent
+        setup = {
+            key: value
+            for key, value in (
+                ("agent", agent),
+                ("goal", self.config.goal),
+            )
+            if value is not None
+        }
+        if not setup:
+            return self.config.initial_prompt
+
+        steps: list[str] = ["Complete this Agentworks setup before doing any other work in this fresh conversation."]
+        if agent is not None:
+            steps.append(
+                "Locate the Codex custom agent whose declared name exactly matches setup.agent. "
+                "Read and follow its developer_instructions in this primary thread. If it is missing "
+                "or unreadable, report that problem instead of substituting another agent. Only its "
+                "developer_instructions apply here; do not claim its model, reasoning, sandbox, MCP, "
+                "skills, or other configuration was applied."
+            )
+        if self.config.goal is not None:
+            steps.append(
+                "Create a native persistent Codex goal whose objective is exactly setup.goal. Omit "
+                "token_budget rather than inventing one."
+            )
+        setup_json = json.dumps(setup, ensure_ascii=False, separators=(",", ":"))
+        parts = ["\n".join(f"{index}. {step}" for index, step in enumerate(steps, start=1)), setup_json]
+        if self.config.initial_prompt is not None:
+            parts.append(
+                "After completing the setup above, continue with this operator initial prompt:\n"
+                f"{self.config.initial_prompt}"
+            )
+        return "\n\n".join(parts)
+
+    def _fresh_setup_disclosure(self) -> str | None:
+        """An operator warning for fresh setup that Codex must interpret."""
+        mediated: list[str] = []
+        if self.config.agent is not None:
+            mediated.append("custom-agent identity")
+        if self.config.goal is not None:
+            mediated.append("goal creation")
+        if not mediated:
+            return None
+        joined = ", ".join(mediated)
+        return f"Agentworks is requesting {joined} through Codex's initial prompt; verify the result in the TUI."
+
+    def _picker_workload_disclosure(self) -> str | None:
+        """Warn when picker Esc cannot conditionally receive fresh input."""
+        if not any(
+            value is not None
+            for value in (
+                self.config.goal,
+                self.config.initial_prompt,
+                self.config.agent,
+            )
+        ):
+            return None
+        return (
+            "Selecting an existing conversation resumes it normally. Pressing esc creates a fresh "
+            "Codex conversation without applying the configured goal, agent, or initial prompt "
+            "because Codex exposes no conditional picker input."
+        )
 
     def _managed_flags(self) -> list[str]:
         """The flags the harness integration models, as argv tokens, in emission order.
@@ -810,8 +927,7 @@ class CodexIntegration(HarnessIntegration):
         return tokens
 
     def _extra_arg_tokens(self) -> list[str]:
-        """``extra_args`` as argv tokens, appended verbatim last so it can
-        carry (or override) any flag the harness integration does not model."""
+        """``extra_args`` as raw option tokens after generated options."""
         return list(self.config.extra_args)
 
     def _recorded_thread_id(self, transport: Transport) -> str | None:

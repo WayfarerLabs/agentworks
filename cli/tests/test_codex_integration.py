@@ -155,6 +155,13 @@ def _echo(command: str) -> str:
     return tokens[1]
 
 
+def _raw_codex_argv(command: str) -> list[str]:
+    """The generated argv with shell quoting peeled off but no expansion."""
+    tokens = shlex.split(_inner(command))
+    codex = tokens.index("codex")
+    return tokens[codex + 1 :]
+
+
 # -- config vocabulary -------------------------------------------------------
 
 
@@ -194,6 +201,10 @@ def test_validation_accepts_the_config_vocabulary_and_empty_config() -> None:
             "network": True,
             "approvals_reviewer": "auto_review",
             "reasoning_effort": "high",
+            "goal": "Finish the migration",
+            "initial_prompt": "Start with the failing tests",
+            "agent": "reviewer",
+            "developer_instructions": "Keep changes focused",
             "vim_mode": True,
             "writable_dirs": ["/srv/cache"],
             "web_search": "cached",
@@ -209,7 +220,19 @@ def test_validation_rejects_unknown_field() -> None:
         _validate({"sandbx": "typo"})
 
 
-@pytest.mark.parametrize("field_name", ["model", "sandbox", "approval_policy", "profile"])
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "model",
+        "sandbox",
+        "approval_policy",
+        "profile",
+        "goal",
+        "initial_prompt",
+        "agent",
+        "developer_instructions",
+    ],
+)
 def test_validation_rejects_non_string_flag_fields(field_name: str) -> None:
     with pytest.raises(ConfigError, match=f"{field_name}: must be a string"):
         _validate({field_name: 3})
@@ -267,6 +290,94 @@ def test_create_clears_a_stale_recording_and_retires_legacy_keys() -> None:
     assert state == {}
     assert 'rm -f "$HOME"/.agentworks/codex/s1.thread' in inner
     assert f'rm -f "$HOME"/{_LEGACY_MARKER}' in inner
+
+
+def test_fresh_workload_setup_precedes_the_operator_prompt_and_extra_args() -> None:
+    goal = "Finish safely; printf 'done'"
+    initial = "Begin with the failing test"
+    developer = "Keep the diff focused"
+    command = _harness_integration(
+        {
+            "goal": goal,
+            "initial_prompt": initial,
+            "agent": "reviewer",
+            "developer_instructions": developer,
+            "extra_args": ["--future-flag"],
+        },
+        state={},
+    ).start(_op_ctx(_target()))
+    argv = _raw_codex_argv(command)
+
+    developer_override = f'developer_instructions="{developer}"'
+    prompt = next(token for token in argv if goal in token and initial in token)
+    setup_json = next(part for part in prompt.split("\n\n") if part.startswith("{"))
+    assert json.loads(setup_json) == {
+        "agent": "reviewer",
+        "goal": goal,
+    }
+    assert developer not in prompt
+    assert prompt.rindex(initial) > prompt.index(setup_json)
+    assert argv[argv.index("--") - 1] == "--future-flag"
+    assert argv[-1] == prompt
+    assert argv.index(developer_override) < argv.index("--future-flag") < argv.index("--")
+
+
+def test_initial_prompt_alone_is_forwarded_without_generated_setup() -> None:
+    initial = "Inspect first; printf 'safe'"
+    command = _harness_integration({"initial_prompt": initial}, state={}).start(_op_ctx(_target()))
+    argv = _raw_codex_argv(command)
+    assert argv[-2:] == ["--", initial]
+
+
+@pytest.mark.parametrize("initial_prompt", ["review", "--help"])
+def test_fresh_initial_prompt_cannot_be_parsed_as_a_command_or_option(initial_prompt: str) -> None:
+    command = _harness_integration(
+        {"initial_prompt": initial_prompt, "extra_args": ["-c", 'model="gpt-5"']}, state={}
+    ).start(_op_ctx(_target()))
+    argv = _raw_codex_argv(command)
+
+    assert argv[-2:] == ["--", initial_prompt]
+    assert argv.index('model="gpt-5"') < argv.index("--")
+
+
+@pytest.mark.parametrize(
+    ("state", "target"),
+    [
+        pytest.param({}, _target(), id="unbound-no-candidates"),
+        pytest.param({"session_id": _SID}, _target(rollout=1), id="stale-no-candidates"),
+    ],
+)
+def test_resume_fresh_fallback_applies_workload_setup(state: dict[str, object], target: _FakeTarget) -> None:
+    goal = "Restore the workload"
+    command = _harness_integration({"goal": goal}, state=state).resume(_op_ctx(target))
+    assert any(goal in token for token in _raw_codex_argv(command))
+
+
+def test_real_resume_reapplies_native_instructions_but_not_fresh_prompt_setup() -> None:
+    values = ("Fresh goal", "Fresh prompt", "reviewer", "Fresh developer instructions")
+    command = _harness_integration(
+        {
+            "goal": values[0],
+            "initial_prompt": values[1],
+            "agent": values[2],
+            "developer_instructions": values[3],
+        }
+    ).resume(_op_ctx(_target(rollout=0)))
+    argv = _raw_codex_argv(command)
+    assert all(all(value not in token for token in argv) for value in values[:3])
+    assert any(values[3] in token for token in argv)
+
+
+def test_fresh_developer_instructions_are_toml_quoted_and_not_prompt_mediated() -> None:
+    instructions = 'Keep "quoted" input safe\nwith a second line'
+    command = _harness_integration({"developer_instructions": instructions, "initial_prompt": "Begin"}, state={}).start(
+        _op_ctx(_target())
+    )
+    argv = _raw_codex_argv(command)
+
+    override = next(token for token in argv if token.startswith("developer_instructions="))
+    assert override == 'developer_instructions="Keep \\"quoted\\" input safe\\nwith a second line"'
+    assert argv.index(override) < argv.index("Begin")
 
 
 # -- layer 1: the notify binding ---------------------------------------------
@@ -386,6 +497,30 @@ def test_several_candidates_open_the_picker_instead_of_raising() -> None:
     assert "exec codex resume -c tui.resume_cwd=current" in command
     assert "could not identify this session's codex conversation with confidence" in _echo(command)
     assert "press esc to start a fresh conversation" in _echo(command)
+
+
+def test_picker_warns_only_when_esc_would_drop_fresh_workload_input() -> None:
+    discovered = f"{_ROLLOUT}\n{_OTHER_ROLLOUT}\n"
+
+    plain = _harness_integration(state={})
+    plain_command = plain.resume(_op_ctx(_target(discovered=discovered)))
+    plain_note = plain.launch_note()
+    assert plain_note is not None
+
+    configured = _harness_integration({"initial_prompt": "Fresh prompt"}, state={})
+    configured_command = configured.resume(_op_ctx(_target(discovered=discovered)))
+    configured_note = configured.launch_note()
+    assert configured_note is not None
+
+    assert configured_note != plain_note
+    assert _echo(configured_command) != _echo(plain_command)
+    assert "Fresh prompt" not in _raw_codex_argv(configured_command)
+
+    native = _harness_integration({"developer_instructions": "Native instructions"}, state={})
+    native_command = native.resume(_op_ctx(_target(discovered=discovered)))
+    assert native.launch_note() == plain_note
+    assert _echo(native_command) == _echo(plain_command)
+    assert any("Native instructions" in token for token in _raw_codex_argv(native_command))
 
 
 def test_a_candidate_whose_filename_has_no_uuid_opens_the_picker() -> None:
@@ -904,6 +1039,8 @@ def test_merge_config_unions_writable_dirs_and_child_wins_the_rest() -> None:
             "writable_dirs": ["/srv/a"],
             "network": True,
             "reasoning_effort": "medium",
+            "goal": "Parent goal",
+            "initial_prompt": "Parent prompt",
             "vim_mode": False,
             "extra_args": ["--x"],
         },
@@ -911,6 +1048,8 @@ def test_merge_config_unions_writable_dirs_and_child_wins_the_rest() -> None:
             "writable_dirs": ["/srv/b", "/srv/a"],
             "network": False,
             "reasoning_effort": "high",
+            "initial_prompt": "Child prompt",
+            "agent": "reviewer",
             "vim_mode": True,
             "extra_args": ["--y"],
         },
@@ -918,6 +1057,9 @@ def test_merge_config_unions_writable_dirs_and_child_wins_the_rest() -> None:
     assert merged["writable_dirs"] == ["/srv/a", "/srv/b"]
     assert merged["network"] is False
     assert merged["reasoning_effort"] == "high"
+    assert merged["goal"] == "Parent goal"
+    assert merged["initial_prompt"] == "Child prompt"
+    assert merged["agent"] == "reviewer"
     assert merged["vim_mode"] is True
     assert merged["extra_args"] == ["--y"]
 

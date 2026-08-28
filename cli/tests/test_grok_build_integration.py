@@ -101,6 +101,10 @@ def test_validation_accepts_open_string_choices_and_empty_config() -> None:
             "model": "future-model",
             "reasoning_effort": "future-effort",
             "sandbox": "future-sandbox",
+            "goal": "Finish the migration",
+            "initial_prompt": "Start with the failing tests",
+            "agent": "reviewer",
+            "rules": "Keep changes focused",
             "extra_args": ["--future-flag"],
         }
     )
@@ -112,7 +116,19 @@ def test_validation_rejects_unknown_field() -> None:
         _validate({"permision_mode": "typo"})
 
 
-@pytest.mark.parametrize("field", ["permission_mode", "model", "reasoning_effort", "sandbox"])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "permission_mode",
+        "model",
+        "reasoning_effort",
+        "sandbox",
+        "goal",
+        "initial_prompt",
+        "agent",
+        "rules",
+    ],
+)
 def test_validation_rejects_non_string_choices(field: str) -> None:
     with pytest.raises(ConfigError):
         _validate({field: 3})
@@ -278,14 +294,66 @@ def test_empty_config_emits_only_the_fresh_session_identity() -> None:
     assert _grok_argv(command) == ["--session-id", _SID]
 
 
+def test_fresh_workload_uses_native_controls_and_one_positional_prompt() -> None:
+    goal = "Finish safely; printf 'done'"
+    initial = "Begin with the failing test"
+    command = _integration(
+        {
+            "goal": goal,
+            "initial_prompt": initial,
+            "agent": "reviewer",
+            "rules": "Keep the diff focused",
+            "extra_args": ["--future-flag"],
+        }
+    ).start(_op_ctx(_FakeTarget({"summary.json": _FakeResult(1)})))
+    argv = _grok_argv(command)
+
+    assert argv[argv.index("--agent") + 1] == "reviewer"
+    assert argv[argv.index("--rules") + 1] == "Keep the diff focused"
+    assert "--prompt" not in argv
+    assert "--agent-profile" not in argv
+    assert argv[-3] == "--future-flag"
+    assert argv[-2] == "--"
+    prompt = argv[-1]
+    assert prompt.index(goal) < prompt.index(initial)
+
+
+@pytest.mark.parametrize("initial_prompt", ["--version", "agent"])
+def test_fresh_initial_prompt_uses_a_positional_parser_boundary(initial_prompt: str) -> None:
+    argv = _grok_argv(
+        _integration({"initial_prompt": initial_prompt, "extra_args": ["--future-flag"]}).start(
+            _op_ctx(_FakeTarget({"summary.json": _FakeResult(1)}))
+        )
+    )
+
+    assert argv[-3:] == ["--future-flag", "--", initial_prompt]
+    assert "--prompt" not in argv
+
+
+def test_resume_reapplies_process_controls_but_not_fresh_conversation_content() -> None:
+    command = _integration(
+        {
+            "goal": "Fresh goal",
+            "initial_prompt": "Fresh prompt",
+            "agent": "reviewer",
+            "rules": "Fresh rules",
+        }
+    ).resume(_op_ctx(_FakeTarget({"summary.json": _FakeResult(0)})))
+    argv = _grok_argv(command)
+    assert argv[argv.index("--agent") + 1] == "reviewer"
+    assert argv[argv.index("--rules") + 1] == "Fresh rules"
+    assert all("Fresh goal" not in token and "Fresh prompt" not in token for token in argv)
+    assert "--" not in argv
+
+
 def test_extra_args_are_quoted_and_appended_last() -> None:
     payload = "a'; touch /tmp/pwned #"
-    command = _integration({"model": "managed", "extra_args": ["--rules", payload]}).start(
+    command = _integration({"model": "managed", "extra_args": ["--future-flag", payload]}).start(
         _op_ctx(_FakeTarget({"summary.json": _FakeResult(1)}))
     )
     argv = _grok_argv(command)
-    assert argv[-2:] == ["--rules", payload]
-    assert argv.index("managed") < argv.index("--rules")
+    assert argv[-2:] == ["--future-flag", payload]
+    assert argv.index("managed") < argv.index("--future-flag")
     assert "touch" not in shlex.split(shlex.split(command)[2])
 
 
