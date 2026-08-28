@@ -1,6 +1,6 @@
 # Instance Spec CLI Contract
 
-- Status: Implemented in R4
+- Status: Implemented in R4; merge-strategy correction in design review
 - Date: 2026-08-24
 - Requirements: R4 and R5 in `frd.md`
 
@@ -104,19 +104,33 @@ or record.
 The instance spec is the final input to the shared layer runner:
 
 - a scalar declared by the instance spec replaces the resolved template scalar;
-- an ordinary map declared by the instance spec merges by key, with its value winning;
-- a list declared by the instance spec appends with the kind's existing stable deduplication; and
-- an empty list or map within the object does not clear inherited content because the template model
-  has no removal tombstone.
+- an object or map merges by key and recursively applies each conflicting child's model-declared
+  strategy;
+- a list appends with stable deduplication by default; and
+- an object or list whose model node declares `replace` discards the complete prior value, so an
+  empty replaced object or list clears that value without introducing a patch language.
+
+The policy is identical for template inheritance and the final instance layer. It is derived from
+typed model annotations at every nesting depth for core and capability-owned config models. A
+replaced object is a subtree boundary: no child strategy inside the discarded prior object
+participates in that layer. An unmarked empty object or list remains additive and therefore changes
+nothing.
+
+Discriminated and structural union values recurse only when both layers select the same arm and that
+arm does not itself replace. An arm change replaces the complete object, so a field cannot
+accidentally retain children that belong to the old arm. Raw invalid values remain raw until
+effective-spec validation; merging does not filter unknown keys, drop malformed items, or coerce a
+bad shape into a valid declaration. When the same unknown key appears twice, the later raw value
+wins rather than being recursively combined by runtime shape.
 
 The admin spec follows the same field rules after its selected admin template. Although an admin
 template does not inherit, the layer fold still distinguishes omitted fields from its concrete
 defaults, so an omitted admin-spec field leaves the selected template value intact.
 
-Session harness selection keeps its domain reducer rather than using ordinary map merge. Naming a
+Session harness selection keeps one structural transition around the generic merge. Naming a
 different harness integration resets the prior integration config. Naming the same integration
-combines config through that integration's typed merge function, including integration-owned
-behavior such as the shell integration's stable union of required commands.
+combines config through that integration's registered config model and the same annotations core
+models use. A capability does not supply an imperative merge callback.
 
 There is deliberately no `--set PATH=VALUE`, JSON-path patch language, or generic key-value surface.
 Those shapes would create a second type system for nested values, map keys, list semantics, and
