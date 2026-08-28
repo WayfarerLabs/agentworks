@@ -177,23 +177,41 @@ off whenever bandwidth allows, on its own merits and its own schedule.
   post-merge pass verified reproducible builds and agreeing version surfaces on the exact release
   head.
 
-  **0.15.1 cut 2026-08-27, artifact still unpublished:** the first release from a maintenance
-  branch. PR #677, the fix for a Windows regression that broke `vm create` on that platform across
-  every cloud provider (`subprocess.run(..., text=True)` rewrote the stdin payload the tailnet join
-  depends on), was cherry-picked onto a new `0.15.x` branch cut from `v0.15.0` instead of being
-  pulled forward, so the fix could reach operators without waiting on the 0.16.0 hold. Two workflow
-  changes made that path durable rather than a one-off: release-please now runs on `[0-9]+.[0-9]+.x`
-  branches with `target-branch` set to the triggering ref, so each maintenance branch computes its
-  own next version from its own manifest (PR #679), and the publish workflow's tag guard now accepts
-  any tag reachable from `main` or a maintenance branch rather than from `main` alone (PR #681). The
-  second was found the hard way: the first publish run failed its `verify-tag-on-main` guard,
-  leaving tag `v0.15.1` and a published GitHub Release with no PyPI artifact, because the saga lead
-  confirmed the workflow's tag trigger and never read the job that trigger gates. **As of 2026-08-28
-  PyPI still serves 0.15.0**, so the Windows regression remains live for anyone installing from the
-  index; the guard is fixed and the tag is reachable from `origin/0.15.x`, so the outstanding step
-  is a `Release to PyPI` dispatch awaiting operator direction. Maintenance branches are trusted
-  rather than protected: `protect-default` targets `~DEFAULT_BRANCH` only, and extending it to the
-  `[0-9]+.[0-9]+.x` pattern is an open operator decision.
+  **0.15.1 cut 2026-08-27, published 2026-08-28:** the first release from a maintenance branch. PR
+  #677, the fix for a Windows regression that broke `vm create` on that platform across every cloud
+  provider (`subprocess.run(..., text=True)` rewrote the stdin payload the tailnet join depends on),
+  was cherry-picked onto a new `0.15.x` branch cut from `v0.15.0` instead of being pulled forward,
+  so the fix could reach operators without waiting on the 0.16.0 hold. Two workflow changes made
+  that path durable rather than a one-off: release-please now runs on `[0-9]+.[0-9]+.x` branches
+  with `target-branch` set to the triggering ref, so each maintenance branch computes its own next
+  version from its own manifest (PR #679), and the publish workflow's tag guard now accepts any tag
+  reachable from `main` or a maintenance branch rather than from `main` alone (PR #681). The second
+  was found the hard way: the first publish run failed its `verify-tag-on-main` guard, leaving tag
+  `v0.15.1` and a published GitHub Release with no PyPI artifact, because the saga lead confirmed
+  the workflow's tag trigger and never read the job that trigger gates. **`agentworks-cli` 0.15.1
+  went live on PyPI 2026-08-28**, verified by installing it from the index and confirming the
+  shipped `agentworks.ssh.run` uses `stdin_bytes()` with no `text=True`, so the fix genuinely
+  reaches operators rather than merely having a green run.
+
+  Getting there took three attempts and cost two days, because **three independent gates encode
+  "releases come from `main`" and we found them one failure at a time**: release-please running only
+  on `main` (fixed, PR #679), the `verify-tag-on-main` job (fixed on `main` by PR #681, and on this
+  branch only by PR #689, since a tag push resolves its workflow from the tag), and the `release`
+  environment permitting deployments only from `v*` refs of type tag. The third is the subtle one:
+  an environment evaluates `github.ref`, not the ref a job checks out, so a `workflow_dispatch`
+  recovery resolves the workflow and clears the guard from a branch and is then refused at
+  `publish`. The workflow's own dispatch input therefore advertises a recovery path the environment
+  forbids. Both 0.14.0 and 0.15.1 were recovered by temporarily permitting the dispatch ref to
+  deploy, publishing, and removing that permission again, with the environment verified
+  byte-identical afterwards. Whether to resolve that contradiction, by permitting the dispatch ref
+  permanently with required reviewers or by keeping tags-only and treating the bridge as a runbook
+  step, is an open operator decision; PR #688 documents the constraint either way.
+
+  Maintenance branches are trusted rather than protected: `protect-default` targets
+  `~DEFAULT_BRANCH` only, so `0.15.x` carries no PR requirement, no required checks, and no
+  force-push protection while `release.yml` treats it as a release line. Closing that needs a
+  ruleset targeting `*.*.x`; note the pattern is fnmatch, so the `[0-9]+.[0-9]+.x` spelling that
+  `release-please.yml` uses for Actions branch filters matches nothing as a ruleset.
 
 - **0.16.0 (held; operator ruling, 2026-08-26):** the release PR does not cut until the
   `2026-08-19-instance-model` child's instance-spec overlays (PR #670, **merged 2026-08-28**) and
