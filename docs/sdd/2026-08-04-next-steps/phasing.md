@@ -177,17 +177,36 @@ off whenever bandwidth allows, on its own merits and its own schedule.
   post-merge pass verified reproducible builds and agreeing version surfaces on the exact release
   head.
 
+  **0.15.1 cut 2026-08-27, artifact still unpublished:** the first release from a maintenance
+  branch. PR #677, a Windows regression that broke `vm create` for effectively every operator on
+  that platform, was cherry-picked onto a new `0.15.x` branch cut from `v0.15.0` instead of being
+  pulled forward, so the fix could reach operators without waiting on the 0.16.0 hold. Two workflow
+  changes made that path durable rather than a one-off: release-please now runs on `[0-9]+.[0-9]+.x`
+  branches with `target-branch` set to the triggering ref, so each maintenance branch computes its
+  own next version from its own manifest (PR #679), and the publish workflow's tag guard now accepts
+  any tag reachable from `main` or a maintenance branch rather than from `main` alone (PR #681). The
+  second was found the hard way: the first publish run failed its `verify-tag-on-main` guard,
+  leaving tag `v0.15.1` and a published GitHub Release with no PyPI artifact, because the saga lead
+  confirmed the workflow's tag trigger and never read the job that trigger gates. **As of 2026-08-28
+  PyPI still serves 0.15.0**, so the Windows regression remains live for anyone installing from the
+  index; the guard is fixed and the tag is reachable from `origin/0.15.x`, so the outstanding step
+  is a `Release to PyPI` dispatch awaiting operator direction. Maintenance branches are trusted
+  rather than protected: `protect-default` targets `~DEFAULT_BRANCH` only, and extending it to the
+  `[0-9]+.[0-9]+.x` pattern is an open operator decision.
+
 - **0.16.0 (held; operator ruling, 2026-08-26):** the release PR does not cut until the
-  `2026-08-19-instance-model` child's instance-spec overlays (PR #670) and the harness integration
-  config knobs ([issue #674](https://github.com/WayfarerLabs/agentworks/issues/674), per-session
-  workload inputs across the Claude Code, Codex, and Grok Build integrations) are both on `main`.
-  Instance specs and the knobs that configure them ship together, because a release carrying the
-  spec mechanism without the settings it exists to carry teaches half a feature. The mechanics
-  matter here: the release PR accumulates whatever is on `main` when it merges, so cutting early
-  does not delay those entries to a later release, it silently ships 0.16.0 without them and pushes
-  them to 0.17.0. Everything already accumulated (the two Azure SDK migrations and their raised
-  floors, the cloud-identifier and name-grammar validation work, the terminal-restore fix, the guide
-  and plugin documentation corrections) rides the same cut.
+  `2026-08-19-instance-model` child's instance-spec overlays (PR #670, **merged 2026-08-28**) and
+  the harness integration config knobs
+  ([issue #674](https://github.com/WayfarerLabs/agentworks/issues/674), per-session workload inputs
+  across the Claude Code, Codex, and Grok Build integrations) are both on `main`. The first gate is
+  satisfied; the knobs are the only one left. Instance specs and the knobs that configure them ship
+  together, because a release carrying the spec mechanism without the settings it exists to carry
+  teaches half a feature. The mechanics matter here: the release PR accumulates whatever is on
+  `main` when it merges, so cutting early does not delay those entries to a later release, it
+  silently ships 0.16.0 without them and pushes them to 0.17.0. Everything already accumulated (the
+  two Azure SDK migrations and their raised floors, the cloud-identifier and name-grammar validation
+  work, the terminal-restore fix, the guide and plugin documentation corrections) rides the same
+  cut.
 
 - **Later:** remaining waves map to releases as they prove out; no need to pin numbers now.
 

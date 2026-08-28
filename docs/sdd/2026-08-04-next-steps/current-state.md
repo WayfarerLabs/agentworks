@@ -1,6 +1,6 @@
 # Current State
 
-- Snapshot date: 2026-08-25, post-0.15.0 (update at wave boundaries)
+- Snapshot date: 2026-08-28, post-0.15.0 and post-instance-specs (update at wave boundaries)
 - Baseline: released Agentworks 0.14.0 (2026-08-18, live on PyPI; see `phasing.md`'s release map for
   the cut's trail) plus post-release `main`. The release itself carries everything the previous
   baseline enumerated (the phase 1 TOML sunset, the 0.14 expired-compat removals, declarative-schema
@@ -162,3 +162,17 @@ its branch is deleted. Remaining unmerged drafts on remote branches, both out of
 - Copilot's automated PR review is currently failing on monthly quota exhaustion (observed
   2026-08-05), so per the development process the fresh-eyes generic pass is substituted with a
   local reviewer until quota resets.
+
+- **No CI runner covers Windows or macOS**; every gate runs on Linux. PR #677 was a Windows-only
+  break in `vm create` that no gate could have caught, and it reached a published release. The
+  exposure is structural rather than incidental: any platform-conditional path is unverified until
+  an operator hits it, and the mechanism there (`subprocess.run(..., text=True)` wrapping stdin in a
+  `TextIOWrapper` that rewrites LF to `os.linesep`) was invisible on Linux by construction. Recorded
+  as a known gap, not a scheduled item.
+
+- **`transports/base.py:82-83` promises more than the code delivers** (verified at `56f9687b`): the
+  `input_text` contract states transports "deliver it byte-exact, so a guest `read -r` binds exactly
+  the value that was sent", unconditionally. The SSH path forwards `force_tty` into `ssh_run`
+  (`transports/ssh.py:222`), which inserts `-tt` (`ssh.py:163`), and a forced PTY's line discipline
+  transforms bytes. The guarantee holds without a TTY and is overstated with one. Prose-only fix,
+  separable from any behavior change, and unowned since the #677 effort closed.
