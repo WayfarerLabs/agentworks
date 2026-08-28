@@ -81,7 +81,9 @@ class Transport(abc.ABC):
         assignments to the bash payload. ``input_text`` streams sensitive
         text to the command on stdin; transports omit it from argv, logs,
         returned output, and failure diagnostics, and deliver it byte-exact,
-        so a guest ``read -r`` binds exactly the value that was sent.
+        so a guest ``read -r`` binds exactly the value that was sent. A
+        forced TTY would break that promise, so SSH refuses the pairing
+        rather than delivering a corrupted value.
 
         ``retries`` and ``on_retry`` are best-effort across transports:
         SSH retries on connection-level timeouts (default 1 attempt);
