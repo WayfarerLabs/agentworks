@@ -34,11 +34,15 @@ jobs:
         # `[0-9]+.[0-9]+.x` spelling `release-please.yml` uses for Actions
         # branch filters does not carry over. Character sets do work, but
         # `[0-9]` matches exactly one character, so `[0-9].[0-9].x` would
-        # cover `0.1.x` and silently miss `0.15.x`.
+        # cover `0.1.x` and silently miss `0.15.x`. `*.*.x` errs the other
+        # way: it covers every maintenance name and some non-maintenance
+        # ones too, which is the safe direction for a protection rule.
         #
-        # This job is one of three gates and not the one that decides whether
-        # a publish can run at all. The `release` environment permits
-        # deployments only from refs matching `v*` of type TAG, and an
+        # This job is one of three gates, and failing it does block a
+        # publish: `test` needs this job and `publish` needs `test`. The
+        # final authorization gate is the `release` environment, which is
+        # what decides whether a given dispatch may publish at all. It
+        # permits deployments only from refs matching `v*` of type TAG, and an
         # environment evaluates `github.ref` rather than whatever a job checks
         # out. So run the dispatch input below with "Use workflow from" set to
         # the tag itself: that satisfies the policy and re-runs that tag's own
