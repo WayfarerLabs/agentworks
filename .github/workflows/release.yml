@@ -22,35 +22,30 @@ jobs:
           fetch-depth: 0
 
       - name: Verify tag is reachable from a release branch
-        # A published tag must sit on a release line rather than anywhere a
-        # tag can be pushed. `main` is protected by the `protect-default`
-        # ruleset; maintenance branches (0.15.x, 0.16.x, ...) are NOT, as of
-        # 2026-08-28, because that ruleset targets `~DEFAULT_BRANCH` only.
-        # So this accepts them on convention rather than on enforcement, and
-        # anyone with write access could create `9.9.x`, push to it directly,
-        # and tag it. Extending the ruleset to cover them is what would make
-        # this an enforced boundary; until then the honest description is that
-        # a maintenance branch is trusted, not verified.
+        # A published tag must sit on a release line rather than anywhere
+        # a tag can be pushed. `main` is covered by the `protect-default`
+        # ruleset and maintenance branches by `protect-maintenance`, which
+        # mirrors its rules against `*.*.x`, so both lines require a reviewed
+        # pull request and passing checks before anything a tag can point at
+        # reaches them.
         #
-        # A ruleset pattern for that is `*.*.x`. Rulesets match with fnmatch,
-        # where `+` is a literal character rather than a quantifier, so the
-        # `[0-9]+.[0-9]+.x` spelling used by `release-please.yml` above cannot
-        # be reused here: that is the Actions branch-filter dialect, and as a
-        # ruleset it matches only names that literally contain plus signs.
-        # Character sets themselves do work, but `[0-9]` matches exactly one
-        # character, so `[0-9].[0-9].x` catches `0.1.x` and silently misses
-        # `0.15.x`. Verified against this repository's own ruleset API.
+        # If you edit that ruleset, mind the dialect. Rulesets match with
+        # fnmatch, where `+` is a literal rather than a quantifier, so the
+        # `[0-9]+.[0-9]+.x` spelling `release-please.yml` uses for Actions
+        # branch filters does not carry over. Character sets do work, but
+        # `[0-9]` matches exactly one character, so `[0-9].[0-9].x` would
+        # cover `0.1.x` and silently miss `0.15.x`.
         #
-        # This job is one of three gates, and it is not the one that decides
-        # whether a publish can run at all. The `release` environment allows
+        # This job is one of three gates and not the one that decides whether
+        # a publish can run at all. The `release` environment permits
         # deployments only from refs matching `v*` of type TAG, and an
-        # environment evaluates `github.ref`, not whatever a job checks out.
-        # So a `workflow_dispatch` re-run resolves the workflow and this guard
-        # from a branch, passes both, and is then refused at `publish`. The
-        # dispatch input below advertises a recovery path the environment
-        # forbids. Recovering a failed publish therefore means temporarily
-        # allowing the dispatch ref to deploy, publishing, and removing it
-        # again; 0.14.0 and 0.15.1 were both recovered that way.
+        # environment evaluates `github.ref` rather than whatever a job checks
+        # out. So run the dispatch input below with "Use workflow from" set to
+        # the tag itself: that satisfies the policy and re-runs that tag's own
+        # workflow, which is what you want for a transient failure. Running a
+        # NEWER workflow against an OLDER tag is what the policy prevents, and
+        # it requires a temporary deployment-policy exception; prefer cutting
+        # a new patch tag that carries the corrected workflow.
         run: |
           git fetch --quiet origin '+refs/heads/*:refs/remotes/origin/*'
           TAG="${{ inputs.tag || github.ref_name }}"
