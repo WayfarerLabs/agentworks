@@ -73,6 +73,7 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ConfigReference, ResourceReference
     from agentworks.schema import RefOwner
     from agentworks.source_location import SourceLocation
+    from agentworks.value_provenance import ProvenancePath
 
 #: Assembled unions, keyed by ``kind`` PLUS the arms the union would be
 #: built from. Never evicts; see :func:`capability_config_union` for both
@@ -83,6 +84,12 @@ _UNION_CACHE: dict[tuple[str, frozenset[tuple[str, type[BaseModel]]]], type[Base
 #: opt-out declaration. Order affects emitted schema and is therefore part of
 #: the key rather than discarded into a set.
 _MAPPING_UNION_CACHE: dict[tuple[str, tuple[type[BaseModel], ...], bool], type[BaseModel]] = {}
+
+#: The current declared-model identity and selected model for each implementation.
+#: A deliberate class-level ``config_model`` swap overwrites the entry and selects
+#: again, preserving the union cache's production-invariant test without retaining
+#: every historical declaration.
+_OFFERED_MODEL_CACHE: dict[type, tuple[object, object]] = {}
 
 
 def selected_name(kind: str, config: object, name: str | None) -> str | None:
@@ -144,7 +151,7 @@ def validate_capability_config(
     owner: RefOwner,
     name: str | None = None,
     location: SourceLocation | None = None,
-    provenance: Mapping[str, RefOwner] | None = None,
+    provenance: Mapping[ProvenancePath, RefOwner] | None = None,
 ) -> BaseModel | None:
     """Validate ``config`` as one ``kind`` implementation's config; return
     the validated instance, or ``None`` when no such implementation is
@@ -159,10 +166,10 @@ def validate_capability_config(
     own, or the operator reads it twice.
 
     ``provenance`` is for a config a caller ASSEMBLED by merging an
-    inheritance chain: it maps each top-level key to the owner that
-    declared it, so an error on an inherited key names that owner instead
-    of blaming the leaf. Every non-inheriting surface omits it, its config
-    being its own declaration.
+    inheritance chain: it maps capability-local field, mapping-key, and
+    list-index paths to their declarers, so an error on an inherited value
+    names its owner instead of blaming the leaf. Every non-inheriting
+    surface omits it, its config being its own declaration.
     """
     descriptor = descriptor_for(kind)
     selected = selected_name(kind, config, name)
@@ -507,13 +514,24 @@ def offered_model(impl: type) -> type[BaseModel]:
     too, which is the case ``descriptor_for_impl`` documents when it
     answers ``None`` rather than raising.
 
+    Selection is stable for one implementation and ``config_model`` declaration
+    identity. Registration therefore checks the same offered model that later
+    merging, validation, reference extraction, and union assembly consume, even if a
+    third-party hook is stateful. A deliberate declaration swap selects again.
+
     That the hook is CALLABLE is a separate guarantee with a separate
     owner: ``conformance.py``'s ``_config_hook_error``, at the registration
     seam, refuses any class whose ``config_for`` is not callable. The call
     below is unconditional because that seam holds, not because the type
     annotation does.
     """
-    return cast("type[Capability]", impl).config_for()
+    declaration = getattr(impl, "config_model", None)
+    cached = _OFFERED_MODEL_CACHE.get(impl)
+    if cached is not None and cached[0] is declaration:
+        return cast("type[BaseModel]", cached[1])
+    selected = cast("type[Capability]", impl).config_for()
+    _OFFERED_MODEL_CACHE[impl] = (declaration, selected)
+    return selected
 
 
 def _seated_impl(descriptor: CapabilityKindDescriptor, name: str) -> type | None:
@@ -614,7 +632,7 @@ def _validated(
     owner: RefOwner,
     location: SourceLocation | None,
     hint: str | None = None,
-    provenance: Mapping[str, RefOwner] | None = None,
+    provenance: Mapping[ProvenancePath, RefOwner] | None = None,
 ) -> BaseModel:
     try:
         # The boundary fill: an omitted owner-templated field is rendered

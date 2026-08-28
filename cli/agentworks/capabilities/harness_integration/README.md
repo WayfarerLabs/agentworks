@@ -149,7 +149,7 @@ integration instance, composes its readiness, and the session manager invokes it
 integration never touches tmux, the database, or the CLI; it declares its config, probes its target,
 and returns pane command strings.
 
-Three integrations ship today and serve as references:
+Four integrations ship today and serve as references:
 
 - **`shell`** (`shell.py`): the core built-in and default. Operator-authored `command` /
   `resume_command` / `required_commands`. The minimal member: no state, no tool conventions.
@@ -161,6 +161,9 @@ Three integrations ship today and serve as references:
   mints its own session ids, so the integration gets the id FROM the tool (codex's `notify` hook
   reports it after every completed turn) and stores it, falling back to source-filtered discovery of
   the tool's on-disk state and, when that is ambiguous, to codex's own session picker in the pane.
+- **`grok-build`** (`agentworks/plugins/grok/harness_integration.py`): a caller-assigned-identity
+  integration shipped as the opt-in `grok` system plugin. It keeps its evolving provider-owned
+  choices as open strings and uses `extra_args` for the remaining CLI surface.
 
 ### Where a Harness Integration Sits
 
@@ -197,13 +200,16 @@ A new harness integration implements this surface (see `base.py` for the full do
 `name` and `description` ClassVars (the registry row), inherited `owner_kind = "session-template"`
 (error framing: config errors render as `session-template/<name>`).
 
-Three class-level declarations are REQUIRED and none is defaulted, because a default would let an
+Four class-level declarations are REQUIRED and none is defaulted, because a default would let an
 unmigrated implementation inherit a claim it never made. Registration refuses an implementation
 missing any of them, naming the plugin:
 
 - `contract_version`: the capability contract version this implementation is written against.
   Registration requires an exact match with the version its kind's descriptor declares supported, so
-  a contract change is a hard cutover rather than a silent re-certification.
+  a contract change is a hard cutover rather than a silent re-certification. The current contract is
+  version 2, and every shipped integration declares 2. Third-party version-1 integrations must
+  migrate before registration; see
+  [`docs/guides/upgrading-to-0.16.md`](../../../../docs/guides/upgrading-to-0.16.md).
 - `config_model`: what the config IS (see below). A capability that accepts none declares a model
   with no fields beyond its tag, which is closed-world by construction.
 - `name` / `description`: the registry row's identity.
@@ -243,34 +249,36 @@ sourced to the session template) and derives its bare-name `secret_refs` union f
 values delivered through `ctx.secret(name)`. No shipped integration declares a secret yet, so a
 secret-declaring integration should expect to be the first real exerciser of that path.
 
-#### Config Inheritance, Decided per Field
+#### Config Inheritance, Declared by the Model
 
-When a child template names the SAME integration as its parent chain, the blobs merge through this
-hook. The base default is shallow child-wins per key. Each added field requires an explicit merge
-policy:
+The integration selector and its config make one structural transition across each template or
+instance layer:
 
-- Scalars (a mode, a model) usually want child-wins: the default is right.
-- **Accumulating lists usually want a union.** `shell` overrides `merge_config` to append-dedupe
-  `required_commands`, so a child that overrides only `command` cannot silently drop the parent's
-  probe list. Note the asymmetry to avoid copying blindly: `claude-code.extra_args` deliberately
-  child-wins (an escape hatch is an override, not an accumulation). The selected policy belongs in
-  the field's documentation.
+- A layer that omits the selector leaves the accumulated selector and config unchanged.
+- The same registered selector merges config through the model that integration offers via
+  `config_for()` (normally its `config_model`).
+- A different selector discards the complete accumulated config before the incoming config is
+  considered, so one integration never receives another integration's fields.
+- Repeating the same unknown selector replaces the complete earlier raw config. There is no model
+  through which to recurse, and the Registry's normal selector miss remains the authoritative error.
 
-The resolver calls `merge_config` on every declared-blob fold, with `base={}` when the lineage
-starts (a template with no parents included) or when a child switches to a different integration.
-Every implementation must therefore accept an empty base. A different integration's blob never lands
-in `base`: the resolver discards accumulated config on an integration switch, so a parent's config
-cannot leak across it.
+For a registered integration, the model tree decides every conflict. Objects and mappings merge
+recursively by default, lists append-deduplicate atomic values in stable order, and scalars replace.
+Use `Annotated[..., MergeStrategy.REPLACE]` for a list or object that should replace completely,
+including with an empty value. A mapping-shaped config model may declare a default root policy with
+`merge_strategy: ClassVar[MergeStrategy]`; a containing field override wins over that model policy.
+The generic author contract and registration restrictions are in
+[`../README.md`](../README.md#merge-policy-is-declared-too).
 
-**`merge_config` runs inside the finalize build walk, which may not raise.** It must be a pure
-function of its two arguments: no I/O, no registry, no config, and no exception on a shape it does
-not like (the blob it is handed has not been validated yet, because the graph is built before
-anything is). This is deliberately NOT a registration conformance check, because neither purity nor
-non-raising is a property a check can establish, so what happens when an implementation breaks it is
-worth stating plainly instead: a raising `merge_config` takes `build_registry` down with that
-plugin's own traceback, and every command fails showing a stack trace rather than a config error. An
-unregistered name never reaches an implementation at all: it gets the base contract's own child-wins
-default, and the kind's miss policy reports the name.
+The shipped policies preserve the intended behavior:
+
+- `shell.required_commands` and `codex.writable_dirs` use default append-deduplication; and
+- `claude-code.extra_args`, `codex.extra_args`, and `grok-build.extra_args` use replacement.
+
+`HarnessIntegration.merge_config` and the package-level `merged_config` helper no longer exist.
+There is no callable merge escape hatch and no second policy authority. Registration applies
+`merge_contract_error()` to that exact offered model before seating a plugin, so a malformed merge
+contract is refused without invoking an integration merge callback during finalization.
 
 #### Construction: Cheap, No I/O
 
@@ -571,7 +579,7 @@ The checklist beyond code, per the repo rules:
 
 ### Reserved Directions (Recorded, Not Built)
 
-Known holes the current contract leaves open on purpose, so v1 boundaries read as deliberate:
+Known holes the current contract leaves open on purpose, so the boundaries read as deliberate:
 
 - **Provisioning.** An integration runs the harness; nothing yet provisions the user it runs as (the
   harness's config files, skills, MCP registration, auth). The sketched shape is a paired future

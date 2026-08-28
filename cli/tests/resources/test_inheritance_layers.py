@@ -1,5 +1,4 @@
-"""``merge_layers`` order is a contract, and the thing it must agree with
-is each kind's own resolver.
+"""``resolution_layers`` order is a contract shared by every resolver.
 
 Callers read "the last layer that declared X" off this order to decide
 which template an edge belongs to. If the order diverged from the merge
@@ -24,7 +23,7 @@ from agentworks.agents.template import AgentTemplate
 from agentworks.agents.templates import effective_template as agent_effective
 from agentworks.env.entry import EnvEntry
 from agentworks.errors import InheritanceCycleError
-from agentworks.resources.inheritance import declarers, merge_layers, resolution_layers
+from agentworks.resources.inheritance import resolution_layers
 from agentworks.sessions.template import SessionTemplate
 from agentworks.sessions.templates import effective_template as session_effective
 from agentworks.vms.template import VMTemplate
@@ -53,22 +52,23 @@ def _diamond(build: Callable[..., Any]) -> dict[str, Any]:
 
 
 @pytest.mark.parametrize(
-    ("build", "resolve"),
+    ("kind", "build", "resolve"),
     [
-        (VMTemplate, vm_effective),
-        (WorkspaceTemplate, workspace_effective),
-        (AgentTemplate, agent_effective),
-        (SessionTemplate, session_effective),
+        ("vm-template", VMTemplate, vm_effective),
+        ("workspace-template", WorkspaceTemplate, workspace_effective),
+        ("agent-template", AgentTemplate, agent_effective),
+        ("session-template", SessionTemplate, session_effective),
     ],
     ids=["vm-template", "workspace-template", "agent-template", "session-template"],
 )
 def test_folding_the_layers_reproduces_the_resolvers_own_merge(
+    kind: str,
     build: Callable[..., Any],
     resolve: Callable[..., Any],
 ) -> None:
     rows = _diamond(build)
     folded: dict[str, EnvEntry] = {}
-    for layer in merge_layers(rows, "kid"):
+    for layer in resolution_layers(rows, "kid", kind):
         folded.update(layer.env or {})
 
     resolved = resolve(rows, "kid")
@@ -78,27 +78,8 @@ def test_folding_the_layers_reproduces_the_resolvers_own_merge(
     assert folded == effective.env
 
 
-def test_the_declarer_of_a_contested_key_is_the_layer_whose_value_survived() -> None:
-    rows = _diamond(VMTemplate)
-    layers = merge_layers(rows, "kid")
-    by_env = declarers(layers, "vm-template", lambda t: t.env)
-    assert by_env["K"] == ("vm-template", "right")
-    assert vm_effective(rows, "kid").env["K"].secret == "right-secret"
-
-
-def test_a_cyclic_chain_stops_rather_than_raising() -> None:
-    """The build walk may not raise; the registry's cycle pass is what
-    reports the loop."""
-    rows = {
-        "a": VMTemplate(name="a", inherits=["b"]),
-        "b": VMTemplate(name="b", inherits=["a"]),
-    }
-    assert [layer.name for layer in merge_layers(rows, "a")] == ["b", "a"]
-
-
 def test_the_resolver_path_refuses_the_same_cycle() -> None:
-    """The one difference between the two layer functions, and the reason
-    both exist: a resolve has a caller that can be told."""
+    """A resolve has a caller that can be told about the cycle."""
     rows = {
         "a": VMTemplate(name="a", inherits=["b"]),
         "b": VMTemplate(name="b", inherits=["a"]),
@@ -109,7 +90,7 @@ def test_the_resolver_path_refuses_the_same_cycle() -> None:
 
 def test_an_unresolved_parent_contributes_nothing() -> None:
     rows = {"kid": VMTemplate(name="kid", inherits=["missing"])}
-    assert [layer.name for layer in merge_layers(rows, "kid")] == ["kid"]
+    assert [layer.name for layer in resolution_layers(rows, "kid", "vm-template")] == ["kid"]
 
 
 def test_a_layer_reached_twice_appears_once_and_before_everything_that_reaches_it() -> None:
@@ -130,7 +111,12 @@ def test_a_layer_reached_twice_appears_once_and_before_everything_that_reaches_i
         "kid": VMTemplate(name="kid", inherits=["left", "right"]),
     }
 
-    assert [layer.name for layer in merge_layers(rows, "kid")] == ["root", "left", "right", "kid"]
+    assert [layer.name for layer in resolution_layers(rows, "kid", "vm-template")] == [
+        "root",
+        "left",
+        "right",
+        "kid",
+    ]
     assert vm_effective(rows, "kid").cpus == 16
 
 
@@ -146,7 +132,7 @@ def test_a_diamond_ladder_produces_one_layer_per_row() -> None:
         rows[f"right{level}"] = VMTemplate(name=f"right{level}", inherits=[parent])
         rows[f"kid{level}"] = VMTemplate(name=f"kid{level}", inherits=[f"left{level}", f"right{level}"])
 
-    assert len(merge_layers(rows, f"kid{levels - 1}")) == len(rows)
+    assert len(resolution_layers(rows, f"kid{levels - 1}", "vm-template")) == len(rows)
 
 
 def test_a_chain_deeper_than_the_recursion_limit_resolves() -> None:
@@ -157,5 +143,5 @@ def test_a_chain_deeper_than_the_recursion_limit_resolves() -> None:
     for level in range(1, depth):
         rows[f"t{level}"] = VMTemplate(name=f"t{level}", inherits=[f"t{level - 1}"])
 
-    assert len(merge_layers(rows, f"t{depth - 1}")) == depth
+    assert len(resolution_layers(rows, f"t{depth - 1}", "vm-template")) == depth
     assert vm_effective(rows, f"t{depth - 1}").cpus == 99

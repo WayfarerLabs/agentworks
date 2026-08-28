@@ -294,7 +294,11 @@ def resume_session(
             registry,
             effective_references(template, ("session", session.name), layered_template.provenance),
         )
-        validate_effective_harness(template, ("session", session.name))
+        validate_effective_harness(
+            template,
+            ("session", session.name),
+            layered_template.provenance,
+        )
 
     # ===== Build: the live node graph from the rows =========================
     #

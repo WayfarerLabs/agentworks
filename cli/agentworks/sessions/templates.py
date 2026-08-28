@@ -20,10 +20,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from agentworks.errors import unknown_template_error
-from agentworks.schema import RefOwner
+from agentworks.schema import merge_model
 
 #: The workload a session runs when nothing in its lineage names one: a
 #: plain login shell, which is the behavior from before harness
@@ -60,8 +60,7 @@ class ResolvedSessionTemplate:
 
 @dataclass(frozen=True)
 class MergedHarness:
-    """The ``(harness_integration, config)`` pair a lineage merged to, and
-    where each surviving key came from.
+    """The ``(harness_integration, config)`` pair a lineage merged to.
 
     ``name`` is the integration the LINEAGE declared, or ``None`` when no
     template in it declared one. The distinction is load-bearing here in a
@@ -70,29 +69,13 @@ class MergedHarness:
     it to ``shell`` first would have every session template in the registry
     pointing at the shell row.
 
-    ``provenance`` maps each key of ``config`` to the template that
-    declared the value that survived the merge, so a shape error on an
-    inherited key can name the template an operator has to go and edit
-    rather than the child that merely inherited it. It records the LAST
-    declarer of a key in merge order, which is the one child-wins keeps;
-    for a key an integration's ``merge_config`` COMBINES across layers
-    (``shell`` unions ``required_commands``) the last declarer is one
-    contributor among several, and the message says "inherited from" rather
-    than claiming sole authorship.
-
-    ``declared_by`` is the same fact at BLOCK granularity, for the
-    reference path: an edge implied by this config, and the selector edge
-    itself, belong to the layer that named the integration, because
-    switching integration is what discards accumulated config. The two
-    coexist rather than one deriving from the other: a validation error
-    names a KEY and can be that precise, while a reference carries no key
-    to be precise about.
+    Value ownership lives exclusively in the surrounding
+    :class:`LayeredResolution`. Keeping a second map here would let the two
+    provenance answers drift.
     """
 
     name: str | None = None
     config: Mapping[str, object] = MappingProxyType({})
-    provenance: Mapping[str, RefOwner] = MappingProxyType({})
-    declared_by: tuple[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -107,11 +90,6 @@ class EffectiveSessionTemplate:
 class _SessionAccumulator:
     resolved: ResolvedSessionTemplate
     harness: MergedHarness
-
-
-def _merge_map(target: dict[str, EnvEntry], source: dict[str, EnvEntry]) -> dict[str, EnvEntry]:
-    """Merge source env map into target. Source wins on key collision."""
-    return {**target, **source}
 
 
 def resolve_from_dict(
@@ -299,24 +277,14 @@ def _resolve_with_provenance(
     return LayeredResolution(result, layered.provenance)
 
 
-def _declared_pair(tmpl: SessionTemplate, source: LayerSource | None = None) -> MergedHarness:
+def _declared_pair(tmpl: SessionTemplate) -> MergedHarness:
     """One template's OWN harness declaration, in the shape the fold
-    takes. ``name`` is ``None`` when this template declares no
-    integration, which is what :func:`_merge_pair` reads as "says nothing"
-    and leaves the accumulator alone for.
+    takes. ``name`` is ``None`` when this template declares no integration.
     """
     block = tmpl.harness_integration
     if block is None:
         return MergedHarness()
-    owner_kind = "session-template" if source is None else source.resource_kind
-    owner_name = tmpl.name if source is None else source.name
-    owner = RefOwner(kind=owner_kind, name=owner_name)
-    return MergedHarness(
-        name=block.name,
-        config=block.config,
-        provenance=dict.fromkeys(block.config, owner),
-        declared_by=(owner_kind, owner_name),
-    )
+    return MergedHarness(name=block.name, config=block.config)
 
 
 def _resolve_walk(
@@ -346,7 +314,7 @@ def _resolve_walk(
     nothing brings it back. Merging each parent's already-merged pair
     would hide that switch inside the parent's own result and resurrect
     the first A's config across a capability that had already discarded
-    it, contradicting the rule :func:`_merge_pair` documents. Pinned by
+    it, contradicting the selector transition below. Pinned by
     ``tests/sessions/test_session_template_surface.py``.
     """
     layered = _resolve_walk_with_provenance(
@@ -404,101 +372,44 @@ def _merge_session_layer(
     tmpl: SessionTemplate,
     source: LayerSource,
 ) -> tuple[_SessionAccumulator, tuple[LayerContribution, ...]]:
+    target.resolved, template_paths = _merge_template(target.resolved, tmpl, source)
+    declared = _declared_pair(tmpl)
+    if declared.name is None:
+        return target, template_paths
+
+    from agentworks.capabilities.config import capability_config_model
     from agentworks.resources.inheritance import LayerContribution
 
-    target.resolved, template_paths = _merge_template(target.resolved, tmpl, source)
-    declared = _declared_pair(tmpl, source)
+    config_path = ("harness_integration_config",)
     same_integration = declared.name == target.harness.name
-    previous_config = target.harness.config
-    target.harness = _merge_pair(target.harness, declared)
-    harness_paths: list[LayerContribution] = []
-    if declared.name is not None:
-        harness_paths.append(LayerContribution.replacement("harness_integration"))
-        if not same_integration:
-            harness_paths.append(LayerContribution.reset_prefix("harness_integration_config"))
-        else:
-            for key in previous_config:
-                if key not in target.harness.config:
-                    harness_paths.append(LayerContribution.reset_prefix("harness_integration_config", key))
-        for key, value in declared.config.items():
-            merged_value = target.harness.config.get(key)
-            if isinstance(value, list) and isinstance(merged_value, list):
-                previous_value = previous_config.get(key)
-                additive = (
-                    same_integration
-                    and isinstance(previous_value, list)
-                    and _list_merge_preserves_base(declared.name, key, value)
-                )
-                if not additive:
-                    harness_paths.append(LayerContribution.reset_prefix("harness_integration_config", key))
-                    contributed = merged_value
-                else:
-                    assert isinstance(previous_value, list)
-                    surviving = {repr(item) for item in merged_value}
-                    harness_paths.extend(
-                        LayerContribution.reset_prefix("harness_integration_config", key, repr(item))
-                        for item in previous_value
-                        if repr(item) not in surviving
-                    )
-                    contributed = [item for item in value if repr(item) in surviving]
-                harness_paths.extend(
-                    LayerContribution.contribution("harness_integration_config", key, repr(item))
-                    for item in contributed
-                )
-            elif key in target.harness.config:
-                if isinstance(previous_config.get(key), list):
-                    harness_paths.append(LayerContribution.reset_prefix("harness_integration_config", key))
-                harness_paths.append(LayerContribution.replacement("harness_integration_config", key))
+    model = capability_config_model("harness-integration", declared.name)
+    harness_paths: list[LayerContribution] = [LayerContribution.replacement("harness_integration")]
+
+    if model is None:
+        # A missing capability has no schema under which two declarations
+        # could honestly compose. Keep the finalize walk total and let the
+        # kind's Registry miss report the selector.
+        harness_paths.extend(
+            (
+                LayerContribution.reset_prefix(*config_path),
+                LayerContribution.replacement(*config_path),
+            )
+        )
+        target.harness = MergedHarness(declared.name, dict(declared.config))
+        return target, (*template_paths, *harness_paths)
+
+    base: object = target.harness.config if same_integration else {}
+    merged, operations = merge_model(model, base, declared.config, config_path)
+    if not same_integration:
+        harness_paths.extend(
+            (
+                LayerContribution.reset_prefix(*config_path),
+                LayerContribution.replacement(*config_path),
+            )
+        )
+    harness_paths.extend(operations)
+    target.harness = MergedHarness(declared.name, cast("dict[str, object]", merged))
     return target, (*template_paths, *harness_paths)
-
-
-def _list_merge_preserves_base(integration_name: str, key: str, child: list[object]) -> bool:
-    """Ask the integration's reducer whether this list key accumulates."""
-    from agentworks.capabilities.harness_integration import merged_config
-
-    sentinel = "\x00agentworks-provenance-sentinel"
-    while sentinel in child:
-        sentinel += "-next"
-    probe = merged_config(integration_name, {key: [sentinel]}, {key: child})
-    merged = probe.get(key)
-    return isinstance(merged, list) and sentinel in merged
-
-
-def _merge_pair(acc: MergedHarness, child: MergedHarness) -> MergedHarness:
-    """Fold one layer's DECLARED harness pair into the accumulator:
-
-    - a child that says nothing about the harness integration leaves the pair
-      untouched (a ``harness_integration_config`` without a ``harness_integration`` cannot load,
-      so silence is unambiguous);
-    - a child naming a DIFFERENT harness integration starts from a fresh blob (the
-      parent's blob was addressed to the wrong capability, never leaks),
-      and from fresh provenance with it;
-    - a child naming the SAME harness integration merges via that integration's
-      ``merge_config`` (child-wins per key; ``shell`` unions
-      ``required_commands``).
-
-    Reaches the merge by NAME (``merged_config``), which is what keeps
-    this total for the finalize walk: an unregistered name is a dangling
-    edge the miss policy reports, not a reason for the merge to raise.
-
-    Provenance follows the value: it is restricted to the keys that
-    actually survived, so a key an integration's merge dropped cannot be
-    blamed on the template that declared it.
-    """
-    if child.name is None:
-        return acc
-    from agentworks.capabilities.harness_integration import merged_config
-
-    same = child.name == acc.name
-    base = acc.config if same else {}
-    config = merged_config(child.name, base, child.config)
-    provenance = {**(acc.provenance if same else {}), **child.provenance}
-    return MergedHarness(
-        name=child.name,
-        config=config,
-        provenance={key: owner for key, owner in provenance.items() if key in config},
-        declared_by=child.declared_by,
-    )
 
 
 def _merge_template(
@@ -506,17 +417,20 @@ def _merge_template(
     tmpl: SessionTemplate,
     _source: object,
 ) -> tuple[ResolvedSessionTemplate, tuple[LayerContribution, ...]]:
-    """Fold one declared SessionTemplate's description / env into the
-    accumulator (the pair folds separately, via :func:`_merge_pair`).
-    None = not set, skip. Scalars: later layer overrides. Maps: merge with
-    the later layer winning. The only writer of those two fields."""
-    from agentworks.resources.inheritance import LayerContribution
+    """Merge the session-owned fields after applying authored absence rules."""
+    from agentworks.env.entry import EnvEntry
 
-    touched: list[LayerContribution] = []
+    previous: dict[str, object] = {
+        "description": target.description,
+        "env": {key: entry.model_dump(mode="python") for key, entry in target.env.items()},
+    }
+    incoming: dict[str, object] = {}
     if tmpl.description is not None:
-        target.description = tmpl.description
-        touched.append(LayerContribution.replacement("description"))
+        incoming["description"] = tmpl.description
     if tmpl.env:
-        target.env = _merge_map(target.env, tmpl.env)
-        touched.extend(LayerContribution.replacement("env", key) for key in tmpl.env)
-    return target, tuple(touched)
+        incoming["env"] = {key: entry.model_dump(mode="python") for key, entry in tmpl.env.items()}
+    merged, operations = merge_model(type(tmpl), previous, incoming)
+    raw = cast("dict[str, object]", merged)
+    target.description = cast("str", raw["description"])
+    target.env = {key: EnvEntry.model_validate(value) for key, value in cast("dict[str, object]", raw["env"]).items()}
+    return target, operations

@@ -188,6 +188,6 @@ def test_a_parent_that_does_not_exist_changes_nothing(kind: _Kind) -> None:
     name, which is how an operator would actually meet it. Standing in a
     built-in default template for the missing row would silently answer a
     question the miss policy exists to raise; an absent parent contributes
-    no layer at all, matching ``resources.inheritance.merge_layers``.
+    no layer at all, matching ``resources.inheritance.resolution_layers``.
     """
     assert _inheriting(kind, "declares", "no-such-template") == _inheriting(kind, "declares")

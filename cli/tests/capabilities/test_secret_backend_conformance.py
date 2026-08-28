@@ -267,6 +267,34 @@ class SourceConfigWithSecretRefUnionArm(AgwModel):
     choice: Annotated[SecretRefArm | PlainArm, Field(discriminator="kind")]
 
 
+def test_forbidden_references_are_checked_on_the_offered_config_model() -> None:
+    class OfferingForbiddenReference(ConformingSecretBackend):
+        name = "phase3-fixture"
+        description = "offers a forbidden source reference"
+        config_model = GoodConfig
+        mapping_model = GoodMapping
+
+        @classmethod
+        def config_for(cls) -> type[BaseModel]:
+            return SourceConfigWithDirectSecretRef
+
+    assert conformance_error(DESCRIPTOR, OfferingForbiddenReference) is not None
+
+
+def test_an_unoffered_declared_model_does_not_drive_reference_conformance() -> None:
+    class OfferingCleanConfig(ConformingSecretBackend):
+        name = "phase3-fixture"
+        description = "offers a clean model instead of its declaration"
+        config_model = SourceConfigWithDirectSecretRef
+        mapping_model = GoodMapping
+
+        @classmethod
+        def config_for(cls) -> type[BaseModel]:
+            return GoodConfig
+
+    assert conformance_error(DESCRIPTOR, OfferingCleanConfig) is None
+
+
 @pytest.mark.parametrize(
     ("config_model", "path"),
     [

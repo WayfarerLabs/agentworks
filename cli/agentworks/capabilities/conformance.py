@@ -26,6 +26,7 @@ from pydantic import BaseModel
 from agentworks.capabilities.descriptor import ConfigContract, ModelInputDomain
 from agentworks.schema import (
     RefMarker,
+    merge_contract_error,
     model_is_complete,
     reference_marker_error,
     structural_union_error,
@@ -39,8 +40,13 @@ _MISSING = object()
 
 
 def conformance_error(descriptor: CapabilityKindDescriptor, impl: type) -> str | None:
-    """Return why ``impl`` violates ``descriptor``, without constructing it."""
-    return (
+    """Return why ``impl`` violates ``descriptor``, without constructing it.
+
+    Primary config conformance follows ``config_for`` because that is the
+    model every core consumer uses. The mapping model remains a direct class
+    declaration with no selection hook.
+    """
+    preliminary = (
         _contract_error(descriptor, impl)
         or _metadata_error(impl)
         or _constructibility_error(impl)
@@ -49,13 +55,31 @@ def conformance_error(descriptor: CapabilityKindDescriptor, impl: type) -> str |
         or _operations_error(descriptor, impl)
         or _focused_operation_error(descriptor, impl)
         or _version_error(descriptor, impl)
-        or _model_error(descriptor, impl, "config_model", descriptor.config_schema)
+    )
+    if preliminary is not None:
+        return preliminary
+
+    model, hook_error = _offered_config_model(impl)
+    if hook_error is not None:
+        return hook_error
+    model_label = "config_model"
+    if inspect.getattr_static(impl, "config_model", _MISSING) is not model:
+        model_label = "config_for() offered model"
+    return (
+        _model_error(
+            descriptor,
+            impl,
+            model_label,
+            descriptor.config_schema,
+            model=model,
+            check_merge_contract=descriptor.config_schema.layered_merge,
+        )
         or (
             _model_error(descriptor, impl, "mapping_model", descriptor.mapping_schema)
             if descriptor.mapping_schema is not None
             else None
         )
-        or _forbidden_reference_error(descriptor, impl)
+        or _forbidden_reference_error(descriptor, model, model_label)
     )
 
 
@@ -108,6 +132,19 @@ def _config_hook_error(impl: type) -> str | None:
     return None
 
 
+def _offered_config_model(impl: type) -> tuple[object, str | None]:
+    """Call the checked model-selection hook once at the registration seam."""
+    from agentworks.capabilities.config import offered_model
+
+    try:
+        return offered_model(impl), None
+    except Exception as exc:
+        return None, (
+            f"its 'config_for' raised {type(exc).__name__} while selecting the config model, "
+            "so the framework cannot determine which schema it offers"
+        )
+
+
 def _attributes_error(descriptor: CapabilityKindDescriptor, impl: type) -> str | None:
     missing = sorted(attr for attr in descriptor.required_attributes if getattr(impl, attr, _MISSING) is _MISSING)
     if missing:
@@ -136,8 +173,12 @@ def _model_error(
     impl: type,
     attribute_name: str,
     contract: ConfigContract,
+    *,
+    model: object = _MISSING,
+    check_merge_contract: bool = False,
 ) -> str | None:
-    model = getattr(impl, attribute_name, None)
+    if model is _MISSING:
+        model = getattr(impl, attribute_name, None)
     if model is None:
         return (
             f"it declares no {attribute_name}, so the framework has no schema to validate its "
@@ -174,6 +215,10 @@ def _model_error(
                 f"its {attribute_name} {model.__name__} accepts {problem} {label} at {path}; "
                 f"{descriptor.kind} mapping input is limited to JSON-native types"
             )
+    if check_merge_contract:
+        merge_contract = merge_contract_error(model)
+        if merge_contract is not None:
+            return f"its {attribute_name} declares an invalid merge contract: {merge_contract}"
     return None
 
 
@@ -203,11 +248,14 @@ def _literal_values(annotation: object) -> tuple[object, ...]:
     return get_args(annotation) if get_origin(annotation) is Literal else ()
 
 
-def _forbidden_reference_error(descriptor: CapabilityKindDescriptor, impl: type) -> str | None:
+def _forbidden_reference_error(
+    descriptor: CapabilityKindDescriptor,
+    model: object,
+    model_label: str,
+) -> str | None:
     forbidden = descriptor.config_schema.forbidden_reference_kinds
     if not forbidden:
         return None
-    model = getattr(impl, "config_model", None)
     if not isinstance(model, type) or not issubclass(model, BaseModel):
         return None
     found = sorted((kind, path) for path, kind in _reference_markers(model) if kind in forbidden)
@@ -215,7 +263,7 @@ def _forbidden_reference_error(descriptor: CapabilityKindDescriptor, impl: type)
         return None
     kind, path = found[0]
     return (
-        f"its config_model {model.__name__} references forbidden kind {kind!r} at {path}; "
+        f"its {model_label} {model.__name__} references forbidden kind {kind!r} at {path}; "
         f"{descriptor.kind} source config cannot reference {kind} values"
     )
 

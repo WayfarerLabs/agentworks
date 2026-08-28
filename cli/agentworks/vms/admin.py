@@ -26,26 +26,28 @@ if TYPE_CHECKING:
     from agentworks.resources.graph import FinalizeContext
     from agentworks.resources.inheritance import LayerSource
     from agentworks.resources.reference import ResourceReference
+    from agentworks.value_provenance import ProvenancePath
 
 
 def effective_references(
     effective: AdminConfig,
     source: tuple[str, str],
-    provenance: Mapping[tuple[str, ...], tuple[LayerSource, ...]],
+    provenance: Mapping[ProvenancePath, tuple[LayerSource, ...]],
 ) -> tuple[ResourceReference, ...]:
     """References required by one effective VM admin declaration."""
     from agentworks.resources.reference import ResourceReference as _ResourceReq
+    from agentworks.value_provenance import longest_prefix_value
 
-    def owner(path: tuple[str, ...]) -> tuple[str, str] | None:
-        sources = provenance.get(path, ())
+    def owner(path: ProvenancePath) -> tuple[str, str] | None:
+        sources = longest_prefix_value(provenance, path) or ()
         return None if not sources else (sources[-1].resource_kind, sources[-1].name)
 
     by_env = {key: declared_by for key in effective.env if (declared_by := owner(("env", key))) is not None}
     refs: list[ResourceReference] = list(env_references(effective.env, source, by_env))
     by_credential = {
         name: declared_by
-        for name in effective.git_credentials
-        if (declared_by := owner(("git_credentials", name))) is not None
+        for index, name in enumerate(effective.git_credentials)
+        if (declared_by := owner(("git_credentials", index))) is not None
     }
     refs.extend(credential_references(effective.git_credentials, source, by_credential))
     refs.extend(
@@ -54,9 +56,9 @@ def effective_references(
             kind="user-install-command",
             usage="a user install command",
             source=source,
-            declared_by=owner(("user_install_commands", name)),
+            declared_by=owner(("user_install_commands", index)),
         )
-        for name in effective.user_install_commands
+        for index, name in enumerate(effective.user_install_commands)
     )
     return tuple(refs)
 

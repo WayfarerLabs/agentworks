@@ -1,7 +1,7 @@
 # Instance Model and State: Functional Requirements
 
-- Status: Active (R1, R2, and R4 merged; merge-strategy correction in design review; R3 and R5
-  pending)
+- Status: Active (R1, R2, and R4 merged; merge-strategy correction implemented and verified; R3 and
+  R5 pending)
 - Date: 2026-08-19
 - Last revised: 2026-08-28
 - Parent: the `2026-08-04-next-steps` saga (destination 2 and the wave-4 enabling track)
@@ -164,8 +164,8 @@ The overlay is applied after the template chain and is correspondingly visible i
 model. It participates in the shared layer stack introduced by R4, never a bespoke instance-only
 merge. The shared runner owns ordering and provenance, and the typed model tree owns field policy
 through one closed merge-strategy vocabulary. The same schema walker applies to core declaration
-models and capability-owned config models at arbitrary nesting depth; a capability does not receive
-an imperative merge callback.
+models and capability-owned config models that participate in layered merging, at arbitrary nesting
+depth; a capability does not receive an imperative merge callback.
 
 Default object merge preserves non-conflicting keys and recursively merges conflicts. A `replace`
 strategy on an object replaces the whole subtree, including with an empty object. A replaced list,
@@ -174,16 +174,16 @@ append-deduplication. A `replace` strategy on a field containing a discriminated
 wins before arm selection. Otherwise, the union recurses only while both values select the same arm:
 an explicit containing-field `merge` wins there, followed by the selected arm model's policy and the
 object default. Different arms, or arms that cannot be selected, replace the complete union value
-even under a containing `merge`, preventing a composite across arms. Both shipped environment-entry
-arm models declare replacement and their containing mapping has no override, so same-arm and
-cross-arm environment conflicts retain today's whole-entry replacement. An unknown key within a
-known schema is preserved; when two layers supply that same unknown key, the later raw value
-replaces the earlier one rather than creating a second runtime-shape merge language. A wholly
-unknown harness integration has no schema or usable effective config, so its later raw config
-replaces its complete prior config and the Registry reports the selector miss. The engine preserves
-malformed input for the existing final typed validation boundary rather than filtering, coercing, or
-laundering it, and it must terminate on a cyclic Python value reaching the deliberately open
-capability config boundary, including through a YAML alias.
+even under a containing `merge`, preventing a composite across arms. The environment-table mapping
+value declares replacement at each per-key conflict, so same-arm and cross-arm environment conflicts
+retain today's whole-entry replacement without attaching mapping-only policy to a scalar-shorthand
+arm. An unknown key within a known schema is preserved; when two layers supply that same unknown
+key, the later raw value replaces the earlier one rather than creating a second runtime-shape merge
+language. A wholly unknown harness integration has no schema or usable effective config, so its
+later raw config replaces its complete prior config and the Registry reports the selector miss. The
+engine preserves malformed input for the existing final typed validation boundary rather than
+filtering, coercing, or laundering it, and it must terminate on a cyclic Python value reaching the
+deliberately open capability config boundary, including through a YAML alias.
 
 Model-directed merging replaces the public `HarnessIntegration.merge_config` customization point.
 That is an intentional hard cutover of the harness-integration capability contract from version 1 to

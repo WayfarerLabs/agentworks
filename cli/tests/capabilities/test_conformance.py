@@ -37,6 +37,7 @@ from agentworks.schema import (
     StructuralUnion,
     extract_references,
     filled_defaults,
+    merge_contract_error,
     model_is_complete,
     reference_marker_error,
     structural_union_error,
@@ -310,6 +311,19 @@ def test_every_union_scalar_shorthand_on_the_shipped_surface_is_complete() -> No
     faults = [
         f"{kind} {block}: {reason}" for kind, block, model in blocks if (reason := union_scalar_shorthand_error(model))
     ]
+    assert not faults, "\n".join(faults)
+
+
+def test_every_core_layer_model_conforms_to_schema_merge() -> None:
+    """Every core model actually passed to the raw layer merger is safe."""
+    from agentworks.agents.template import AgentTemplate
+    from agentworks.sessions.template import SessionTemplate
+    from agentworks.vms.admin import AdminConfig
+    from agentworks.vms.template import VMTemplate
+    from agentworks.workspaces.template import WorkspaceTemplate
+
+    models = (VMTemplate, AdminConfig, WorkspaceTemplate, AgentTemplate, SessionTemplate)
+    faults = [f"{model.__name__}: {reason}" for model in models if (reason := merge_contract_error(model))]
     assert not faults, "\n".join(faults)
 
 

@@ -46,10 +46,7 @@ Mapping-shaped schema models also expose a class policy for uses where no contai
 where the same object policy should follow the model everywhere:
 
 ```python
-class PlaintextEnvEntry(AgwModel):
-    merge_strategy: ClassVar[MergeStrategy] = MergeStrategy.REPLACE
-
-class SecretEnvEntry(AgwModel):
+class Credentials(AgwModel):
     merge_strategy: ClassVar[MergeStrategy] = MergeStrategy.REPLACE
 ```
 
@@ -203,9 +200,11 @@ A same-arm composite can therefore be requested deliberately by a containing fie
 reusable arm model normally replaces. That is ordinary field-over-model precedence, not a cross-arm
 hybrid. A containing `merge` never overrides the arm-selection safety gate.
 
-Both environment-entry arm models use model-level replacement and their containing mapping carries
-no override, so changing between secret and plaintext forms, or overriding one entry with another of
-the same form, preserves today's whole-entry replacement.
+The shared environment-table type annotates its mapping value as
+`Annotated[EnvEntry, MergeStrategy.REPLACE]`. Policy therefore sits at the actual per-key conflict
+position. Changing between secret and plaintext forms, or overriding one entry with another of the
+same form, preserves today's whole-entry replacement without placing mapping-only policy on an arm
+that also accepts scalar shorthand.
 
 An object-level replacement is a strict subtree boundary. The previous object and every child under
 it are discarded before the incoming object is recorded at the node. Child annotations inside that
@@ -278,14 +277,14 @@ Existing shipped behavior is preserved with model policy:
 - core additive lists continue to use the list default;
 - capability lists that currently replace, including argument vectors, declare `replace`;
 - shell required commands and Codex writable directories continue to append-dedupe;
-- environment-entry models declare whole-object replacement; and
+- the environment-table value position declares whole-entry replacement; and
 - ordinary scalar and scalar-valued map conflicts continue to replace.
 
 Session harness selection has one necessary dynamic schema step. A same-name integration obtains the
-registered capability config model and merges through it. A changed integration name resets the
-complete config subtree before using the new model. An unknown name takes the total untyped path:
-the later config replaces the complete prior config without inspection, and normal Registry miss
-handling remains the authoritative error.
+registered capability's offered config model and merges through it. A changed integration name
+resets the complete config subtree before using the new model. An unknown name takes the total
+untyped path: the later config replaces the complete prior config without inspection, and normal
+Registry miss handling remains the authoritative error.
 
 The `HarnessIntegration.merge_config` callback and the resolver's sentinel-based inference are
 removed. No callable escape hatch remains for cross-field transforms; a capability represents merge
@@ -300,10 +299,13 @@ restore a second merge-policy authority and silently diverge from model annotati
 ## Registration validation
 
 One pure recursive `merge_contract_error(model)` conformance function owns metadata validation and
-uses a model cycle guard. Capability plugin registration invokes it for each registered config model
-and rejects an invalid third-party contract. First-party core declaration and capability models are
-covered by exhaustive, registry-derived conformance tests rather than a new import-time core
-rejection path. The pass rejects:
+uses a model cycle guard. A capability kind whose config actually participates in layered merging
+opts into that contract through its core-owned `ConfigContract`. Capability plugin registration then
+checks that kind's registered offered config model and rejects an invalid third-party contract.
+Kinds without a layered config surface retain their existing conformance contract; registration does
+not impose merge constraints that their config never exercises. First-party core declaration models
+and opted-in capability models are covered by exhaustive, registry-derived conformance tests rather
+than a new import-time core rejection path. The pass rejects:
 
 - more than one `MergeStrategy` metadata value at a node;
 - `merge` on a non-object node;
@@ -342,8 +344,11 @@ Serialization-only aliases do not affect raw validation-key lookup and remain al
 Mapping value annotations and every model recursively reachable through them are traversed for
 strategy placement and validation-alias conformance. A validation alias on a nested mapping-value
 model is refused even when the containing mapping or an ancestor uses whole-node replacement. The
-dynamic session merger reads the registered integration's config model directly, so capability
-projection metadata is not a merge contract and receives no speculative preservation requirement.
+dynamic session merger reads the registered integration's offered config model through the same
+central accessor used by validation and reference extraction. The harness-integration
+`ConfigContract` opts into layered merging, so registration validates that exact offered model.
+Capability projection metadata is not a merge contract and receives no speculative preservation
+requirement.
 
 ## Compatibility and persistence
 

@@ -10,6 +10,7 @@ from pydantic import AfterValidator, ConfigDict
 from agentworks.schema import (
     AgwModel,
     AgwRootModel,
+    MergeStrategy,
     ScalarShorthand,
     SecretRef,
     StructuralUnion,
@@ -127,7 +128,7 @@ class EnvEntry(
         ]
 
 
-EnvTable = dict[EnvVarName, EnvEntry]
+EnvTable = dict[EnvVarName, Annotated[EnvEntry, MergeStrategy.REPLACE]]
 """The shared env-table field type used by every env-bearing kind."""
 
 

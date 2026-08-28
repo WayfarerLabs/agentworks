@@ -37,6 +37,11 @@ contract it relies on (validate / construct / preflight / runup / ops) is docume
 > were removed in 0.14.0. `session resume`, `resume_command`, and `harness_integration` are the
 > accepted surfaces. The older vocabulary below records the decision as it stood when this ADR was
 > accepted.
+>
+> Note (2026-08-28): harness-integration contract version 2 replaces the imperative
+> `HarnessIntegration.merge_config` callback with schema-directed model policy. The selector/config
+> transition described below is current; a version-1 third-party integration is refused at
+> registration until it migrates its merge behavior to its config model.
 
 ## Context
 
@@ -101,16 +106,17 @@ consuming resource that holds one.
   file-presence probe: it checks whether that stored session id's transcript exists on the launch
   target (a slug-independent `find` under the Claude config dir), empirically confirmed to equal
   Claude's own resume boundary, rather than trusting any in-memory or derived state.
-- **`harness_integration` + `harness_integration_config` inherit as a PAIR.** Template inheritance
-  merges the pair through one rule (`_merge_pair`): a child silent about `harness_integration`
-  leaves the accumulated pair untouched (so an integration-silent later parent no longer wipes an
-  earlier parent's config); a child naming a DIFFERENT integration starts from a fresh blob (the
-  parent's config was addressed to the wrong capability and never leaks); a child naming the SAME
-  integration merges via that integration's `merge_config` (child-wins per key, `shell` unioning
-  `required_commands`). Validation runs once on the merged blob, at load: the declarative-schema
-  effort (FR12) moved it there from resolve, since a template's merged config is exactly as
-  checkable at load as the config of a resource that inherits nothing, and an error naming a key an
-  ancestor declared says which template to go and edit.
+- **The selector and config form one structural transition, while the selected model owns field
+  policy.** A layer silent about `harness_integration` leaves the accumulated selector and config
+  untouched. A layer naming a different integration discards the prior config before considering the
+  incoming one, because the old fields were addressed to another capability. Two layers naming the
+  same registered integration recursively merge through the model that integration offers via
+  `config_for()` (normally its `config_model`): objects merge by key, lists append-deduplicate, and
+  scalars replace unless the model declares an override. Two layers naming the same unknown
+  integration replace the complete raw config because no model can direct recursion; Registry miss
+  handling remains the authoritative selector error. Validation runs once on the effective blob at
+  load, so a partial declaration may be completed by its lineage while an error can still identify
+  the template that supplied the invalid value.
 
 ## Consequences
 
@@ -123,14 +129,17 @@ consuming resource that holds one.
   secret-declaring integration needs no new plumbing (the node already folds `secret_refs`).
 - One readiness fork, in one place, shared by every integration member, replacing the session-only
   `RequiredCommandsCheck` stand-in. The identity guard closes a gap the stand-in never had.
-- Pair-inheritance fixes a real multi-parent divergence: an integration-silent parent can no longer
-  erase a sibling parent's command.
+- Selector-aware inheritance fixes a real multi-parent divergence: an integration-silent parent can
+  no longer erase a sibling parent's command, and a selector change cannot inherit config meant for
+  another integration.
+- The config model is the single merge-policy authority for core and third-party integrations. No
+  capability callback runs during the raw finalize walk.
 
 ### Negative
 
-- Inheritance for the workload is now pair-scoped, not per-field, which is a different mental model
-  from the other three flat-field template families; the reference-plus-blob shape and the pair rule
-  are documented to compensate.
+- A selector change still replaces the entire workload config, even though repeated use of the same
+  registered selector merges recursively by field. Authors must model any non-default same-selector
+  behavior explicitly on the config model.
 - The migration landed in phases: between the orchestrator swap and the template's surface change,
   the harness integration was always `shell`, built from the template's still-flat fields via an
   interim adapter. Each interim `main` state was complete and honest (the mechanism was real and
@@ -155,7 +164,10 @@ consuming resource that holds one.
   config is per-session and small, so a dedicated declarable per configuration would be ceremony;
   the inline reference-plus-blob keeps the simple case a single template, and `validate_config`'s
   host-agnostic `owner` already serves the inline host.
-- **Per-field inheritance for `harness_integration_config` (merge each key independently across
-  parents).** Rejected: a config blob is addressed to a specific integration, so merging keys across
-  an integration switch would leak a parent's `claude-code` flags onto a `shell` child. The pair is
-  the correct merge unit.
+- **Merge config fields across an integration switch.** Rejected: a config blob is addressed to a
+  specific integration, so carrying keys across a switch would leak a parent's `claude-code` flags
+  onto a `shell` child. Recursive field policy applies only after both values select the same
+  registered integration.
+- **Let integrations implement a merge callback.** Retired by contract version 2: executable plugin
+  code in the raw finalize walk created a second merge authority and could fail before normal config
+  validation. The declared config model now owns the same behavior through checked metadata.

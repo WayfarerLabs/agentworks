@@ -22,7 +22,8 @@ import pytest
 
 import agentworks
 import agentworks.plugins as plugins_pkg
-from agentworks.capabilities.descriptor import capability_descriptors
+from agentworks.capabilities.conformance import conformance_error
+from agentworks.capabilities.descriptor import capability_descriptors, descriptor_for
 from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.errors import StateError
 from agentworks.origin import Origin
@@ -44,6 +45,7 @@ from agentworks.resources.graph import (
 from agentworks.schema import AgwModel, AgwRootModel
 from tests.plugins._fixtures import (
     ConformingGitCredentialProvider,
+    ConformingHarnessIntegration,
     ConformingSecretBackend,
     ConformingVMPlatform,
     FixtureHarnessIntegration,
@@ -236,6 +238,12 @@ class _PlatformOnAnOldContract(ConformingVMPlatform):
     contract_version = 1
 
 
+class _HarnessOnAnOldContract(ConformingHarnessIntegration):
+    name = "old-contract-harness"
+    description = "written against the callback-era harness contract"
+    contract_version = 1
+
+
 class _BackendWithInstanceReadiness(ConformingSecretBackend):
     name = "instance-readiness-backend"
     description = "mistakenly binds readiness to an instance"
@@ -296,6 +304,28 @@ class _MistaggedConfig(AgwModel):
     name: Literal["some-other-platform"]
 
 
+class _UnsafeMergeConfig(AgwModel):
+    """A buildable config whose default list policy cannot compare its items."""
+
+    name: Literal["unsafe-merge-platform"]
+    values: list[object]
+
+
+class _OfferedUnsafeMergeConfig(AgwModel):
+    name: Literal["offered-unsafe-merge-platform"]
+    values: list[object]
+
+
+class _UnsafeHarnessMergeConfig(AgwModel):
+    name: Literal["unsafe-merge-harness"]
+    values: list[object]
+
+
+class _OfferedUnsafeHarnessMergeConfig(AgwModel):
+    name: Literal["offered-unsafe-merge-harness"]
+    values: list[object]
+
+
 class _PlatformWithoutAModel(ConformingVMPlatform):
     """The config model is not a model at all."""
 
@@ -331,6 +361,54 @@ class _PlatformWithAnUncallableConfigHook(ConformingVMPlatform):
     # through the exported ``register_plugin`` never went through mypy, which
     # is why the seam has to check it at runtime.
     config_for = None  # type: ignore[assignment]
+
+
+class _PlatformWithAnUnsafeMergeContract(ConformingVMPlatform):
+    name = "unsafe-merge-platform"
+    description = "declares an unsafe append-dedupe list"
+    config_model = _UnsafeMergeConfig
+
+
+class _PlatformOfferingAnUnsafeMergeContract(ConformingVMPlatform):
+    name = "offered-unsafe-merge-platform"
+    description = "offers an unsafe model instead of its safe declaration"
+
+    @classmethod
+    def config_for(cls) -> type[AgwModel]:
+        return _OfferedUnsafeMergeConfig
+
+
+class _PlatformOfferingAnInvalidModel(ConformingVMPlatform):
+    name = "invalid-offered-model-platform"
+    description = "returns a non-model from its config hook"
+
+    @classmethod
+    def config_for(cls) -> type[AgwModel]:
+        return cast("type[AgwModel]", object)
+
+
+class _PlatformWhoseConfigHookRaises(ConformingVMPlatform):
+    name = "raising-config-hook-platform"
+    description = "raises while selecting its offered model"
+
+    @classmethod
+    def config_for(cls) -> type[AgwModel]:
+        raise RuntimeError("fixture hook failure")
+
+
+class _HarnessWithAnUnsafeMergeContract(ConformingHarnessIntegration):
+    name = "unsafe-merge-harness"
+    description = "declares an unsafe append-dedupe list"
+    config_model = _UnsafeHarnessMergeConfig
+
+
+class _HarnessOfferingAnUnsafeMergeContract(ConformingHarnessIntegration):
+    name = "offered-unsafe-merge-harness"
+    description = "offers an unsafe model instead of its safe declaration"
+
+    @classmethod
+    def config_for(cls) -> type[AgwModel]:
+        return _OfferedUnsafeHarnessMergeConfig
 
 
 @pytest.mark.parametrize(
@@ -372,6 +450,35 @@ def test_rejects_a_non_conforming_impl_naming_the_plugin(kind: str, impl: type, 
     assert expected in message
 
 
+@pytest.mark.parametrize(
+    ("kind", "impl"),
+    [
+        ("harness-integration", _HarnessWithAnUnsafeMergeContract),
+        ("harness-integration", _HarnessOfferingAnUnsafeMergeContract),
+        ("vm-platform", _PlatformOfferingAnInvalidModel),
+        ("vm-platform", _PlatformWhoseConfigHookRaises),
+    ],
+    ids=("declared-contract", "offered-contract", "invalid-offer", "raising-hook"),
+)
+def test_model_selection_and_layered_contract_failures_are_typed_and_atomic(kind: str, impl: type) -> None:
+    before = _snapshot_registries()
+    plugin = Plugin(name="p", capabilities={kind: (impl,)})
+
+    with pytest.raises(PluginError):
+        register_plugin(plugin)
+
+    assert _snapshot_registries() == before
+
+
+@pytest.mark.parametrize(
+    "impl",
+    (_PlatformWithAnUnsafeMergeContract, _PlatformOfferingAnUnsafeMergeContract),
+    ids=("declared", "offered"),
+)
+def test_a_non_layered_capability_does_not_acquire_the_schema_merge_contract(impl: type) -> None:
+    assert conformance_error(descriptor_for("vm-platform"), impl) is None
+
+
 def test_registration_rejects_vm_platform_contract_v1_exactly() -> None:
     plugin = Plugin(name="p", capabilities={"vm-platform": (_PlatformOnAnOldContract,)})
 
@@ -383,6 +490,19 @@ def test_registration_rejects_vm_platform_contract_v1_exactly() -> None:
         "the vm-platform capability contract: it declares contract_version 1, but this build "
         "supports vm-platform contract version 2"
     )
+
+
+def test_registration_rejects_harness_integration_contract_v1_without_writing() -> None:
+    before = _snapshot_registries()
+    plugin = Plugin(
+        name="p",
+        capabilities={"harness-integration": (_HarnessOnAnOldContract,)},
+    )
+
+    with pytest.raises(PluginError):
+        register_plugin(plugin)
+
+    assert _snapshot_registries() == before
 
 
 def test_a_non_conforming_impl_is_refused_before_any_registry_write() -> None:

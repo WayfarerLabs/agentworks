@@ -102,7 +102,11 @@ def _build_session_graph(
             registry,
             session_effective_references(template, ("session", name), layered_session.provenance),
         )
-        validate_effective_harness(template, ("session", name))
+        validate_effective_harness(
+            template,
+            ("session", name),
+            layered_session.provenance,
+        )
 
     # ===== Build: the derived node graph ====================================
     #

@@ -17,13 +17,13 @@ from __future__ import annotations
 
 import shlex
 import uuid
-from typing import TYPE_CHECKING, ClassVar, Literal
+from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 
 from pydantic import Field
 
 from agentworks.capabilities.harness_integration.base import HarnessIntegration, require_commands
 from agentworks.errors import StateError
-from agentworks.schema import AgwModel
+from agentworks.schema import AgwModel, MergeStrategy
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
@@ -59,7 +59,7 @@ class GrokBuildConfig(AgwModel):
     unknown profile rather than falling back. A child template's declared
     value replaces its parent's."""
 
-    extra_args: list[str] = Field(default_factory=list)
+    extra_args: Annotated[list[str], MergeStrategy.REPLACE] = Field(default_factory=list)
     """Raw argv tokens appended verbatim after every managed flag. Grok
     Build 1.0.4 rejects repeated managed flags, so use this for unmodeled flags
     rather than overriding a modeled field. A child template's declared list
@@ -75,7 +75,7 @@ _SESSIONS_DIR = "${GROK_HOME:-$HOME/.grok}/sessions"
 class GrokBuildIntegration(HarnessIntegration):
     """Run Grok Build, resuming its persisted session when one exists."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 2
     name: ClassVar[str] = "grok-build"
     description: ClassVar[str] = "Run Grok Build, resuming its session when one exists"
     config_model: ClassVar[type[GrokBuildConfig]] = GrokBuildConfig

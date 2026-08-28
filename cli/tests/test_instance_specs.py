@@ -372,7 +372,7 @@ def test_all_domain_folds_append_the_instance_layer() -> None:
 
     assert vm.value.cpus == 8
     assert vm.value.apt == ["git"]
-    assert [source.kind for source in vm.provenance[("apt", "git")]] == [
+    assert [source.kind for source in vm.provenance[("apt", 0)]] == [
         LayerSourceKind.TEMPLATE,
         LayerSourceKind.INSTANCE,
     ]
@@ -380,7 +380,7 @@ def test_all_domain_folds_append_the_instance_layer() -> None:
     assert workspace.value.tmuxinator is False
     assert workspace.provenance[("tmuxinator",)][-1].resource_kind == "workspace"
     assert agent.value.shell == "zsh"
-    assert agent.provenance[("mise_packages", "node@22")][-1].resource_kind == "agent"
+    assert agent.provenance[("mise_packages", 0)][-1].resource_kind == "agent"
     assert session.value.env["MODE"].model_dump() == {"value": "instance"}
     assert session.provenance[("env", "MODE")][-1].resource_kind == "session"
 
@@ -420,16 +420,8 @@ def test_admin_final_layer_uses_scalar_map_and_unique_append_semantics() -> None
     assert resolution.value.user_install_commands == ["base-command", "instance-command"]
     assert resolution.value.env["BASE"].value == "yes"
     assert resolution.value.env["SHARED"].value == "instance"
-    assert resolution.provenance[("git_credentials", "shared")][-1].resource_kind == "vm"
+    assert resolution.provenance[("git_credentials", 1)][-1].resource_kind == "vm"
     assert resolution.provenance[("env", "SHARED")][-1].resource_kind == "vm"
-
-
-def test_admin_fold_partitions_every_declaration_field() -> None:
-    from agentworks.vms import admin_templates
-
-    partition = set(admin_templates._SCALAR_FIELDS) | set(admin_templates._APPEND_FIELDS) | {"env"}
-
-    assert partition == set(AdminConfig.model_fields) - OVERLAY_EXCLUDED_FIELDS
 
 
 def test_admin_partial_validation_defers_until_after_template_fold(monkeypatch: pytest.MonkeyPatch) -> None:

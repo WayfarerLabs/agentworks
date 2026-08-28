@@ -219,32 +219,32 @@ review evidence rather than a live backend run.
 
 ### R4 correction: schema-directed merge strategies
 
-- [ ] Amend the R4 requirements and architecture so core and capability model definitions, rather
-      than five domain policy reducers or capability callbacks, own merge behavior at arbitrary
-      nesting depth.
-- [ ] Define and registration-validate one closed strategy vocabulary with object merge,
+- [x] Amend the R4 requirements and architecture so core model definitions and capability model
+      definitions that participate in layered merging, rather than five domain policy reducers or
+      capability callbacks, own merge behavior at arbitrary nesting depth.
+- [x] Define and registration-validate one closed strategy vocabulary with object merge,
       append-deduplicated list, and scalar replacement defaults plus field-level and model-level
       overrides, mapping-value annotations, and rejection of duplicate or shape-incompatible
       placements.
-- [ ] Implement recursive object merge, whole-node replacement, stable list append-deduplication,
+- [x] Implement recursive object merge, whole-node replacement, stable list append-deduplication,
       type-sensitive structural JSON equality, union-arm replacement, later raw replacement for
       unknown conflicts, cycle-safe malformed-input totality, and value-safe nested provenance in
       one schema walker used by template inheritance and final instance layers.
-- [ ] Migrate `ProvenancePath` end to end across `LayeredResolution`, every `LayerContribution`
+- [x] Migrate `ProvenancePath` end to end across `LayeredResolution`, every `LayerContribution`
       constructor, `run_layer_fold` defaults and accumulation, all five `effective_references`
       consumers, declared-template finalize, session pending, live, and lifecycle validation, and
       the capability error bridge. Project selector and config paths into one capability-local map,
       preserve optional source-location framing, use replacement for a new list index and
       contribution for an equal existing index, and use one longest-prefix lookup throughout. Retain
       no value- or `repr`-based path and no second session ownership channel.
-- [ ] Reduce VM, admin, workspace, agent, and session reducers to authored-field and seed adapters;
+- [x] Reduce VM, admin, workspace, agent, and session reducers to authored-field and seed adapters;
       replace same-integration capability callbacks with registered config-model policy while
       retaining complete config reset when the integration selector changes. Increment the
       harness-integration capability contract from version 1 to version 2 and refuse old plugins
       clearly rather than bridging two merge authorities.
-- [ ] Annotate every existing non-default field so shipped core and capability behavior remains
+- [x] Annotate every existing non-default field so shipped core and capability behavior remains
       compatible, including whole-entry environment replacement and replacement argument lists.
-- [ ] Prove nested core and capability behavior, explicit empty replacement, containing replacement
+- [x] Prove nested core and capability behavior, explicit empty replacement, containing replacement
       before arm selection, same-arm field-over-model merge, same-arm model replacement,
       different-arm or selection-failure reset despite containing merge, registration refusal,
       invalid-input preservation, typed equality, normalized validation locations, result-index list
@@ -254,12 +254,26 @@ review evidence rather than a live backend run.
       non-carrier values, an unsupported Python object whose equality raises, non-finite floats,
       cyclic items, and the absence of persistence or CLI schema changes. Mutation-test exactly
       object replacement, list replacement, union reset, and longest-prefix attribution.
-- [ ] Update permanent schema, capability, harness-integration, ADR, and active upgrade collateral
+- [x] Update permanent schema, capability, harness-integration, ADR, and active upgrade collateral
       in the same implementation range that removes the imperative hook and increments its contract;
       document shipped atomic list-item behavior in the schema README and preserve model-declared
       list-item identity as unsupported future direction in ADR 0023.
-- [ ] Complete the SDD-only checkpoint review, then the implementation private review, fresh-eyes,
+- [x] Complete the SDD-only checkpoint review, then the implementation private review, fresh-eyes,
       complexity, test-quality, full-gate, and isolated shipped-CLI passes before merge intent.
+
+Completed on 2026-08-28. One iterative schema walker now owns nested field behavior and value-path
+provenance across the five core layer adapters and opted-in capability config. Harness integration
+contract version 2 removes its executable merge callback; existing argument-vector and environment
+replacement behavior is model-declared, and no database, desired-payload, or CLI contract changed.
+The private project, fresh-eyes, and complexity loops converged with no material finding. All four
+required safety mutations were killed by focused tests. The exact non-integration suite passed 7,894
+tests with one skip, alongside Ruff, formatting, Mypy, Typer isolation, file lint, Rulesync,
+locked-SDD, website, and deterministic-build gates. An isolated-home shipped-CLI pass proved nested
+core list/map merging, complete environment-entry replacement, same-integration harness
+finalization, merged-list error indexing, bounded malformed-input recovery, empty live tables, and
+complete scratch cleanup. No provider inventory was authorized, so provider, VM, SSH, and
+session-launch behavior was deliberately not exercised; this correction does not change those
+surfaces.
 
 Definition of done: every template and instance layer resolves through one schema-directed field
 policy at arbitrary depth; object replacement is an honest subtree boundary; capability authors use

@@ -6,8 +6,8 @@ built-in empty template fallback.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field, fields
+from typing import TYPE_CHECKING, Any, cast
 
 from agentworks.errors import ConfigError, NotFoundError, unknown_template_error
 
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.db import Database
-    from agentworks.env import EnvEntry
+    from agentworks.env.entry import EnvEntry
     from agentworks.resources.inheritance import LayerContribution, LayeredResolution
     from agentworks.resources.registry import Registry
     from agentworks.workspaces.template import WorkspaceTemplate
@@ -289,24 +289,25 @@ def _merge_template(
     tmpl: WorkspaceTemplate,
     _source: object,
 ) -> tuple[ResolvedTemplate, tuple[LayerContribution, ...]]:
-    """Fold one declared WorkspaceTemplate into the accumulator. None =
-    not set, skip. The only writer of a ``ResolvedTemplate``'s fields."""
-    from agentworks.resources.inheritance import LayerContribution
+    """Merge one declaration, preserving the domain's ``None``-as-absence rule."""
+    from agentworks.env.entry import EnvEntry
+    from agentworks.instance_overlay_codec import OVERLAY_EXCLUDED_FIELDS
+    from agentworks.schema import merge_model
 
-    touched: list[LayerContribution] = []
-    if tmpl.repo is not None:
-        target.repo = tmpl.repo
-        touched.append(LayerContribution.replacement("repo"))
-    if tmpl.tmuxinator is not None:
-        target.tmuxinator = tmpl.tmuxinator
-        touched.append(LayerContribution.replacement("tmuxinator"))
-    if tmpl.git_user_name is not None:
-        target.git_user_name = tmpl.git_user_name
-        touched.append(LayerContribution.replacement("git_user_name"))
-    if tmpl.git_user_email is not None:
-        target.git_user_email = tmpl.git_user_email
-        touched.append(LayerContribution.replacement("git_user_email"))
-    if tmpl.env:
-        target.env = {**target.env, **tmpl.env}
-        touched.extend(LayerContribution.replacement("env", key) for key in tmpl.env)
-    return target, tuple(touched)
+    resolved_fields = fields(ResolvedTemplate)
+    previous = {field.name: getattr(target, field.name) for field in resolved_fields if field.name != "name"}
+    previous["env"] = {key: entry.model_dump(mode="python") for key, entry in target.env.items()}
+    dumped = tmpl.model_dump(
+        mode="python",
+        exclude=set(OVERLAY_EXCLUDED_FIELDS),
+        exclude_unset=True,
+    )
+    authored = {name: value for name, value in dumped.items() if value is not None}
+    merged, operations = merge_model(type(tmpl), previous, authored)
+    raw = cast("dict[str, object]", merged)
+    raw["env"] = {key: EnvEntry.model_validate(value) for key, value in cast("dict[str, object]", raw["env"]).items()}
+    raw["name"] = target.name
+    return (
+        ResolvedTemplate(**cast("dict[str, Any]", raw)),
+        operations,
+    )

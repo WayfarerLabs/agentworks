@@ -101,19 +101,17 @@ from __future__ import annotations
 
 import re
 import shlex
-from typing import TYPE_CHECKING, ClassVar, Literal, NamedTuple
+from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, NamedTuple
 
 from pydantic import Field
 
 from agentworks.capabilities.harness_integration.base import HarnessIntegration, require_commands
 from agentworks.errors import StateError
 from agentworks.plugins.codex.recorder import home_word, notify_value_word, provision_fragment, thread_tail
-from agentworks.schema import AgwModel
+from agentworks.schema import AgwModel, MergeStrategy
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from agentworks.capabilities.base import RunContext
     from agentworks.transports import Transport
 
@@ -177,7 +175,7 @@ class CodexConfig(AgwModel):
     """Turn OFF ``--strict-config``, for a target whose own
     ``config.toml`` a newer codex wrote."""
 
-    extra_args: list[str] = Field(default_factory=list)
+    extra_args: Annotated[list[str], MergeStrategy.REPLACE] = Field(default_factory=list)
     """Raw argv tokens appended verbatim, last, so they can add unmodeled
     arguments or override managed ``-c`` configuration values. Codex
     0.147.0 takes the last value for a repeated ``-c`` key. Overriding
@@ -247,38 +245,6 @@ _APPROVALS_REVIEWER_KEY = "approvals_reviewer"
 _REASONING_EFFORT_KEY = "model_reasoning_effort"
 _VIM_MODE_KEY = "tui.vim_mode_default"
 _WEB_SEARCH_KEY = "web_search"
-
-
-def _as_str_list(value: object) -> list[str] | None:
-    """Narrow a merge-time list field: an ABSENT value is a clean empty
-    list; a fully-string list passes through; anything else returns
-    ``None`` (unclean). ``merge_config`` runs on raw declared blobs (the
-    resolver merges before the final validate), so an unclean side must
-    NOT be filtered into a valid-looking union: laundering would hide the
-    bad entry from the merged-blob ``validate`` pass. The caller skips
-    the union instead, leaving the raw value for ``validate`` to reject.
-    """
-    if value is None:
-        return []
-    if isinstance(value, list) and all(isinstance(item, str) for item in value):
-        return list(value)
-    return None
-
-
-def _append_dedupe(target: list[str], source: list[str]) -> list[str]:
-    """Append source items to target, skipping dupes. Preserves order.
-
-    A per-domain copy of the trivial merge helper (``shell.py`` carries
-    its own for ``required_commands``), per the sanctioned copy-per-domain
-    shape.
-    """
-    seen = set(target)
-    result = list(target)
-    for item in source:
-        if item not in seen:
-            seen.add(item)
-            result.append(item)
-    return result
 
 
 # The rollout root. ``CODEX_HOME`` is the CLI's own override env var
@@ -371,7 +337,7 @@ class _Layer2(NamedTuple):
 class CodexIntegration(HarnessIntegration):
     """Runs Codex, resuming or launching fresh per on-disk state."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 2
     name: ClassVar[str] = "codex"
     description: ClassVar[str] = "Run Codex, resuming its session when one exists"
     config_model: ClassVar[type[CodexConfig]] = CodexConfig
@@ -410,29 +376,6 @@ class CodexIntegration(HarnessIntegration):
     def config(self) -> CodexConfig:
         """This session's validated codex config."""
         return self._config_as(CodexConfig)
-
-    @classmethod
-    def merge_config(cls, base: Mapping[str, object], child: Mapping[str, object]) -> dict[str, object]:
-        """Same-harness integration inheritance merge: scalars and bools child-win via
-        the shallow default; ``writable_dirs`` unions append-dedupe (it is
-        an additive grant list, like ``shell``'s ``required_commands``: a
-        child adding one dir must not silently drop the parent's).
-        ``extra_args`` deliberately child-wins (an escape hatch is an
-        override, not an accumulation), matching ``claude-code``.
-
-        The union runs only when BOTH sides are clean lists of strings:
-        the merge sees raw declared blobs, and filtering a mixed list
-        into a valid-looking union would hide the invalid entry from the
-        merged-blob ``validate`` pass. An unclean side falls through to
-        the shallow merge, so ``validate`` still rejects it."""
-        merged = {**base, **child}
-        base_dirs = _as_str_list(base.get("writable_dirs"))
-        child_dirs = _as_str_list(child.get("writable_dirs"))
-        if base_dirs is not None and child_dirs is not None:
-            union = _append_dedupe(base_dirs, child_dirs)
-            if union:
-                merged["writable_dirs"] = union
-        return merged
 
     def start(self, ctx: RunContext) -> str:
         """The pane command for ``session create``: ALWAYS a fresh launch.

@@ -5,15 +5,15 @@ from __future__ import annotations
 import shlex
 import subprocess
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.capabilities.config import capability_config_references, validate_capability_config
 from agentworks.errors import ConfigError, StateError
-from agentworks.plugins.grok.harness_integration import GrokBuildIntegration
-from agentworks.schema import RefOwner
+from agentworks.plugins.grok.harness_integration import GrokBuildConfig, GrokBuildIntegration
+from agentworks.schema import RefOwner, merge_model
 from tests.conftest import _FakeResult, _FakeTarget
 
 if TYPE_CHECKING:
@@ -121,6 +121,15 @@ def test_validation_rejects_non_string_choices(field: str) -> None:
 def test_validation_rejects_non_list_extra_args() -> None:
     with pytest.raises(ConfigError, match="extra_args: must be a list"):
         _validate({"extra_args": "--flag"})
+
+
+def test_model_merge_replaces_extra_args_including_with_an_empty_list() -> None:
+    raw, _ = merge_model(
+        GrokBuildConfig,
+        {"extra_args": ["--parent"]},
+        {"extra_args": []},
+    )
+    assert cast("dict[str, object]", raw)["extra_args"] == []
 
 
 def test_construct_revalidates_config() -> None:

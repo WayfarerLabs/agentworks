@@ -30,6 +30,7 @@ _PERMITTED = (
     "agentworks.source_location",
     "agentworks.schema",
     "agentworks.traversal",
+    "agentworks.value_provenance",
 )
 
 

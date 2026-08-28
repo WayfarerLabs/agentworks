@@ -1,6 +1,7 @@
 # HLA: Instance Model and State
 
-- Status: R1, R2, and R4 merged; merge-strategy correction in design review; R3 and R5 pending
+- Status: R1, R2, and R4 merged; merge-strategy correction implemented and verified; R3 and R5
+  pending
 - Date: 2026-08-23
 - Last revised: 2026-08-28
 - FRD: [frd.md](./frd.md)

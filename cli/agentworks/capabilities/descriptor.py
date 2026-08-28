@@ -70,6 +70,9 @@ class ConfigContract:
     forbidden_reference_kinds: frozenset[str] = frozenset()
     """Reference-marker kinds this config layer is not allowed to contain."""
 
+    layered_merge: bool = False
+    """Whether this primary config model participates in schema-directed layers."""
+
 
 @dataclass(frozen=True)
 class HostSurface:

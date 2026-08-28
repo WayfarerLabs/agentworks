@@ -350,6 +350,9 @@ def test_each_kinds_config_contract_matches_how_its_config_is_dispatched() -> No
         assert contracts[tagged].base is AgwModel, tagged
         assert contracts[tagged].discriminator == "name", tagged
 
+    assert contracts["harness-integration"].layered_merge is True
+    assert all(not contract.layered_merge for kind, contract in contracts.items() if kind != "harness-integration")
+
     assert contracts["git-credential-provider"].base is TokenAcquiringConfig
     assert contracts["git-credential-provider"].discriminator == "name"
 
@@ -361,6 +364,7 @@ def test_each_kinds_config_contract_matches_how_its_config_is_dispatched() -> No
     assert backend.mapping_schema.base is AgwRootModel
     assert backend.mapping_schema.discriminator is None
     assert backend.mapping_schema.input_domain is ModelInputDomain.JSON_NATIVE
+    assert backend.mapping_schema.layered_merge is False
     assert backend.mapping_host is not None
     assert backend.mapping_host.host_kind == "secret"
     assert backend.mapping_host.field_name == "backend_mappings"
