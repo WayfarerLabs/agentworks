@@ -24,8 +24,9 @@ from pathlib import Path
 
 
 def format_host_path(file: Path) -> str:
-    """Render a file path operator-friendly: ``~/path`` when under
-    ``$HOME``, else the bare absolute path. Relative paths render as-is.
+    """Render a file path operator-friendly: ``~`` plus the host path
+    separator when under ``$HOME``, else the bare absolute path. Relative
+    paths render as-is.
 
     **This is the one way a host path is spelled to an operator.** Every
     string a human reads that names a file on the machine they are
@@ -67,7 +68,7 @@ def format_host_path(file: Path) -> str:
     """
     if file.is_absolute():
         try:
-            return f"~/{file.relative_to(Path.home())}"
+            return str(Path("~") / file.relative_to(Path.home()))
         except ValueError:
             return str(file)
     return str(file)
