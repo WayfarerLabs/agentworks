@@ -219,7 +219,14 @@ class SSHTransport(Transport):
                     identity_file=self.identity_file,
                     proxy_jump=self.proxy_jump,
                     login_shell=self.login_shell,
-                    force_tty=self.force_tty if tty is None else tty,
+                    # The constructor's ``force_tty`` is a Windows-zsh
+                    # workaround for interactive shells, which a
+                    # non-interactive stdin write is not; forwarding it here
+                    # would put a line discipline in front of a payload this
+                    # branch promises to deliver byte-exact. An explicit
+                    # ``tty=True`` still reaches ``ssh.run``'s refusal, since
+                    # a caller asking for both is asking for a contradiction.
+                    force_tty=tty if tty is not None else False,
                 ),
                 command,
                 check=check,

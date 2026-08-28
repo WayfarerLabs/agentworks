@@ -104,6 +104,35 @@ def test_ssh_run_rejects_a_forced_tty_before_subprocess() -> None:
     assert secret not in str(caught.value)
 
 
+def test_transport_stdin_ignores_the_windows_tty_default() -> None:
+    """The production path. Cloud platforms build the transport with
+    ``force_tty=sys.platform == "win32"``, and ``join_tailscale_ephemerally``
+    sends stdin without a ``tty`` override, so forwarding that default would
+    fail every Windows VM create at its tailnet join.
+    """
+    from agentworks.transports.ssh import SSHTransport
+
+    secret = "ssh-stdin-swordfish"
+
+    with patch("agentworks.ssh.subprocess.run") as process:
+        process.return_value = subprocess.CompletedProcess([], 0, stdout=b"", stderr=b"")
+        SSHTransport("vm-host", force_tty=True).run("read -r token", input_text=secret)
+
+    argv = process.call_args.args[0]
+    assert "-tt" not in argv
+    assert process.call_args.kwargs["input"] == secret.encode()
+
+
+def test_transport_stdin_still_refuses_an_explicit_tty() -> None:
+    """Overriding the default on purpose is a contradiction, not a default."""
+    from agentworks.transports.ssh import SSHTransport
+
+    with patch("agentworks.ssh.subprocess.run") as process, pytest.raises(ValueError):
+        SSHTransport("vm-host").run("read -r token", input_text="s", tty=True)
+
+    process.assert_not_called()
+
+
 def test_ssh_run_translates_sensitive_native_failure_without_exception_link() -> None:
     secret = "ssh-native-failure-swordfish"
     native_failure = OSError(f"write reflected {secret}")
