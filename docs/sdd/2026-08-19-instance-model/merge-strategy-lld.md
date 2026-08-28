@@ -411,26 +411,15 @@ provenance attribution.
 The implementation PR updates the schema README, capability authoring README, harness-integration
 README, ADR 0020, ADR 0023, and the active upgrade guidance in the same commit range that removes
 the imperative hook and increments the contract version. The schema README describes shipped atomic
-list-item behavior; ADR 0023 preserves the unsupported future identity direction below. No permanent
-artifact will depend on this SDD path.
+list-item behavior; ADR 0023 preserves the approved unsupported future identity direction. No
+permanent artifact will depend on this SDD path.
 
 ## Future extension: model identity for list items
 
-This correction treats append-deduplicated list items as atomic values. A future object-item model
-may optionally declare a stable identity through model metadata. That declaration would extend list
-comparison to three outcomes without adding a callback or a second merge language:
-
-- equal values contribute provenance but do not append;
-- different identities append in stable order; and
-- the same identity with unequal values recursively merges through the item model's existing field-,
-  model-, and shape-directed strategies.
-
-No identity declaration, or an identity that cannot be read safely from malformed input, retains the
-current atomic equality-and-append behavior so the merger does not launder invalid data. A matched
-item's root policy still controls the conflict: ordinary object policy recurses, while `replace`
-replaces the complete matched item. Any future implementation must settle duplicate identities
-within one layer, union-arm identity, identity-field mutation, provenance for matched positions, and
-registration validation before exposing the metadata.
+This correction keeps list items atomic and model-declared item identity unsupported.
+[ADR 0023](../../adrs/0023-declared-schemas-and-the-kind-descriptor.md) is the permanent record for
+the approved future direction; the implementation updates it before this ephemeral SDD can be
+deleted.
 
 ## Out of scope
 
