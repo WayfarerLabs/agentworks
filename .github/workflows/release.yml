@@ -22,16 +22,34 @@ jobs:
           fetch-depth: 0
 
       - name: Verify tag is reachable from a release branch
-        # A published tag must sit on a release line rather than anywhere a
-        # tag can be pushed. `main` is protected by the `protect-default`
-        # ruleset; maintenance branches (0.15.x, 0.16.x, ...) are NOT, as of
-        # 2026-08-27, because that ruleset targets `~DEFAULT_BRANCH` only.
-        # So this accepts them on convention rather than on enforcement, and
-        # anyone with write access could create `9.9.x`, push to it directly,
-        # and tag it. Extending the ruleset to `[0-9]+.[0-9]+.x` with the same
-        # pull_request and required_status_checks rules is what would make
-        # this an enforced boundary; until then the honest description is that
-        # a maintenance branch is trusted, not verified.
+        # A published tag must sit on a release line rather than anywhere
+        # a tag can be pushed. `main` is covered by the `protect-default`
+        # ruleset and maintenance branches by `protect-maintenance`, which
+        # mirrors its rules against `*.*.x`, so both lines require a reviewed
+        # pull request and passing checks before anything a tag can point at
+        # reaches them.
+        #
+        # If you edit that ruleset, mind the dialect. Rulesets match with
+        # fnmatch, where `+` is a literal rather than a quantifier, so the
+        # `[0-9]+.[0-9]+.x` spelling `release-please.yml` uses for Actions
+        # branch filters does not carry over. Character sets do work, but
+        # `[0-9]` matches exactly one character, so `[0-9].[0-9].x` would
+        # cover `0.1.x` and silently miss `0.15.x`. `*.*.x` errs the other
+        # way: it covers every maintenance name and some non-maintenance
+        # ones too, which is the safe direction for a protection rule.
+        #
+        # This job is one of three gates, and failing it does block a
+        # publish: `test` needs this job and `publish` needs `test`. The
+        # final authorization gate is the `release` environment, which is
+        # what decides whether a given dispatch may publish at all. It
+        # permits deployments only from refs matching `v*` of type TAG, and an
+        # environment evaluates `github.ref` rather than whatever a job checks
+        # out. So run the dispatch input below with "Use workflow from" set to
+        # the tag itself: that satisfies the policy and re-runs that tag's own
+        # workflow, which is what you want for a transient failure. Running a
+        # NEWER workflow against an OLDER tag is what the policy prevents, and
+        # it requires a temporary deployment-policy exception; prefer cutting
+        # a new patch tag that carries the corrected workflow.
         run: |
           git fetch --quiet origin '+refs/heads/*:refs/remotes/origin/*'
           TAG="${{ inputs.tag || github.ref_name }}"
