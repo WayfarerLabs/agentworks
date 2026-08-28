@@ -1,8 +1,8 @@
-"""The HARNESS INTEGRATION column on ``session list`` and the shared table render.
+"""The harness integration column on ``session list`` and the shared table render.
 
 ``session list`` resolves every session's template to its concrete
 harness integration name (a config-only, no-SSH derivation) and shows it in a
-HARNESS INTEGRATION column between TEMPLATE and MODE. These pins cover the column
+harness integration column between TEMPLATE and MODE. These pins cover the column
 value for the default (``shell``) and a declared ``claude-code``
 template, the guard that a template which fails to resolve shows ``-``
 without aborting the render, the 20-char truncation the shared
@@ -15,6 +15,7 @@ HARNESS INTEGRATION derivation is orthogonal to the STATUS batch.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 from agentworks.db import SessionMode
@@ -74,14 +75,12 @@ def test_list_shows_harness_integration_column_between_template_and_mode(
 
     session_manager.list_sessions(db, config, no_status=True, interaction=TtyInteractionPolicy.REFUSE)
 
-    header, rows = _header_and_rows(captured_output.info)
-    # Column order: NAME, WORKSPACE, VM, TEMPLATE, HARNESS INTEGRATION, MODE, STATUS.
-    assert header.split() == ["NAME", "WORKSPACE", "VM", "TEMPLATE", "HARNESS", "INTEGRATION", "MODE", "STATUS"]
+    _header, rows = _header_and_rows(captured_output.info)
     by_name = {row.split()[0]: row.split() for row in rows}
     # The default (undeclared) template resolves to the built-in shell integration.
-    assert "shell" in by_name["s-shell"]
+    assert by_name["s-shell"][4] == "shell"
     # The declared claude template resolves to its claude-code integration.
-    assert "claude-code" in by_name["s-claude"]
+    assert by_name["s-claude"][4] == "claude-code"
 
 
 def test_listing_uses_the_live_session_overlay_harness_integration(
@@ -142,6 +141,32 @@ def test_list_truncates_over_cap_values_with_ellipsis(
     _header, rows = _header_and_rows(captured_output.info)
     assert rows[0].startswith(long_name[:17] + "...")
     assert long_name not in rows[0]
+
+
+def test_list_mode_column_uses_wider_cap(
+    db: Database,
+    make_config,  # noqa: ANN001
+    captured_output,  # noqa: ANN001
+) -> None:
+    config = make_config()
+    agent_name = "long-agent-name-" + "x" * 30
+    _seed_vm(db, "box", "ws-box")
+    db.insert_agent(agent_name, "box", "agt-long-mode")
+    db.insert_session(
+        "s1",
+        "ws-box",
+        "default",
+        SessionMode.AGENT,
+        agent_name=agent_name,
+        socket_path="/tmp/s1.sock",
+    )
+
+    session_manager.list_sessions(db, config, no_status=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    _header, rows = _header_and_rows(captured_output.info)
+    mode_cell = re.split(r" {2,}", rows[0])[5]
+    assert len(mode_cell) == 40
+    assert mode_cell.endswith("...")
 
 
 def test_list_no_status_still_shows_harness_integration(

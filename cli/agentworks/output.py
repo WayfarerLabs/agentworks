@@ -52,7 +52,7 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Iterator, Mapping, Sequence
 
 # Re-export the kind-based exception hierarchy from agentworks.errors so existing
 # `from agentworks.output import X` users keep working. New code should prefer
@@ -444,6 +444,7 @@ def render_table(
     rows: Sequence[Sequence[str]],
     *,
     max_col_width: int = 20,
+    max_col_widths: Mapping[int, int] | None = None,
 ) -> list[str]:
     """Render a left-justified table into a list of lines.
 
@@ -454,11 +455,17 @@ def render_table(
     ``cell[: max_col_width - 3] + "..."`` (so a 21-char cell becomes 20
     chars), while a cell of exactly the cap is left intact. Columns whose
     content all fits under the cap keep their natural, narrower width.
+    ``max_col_widths`` can override the cap for selected zero-based column
+    indexes without changing the default for the remaining columns.
 
     The caller emits each returned line via :func:`info`.
     """
     columns = list(zip(headers, *rows, strict=True))
-    widths = [min(max_col_width, max(len(cell) for cell in column)) for column in columns]
+    column_caps = max_col_widths if max_col_widths is not None else {}
+    widths = [
+        min(column_caps.get(index, max_col_width), max(len(cell) for cell in column))
+        for index, column in enumerate(columns)
+    ]
 
     def _line(cells: Sequence[str]) -> str:
         rendered = (truncate(cell, width).ljust(width) for cell, width in zip(cells, widths, strict=True))
