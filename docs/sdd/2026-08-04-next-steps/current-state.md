@@ -170,9 +170,11 @@ its branch is deleted. Remaining unmerged drafts on remote branches, both out of
   `TextIOWrapper` that rewrites LF to `os.linesep`) was invisible on Linux by construction. Recorded
   as a known gap, not a scheduled item.
 
-- **`transports/base.py:82-83` promises more than the code delivers** (verified at `56f9687b`): the
-  `input_text` contract states transports "deliver it byte-exact, so a guest `read -r` binds exactly
-  the value that was sent", unconditionally. The SSH path forwards `force_tty` into `ssh_run`
-  (`transports/ssh.py:222`), which inserts `-tt` (`ssh.py:163`), and a forced PTY's line discipline
-  transforms bytes. The guarantee holds without a TTY and is overstated with one. Prose-only fix,
-  separable from any behavior change, and unowned since the #677 effort closed.
+- **The `input_text` byte-exact guarantee was documented but not enforced** (found 2026-08-28, fixed
+  by PR #684). `transports/base.py` stated it unconditionally while the SSH path could forward
+  `force_tty` into `ssh.run` (`transports/ssh.py:222`), which inserts `-tt` (`ssh.py:323`), and a
+  PTY's line discipline echoes input and rewrites CR. An earlier version of this entry said the
+  docstring "promises more than the code delivers", which overstated it: no caller pairs the two, so
+  nothing was broken, and the real defect was the gap between a documented guarantee and an API that
+  permitted breaking it. The fix refuses the pairing in `ssh.run`, matching the guard that already
+  refuses stdin combined with command logging, rather than narrowing the sentence.
