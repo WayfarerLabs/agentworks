@@ -22,6 +22,11 @@ def test_format_host_path_uses_tilde_for_home(tmp_path: Path, monkeypatch: pytes
     assert rendered == "~/agentworks/config.toml"
 
 
+def test_format_host_path_uses_tilde_for_home_itself(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    assert path_rendering.format_host_path(tmp_path) == "~"
+
+
 def test_format_host_path_uses_windows_separators_for_home(monkeypatch: pytest.MonkeyPatch) -> None:
     class _WindowsPath(PureWindowsPath):
         @classmethod
