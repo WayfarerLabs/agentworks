@@ -14,10 +14,12 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from agentworks import db as db_module
 from agentworks.agents import grants as agent_grants
 from agentworks.agents import initializer as agent_initializer
 from agentworks.agents import manager as agent_manager
 from agentworks.capabilities.base import RunContext
+from agentworks.db import VersionedPayload
 from agentworks.errors import ExternalError, NotFoundError, StateError
 from agentworks.output import Role
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
@@ -70,6 +72,29 @@ def mutation(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 def _seed_vm(db: Database) -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
+
+
+def test_create_with_missing_vm_preserves_domain_error_and_state(
+    db: Database,
+    make_config,
+) -> None:
+    db.insert_vm("unrelated", site="proxmox", hostname="unrelated")
+    db.instance_state.put_desired_overlay("vm", "unrelated", VersionedPayload(2, {"future": True}))
+
+    with pytest.raises(NotFoundError) as caught:
+        agent_manager.create_agent(
+            db,
+            make_config(),
+            name="dev",
+            vm_name="missing",
+            spec='{"env":{"TOKEN":{"secret":"overlay-token"}}}',
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert caught.value.entity_kind == "vm"
+    assert caught.value.entity_name == "missing"
+    assert db.get_agent("dev") is None
+    assert db.instance_state.get_desired_overlay("agent", "dev") is None
 
 
 def _reachable(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:
@@ -337,6 +362,76 @@ def test_create_mutation_failure_cleans_up_and_leaves_no_row(
     assert db.get_agent("dev") is None
 
 
+def test_create_overlay_persistence_failure_rolls_back_the_remote_agent_and_owner(
+    db: Database,
+    make_config,  # noqa: ANN001
+    mutation: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    deletes: list[str] = []
+    monkeypatch.setattr(
+        agent_initializer,
+        "delete_agent_on_vm",
+        lambda vm, config_, linux_user, **k: deletes.append(linux_user),
+    )
+    monkeypatch.setattr(
+        "agentworks.instance_specs.persist_creation_overlay",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("overlay write failed")),
+    )
+
+    with pytest.raises(ExternalError) as caught:
+        agent_manager.create_agent(
+            db,
+            config,
+            name="dev",
+            vm_name="box",
+            spec='{"shell":"zsh"}',
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert caught.value.entity_kind == "agent"
+    assert caught.value.entity_name == "dev"
+    assert deletes == ["agt-dev"]
+    assert db.get_agent("dev") is None
+    assert db.instance_state.get_desired_overlay("agent", "dev") is None
+
+
+def test_create_logger_close_failure_retains_owner_and_reports_once(
+    db: Database,
+    make_config,  # noqa: ANN001
+    mutation: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    from agentworks.instance_specs import OverlayDisposition, OverlayOutcome
+    from agentworks.ssh import SSHLogger
+
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    outcomes: list[OverlayOutcome] = []
+    monkeypatch.setattr("agentworks.instance_specs.render_overlay_outcome", outcomes.append)
+    monkeypatch.setattr(SSHLogger, "close", lambda self: (_ for _ in ()).throw(RuntimeError("close failed")))
+
+    with pytest.raises(RuntimeError, match="close failed"):
+        agent_manager.create_agent(
+            db,
+            config,
+            name="dev",
+            vm_name="box",
+            spec='{"shell":"zsh"}',
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert db.get_agent("dev") is not None
+    assert db.instance_state.get_desired_overlay("agent", "dev") is not None
+    assert [(outcome.disposition, outcome.fields) for outcome in outcomes] == [(OverlayDisposition.SET, ("shell",))]
+
+
 def test_reinit_mutation_failure_wraps_and_keeps_the_agent(
     db: Database,
     make_config,  # noqa: ANN001
@@ -357,6 +452,154 @@ def test_reinit_mutation_failure_wraps_and_keeps_the_agent(
         agent_manager.reinit_agent(db, config, name="dev", interaction=TtyInteractionPolicy.REFUSE)
 
     assert db.get_agent("dev") is not None  # re-runnable, as before
+
+
+def test_reinit_build_failure_reports_the_committed_overlay_once(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    from agentworks.instance_specs import OverlayDisposition, OverlayOutcome
+
+    config = make_config()
+    _seed_vm(db)
+    db.insert_agent("dev", "box", "agt-dev", template="default")
+    outcomes: list[OverlayOutcome] = []
+    monkeypatch.setattr("agentworks.instance_specs.render_overlay_outcome", outcomes.append)
+    monkeypatch.setattr(
+        "agentworks.vms.nodes.live_vm_node",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("build failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="build failed"):
+        agent_manager.reinit_agent(
+            db,
+            config,
+            name="dev",
+            spec='{"shell":"zsh"}',
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    stored = db.instance_state.get_desired_overlay("agent", "dev")
+    assert stored is not None and stored.payload.value == {"shell": "zsh"}
+    assert [(outcome.disposition, outcome.fields) for outcome in outcomes] == [(OverlayDisposition.SET, ("shell",))]
+
+
+@pytest.mark.parametrize("clear_spec", ["{}", ""])
+def test_reinit_retains_replaces_and_clears_the_stored_overlay(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+    clear_spec: str,
+) -> None:
+    from agentworks.instance_specs import parse_instance_spec
+
+    config = make_config()
+    _seed_vm(db)
+    db.insert_agent("dev", "box", "agt-dev", template="default")
+    original = parse_instance_spec("agent", '{"shell":"bash"}')
+    db.instance_state.put_desired_overlay("agent", "dev", original.payload)
+    _reachable(monkeypatch, True)
+    monkeypatch.setattr(agent_initializer, "create_agent_on_vm", lambda *a, **k: None)
+    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None)
+
+    agent_manager.reinit_agent(db, config, name="dev", interaction=TtyInteractionPolicy.REFUSE)
+    retained = db.instance_state.get_desired_overlay("agent", "dev")
+    assert retained is not None and retained.payload == original.payload
+
+    agent_manager.reinit_agent(
+        db,
+        config,
+        name="dev",
+        spec='{"shell":"zsh"}',
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+    replaced = db.instance_state.get_desired_overlay("agent", "dev")
+    assert replaced is not None and replaced.payload.value == {"shell": "zsh"}
+
+    agent_manager.reinit_agent(
+        db,
+        config,
+        name="dev",
+        spec=clear_spec,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+    assert db.instance_state.get_desired_overlay("agent", "dev") is None
+
+
+@pytest.mark.parametrize(
+    "stored_payload",
+    [
+        pytest.param(VersionedPayload(1, {"future_field": "do-not-print-this-value"}), id="future-field"),
+        pytest.param(VersionedPayload(2, {"opaque": "do-not-print-this-value"}), id="future-version"),
+    ],
+)
+def test_reinit_empty_spec_clears_an_unsupported_stored_overlay_without_exposing_it(
+    db: Database,
+    make_config,  # noqa: ANN001
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: dict[str, Any],
+    captured_output,  # noqa: ANN001
+    stored_payload: VersionedPayload,
+) -> None:
+    config = make_config()
+    _seed_vm(db)
+    db.insert_agent("dev", "box", "agt-dev", template="default")
+    db.instance_state.put_desired_overlay("agent", "dev", stored_payload)
+    monkeypatch.setattr(db_module, "DB_PATH", tmp_path / "test.db")
+    _reachable(monkeypatch, True)
+
+    agent_manager.reinit_agent(
+        db,
+        config,
+        name="dev",
+        spec="",
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    assert db.instance_state.get_desired_overlay("agent", "dev") is None
+    assert mutation["agent_name"] == "dev"
+    assert "future_field" not in repr(captured_output.lines)
+    assert "opaque" not in repr(captured_output.lines)
+    assert "do-not-print-this-value" not in repr(captured_output.lines)
+
+
+def test_reinit_whitespace_spec_remains_invalid_and_retains_the_stored_overlay(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.errors import ValidationError
+    from agentworks.instance_specs import parse_instance_spec
+
+    config = make_config()
+    _seed_vm(db)
+    db.insert_agent("dev", "box", "agt-dev", template="default")
+    original = parse_instance_spec("agent", '{"shell":"bash"}')
+    db.instance_state.put_desired_overlay("agent", "dev", original.payload)
+    mutation_reached = False
+
+    def _mutation(*args: object, **kwargs: object) -> None:
+        nonlocal mutation_reached
+        mutation_reached = True
+
+    monkeypatch.setattr(agent_initializer, "create_agent_on_vm", _mutation)
+
+    with pytest.raises(ValidationError):
+        agent_manager.reinit_agent(
+            db,
+            config,
+            name="dev",
+            spec=" ",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    retained = db.instance_state.get_desired_overlay("agent", "dev")
+    assert retained is not None and retained.payload == original.payload
+    assert not mutation_reached
 
 
 # -- --update-template re-points before reinit --------------------------------
@@ -523,7 +766,7 @@ def test_create_agent_on_disabled_plugin_recipe_refuses_before_any_work(
 
     monkeypatch.setattr(agent_initializer, "create_agent_on_vm", _boom)
 
-    with pytest.raises(StateError, match="enable plugin `decl-plugin`"):
+    with pytest.raises(StateError) as caught:
         agent_manager.create_agent(
             db,
             config,
@@ -533,7 +776,55 @@ def test_create_agent_on_disabled_plugin_recipe_refuses_before_any_work(
             interaction=TtyInteractionPolicy.REFUSE,
         )
 
+    assert (caught.value.entity_kind, caught.value.entity_name) == ("agent-template", "fixture-agent-tmpl")
     assert db.get_agent("dev") is None  # refused before any DB write
+
+
+def test_create_agent_overlay_only_disabled_reference_refuses_before_mutation(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config()
+    _seed_vm(db)
+    _install_disabled_fixture(monkeypatch)
+
+    with pytest.raises(StateError) as caught:
+        agent_manager.create_agent(
+            db,
+            config,
+            name="dev",
+            vm_name="box",
+            spec='{"user_install_commands":["fixture-user-cmd"]}',
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert (caught.value.entity_kind, caught.value.entity_name) == ("user-install-command", "fixture-user-cmd")
+    assert db.get_agent("dev") is None
+    assert db.instance_state.get_desired_overlay("agent", "dev") is None
+
+
+def test_reinit_agent_overlay_only_disabled_reference_refuses_before_persist(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config()
+    _seed_vm(db)
+    db.insert_agent("dev", "box", "dev")
+    _install_disabled_fixture(monkeypatch)
+
+    with pytest.raises(StateError) as caught:
+        agent_manager.reinit_agent(
+            db,
+            config,
+            name="dev",
+            spec='{"user_install_commands":["fixture-user-cmd"]}',
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert (caught.value.entity_kind, caught.value.entity_name) == ("user-install-command", "fixture-user-cmd")
+    assert db.instance_state.get_desired_overlay("agent", "dev") is None
 
 
 def test_reinit_update_template_to_disabled_recipe_refuses_before_persist(
@@ -556,11 +847,12 @@ def test_reinit_update_template_to_disabled_recipe_refuses_before_persist(
 
     monkeypatch.setattr(agent_initializer, "create_agent_on_vm", _boom)
 
-    with pytest.raises(StateError, match="enable plugin `decl-plugin`"):
+    with pytest.raises(StateError) as caught:
         agent_manager.reinit_agent(
             db, config, name="dev", update_template="fixture-agent-tmpl", interaction=TtyInteractionPolicy.REFUSE
         )
 
+    assert (caught.value.entity_kind, caught.value.entity_name) == ("agent-template", "fixture-agent-tmpl")
     row = db.get_agent("dev")
     assert row is not None and row.template == "default"  # the refused repoint was NOT persisted
 

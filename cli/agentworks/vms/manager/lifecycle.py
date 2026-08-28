@@ -32,7 +32,6 @@ from agentworks.errors import (
     ProvisioningError,
     StateError,
     UserAbort,
-    unknown_template_error,
 )
 from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
 
@@ -117,15 +116,19 @@ def create_vm(
     *,
     name: str,
     template: str | None = None,
+    spec: str | None = None,
     admin_template: str | None = None,
+    admin_spec: str | None = None,
     site: str | None = None,
     interaction: TtyInteractionPolicy,
 ) -> None:
     """Create a new VM: provision + initialize.
 
-    Hardware and the admin username are template-owned: the vm-template
-    supplies cpus/memory/disk/swap and the admin-template the username.
-    There are no per-create overrides; deviations are new templates.
+    Hardware and the admin username are template-derived: the vm-template
+    supplies cpus/memory/disk/swap and the admin-template the username. A
+    typed final ``spec`` layer may override VM-template fields for this VM,
+    and ``admin_spec`` may override admin-template fields. There are no
+    individual per-hardware flags.
 
     ``admin_template`` selects which admin-template provisions the admin
     user (None = the reserved ``default``). A non-default name must be a
@@ -134,15 +137,25 @@ def create_vm(
     """
     import agentworks.vms.manager as _mgr
     from agentworks.bootstrap import load_request_registry
-    from agentworks.vms.templates import resolve_template
+    from agentworks.vms.templates import resolve_template_with_provenance
 
-    # build_registry runs first so framework miss-policies (typo'd git
+    # A declaration-only registry runs first so framework miss-policies (typo'd git
     # credential, future TemplateReference typos on inherits, etc.)
-    # surface before any template / DB / VM business logic.
-    registry = load_request_registry(config)
+    # surface before any template / DB / VM business logic. The
+    # pending-plus-durable registry built below is authoritative for mutation.
+    registry = load_request_registry(config, include_live_resources=False)
 
-    vm_tmpl = resolve_template(registry, template)
+    from agentworks.instance_specs import parse_vm_instance_specs
 
+    desired_overlays = parse_vm_instance_specs(spec, admin_spec)
+    vm_overlay = None if desired_overlays is None else desired_overlays.vm
+    layered_vm_tmpl = resolve_template_with_provenance(
+        registry,
+        template,
+        overlay=None if vm_overlay is None else vm_overlay.declaration,
+        instance_name=name,
+    )
+    vm_tmpl = layered_vm_tmpl.value
     # Refuse a vm-template recipe that draws on a disabled plugin's declarable
     # resource (a bundled install-command / apt entry / inherited template)
     # BEFORE any DB or backend work, with the enable-plugin hint (Phase 7,
@@ -151,6 +164,20 @@ def create_vm(
     from agentworks.resources.access import ensure_recipe_enabled
 
     ensure_recipe_enabled(registry, "vm-template", vm_tmpl.name)
+
+    selected_admin_template = "default" if admin_template is None else admin_template
+    from agentworks.vms.admin_templates import resolve_template_with_provenance as resolve_admin_template
+
+    layered_admin = resolve_admin_template(
+        registry,
+        selected_admin_template,
+        overlay=None if desired_overlays is None else desired_overlays.admin,
+        instance_name=name,
+    )
+    admin = layered_admin.value
+    ensure_recipe_enabled(registry, "admin-template", selected_admin_template)
+    resolved_admin_username = admin.username
+    validate_admin_username(resolved_admin_username)
 
     # Resolve the target site and its declaration. An undeclared site
     # fails here with the stranded-site ConfigError + manifest hint,
@@ -161,47 +188,47 @@ def create_vm(
     from agentworks.vms.sites import ensure_site_ready, lookup_site, select_site
 
     site = select_site(site, config.defaults.site, registry)
+    from agentworks.resources.live_publish import project_vm_live_resource
+
+    pending = project_vm_live_resource(
+        name=name,
+        site=site,
+        vm_template_name="default" if template is None else template,
+        admin_template_name=selected_admin_template,
+        layered_vm=layered_vm_tmpl,
+        layered_admin=layered_admin,
+    )
+    existing_vm = db.get_vm(name)
+    if existing_vm is None:
+        registry = load_request_registry(
+            config,
+            live_database=db,
+            pending_publishers=(lambda target: target.add_live(pending),),
+        )
+        from agentworks.instance_specs import ensure_effective_references_enabled
+
+        ensure_effective_references_enabled(registry, pending.outbound)
     site_decl = lookup_site(site, registry)
     ensure_site_ready(site_decl, registry)
 
     vm_name = name
     validate_name(vm_name, max_length=MAX_VM_NAME_LENGTH)
 
-    if db.get_vm(vm_name) is not None:
+    if existing_vm is not None:
         raise AlreadyExistsError(
             f"VM '{vm_name}' already exists",
             entity_kind="vm",
             entity_name=vm_name,
         )
+    from agentworks.instance_specs import refuse_orphan_creation_state
 
-    # Resource settings are template-owned (no per-create overrides): the
-    # vm-template carries hardware, the admin-template the username.
+    refuse_orphan_creation_state(db, "vm", vm_name)
+
+    # Resource settings come from the already-resolved template plus its
+    # optional final instance layer; the admin-template owns the username.
     resolved_cpus = vm_tmpl.cpus
     resolved_memory = vm_tmpl.memory
     resolved_disk = vm_tmpl.disk
-    from agentworks.resources.access import admin_template as access_admin_template
-    from agentworks.resources.access import kind_dict
-
-    # Resolve the selected admin-template (None = reserved ``default``,
-    # which always materializes). A non-default name that the operator
-    # never declared raises here, before any DB or backend work, with the
-    # framework's uniform unknown-template error naming the bad selector.
-    selected_admin_template = admin_template or "default"
-    try:
-        admin = access_admin_template(registry, selected_admin_template)
-    except KeyError:
-        raise unknown_template_error(
-            kind="admin-template",
-            label="admin template",
-            name=selected_admin_template,
-            available=kind_dict(registry, "admin-template"),
-        ) from None
-    # Gate the selected admin-template's recipe too (its own
-    # user_install_commands closure), before backend work (Phase 7, LLD b).
-    ensure_recipe_enabled(registry, "admin-template", selected_admin_template)
-    resolved_admin_username = admin.username
-    validate_admin_username(resolved_admin_username)
-
     _mgr.verify_tailscale_available()
     from agentworks.capabilities.base import OperationScope, ScopeLevel
     from agentworks.git_credentials.nodes import git_credential_node
@@ -344,21 +371,26 @@ def create_vm(
             # below unwinds exactly the row (today's rollback, relocated onto
             # the node), and nothing past provisioning is rollback-tracked (an
             # initialized-but-partial VM is kept, debuggable, reinit-able).
-            db.insert_vm(
-                vm_name,
-                site=site,
-                hostname=hostname,
-                template=vm_tmpl.name,
-                # Store the canonical NULL for the reserved default (whether the
-                # operator omitted the flag or passed it explicitly), so the
-                # column has one encoding per semantic state.
-                admin_template=None if selected_admin_template == "default" else selected_admin_template,
-                cpus=resolved_cpus,
-                memory_gib=resolved_memory,
-                disk_gib=resolved_disk,
-                swap_gib=vm_tmpl.swap,
-                admin_username=resolved_admin_username,
-            )
+            from agentworks.instance_specs import persist_vm_creation_overlays
+
+            with db.transaction():
+                refuse_orphan_creation_state(db, "vm", vm_name)
+                db.insert_vm(
+                    vm_name,
+                    site=site,
+                    hostname=hostname,
+                    template=vm_tmpl.name,
+                    # Store the canonical NULL for the reserved default (whether the
+                    # operator omitted the flag or passed it explicitly), so the
+                    # column has one encoding per semantic state.
+                    admin_template=None if selected_admin_template == "default" else selected_admin_template,
+                    cpus=resolved_cpus,
+                    memory_gib=resolved_memory,
+                    disk_gib=resolved_disk,
+                    swap_gib=vm_tmpl.swap,
+                    admin_username=resolved_admin_username,
+                )
+                overlay_outcome = persist_vm_creation_overlays(db, vm_name, desired_overlays)
             log = RealizationLog()
             log.mark_realized(pending_vm)
 
@@ -397,6 +429,9 @@ def create_vm(
                     logger.close()
                 except BaseException as close_error:
                     if active_primary is None:
+                        from agentworks.instance_specs import render_retained_creation_overlay
+
+                        render_retained_creation_overlay(db, "vm", vm_name)
                         raise
                     try:  # noqa: SIM105 - warning failure must not replace the active primary
                         output.warn(f"could not close provisioning log {logger.display_path}: {close_error}")
@@ -405,29 +440,33 @@ def create_vm(
 
             init_stack.callback(_close_create_logger)
 
-            request = ProvisionRequest(
-                vm_name=vm_name,
-                hostname=hostname,
-                system_slug=slug,
-                admin_username=resolved_admin_username,
-                ssh_public_key=config.operator.ssh_public_key.read_text().strip(),
-                ssh_private_key=config.operator.ssh_private_key,
-                tailscale_auth_key=tailscale_auth_key,
-                progress=logger,
-                cpus=resolved_cpus,
-                memory_gib=resolved_memory,
-                disk_gib=resolved_disk,
-                swap_gib=vm_tmpl.swap,
-            )
+            try:
+                request = ProvisionRequest(
+                    vm_name=vm_name,
+                    hostname=hostname,
+                    system_slug=slug,
+                    admin_username=resolved_admin_username,
+                    ssh_public_key=config.operator.ssh_public_key.read_text().strip(),
+                    ssh_private_key=config.operator.ssh_private_key,
+                    tailscale_auth_key=tailscale_auth_key,
+                    progress=logger,
+                    cpus=resolved_cpus,
+                    memory_gib=resolved_memory,
+                    disk_gib=resolved_disk,
+                    swap_gib=vm_tmpl.swap,
+                )
 
-            # The op-start context for the platform's create op: secrets scoped
-            # to the site's declared names.
-            platform_ctx = scoped_ctx(site_node.secret_refs())
+                # The op-start context for the platform's create op: secrets scoped
+                # to the site's declared names.
+                platform_ctx = scoped_ctx(site_node.secret_refs())
 
-            # The primary provisioning step: promoted to info so it sits at
-            # the section body level (the platform's own sub-steps render as
-            # detail one notch deeper).
-            output.info(f"Creating VM '{vm_name}' on vm-site '{site}'...")
+                # The primary provisioning step: promoted to info so it sits at
+                # the section body level (the platform's own sub-steps render as
+                # detail one notch deeper).
+                output.info(f"Creating VM '{vm_name}' on vm-site '{site}'...")
+            except BaseException:
+                log.unwind()
+                raise
             try:
                 result = platform_obj.create(request, platform_ctx)
             except KeyboardInterrupt:
@@ -460,10 +499,15 @@ def create_vm(
             # The unwind window closes here: provisioning succeeded, the VM
             # exists, and initialization failures keep it (with recovery
             # guidance), exactly as before.
+            from agentworks.instance_specs import render_overlay_outcome
 
             # Persist the platform's opaque identifiers verbatim; the owning
             # platform is the column's only reader.
-            db.update_vm_platform_metadata(vm_name, result.platform_metadata)
+            try:
+                db.update_vm_platform_metadata(vm_name, result.platform_metadata)
+            except BaseException:
+                render_overlay_outcome(overlay_outcome)
+                raise
 
             # -- Phase A: record + verify connectivity (the tail of Provisioning) --
             # Past the unwind window: if anything below fails, the VM exists on
@@ -496,8 +540,10 @@ def create_vm(
                 # Provisioning/External error; re-raise as itself after the
                 # recovery-guidance warning.
                 _warn_init_cancel(vm_name)
+                render_overlay_outcome(overlay_outcome)
                 raise
             except Exception as e:
+                render_overlay_outcome(overlay_outcome)
                 _raise_init_failure(db, vm_name, e)
 
         # -- Initialization (Phase B) --
@@ -521,8 +567,10 @@ def create_vm(
             )
         except (KeyboardInterrupt, UserAbort):
             _warn_init_cancel(vm_name)
+            render_overlay_outcome(overlay_outcome)
             raise
         except Exception as e:
+            render_overlay_outcome(overlay_outcome)
             _raise_init_failure(db, vm_name, e)
 
     # -- Post-init: SSH config re-sync --
@@ -542,6 +590,7 @@ def create_vm(
     # terminal outcome line renders at column 0 via result().
     vm = db.get_vm(vm_name)
     assert vm is not None
+    render_overlay_outcome(overlay_outcome)
     if vm.init_status == InitStatus.PARTIAL.value:
         output.result(f"VM '{vm_name}' is ready (with warnings, see above)")
     else:
@@ -573,7 +622,7 @@ def reinit_vm(
 
     # build_registry runs first so framework miss-policies surface
     # before any template / DB / VM business logic.
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
 
     vm = _require_vm(db, name)
 
@@ -598,10 +647,23 @@ def reinit_vm(
     vm_node = live_vm_node(db, config, registry, vm)
 
     # Resolve the VM's template so init uses the right values
-    from agentworks.resources.access import admin_template
-    from agentworks.vms.templates import resolve_template
+    from agentworks.instance_specs import ensure_effective_references_enabled, get_vm_instance_overlays
+    from agentworks.vms.template import effective_references
+    from agentworks.vms.templates import resolve_template_with_provenance
 
-    reinit_vm_tmpl = resolve_template(registry, vm.template)
+    stored_overlays = get_vm_instance_overlays(db, vm.name)
+    stored_vm_overlay = None if stored_overlays is None else stored_overlays.vm
+    layered_reinit_vm_tmpl = resolve_template_with_provenance(
+        registry,
+        vm.template,
+        overlay=None if stored_vm_overlay is None else stored_vm_overlay.declaration,
+        instance_name=vm.name,
+    )
+    reinit_vm_tmpl = layered_reinit_vm_tmpl.value
+    ensure_effective_references_enabled(
+        registry,
+        effective_references(reinit_vm_tmpl, ("vm", vm.name), layered_reinit_vm_tmpl.provenance),
+    )
 
     # Refuse a recipe drawing on a disabled plugin's declarable resource before
     # the reinit realize (Phase 7, LLD b). Drift guard:
@@ -631,18 +693,21 @@ def reinit_vm(
     # dropped admin-template surfaces as a typed error naming the selector
     # rather than a raw KeyError traceback. This cheap row + registry
     # check bails before the Tailscale probe below.
-    from agentworks.resources.access import kind_dict
+    selected_admin_template = "default" if vm.admin_template is None else vm.admin_template
+    from agentworks.vms.admin import effective_references as admin_effective_references
+    from agentworks.vms.admin_templates import resolve_template_with_provenance as resolve_admin_template
 
-    selected_admin_template = vm.admin_template or "default"
-    try:
-        admin = admin_template(registry, selected_admin_template)
-    except KeyError:
-        raise unknown_template_error(
-            kind="admin-template",
-            label="admin template",
-            name=selected_admin_template,
-            available=kind_dict(registry, "admin-template"),
-        ) from None
+    layered_admin = resolve_admin_template(
+        registry,
+        selected_admin_template,
+        overlay=None if stored_overlays is None else stored_overlays.admin,
+        instance_name=vm.name,
+    )
+    admin = layered_admin.value
+    ensure_effective_references_enabled(
+        registry,
+        admin_effective_references(admin, ("vm", vm.name), layered_admin.provenance),
+    )
 
     # Gate the selected admin-template's recipe too, before backend work
     # (Phase 7, LLD b).

@@ -566,6 +566,22 @@ class TestOptionFlagsInSpec:
             script = generate(shell)
             assert "--allow-interaction" in script
 
+    def test_instance_spec_options_reach_every_shell_completion(self) -> None:
+        commands = _walk_commands(build_spec(app))
+        expected = {
+            "agentworks.vm.create": {"--spec"},
+            "agentworks.workspace.create": {"--spec"},
+            "agentworks.agent.create": {"--spec"},
+            "agentworks.agent.reinit": {"--spec"},
+            "agentworks.session.create": {"--spec", "--workspace-spec", "--agent-spec"},
+        }
+        for path, options in expected.items():
+            actual = {option for parameter in commands[path].params for option in parameter.opts}
+            assert options <= actual
+        for shell in ("bash", "zsh", "powershell"):
+            script = generate(shell)
+            assert all(option in script for options in expected.values() for option in options)
+
     def test_machine_output_options_reach_every_shell_completion(self) -> None:
         """Every JSON v1 command exposes the closed output choices to generated shells."""
         spec = build_spec(app)

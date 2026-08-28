@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from textwrap import dedent
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import Mock
@@ -11,8 +12,10 @@ import pytest
 from agentworks.bootstrap import build_registry
 from agentworks.capabilities.secret_backend import BlockReason, TtyInteractionAccess
 from agentworks.config import load_config
-from agentworks.doctor import Status, _check_config, _check_secrets, checks_for_resource
+from agentworks.db import LATEST_VERSION, Database, VersionedPayload
+from agentworks.doctor import Status, _build_doctor_registry, _check_config, _check_secrets, checks_for_resource
 from agentworks.errors import ConfigError, StateError
+from agentworks.manifests import load_manifests
 from agentworks.resources.access import ResourceIdentity
 from agentworks.secrets.preview import PreviewStatus
 from tests.conftest import ManifestDoc, write_manifests
@@ -619,6 +622,96 @@ def test_clean_manifests_keep_config_valid_row(tmp_path: Path, monkeypatch) -> N
     assert any(c.name == "Config is valid" for c in g.checks)
     assert not any(c.name == "Manifest" for c in g.checks)
     assert registry is not None
+
+
+def test_stale_database_keeps_declared_doctor_registry_without_migrating(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks import db as db_module
+
+    cfg = _write_config(tmp_path)
+    database_path = tmp_path / "state.db"
+    Database(database_path).close()
+    connection = sqlite3.connect(database_path)
+    connection.execute("UPDATE schema_version SET version = ?", (LATEST_VERSION - 1,))
+    connection.commit()
+    connection.close()
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+    monkeypatch.setattr(db_module, "DB_PATH", database_path)
+
+    config = load_config(cfg, warn_issues=False)
+    registry, coverage = _build_doctor_registry(config, load_manifests(cfg.parent / "resources"))
+
+    assert registry is not None
+    assert registry.lookup("vm-template", "default") is not None
+    assert coverage is not None
+    assert coverage.status is Status.INFO
+    connection = sqlite3.connect(database_path)
+    version = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
+    connection.close()
+    assert version == LATEST_VERSION - 1
+
+
+@pytest.mark.parametrize(
+    "stored_value",
+    [
+        {"future_field": True},
+        {"env": {"TOKEN": {"unexpected": "value"}}},
+    ],
+    ids=["unsupported", "malformed"],
+)
+def test_invalid_live_overlay_keeps_declared_doctor_registry(
+    tmp_path: Path,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    stored_value: dict[str, object],
+) -> None:
+    from agentworks import db as db_module
+
+    cfg = _write_config(tmp_path, manifests=[ManifestDoc("agent-template", "default")])
+    db.insert_vm("box", "lima-local", "box", template="default")
+    db.insert_agent("dev", "box", "dev", template="default")
+    db.instance_state.put_desired_overlay(
+        "agent",
+        "dev",
+        VersionedPayload(1, stored_value),
+    )
+    database_path = tmp_path / "test.db"
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+    monkeypatch.setattr(db_module, "DB_PATH", database_path)
+
+    config = load_config(cfg, warn_issues=False)
+    registry, live_failure = _build_doctor_registry(config, load_manifests(cfg.parent / "resources"))
+
+    assert registry is not None
+    assert registry.lookup("agent-template", "default") is not None
+    assert registry.graph.is_live("agent", "dev") is False
+    assert live_failure is not None
+    assert live_failure.status is Status.FAIL
+
+
+def test_malformed_current_schema_keeps_declared_doctor_registry(
+    tmp_path: Path,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks import db as db_module
+
+    cfg = _write_config(tmp_path)
+    db.insert_vm("box", "lima-local", "box")
+    db._conn.execute("ALTER TABLE vms DROP COLUMN admin_template")
+    db._conn.commit()
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+    monkeypatch.setattr(db_module, "DB_PATH", tmp_path / "test.db")
+
+    config = load_config(cfg, warn_issues=False)
+    registry, live_failure = _build_doctor_registry(config, load_manifests(cfg.parent / "resources"))
+
+    assert registry is not None
+    assert registry.lookup("vm-template", "default") is not None
+    assert live_failure is not None
+    assert live_failure.status is Status.FAIL
 
 
 def test_manifest_load_failure_keeps_other_rows(tmp_path: Path, monkeypatch) -> None:

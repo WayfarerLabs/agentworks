@@ -113,7 +113,7 @@ def _prepare_vm(
             entity_name=vm.name,
         )
 
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
     with gated_vm_boundary(
         db,
         config,
@@ -149,13 +149,20 @@ def _regenerate_tmuxinator(
     logger: SSHLogger | None = None,
 ) -> None:
     """Regenerate the workspace tmuxinator config from current session state."""
-    from agentworks.workspaces.tmuxinator import generate_config
+    from agentworks.bootstrap import load_request_registry
+    from agentworks.workspaces.templates import resolve_live_tmuxinator
+    from agentworks.workspaces.tmuxinator import generate_config, remove_config
+
+    registry = load_request_registry(config, live_database=db)
+    target = _mgr.transport(vm, config, logger=logger)
+    if not resolve_live_tmuxinator(db, registry, ws.name, ws.template):
+        remove_config(target, ws.name, ws.workspace_path)
+        return
 
     sessions = db.list_sessions(workspace_name=ws.name)
     # Build socket paths for tmuxinator (admin sessions have NULL, agent sessions always set)
     socket_paths = {s.name: s.socket_path for s in sessions}
     config_text = generate_config(ws.name, ws.workspace_path, sessions=sessions, socket_paths=socket_paths)
-    target = _mgr.transport(vm, config, logger=logger)
     target.write_file(f"{ws.workspace_path}/.tmuxinator.yml", config_text)
 
 
@@ -281,7 +288,7 @@ def _batch_vm_boundary(
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import VMSiteNode, live_vm_node
 
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
     resolver = Resolver(config, registry, interaction=interaction)
     site_nodes: dict[str, VMSiteNode] = {}
     vm_nodes = [live_vm_node(db, config, registry, vm, site_nodes=site_nodes) for vm in vms]

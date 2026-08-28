@@ -129,9 +129,9 @@ def test_session_create_calls_resolve_with_session_target(
     calls: list[list[object]] = []
     real_register = _RealResolver.register_targets
 
-    def _register_spy(self: _RealResolver, targets: Any) -> None:
+    def _register_spy(self: _RealResolver, targets: Any, **kwargs: object) -> None:
         calls.append(list(targets))
-        real_register(self, targets)
+        real_register(self, targets, **kwargs)
 
     monkeypatch.setattr(_RealResolver, "register_targets", _register_spy)
     monkeypatch.setattr(_RealResolver, "resolve", lambda self: (_ for _ in ()).throw(_Sentinel()))

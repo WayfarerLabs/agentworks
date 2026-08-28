@@ -3,17 +3,16 @@
 from __future__ import annotations
 
 import unicodedata
-from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace, TracebackType
-from typing import TYPE_CHECKING, Any, Literal, cast
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
-from agentworks.errors import BusyStateError, NotFoundError, StateError
+from agentworks.errors import NotFoundError, StateError
 from agentworks.machine_output import MachineOutputCommand, encode_json_envelope
 from agentworks.origin import Origin
 from agentworks.resources import KIND_REGISTRY, Registry
@@ -21,7 +20,6 @@ from agentworks.resources.access import ResourceIdentity
 from agentworks.resources.graph import build_graph
 from agentworks.resources.graph_query import (
     GRAPH_TRAVERSED_RELATIONSHIPS,
-    DatabaseLiveSource,
     GraphDirection,
     GraphDistanceGroup,
     GraphEdge,
@@ -31,21 +29,17 @@ from agentworks.resources.graph_query import (
     GraphNodeType,
     GraphQuery,
     GraphResult,
-    LiveSourceState,
     focused_graph_facts,
     graph_result_data,
     group_graph_result,
     show_graph,
 )
 from agentworks.resources.graph_render import render_graph_result
-from agentworks.resources.kind import InstanceRef
 from agentworks.resources.reference import RefRelationship, ResourceReference
 from tests.conftest import ManifestDoc, write_cfg
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Sequence
-
-    from agentworks.db.database import Database
+    from collections.abc import Sequence
 
 
 @dataclass(frozen=True)
@@ -115,7 +109,6 @@ def _query(
         ResourceIdentity("node", focus),
         direction,
         depth,
-        DatabaseLiveSource(tmp_path / "absent.db"),
     )
 
 
@@ -307,7 +300,6 @@ def test_focused_slice_retains_only_incident_edges_duplicates_and_provenance(
     facts = focused_graph_facts(
         registry,
         ResourceIdentity("node", "focus"),
-        DatabaseLiveSource(tmp_path / "absent.db"),
     )
 
     assert [(edge.target.name, edge.relationship, edge.usage) for edge in facts.dependencies] == [
@@ -337,14 +329,12 @@ def test_focused_slice_includes_direct_edges_outside_traversal_policy(
     facts = focused_graph_facts(
         registry,
         ResourceIdentity("node", "focus"),
-        DatabaseLiveSource(tmp_path / "focused-absent.db"),
     )
     traversed = show_graph(
         registry,
         ResourceIdentity("node", "focus"),
         GraphDirection.DEPENDENCIES,
         1,
-        DatabaseLiveSource(tmp_path / "traversal-absent.db"),
     )
 
     assert [(edge.target.name, edge.relationship) for edge in facts.dependencies] == [
@@ -354,32 +344,16 @@ def test_focused_slice_includes_direct_edges_outside_traversal_policy(
     assert {(node.name, node.distance) for node in traversed.nodes} == {("focus", 0), ("runtime", 1)}
 
 
-def test_focused_slice_keeps_edge_free_identity_and_live_support_distinction(
+def test_focused_slice_keeps_edge_free_identity(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
-    class _UninspectedPath:
-        def stat(self) -> None:
-            raise AssertionError("unsupported live usage inspected the database path")
-
-    unsupported = _registry(monkeypatch, ["focus"])
-    unsupported_facts = focused_graph_facts(
-        unsupported,
+    registry = _registry(monkeypatch, ["focus"])
+    facts = focused_graph_facts(
+        registry,
         ResourceIdentity("node", "focus"),
-        DatabaseLiveSource(cast("Path", _UninspectedPath())),
     )
-    assert unsupported_facts.dependencies == unsupported_facts.dependents == ()
-    assert unsupported_facts.used_by is None
-
-    handler = _InstanceHandler(lambda _name: iter(()))
-    supported = _registry(monkeypatch, ["focus"], handler=handler)
-    supported_facts = focused_graph_facts(
-        supported,
-        ResourceIdentity("node", "focus"),
-        DatabaseLiveSource(tmp_path / "still-absent.db"),
-    )
-    assert supported_facts.used_by == ()
-    assert handler.calls == []
+    assert facts.dependencies == facts.dependents == ()
+    assert facts.used_by is None
 
 
 def test_focused_slice_reads_each_incident_arm_once_without_expanding_neighbors(
@@ -411,7 +385,6 @@ def test_focused_slice_reads_each_incident_arm_once_without_expanding_neighbors(
     facts = focused_graph_facts(
         registry,
         ResourceIdentity("node", "focus"),
-        DatabaseLiveSource(tmp_path / "absent.db"),
     )
 
     assert calls == [("out", "node", "focus"), ("in", "node", "focus")]
@@ -437,7 +410,6 @@ def test_focused_slice_rejects_an_edge_that_does_not_touch_its_focus(
         focused_graph_facts(
             registry,
             ResourceIdentity("node", "focus"),
-            DatabaseLiveSource(tmp_path / "absent.db"),
         )
 
 
@@ -452,7 +424,6 @@ def test_real_registry_inbound_edges_retain_relationship_and_usage(tmp_path: Pat
         ResourceIdentity("secret", "tailscale-auth-key"),
         GraphDirection.DEPENDENTS,
         1,
-        DatabaseLiveSource(tmp_path / "absent.db"),
     )
     inbound = [
         edge for edge in result.edges if edge.target.kind == "secret" and edge.target.name == "tailscale-auth-key"
@@ -463,36 +434,27 @@ def test_real_registry_inbound_edges_retain_relationship_and_usage(tmp_path: Pat
     assert all(edge.usage for edge in inbound)
 
 
-def test_registry_and_focus_validation_precede_live_source_demand(monkeypatch: pytest.MonkeyPatch) -> None:
-    path = _PresentPath()
+def test_registry_and_focus_validation_precede_query(monkeypatch: pytest.MonkeyPatch) -> None:
     unfinished = Registry.empty()
-    unfinished_source = DatabaseLiveSource(cast("Path", path))
     with pytest.raises(StateError) as unfinished_error:
         show_graph(
             unfinished,
             ResourceIdentity("node", "focus"),
             GraphDirection.BOTH,
             1,
-            unfinished_source,
         )
     assert unfinished_error.value.entity_kind == "registry"
-    assert unfinished_source.state is LiveSourceState.CLOSED
-    assert path.stat_count == 0
 
-    registry = _registry(monkeypatch, ["present"], handler=_InstanceHandler(lambda name: iter(())))
-    missing_source = DatabaseLiveSource(cast("Path", path))
+    registry = _registry(monkeypatch, ["present"])
     with pytest.raises(NotFoundError) as missing_error:
         show_graph(
             registry,
             ResourceIdentity("node", "missing"),
             GraphDirection.BOTH,
             1,
-            missing_source,
         )
     assert missing_error.value.entity_kind == "node"
     assert missing_error.value.entity_name == "missing"
-    assert missing_source.state is LiveSourceState.CLOSED
-    assert path.stat_count == 0
 
 
 def test_total_order_is_independent_of_registry_insertion_order(
@@ -507,578 +469,6 @@ def test_total_order_is_independent_of_registry_insertion_order(
     )
     assert forward == reverse
     assert len(forward.nodes) == 250
-
-
-class _Transaction(AbstractContextManager[None]):
-    def __init__(self, counts: dict[str, int], exit_error: BaseException | None = None) -> None:
-        self.counts = counts
-        self.exit_error = exit_error
-
-    def __enter__(self) -> None:
-        self.counts["transaction_enter"] += 1
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_value: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> Literal[False]:
-        del exc_type, exc_value, traceback
-        self.counts["transaction_exit"] += 1
-        if self.exit_error is not None:
-            raise self.exit_error
-        return False
-
-
-class _FakeDatabase:
-    counts: dict[str, int]
-    exit_error: BaseException | None = None
-    close_error: BaseException | None = None
-
-    def __init__(self, path: Path, *, read_only: bool = False, timeout: float | None = None) -> None:
-        del path
-        assert read_only is True
-        assert timeout is None
-        self.counts["database"] += 1
-
-    def read_transaction(self) -> AbstractContextManager[None]:
-        return _Transaction(self.counts, self.exit_error)
-
-    def close(self) -> None:
-        self.counts["close"] += 1
-        if self.close_error is not None:
-            raise self.close_error
-
-
-class _QueryCountingDatabase(_FakeDatabase):
-    def list_vms(self) -> tuple[()]:
-        self.counts["list_vms"] += 1
-        return ()
-
-    def list_sessions(self) -> tuple[()]:
-        self.counts["list_sessions"] += 1
-        return ()
-
-
-class _InstanceHandler:
-    def __init__(self, values: Callable[[str], Iterator[InstanceRef]]) -> None:
-        self.values = values
-        self.calls: list[str] = []
-
-    def instances(self, db: Database, registry: Registry, row: _Row) -> Iterator[InstanceRef]:
-        del db, registry
-        self.calls.append(row.name)
-        return self.values(row.name)
-
-
-class _ListQueryHandler:
-    def __init__(self, query: Callable[[Database], Sequence[object]]) -> None:
-        self.query = query
-        self.calls: list[str] = []
-
-    def instances(self, db: Database, registry: Registry, row: _Row) -> tuple[InstanceRef, ...]:
-        del registry
-        self.calls.append(row.name)
-        self.query(db)
-        return ()
-
-
-def _install_fake_database(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
-    from agentworks.resources import graph_query
-
-    counts = {"database": 0, "transaction_enter": 0, "transaction_exit": 0, "close": 0}
-    _FakeDatabase.counts = counts
-    _FakeDatabase.exit_error = None
-    _FakeDatabase.close_error = None
-    monkeypatch.setattr(graph_query, "Database", _FakeDatabase)
-    return counts
-
-
-def test_focused_supported_live_usage_uses_one_read_only_snapshot(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    counts = _install_fake_database(monkeypatch)
-    database_path = tmp_path / "state.db"
-    database_path.touch()
-    handler = _InstanceHandler(
-        lambda _name: iter((InstanceRef("session", "z"), InstanceRef("vm", "a"))),
-    )
-    registry = _registry(monkeypatch, ["focus"], handler=handler)
-
-    facts = focused_graph_facts(
-        registry,
-        ResourceIdentity("node", "focus"),
-        DatabaseLiveSource(database_path),
-    )
-
-    assert facts.used_by == (InstanceRef("session", "z"), InstanceRef("vm", "a"))
-    assert handler.calls == ["focus"]
-    assert counts == {"database": 1, "transaction_enter": 1, "transaction_exit": 1, "close": 1}
-
-
-def test_focused_supported_live_usage_preserves_present_but_empty(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    counts = _install_fake_database(monkeypatch)
-    database_path = tmp_path / "state.db"
-    database_path.touch()
-    handler = _InstanceHandler(lambda _name: iter(()))
-    registry = _registry(monkeypatch, ["focus"], handler=handler)
-
-    facts = focused_graph_facts(
-        registry,
-        ResourceIdentity("node", "focus"),
-        DatabaseLiveSource(database_path),
-    )
-
-    assert facts.used_by == ()
-    assert handler.calls == ["focus"]
-    assert counts == {"database": 1, "transaction_enter": 1, "transaction_exit": 1, "close": 1}
-
-
-def test_live_source_is_lazy_then_reused_once_across_expanded_resources(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    counts = _install_fake_database(monkeypatch)
-    database_path = tmp_path / "state.db"
-    database_path.touch()
-    handler = _InstanceHandler(lambda name: iter((InstanceRef("vm", f"live-{name}"),)))
-    registry = _registry(monkeypatch, ["a", "b", "c"], [_ref("a", "b"), _ref("b", "c")], handler=handler)
-    source = DatabaseLiveSource(database_path)
-    result = show_graph(registry, ResourceIdentity("node", "a"), GraphDirection.BOTH, None, source)
-
-    assert counts == {"database": 1, "transaction_enter": 1, "transaction_exit": 1, "close": 1}
-    assert handler.calls == ["a", "b", "c"]
-    assert source.state is LiveSourceState.CLOSED
-    assert {node.node_type for node in result.nodes} == {GraphNodeType.RESOURCE, GraphNodeType.LIVE_INSTANCE}
-    live_edges = [edge for edge in result.edges if edge.edge_type is GraphEdgeType.LIVE_USAGE]
-    assert len(live_edges) == 3
-    assert all(edge.source.node_type is GraphNodeType.LIVE_INSTANCE for edge in live_edges)
-    assert all(edge.target.node_type is GraphNodeType.RESOURCE for edge in live_edges)
-    assert all(edge.relationship is RefRelationship.USES for edge in live_edges)
-
-
-def test_dependencies_and_depth_boundary_do_not_inspect_live_source(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    class _CountingPath:
-        def stat(self) -> None:
-            raise AssertionError("path inspection was not demanded")
-
-    reference = ResourceReference(
-        name="platform",
-        kind="platform",
-        usage="SITE_TO_PLATFORM",
-        source=("site", "site"),
-    )
-    registry = Registry.empty()
-    registry.add(
-        "platform",
-        "platform",
-        _Row("platform"),
-        Origin.built_in(source="tests.graph-query"),
-    )
-    registry.add(
-        "site",
-        "site",
-        _Row("site", (reference,)),
-        Origin.built_in(source="tests.graph-query"),
-    )
-    registry.finalize()
-    handler = _InstanceHandler(lambda name: iter((InstanceRef("vm", name),)))
-    monkeypatch.setitem(KIND_REGISTRY, "platform", SimpleNamespace())
-    monkeypatch.setitem(KIND_REGISTRY, "site", handler)
-    path = cast("Path", _CountingPath())
-    dependency_result = show_graph(
-        registry,
-        ResourceIdentity("site", "site"),
-        GraphDirection.DEPENDENCIES,
-        1,
-        DatabaseLiveSource(path),
-    )
-    boundary_result = show_graph(
-        registry,
-        ResourceIdentity("platform", "platform"),
-        GraphDirection.DEPENDENTS,
-        1,
-        DatabaseLiveSource(path),
-    )
-    assert {(node.kind, node.name) for node in dependency_result.nodes} == {
-        ("site", "site"),
-        ("platform", "platform"),
-    }
-    assert {(node.kind, node.name) for node in boundary_result.nodes} == {
-        ("site", "site"),
-        ("platform", "platform"),
-    }
-    assert handler.calls == []
-
-
-def test_platform_site_live_depth_demand_and_boundary_asymmetry(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    counts = _install_fake_database(monkeypatch)
-    database_path = tmp_path / "state.db"
-    database_path.touch()
-    site_handler = _InstanceHandler(lambda name: iter((InstanceRef("vm", f"vm-for-{name}"),)))
-    registry = _registry(monkeypatch, ["platform", "site"], [_ref("site", "platform")])
-    monkeypatch.setitem(KIND_REGISTRY, "node", SimpleNamespace())
-    shallow = show_graph(
-        registry,
-        ResourceIdentity("node", "platform"),
-        GraphDirection.DEPENDENTS,
-        1,
-        DatabaseLiveSource(database_path),
-    )
-    assert counts["database"] == 0
-    assert all(node.node_type is GraphNodeType.RESOURCE for node in shallow.nodes)
-
-    monkeypatch.setitem(KIND_REGISTRY, "node", site_handler)
-    deep = show_graph(
-        registry,
-        ResourceIdentity("node", "platform"),
-        GraphDirection.DEPENDENTS,
-        2,
-        DatabaseLiveSource(database_path),
-    )
-    assert counts["database"] == 1
-    assert any(node.node_type is GraphNodeType.LIVE_INSTANCE and node.distance == 2 for node in deep.nodes)
-
-
-def test_missing_database_is_empty_and_source_is_single_use(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    handler = _InstanceHandler(lambda name: iter((InstanceRef("vm", name),)))
-    registry = _registry(monkeypatch, ["focus"], handler=handler)
-    source = DatabaseLiveSource(tmp_path / "missing.db")
-    result = show_graph(registry, ResourceIdentity("node", "focus"), GraphDirection.DEPENDENTS, None, source)
-    assert result.nodes == (GraphNode(GraphNodeType.RESOURCE, "node", "focus", 0),)
-    assert handler.calls == []
-    assert source.state is LiveSourceState.CLOSED
-    with pytest.raises(StateError) as raised:
-        source.supports("node")
-    assert raised.value.entity_kind == "database"
-    with pytest.raises(StateError):
-        source.__enter__()
-
-
-def test_absent_source_is_checked_once_and_reused_without_hooks(monkeypatch: pytest.MonkeyPatch) -> None:
-    path = _MissingPath()
-    handler = _InstanceHandler(lambda name: iter((InstanceRef("vm", name),)))
-    registry = _registry(monkeypatch, ["a", "b"], [_ref("a", "b")], handler=handler)
-    result = show_graph(
-        registry,
-        ResourceIdentity("node", "a"),
-        GraphDirection.BOTH,
-        None,
-        DatabaseLiveSource(cast("Path", path)),
-    )
-    assert {(node.kind, node.name) for node in result.nodes} == {("node", "a"), ("node", "b")}
-    assert path.stat_count == 1
-    assert handler.calls == []
-
-
-def test_known_live_node_keeps_distinct_edges_from_each_expanded_resource(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    _install_fake_database(monkeypatch)
-    database_path = tmp_path / "state.db"
-    database_path.touch()
-    handler = _InstanceHandler(lambda name: iter((InstanceRef("vm", "shared"),)))
-    registry = _registry(monkeypatch, ["a", "b"], [_ref("a", "b")], handler=handler)
-    result = show_graph(
-        registry,
-        ResourceIdentity("node", "a"),
-        GraphDirection.BOTH,
-        None,
-        DatabaseLiveSource(database_path),
-    )
-    live_nodes = [node for node in result.nodes if node.node_type is GraphNodeType.LIVE_INSTANCE]
-    live_edges = [edge for edge in result.edges if edge.edge_type is GraphEdgeType.LIVE_USAGE]
-    assert [(node.kind, node.name, node.distance) for node in live_nodes] == [("vm", "shared", 1)]
-    assert {(edge.source.name, edge.target.name) for edge in live_edges} == {("shared", "a"), ("shared", "b")}
-
-
-class _StatFailure:
-    def __init__(self, error: OSError) -> None:
-        self.error = error
-
-    def stat(self) -> None:
-        raise self.error
-
-
-class _PresentPath:
-    def __init__(self) -> None:
-        self.stat_count = 0
-
-    def stat(self) -> None:
-        self.stat_count += 1
-
-
-class _MissingPath:
-    def __init__(self) -> None:
-        self.stat_count = 0
-
-    def stat(self) -> None:
-        self.stat_count += 1
-        raise FileNotFoundError
-
-
-@pytest.mark.parametrize("error", [PermissionError(), NotADirectoryError(), OSError("unreadable")])
-def test_non_missing_path_inspection_failures_are_typed(monkeypatch: pytest.MonkeyPatch, error: OSError) -> None:
-    handler = _InstanceHandler(lambda name: iter(()))
-    registry = _registry(monkeypatch, ["focus"], handler=handler)
-    source = DatabaseLiveSource(cast("Path", _StatFailure(error)))
-    with pytest.raises(StateError) as raised:
-        show_graph(registry, ResourceIdentity("node", "focus"), GraphDirection.DEPENDENTS, 1, source)
-    assert raised.value.entity_kind == "database"
-    assert raised.value.__cause__ is error
-    assert source.state is LiveSourceState.CLOSED
-
-
-@pytest.mark.parametrize(
-    "failure",
-    [
-        StateError("stale", entity_kind="database"),
-        StateError("newer", entity_kind="database"),
-        StateError("malformed", entity_kind="database"),
-        BusyStateError(),
-    ],
-)
-def test_typed_database_open_failures_propagate_whole_query(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: StateError
-) -> None:
-    from agentworks.resources import graph_query
-
-    database_path = tmp_path / "state.db"
-    database_path.touch()
-    handler = _InstanceHandler(lambda name: iter(()))
-    registry = _registry(monkeypatch, ["focus"], handler=handler)
-
-    def fail_open(path: Path, *, read_only: bool = False) -> Any:
-        del path, read_only
-        raise failure
-
-    monkeypatch.setattr(graph_query, "Database", fail_open)
-    with pytest.raises(type(failure)) as raised:
-        show_graph(
-            registry,
-            ResourceIdentity("node", "focus"),
-            GraphDirection.DEPENDENTS,
-            1,
-            DatabaseLiveSource(database_path),
-        )
-    assert raised.value is failure
-
-
-def test_disappearing_after_stat_is_an_open_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    from agentworks.resources import graph_query
-
-    database_path = tmp_path / "state.db"
-    database_path.touch()
-    registry = _registry(monkeypatch, ["focus"], handler=_InstanceHandler(lambda name: iter(())))
-
-    def vanish(path: Path, *, read_only: bool = False) -> Any:
-        del path, read_only
-        raise FileNotFoundError("race")
-
-    monkeypatch.setattr(graph_query, "Database", vanish)
-    with pytest.raises(StateError) as raised:
-        _query_with_source(registry, database_path)
-    assert raised.value.entity_kind == "database"
-    assert isinstance(raised.value.__cause__, FileNotFoundError)
-
-
-def test_directory_database_is_a_typed_whole_query_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    directory = tmp_path / "state-directory"
-    directory.mkdir()
-    registry = _registry(monkeypatch, ["focus"], handler=_InstanceHandler(lambda name: iter(())))
-    with pytest.raises(StateError):
-        _query_with_source(registry, directory)
-
-
-def test_transaction_entry_failure_closes_and_frames_untyped_error(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from agentworks.resources import graph_query
-
-    failure = RuntimeError("TRANSACTION_ENTRY_SENTINEL")
-    counts = {"close": 0}
-
-    class _BrokenTransaction:
-        def __enter__(self) -> None:
-            raise failure
-
-        def __exit__(self, *args: object) -> Literal[False]:
-            del args
-            return False
-
-    class _EntryFailureDatabase:
-        def __init__(self, path: Path, *, read_only: bool = False) -> None:
-            del path
-            assert read_only is True
-
-        def read_transaction(self) -> _BrokenTransaction:
-            return _BrokenTransaction()
-
-        def close(self) -> None:
-            counts["close"] += 1
-
-    database_path = tmp_path / "state.db"
-    database_path.touch()
-    registry = _registry(monkeypatch, ["focus"], handler=_InstanceHandler(lambda name: iter(())))
-    monkeypatch.setattr(graph_query, "Database", _EntryFailureDatabase)
-    with pytest.raises(StateError) as raised:
-        _query_with_source(registry, database_path)
-    assert raised.value.entity_kind == "database"
-    assert raised.value.__cause__ is failure
-    assert counts["close"] == 1
-
-
-def _query_with_source(registry: Registry, database_path: Path) -> GraphResult:
-    return show_graph(
-        registry,
-        ResourceIdentity("node", "focus"),
-        GraphDirection.DEPENDENTS,
-        1,
-        DatabaseLiveSource(database_path),
-    )
-
-
-@pytest.mark.parametrize("during_iteration", [False, True])
-def test_hook_call_and_iteration_failures_are_resource_framed_and_close(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, during_iteration: bool
-) -> None:
-    counts = _install_fake_database(monkeypatch)
-    database_path = tmp_path / "state.db"
-    database_path.touch()
-    failure = RuntimeError("HOOK_SENTINEL")
-
-    def values(name: str) -> Iterator[InstanceRef]:
-        del name
-        if not during_iteration:
-            raise failure
-
-        def broken() -> Iterator[InstanceRef]:
-            yield InstanceRef("vm", "partial")
-            raise failure
-
-        return broken()
-
-    registry = _registry(monkeypatch, ["focus"], handler=_InstanceHandler(values))
-    with pytest.raises(StateError) as raised:
-        _query_with_source(registry, database_path)
-    assert raised.value.entity_kind == "node"
-    assert raised.value.entity_name == "focus"
-    assert raised.value.__cause__ is failure
-    assert counts["transaction_exit"] == 1
-    assert counts["close"] == 1
-
-
-def test_control_signal_and_close_failure_propagate_after_cleanup(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    counts = _install_fake_database(monkeypatch)
-    database_path = tmp_path / "state.db"
-    database_path.touch()
-
-    def interrupted(name: str) -> Iterator[InstanceRef]:
-        del name
-        raise KeyboardInterrupt
-
-    registry = _registry(monkeypatch, ["focus"], handler=_InstanceHandler(interrupted))
-    with pytest.raises(KeyboardInterrupt):
-        _query_with_source(registry, database_path)
-    assert counts["transaction_exit"] == 1
-    assert counts["close"] == 1
-
-    rollback_failure = RuntimeError("ROLLBACK_SENTINEL")
-    _FakeDatabase.exit_error = rollback_failure
-    registry = _registry(monkeypatch, ["focus"], handler=_InstanceHandler(lambda name: iter(())))
-    with pytest.raises(RuntimeError) as raised:
-        _query_with_source(registry, database_path)
-    assert raised.value is rollback_failure
-    assert counts["close"] == 2
-
-    _FakeDatabase.exit_error = None
-    close_failure = RuntimeError("CLOSE_SENTINEL")
-    _FakeDatabase.close_error = close_failure
-    registry = _registry(monkeypatch, ["focus"], handler=_InstanceHandler(lambda name: iter(())))
-    with pytest.raises(RuntimeError) as raised:
-        _query_with_source(registry, database_path)
-    assert raised.value is close_failure
-
-
-def test_repeated_hook_scale_uses_one_source_and_one_query_per_expansion(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from agentworks.resources import graph_query
-
-    counts = {
-        "database": 0,
-        "transaction_enter": 0,
-        "transaction_exit": 0,
-        "close": 0,
-        "list_vms": 0,
-        "list_sessions": 0,
-    }
-    _QueryCountingDatabase.counts = counts
-    _QueryCountingDatabase.exit_error = None
-    _QueryCountingDatabase.close_error = None
-    monkeypatch.setattr(graph_query, "Database", _QueryCountingDatabase)
-
-    identities = [("kind-a" if index % 2 == 0 else "kind-b", f"resource-{index:03}") for index in range(40)]
-    references_by_source: dict[tuple[str, str], list[ResourceReference]] = {}
-    for source_identity, target_identity in zip(identities, identities[1:], strict=False):
-        references_by_source.setdefault(source_identity, []).append(
-            ResourceReference(
-                name=target_identity[1],
-                kind=target_identity[0],
-                usage=f"{source_identity[1]}-TO-{target_identity[1]}",
-                source=source_identity,
-            )
-        )
-
-    KIND_REGISTRY.pop("kind-a", None)
-    KIND_REGISTRY.pop("kind-b", None)
-    registry = Registry.empty()
-    for kind, name in identities:
-        registry.add(
-            kind,
-            name,
-            _Row(name, tuple(references_by_source.get((kind, name), ()))),
-            Origin.built_in(source="tests.graph-query"),
-        )
-    registry.finalize()
-    handler_a = _ListQueryHandler(lambda db: db.list_vms())
-    handler_b = _ListQueryHandler(lambda db: db.list_sessions())
-    monkeypatch.setitem(KIND_REGISTRY, "kind-a", handler_a)
-    monkeypatch.setitem(KIND_REGISTRY, "kind-b", handler_b)
-
-    path = _PresentPath()
-    source = DatabaseLiveSource(cast("Path", path))
-    assert source.supports("kind-a") is True
-    assert source.supports("kind-b") is True
-    assert path.stat_count == 0
-    result = show_graph(
-        registry,
-        ResourceIdentity(*identities[0]),
-        GraphDirection.BOTH,
-        None,
-        source,
-    )
-    assert len(result.nodes) == 40
-    assert path.stat_count == 1
-    assert counts == {
-        "database": 1,
-        "transaction_enter": 1,
-        "transaction_exit": 1,
-        "close": 1,
-        "list_vms": 20,
-        "list_sessions": 20,
-    }
-    assert handler_a.calls == [name for kind, name in identities if kind == "kind-a"]
-    assert handler_b.calls == [name for kind, name in identities if kind == "kind-b"]
 
 
 def test_grouping_assigns_each_edge_once_at_maximum_endpoint_distance() -> None:

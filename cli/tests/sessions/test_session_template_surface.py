@@ -18,19 +18,20 @@ from textwrap import dedent
 from typing import Literal
 
 import pytest
+from pydantic import Field
 
 from agentworks.bootstrap import build_registry
 from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY, HarnessIntegration
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.manifests import load_manifests
-from agentworks.resources import DatabaseLiveSource, GraphDirection, show_graph
+from agentworks.resources import GraphDirection, show_graph
 from agentworks.resources.access import ResourceIdentity
 from agentworks.resources.graph import FinalizeContext
 from agentworks.resources.reference import RefRelationship
 from agentworks.schema import AgwModel, CapabilityBlock
 from agentworks.sessions.template import SessionTemplate
-from agentworks.sessions.templates import resolve_from_dict
+from agentworks.sessions.templates import resolve_from_dict, resolve_from_dict_with_provenance
 
 # -- a second registered harness integration, for the cross-integration R5 case --
 
@@ -41,6 +42,7 @@ class _FakeConfig(AgwModel):
 
     name: Literal["fake"]
     marker: str | None = None
+    items: list[str] = Field(default_factory=list)
 
 
 class _FakeHarnessIntegration(HarnessIntegration):
@@ -206,6 +208,63 @@ def test_child_same_harness_integration_merges_child_wins_and_unions_required() 
     assert resolved.harness_integration_config["required_commands"] == ["claude", "rg"]  # union
 
 
+def test_harness_list_provenance_tracks_union_and_child_wins(
+    fake_harness_integration: None,
+) -> None:
+    templates = {
+        "shell-base": SessionTemplate(
+            name="shell-base",
+            harness_integration=CapabilityBlock.of("shell", **{"required_commands": ["git"]}),
+        ),
+        "shell-child": SessionTemplate(
+            name="shell-child",
+            inherits=["shell-base"],
+            harness_integration=CapabilityBlock.of("shell", **{"required_commands": ["rg"]}),
+        ),
+        "fake-base": SessionTemplate(
+            name="fake-base",
+            harness_integration=CapabilityBlock.of("fake", **{"items": ["parent"]}),
+        ),
+        "fake-child": SessionTemplate(
+            name="fake-child",
+            inherits=["fake-base"],
+            harness_integration=CapabilityBlock.of("fake", **{"items": ["child"]}),
+        ),
+        "same-base": SessionTemplate(
+            name="same-base",
+            harness_integration=CapabilityBlock.of("fake", **{"items": ["same"]}),
+        ),
+        "same-child": SessionTemplate(
+            name="same-child",
+            inherits=["same-base"],
+            harness_integration=CapabilityBlock.of("fake", **{"items": ["same"]}),
+        ),
+        "shape-base": SessionTemplate(
+            name="shape-base",
+            harness_integration=CapabilityBlock.of("fake", **{"items": "scalar"}),
+        ),
+        "shape-child": SessionTemplate(
+            name="shape-child",
+            inherits=["shape-base"],
+            harness_integration=CapabilityBlock.of("fake", **{"items": ["child"]}),
+        ),
+    }
+
+    union = resolve_from_dict_with_provenance(templates, "shell-child")
+    replaced = resolve_from_dict_with_provenance(templates, "fake-child")
+    same = resolve_from_dict_with_provenance(templates, "same-child")
+    shape = resolve_from_dict_with_provenance(templates, "shape-child")
+
+    assert union.provenance[("harness_integration_config", "required_commands", repr("git"))][0].name == "shell-base"
+    assert union.provenance[("harness_integration_config", "required_commands", repr("rg"))][0].name == "shell-child"
+    assert ("harness_integration_config", "items", repr("parent")) not in replaced.provenance
+    assert replaced.provenance[("harness_integration_config", "items", repr("child"))][0].name == "fake-child"
+    assert [source.name for source in same.provenance[("harness_integration_config", "items", repr("same"))]] == [
+        "same-child"
+    ]
+    assert ("harness_integration_config", "items") not in shape.provenance
+
+
 def test_child_silent_inherits_the_pair_unchanged() -> None:
     templates = {
         "base": SessionTemplate(name="base", harness_integration=CapabilityBlock.of("shell", **{"command": "claude"})),
@@ -346,7 +405,6 @@ def test_harness_integration_row_lists_its_declaring_template(tmp_path: Path) ->
         ResourceIdentity("harness-integration", "shell"),
         GraphDirection.DEPENDENTS,
         1,
-        DatabaseLiveSource(tmp_path / "absent.db"),
     )
     assert any(
         edge.source.kind == "session-template"

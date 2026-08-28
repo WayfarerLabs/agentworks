@@ -170,6 +170,40 @@ def test_create_reachable_vm_fast_path_costs_no_gate_resolve(
     assert db.get_workspace("ws1") is not None
 
 
+def test_create_with_spec_persists_owner_and_overlay_and_reports_set(
+    db: Database,
+    make_config,  # noqa: ANN001
+    mutation: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.db.instance_state import VersionedPayload
+    from agentworks.instance_specs import OverlayDisposition, OverlayOutcome
+
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    outcomes: list[OverlayOutcome] = []
+    monkeypatch.setattr("agentworks.instance_specs.render_overlay_outcome", outcomes.append)
+
+    workspace_manager.create_workspace(
+        db,
+        config,
+        name="ws1",
+        vm_name="box",
+        spec='{"tmuxinator":false}',
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    assert mutation["ws_name"] == "ws1"
+    assert db.get_workspace("ws1") is not None
+    stored = db.instance_state.get_desired_overlay("workspace", "ws1")
+    assert stored is not None
+    assert stored.payload == VersionedPayload(1, {"tmuxinator": False})
+    assert [(outcome.disposition, outcome.fields) for outcome in outcomes] == [
+        (OverlayDisposition.SET, ("tmuxinator",))
+    ]
+
+
 def test_create_bad_template_bails_before_any_prompt_or_start(
     db: Database,
     make_config,  # noqa: ANN001
@@ -183,6 +217,9 @@ def test_create_bad_template_bails_before_any_prompt_or_start(
     VM. Validation relocated behind the gate would trip this."""
     config = make_config()
     _seed_vm(db)
+    from agentworks.db import VersionedPayload
+
+    db.instance_state.put_desired_overlay("vm", "box", VersionedPayload(2, {"future": True}))
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
 
@@ -262,11 +299,17 @@ def test_create_mutation_failure_cleans_up_and_leaves_no_row(
 
     with pytest.raises(ExternalError, match="creating workspace: ssh exploded"):
         workspace_manager.create_workspace(
-            db, config, name="ws1", vm_name="box", interaction=TtyInteractionPolicy.REFUSE
+            db,
+            config,
+            name="ws1",
+            vm_name="box",
+            spec='{"tmuxinator":false}',
+            interaction=TtyInteractionPolicy.REFUSE,
         )
 
     assert deletes == ["/srv/ws1"]  # the body's partial-state cleanup ran
     assert db.get_workspace("ws1") is None
+    assert db.instance_state.get_desired_overlay("workspace", "ws1") is None
 
 
 # -- the operation scope reaches readiness ------------------------------------

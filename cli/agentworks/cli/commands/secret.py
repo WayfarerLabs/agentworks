@@ -9,7 +9,7 @@ import typer
 from agentworks import output
 from agentworks.capabilities.secret_backend import OperatorImpact
 from agentworks.cli._app import app
-from agentworks.cli._helpers import get_db, ordinary_tty_interaction_access
+from agentworks.cli._helpers import get_db, load_completion_registry, ordinary_tty_interaction_access
 from agentworks.machine_output import OutputFormat
 
 secret_app = typer.Typer(
@@ -54,7 +54,15 @@ def secret_list(
     from agentworks.secrets.inspect import build_secret_table, render_secret_table, secret_table_data
 
     config = load_config(warn_issues=output_format is OutputFormat.HUMAN, workload_gated_issues_fatal=False)
-    registry = load_request_registry(config, warn=output_format is OutputFormat.HUMAN)
+    if names_only:
+        registry = load_completion_registry(config)
+    else:
+        db = get_db()
+        registry = load_request_registry(
+            config,
+            warn=output_format is OutputFormat.HUMAN,
+            live_database=db,
+        )
     table = build_secret_table(config, registry)
     if names_only:
         for row in table.rows:
@@ -91,9 +99,8 @@ def secret_describe(
     Five sections: header (name,
     kind, origin, description, hint); ``Referenced by:`` (one row per
     matching config reference); ``Used by (per current config):`` (one
-    row per live session whose subgraph reaches this secret, projected
-    via the secret kind's ``instances`` hook -- same shape as
-    the resource graph); ``Backend mappings:`` (per-active-source
+    row per session whose effective environment reaches this secret, from
+    the finalized resource graph); ``Backend mappings:`` (per-active-source
     disposition with selected backend and provenance); ``Resolution preview:``
     (provider-aware, value-free availability). The default may perform
     non-disruptive provider work. ``--allow-interaction`` may prompt or
@@ -109,11 +116,15 @@ def secret_describe(
     from agentworks.secrets.inspect import describe_secret, render_secret_description, secret_description_data
 
     config = load_config(warn_issues=output_format is OutputFormat.HUMAN, workload_gated_issues_fatal=False)
-    registry = load_request_registry(config, warn=output_format is OutputFormat.HUMAN)
     db = get_db()
+    registry = load_request_registry(
+        config,
+        warn=output_format is OutputFormat.HUMAN,
+        live_database=db,
+    )
     impact = OperatorImpact.ALLOW if allow_interaction else OperatorImpact.NONE
     tty_access = ordinary_tty_interaction_access()
-    desc = describe_secret(config, registry, name, db=db, impact=impact, tty_access=tty_access)
+    desc = describe_secret(config, registry, name, impact=impact, tty_access=tty_access)
     if output_format is OutputFormat.JSON:
         from click import get_binary_stream
 
@@ -144,7 +155,8 @@ def secret_verify(
     from agentworks.secrets.verification import render_verification, verify_secrets
 
     config = load_config()
-    registry = load_request_registry(config)
+    db = get_db()
+    registry = load_request_registry(config, live_database=db)
     impact = OperatorImpact.ALLOW if allow_interaction else OperatorImpact.NONE
     tty_access = ordinary_tty_interaction_access()
     outcomes = verify_secrets(config, registry, names, impact=impact, tty_access=tty_access)

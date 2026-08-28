@@ -16,12 +16,14 @@ from typing import TYPE_CHECKING
 import typer
 
 from agentworks.cli._app import completion_mode_enabled, require_interactive
-from agentworks.errors import BackupError, StateError
+from agentworks.errors import BackupError, ConfigError, StateError
 from agentworks.secrets.policy import TtyInteractionPolicy, tty_interaction_access
 
 if TYPE_CHECKING:
     from agentworks.capabilities.secret_backend import TtyInteractionAccess
+    from agentworks.config import Config
     from agentworks.db import Database, VMRow, WorkspaceRow
+    from agentworks.resources.registry import Registry
 
 
 def ordinary_tty_interaction_policy() -> TtyInteractionPolicy:
@@ -36,6 +38,37 @@ def ordinary_tty_interaction_access() -> TtyInteractionAccess:
     return tty_interaction_access(
         ordinary_tty_interaction_policy(),
         terminal_input_usable=sys.stdin.isatty(),
+    )
+
+
+def load_completion_registry(config: Config) -> Registry:
+    """Build the fullest safe Registry available to a names-only callback."""
+    from agentworks import db as db_module
+    from agentworks.bootstrap import load_request_registry
+    from agentworks.db import open_completion_database
+
+    completion_database = open_completion_database(db_module.DB_PATH)
+    if completion_database is None:
+        return load_request_registry(
+            config,
+            include_live_resources=False,
+        )
+
+    try:
+        registry = load_request_registry(
+            config,
+            live_database=completion_database,
+        )
+    except (ConfigError, StateError):
+        registry = None
+    finally:
+        completion_database.close()
+
+    if registry is not None:
+        return registry
+    return load_request_registry(
+        config,
+        include_live_resources=False,
     )
 
 

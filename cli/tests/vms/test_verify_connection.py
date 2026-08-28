@@ -131,7 +131,7 @@ def test_verify_connection_cli_reports_service_result(monkeypatch: pytest.Monkey
     registry = object()
     monkeypatch.setattr("agentworks.cli.commands.vm.get_db", lambda: database)
     monkeypatch.setattr("agentworks.config.load_config", lambda: config)
-    monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda candidate: registry)
+    monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda candidate, **_kwargs: registry)
     monkeypatch.setattr(
         "agentworks.vms.manager.verify_vm_connection",
         lambda db, cfg, reg, name: calls.append((db, cfg, reg, name)) or SimpleNamespace(name=name, transport="ssh"),

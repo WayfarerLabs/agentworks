@@ -253,6 +253,15 @@ class InstanceStateRepository:
         ).fetchone()
         return None if row is None else self._to_desired(row)
 
+    def has_instance_records(self, instance_kind: InstanceKind, instance_name: str) -> bool:
+        """Whether any current or future state record exists for this identity."""
+        _validate_identity(instance_kind, instance_name)
+        row = self._connection.execute(
+            "SELECT 1 FROM instance_records WHERE instance_kind = ? AND instance_name = ? LIMIT 1",
+            (instance_kind, instance_name),
+        ).fetchone()
+        return row is not None
+
     def put_desired_overlay(
         self,
         instance_kind: InstanceKind,
@@ -300,6 +309,42 @@ class InstanceStateRepository:
             (instance_kind, _DESIRED_OVERLAY),
         ).fetchall()
         return tuple(self._to_desired(row) for row in rows)
+
+    def has_vm_owner_tree_desired_overlay(self, vm_name: str) -> bool:
+        """Whether a VM or any of its current descendants has a desired overlay."""
+        return bool(self._vm_owner_tree_desired_overlay_rows(vm_name, limit_one=True))
+
+    def list_vm_owner_tree_desired_overlays(self, vm_name: str) -> tuple[DesiredOverlayRecord, ...]:
+        """Desired overlays belonging to one VM's current owner tree."""
+        rows = self._vm_owner_tree_desired_overlay_rows(vm_name, limit_one=False)
+        return tuple(self._to_desired(row) for row in rows)
+
+    def _vm_owner_tree_desired_overlay_rows(
+        self,
+        vm_name: str,
+        *,
+        limit_one: bool,
+    ) -> list[sqlite3.Row]:
+        """Select the closed VM backup projection before decoding payloads."""
+        _validate_identity("vm", vm_name)
+        limit = " LIMIT 1" if limit_one else ""
+        rows = self._connection.execute(
+            "SELECT state.* FROM instance_records AS state "
+            "WHERE state.record_type = ? AND state.record_key = ? AND ("
+            "(state.instance_kind = 'vm' AND state.instance_name = ?) OR "
+            "(state.instance_kind = 'workspace' AND state.instance_name IN "
+            " (SELECT name FROM workspaces WHERE vm_name = ?)) OR "
+            "(state.instance_kind = 'agent' AND state.instance_name IN "
+            " (SELECT name FROM agents WHERE vm_name = ?)) OR "
+            "(state.instance_kind = 'session' AND state.instance_name IN "
+            " (SELECT sessions.name FROM sessions JOIN workspaces "
+            "  ON sessions.workspace_name = workspaces.name WHERE workspaces.vm_name = ?))"
+            ") ORDER BY CASE state.instance_kind "
+            "WHEN 'vm' THEN 0 WHEN 'workspace' THEN 1 WHEN 'agent' THEN 2 ELSE 3 END, "
+            "state.instance_name" + limit,
+            (_DESIRED_OVERLAY, _DESIRED_KEY, vm_name, vm_name, vm_name, vm_name),
+        ).fetchall()
+        return rows
 
     def get_applied_slices(
         self,

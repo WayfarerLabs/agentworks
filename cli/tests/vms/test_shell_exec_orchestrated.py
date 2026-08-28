@@ -16,8 +16,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import VMStatus
-from agentworks.errors import ValidationError
+from agentworks.db import VersionedPayload, VMStatus
+from agentworks.errors import StateError, ValidationError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
@@ -130,7 +130,7 @@ def test_graph_derives_from_row_and_env_joins_via_targets(
 
     for name in secret_union(nodes):
         resolver.register_name(name)
-    scopes = vm_manager._resolve_vm_admin_env_scopes(registry, vm)
+    scopes = vm_manager._resolve_vm_admin_env_scopes(db, registry, vm)
     resolver.register_targets([vm_manager._vm_secret_target(scopes, label="vm-shell=box")])
     resolver.resolve()
     assert set(resolver.values) == {"proxmox-token", "vm-env-secret"}
@@ -173,15 +173,67 @@ def test_copied_workspace_pin_resolves_env_scopes_without_a_template(
 
     # The copied marker resolves cleanly to an empty workspace scope; the
     # vm scope (its env-block secret ref) is untouched.
-    copied_scopes = vm_manager._resolve_vm_admin_env_scopes(registry, vm, ws=copied)
+    copied_scopes = vm_manager._resolve_vm_admin_env_scopes(db, registry, vm, ws=copied)
     assert copied_scopes.workspace == {}
     assert "API_KEY" in copied_scopes.vm
 
     # A real template still contributes its env: the fix does not swallow
     # resolvable templates.
-    proj_scopes = vm_manager._resolve_vm_admin_env_scopes(registry, vm, ws=proj)
+    proj_scopes = vm_manager._resolve_vm_admin_env_scopes(db, registry, vm, ws=proj)
     assert proj_scopes.workspace is not None
     assert "WS_VAR" in proj_scopes.workspace
+
+
+def test_vm_workspace_env_uses_base_for_an_unsupported_stored_overlay(
+    db: Database,
+    make_config,  # noqa: ANN001
+    captured_output,  # noqa: ANN001
+) -> None:
+    from agentworks.bootstrap import build_registry
+
+    config = make_config(manifests=[VM_ENV_TEMPLATE, WORKSPACE_ENV_TEMPLATE])
+    _seed_vm(db)
+    _seed_workspace(db, name="future-ws", template="proj")
+    plaintext = "do-not-print-this-value"
+    db.instance_state.put_desired_overlay(
+        "workspace",
+        "future-ws",
+        VersionedPayload(1, {"future_field": plaintext}),
+    )
+    vm = db.get_vm("box")
+    ws = db.get_workspace("future-ws")
+    assert vm is not None and ws is not None
+
+    scopes = vm_manager._resolve_vm_admin_env_scopes(db, build_registry(config), vm, ws=ws)
+
+    assert scopes.workspace is not None
+    assert scopes.workspace["WS_VAR"].value == "ws-val"
+    assert captured_output.warnings
+    assert plaintext not in repr(captured_output.lines)
+
+
+def test_vm_workspace_env_does_not_swallow_a_malformed_stored_overlay(
+    db: Database,
+    make_config,  # noqa: ANN001
+) -> None:
+    from agentworks.bootstrap import build_registry
+
+    config = make_config(manifests=[VM_ENV_TEMPLATE, WORKSPACE_ENV_TEMPLATE])
+    _seed_vm(db)
+    _seed_workspace(db, name="broken-ws", template="proj")
+    db.instance_state.put_desired_overlay(
+        "workspace",
+        "broken-ws",
+        VersionedPayload(1, {"env": {"TOKEN": {"unexpected": "value"}}}),
+    )
+    vm = db.get_vm("box")
+    ws = db.get_workspace("broken-ws")
+    assert vm is not None and ws is not None
+
+    with pytest.raises(StateError) as caught:
+        vm_manager._resolve_vm_admin_env_scopes(db, build_registry(config), vm, ws=ws)
+
+    assert type(caught.value) is StateError
 
 
 def test_exec_copied_workspace_pin_no_longer_crashes(
@@ -283,6 +335,35 @@ def test_exec_reachable_vm_is_one_boundary_burst(
     ((cmd, env),) = target.streaming_calls
     assert cmd == "echo hi"
     assert env.get("API_KEY") == "env-val"
+
+
+def test_exec_resolves_a_stored_overlay_only_secret_through_the_runtime_boundary(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    from agentworks.instance_specs import parse_vm_instance_specs
+
+    config = make_config()
+    _seed_vm(db)
+    overlays = parse_vm_instance_specs(
+        '{"env":{"OVERLAY_TOKEN":{"secret":"overlay-only"}}}',
+        '{"env":{"ADMIN_OVERLAY_TOKEN":{"secret":"admin-overlay-only"}}}',
+    )
+    assert overlays is not None
+    db.instance_state.put_desired_overlay("vm", "box", overlays.payload)
+    monkeypatch.setenv("AW_SECRET_OVERLAY_ONLY", "resolved")
+    monkeypatch.setenv("AW_SECRET_ADMIN_OVERLAY_ONLY", "admin-resolved")
+    _reachable(monkeypatch, True)
+
+    rc = vm_manager.exec_vm(db, config, "box", ["echo", "hi"], interaction=TtyInteractionPolicy.REFUSE)
+
+    assert rc == 0
+    ((_cmd, env),) = target.streaming_calls
+    assert env["OVERLAY_TOKEN"] == "resolved"
+    assert env["ADMIN_OVERLAY_TOKEN"] == "admin-resolved"
 
 
 def test_exec_stopped_vm_gate_burst_then_boundary_burst(

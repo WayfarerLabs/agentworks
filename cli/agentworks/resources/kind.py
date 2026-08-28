@@ -32,11 +32,10 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class InstanceRef:
-    """One live DB instance that depends on a Resource per current config.
+    """One live resource that directly depends on another graph node.
 
-    Returned by ``ResourceKind.instances(...)``; rendered as the per-row
-    contribution to ``agw resource list``'s ``USED BY`` column count and to
-    ``agw graph show``'s live-usage edges.
+    Projected from the finalized dependency graph for ``resource list``,
+    ``resource show``, secret inspection, and graph queries.
 
     Fields:
 
@@ -46,11 +45,7 @@ class InstanceRef:
     - ``instance_name``: the DB row's name (``vm.name``, ``session.name``,
       etc.).
 
-    The shape is intentionally minimal so a future provisioned-state
-    SDD can return the same dataclass from a sibling
-    ``provisioned_instances(...)`` hook (today's projection is "per
-    current config"; a manifest-driven sibling would be "per provisioned
-    state").
+    The shape is intentionally minimal and value-free.
     """
 
     instance_kind: str
@@ -96,8 +91,8 @@ class ResourceKind(Protocol):
       one nobody notices is undocumented. Field facts never appear in it:
       those come from the model.
     - ``model``: the kind's declared-resource row class, which IS its
-      spec model. Optional by CATEGORY rather than per kind, like
-      ``instances`` below: every ``declarable`` kind declares one and no
+      spec model. Optional by CATEGORY rather than per kind: every
+      ``declarable`` kind declares one and no
       ``capability`` kind does, and a test pins exactly that. It is the
       single per-kind schema authority: manifest decode validates a
       document's ``spec`` against it, schema emission derives from it,
@@ -166,37 +161,13 @@ class ResourceKind(Protocol):
     def synthesize(self, references: Sequence[ResourceReference]) -> Any: ...
 
     # The ``model`` attribute is optional by CATEGORY, and so it is absent
-    # from this Protocol for the same reason ``instances`` is (below):
-    # declaring it here would force the capability kinds, which have no
+    # from this Protocol: declaring it here would force capability kinds, which have no
     # declared row at all, to carry a field that means nothing to them.
     # Every ``declarable`` kind declares it and no ``capability`` kind
     # does; ``tests/test_resource_kinds.py`` pins that split, and manifest
     # decode reads it with ``KIND_REGISTRY[kind].model``. Its shape is:
     #
     #     model: type[DeclaredResource] = VMTemplate
-    #
-    # The optional ``instances(db, registry, resource) -> Iterable[InstanceRef]``
-    # method is intentionally NOT declared on this Protocol. Kinds with a
-    # per-instance lifecycle concept (the four named template kinds plus
-    # ``admin-template`` plus ``secret``) implement it; kinds without
-    # (the apt / install-command kinds, ``git-credential-provider``,
-    # ``secret-backend``) omit it entirely. The framework's consumer
-    # (``agentworks.resources.inspect``) uses
-    # ``getattr(handler, "instances", None)`` to gate the call, so
-    # absent-on-class IS the "no instance concept" signal. Declaring the
-    # method on the Protocol would force every kind to either implement
-    # it (Liskov violation for kinds where it's meaningless) or use
-    # ``# type: ignore`` to opt out. Structural-duck-typing keeps the
-    # contract honest. The shape of the optional method is:
-    #
-    #     def instances(self, db: Database, registry: Registry,
-    #                   resource: Any) -> Iterable[InstanceRef]:
-    #         ...
-    #
-    # Per current config: a future SDD adding provisioned-state tracking
-    # would add a sibling ``provisioned_instances(...)`` hook returning
-    # the same ``InstanceRef`` shape from manifests; today's
-    # ``instances`` is the config-projected dimension.
     #
     # Readiness is NOT a per-kind hook: a resource's verdict is folded once at
     # finalize (from its capability impl or its own ``not_ready``) and stored on

@@ -454,7 +454,7 @@ def vm_description(
     status_disposition: str | None = None
     live_resources: VMLiveResources | None = None
 
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
     try:
         site_decl = lookup_site(vm.site, registry)
         platform_name = site_decl.platform.name

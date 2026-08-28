@@ -60,6 +60,28 @@ def test_vm_create_admin_template_flag_forwards(
     assert captured["admin_template"] == "work"
 
 
+def test_vm_create_forwards_vm_and_admin_specs_independently(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+    result = _invoke(
+        monkeypatch,
+        [
+            "vm",
+            "create",
+            "box",
+            "--spec",
+            '{"cpus":8}',
+            "--admin-spec",
+            '{"shell":"zsh"}',
+        ],
+        "agentworks.vms.manager.create_vm",
+        captured,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["spec"] == '{"cpus":8}'
+    assert captured["admin_spec"] == '{"shell":"zsh"}'
+
+
 @pytest.mark.parametrize(
     "flag",
     ["--cpus", "--memory", "--disk", "--azure-vm-size", "--admin-username"],

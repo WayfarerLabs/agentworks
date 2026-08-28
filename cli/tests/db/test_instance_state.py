@@ -700,10 +700,63 @@ def _create_owner_tree(database: Database, suffix: str = "") -> tuple[str, str, 
     agent = f"agent{suffix}"
     session = f"session{suffix}"
     database.insert_vm(vm, site="local", hostname=vm)
-    database.insert_workspace(workspace, "/tmp/workspace", vm, "workspace-group")
-    database.insert_agent(agent, vm, "agent-user")
-    database.insert_session(session, workspace, "template", SessionMode.AGENT, agent, socket_path="/tmp/socket")
+    database.insert_workspace(workspace, f"/tmp/workspace{suffix}", vm, f"workspace-group{suffix}")
+    database.insert_agent(agent, vm, f"agent-user{suffix}")
+    database.insert_session(
+        session,
+        workspace,
+        "template",
+        SessionMode.AGENT,
+        agent,
+        socket_path=f"/tmp/socket{suffix}",
+    )
     return vm, workspace, agent, session
+
+
+def test_vm_backup_snapshot_projects_exact_owner_tree_overlays(db: Database) -> None:
+    owner_tree = _create_owner_tree(db)
+    other_tree = _create_owner_tree(db, "-other")
+    kinds = ("vm", "workspace", "agent", "session")
+    for kind, name in zip(kinds, owner_tree, strict=True):
+        db.instance_state.put_desired_overlay(kind, name, _payload(f"included-{kind}"))
+    for kind, name in zip(kinds, other_tree, strict=True):
+        db.instance_state.put_desired_overlay(kind, name, _payload(f"excluded-{kind}"))
+
+    *_, desired_overlays = db.snapshot_vm_backup_data(owner_tree[0])
+
+    assert {(record.instance_kind, record.instance_name) for record in desired_overlays} == set(
+        zip(kinds, owner_tree, strict=True)
+    )
+    assert {record.payload.value["value"] for record in desired_overlays} == {f"included-{kind}" for kind in kinds}
+
+
+def test_vm_owner_tree_overlay_queries_decode_only_selected_rows(db: Database) -> None:
+    owner_tree = _create_owner_tree(db)
+    other_tree = _create_owner_tree(db, "-other")
+    db.instance_state.put_desired_overlay("vm", owner_tree[0], _payload("included"))
+    db.instance_state.put_desired_overlay("vm", other_tree[0], _payload("unrelated"))
+    db._conn.execute(  # noqa: SLF001
+        "UPDATE instance_records SET value_json = ? "
+        "WHERE instance_kind = 'vm' AND instance_name = ? AND record_type = 'desired-overlay'",
+        ('{"value": "unrelated"}', other_tree[0]),
+    )
+    db._conn.commit()  # noqa: SLF001
+
+    assert db.instance_state.has_vm_owner_tree_desired_overlay(owner_tree[0]) is True
+    records = db.instance_state.list_vm_owner_tree_desired_overlays(owner_tree[0])
+    assert [(record.instance_kind, record.instance_name) for record in records] == [("vm", owner_tree[0])]
+    *_, snapshot_records = db.snapshot_vm_backup_data(owner_tree[0])
+    assert snapshot_records == records
+
+    db._conn.execute(  # noqa: SLF001
+        "UPDATE instance_records SET value_json = ? "
+        "WHERE instance_kind = 'vm' AND instance_name = ? AND record_type = 'desired-overlay'",
+        ('{"value": "included"}', owner_tree[0]),
+    )
+    db._conn.commit()  # noqa: SLF001
+
+    with pytest.raises(StateError):
+        db.snapshot_vm_backup_data(owner_tree[0])
 
 
 def test_owner_and_aggregate_deletes_remove_all_owned_records(db: Database) -> None:

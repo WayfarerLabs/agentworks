@@ -34,7 +34,6 @@ from agentworks.resources.render import format_origin_line
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from agentworks.db import Database
     from agentworks.origin import Origin
     from agentworks.resources import Registry
     from agentworks.resources.access import ResourceIdentity
@@ -54,12 +53,8 @@ class ResourceSummary:
       instances on the Resource's graph node (how many config points name
       it), from ``Registry.graph.dependents_of``. The list view renders
       this as the REFS column.
-    - ``used_by_count`` is the number of live DB instances that depend
-      on this Resource per the current config, computed via the kind's
-      ``instances(db, registry, resource)`` hook. ``None`` for kinds
-      with no instance concept (apt / install-commands, providers,
-      backends); the list view renders ``None`` as ``-`` in the USED BY
-      column.
+    - ``used_by_count`` is the stable JSON v1 live-usage projection's count,
+      or ``None`` for kinds without that projection.
     - ``not_ready_reason`` is the resource's stored readiness verdict's reason,
       read off the graph (``None`` = ready, or the kind has no readiness
       concept). The list view marks not-ready rows.
@@ -167,7 +162,6 @@ def summarize_resource(
 
 def list_resources(
     registry: Registry,
-    db: Database | None = None,
     *,
     kinds: tuple[str, ...] | None = None,
     origin_filter: OriginFilter | None = None,
@@ -191,10 +185,8 @@ def list_resources(
     lists with its ``(not ready)`` marker. "Off by opt-in" hides; "on but
     blocked" shows.
 
-    ``db`` is optional: when provided, each row's ``used_by_count`` is
-    populated via the kind's ``instances`` hook. When ``None`` (e.g.
-    tests that don't care about the dynamic dimension), every row's
-    ``used_by_count`` stays ``None`` -- the list renderer shows ``-``.
+    Live-user counts come from the same finalized Registry snapshot as
+    every other structural field.
     """
     from agentworks.errors import NotFoundError, ValidationError
     from agentworks.resources import KIND_REGISTRY
@@ -244,7 +236,7 @@ def list_resources(
             disabled = registry.graph.enablement_of(kind, name) is Enablement.disabled
             if not include_disabled and disabled:
                 continue
-            used_by = used_by_for(db, registry, kind, resource)
+            used_by = registry.graph.compatibility_live_users_of(kind, name)
             rows.append(summarize_resource(registry, ResourceIdentity(kind, name), used_by))
             variant = origin.variant if origin is not None else None
             if variant == "operator-declared":
@@ -277,31 +269,6 @@ def not_ready_reason_for(registry: Registry, kind: str, name: str) -> str | None
     readiness (R6/R9.1).
     """
     return registry.graph.readiness_of(kind, name).reason
-
-
-def used_by_for(db: Database | None, registry: Registry, kind: str, resource: object) -> tuple[InstanceRef, ...] | None:
-    """Project ``(kind, resource) -> tuple[InstanceRef, ...] | None`` via
-    the kind's ``instances`` hook. ``None`` for kinds that don't
-    implement the hook (apt / install-commands, providers, backends) or
-    when ``db`` isn't available; callers treat ``None`` as ``-`` rather
-    than ``0`` to distinguish "kind has no instance concept" from "kind
-    has zero instances right now."
-
-    The ``instances`` method is intentionally NOT on the ``ResourceKind``
-    Protocol; absent-on-class IS the "no instance concept" signal (see
-    ``resources/kind.py``'s comment for the Liskov-based rationale).
-    """
-    if db is None:
-        return None
-    from agentworks.resources import KIND_REGISTRY
-
-    handler = KIND_REGISTRY.get(kind)
-    if handler is None:
-        return None
-    method = getattr(handler, "instances", None)
-    if method is None:
-        return None
-    return tuple(method(db, registry, resource))
 
 
 def _plugin_provenance(origin: Origin | None) -> str | None:
@@ -446,10 +413,6 @@ def render_resource_table(listing: ResourceListing) -> None:
     headers = ("KIND", "NAME", "ORIGIN", "REFS", "USED BY", "DESCRIPTION")
     rendered: list[tuple[str, ...]] = []
     for row in listing.rows:
-        # ``used_by_count`` is None for kinds with no instance concept
-        # (apt / install-commands, providers, backends); render as ``-``
-        # to distinguish "no instance concept" from "zero instances
-        # right now."
         used_by_cell = "-" if row.used_by_count is None else str(row.used_by_count)
         # Not-ready rows are marked in the DESCRIPTION cell, never the
         # NAME cell: the rendered name must stay the exact selector an

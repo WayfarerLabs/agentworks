@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow
     from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.sessions.template import SessionTemplate
     from agentworks.sessions.tmux import RunCommand
     from agentworks.transports import Transport
 from ._constants import _STOP_GRACE_SECONDS
@@ -263,12 +264,37 @@ def resume_session(
         deploy_restricted_config,
     )
 
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
 
     session = _mgr._require_session(db, name)
     ws = _mgr._require_workspace(db, session.workspace_name)
     vm = _mgr._require_vm_for_workspace(db, ws)
-    template = _mgr._resolve_template(registry, session.template)
+    template = _mgr._resolve_template(
+        registry,
+        session.template,
+        db=db,
+        instance_name=session.name,
+    )
+    from typing import cast
+
+    from agentworks.instance_specs import ensure_effective_references_enabled, get_instance_overlay
+    from agentworks.sessions.template import effective_references, validate_effective_harness
+    from agentworks.sessions.templates import resolve_template_with_provenance
+
+    stored_overlay = get_instance_overlay(db, "session", session.name)
+    if stored_overlay is not None:
+        layered_template = resolve_template_with_provenance(
+            registry,
+            session.template,
+            overlay=cast("SessionTemplate", stored_overlay.declaration),
+            instance_name=session.name,
+        )
+        template = layered_template.value
+        ensure_effective_references_enabled(
+            registry,
+            effective_references(template, ("session", session.name), layered_template.provenance),
+        )
+        validate_effective_harness(template, ("session", session.name))
 
     # ===== Build: the live node graph from the rows =========================
     #
@@ -487,6 +513,7 @@ def resume_session(
                 ],
                 config,
                 registry,
+                allow_transient_auto_declare=True,
                 interaction=interaction,
             )
 

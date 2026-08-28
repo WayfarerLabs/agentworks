@@ -20,6 +20,7 @@ import pytest
 from agentworks.agents import manager as agent_manager
 from agentworks.db import VMStatus
 from agentworks.errors import AuthorizationError, ValidationError
+from agentworks.instance_specs import parse_instance_spec
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
@@ -138,10 +139,99 @@ def test_graph_derives_from_row_and_env_joins_via_targets(
 
     for name in secret_union(nodes):
         resolver.register_name(name)
-    scopes = agent_manager._resolve_agent_direct_env_scopes(registry, vm, agent)
+    scopes = agent_manager._resolve_agent_direct_env_scopes(db, registry, vm, agent)
     resolver.register_targets([agent_manager._agent_direct_secret_target(scopes, label="agent-shell=a1")])
     resolver.resolve()
     assert set(resolver.values) == {"proxmox-token", "agent-env-secret"}
+
+
+def test_direct_agent_scopes_compose_stored_vm_workspace_and_agent_overlays(
+    db: Database,
+    make_config,  # noqa: ANN001
+) -> None:
+    from agentworks.bootstrap import build_registry
+
+    config = make_config(manifests=[AGENT_ENV_TEMPLATE])
+    _seed(db)
+    _seed_workspace(db, vm_name="box", name="ws1")
+    for kind, name, key in (
+        ("vm", "box", "VM_SPEC"),
+        ("workspace", "ws1", "WORKSPACE_SPEC"),
+        ("agent", "a1", "AGENT_SPEC"),
+    ):
+        if kind == "vm":
+            from agentworks.instance_specs import parse_vm_instance_specs
+
+            vm_overlays = parse_vm_instance_specs(f'{{"env":{{"{key}":"set"}}}}', None)
+            assert vm_overlays is not None
+            payload = vm_overlays.payload
+        else:
+            payload = parse_instance_spec(kind, f'{{"env":{{"{key}":"set"}}}}').payload  # type: ignore[arg-type]
+        db.instance_state.put_desired_overlay(kind, name, payload)  # type: ignore[arg-type]
+
+    vm = db.get_vm("box")
+    agent = db.get_agent("a1")
+    workspace = db.get_workspace("ws1")
+    assert vm is not None and agent is not None and workspace is not None
+
+    scopes = agent_manager._resolve_agent_direct_env_scopes(
+        db,
+        build_registry(config),
+        vm,
+        agent,
+        ws=workspace,
+    )
+
+    assert scopes.vm["VM_SPEC"].value == "set"
+    assert scopes.workspace is not None
+    assert scopes.workspace["WORKSPACE_SPEC"].value == "set"
+    assert scopes.agent["AGENT_SPEC"].value == "set"
+
+
+def test_console_sidecar_env_composes_stored_live_overlays(
+    db: Database,
+    make_config,  # noqa: ANN001
+) -> None:
+    from agentworks.bootstrap import build_registry
+    from agentworks.db import SessionMode
+    from agentworks.sessions import multi_console
+
+    config = make_config(manifests=[AGENT_ENV_TEMPLATE])
+    _seed(db)
+    _seed_workspace(db, vm_name="box", name="ws1")
+    db.insert_session("s1", "ws1", "default", SessionMode.AGENT, "a1", socket_path="/tmp/s1.sock")
+    for kind, name, key in (
+        ("vm", "box", "VM_SPEC"),
+        ("workspace", "ws1", "WORKSPACE_SPEC"),
+        ("agent", "a1", "AGENT_SPEC"),
+    ):
+        if kind == "vm":
+            from agentworks.instance_specs import parse_vm_instance_specs
+
+            vm_overlays = parse_vm_instance_specs(f'{{"env":{{"{key}":"set"}}}}', None)
+            assert vm_overlays is not None
+            payload = vm_overlays.payload
+        else:
+            payload = parse_instance_spec(kind, f'{{"env":{{"{key}":"set"}}}}').payload  # type: ignore[arg-type]
+        db.instance_state.put_desired_overlay(kind, name, payload)  # type: ignore[arg-type]
+
+    vm = db.get_vm("box")
+    session = db.get_session("s1")
+    assert vm is not None and session is not None
+
+    env = multi_console._resolve_pane_env(
+        db,
+        build_registry(config),
+        values={"agent-env-secret": "agent-env-val"},
+        vm=vm,
+        session=session,
+        pane_user="agt-a1",
+        is_admin_pane=False,
+    )
+
+    assert env["VM_SPEC"] == "set"
+    assert env["WORKSPACE_SPEC"] == "set"
+    assert env["AGENT_SPEC"] == "set"
 
 
 # -- gate-prompt parity (the per-command carries) -----------------------------

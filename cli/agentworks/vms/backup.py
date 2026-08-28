@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import subprocess
 import time
 from dataclasses import asdict
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NoReturn
 
 from agentworks import output
 from agentworks.errors import BackupError, NotFoundError, StateError
@@ -62,14 +63,16 @@ def backup_vm(
             entity_kind="vm",
             entity_name=vm_name,
         )
-    registry = load_request_registry(config)
+    if not _host_supports_private_backup_permissions() and db.instance_state.has_vm_owner_tree_desired_overlay(vm_name):
+        _raise_windows_overlay_backup_error(vm_name)
+    registry = load_request_registry(config, live_database=db)
 
     with gated_vm_boundary(db, config, registry, vm, interaction=interaction):
         # Create backup directory first so the log goes inside it
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         backup_name = f"{vm_name}-{timestamp}"
         backup_dir = config.paths.backups / backup_name
-        backup_dir.mkdir(parents=True, exist_ok=True)
+        _create_backup_directory(backup_dir, vm_name)
 
         ssh_logger = SSHLogger(vm_name, "vm-backup")
         ssh_logger.path = backup_dir / "backup.log"
@@ -92,7 +95,17 @@ def backup_vm(
             with output.section(f"Backing up VM '{vm_name}' to {format_host_path(backup_dir)}"):
                 # Snapshot all DB data in a single transaction for consistency
                 output.info("Reading database (consistent snapshot)...")
-                _vm, agents, workspaces, sessions, events, grants_by_agent = db.snapshot_vm_backup_data(vm_name)
+                (
+                    _vm,
+                    agents,
+                    workspaces,
+                    sessions,
+                    events,
+                    grants_by_agent,
+                    desired_overlays,
+                ) = db.snapshot_vm_backup_data(vm_name)
+                if not _host_supports_private_backup_permissions() and desired_overlays:
+                    _raise_windows_overlay_backup_error(vm_name)
 
                 # 1. VM metadata
                 output.info("Exporting VM metadata...")
@@ -146,7 +159,22 @@ def backup_vm(
                 output.info(f"Exporting {len(sessions)} sessions...")
                 _write_json(backup_dir / "sessions.json", [asdict(s) for s in sessions])
 
-                # 6. Workspace files -- single archive of all workspace paths.
+                # 6. Desired overlays. This exact owner-tree projection may
+                # contain plaintext environment values, so every local file
+                # is created owner-only and the containing directory is 0700.
+                overlay_data = [
+                    {
+                        "instance_kind": record.instance_kind,
+                        "instance_name": record.instance_name,
+                        "payload_version": record.payload.payload_version,
+                        "value": record.payload.value,
+                        "recorded_at": record.recorded_at,
+                    }
+                    for record in desired_overlays
+                ]
+                _write_json(backup_dir / "instance-specs.json", overlay_data)
+
+                # 7. Workspace files -- single archive of all workspace paths.
                 # _archive_workspaces catches its own KeyboardInterrupt during the
                 # long tar phase and converts it to UserAbort (an AgentworksError),
                 # which the outer except below treats as a backup_failed event.
@@ -164,15 +192,16 @@ def backup_vm(
                 else:
                     output.info("No VM workspaces to archive.")
 
-                # 7. Manifest
+                # 8. Manifest
                 manifest = {
-                    "version": 2,
+                    "version": 3,
                     "vm_name": vm_name,
                     "timestamp": timestamp,
                     "agent_count": len(agents_data),
                     "workspace_count": len(ws_data),
                     "session_count": len(sessions),
                     "event_count": len(events),
+                    "instance_spec_count": len(overlay_data),
                     "archived_paths": archived_paths,
                     "skipped_paths": skipped_paths,
                 }
@@ -458,4 +487,37 @@ def _report_size(target: Transport, remote_path: str) -> None:
 
 
 def _write_json(path: Path, data: object) -> None:
-    path.write_text(json.dumps(data, indent=2, default=str) + "\n")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        stream.write(json.dumps(data, indent=2, default=str) + "\n")
+    path.chmod(0o600)
+
+
+def _host_supports_private_backup_permissions() -> bool:
+    return os.name != "nt"
+
+
+def _raise_windows_overlay_backup_error(vm_name: str) -> NoReturn:
+    raise BackupError(
+        "VM backups containing instance specs are not supported on Windows",
+        entity_kind="vm",
+        entity_name=vm_name,
+        hint=(
+            "Run the backup from a POSIX host; private-DACL export for plaintext "
+            "instance-spec environment values is not implemented yet."
+        ),
+    )
+
+
+def _create_backup_directory(path: Path, vm_name: str) -> None:
+    """Create an owner-only backup destination and refuse any collision."""
+    try:
+        path.mkdir(parents=True, mode=0o700, exist_ok=False)
+    except FileExistsError as error:
+        raise BackupError(
+            f"backup destination already exists: {format_host_path(path)}",
+            entity_kind="vm",
+            entity_name=vm_name,
+        ) from error
+    path.chmod(0o700)

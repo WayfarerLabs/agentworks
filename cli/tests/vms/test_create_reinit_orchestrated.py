@@ -18,11 +18,13 @@ import pytest
 
 from agentworks.capabilities.vm_platform import ProvisionResult
 from agentworks.config import load_config
-from agentworks.db import VMStatus
+from agentworks.db import VersionedPayload, VMStatus
 from agentworks.errors import StateError
 from agentworks.output import Role
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
+from agentworks.vms.admin import AdminConfig
+from agentworks.vms.templates import ResolvedVMTemplate
 from tests.conftest import ManifestDoc, write_manifests
 from tests.orchestrated_fixtures import proxmox_site
 
@@ -70,6 +72,27 @@ def _no_tailscale_check(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 # -- vm create: the derived graph --------------------------------------------
+
+
+def test_create_unknown_template_precedes_unrelated_unsupported_live_overlay(
+    make_config,
+    db: Database,
+) -> None:
+    from agentworks.errors import NotFoundError
+
+    db.insert_vm("unrelated", site="lima-local", hostname="unrelated")
+    db.instance_state.put_desired_overlay("vm", "unrelated", VersionedPayload(2, {"future": True}))
+
+    with pytest.raises(NotFoundError) as caught:
+        vm_manager.create_vm(
+            db,
+            make_config(),
+            name="new-vm",
+            template="missing",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert (caught.value.entity_kind, caught.value.entity_name) == ("vm-template", "missing")
 
 
 def test_create_graph_derives_from_declared_resources(make_config, db: Database) -> None:
@@ -128,23 +151,17 @@ def test_create_graph_derives_from_declared_resources(make_config, db: Database)
     assert "api-key" not in secret_union(nodes)
 
 
-def test_create_logger_precedes_dispatch_has_all_redactions_and_closes_once(
+def test_create_admin_spec_credential_joins_graph_and_logger_redactions(
     make_config,
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: object,
 ) -> None:
-    """The manager constructs one fully redacted log before platform create,
-    passes it as bootstrap progress, reuses it downstream, and closes it once."""
+    """An admin final layer contributes to the create graph and its log."""
     from agentworks.capabilities.vm_platform import ProvisionRequest
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
-    config = make_config(
-        manifests=[
-            GIT_CRED_GH,
-            ManifestDoc("admin-template", "default", {"git_credentials": ["gh"]}),
-        ]
-    )
+    config = make_config(manifests=[GIT_CRED_GH])
     events: list[str] = []
     captured_redactions: list[tuple[str, ...]] = []
     loggers: list[object] = []
@@ -182,10 +199,20 @@ def test_create_logger_precedes_dispatch_has_all_redactions_and_closes_once(
     def _phase_b(*args: object, **kwargs: object) -> None:
         events.append("phase-b")
         assert args[10] is loggers[0]
+        providers = args[7]
+        assert isinstance(providers, dict)
+        assert list(providers) == ["gh"]
+        assert kwargs["git_tokens"] == {"gh": "ghtok"}
 
     monkeypatch.setattr(vm_manager, "run_initialization", _phase_b)
 
-    vm_manager.create_vm(db, config, name="logvm", interaction=TtyInteractionPolicy.REFUSE)
+    vm_manager.create_vm(
+        db,
+        config,
+        name="logvm",
+        admin_spec='{"git_credentials":["gh"]}',
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
 
     assert captured_redactions == [("tskey-test", "ghtok")]
     assert events == ["logger", "create", "phase-a", "phase-b", "close"]
@@ -776,11 +803,7 @@ def test_reinit_resolves_the_stored_admin_template(
     tmp_path: Path,
     captured_output,
 ) -> None:
-    """Reinit reads the VM's stored admin-template column, not always
-    ``default``: a VM created on the ``work`` admin-template (whose only
-    git credential is ``gh``) reinitializes with that credential. The
-    default admin-template declares none, so seeing ``gh`` proves the
-    column, not the default, drove resolution."""
+    """Reinit reapplies the stored admin layer after its selected template."""
     from textwrap import dedent
 
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
@@ -794,13 +817,18 @@ def test_reinit_resolves_the_stored_admin_template(
         metadata:
           name: work
         spec:
-          git_credentials: ["gh"]
+          shell: bash
         """)
     )
     config = make_config(manifests=[GIT_CRED_GH])
     db.insert_vm("rvm", site="lima-local", hostname="rvm", admin_template="work")
     db.update_vm_tailscale("rvm", "100.64.0.9")
     db.update_vm_provisioning_status("rvm", ProvisioningStatus.COMPLETE)
+    from agentworks.instance_specs import parse_vm_instance_specs
+
+    overlays = parse_vm_instance_specs(None, '{"git_credentials":["gh"],"shell":"zsh"}')
+    assert overlays is not None
+    db.instance_state.put_desired_overlay("vm", "rvm", overlays.payload)
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
 
     import contextlib as _contextlib
@@ -815,6 +843,7 @@ def test_reinit_resolves_the_stored_admin_template(
     def _fake_init(*args: object, **kwargs: object) -> None:
         captured["git_tokens"] = kwargs["git_tokens"]
         captured["providers"] = args[7]
+        captured["admin"] = args[4]
 
     monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
     import agentworks.transports as transports
@@ -823,29 +852,59 @@ def test_reinit_resolves_the_stored_admin_template(
 
     vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
 
-    # The work admin-template's git credential flowed through: reinit
-    # resolved ``work``, not the credential-less ``default``.
     assert captured["git_tokens"] == {"gh": "ghtok"}
     assert list(captured["providers"]) == ["gh"]  # type: ignore[call-overload]
+    assert isinstance(captured["admin"], AdminConfig)
+    assert captured["admin"].shell == "zsh"
 
 
-def test_reinit_errors_cleanly_when_the_stored_admin_template_is_gone(
+def test_reinit_applies_a_legacy_flat_vm_payload(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A VM desired layer written before paired admin layers still reapplies."""
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    config = make_config()
+    _seed_provisioned_vm(db)
+    db.instance_state.put_desired_overlay("vm", "rvm", VersionedPayload(1, {"cpus": 11}))
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
+
+    @contextlib.contextmanager
+    def _hold(self: LimaPlatform, vm: object, *, config: object | None = None):
+        yield
+
+    monkeypatch.setattr(LimaPlatform, "vm_active", _hold)
+    captured: dict[str, object] = {}
+
+    def _fake_init(*args: object, **kwargs: object) -> None:
+        captured["vm_template"] = args[3]
+
+    monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
+    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kw: SimpleNamespace())
+
+    vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
+
+    vm_template = captured["vm_template"]
+    assert isinstance(vm_template, ResolvedVMTemplate)
+    assert vm_template.cpus == 11
+
+
+@pytest.mark.parametrize("admin_template", ["", "work"])
+def test_reinit_errors_cleanly_for_an_unresolved_stored_admin_template(
     make_config,
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,
+    admin_template: str,
 ) -> None:
-    """A VM whose stored admin-template was since removed from config
-    reinitializes into a clean typed error naming the selector, not a raw
-    ``KeyError`` traceback (parity with create's unknown-template error).
-    The error fires before any initialization work."""
+    """An unresolved stored selector produces a typed error before work."""
     from agentworks.db import ProvisioningStatus
     from agentworks.errors import NotFoundError
 
-    # No admin manifest declares ``work``; the column points at a name the
-    # registry no longer knows.
     config = make_config()
-    db.insert_vm("rvm", site="lima-local", hostname="rvm", admin_template="work")
+    db.insert_vm("rvm", site="lima-local", hostname="rvm", admin_template=admin_template)
     db.update_vm_tailscale("rvm", "100.64.0.9")
     db.update_vm_provisioning_status("rvm", ProvisioningStatus.COMPLETE)
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
@@ -858,8 +917,10 @@ def test_reinit_errors_cleanly_when_the_stored_admin_template_is_gone(
 
     monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
 
-    with pytest.raises(NotFoundError, match="work"):
+    with pytest.raises(NotFoundError) as caught:
         vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
+    assert caught.value.entity_kind == "admin-template"
+    assert caught.value.entity_name == admin_template
     assert not called  # errored before initialization
 
 

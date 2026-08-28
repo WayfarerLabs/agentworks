@@ -167,7 +167,7 @@ def port_forward_vm(
         output.info("Use --verbose for detailed SSH output.")
 
     # Run in foreground until interrupted
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
     with gated_vm_boundary(db, config, registry, vm, interaction=interaction):
         try:
             proc = subprocess.Popen(ssh_cmd)

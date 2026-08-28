@@ -11,6 +11,44 @@ authentication may request approval and wait for the configured source timeout.
 
 ## Commands
 
+### Instance specs
+
+An instance spec is an inline JSON object applied as the final layer after a selected template. Use
+`--spec JSON` on `vm create`, `workspace create`, `agent create`, and `session create`. A VM has two
+declarations: `--template` and `--spec` shape the VM, while `--admin-template` and `--admin-spec`
+shape its admin user. `agent reinit` also accepts `--spec JSON` because it is the existing-instance
+command that can change the bound template. No other reinit, repair, resume, or copy command accepts
+an instance spec.
+
+The JSON must be one object written directly on the command line. It cannot be a file path, `null`,
+an array, or multiple JSON values. Duplicate keys, non-finite numbers, nested nulls, unknown fields,
+and the template-only fields `name`, `inherits`, `metadata`, and `framework` are rejected before
+state or remote resources change. Quote the object for the current shell:
+
+```bash
+agw vm create build-01 --template dev --spec '{"cpus":8,"memory":16}' \
+  --admin-template operator --admin-spec '{"shell":"zsh"}'
+agw agent create coder-01 --spec '{"shell":"/bin/bash","mise_activate":true}'
+```
+
+An omitted `--spec` on `agent reinit` retains the stored instance layer. A supplied object replaces
+the complete prior layer, and `{}` or an empty value clears it. The empty-value shorthand applies
+only to `agent reinit`; create commands still require a JSON object. Template changes and
+instance-spec changes are validated and persisted together before remote convergence. If that remote
+work fails, the new desired state remains stored so a plain `agent reinit NAME` can retry it.
+
+For compound `session create`, `--spec` applies to the new session. `--workspace-spec` is accepted
+only with `--new-workspace`, and `--agent-spec` only with `--new-agent`; each applies to that
+matching new owner. The command reports whether an instance layer was set, replaced, retained,
+cleared, or explicitly absent, along with recognized field names when available. It never prints the
+JSON or environment values.
+
+Instance specs use the fields and merge rules of their matching template kind. Scalars replace the
+template value, map keys use child-wins merge, and list fields use that kind's stable append and
+deduplication behavior. Run `agw resource explain vm-template`, `workspace-template`,
+`agent-template`, or `session-template` for the accepted fields. Use
+`agw resource explain admin-template` for `--admin-spec` fields.
+
 ### Machine-readable output
 
 The operational inspection commands `agw graph show`, `agw resource list`, `agw resource show`,
@@ -463,18 +501,22 @@ stopped VM is in: its status reads `stopped (manual)` versus `stopped (idle)`.
 
 `vm create <name>` takes the VM name as a required positional. Optional flags: `--template` (a
 declared vm-template), `--admin-template` (a declared admin-template; defaults to the reserved
-`default` admin-template, which always exists), and `--site` (a declared vm-site; falls back to
-`defaults.site`, else the one ENABLED site is inferred when there is exactly one, several prompt
-interactively, and non-interactive runs error naming the options). The selected admin-template is
-stored on the VM row (NULL = `default`) and drives its admin user on every later `vm reinit`,
-`vm shell`, and admin-mode session. An unknown `--admin-template` name fails before any provisioning
-or DB work. Hardware (`cpus`, `memory`, `disk`, `swap`) comes from the vm-template and the admin
-username from the admin-template; there are no per-create overrides, so to deviate you declare a new
-template. On Azure, `cpus` + `memory` select the smallest fitting VM size from the site's catalog
+`default` admin-template, which always exists), `--spec` (an inline final VM layer), `--admin-spec`
+(an inline final admin layer), and `--site` (a declared vm-site; falls back to `defaults.site`, else
+the one ENABLED site is inferred when there is exactly one, several prompt interactively, and
+non-interactive runs error naming the options). The selected admin-template is stored on the VM row
+(NULL = `default`) and drives its admin user on every later `vm reinit`, `vm shell`, and admin-mode
+session. An unknown `--admin-template` name fails before any provisioning or DB work. Hardware
+(`cpus`, `memory`, `disk`, `swap`) starts with the vm-template and the admin username comes from the
+admin-template. `--spec` may supply a typed final VM layer for hardware or other VM-template fields,
+while `--admin-spec` may supply a typed final admin layer. The removed individual override flags do
+not return. On Azure, `cpus` + `memory` select the smallest fitting VM size from the site's catalog
 (built-in B-series, or the site's `vm_sizes` platform key); an off-ratio request rounds up and
 warns. These are immutable provisioning parameters stored in the database. All initialization
-behavior (packages, install commands, etc.) is driven by config. Templates carry no `site`:
-placement is per-host, so it never travels inside a shared template.
+follows the effective VM and admin declarations, with config and registry resources backing
+referenced packages, credentials, secrets, and install commands. Both final layers are stored in one
+desired VM record and reapplied by `vm reinit`. Templates carry no `site`: placement is per-host, so
+it never travels inside a shared template.
 
 The first interactive `vm create` asks once for an optional **system slug** (3-20 chars, lowercase
 alphanumeric plus dash, no leading/trailing dash): a short identifier for this Agentworks
@@ -484,10 +526,18 @@ install is the only one using its sites' backends; a blank answer is remembered 
 ask again. Non-interactive runs never prompt (a later interactive create still asks once).
 
 `vm reinit` re-runs the initialization phase using the current config without reprovisioning the VM.
-Changes to config (new packages, different install commands, etc.) are picked up automatically.
+Changes to config (new packages, different install commands, etc.) are picked up automatically. It
+consumes both stored VM and admin instance specs but cannot change or clear either one.
 
 `vm delete` requires `--force` if the VM has workspaces, agents, or sessions. The confirmation
 message shows what will be deleted. Pass `--yes` to skip the prompt.
+
+`vm backup` exports the VM row and exact owner tree of agents, workspaces, sessions, events, grants,
+desired instance specs, and workspace files. On POSIX, its local timestamp directory is created with
+mode 0700 and its JSON files with mode 0600. Native Windows refuses backups containing instance
+specs until private access-control export is supported. Instance specs can contain plaintext
+environment values, so keep the configured backup path on a trusted local filesystem and protect any
+copies of the archive with equivalent access controls.
 
 `agw vm shell` is the Agentworks-wrapped entry point; for raw SSH (VS Code Remote-SSH, `scp`, etc.),
 use the `awvm--<vm>` alias documented under [Direct SSH aliases](#direct-ssh-aliases).
@@ -536,7 +586,7 @@ Manage workspaces on VMs.
 | `agw workspace delete <name>`        | Delete a workspace                  |
 
 `workspace create <name>` takes the workspace name as a required positional. Optional flags: `--vm`,
-`--template`, and `--open-vscode`.
+`--template`, `--spec`, and `--open-vscode`.
 
 `workspace copy <source> <name>` copies a workspace to a new VM workspace. Accepts `--vm`. Source
 and destination can be the same VM (a clone) or different VMs.
@@ -556,29 +606,30 @@ workspace's sessions, use `agw console create` + `agw console attach`.
 
 Manage agents (isolated Linux users) on VMs. Agents are VM-scoped and access workspaces via grants.
 
-| Command                                                | Description                              |
-| ------------------------------------------------------ | ---------------------------------------- |
-| `agw agent create <name> [--vm]`                       | Create an agent on a VM                  |
-| `agw agent list [--vm <vm>]`                           | List agents                              |
-| `agw agent describe <name>`                            | Show agent details and grants            |
-| `agw agent reinit <name> [--update-template <tmpl>]`   | Re-run agent setup                       |
-| `agw agent grant-workspaces <name> <ws>...`            | Grant workspace access                   |
-| `agw agent grant-workspaces <name> --all`              | Grant access to all workspaces           |
-| `agw agent revoke-workspaces <name> <ws>...`           | Revoke workspace access                  |
-| `agw agent revoke-workspaces <name> --all`             | Revoke all explicit grants               |
-| `agw agent shell <name> [--workspace <ws>]`            | Open an interactive shell as the agent   |
-| `agw agent exec <name> [--workspace <ws>] -- <cmd...>` | Run a one-shot command non-interactively |
-| `agw agent delete <name>`                              | Delete an agent                          |
+| Command                                                            | Description                              |
+| ------------------------------------------------------------------ | ---------------------------------------- |
+| `agw agent create <name> [--vm]`                                   | Create an agent on a VM                  |
+| `agw agent list [--vm <vm>]`                                       | List agents                              |
+| `agw agent describe <name>`                                        | Show agent details and grants            |
+| `agw agent reinit <name> [--update-template <tmpl>] [--spec JSON]` | Re-run agent setup                       |
+| `agw agent grant-workspaces <name> <ws>...`                        | Grant workspace access                   |
+| `agw agent grant-workspaces <name> --all`                          | Grant access to all workspaces           |
+| `agw agent revoke-workspaces <name> <ws>...`                       | Revoke workspace access                  |
+| `agw agent revoke-workspaces <name> --all`                         | Revoke all explicit grants               |
+| `agw agent shell <name> [--workspace <ws>]`                        | Open an interactive shell as the agent   |
+| `agw agent exec <name> [--workspace <ws>] -- <cmd...>`             | Run a one-shot command non-interactively |
+| `agw agent delete <name>`                                          | Delete an agent                          |
 
 `agent create <name>` takes the agent name as a required positional. Optional flags: `--vm`,
-`--template`, and `--grant-all-workspaces`.
+`--template`, `--spec`, and `--grant-all-workspaces`.
 
 `agent list` accepts `--vm` to narrow the result set to one VM's agents. An unknown name in the
 filter is an error, not an empty result.
 
 `agent reinit --update-template <tmpl>` re-points the agent to a different declared template
 (validated against the resource registry, then persisted) before re-running setup. An unknown
-template name is rejected up front, leaving the stored binding unchanged.
+template name is rejected up front, leaving the stored binding unchanged. Its optional `--spec`
+changes the final instance layer under the rules in [Instance specs](#instance-specs).
 
 `agent shell` and `agent exec` both SSH directly as the agent's Linux user. `agent shell` opens an
 interactive login shell (sources the agent's profile). `agent exec` runs a single command
@@ -656,24 +707,25 @@ PID and boot-ID model, live status derivation, automatic repair, and the safety 
 `--force`.
 
 `session create <name>` takes the session name as a required positional. Optional flags:
-`--workspace`, `--template`, `--admin`, and `--agent`. If `--workspace` / `--new-workspace` is
-omitted, you are prompted to pick from the existing workspaces or `[Create new workspace]` --
-filtered to the known VM when `--vm` or `--agent` already pins one (the prompt prints
-`Only showing workspaces on VM 'X'` when a filter is active). If `--admin` / `--agent` /
-`--new-agent` is omitted, you are prompted with `admin`, the existing agents on the resolved VM, and
-`[Create new agent]`. The prompts always fire when the flags are absent -- there is no single-option
-auto-select for workspace or mode, since both are part of the session's identity. `--vm` works
-differently: it auto-selects when exactly one usable VM exists (logged as `Using VM 'X'`), prompts
-when multiple, and is required only in non-interactive mode when no workspace or agent anchor pins
-the VM. In non-interactive mode (`--non-interactive` or no TTY), any required prompt raises a
-`ValidationError` directing you to pass the corresponding flag. Pass `--new-workspace` to create a
-workspace on the fly (with optional `--workspace-name`, `--workspace-template`, and `--vm`;
-`--workspace-name` defaults to the session name). Pass `--new-agent` to create a new agent for the
-session (with optional `--agent-name` and `--agent-template`; `--agent-name` defaults to the session
-name); the new agent is provisioned on the workspace's VM. When a session created with
-`--new-workspace` or `--new-agent` is later deleted, you are offered the option to delete the
-workspace and/or agent as well -- the workspace if no other sessions remain on it, the agent if it
-has no other sessions and no explicit grants.
+`--workspace`, `--template`, `--spec`, `--admin`, and `--agent`. If `--workspace` /
+`--new-workspace` is omitted, you are prompted to pick from the existing workspaces or
+`[Create new workspace]` -- filtered to the known VM when `--vm` or `--agent` already pins one (the
+prompt prints `Only showing workspaces on VM 'X'` when a filter is active). If `--admin` / `--agent`
+/ `--new-agent` is omitted, you are prompted with `admin`, the existing agents on the resolved VM,
+and `[Create new agent]`. The prompts always fire when the flags are absent -- there is no
+single-option auto-select for workspace or mode, since both are part of the session's identity.
+`--vm` works differently: it auto-selects when exactly one usable VM exists (logged as
+`Using VM 'X'`), prompts when multiple, and is required only in non-interactive mode when no
+workspace or agent anchor pins the VM. In non-interactive mode (`--non-interactive` or no TTY), any
+required prompt raises a `ValidationError` directing you to pass the corresponding flag. Pass
+`--new-workspace` to create a workspace on the fly (with optional `--workspace-name`,
+`--workspace-template`, and `--vm`; `--workspace-name` defaults to the session name). Pass
+`--new-agent` to create a new agent for the session (with optional `--agent-name` and
+`--agent-template`; `--agent-name` defaults to the session name); the new agent is provisioned on
+the workspace's VM. `--workspace-spec` and `--agent-spec` apply only to those matching newly created
+owners. When a session created with `--new-workspace` or `--new-agent` is later deleted, you are
+offered the option to delete the workspace and/or agent as well -- the workspace if no other
+sessions remain on it, the agent if it has no other sessions and no explicit grants.
 
 <!-- Linked from the top-level README; rename only if you also update README.md. -->
 

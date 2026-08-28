@@ -116,7 +116,9 @@ Use `agw doctor --output json` when a machine-readable result is more useful.
 ## Start working
 
 Create the first VM with `agw vm create --help` as the current syntax guide. The command can infer a
-single ready site or prompt when several are available.
+single ready site or prompt when several are available. Its optional `--spec` is an inline JSON
+object for a final instance-specific layer; prefer a reusable template when several instances need
+the same declaration.
 
 Then use `agw session create --help` to create a session. It can use existing resources or create a
 new workspace and managed agent as part of the same request. Attach with `agw session attach NAME`.

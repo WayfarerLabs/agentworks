@@ -125,6 +125,29 @@ def test_unknown_reference_raises_instead_of_dropping(tmp_path: Path) -> None:
         )
 
 
+def test_runtime_target_can_transiently_auto_declare_overlay_only_secret(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AW_SECRET_OVERLAY_ONLY", "resolved")
+    cfg = _write_config(tmp_path, settings='[secret_config]\nsources = ["env-var"]')
+    config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
+    target = SecretTarget(vm={"TOKEN": EnvEntry({"secret": "overlay-only"})})
+
+    values = resolve_for_command(
+        [target],
+        config,
+        registry,
+        allow_transient_auto_declare=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    assert values == {"overlay-only": "resolved"}
+    with pytest.raises(KeyError):
+        registry.lookup("secret", "overlay-only")
+
+
 def test_unions_across_multiple_targets_dedup_by_name(tmp_path: Path) -> None:
     cfg = _write_config(
         tmp_path,

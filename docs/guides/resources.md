@@ -14,28 +14,46 @@ opt-in plugins, the manifest validation that tightened) is in
 defaults, and the secret source chain (`[secret_config].sources`). Settings configure your install;
 they are not named, referenceable entities.
 
-**Resources** are the named things everything else refers to: a `secret` called `npm-token`, a
-`vm-template` called `dev`, a `git-credential` called `github`. Every resource lives in the resource
-registry, is identified by `kind` + `name`, and can be inspected uniformly:
+**Resources** are the named things in the dependency graph. Declared resources include a `secret`
+called `npm-token`, a `vm-template` called `dev`, or a `git-credential` called `github`. Live
+resources are the VMs, workspaces, agents, sessions, and consoles recorded in the state database;
+"live" means database-backed, not necessarily running. Both forms are identified by `kind` + `name`
+and participate in the same finalized graph.
+
+Resource commands inspect the declared catalog, while each operational group owns its live rows:
 
 ```bash
-agw resource list                       # everything, all kinds and origins
+agw resource list                       # declared resources, all kinds and origins
 agw resource list --kind secret         # one kind
 agw resource show vm-template/dev       # one complete focused resource card
 agw graph show vm-template/dev          # traverse declared and live relationships
 agw resource kinds                      # every kind: category, counts, purpose
+agw agent list                          # database-backed live agents
 ```
 
-Resources come from four origins: **operator-declared** (you wrote them, as YAML manifests),
-**built-in** (shipped with agentworks and inseparable from it, e.g. the `env-var` and `prompt`
-secret backends), **auto-declared** (the framework filled in a referenced-but-undeclared resource,
-e.g. the `tailscale-auth-key` secret or `git-token-<name>` secrets), and **system-plugin**
+Declared resources come from four origins: **operator-declared** (you wrote them, as YAML
+manifests), **built-in** (shipped with agentworks and inseparable from it, e.g. the `env-var` and
+`prompt` secret backends), **auto-declared** (the framework filled in a referenced-but-undeclared
+resource, e.g. the `tailscale-auth-key` secret or `git-token-<name>` secrets), and **system-plugin**
 (contributed by an installed system plugin, regardless of whether its rows are enabled; see "System
 plugins" below). Filter by origin with `agw resource list --origin operator|auto|builtin|plugin`.
 
+Registry construction collects declared publishers and a value-free projection of database-backed
+live resources before one finalization pass. A live resource's dependencies come from its selected
+template plus any persisted instance spec, so a secret referenced only by an agent's instance spec
+is still auto-declared and visible to the ordinary secret and graph inspection commands. Creating
+commands apply the same rule to pending resources before mutation; a failed creation publishes
+nothing durably.
+
+`USED BY` retains the established per-kind inspection meaning. Template and site rows report their
+direct live owners, while secret rows report sessions whose effective environment reaches the
+secret. Kinds without an established live-instance projection show `-`. Use
+`graph show --direction dependents` for the complete direct topology, including an agent whose
+persisted instance spec is the only declaration that names a secret.
+
 `agw resource show KIND/NAME` is the focused view of one concrete registry row. For a declarable
 resource it combines the exact matching `resource list` facts with full stored readiness, direct
-dependencies and dependents, current live users when that kind supports them, the checks `doctor`
+dependencies and dependents, the stable per-kind `USED BY` projection, the checks `doctor`
 attributes to that resource, and a normalized manifest with loaded defaults and JSON-native values.
 The relationship slice stops after the edges touching the row; use `graph show` to traverse farther.
 The focused diagnostics do not replace the fleet-wide `doctor` report. Capability resources have no
@@ -749,9 +767,10 @@ The read-only graph, resource, secret, and health commands also support `--outpu
 and `doctor`. Each successful response is one JSON document with `schema_version`, `command`, and
 `data` fields. The backend lists and reference arrays retain their operational precedence and graph
 order, and the secret views report only lookup prediction and metadata, never a secret value.
-`resource show` likewise exposes only value-free secret previews, opens persisted state read-only
-and only for kinds with a live-instance hook, and reports null rather than an empty array when a
-kind has no such concept.
+`resource show` likewise exposes only value-free secret previews. Structural live-use facts come
+from the same finalized Registry snapshot as every other relationship, rather than from a second
+database scan. A supported row with no current users reports an empty array and a count of zero;
+kinds without the stable live-usage projection retain JSON null.
 
 `--output human` is the default and keeps the terminal-oriented rendering. `--names-only` remains
 reserved for shell completion, so it cannot be combined with JSON output. `agw doctor --output json`

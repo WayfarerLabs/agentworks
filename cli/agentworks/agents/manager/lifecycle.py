@@ -7,7 +7,7 @@ with the session orchestrator lives in ``agents/realize.py``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import agentworks.agents.manager as _mgr
 from agentworks import output
@@ -27,6 +27,7 @@ from ._common import MAX_AGENT_NAME_LENGTH, _require_vm, agent_scope
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
 
+    from agentworks.agents.template import AgentTemplate
     from agentworks.config import Config
     from agentworks.db import Database
     from agentworks.secrets.policy import TtyInteractionPolicy
@@ -48,6 +49,7 @@ def create_agent(
     name: str,
     vm_name: str,
     template: str | None = None,
+    spec: str | None = None,
     grant_all_workspaces: bool = False,
     interaction: TtyInteractionPolicy,
 ) -> None:
@@ -66,17 +68,45 @@ def create_agent(
     realization log exists here.
     """
 
-    from agentworks.agents.templates import resolve_template
+    from agentworks.agents.templates import resolve_template_with_provenance
     from agentworks.bootstrap import load_request_registry
 
-    # build_registry runs first so framework miss-policies (e.g.
+    # A declaration-only registry runs first so framework miss-policies (e.g.
     # GitCredentialKind's error policy on agent template's
     # git_credentials list, future TemplateReference typos on
     # inherits) fire before any template / DB / VM business logic
-    # surfaces its own NotFoundError.
-    registry = load_request_registry(config)
+    # surfaces its own NotFoundError. The pending-plus-durable registry
+    # built below is the authoritative graph for mutation.
+    registry = load_request_registry(config, include_live_resources=False)
 
-    agent_tmpl = resolve_template(registry, template)
+    from agentworks.instance_specs import parse_instance_spec
+
+    overlay = None if spec is None else parse_instance_spec("agent", spec)
+    layered_agent_tmpl = resolve_template_with_provenance(
+        registry,
+        template,
+        overlay=None if overlay is None else cast("AgentTemplate", overlay.declaration),
+        instance_name=name,
+    )
+    agent_tmpl = layered_agent_tmpl.value
+    vm = _require_vm(db, vm_name)
+    from agentworks.resources.live_publish import project_agent_live_resource
+
+    pending = project_agent_live_resource(
+        name=name,
+        vm_name=vm_name,
+        template_name="default" if template is None else template,
+        layered=layered_agent_tmpl,
+    )
+    if db.get_agent(name) is None:
+        registry = load_request_registry(
+            config,
+            live_database=db,
+            pending_publishers=(lambda target: target.add_live(pending),),
+        )
+        from agentworks.instance_specs import ensure_effective_references_enabled
+
+        ensure_effective_references_enabled(registry, pending.outbound)
 
     # Refuse a recipe that draws on a disabled plugin's declarable resource
     # (an install-command / inherited template a not-enabled plugin bundled)
@@ -94,8 +124,9 @@ def create_agent(
             entity_kind="agent",
             entity_name=name,
         )
+    from agentworks.instance_specs import refuse_orphan_creation_state
 
-    vm = _require_vm(db, vm_name)
+    refuse_orphan_creation_state(db, "agent", name)
 
     # BUILD: the command names its direct resources (the resolved
     # template, this VM) and constructs the pending agent node with its
@@ -200,6 +231,7 @@ def create_agent(
                 template=agent_tmpl,
                 git_tokens=git_tokens,
                 grant_all_workspaces=grant_all_workspaces,
+                overlay=overlay,
             )
             # Bookkeeping only, deliberately not via a realization log:
             # this command never unwinds a realized agent (a failure after
@@ -281,7 +313,7 @@ def delete_agent(
         # The standalone composition root: build the boundary here.
         from agentworks.bootstrap import load_request_registry
 
-        registry = load_request_registry(config)
+        registry = load_request_registry(config, live_database=db)
         boundary: AbstractContextManager[object] = gated_vm_boundary(
             db,
             config,
@@ -397,6 +429,7 @@ def reinit_agent(
     *,
     name: str,
     update_template: str | None = None,
+    spec: str | None = None,
     interaction: TtyInteractionPolicy,
 ) -> None:
     """Re-run agent setup using the stored template.
@@ -423,14 +456,16 @@ def reinit_agent(
     ordering exists to prevent.
     """
 
-    from agentworks.agents.templates import resolve_template
+    from agentworks.agents.templates import resolve_template_with_provenance
     from agentworks.bootstrap import load_request_registry
 
     require_exact_tty_interaction_policy(interaction)
 
-    # build_registry runs first so framework miss-policies fire before
-    # template / DB / VM business logic.
-    registry = load_request_registry(config)
+    # Resolve the candidate from declarations before publishing durable live
+    # rows. A supplied replacement (notably an empty spec that clears state)
+    # must remain able to supersede an unsupported stored overlay; the second
+    # prospective build below publishes that candidate before reading the DB.
+    registry = load_request_registry(config, include_live_resources=False)
 
     agent = db.get_agent(name)
     if agent is None:
@@ -442,12 +477,17 @@ def reinit_agent(
 
     vm = _require_vm(db, agent.vm_name)
 
-    # Re-point before resolving: validate the new template exists, persist
-    # it, and mutate the in-memory row so the resolve below uses the NEW
-    # template. Both cheap not-found checks (agent, VM) run first, so a bad
-    # agent / VM / template name raises pre-boundary and costs zero prompts,
-    # and only a valid re-point is ever persisted.
+    # Validate both declaration inputs before persisting either one. They
+    # form one candidate effective declaration and one retry state.
+    from agentworks.instance_specs import get_instance_overlay, parse_instance_spec
     from agentworks.resources.access import ensure_recipe_enabled
+
+    supplied_overlay = spec is not None
+    normalized_spec = "{}" if spec == "" else spec
+    parsed_overlay = None if normalized_spec is None else parse_instance_spec("agent", normalized_spec)
+    candidate_overlay = get_instance_overlay(db, "agent", name) if parsed_overlay is None else parsed_overlay
+    if parsed_overlay is not None and not parsed_overlay.payload.value:
+        candidate_overlay = None
 
     if update_template is not None:
         from agentworks.resources.access import require_declared_template
@@ -458,10 +498,30 @@ def reinit_agent(
         # template (mirrors create's "gate before any DB / VM / realize work").
         # require_declared_template only checks the name is DECLARED, not enabled.
         ensure_recipe_enabled(registry, "agent-template", update_template)
-        db.update_agent_template(name, update_template)
-        agent.template = update_template
+    candidate_template = agent.template if update_template is None else update_template
+    layered_agent_tmpl = resolve_template_with_provenance(
+        registry,
+        candidate_template,
+        overlay=None if candidate_overlay is None else cast("AgentTemplate", candidate_overlay.declaration),
+        instance_name=name,
+    )
+    agent_tmpl = layered_agent_tmpl.value
+    from agentworks.resources.live_publish import project_agent_live_resource
 
-    agent_tmpl = resolve_template(registry, agent.template)
+    pending = project_agent_live_resource(
+        name=name,
+        vm_name=agent.vm_name,
+        template_name="default" if candidate_template is None else candidate_template,
+        layered=layered_agent_tmpl,
+    )
+    registry = load_request_registry(
+        config,
+        live_database=db,
+        pending_publishers=(lambda target: target.add_live(pending),),
+    )
+    from agentworks.instance_specs import ensure_effective_references_enabled
+
+    ensure_effective_references_enabled(registry, pending.outbound)
 
     # Refuse a recipe drawing on a disabled plugin's declarable resource before
     # the reinit realize (Phase 7, LLD b). A repoint already gated above
@@ -470,51 +530,76 @@ def reinit_agent(
     # tests/agents/test_recipe_gate_drift.py.
     ensure_recipe_enabled(registry, "agent-template", agent_tmpl.name)
 
-    # BUILD: the live agent from its row, plus the resolved template
-    # whose declared credentials become edges (the template is a
-    # planned-ops participant at reinit: the materials rewrite needs
-    # its tokens, so they must join the boundary union). The live
-    # agent's row carries no template edge, so the walk is multi-root.
-    from agentworks.agents.nodes import (
-        agent_template_node,
-        credential_tokens,
-        live_agent_node,
-    )
-    from agentworks.capabilities.base import (
-        OperationScope,
-        RunContext,
-        ScopeLevel,
-    )
-    from agentworks.db import SYSTEM_SLUG_KEY
-    from agentworks.orchestration.activation import (
-        activation_gate,
-        gate_secret_resolver,
-    )
-    from agentworks.orchestration.readiness import preflight_all
-    from agentworks.orchestration.secrets import ScopedSecrets, secret_union
-    from agentworks.orchestration.walk import walk
-    from agentworks.secrets.resolver import Resolver
-    from agentworks.vms.initializer import announce_git_credentials
-    from agentworks.vms.nodes import live_vm_node
+    from agentworks.instance_specs import replace_agent_overlay, report_overlay_outcome
 
-    resolver = Resolver(config, registry, interaction=interaction)
+    with db.transaction():
+        if update_template is not None:
+            db.update_agent_template(name, update_template)
+            agent.template = update_template
+        overlay_outcome = replace_agent_overlay(
+            db,
+            name,
+            parsed_overlay,
+            supplied=supplied_overlay,
+        )
 
-    vm_node = live_vm_node(db, config, registry, vm)
-    agent_node = live_agent_node(agent, vm_node)
-    tmpl_node = agent_template_node(registry, agent_tmpl)
-    nodes = walk(agent_node, tmpl_node)
-    for secret_name in secret_union(nodes):
-        resolver.register_name(secret_name)
-    providers = {node.provider.owner_name: node.provider for node in tmpl_node.credentials}
+    try:
+        # BUILD: the live agent from its row, plus the resolved template
+        # whose declared credentials become edges (the template is a
+        # planned-ops participant at reinit: the materials rewrite needs
+        # its tokens, so they must join the boundary union). The live
+        # agent's row carries no template edge, so the walk is multi-root.
+        from agentworks.agents.nodes import (
+            agent_template_node,
+            credential_tokens,
+            live_agent_node,
+        )
+        from agentworks.capabilities.base import (
+            OperationScope,
+            RunContext,
+            ScopeLevel,
+        )
+        from agentworks.db import SYSTEM_SLUG_KEY
+        from agentworks.orchestration.activation import (
+            activation_gate,
+            gate_secret_resolver,
+        )
+        from agentworks.orchestration.readiness import preflight_all
+        from agentworks.orchestration.secrets import ScopedSecrets, secret_union
+        from agentworks.orchestration.walk import walk
+        from agentworks.secrets.resolver import Resolver
+        from agentworks.vms.initializer import announce_git_credentials
+        from agentworks.vms.nodes import live_vm_node
 
-    scope = OperationScope(
-        level=ScopeLevel.AGENT,
-        system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
-        vm=agent.vm_name,
-        agent=name,
-    )
+        resolver = Resolver(config, registry, interaction=interaction)
 
-    with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
+        vm_node = live_vm_node(db, config, registry, vm)
+        agent_node = live_agent_node(agent, vm_node)
+        tmpl_node = agent_template_node(registry, agent_tmpl)
+        nodes = walk(agent_node, tmpl_node)
+        for secret_name in secret_union(nodes):
+            resolver.register_name(secret_name)
+        providers = {node.provider.owner_name: node.provider for node in tmpl_node.credentials}
+
+        scope = OperationScope(
+            level=ScopeLevel.AGENT,
+            system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
+            vm=agent.vm_name,
+            agent=name,
+        )
+    except BaseException:
+        from agentworks.instance_specs import render_overlay_outcome
+
+        render_overlay_outcome(overlay_outcome)
+        raise
+
+    with (
+        report_overlay_outcome(overlay_outcome),
+        activation_gate(
+            vm_node,
+            gate_secret_resolver(config, registry, resolver),
+        ),
+    ):
         # The preflight boundary: git tokens and any site config secret
         # resolve in one prompt session. Provisioning is hermetic: no
         # operator-env secrets are prompted at reinit.
@@ -547,6 +632,8 @@ def reinit_agent(
             ssh_logger = SSHLogger(vm.name, "agent-reinit", redactions=tuple(git_tokens.values()))
             try:
                 try:
+                    from agentworks.vms.admin_templates import resolve_live_template as resolve_admin_template
+
                     create_agent_on_vm(
                         vm,
                         config,
@@ -556,6 +643,12 @@ def reinit_agent(
                         agent_name=agent.name,
                         git_tokens=git_tokens,
                         logger=ssh_logger,
+                        admin_git_force_safe_directory=resolve_admin_template(
+                            db,
+                            registry,
+                            vm.name,
+                            vm.admin_template,
+                        ).git_force_safe_directory,
                     )
 
                     # Reconcile the agent's recorded workspace grants onto the

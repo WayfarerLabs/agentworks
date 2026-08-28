@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-    from agentworks.db.instance_state import InstanceStateRepository
+    from agentworks.db.instance_state import DesiredOverlayRecord, InstanceStateRepository
     from agentworks.db.models import (
         AgentGrantRow,
         AgentRow,
@@ -93,6 +93,7 @@ class Database:
                     raise BusyStateError() from error
                 raise StateError(
                     "state database is unavailable or malformed",
+                    entity_kind="database",
                     hint="Run a normal Agentworks command to initialize or repair the state database.",
                 ) from error
             current = row[0]
@@ -100,17 +101,19 @@ class Database:
                 current = 0
             elif type(current) is not int or current < 0:
                 connection.close()
-                raise StateError("state database schema version is invalid")
+                raise StateError("state database schema version is invalid", entity_kind="database")
             if current > LATEST_VERSION:
                 connection.close()
                 raise StateError(
                     f"state database schema is newer than this release ({current}/{LATEST_VERSION})",
+                    entity_kind="database",
                     hint="Use a release that understands this database schema.",
                 )
             if current != LATEST_VERSION:
                 connection.close()
                 raise StateError(
                     f"state database schema is outdated ({current}/{LATEST_VERSION})",
+                    entity_kind="database",
                     hint="Run a normal Agentworks command to initialize or migrate the state database.",
                 )
             self._conn = connection
@@ -185,6 +188,18 @@ class Database:
                 self._conn.rollback()
         finally:
             self._read_tx_active = False
+
+    @contextmanager
+    def snapshot(self) -> Iterator[None]:
+        """Hold one read snapshot on either writable or read-only facades.
+
+        Writable command-owned databases use the composable transaction
+        boundary; completion and path-owned read-only facades use the strict
+        read transaction. Callers need not inspect private connection mode.
+        """
+        context = self.read_transaction() if self._read_only else self.transaction()
+        with context:
+            yield
 
     def _commit_unless_in_tx(self) -> None:
         """Commit pending changes unless inside an explicit transaction()."""
@@ -333,7 +348,7 @@ class Database:
                 admin_username,
             ),
         )
-        self._conn.commit()
+        self._commit_unless_in_tx()
         result = self.get_vm(name)
         assert result is not None
         return result
@@ -456,7 +471,7 @@ class Database:
             "INSERT INTO workspaces (name, vm_name, template, workspace_path, linux_group) VALUES (?, ?, ?, ?, ?)",
             (name, vm_name, template, workspace_path, linux_group),
         )
-        self._conn.commit()
+        self._commit_unless_in_tx()
         result = self.get_workspace(name)
         assert result is not None
         return result
@@ -528,7 +543,7 @@ class Database:
             "INSERT INTO agents (name, vm_name, linux_user, template, grant_all) VALUES (?, ?, ?, ?, ?)",
             (name, vm_name, linux_user, template, int(grant_all)),
         )
-        self._conn.commit()
+        self._commit_unless_in_tx()
         result = self.get_agent(name)
         assert result is not None
         return result
@@ -565,7 +580,7 @@ class Database:
             "UPDATE agents SET template = ? WHERE name = ?",
             (template, name),
         )
-        self._conn.commit()
+        self._commit_unless_in_tx()
 
     def list_agents_on_vm_with_grant_all(self, vm_name: str) -> list[AgentRow]:
         """List agents on a VM that have grant_all enabled."""
@@ -735,7 +750,7 @@ class Database:
                 json.dumps(harness_integration_state or {}),
             ),
         )
-        self._conn.commit()
+        self._commit_unless_in_tx()
         result = self.get_session(name)
         assert result is not None
         return result
@@ -1109,11 +1124,12 @@ class Database:
         list[SessionRow],
         list[VMEventRow],
         dict[str, list[AgentGrantRow]],
+        tuple[DesiredOverlayRecord, ...],
     ]:
         """Read the currently exported VM backup rows in one transaction.
 
-        Returns (vm, agents, workspaces, sessions, events, grants_by_agent).
-        Instance records are not part of this export tuple.
+        Returns (vm, agents, workspaces, sessions, events,
+        grants_by_agent, desired_overlays).
         """
         self._conn.execute("BEGIN")
         try:
@@ -1127,6 +1143,7 @@ class Database:
             grants_by_agent: dict[str, list[AgentGrantRow]] = {}
             for agent in agents:
                 grants_by_agent[agent.name] = self.list_agent_grants(agent.name)
+            desired_overlays = self.instance_state.list_vm_owner_tree_desired_overlays(vm_name)
         finally:
             self._conn.execute("COMMIT")
-        return vm, agents, workspaces, sessions, events, grants_by_agent
+        return vm, agents, workspaces, sessions, events, grants_by_agent, desired_overlays

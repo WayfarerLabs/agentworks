@@ -25,7 +25,6 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.multi_console as _mc
 from agentworks.errors import NotFoundError
-from agentworks.resources.access import admin_template
 
 from .attach import _session_linux_user
 
@@ -73,23 +72,24 @@ def _pane_secret_target(
     and silently return ``None``, breaking the eager-resolve guarantee
     for that shape.
     """
-    from agentworks.agents.templates import resolve_template as _resolve_agent_template
+    from agentworks.agents.templates import resolve_live_template as _resolve_agent_template
     from agentworks.secrets import SecretTarget
-    from agentworks.vms.templates import resolve_template as _resolve_vm_template
-    from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
+    from agentworks.vms.admin_templates import resolve_live_template as _resolve_admin_template
+    from agentworks.vms.templates import resolve_live_template as _resolve_vm_template
+    from agentworks.workspaces.templates import resolve_live_template as _resolve_ws_template
 
     workspace = db.get_workspace(session.workspace_name)
     if workspace is None:
         return None
 
-    vm_tmpl = _resolve_vm_template(registry, vm.template)
-    ws_tmpl = _resolve_ws_template(registry, workspace.template)
+    vm_tmpl = _resolve_vm_template(db, registry, vm.name, vm.template)
+    ws_tmpl = _resolve_ws_template(db, registry, workspace.name, workspace.template)
 
     if is_admin_pane:
         return SecretTarget(
             vm=vm_tmpl.env,
             workspace=ws_tmpl.env,
-            admin=admin_template(registry, vm.admin_template or "default").env,
+            admin=_resolve_admin_template(db, registry, vm.name, vm.admin_template).env,
             label=f"console-pane:{session.name}/admin",
         )
 
@@ -98,7 +98,7 @@ def _pane_secret_target(
     agent = db.get_agent(session.agent_name)
     if agent is None:
         return None
-    agent_tmpl = _resolve_agent_template(registry, agent.template)
+    agent_tmpl = _resolve_agent_template(db, registry, agent.name, agent.template)
     return SecretTarget(
         vm=vm_tmpl.env,
         workspace=ws_tmpl.env,
@@ -108,6 +108,7 @@ def _pane_secret_target(
 
 
 def _admin_only_secret_target(
+    db: Database,
     registry: Registry,
     vm: VMRow,
     *,
@@ -128,12 +129,13 @@ def _admin_only_secret_target(
     when it lands as a follow-up.
     """
     from agentworks.secrets import SecretTarget
-    from agentworks.vms.templates import resolve_template as _resolve_vm_template
+    from agentworks.vms.admin_templates import resolve_live_template as _resolve_admin_template
+    from agentworks.vms.templates import resolve_live_template as _resolve_vm_template
 
-    vm_tmpl = _resolve_vm_template(registry, vm.template)
+    vm_tmpl = _resolve_vm_template(db, registry, vm.name, vm.template)
     return SecretTarget(
         vm=vm_tmpl.env,
-        admin=admin_template(registry, vm.admin_template or "default").env,
+        admin=_resolve_admin_template(db, registry, vm.name, vm.admin_template).env,
         label=label,
     )
 
@@ -168,6 +170,7 @@ def _console_build_secret_targets(
     if console.admin_shell:
         targets.append(
             _mc._admin_only_secret_target(
+                db,
                 registry,
                 vm,
                 label=f"console={console.name}/admin-shell",
@@ -269,17 +272,17 @@ def _resolve_pane_env(
     resolution needs (e.g. workspace lookup fails); the caller proceeds
     without env injection rather than raising mid-pane-split.
     """
-    from agentworks.agents.templates import resolve_template as _resolve_agent_template
+    from agentworks.agents.templates import resolve_live_template as _resolve_agent_template
     from agentworks.env import ResourceContext, compose_env
-    from agentworks.vms.templates import resolve_template as _resolve_vm_template
-    from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
+    from agentworks.vms.templates import resolve_live_template as _resolve_vm_template
+    from agentworks.workspaces.templates import resolve_live_template as _resolve_ws_template
 
     workspace = db.get_workspace(session.workspace_name)
     if workspace is None:
         return {}
 
-    vm_tmpl = _resolve_vm_template(registry, vm.template)
-    ws_tmpl = _resolve_ws_template(registry, workspace.template)
+    vm_tmpl = _resolve_vm_template(db, registry, vm.name, vm.template)
+    ws_tmpl = _resolve_ws_template(db, registry, workspace.name, workspace.template)
 
     # No session context: add-shell panes are sidecar shells, not part of
     # the session itself. No agent_name in the ctx either -- the agent
@@ -297,12 +300,14 @@ def _resolve_pane_env(
     )
 
     if is_admin_pane:
+        from agentworks.vms.admin_templates import resolve_live_template as _resolve_admin_template
+
         return compose_env(
             values=values,
             ctx=ctx,
             vm=vm_tmpl.env,
             workspace=ws_tmpl.env,
-            admin=admin_template(registry, vm.admin_template or "default").env,
+            admin=_resolve_admin_template(db, registry, vm.name, vm.admin_template).env,
         )
 
     if session.agent_name is None:
@@ -316,7 +321,7 @@ def _resolve_pane_env(
     agent = db.get_agent(session.agent_name)
     if agent is None:
         return {}
-    agent_tmpl = _resolve_agent_template(registry, agent.template)
+    agent_tmpl = _resolve_agent_template(db, registry, agent.name, agent.template)
     return compose_env(
         values=values,
         ctx=ctx,

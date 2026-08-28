@@ -19,24 +19,18 @@ selector exists (issue #165).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 from agentworks.origin import Origin
-from agentworks.resources.kind import (
-    ALWAYS_MATERIALIZE_SOURCE,
-    KIND_REGISTRY,
-    InstanceRef,
-)
+from agentworks.resources.kind import ALWAYS_MATERIALIZE_SOURCE, KIND_REGISTRY
 from agentworks.sessions.template import NamedConsoleConfig, SessionTemplate
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Sequence
 
-    from agentworks.db import Database
     from agentworks.declared_resource import DeclaredResource
     from agentworks.resources.reference import ResourceReference
-    from agentworks.resources.registry import Registry
 
 
 @dataclass(frozen=True)
@@ -80,18 +74,6 @@ class _SessionTemplateKind:
         """
         source = references[0].source if references else ALWAYS_MATERIALIZE_SOURCE
         return SessionTemplate(name="default", origin=Origin.auto_declared(source=source))
-
-    def instances(self, db: Database, registry: Registry, resource: Any) -> Iterable[InstanceRef]:
-        """Every session whose ``template`` column matches this
-        SessionTemplate's name. ``SessionRow.template`` is non-optional,
-        so the NULL-as-default fallback used by other template kinds
-        doesn't apply here -- sessions are always created with an
-        explicit template value (``default`` when none is specified).
-        """
-        name = resource.name
-        for sess in db.list_sessions():
-            if sess.template == name:
-                yield InstanceRef(instance_kind="session", instance_name=sess.name)
 
 
 @dataclass(frozen=True)
@@ -140,30 +122,6 @@ class _NamedConsoleTemplateKind:
         """
         source = references[0].source if references else ALWAYS_MATERIALIZE_SOURCE
         return NamedConsoleConfig(name="default", origin=Origin.auto_declared(source=source))
-
-    def instances(self, db: Database, registry: Registry, resource: Any) -> Iterable[InstanceRef]:
-        """Every console implicitly uses the singleton
-        ``named-console-template:default`` -- there's no per-console
-        template column on the operator surface yet, and
-        ``NamedConsoleConfig`` has not been plurified (no ``name`` field),
-        so the kind is effectively a singleton today. When operator
-        demand for named console templates lands, plurify
-        ``NamedConsoleConfig`` (mirror how ``admin-template`` was
-        plurified) and
-        switch this filter to ``resource.name`` + a ``console.template``
-        column.
-
-        Asymmetry with ``admin-template``: that kind guards with
-        ``if resource.name != "default": return`` because ``AdminConfig``
-        has a ``name`` field. ``NamedConsoleConfig``
-        doesn't have a ``name`` field yet, and the registry refuses any
-        non-``default`` named-console-template name via miss-policy
-        dispatch, so the guard isn't reachable today. When the plurified
-        surface lands and ``NamedConsoleConfig`` gains a ``name`` field,
-        mirror the ``admin-template`` shape exactly.
-        """
-        for console in db.list_consoles():
-            yield InstanceRef(instance_kind="console", instance_name=console.name)
 
 
 KIND_REGISTRY["session-template"] = _SessionTemplateKind()

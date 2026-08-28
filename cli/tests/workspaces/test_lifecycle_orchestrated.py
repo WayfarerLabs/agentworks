@@ -1863,6 +1863,31 @@ def test_rehome_routes_through_the_canonical_acl_helper(
     assert row is not None and row.workspace_path == "/dst/ws1"
 
 
+def test_rehome_removes_tmuxinator_projections_when_live_overlay_disables_them(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.instance_specs import parse_instance_spec
+
+    config = make_config()
+    _seed(db)
+    db._conn.execute("UPDATE workspaces SET template = 'copied' WHERE name = 'ws1'")
+    db._conn.commit()
+    overlay = parse_instance_spec("workspace", '{"tmuxinator":false}')
+    db.instance_state.put_desired_overlay("workspace", "ws1", overlay.payload)
+    _reachable(monkeypatch, True)
+    fake = _RehomeTarget()
+    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config_, **kwargs: fake)
+
+    workspace_manager.rehome_workspace(
+        db, config, "ws1", target_path="/dst/ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE
+    )
+
+    assert not any(path.endswith("/.tmuxinator.yml") for path, _content in fake.written)
+    assert any(command.startswith("rm -f ") and ".tmuxinator.yml" in command for command in fake.commands)
+
+
 class _RehomeThenRepairTarget(_FakeAdminTarget, SSHTransport):  # type: ignore[misc]  # the fake's recording run deliberately shadows the real signature
     """Stateful SSHTransport-typed fake spanning a rehome then a repair of the
     same workspace, mirroring ``_CopyThenRepairTarget``: the canonical ACL the

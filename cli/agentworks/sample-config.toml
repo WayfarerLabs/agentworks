@@ -74,6 +74,10 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # admin and agent homes there are kept private (mode 0750). Use a data volume path.
 #vm_workspaces = "/opt/agentworks/workspaces"  # workspace directory on VMs
 #vscode_workspaces = "~/aw-vscode-workspaces"   # .code-workspace file directory
+# VM backups include stored instance specs, which can contain plaintext
+# environment values. POSIX backup directories are owner-only; native Windows refuses
+# overlay-bearing backups until private-DACL export is supported. Keep this root
+# on trusted storage and protect copied archives equivalently.
 #backups = "~/.config/agentworks/backups"       # backup directory (vm backups)
 
 # --- System plugins ---

@@ -33,7 +33,9 @@ DEFAULT_HARNESS_INTEGRATION = "shell"
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from agentworks.db import Database
     from agentworks.env import EnvEntry
+    from agentworks.resources.inheritance import LayerContribution, LayeredResolution, LayerSource
     from agentworks.resources.registry import Registry
     from agentworks.sessions.template import SessionTemplate
 
@@ -101,6 +103,12 @@ class EffectiveSessionTemplate:
     harness: MergedHarness = MergedHarness()
 
 
+@dataclass
+class _SessionAccumulator:
+    resolved: ResolvedSessionTemplate
+    harness: MergedHarness
+
+
 def _merge_map(target: dict[str, EnvEntry], source: dict[str, EnvEntry]) -> dict[str, EnvEntry]:
     """Merge source env map into target. Source wins on key collision."""
     return {**target, **source}
@@ -109,8 +117,26 @@ def _merge_map(target: dict[str, EnvEntry], source: dict[str, EnvEntry]) -> dict
 def resolve_from_dict(
     templates: dict[str, SessionTemplate],
     template_name: str | None = None,
+    *,
+    overlay: SessionTemplate | None = None,
+    instance_name: str | None = None,
 ) -> ResolvedSessionTemplate:
     """Resolve a session template from a templates dict (no Config required)."""
+    return resolve_from_dict_with_provenance(
+        templates,
+        template_name,
+        overlay=overlay,
+        instance_name=instance_name,
+    ).value
+
+
+def resolve_from_dict_with_provenance(
+    templates: dict[str, SessionTemplate],
+    template_name: str | None = None,
+    *,
+    overlay: SessionTemplate | None = None,
+    instance_name: str | None = None,
+) -> LayeredResolution[ResolvedSessionTemplate]:
     if template_name is not None and template_name != "default":
         if template_name not in templates:
             raise unknown_template_error(
@@ -119,36 +145,121 @@ def resolve_from_dict(
                 name=template_name,
                 available=templates,
             )
-        return _resolve(templates, template_name)
+        return _resolve_with_provenance(templates, template_name, overlay=overlay, instance_name=instance_name)
 
     if "default" in templates:
-        return _resolve(templates, "default")
+        return _resolve_with_provenance(templates, "default", overlay=overlay, instance_name=instance_name)
 
-    return ResolvedSessionTemplate(name="default")
+    return _resolve_with_provenance({}, "default", overlay=overlay, instance_name=instance_name)
 
 
-def resolve_template(registry: Registry, template_name: str | None = None) -> ResolvedSessionTemplate:
+def resolve_template(
+    registry: Registry,
+    template_name: str | None = None,
+    *,
+    overlay: SessionTemplate | None = None,
+    instance_name: str | None = None,
+) -> ResolvedSessionTemplate:
     """Resolve a session template by name, applying inheritance."""
+
+    return resolve_template_with_provenance(
+        registry,
+        template_name,
+        overlay=overlay,
+        instance_name=instance_name,
+    ).value
+
+
+def resolve_template_with_provenance(
+    registry: Registry,
+    template_name: str | None = None,
+    *,
+    overlay: SessionTemplate | None = None,
+    instance_name: str | None = None,
+) -> LayeredResolution[ResolvedSessionTemplate]:
     from agentworks.resources.access import kind_dict
 
-    return resolve_from_dict(kind_dict(registry, "session-template"), template_name)
+    return resolve_from_dict_with_provenance(
+        kind_dict(registry, "session-template"),
+        template_name,
+        overlay=overlay,
+        instance_name=instance_name,
+    )
+
+
+def resolve_live_template(
+    db: Database,
+    registry: Registry,
+    instance_name: str,
+    template_name: str | None,
+) -> ResolvedSessionTemplate:
+    """Resolve a persisted session's template chain plus its stored final layer."""
+    from typing import cast
+
+    from agentworks.instance_specs import get_instance_overlay
+
+    overlay = get_instance_overlay(db, "session", instance_name)
+    if overlay is None:
+        return resolve_template(registry, template_name)
+    return resolve_template(
+        registry,
+        template_name,
+        overlay=cast("SessionTemplate", overlay.declaration),
+        instance_name=instance_name,
+    )
+
+
+def resolve_live_template_with_provenance(
+    db: Database,
+    registry: Registry,
+    instance_name: str,
+    template_name: str | None,
+) -> LayeredResolution[ResolvedSessionTemplate]:
+    """Resolve a persisted session and retain its layer provenance."""
+    from typing import cast
+
+    from agentworks.instance_specs import get_instance_overlay
+
+    overlay = get_instance_overlay(db, "session", instance_name)
+    return resolve_template_with_provenance(
+        registry,
+        template_name,
+        overlay=None if overlay is None else cast("SessionTemplate", overlay.declaration),
+        instance_name=instance_name,
+    )
 
 
 def effective_template(templates: Mapping[str, SessionTemplate], name: str) -> EffectiveSessionTemplate:
     """The effective (merged) declaration of ``name``, for the finalize
     passes. TOTAL; see ``vms/templates.effective_template`` for why the
     degradation on a cyclic chain is never observed."""
+    return effective_template_with_provenance(templates, name).value
+
+
+def effective_template_with_provenance(
+    templates: Mapping[str, SessionTemplate],
+    name: str,
+) -> LayeredResolution[EffectiveSessionTemplate]:
+    """The total finalize view with the provenance of every surviving value."""
     from agentworks.errors import InheritanceCycleError
+    from agentworks.resources.inheritance import LayeredResolution
 
     try:
-        return _resolve_walk(templates, name)
+        layered = _resolve_walk_with_provenance(templates, name)
     except InheritanceCycleError:
-        return EffectiveSessionTemplate(resolved=ResolvedSessionTemplate(name=name))
+        return LayeredResolution(EffectiveSessionTemplate(resolved=ResolvedSessionTemplate(name=name)), {})
+    return LayeredResolution(
+        EffectiveSessionTemplate(resolved=layered.value.resolved, harness=layered.value.harness),
+        layered.provenance,
+    )
 
 
 def _resolve(
     templates: Mapping[str, SessionTemplate],
     name: str,
+    *,
+    overlay: SessionTemplate | None = None,
+    instance_name: str | None = None,
 ) -> ResolvedSessionTemplate:
     """Depth-first, left-to-right resolution.
 
@@ -159,14 +270,36 @@ def _resolve(
     merge, with the rest of hard validation (FR12), and construction
     re-validates the blob it binds.
     """
-    effective = _resolve_walk(templates, name)
-    result = effective.resolved
-    result.harness_integration = effective.harness.name or DEFAULT_HARNESS_INTEGRATION
-    result.harness_integration_config = dict(effective.harness.config)
-    return result
+    return _resolve_with_provenance(
+        templates,
+        name,
+        overlay=overlay,
+        instance_name=instance_name,
+    ).value
 
 
-def _declared_pair(tmpl: SessionTemplate) -> MergedHarness:
+def _resolve_with_provenance(
+    templates: Mapping[str, SessionTemplate],
+    name: str,
+    *,
+    overlay: SessionTemplate | None = None,
+    instance_name: str | None = None,
+) -> LayeredResolution[ResolvedSessionTemplate]:
+    from agentworks.resources.inheritance import LayeredResolution
+
+    layered = _resolve_walk_with_provenance(
+        templates,
+        name,
+        overlay=overlay,
+        instance_name=instance_name,
+    )
+    result = layered.value.resolved
+    result.harness_integration = layered.value.harness.name or DEFAULT_HARNESS_INTEGRATION
+    result.harness_integration_config = dict(layered.value.harness.config)
+    return LayeredResolution(result, layered.provenance)
+
+
+def _declared_pair(tmpl: SessionTemplate, source: LayerSource | None = None) -> MergedHarness:
     """One template's OWN harness declaration, in the shape the fold
     takes. ``name`` is ``None`` when this template declares no
     integration, which is what :func:`_merge_pair` reads as "says nothing"
@@ -175,18 +308,23 @@ def _declared_pair(tmpl: SessionTemplate) -> MergedHarness:
     block = tmpl.harness_integration
     if block is None:
         return MergedHarness()
-    owner = RefOwner(kind="session-template", name=tmpl.name)
+    owner_kind = "session-template" if source is None else source.resource_kind
+    owner_name = tmpl.name if source is None else source.name
+    owner = RefOwner(kind=owner_kind, name=owner_name)
     return MergedHarness(
         name=block.name,
         config=block.config,
         provenance=dict.fromkeys(block.config, owner),
-        declared_by=("session-template", tmpl.name),
+        declared_by=(owner_kind, owner_name),
     )
 
 
 def _resolve_walk(
     templates: Mapping[str, SessionTemplate],
     name: str,
+    *,
+    overlay: SessionTemplate | None = None,
+    instance_name: str | None = None,
 ) -> EffectiveSessionTemplate:
     """Resolve ``name``'s chain: one accumulator per half, folded over the
     chain's declarations in merge order.
@@ -211,16 +349,119 @@ def _resolve_walk(
     it, contradicting the rule :func:`_merge_pair` documents. Pinned by
     ``tests/sessions/test_session_template_surface.py``.
     """
+    layered = _resolve_walk_with_provenance(
+        templates,
+        name,
+        overlay=overlay,
+        instance_name=instance_name,
+    )
+    return EffectiveSessionTemplate(resolved=layered.value.resolved, harness=layered.value.harness)
+
+
+def _resolve_walk_with_provenance(
+    templates: Mapping[str, SessionTemplate],
+    name: str,
+    *,
+    overlay: SessionTemplate | None = None,
+    instance_name: str | None = None,
+) -> LayeredResolution[_SessionAccumulator]:
     # Imported here, not at module level: ``agentworks.resources``'s package
     # init loads every kind module, and every kind module reaches this one.
-    from agentworks.resources.inheritance import resolution_layers
+    from agentworks.resources.inheritance import (
+        DeclarationLayer,
+        LayerSource,
+        LayerSourceKind,
+        resolution_layers,
+        run_layer_fold,
+    )
 
-    result = ResolvedSessionTemplate(name=name)
-    harness = MergedHarness()
-    for layer in resolution_layers(templates, name, "session-template"):
-        _merge_template(result, layer)
-        harness = _merge_pair(harness, _declared_pair(layer))
-    return EffectiveSessionTemplate(resolved=result, harness=harness)
+    layers = [
+        DeclarationLayer(
+            LayerSource(LayerSourceKind.TEMPLATE, "session-template", layer.name),
+            layer,
+        )
+        for layer in resolution_layers(templates, name, "session-template")
+    ]
+    if overlay is not None:
+        layers.append(
+            DeclarationLayer(
+                LayerSource(LayerSourceKind.INSTANCE, "session", instance_name or overlay.name),
+                overlay,
+            )
+        )
+    return run_layer_fold(
+        _SessionAccumulator(ResolvedSessionTemplate(name=name), MergedHarness()),
+        layers,
+        _merge_session_layer,
+        default_paths=(("description",), ("harness_integration",)),
+        default_resource_kind="session-template",
+        default_name=name,
+    )
+
+
+def _merge_session_layer(
+    target: _SessionAccumulator,
+    tmpl: SessionTemplate,
+    source: LayerSource,
+) -> tuple[_SessionAccumulator, tuple[LayerContribution, ...]]:
+    from agentworks.resources.inheritance import LayerContribution
+
+    target.resolved, template_paths = _merge_template(target.resolved, tmpl, source)
+    declared = _declared_pair(tmpl, source)
+    same_integration = declared.name == target.harness.name
+    previous_config = target.harness.config
+    target.harness = _merge_pair(target.harness, declared)
+    harness_paths: list[LayerContribution] = []
+    if declared.name is not None:
+        harness_paths.append(LayerContribution.replacement("harness_integration"))
+        if not same_integration:
+            harness_paths.append(LayerContribution.reset_prefix("harness_integration_config"))
+        else:
+            for key in previous_config:
+                if key not in target.harness.config:
+                    harness_paths.append(LayerContribution.reset_prefix("harness_integration_config", key))
+        for key, value in declared.config.items():
+            merged_value = target.harness.config.get(key)
+            if isinstance(value, list) and isinstance(merged_value, list):
+                previous_value = previous_config.get(key)
+                additive = (
+                    same_integration
+                    and isinstance(previous_value, list)
+                    and _list_merge_preserves_base(declared.name, key, value)
+                )
+                if not additive:
+                    harness_paths.append(LayerContribution.reset_prefix("harness_integration_config", key))
+                    contributed = merged_value
+                else:
+                    assert isinstance(previous_value, list)
+                    surviving = {repr(item) for item in merged_value}
+                    harness_paths.extend(
+                        LayerContribution.reset_prefix("harness_integration_config", key, repr(item))
+                        for item in previous_value
+                        if repr(item) not in surviving
+                    )
+                    contributed = [item for item in value if repr(item) in surviving]
+                harness_paths.extend(
+                    LayerContribution.contribution("harness_integration_config", key, repr(item))
+                    for item in contributed
+                )
+            elif key in target.harness.config:
+                if isinstance(previous_config.get(key), list):
+                    harness_paths.append(LayerContribution.reset_prefix("harness_integration_config", key))
+                harness_paths.append(LayerContribution.replacement("harness_integration_config", key))
+    return target, (*template_paths, *harness_paths)
+
+
+def _list_merge_preserves_base(integration_name: str, key: str, child: list[object]) -> bool:
+    """Ask the integration's reducer whether this list key accumulates."""
+    from agentworks.capabilities.harness_integration import merged_config
+
+    sentinel = "\x00agentworks-provenance-sentinel"
+    while sentinel in child:
+        sentinel += "-next"
+    probe = merged_config(integration_name, {key: [sentinel]}, {key: child})
+    merged = probe.get(key)
+    return isinstance(merged, list) and sentinel in merged
 
 
 def _merge_pair(acc: MergedHarness, child: MergedHarness) -> MergedHarness:
@@ -260,12 +501,22 @@ def _merge_pair(acc: MergedHarness, child: MergedHarness) -> MergedHarness:
     )
 
 
-def _merge_template(target: ResolvedSessionTemplate, tmpl: SessionTemplate) -> None:
+def _merge_template(
+    target: ResolvedSessionTemplate,
+    tmpl: SessionTemplate,
+    _source: object,
+) -> tuple[ResolvedSessionTemplate, tuple[LayerContribution, ...]]:
     """Fold one declared SessionTemplate's description / env into the
     accumulator (the pair folds separately, via :func:`_merge_pair`).
     None = not set, skip. Scalars: later layer overrides. Maps: merge with
     the later layer winning. The only writer of those two fields."""
+    from agentworks.resources.inheritance import LayerContribution
+
+    touched: list[LayerContribution] = []
     if tmpl.description is not None:
         target.description = tmpl.description
+        touched.append(LayerContribution.replacement("description"))
     if tmpl.env:
         target.env = _merge_map(target.env, tmpl.env)
+        touched.extend(LayerContribution.replacement("env", key) for key in tmpl.env)
+    return target, tuple(touched)

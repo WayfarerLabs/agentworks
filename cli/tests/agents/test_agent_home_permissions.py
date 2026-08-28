@@ -133,6 +133,7 @@ def _run_create_on_vm(
         agent_name="dev",
         git_tokens={},
         logger=SSHLogger("box", "test-home-perms"),
+        admin_git_force_safe_directory=True,
     )
     return admin, agent
 

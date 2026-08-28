@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import subprocess
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from agentworks import output
 from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from agentworks.db import Database, WorkspaceRow
     from agentworks.machine_output import JsonObject
     from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.workspaces.template import WorkspaceTemplate
 
 # NAME-column truncation cap for ``workspace list``, derived from the
 # workspace-name cap so the two cannot drift: a valid name (<= 29) never
@@ -131,6 +132,7 @@ def create_workspace(
     name: str,
     vm_name: str | None = None,
     template_name: str | None = None,
+    spec: str | None = None,
     open_vscode: bool = False,
     interaction: TtyInteractionPolicy,
 ) -> None:
@@ -151,9 +153,10 @@ def create_workspace(
     """
     from agentworks.bootstrap import load_request_registry
 
-    # build_registry runs first so framework miss-policies fire before
-    # any template / DB / VM business logic.
-    registry = load_request_registry(config)
+    # A declaration-only registry runs first so framework miss-policies fire
+    # before any template / DB / VM business logic. The pending-plus-durable
+    # registry built below is the authoritative graph for mutation.
+    registry = load_request_registry(config, include_live_resources=False)
 
     ws_name = name
     validate_name(ws_name, max_length=MAX_WORKSPACE_NAME_LENGTH)
@@ -164,16 +167,26 @@ def create_workspace(
             entity_kind="workspace",
             entity_name=ws_name,
         )
+    from agentworks.instance_specs import refuse_orphan_creation_state
+
+    refuse_orphan_creation_state(db, "workspace", ws_name)
 
     # Cheap validation FIRST, before the gate and before any secret is
     # touched: template resolution, the repo advisories (config-only,
     # no tokens), and the VM init-status guard all fail with zero
     # prompts and zero VM starts, the same bail-early precedence every
     # migrated sibling keeps.
-    from agentworks.workspaces.templates import resolve_template
+    from agentworks.instance_specs import parse_instance_spec
+    from agentworks.workspaces.templates import resolve_template_with_provenance
 
-    template = resolve_template(registry, template_name)
-
+    overlay = None if spec is None else parse_instance_spec("workspace", spec)
+    layered_template = resolve_template_with_provenance(
+        registry,
+        template_name,
+        overlay=None if overlay is None else cast("WorkspaceTemplate", overlay.declaration),
+        instance_name=name,
+    )
+    template = layered_template.value
     # Advise if the resolved template's repo remote will not resolve
     # cleanly against the declared git credentials (config-only, no
     # tokens). Each credential judges the URL by its own host/scope
@@ -186,6 +199,22 @@ def create_workspace(
             output.warn(advisory)
 
     vm = _resolve_vm(db, vm_name)
+    from agentworks.resources.live_publish import project_workspace_live_resource
+
+    pending = project_workspace_live_resource(
+        name=name,
+        vm_name=vm.name,
+        template_name="default" if template_name is None else template_name,
+        layered=layered_template,
+    )
+    registry = load_request_registry(
+        config,
+        live_database=db,
+        pending_publishers=(lambda target: target.add_live(pending),),
+    )
+    from agentworks.instance_specs import ensure_effective_references_enabled
+
+    ensure_effective_references_enabled(registry, pending.outbound)
     _guard_vm_status(vm)
 
     # BUILD: the command names its direct resources (this VM, the
@@ -250,6 +279,7 @@ def create_workspace(
             name=ws_name,
             vm=vm,
             template=template,
+            overlay=overlay,
         )
         # Bookkeeping only, deliberately not via a realization log:
         # this command never unwinds a realized workspace (a failure
@@ -294,7 +324,8 @@ def render_workspace_description(description: WorkspaceDescription) -> None:
     ws = description.workspace
     output.info(f"Name:       {ws.name}")
     output.info(f"VM:         {ws.vm_name}")
-    output.info(f"Template:   {ws.template or 'default'}")
+    template_name = "default" if ws.template is None else ws.template
+    output.info(f"Template:   {template_name}")
     output.info(f"Path:       {ws.path}")
     output.info(f"Created:    {ws.created_at}")
 

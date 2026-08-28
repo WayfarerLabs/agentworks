@@ -3,8 +3,11 @@
 
 from __future__ import annotations
 
+import sqlite3
 from textwrap import dedent
 from typing import TYPE_CHECKING
+
+import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
@@ -211,7 +214,9 @@ def test_names_only_lists_every_registry_secret(tmp_path: Path, monkeypatch) -> 
     the table's rows."""
     from typer.testing import CliRunner
 
+    from agentworks import db
     from agentworks.cli import app
+    from agentworks.cli.commands import secret
 
     cfg_file = tmp_path / "config.toml"
     _write_base(
@@ -223,6 +228,9 @@ def test_names_only_lists_every_registry_secret(tmp_path: Path, monkeypatch) -> 
         ],
     )
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
+    database_path = tmp_path / "state.db"
+    monkeypatch.setattr(db, "DB_PATH", database_path)
+    monkeypatch.setattr(secret, "get_db", lambda: (_ for _ in ()).throw(AssertionError("no get_db")))
 
     result = CliRunner().invoke(app, ["secret", "list", "--names-only"])
     assert result.exit_code == 0, result.stdout
@@ -233,6 +241,71 @@ def test_names_only_lists_every_registry_secret(tmp_path: Path, monkeypatch) -> 
     assert "a-token" in names
     assert "z-token" in names
     assert "tailscale-auth-key" in names
+    assert not database_path.exists()
+
+
+@pytest.mark.parametrize(
+    "database_state",
+    ["stale", "newer", "malformed", "busy", "unreadable", "unsupported-overlay", "stranded-overlay"],
+)
+def test_secret_names_only_falls_back_when_database_is_unusable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    database_state: str,
+) -> None:
+    from typer.testing import CliRunner
+
+    from agentworks import db
+    from agentworks.cli import app
+    from agentworks.db import LATEST_VERSION, Database, VersionedPayload
+
+    cfg_file = tmp_path / "config.toml"
+    _write_base(cfg_file, manifests=[ManifestDoc("secret", "declared", description="declared")])
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
+    database_path = tmp_path / "state.db"
+    lock: sqlite3.Connection | None = None
+
+    if database_state in {"stale", "newer", "busy"}:
+        Database(database_path).close()
+    if database_state in {"stale", "newer"}:
+        connection = sqlite3.connect(database_path)
+        version = LATEST_VERSION - 1 if database_state == "stale" else LATEST_VERSION + 1
+        connection.execute("UPDATE schema_version SET version = ?", (version,))
+        connection.commit()
+        connection.close()
+    elif database_state == "malformed":
+        database_path.write_bytes(b"not sqlite")
+    elif database_state == "busy":
+        lock = sqlite3.connect(database_path)
+        lock.execute("BEGIN EXCLUSIVE")
+    elif database_state == "unreadable":
+        database_path.mkdir()
+    else:
+        database = Database(database_path)
+        database.insert_vm("box", "lima-local", "box")
+        database.insert_agent("dev", "box", "dev")
+        payload = (
+            VersionedPayload(2, {"future_field": True})
+            if database_state == "unsupported-overlay"
+            else VersionedPayload(1, {"user_install_commands": ["gone"]})
+        )
+        database.instance_state.put_desired_overlay(
+            "agent",
+            "dev",
+            payload,
+        )
+        database.close()
+
+    monkeypatch.setattr(db, "DB_PATH", database_path)
+    try:
+        result = CliRunner().invoke(app, ["secret", "list", "--names-only"])
+    finally:
+        if lock is not None:
+            lock.rollback()
+            lock.close()
+
+    assert result.exit_code == 0, result.output
+    assert "declared" in result.stdout.splitlines()
 
 
 def test_empty_backend_chain_yields_no_columns(tmp_path: Path) -> None:

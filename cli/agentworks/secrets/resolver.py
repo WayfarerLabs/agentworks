@@ -77,7 +77,12 @@ class Resolver:
         for decl in decls:
             self._decls.setdefault(decl.name, decl)
 
-    def register_targets(self, targets: Sequence[SecretTarget]) -> None:
+    def register_targets(
+        self,
+        targets: Sequence[SecretTarget],
+        *,
+        allow_transient_auto_declare: bool = False,
+    ) -> None:
         """Register every secret referenced by the targets' env chains.
 
         This is how the runtime env system joins the operation's one
@@ -91,7 +96,13 @@ class Resolver:
 
         retained = list(targets)
         self._targets.extend(retained)
-        self.register(compute_needed_secrets(retained, self._registry))
+        self.register(
+            compute_needed_secrets(
+                retained,
+                self._registry,
+                allow_transient_auto_declare=allow_transient_auto_declare,
+            )
+        )
 
     def register_name(self, name: str) -> SecretDecl:
         """Register a secret by name and return its declaration.

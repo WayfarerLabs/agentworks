@@ -42,8 +42,11 @@ from agentworks import output
 from agentworks.errors import ExternalError
 
 if TYPE_CHECKING:
+    from pydantic import BaseModel
+
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, VMRow
+    from agentworks.instance_specs import InstanceOverlay
     from agentworks.resources.registry import Registry
 
     from .templates import ResolvedAgentTemplate
@@ -59,6 +62,8 @@ def realize_agent(
     template: ResolvedAgentTemplate,
     git_tokens: dict[str, str],
     grant_all_workspaces: bool = False,
+    overlay: InstanceOverlay[BaseModel] | None = None,
+    defer_overlay_report: bool = False,
 ) -> AgentRow:
     """Make agent ``name`` real on ``vm``: create and configure the
     Linux user (including the git-credential materials, their write-step
@@ -101,6 +106,8 @@ def realize_agent(
     # rollback commands are logged BEFORE the footer, not after.
     try:
         try:
+            from agentworks.vms.admin_templates import resolve_live_template as resolve_admin_template
+
             create_agent_on_vm(
                 vm,
                 config,
@@ -110,7 +117,26 @@ def realize_agent(
                 agent_name=name,
                 git_tokens=git_tokens,
                 logger=ssh_logger,
+                admin_git_force_safe_directory=resolve_admin_template(
+                    db,
+                    registry,
+                    vm.name,
+                    vm.admin_template,
+                ).git_force_safe_directory,
             )
+
+            from agentworks.instance_specs import persist_creation_overlay, refuse_orphan_creation_state
+
+            with db.transaction():
+                refuse_orphan_creation_state(db, "agent", name)
+                agent = db.insert_agent(
+                    name,
+                    vm.name,
+                    linux_user,
+                    template=template.name,
+                    grant_all=grant_all_workspaces,
+                )
+                overlay_outcome = persist_creation_overlay(db, "agent", name, overlay)
         except KeyboardInterrupt:
             output.warn(f"Cancelling agent create '{name}'... rolling back.")
             _safe_rollback()
@@ -124,29 +150,31 @@ def realize_agent(
                 hint=f"SSH log: {ssh_logger.display_path}",
             ) from e
     finally:
-        ssh_logger.close()
+        try:
+            ssh_logger.close()
+        except BaseException:
+            if not defer_overlay_report:
+                from agentworks.instance_specs import render_retained_creation_overlay
 
-    agent = db.insert_agent(
-        name,
-        vm.name,
-        linux_user,
-        template=template.name,
-        grant_all=grant_all_workspaces,
-    )
+                render_retained_creation_overlay(db, "agent", name)
+            raise
 
-    # If grant_all, add to all existing workspace groups
-    if grant_all_workspaces:
-        from agentworks.agents.grants import add_to_workspace_group
+    from agentworks.instance_specs import report_overlay_outcome
 
-        for ws in db.list_workspaces(vm_name=vm.name):
-            add_to_workspace_group(vm, config, db, linux_user, ws.name, logger=None)
-            db.insert_agent_grant(name, ws.name, "explicit")
+    with report_overlay_outcome(None if defer_overlay_report else overlay_outcome):
+        # If grant_all, add to all existing workspace groups
+        if grant_all_workspaces:
+            from agentworks.agents.grants import add_to_workspace_group
 
-    # Refresh operator SSH config so `ssh <prefix><vm>--<agent>` works.
-    # Declarative rebuild from DB state picks up the new agent row.
-    from agentworks.ssh_config import sync_ssh_config
+            for ws in db.list_workspaces(vm_name=vm.name):
+                add_to_workspace_group(vm, config, db, linux_user, ws.name, logger=None)
+                db.insert_agent_grant(name, ws.name, "explicit")
 
-    sync_ssh_config(config, db)
+        # Refresh operator SSH config so `ssh <prefix><vm>--<agent>` works.
+        # Declarative rebuild from DB state picks up the new agent row.
+        from agentworks.ssh_config import sync_ssh_config
 
-    output.info(f"Agent '{name}' created on VM '{vm.name}' (user: {agent.linux_user})")
+        sync_ssh_config(config, db)
+
+        output.info(f"Agent '{name}' created on VM '{vm.name}' (user: {agent.linux_user})")
     return agent

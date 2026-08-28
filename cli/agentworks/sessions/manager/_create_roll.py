@@ -70,15 +70,23 @@ def _realize_ephemerals(
         # (used by the standalone `workspace create` path too), so the
         # session flow must not echo it a second time here.
         with output.section("Creating Workspace"):
-            realize_workspace(
-                db,
-                config,
-                registry,
-                name=plan.workspace_name,
-                vm=vm,
-                template=graph.workspace_tmpl,
-            )
-            log.mark_realized(graph.pending_workspace)
+            try:
+                realize_workspace(
+                    db,
+                    config,
+                    registry,
+                    name=plan.workspace_name,
+                    vm=vm,
+                    template=graph.workspace_tmpl,
+                    overlay=graph.workspace_overlay,
+                    defer_overlay_report=True,
+                )
+            except BaseException:
+                if db.get_workspace(plan.workspace_name) is not None:
+                    log.mark_realized(graph.pending_workspace)
+                raise
+            else:
+                log.mark_realized(graph.pending_workspace)
     if graph.pending_agent is not None:
         from agentworks.agents.nodes import credential_tokens
         from agentworks.agents.realize import realize_agent
@@ -92,16 +100,24 @@ def _realize_ephemerals(
             # graph-derived fold replaces the nested create_agent's
             # git_tokens hand-off).
             git_tokens = credential_tokens(graph.agent_tmpl_node, scoped_ctx)
-            realize_agent(
-                db,
-                config,
-                registry,
-                name=plan.agent_name,
-                vm=vm,
-                template=graph.agent_tmpl,
-                git_tokens=git_tokens,
-            )
-            log.mark_realized(graph.pending_agent)
+            try:
+                realize_agent(
+                    db,
+                    config,
+                    registry,
+                    name=plan.agent_name,
+                    vm=vm,
+                    template=graph.agent_tmpl,
+                    git_tokens=git_tokens,
+                    overlay=graph.agent_overlay,
+                    defer_overlay_report=True,
+                )
+            except BaseException:
+                if db.get_agent(plan.agent_name) is not None:
+                    log.mark_realized(graph.pending_agent)
+                raise
+            else:
+                log.mark_realized(graph.pending_agent)
 
 
 def _start_session_slice(
@@ -257,17 +273,22 @@ def _start_session_slice(
             # delete). The harness_integration's start op ran just above, so its
             # state (mutated in place inside the node's full namespaced
             # blob) lands with the new row.
-            db.insert_session(
-                name,
-                workspace_name,
-                template.name,
-                mode,
-                agent_name=resolved_agent_name,
-                created_workspace=pending_workspace is not None,
-                created_agent=pending_agent is not None,
-                socket_path=expected_socket,
-                harness_integration_state=session_node.harness_integration_state,
-            )
+            from agentworks.instance_specs import persist_creation_overlay, refuse_orphan_creation_state
+
+            with db.transaction():
+                refuse_orphan_creation_state(db, "session", name)
+                db.insert_session(
+                    name,
+                    workspace_name,
+                    template.name,
+                    mode,
+                    agent_name=resolved_agent_name,
+                    created_workspace=pending_workspace is not None,
+                    created_agent=pending_agent is not None,
+                    socket_path=expected_socket,
+                    harness_integration_state=session_node.harness_integration_state,
+                )
+                persist_creation_overlay(db, "session", name, graph.session_overlay)
 
             deploy_restricted_config(run_command, history_limit=config.session.history_limit)
             session_env = _mgr._resolve_session_env(
@@ -397,6 +418,7 @@ def _roll_forward(
     except KeyboardInterrupt:
         output.warn(f"Cancelling session create '{plan.name}'... rolling back.")
         log.unwind()
+        _render_retained_overlay_outcomes(db, plan, graph)
         raise
     except Exception as e:
         # Print the reason BEFORE the rollback's delete-* messages so the
@@ -407,4 +429,19 @@ def _roll_forward(
         # the silence between "thing X created" and the rollback output.
         output.warn(f"Session create '{plan.name}' failed; rolling back. Reason: {e}")
         log.unwind()
+        _render_retained_overlay_outcomes(db, plan, graph)
         raise
+    else:
+        _render_retained_overlay_outcomes(db, plan, graph)
+
+
+def _render_retained_overlay_outcomes(db: Database, plan: SessionPlan, graph: SessionGraph) -> None:
+    """Report only desired layers whose owners remain after this roll-forward."""
+    from agentworks.instance_specs import render_retained_creation_overlay
+
+    if graph.pending_workspace is not None:
+        render_retained_creation_overlay(db, "workspace", plan.workspace_name)
+    if graph.pending_agent is not None:
+        assert plan.agent_name is not None
+        render_retained_creation_overlay(db, "agent", plan.agent_name)
+    render_retained_creation_overlay(db, "session", plan.name)

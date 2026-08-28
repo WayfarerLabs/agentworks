@@ -13,13 +13,97 @@ from ._create_plan import _resolve_session_plan
 from ._create_roll import _roll_forward
 
 if TYPE_CHECKING:
+    from pydantic import BaseModel
+
+    from agentworks.agents.template import AgentTemplate
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
+    from agentworks.instance_specs import InstanceOverlay
+    from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.sessions.template import SessionTemplate
     from agentworks.sessions.tmux import RunCommand
     from agentworks.transports import Transport
+    from agentworks.workspaces.template import WorkspaceTemplate
 
     from ._create_types import SessionGraph, SessionPlan
+
+
+def _publish_pending_plan(
+    registry: Registry,
+    plan: SessionPlan,
+    *,
+    template_name: str | None,
+    session_overlay: InstanceOverlay[BaseModel] | None,
+    workspace_overlay: InstanceOverlay[BaseModel] | None,
+    agent_overlay: InstanceOverlay[BaseModel] | None,
+) -> None:
+    """Publish a compound session create as prospective live resources."""
+    from typing import cast
+
+    from agentworks.resources.live_publish import (
+        project_agent_live_resource,
+        project_session_live_resource,
+        project_workspace_live_resource,
+    )
+
+    if plan.new_workspace:
+        from agentworks.workspaces.templates import resolve_template_with_provenance as resolve_workspace
+
+        selected = "default" if plan.workspace_template is None else plan.workspace_template
+        workspace_layered = resolve_workspace(
+            registry,
+            selected,
+            overlay=(None if workspace_overlay is None else cast("WorkspaceTemplate", workspace_overlay.declaration)),
+            instance_name=plan.workspace_name,
+        )
+        registry.add_live(
+            project_workspace_live_resource(
+                name=plan.workspace_name,
+                vm_name=plan.target_vm_name,
+                template_name=selected,
+                layered=workspace_layered,
+            )
+        )
+
+    if plan.new_agent:
+        from agentworks.agents.templates import resolve_template_with_provenance as resolve_agent
+
+        assert plan.agent_name is not None
+        selected = "default" if plan.agent_template is None else plan.agent_template
+        agent_layered = resolve_agent(
+            registry,
+            selected,
+            overlay=None if agent_overlay is None else cast("AgentTemplate", agent_overlay.declaration),
+            instance_name=plan.agent_name,
+        )
+        registry.add_live(
+            project_agent_live_resource(
+                name=plan.agent_name,
+                vm_name=plan.target_vm_name,
+                template_name=selected,
+                layered=agent_layered,
+            )
+        )
+
+    from agentworks.sessions.templates import resolve_template_with_provenance as resolve_session
+
+    selected = "default" if template_name is None else template_name
+    session_layered = resolve_session(
+        registry,
+        selected,
+        overlay=None if session_overlay is None else cast("SessionTemplate", session_overlay.declaration),
+        instance_name=plan.name,
+    )
+    registry.add_live(
+        project_session_live_resource(
+            name=plan.name,
+            workspace_name=plan.workspace_name,
+            agent_name=plan.agent_name,
+            template_name=selected,
+            layered=session_layered,
+        )
+    )
 
 
 def _reload_vm(db: Database, target_vm_name: str) -> VMRow:
@@ -137,16 +221,19 @@ def create_session(
     *,
     name: str,
     template_name: str | None = None,
+    spec: str | None = None,
     # Workspace selection (CLI-flag-shaped; service consolidates):
     workspace: str | None = None,
     new_workspace: bool = False,
     workspace_name: str | None = None,
     workspace_template: str | None = None,
+    workspace_spec: str | None = None,
     # Agent / admin selection (CLI-flag-shaped; service consolidates):
     agent: str | None = None,
     new_agent: bool = False,
     agent_name: str | None = None,
     agent_template: str | None = None,
+    agent_spec: str | None = None,
     admin: bool = False,
     # VM anchor (validated against workspace/agent VMs when both specified):
     vm_name: str | None = None,
@@ -186,15 +273,41 @@ def create_session(
     """
     from agentworks.bootstrap import load_request_registry
 
-    # build_registry runs first so framework miss-policies (e.g. typos
+    # A declaration-only registry runs first so framework miss-policies (e.g. typos
     # in agent template's git_credentials list, future TemplateReference
     # typos on inherits) surface as clean framework errors before any
     # flag validation, DB lookup, or ephemeral-resource creation. The
     # registry isn't yet consumed by create_session's flow (operator-env
     # secrets resolve via resolve_for_command's SecretTarget shape later),
     # but constructing it here makes the entry point's error-surface
-    # consistent with create_vm / create_agent / reinit_*.
-    registry = load_request_registry(config)
+    # consistent with create_vm / create_agent / reinit_*. The pending-plus-
+    # durable registry built after plan resolution is authoritative for mutation.
+    registry = load_request_registry(config, include_live_resources=False)
+
+    if workspace_spec is not None and not new_workspace:
+        from agentworks.errors import ValidationError
+
+        raise ValidationError("--workspace-spec requires --new-workspace", entity_kind="session", entity_name=name)
+    if agent_spec is not None and not new_agent:
+        from agentworks.errors import ValidationError
+
+        raise ValidationError("--agent-spec requires --new-agent", entity_kind="session", entity_name=name)
+
+    from agentworks.instance_specs import parse_instance_spec, refuse_orphan_creation_state
+    from agentworks.naming import validate_name
+    from agentworks.sessions.tmux import MAX_SESSION_NAME_LENGTH
+
+    session_overlay = None if spec is None else parse_instance_spec("session", spec)
+    workspace_overlay = None if workspace_spec is None else parse_instance_spec("workspace", workspace_spec)
+    agent_overlay = None if agent_spec is None else parse_instance_spec("agent", agent_spec)
+
+    # The session identity is already final at the service boundary. Validate
+    # it before consulting persisted orphan state, then reject that state
+    # before plan resolution can prompt for workspace or mode. Ephemeral child
+    # identities are not final until the plan canonicalizes/defaults them, so
+    # their probes remain below.
+    validate_name(name, max_length=MAX_SESSION_NAME_LENGTH)
+    refuse_orphan_creation_state(db, "session", name)
 
     # ===== Resolve the plan (S1-S8: flags, prompts, anchors, VM) ============
     #
@@ -216,6 +329,34 @@ def create_session(
         vm_name=vm_name,
     )
 
+    registry = load_request_registry(
+        config,
+        live_database=db,
+        pending_publishers=(
+            lambda target: _publish_pending_plan(
+                target,
+                plan,
+                template_name=template_name,
+                session_overlay=session_overlay,
+                workspace_overlay=workspace_overlay,
+                agent_overlay=agent_overlay,
+            ),
+        ),
+    )
+    from agentworks.instance_specs import ensure_effective_references_enabled
+    from agentworks.resources.live import LiveResource
+
+    pending_identities = [("session", plan.name)]
+    if plan.new_workspace:
+        pending_identities.append(("workspace", plan.workspace_name))
+    if plan.new_agent:
+        assert plan.agent_name is not None
+        pending_identities.append(("agent", plan.agent_name))
+    for pending_kind, pending_name in pending_identities:
+        published = registry.lookup(pending_kind, pending_name)
+        assert isinstance(published, LiveResource)
+        ensure_effective_references_enabled(registry, published.outbound)
+
     # ===== Build the node graph (S9: nodes, resolver union, scope) ==========
     #
     # Cheap and pure: template resolution, node construction, the
@@ -228,6 +369,9 @@ def create_session(
         registry=registry,
         plan=plan,
         template_name=template_name,
+        session_overlay=session_overlay,
+        workspace_overlay=workspace_overlay,
+        agent_overlay=agent_overlay,
         interaction=interaction,
     )
 

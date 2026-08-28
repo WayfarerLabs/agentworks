@@ -2,23 +2,24 @@
 
 <!-- cspell:ignore sdds -->
 
-- Status: R2 feedback correction complete; R4 design accepted
+- Status: R2 merged; R4 correction complete pending merge; R3 and R5 pending
 - Date: 2026-08-23
-- Last revised: 2026-08-24
+- Last revised: 2026-08-27
 - Requirements: [frd.md](./frd.md)
 - R1 assessment: [database-assessment.md](./database-assessment.md)
 - R2 contract: [store-contract.md](./store-contract.md)
 - Instance-spec CLI: [instance-spec-cli.md](./instance-spec-cli.md)
-- Code basis: `333b70bf`, based on `main` with accepted R1 PR #632 merged
-- Delivery vehicle: merged R1 artifact PR #632; R2 store and accepted R4 design in PR #636;
+- Code basis: `20e7b6e2`, based on `main` with accepted R1 PR #632 and R2 PR #636 merged
+- Delivery vehicle: merged R1 artifact PR #632; merged R2 store and accepted R4 design PR #636;
   remaining phases as independently green PRs from `main`, stacked only for actual dependencies
 
 ## Delivery posture
 
 R1 is an independently reviewed coordination artifact merged through PR #632. R2 is an independently
-valuable, always-green persistence increment in PR #636: it establishes the store contract needed by
-this effort and wave 4 without exposing the later SSH, merge, CLI, and diagnostic risk in the same
-review. Its accepted R4 design artifacts remain response material for the later implementation.
+valuable, always-green persistence increment merged through PR #636: it establishes the store
+contract needed by this effort and wave 4 without exposing the later SSH, merge, CLI, and diagnostic
+risk in the same review. Its accepted R4 design artifacts remain response material for the later
+implementation.
 
 After PR #636 merges, each remaining delivery starts from `main` and is independently complete,
 reviewed, and green. Stack a PR only when its implementation actually depends on an unmerged
@@ -104,36 +105,114 @@ implementation does not begin until the saga lead accepts this checkpoint. Accep
 
 ## Phase 3: general layer stack and desired instance overlays
 
-- [ ] Finalize the R4 design from the four existing per-kind folds. Route a split for authenticated
+- [x] Finalize the R4 design from the four existing per-kind folds. Route a split for authenticated
       operator direction if one shared layer-stack mechanism cannot replace the four loops without a
       fifth instance-only merge.
-- [ ] Introduce one general ordered layer fold while retaining each domain's field merge semantics,
+- [x] Introduce one general ordered layer fold while retaining each domain's field merge semantics,
       defaulting rules, validation, and provenance.
-- [ ] Preserve current template clearing semantics: empty additive lists and maps do not invent a
+- [x] Preserve current template clearing semantics: empty additive lists and maps do not invent a
       removal tombstone, and an overlay cannot declare `name`, `inherits`, metadata, or framework
       provenance.
-- [ ] Define typed per-kind overlay payloads and codecs over the shared store, with one final
+- [x] Define typed per-kind overlay payloads and codecs over the shared store, with one final
       overlay layer after the template chain and no required ceremony when it is absent.
-- [ ] Reject JSON `null` at every depth and report each material layer decision as set, retained,
+- [x] Reject JSON `null` at every depth and report each material layer decision as set, retained,
       replaced, cleared, or explicitly absent using a value-safe field-name summary.
-- [ ] Add inline JSON `--spec JSON` exactly where an instance template can be selected or changed:
+- [x] Add inline JSON `--spec JSON` exactly where an instance template can be selected or changed:
       the four direct creation commands and `agent reinit`. Add `--workspace-spec JSON` and
       `--agent-spec JSON` to compound session creation for newly created child owners. Omit
       standalone spec mutation verbs and do not add the option to VM reinit, workspace repair,
-      session resume, or workspace copy. Treat `{}` on `agent reinit` as clearing the prior layer
-      and omission as retaining it. Apply declaration-time effective-instance reference and
-      capability validation matching template error quality without publishing a fake template or
-      creating an instance manifest.
-- [ ] Prove scalar override, list/map merge behavior, defaults, provenance, invalid overlays, absent
+      session resume, or workspace copy. Treat `{}` or the exact empty CLI value on `agent reinit`
+      as clearing the prior layer, whitespace-only input as invalid, and omission as retaining it.
+      Apply declaration-time effective-instance reference and capability validation matching
+      template error quality without publishing a fake template or creating an instance manifest.
+- [x] Prove scalar override, list/map merge behavior, defaults, provenance, invalid overlays, absent
       overlays, persistence, deletion, and parity across VM, workspace, agent, and session kinds.
-- [ ] Extend VM backup's exact snapshot and archive projection for desired overlays across the VM
+- [x] Extend VM backup's exact snapshot and archive projection for desired overlays across the VM
       owner tree, with explicit archive versioning and safe handling for plaintext environment
       values.
-- [ ] Update command reference, completions, sample configuration or manifest teaching, and guide
+- [x] Update command reference, completions, sample configuration or manifest teaching, and guide
       collateral in the same phase that makes each claim true.
 
 Definition of done: every instance kind resolves template declarations plus an optional final
 instance layer through one shared stack mechanism, and no fifth per-kind merger exists.
+
+Completed on 2026-08-25. Two independent review passes reported no findings after the feedback/fix
+loop. The final non-integration suite passed with 7,438 tests and 1 skip; Ruff, Mypy, file lint,
+Rulesync, locked-SDD, website, deterministic-build, and Typer-isolation gates passed. A bounded
+isolated-home shipped-CLI pass confirmed the option surface and strict validation boundaries without
+contacting a provider; no authorized live-provider inventory was present.
+
+### R4 correction: paired VM and admin final layers
+
+- [x] Add `vm create --admin-spec JSON` beside `--admin-template`, retain unprefixed `--template`
+      and `--spec` for the primary VM declaration, and add no `--vm-*` aliases or VM-reinit spec
+      inputs.
+- [x] Fold and validate the VM and admin layers independently, then persist them atomically as one
+      typed VM desired payload that reinit and runtime access paths consume together.
+- [x] Prove strict input, field merge behavior, effective references, lifecycle ordering, rollback
+      and retention, backup projection, reinit reuse, value-safe reporting, and no schema migration.
+- [x] Update the SDD contracts and permanent CLI/store collateral, run the full R4 quality gates,
+      and repeat the private review and complexity passes for the corrected implementation.
+
+Completed on 2026-08-26. The correction keeps `--template` and `--spec` as the VM pair, adds
+`--admin-spec` beside `--admin-template`, and stores both final layers as one payload-version-2 VM
+declaration while retaining flat payload-version-1 reads without a database migration. The private
+project, fresh-eyes, and complexity loops finished clean after three feedback/fix rounds. Full
+Python, repository, and website gates passed. A 20-invocation isolated-home shipped-CLI pass proved
+the paired option surface, strict/value-safe input refusal, legacy reads, composite version-skew
+classification, admin-only consumption, and unchanged stored rows using a passphrase-protected
+scratch key. No authorized live-provider inventory was available, so provisioning, remote reinit,
+and SSH transport remain explicit live-test gaps.
+
+### R4 correction: live and pending resource publication
+
+- [x] Add database-backed VMs, workspaces, agents, sessions, and consoles as typed live-resource
+      publishers in the ordinary Registry collection phase before its single finalization pass; keep
+      the Registry publisher-agnostic and retain one read snapshot for the publication.
+- [x] Publish each live resource's effective desired references through the existing per-domain
+      resolution and extraction contracts, including paired VM/admin state, without raw JSON
+      scanning, provider observation, or plaintext value exposure.
+- [x] Replace operation-local missing-target acceptance with prospective pending-resource
+      publication for direct and compound creation, so normal finalization validates and
+      auto-declares the candidate graph before mutation and a failed command leaves no publication.
+- [x] Route secret list, describe, verify, doctor, and graph/used-by projections through the one
+      finalized graph, removing transient fallbacks or post-finalize DB projections where the
+      unified graph now owns the answer.
+- [x] Prove explicit-over-auto precedence, multiple live owners, last-owner garbage collection,
+      deletion and overlay clearing, missing or unreadable desired state, paired VM atomicity,
+      snapshot consistency, failed-create non-publication, and the agent-env secret regression.
+- [x] Update permanent architecture and operator collateral, run the full code gates, repeat the
+      project/fresh-eyes/complexity review loop, and perform isolated shipped-CLI validation of
+      persisted and prospective publications.
+
+Definition of done: database-backed and pending resources enter through the same publish/collect
+boundary as every other resource, one finalization pass owns reference resolution and
+auto-declaration, and every inspection surface observes the same resulting graph.
+
+Completed on 2026-08-27. The database and pending candidates are peer Registry publishers before one
+finalization pass; durable absence recovery omits unavailable edges without inventing defaults, and
+JSON v1 `used_by` remains compatible while ordinary graph queries expose direct live relationships.
+A post-handoff correction keeps doctor non-migrating while preserving its declared-resource checks
+when database publication is unavailable; the report explicitly marks the missing live-resource
+coverage instead of treating the partial view as complete. Feedback round one then preserved empty
+selectors as unresolved across durable, pending, runtime, and rendering paths; restored
+declared-only completion fallback for typed live-publication failures; replaced authored-prose
+assertions with structural checks; and pinned runtime-closure secret usage plus the database
+publisher's live-kind vocabulary. Correction code head `6ad9bf2e` passed 7,813 non-integration
+Python tests with one skip, and the full local suite passed 7,816 tests with one skip; Ruff,
+formatting, Mypy, file lint, Rulesync, locked-SDD, website, and deterministic-build gates also
+passed. The greenfield project re-review found no remaining code or test issue, the final fresh-eyes
+review was clean, and Muntz reported `SHIP`. Final feedback-round code head `f1e36ed4` then made the
+four create-command validation registries declaration-only while retaining their later authoritative
+pending-plus-durable builds, and corrected the completion helper guidance. Its four precedence
+regressions and affected suites passed; the exact CI selection passed 7,815 tests with one skip,
+alongside clean static, file, Rulesync, locked-SDD, website, and deterministic-build gates. The
+greenfield reviewer and Muntz reported `SHIP`, and fresh-eyes review was clean. An isolated
+shipped-CLI pass proved durable overlay-only secret discovery, direct graph topology,
+session-oriented usage, clearing, last-owner removal, absent and unreadable completion fallback, and
+a pending disabled-resource refusal with no durable publication or provider work. No authorized
+provider inventory was available, so successful provider-backed creation remains covered by unit and
+review evidence rather than a live backend run.
 
 ## Phase 4: R3 applied instance state and SSH proving slice
 

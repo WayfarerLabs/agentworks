@@ -67,7 +67,7 @@ def restore_session(
     from agentworks.bootstrap import load_request_registry
 
     console = _require_console(db, console_name)
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
     member = db.get_console_session(console_name, session_name)
     if member is None:
         raise NotFoundError(
@@ -167,6 +167,7 @@ def restore_session(
                     ),
                     config,
                     registry,
+                    allow_transient_auto_declare=True,
                     interaction=interaction,
                 )
             result = _mc._add_session_window(
@@ -356,6 +357,7 @@ def restore_session(
             ),
             config,
             registry,
+            allow_transient_auto_declare=True,
             interaction=interaction,
         )
 

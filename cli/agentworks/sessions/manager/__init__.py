@@ -25,6 +25,9 @@ from ._env import (
     _display_harness_integration as _display_harness_integration,
 )
 from ._env import (
+    _display_live_harness_integration as _display_live_harness_integration,
+)
+from ._env import (
     _display_registry as _display_registry,
 )
 from ._env import (

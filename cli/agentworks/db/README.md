@@ -12,6 +12,14 @@ type or caller-authored record key, provide raw JSON or SQL, or issue arbitrary 
 repository owns canonical JSON object encoding and treats a malformed persisted envelope as
 `StateError`, never as an absent record.
 
+Owner-existence guards use the narrow `has_instance_records` query before an insert so orphaned
+desired or applied state cannot silently acquire a new owner. VM backup uses the equally narrow
+`has_vm_owner_tree_desired_overlay` and `list_vm_owner_tree_desired_overlays` queries. Those methods
+select exactly the VM, its workspaces and agents, and those workspaces' sessions in SQL before any
+payload is decoded. A malformed selected row therefore fails the backup, while a malformed row for
+an unrelated owner cannot block it. These named predicates are part of the repository contract;
+callers do not recreate the polymorphic owner-tree query or filter a decoded global record list.
+
 Because the polymorphic table deliberately has no owner foreign key, a damaged or hand-edited
 database can contain identities that normal creation paths reject. Operator-facing errors retain a
 valid owner kind but include the owner name only when its representation is printable and bounded;
@@ -24,6 +32,20 @@ are checked on writes and persisted reads. The current VM-only keys are `hardwar
 replaces only the supplied slice keys, with one operation and one timestamp, and preserves all
 unrelated facts. Empty replacement is a no-op. Existing instances have no synthesized records:
 absence means not recorded until a lifecycle operation establishes state.
+
+VM desired overlays use one owner record for the paired final VM and admin layers. New writes use
+payload version 2 with explicit `vm` and `admin` components. Readers retain compatibility with the
+legacy payload-version-1 flat VM layer, treating its admin component as absent. Other instance kinds
+continue to use their direct payload-version-1 layer. This payload evolution does not change the
+physical store or require a database migration.
+
+That declaration/evidence distinction controls forward compatibility. An older release refuses a
+desired overlay with an unknown field or unsupported payload version rather than silently realizing
+only the fields it understands. It reports version skew and points to a compatible or newer release,
+not to corruption repair. Lifecycle/application paths stay strict; a base-safe read or access path
+may explicitly warn and use the base template without claiming the overlay was applied. Applied
+state differs because an unknown well-formed key is additive evidence the older release does not
+consume, so omitting it from typed reads does not change an operator-authored declaration.
 
 An unknown applied key is well formed only when it is 1 to 64 ASCII characters in lower-kebab form:
 a lowercase letter followed by lowercase letters or digits, with single hyphens separating nonempty

@@ -26,12 +26,23 @@ def session_create(
     name: Annotated[str, typer.Argument(help="Session name")],
     workspace: Annotated[str | None, typer.Option("--workspace", help="Existing workspace")] = None,
     template: Annotated[str | None, typer.Option("--template", help="Session template")] = None,
+    spec: Annotated[
+        str | None,
+        typer.Option("--spec", help="Inline JSON instance spec applied after the selected template"),
+    ] = None,
     admin: Annotated[bool, typer.Option("--admin", help="Run as the VM admin user")] = False,
     agent: Annotated[str | None, typer.Option("--agent", help="Agent name (agent mode)")] = None,
     new_workspace: Annotated[bool, typer.Option("--new-workspace", help="Create a new workspace")] = False,
     workspace_name: Annotated[str | None, typer.Option("--workspace-name", help="Name for new workspace")] = None,
     workspace_template: Annotated[
         str | None, typer.Option("--workspace-template", help="Template for new workspace")
+    ] = None,
+    workspace_spec: Annotated[
+        str | None,
+        typer.Option(
+            "--workspace-spec",
+            help="Inline JSON workspace instance spec applied after its selected template",
+        ),
     ] = None,
     vm: Annotated[
         str | None,
@@ -50,6 +61,13 @@ def session_create(
     new_agent: Annotated[bool, typer.Option("--new-agent", help="Create a new agent for this session")] = False,
     agent_name: Annotated[str | None, typer.Option("--agent-name", help="Name for new agent")] = None,
     agent_template: Annotated[str | None, typer.Option("--agent-template", help="Template for new agent")] = None,
+    agent_spec: Annotated[
+        str | None,
+        typer.Option(
+            "--agent-spec",
+            help="Inline JSON agent instance spec applied after its selected template",
+        ),
+    ] = None,
 ) -> None:
     """Create and start a session in a workspace."""
     interaction = ordinary_tty_interaction_policy()
@@ -61,14 +79,17 @@ def session_create(
         load_config(),
         name=name,
         template_name=template,
+        spec=spec,
         workspace=workspace,
         new_workspace=new_workspace,
         workspace_name=workspace_name,
         workspace_template=workspace_template,
+        workspace_spec=workspace_spec,
         agent=agent,
         new_agent=new_agent,
         agent_name=agent_name,
         agent_template=agent_template,
+        agent_spec=agent_spec,
         admin=admin,
         vm_name=vm,
         interaction=interaction,

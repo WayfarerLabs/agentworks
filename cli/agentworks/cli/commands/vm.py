@@ -23,6 +23,10 @@ app.add_typer(vm_app)
 def vm_create(
     name: Annotated[str, typer.Argument(help="VM name")],
     template: Annotated[str | None, typer.Option("--template", help="VM template")] = None,
+    spec: Annotated[
+        str | None,
+        typer.Option("--spec", help="Inline JSON VM spec applied after the selected VM template"),
+    ] = None,
     admin_template: Annotated[
         str | None,
         typer.Option(
@@ -32,6 +36,13 @@ def vm_create(
                 "declared admin-template resource; default: the 'default' "
                 "admin-template)"
             ),
+        ),
+    ] = None,
+    admin_spec: Annotated[
+        str | None,
+        typer.Option(
+            "--admin-spec",
+            help="Inline JSON admin spec applied after the selected admin template",
         ),
     ] = None,
     site: Annotated[
@@ -49,11 +60,9 @@ def vm_create(
 ) -> None:
     """Create a new VM (provision + initialize).
 
-    Hardware (cpus, memory, disk, swap) and the admin username come from
-    the selected vm-template and admin-template. Use --admin-template to
-    provision the admin user from a declared, non-default admin-template.
-    To deviate otherwise, declare a new template rather than overriding on
-    the command line.
+    Hardware starts with the selected vm-template and the admin user starts
+    with the selected admin-template. The two inline spec options apply the
+    final VM-specific layers after those respective templates.
     """
     interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config
@@ -65,7 +74,9 @@ def vm_create(
         config,
         name=name,
         template=template,
+        spec=spec,
         admin_template=admin_template,
+        admin_spec=admin_spec,
         site=site,
         interaction=interaction,
     )
@@ -167,8 +178,9 @@ def vm_verify_connection(
     from agentworks.vms.manager import verify_vm_connection
 
     config = load_config()
-    registry = load_request_registry(config)
-    result = verify_vm_connection(get_db(), config, registry, name)
+    db = get_db()
+    registry = load_request_registry(config, live_database=db)
+    result = verify_vm_connection(db, config, registry, name)
     output.result(f"VM '{result.name}' connection verified via {result.transport}.")
 
 

@@ -18,8 +18,27 @@ from agentworks.schema import ResourceRef
 from agentworks.schema.reference import RefRelationship
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentworks.resources.graph import FinalizeContext
+    from agentworks.resources.inheritance import LayerSource
     from agentworks.resources.reference import ResourceReference
+    from agentworks.workspaces.templates import ResolvedTemplate
+
+
+def effective_references(
+    effective: ResolvedTemplate,
+    source: tuple[str, str],
+    provenance: Mapping[tuple[str, ...], tuple[LayerSource, ...]],
+) -> tuple[ResourceReference, ...]:
+    """References required by one effective workspace declaration."""
+
+    def owner(key: str) -> tuple[str, str] | None:
+        sources = provenance.get(("env", key), ())
+        return None if not sources else (sources[-1].resource_kind, sources[-1].name)
+
+    by_env = {key: declared_by for key in effective.env if (declared_by := owner(key)) is not None}
+    return tuple(env_references(effective.env, source, by_env))
 
 
 class WorkspaceTemplate(DeclaredResource):
@@ -60,14 +79,12 @@ class WorkspaceTemplate(DeclaredResource):
         """The ``inherits`` edges as declared, plus the runtime needs of
         the EFFECTIVE declaration (FR17; see ``VMTemplate.dependencies``
         for the rule the four inheriting kinds share)."""
-        from agentworks.resources.inheritance import declarers, merge_layers
         from agentworks.resources.reference import inherits_reference
-        from agentworks.workspaces.templates import effective_template
+        from agentworks.workspaces.templates import effective_template_with_provenance
 
         source = ("workspace-template", self.name)
         rows = {**context.rows_of("workspace-template"), self.name: self}
-        effective = effective_template(rows, self.name)
-        by_env = declarers(merge_layers(rows, self.name), "workspace-template", lambda t: t.env)
-        refs: list[ResourceReference] = list(env_references(effective.env, source, by_env))
+        layered = effective_template_with_provenance(rows, self.name)
+        refs = list(effective_references(layered.value, source, layered.provenance))
         refs.extend(inherits_reference(parent, source) for parent in self.inherits)
         return refs

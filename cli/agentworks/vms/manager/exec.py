@@ -111,8 +111,8 @@ def shell_vm(
     # a non-default-template VM.
     from agentworks.bootstrap import load_request_registry
 
-    registry = load_request_registry(config)
-    scopes = _mgr._resolve_vm_admin_env_scopes(registry, vm, ws=ws)
+    registry = load_request_registry(config, live_database=db)
+    scopes = _mgr._resolve_vm_admin_env_scopes(db, registry, vm, ws=ws)
 
     with contextlib.ExitStack() as stack:
         vm_node, resolver, ops_ctx = stack.enter_context(
@@ -218,8 +218,8 @@ def exec_vm(
     # vm.template (DB row), not the config-default template.
     from agentworks.bootstrap import load_request_registry
 
-    registry = load_request_registry(config)
-    scopes = _mgr._resolve_vm_admin_env_scopes(registry, vm, ws=ws)
+    registry = load_request_registry(config, live_database=db)
+    scopes = _mgr._resolve_vm_admin_env_scopes(db, registry, vm, ws=ws)
 
     with gated_vm_boundary(
         db,
@@ -296,7 +296,7 @@ def add_git_credential(
     # build_registry runs first so framework miss-policies (e.g.
     # GitCredentialKind's error policy on a typo'd credential name)
     # surface before any DB / VM / config-key business logic.
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
 
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)

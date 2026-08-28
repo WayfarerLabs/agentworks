@@ -533,7 +533,7 @@ def test_resource_list_json_is_parseable_deterministic_and_uses_safe_fields(monk
                 name="token",
                 origin=Origin.built_in(source="agentworks.test"),
                 reference_count=2,
-                used_by_count=None,
+                used_by_count=0,
                 description="test token",
                 not_ready_reason="backend unavailable",
                 disabled=False,
@@ -556,7 +556,7 @@ def test_resource_list_json_is_parseable_deterministic_and_uses_safe_fields(monk
         b"1 resource (1 built-in)\n\n"
         b"KIND    NAME   ORIGIN                      REFS  USED BY  DESCRIPTION           \n"
         b"------  -----  --------------------------  ----  -------  ----------------------\n"
-        b"secret  token  built-in (agentworks.test)  2     -        (not ready) test token\n",
+        b"secret  token  built-in (agentworks.test)  2     0        (not ready) test token\n",
     )
 
     assert first.exit_code == 0, first.output
@@ -578,7 +578,7 @@ def test_resource_list_json_is_parseable_deterministic_and_uses_safe_fields(monk
         "not_ready_reason",
         "disabled",
     ]
-    assert resource["used_by_count"] is None
+    assert resource["used_by_count"] == 0
 
 
 def test_secret_list_json_preserves_source_precedence_without_values(monkeypatch) -> None:
@@ -663,7 +663,7 @@ def test_secret_describe_json_preserves_nulls_and_source_order(monkeypatch) -> N
         description="test token",
         hint=None,
         references=(),
-        used_by=None,
+        used_by=(),
         source_mappings=(
             SourceMapping("work-op", "onepassword", SourceProvenance.DECLARED, True, "op://Work/token", None),
             SourceMapping("prompt-fallback", "prompt", SourceProvenance.DECLARED, True, None, "source unavailable"),
@@ -696,7 +696,7 @@ def test_secret_describe_json_preserves_nulls_and_source_order(monkeypatch) -> N
     assert isinstance(described, dict)
     assert described["origin"] is None
     assert described["hint"] is None
-    assert described["used_by"] is None
+    assert described["used_by"] == []
     assert [mapping["source"] for mapping in described["source_mappings"]] == ["work-op", "prompt-fallback"]
     assert [mapping["backend"] for mapping in described["source_mappings"]] == ["onepassword", "prompt"]
 

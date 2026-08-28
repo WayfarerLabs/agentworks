@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 from agentworks.declared_resource import replace_fields
 from agentworks.errors import ConfigError, StateError
 from agentworks.resources.kind import KIND_REGISTRY
+from agentworks.resources.live import LiveResource
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping, Sequence
@@ -188,6 +189,29 @@ class Registry:
             self._weak.add(key)
         stamped = replace_fields(resource, origin=origin)
         self._resources.setdefault(kind, {})[name] = stamped
+
+    def add_live(self, resource: LiveResource) -> None:
+        """Publish one database-backed or pending live resource.
+
+        Live rows participate in the ordinary pre-finalize dependency walk,
+        but they have no ``Origin`` and are not declared resources. A
+        duplicate identity is a publisher bug or a create preflight racing an
+        existing row, so it is refused instead of applying declared-resource
+        collision policy.
+        """
+        if self._frozen:
+            raise RuntimeError("registry is frozen; add_live must precede finalize")
+        if resource.name in self._resources.get(resource.kind, {}):
+            raise StateError(
+                "duplicate live-resource publication",
+                entity_kind=resource.kind,
+                entity_name=resource.name,
+            )
+        self._resources.setdefault(resource.kind, {})[resource.name] = resource
+
+    def has_live(self, kind: str, name: str) -> bool:
+        """Return whether a publisher has already claimed a live identity."""
+        return isinstance(self._resources.get(kind, {}).get(name), LiveResource)
 
     @staticmethod
     def _check_collision(kind: str, name: str, existing: Any, incoming: Origin) -> _CollisionDecision:
@@ -391,7 +415,7 @@ class Registry:
 
         # 0: reserved-defaults. Seed always-materialize rows so the build
         # walk sees them alongside operator-published ones.
-        self._materialize_reserved_defaults()
+        self.publish_reserved_defaults()
 
         # The build context threaded to every dependency projection includes
         # the generic read-only capability-class map used when a secret
@@ -474,11 +498,17 @@ class Registry:
         # 6: attach. Build the retained graph (inbound + readiness + enablement
         # on the node), then polish auto-declared descriptions off its inbound
         # refs.
-        self._graph = build_graph(self._resources, all_refs, all_outbound, readiness, enablement)
+        self._graph = build_graph(
+            self._resources,
+            all_refs,
+            all_outbound,
+            readiness,
+            enablement,
+        )
         for kind in list(self._resources.keys()):
             for name in list(self._resources[kind].keys()):
                 existing = self._resources[kind][name]
-                inbound = self._graph.dependents_of(kind, name)
+                inbound = self._graph.all_dependents_of(kind, name)
                 self._resources[kind][name] = _polish_auto_declared_description(existing, kind, inbound)
 
         # 7: validate every present resource's capability config (R3). No
@@ -587,7 +617,7 @@ class Registry:
         """The ``(kind, name)`` of every currently-published Resource."""
         return {(kind, name) for kind, kind_dict in self._resources.items() for name in kind_dict}
 
-    def _materialize_reserved_defaults(self) -> None:
+    def publish_reserved_defaults(self) -> None:
         """Seed the registry with reserved-default rows for every kind
         whose ``auto_declare_names`` is a non-None set.
 
@@ -606,9 +636,9 @@ class Registry:
         from ``add``'s stamp-by-the-registry pattern -- the seeded row
         already carries its origin when it reaches this method.
 
-        Called at the start of ``finalize`` before the worklist loop so
-        the seeded Resources participate in the reference walk
-        alongside operator-published ones.
+        Bootstrap may call this after declared publishers and before a live
+        publisher needs to resolve a default template. ``finalize`` calls it
+        again idempotently for hand-assembled registries.
         """
         for kind, kind_handler in KIND_REGISTRY.items():
             if kind_handler.auto_declare_names is None:
@@ -820,7 +850,9 @@ class Registry:
         kind has no Resources (or no Resources have been published under
         it yet).
         """
-        return iter(self._resources.get(kind, {}).values())
+        return (
+            resource for resource in self._resources.get(kind, {}).values() if not isinstance(resource, LiveResource)
+        )
 
     def iter_kind_items(self, kind: str) -> Iterator[tuple[str, Any]]:
         """Iterate ``(name, Resource)`` pairs under one ``kind``.
@@ -830,14 +862,22 @@ class Registry:
         field (most do) or on a different field (capability resources).
         Empty iterator if the kind has no Resources.
         """
-        return iter(self._resources.get(kind, {}).items())
+        return (
+            (name, resource)
+            for name, resource in self._resources.get(kind, {}).items()
+            if not isinstance(resource, LiveResource)
+        )
 
     def iter_kinds(self) -> Iterator[str]:
         """Iterate the kind identifiers that currently have at least one
         published Resource. Used by ``agw resource list`` to enumerate
         all kinds when no ``--kind`` filter is given.
         """
-        return iter(self._resources.keys())
+        return (
+            kind
+            for kind, resources in self._resources.items()
+            if any(not isinstance(resource, LiveResource) for resource in resources.values())
+        )
 
     @property
     def is_finalized(self) -> bool:

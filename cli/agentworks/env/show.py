@@ -102,8 +102,11 @@ def show_env(
     # template inheritance is already merged into the resolved templates).
     from agentworks.bootstrap import load_request_registry
 
-    registry = load_request_registry(config)
-    vm_env, workspace_env, admin_env, agent_env, session_env = _resolve_scope_envs(registry, ctx)
+    # This display owns an explicit base-safe overlay fallback below. It does
+    # not claim a complete live graph and must remain usable when a stored
+    # desired layer was written by a newer release.
+    registry = load_request_registry(config, include_live_resources=False)
+    vm_env, workspace_env, admin_env, agent_env, session_env = _resolve_scope_envs(db, registry, ctx)
 
     # Build the resource context for identity vars.
     resource_ctx = _build_resource_context(ctx, registry)
@@ -257,6 +260,7 @@ def _resolve_context(
 
 
 def _resolve_scope_envs(
+    db: Database,
     registry: Registry,
     ctx: _ResolvedContext,
 ) -> tuple[
@@ -272,43 +276,65 @@ def _resolve_scope_envs(
     are mutually exclusive: a context with an agent uses the agent scope,
     otherwise the admin scope.
     """
-    from agentworks.agents.templates import resolve_template as _resolve_agent_template
-    from agentworks.resources.access import admin_template as _admin_template
-    from agentworks.sessions.templates import resolve_template as _resolve_session_template
-    from agentworks.vms.templates import resolve_template as _resolve_vm_template
-    from agentworks.workspaces.templates import resolve_ws_template_env_or_empty
+    from agentworks.agents.templates import resolve_live_template as _resolve_agent_template
+    from agentworks.sessions.templates import resolve_live_template as _resolve_session_template
+    from agentworks.vms.templates import resolve_live_template as _resolve_vm_template
+    from agentworks.workspaces.templates import resolve_live_template as _resolve_workspace_template
 
     vm_template: ResolvedVMTemplate = _resolve_vm_template(
+        db,
         registry,
+        ctx.vm.name,
         ctx.vm.template,
     )
     vm_env = vm_template.env
 
     workspace_env: dict[str, EnvEntry] | None = None
     if ctx.workspace is not None:
-        # A copied workspace's synthetic ``template="copied"`` marker (or a
-        # template later removed from config) resolves to an empty env scope
-        # rather than raising ``unknown_template_error``. This keeps ``env
-        # show --workspace <copied>`` (and ``--session`` whose workspace is
-        # copied) working, consistent with exec/shell; the other scopes below
-        # are unaffected.
-        workspace_env = resolve_ws_template_env_or_empty(registry, ctx.workspace.template)
+        # A stored instance layer can keep contributing after its selected
+        # base disappears. A workspace without either still contributes an
+        # empty scope, preserving copied-workspace compatibility.
+        from agentworks.errors import ConfigError, NotFoundError
+        from agentworks.instance_specs import UnsupportedStoredOverlayError
+        from agentworks.workspaces.templates import resolve_ws_template_env_or_empty
+
+        try:
+            workspace_env = _resolve_workspace_template(
+                db,
+                registry,
+                ctx.workspace.name,
+                ctx.workspace.template,
+            ).env
+        except UnsupportedStoredOverlayError:
+            output.warn(
+                f"Stored workspace instance spec for {ctx.workspace.name!r} requires a compatible or newer "
+                "Agentworks release; using its base template for this environment inspection."
+            )
+            workspace_env = resolve_ws_template_env_or_empty(registry, ctx.workspace.template)
+        except (ValueError, ConfigError, NotFoundError):
+            workspace_env = {}
 
     admin_env: dict[str, EnvEntry] | None = None
     agent_env: dict[str, EnvEntry] | None = None
     if ctx.agent is not None:
         agent_template: ResolvedAgentTemplate = _resolve_agent_template(
+            db,
             registry,
+            ctx.agent.name,
             ctx.agent.template,
         )
         agent_env = agent_template.env
     else:
-        admin_env = _admin_template(registry, ctx.vm.admin_template or "default").env
+        from agentworks.vms.admin_templates import resolve_live_template as _resolve_admin_template
+
+        admin_env = _resolve_admin_template(db, registry, ctx.vm.name, ctx.vm.admin_template).env
 
     session_env: dict[str, EnvEntry] | None = None
     if ctx.session is not None:
         session_template: ResolvedSessionTemplate = _resolve_session_template(
+            db,
             registry,
+            ctx.session.name,
             ctx.session.template,
         )
         session_env = session_template.env

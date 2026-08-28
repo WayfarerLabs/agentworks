@@ -84,7 +84,7 @@ def repair_workspace(
 
     # build_registry runs first so framework miss-policies fire before
     # any DB / VM business logic.
-    registry = load_request_registry(config)
+    registry = load_request_registry(config, live_database=db)
 
     ws = db.get_workspace(name)
     if ws is None:
@@ -261,7 +261,7 @@ def repair_workspace(
         # after create lands here (detection-based, so an unchanged value
         # reports OK). Only meaningful when the workspace is a git repo; a
         # declared identity on a repo-less workspace is a no-op.
-        fixes += _repair_git_identity(target, registry, ws)
+        fixes += _repair_git_identity(db, target, registry, ws)
 
         # 6. Reconcile agent group membership
         # Get agents that SHOULD be in the group (have any grant)
@@ -352,6 +352,7 @@ def _acls_changed(before: str, after: str) -> bool:
 
 
 def _repair_git_identity(
+    db: Database,
     target: Transport,
     registry: Registry,
     ws: WorkspaceRow,
@@ -375,10 +376,10 @@ def _repair_git_identity(
     """
     from agentworks.errors import ConfigError, NotFoundError
     from agentworks.ssh import SSHError
-    from agentworks.workspaces.templates import resolve_template
+    from agentworks.workspaces.templates import resolve_live_template
 
     try:
-        tmpl = resolve_template(registry, ws.template)
+        tmpl = resolve_live_template(db, registry, ws.name, ws.template)
     except (ValueError, ConfigError, NotFoundError):
         # The workspace's template cannot be resolved: it is gone from config,
         # or it is a synthetic marker (a copied workspace records

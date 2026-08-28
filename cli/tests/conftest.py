@@ -613,9 +613,14 @@ def stub_session_resolvers(monkeypatch: pytest.MonkeyPatch) -> None:
     ``resolve_for_command`` before the first mutation. Tests that don't
     care about secret resolution patch both out.
     """
+    from agentworks.resources.inheritance import LayeredResolution
     from agentworks.sessions import manager as session_manager
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _StubSessionTemplate())
+    monkeypatch.setattr(
+        "agentworks.sessions.templates.resolve_template_with_provenance",
+        lambda *a, **k: LayeredResolution(_StubSessionTemplate(), {}),
+    )
     monkeypatch.setattr(session_manager, "_resolve_session_env", lambda *a, **k: {})
     monkeypatch.setattr(session_manager, "_session_secret_target", lambda *a, **k: empty_secret_target())
     monkeypatch.setattr(
@@ -667,8 +672,29 @@ class _StubRegistry:
         "user-install-command": "user_install_commands",
     }
 
-    def __init__(self, config: object) -> None:
+    def __init__(
+        self,
+        config: object,
+        manifests: object | None = None,
+        *,
+        warn: bool = True,
+        probe_host_readiness: bool = True,
+        include_live_resources: bool = True,
+        live_database: object | None = None,
+        pending_publishers: tuple[object, ...] = (),
+    ) -> None:
+        del manifests, warn, probe_host_readiness, include_live_resources, live_database
         self._config = config
+        self._live_resources: dict[tuple[str, str], object] = {}
+        for publisher in pending_publishers:
+            assert callable(publisher)
+            publisher(self)
+
+    def add_live(self, resource: object) -> None:
+        key = (resource.kind, resource.name)  # type: ignore[attr-defined]
+        if key in self._live_resources:
+            raise AssertionError(f"duplicate live-resource publication: {key[0]}/{key[1]}")
+        self._live_resources[key] = resource
 
     def _kind_dict(self, kind: str) -> dict[str, object]:
         attr = self._KIND_ATTRS.get(kind)
@@ -681,6 +707,9 @@ class _StubRegistry:
         # KeyError on unknown kinds and names so stubbed tests fail the
         # same way production does. The singleton kinds fall back to
         # code-default rows only for the reserved name.
+        live = self._live_resources.get((kind, name))
+        if live is not None:
+            return live
         if kind == "admin-template":
             from agentworks.vms.admin import AdminConfig
 
@@ -705,6 +734,12 @@ class _StubRegistry:
             if name not in VM_PLATFORM_REGISTRY:
                 raise KeyError(name)
             return VMSiteDecl(name=name, platform=CapabilityBlock.of(name, **_STUB_PLATFORM_CONFIG.get(name, {})))
+        from agentworks.capabilities.descriptor import capability_descriptors
+
+        descriptor = next((item for item in capability_descriptors() if item.kind == kind), None)
+        if descriptor is not None:
+            implementation = descriptor.registry()[name]
+            return descriptor.entry_factory(name, implementation, None)
         if kind not in self._KIND_ATTRS:
             raise KeyError(kind)
         return self._kind_dict(kind)[name]

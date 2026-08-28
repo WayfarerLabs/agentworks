@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import re
 from datetime import date
+from enum import StrEnum
 from pathlib import Path
 
 from agentworks.errors import ConfigError
@@ -81,6 +82,22 @@ def validate_vm_workspaces(path: str) -> None:
 _MISE_DURATION_RE = re.compile(r"^[1-9][0-9]*[dhwmy]$")
 
 
+class MiseSettingsErrorKind(StrEnum):
+    """Stable categories for mise model-validation failures."""
+
+    PACKAGE_SYNTAX = "package-syntax"
+    LOCKFILE = "lockfile"
+    INSTALL_BEFORE = "install-before"
+
+
+class MiseSettingsError(ValueError):
+    """A mise validation failure with a stable machine-readable category."""
+
+    def __init__(self, kind: MiseSettingsErrorKind, message: str) -> None:
+        self.kind = kind
+        super().__init__(message)
+
+
 def _has_unsafe_mise_component_char(value: str) -> bool:
     return any(char.isspace() or ord(char) < 32 or ord(char) == 127 or char in {'"', "\\"} for char in value)
 
@@ -106,17 +123,23 @@ def check_mise_settings(packages: list[str], lockfile: str | None, install_befor
             or _has_unsafe_mise_component_char(name)
             or _has_unsafe_mise_component_char(version)
         ):
-            raise ValueError("mise_packages entries must use non-empty name@version syntax")
+            raise MiseSettingsError(
+                MiseSettingsErrorKind.PACKAGE_SYNTAX,
+                "mise_packages entries must use non-empty name@version syntax",
+            )
 
     if lockfile is not None:
         try:
             parse_source_ref(lockfile, default_filename="mise.lock")
         except SourceRefError as exc:
-            raise ValueError(f"mise_lockfile is invalid: {exc}") from exc
+            raise MiseSettingsError(MiseSettingsErrorKind.LOCKFILE, f"mise_lockfile is invalid: {exc}") from exc
 
     if _MISE_DURATION_RE.fullmatch(install_before):
         return
     try:
         date.fromisoformat(install_before)
     except ValueError as exc:
-        raise ValueError("mise_install_before must be a positive duration such as '7d' or an ISO date") from exc
+        raise MiseSettingsError(
+            MiseSettingsErrorKind.INSTALL_BEFORE,
+            "mise_install_before must be a positive duration such as '7d' or an ISO date",
+        ) from exc

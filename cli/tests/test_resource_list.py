@@ -254,8 +254,7 @@ def test_missing_ssh_keys_do_not_block_resource_list(tmp_path: Path, monkeypatch
 
 def test_cli_names_only_emits_kind_slash_name_per_line(tmp_path: Path, monkeypatch) -> None:
     """``agw resource list --names-only`` is the source for shell
-    completion; the line format is ``<kind>:<name>``. Completion
-    snippets (bash/zsh/powershell) parse this with ``awk -F:``.
+    completion; the line format is ``<kind>/<name>``.
     """
     from typer.testing import CliRunner
 
@@ -267,11 +266,8 @@ def test_cli_names_only_emits_kind_slash_name_per_line(tmp_path: Path, monkeypat
     _write_base(cfg_file, manifests=[_VM_DEFAULT])
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
     monkeypatch.setattr(resource, "get_db", lambda: (_ for _ in ()).throw(AssertionError("no get_db")))
-    monkeypatch.setattr(
-        db,
-        "open_completion_database",
-        lambda _path: (_ for _ in ()).throw(AssertionError("no completion database")),
-    )
+    database_path = tmp_path / "state.db"
+    monkeypatch.setattr(db, "DB_PATH", database_path)
 
     result = CliRunner().invoke(app, ["resource", "list", "--names-only"])
     assert result.exit_code == 0, result.stdout
@@ -283,27 +279,31 @@ def test_cli_names_only_emits_kind_slash_name_per_line(tmp_path: Path, monkeypat
     # operator-declared; tailscale-auth-key auto-declared).
     assert "vm-template/default" in lines
     assert "secret/tailscale-auth-key" in lines
+    assert not database_path.exists()
 
 
-def test_names_only_candidate_order_matches_a_healthy_database(tmp_path: Path) -> None:
-    from agentworks.db import Database
-
+def test_registry_list_order_is_stable(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(cfg_file, manifests=[_VM_DEFAULT])
     registry = build_registry(load_config(cfg_file))
-    database = Database(tmp_path / "agentworks.db")
-    try:
-        with_database = list_resources(registry, database)
-    finally:
-        database.close()
-    registry_only = list_resources(registry, None)
-
-    assert tuple((row.kind, row.name) for row in registry_only.rows) == tuple(
-        (row.kind, row.name) for row in with_database.rows
-    )
+    first = list_resources(registry)
+    second = list_resources(registry)
+    assert tuple((row.kind, row.name) for row in first.rows) == tuple((row.kind, row.name) for row in second.rows)
 
 
-@pytest.mark.parametrize("database_state", ["absent", "stale", "newer", "malformed", "busy", "unreadable"])
+@pytest.mark.parametrize(
+    "database_state",
+    [
+        "absent",
+        "stale",
+        "newer",
+        "malformed",
+        "busy",
+        "unreadable",
+        "unsupported-overlay",
+        "stranded-overlay",
+    ],
+)
 def test_names_only_ignores_unusable_database_states(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -313,7 +313,7 @@ def test_names_only_ignores_unusable_database_states(
 
     from agentworks import db
     from agentworks.cli import app
-    from agentworks.db import LATEST_VERSION, Database
+    from agentworks.db import LATEST_VERSION, Database, VersionedPayload
 
     cfg_file = tmp_path / "config.toml"
     _write_base(cfg_file, manifests=[_VM_DEFAULT])
@@ -336,6 +336,21 @@ def test_names_only_ignores_unusable_database_states(
         lock.execute("BEGIN EXCLUSIVE")
     elif database_state == "unreadable":
         database_path.mkdir()
+    elif database_state in {"unsupported-overlay", "stranded-overlay"}:
+        database = Database(database_path)
+        database.insert_vm("box", "lima-local", "box")
+        database.insert_agent("dev", "box", "dev")
+        payload = (
+            VersionedPayload(2, {"future_field": True})
+            if database_state == "unsupported-overlay"
+            else VersionedPayload(1, {"user_install_commands": ["gone"]})
+        )
+        database.instance_state.put_desired_overlay(
+            "agent",
+            "dev",
+            payload,
+        )
+        database.close()
 
     monkeypatch.setattr(db, "DB_PATH", database_path)
     try:

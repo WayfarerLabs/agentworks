@@ -13,9 +13,9 @@ parameter list. Splitting the sections into named helpers gives each a
 cohesive purpose and keeps its complexity bounded, with the mutation
 contained to the shared draft. The sections are not independent: each
 runs only in sequence, building on the state the prior ones accreted, and
-the draft is frozen into the immutable :class:`SessionPlan` at the end. No
-side effect, DB call, or prompt was reordered relative to the original
-``create_session`` prologue.
+the draft is frozen into the immutable :class:`SessionPlan` at the end.
+Owner-state guards run as soon as each new child identity becomes final and
+validated, before any later prompt can fire.
 """
 
 from __future__ import annotations
@@ -218,20 +218,41 @@ def _validate_ephemeral_name(
         raise
 
 
+def _validate_flag_new_agent(db: Database, draft: _PlanDraft, name: str) -> None:
+    """Finalize and validate a flag-selected new agent before prompts."""
+    if not draft.new_agent:
+        return
+
+    defaulted = draft.agent_name is None
+    if defaulted:
+        draft.agent_name = name
+    assert draft.agent_name is not None
+    _validate_ephemeral_name(
+        draft.agent_name,
+        kind="agent",
+        derived="username",
+        max_length=MAX_AGENT_NAME_LENGTH,
+        override_flag="--agent-name",
+        defaulted_from_session=defaulted,
+    )
+    if db.get_agent(draft.agent_name) is not None:
+        raise AlreadyExistsError(
+            f"agent '{draft.agent_name}' already exists",
+            entity_kind="agent",
+            entity_name=draft.agent_name,
+        )
+
+
 def _validate_names_and_existence(db: Database, draft: _PlanDraft, name: str) -> None:
-    """S5: default ephemeral names, validate every name, and run the pure
-    DB existence checks (no SSH, no mutations)."""
+    """S5: finalize workspace names and run pure existence checks."""
     # Capture whether each ephemeral name will be defaulted from the session
     # name BEFORE the default assignment, so the validation below can tailor
     # the too-long hint to the defaulted path.
     ws_defaulted = draft.new_workspace and draft.workspace_name is None
-    agent_defaulted = draft.new_agent and draft.agent_name is None
 
     # Default ephemeral resource names to the session name when omitted.
     if ws_defaulted:
         draft.workspace_name = name
-    if agent_defaulted:
-        draft.agent_name = name
     assert draft.workspace_name is not None  # invariant after canonicalize + prompt
 
     # Each referenced name is validated against ITS OWN kind's cap, not the
@@ -249,19 +270,9 @@ def _validate_names_and_existence(db: Database, draft: _PlanDraft, name: str) ->
             override_flag="--workspace-name",
             defaulted_from_session=ws_defaulted,
         )
-    if draft.new_agent:
-        assert draft.agent_name is not None
-        _validate_ephemeral_name(
-            draft.agent_name,
-            kind="agent",
-            derived="username",
-            max_length=MAX_AGENT_NAME_LENGTH,
-            override_flag="--agent-name",
-            defaulted_from_session=agent_defaulted,
-        )
-
-    # DB existence checks. Session must not exist. Ephemeral workspace /
-    # agent must not exist; existing workspace / agent must exist.
+    # DB existence checks. Session and an ephemeral workspace must not
+    # exist. Agent existence was checked either before the workspace prompt
+    # for a flag-selected new agent or inside the mode-prompt path.
     if db.get_session(name) is not None:
         raise AlreadyExistsError(
             f"session '{name}' already exists",
@@ -274,14 +285,6 @@ def _validate_names_and_existence(db: Database, draft: _PlanDraft, name: str) ->
             entity_kind="workspace",
             entity_name=draft.workspace_name,
         )
-    if draft.new_agent:
-        assert draft.agent_name is not None  # defaulted to ``name`` above
-        if db.get_agent(draft.agent_name) is not None:
-            raise AlreadyExistsError(
-                f"agent '{draft.agent_name}' already exists",
-                entity_kind="agent",
-                entity_name=draft.agent_name,
-            )
 
 
 def _lookup_workspace_and_prompt_mode(db: Database, draft: _PlanDraft, name: str, vm_name: str | None) -> None:
@@ -443,10 +446,23 @@ def _resolve_session_plan(
         known_vm=vm_name,
     )
 
+    from agentworks.instance_specs import refuse_orphan_creation_state
+
     _validate_and_canonicalize_flags(draft, name)
+    flag_new_agent = draft.new_agent
+    _validate_flag_new_agent(db, draft, name)
+    if flag_new_agent:
+        assert draft.agent_name is not None
+        refuse_orphan_creation_state(db, "agent", draft.agent_name)
     _narrow_and_prompt_workspace(db, draft, name)
     _validate_names_and_existence(db, draft, name)
+    if draft.new_workspace:
+        assert draft.workspace_name is not None
+        refuse_orphan_creation_state(db, "workspace", draft.workspace_name)
     _lookup_workspace_and_prompt_mode(db, draft, name, vm_name)
+    if draft.new_agent and not flag_new_agent:
+        assert draft.agent_name is not None
+        refuse_orphan_creation_state(db, "agent", draft.agent_name)
     _resolve_target_vm(db, draft, name, vm_name)
 
     assert draft.workspace_name is not None  # defaulted in the validation section

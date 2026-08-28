@@ -26,7 +26,6 @@ from agentworks.machine_output import (
     project_origin,
     project_references,
 )
-from agentworks.resources.inspect import used_by_for
 from agentworks.resources.render import format_origin_line, format_reference_entry
 from agentworks.secrets.kinds import SECRET_KIND_NAME
 from agentworks.secrets.preview import ResolutionPreview, preview_batch, preview_data, preview_hint
@@ -34,7 +33,6 @@ from agentworks.secrets.sources import SourceProvenance, source_provenance
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.db import Database
     from agentworks.origin import Origin
     from agentworks.resources import Registry
     from agentworks.resources.kind import InstanceRef
@@ -343,12 +341,9 @@ class SecretDescription:
     surfaced for debugging "why isn't my prompt showing the helpful
     hint" without triggering a prompt.
 
-    ``references`` is the inbound reference list (config points that
-    name this secret); ``used_by`` is the live DB instances that
-    depend on this secret per the current config (projected via the
-    secret kind's ``instances`` hook). ``used_by`` is ``None`` when
-    ``describe_secret`` was called without a ``db``; the renderer
-    omits the "Used by:" section in that case.
+    ``references`` is the inbound declared-reference list. ``used_by`` is
+    the stable session-oriented JSON v1 projection derived from the finalized
+    graph's published, value-free environment targets.
 
     ``name`` is retained by the independently rendered human and JSON
     describe surfaces, so construction rejects unsafe identity text even
@@ -361,7 +356,7 @@ class SecretDescription:
     description: str
     hint: str | None
     references: tuple[ReferenceEntry, ...]
-    used_by: tuple[InstanceRef, ...] | None
+    used_by: tuple[InstanceRef, ...]
     source_mappings: tuple[SourceMapping, ...]
     resolution: StaticResolution
     preview: ResolutionPreview
@@ -373,11 +368,7 @@ class SecretDescription:
 def secret_description_data(description: SecretDescription) -> JsonObject:
     """Project describe facts into the closed ``secret.describe`` JSON data shape."""
     references: list[JsonValue] = [reference for reference in project_references(description.references)]
-    used_by: list[JsonValue] | None = (
-        None
-        if description.used_by is None
-        else [reference for reference in project_instance_references(description.used_by)]
-    )
+    used_by: list[JsonValue] = [reference for reference in project_instance_references(description.used_by)]
     return {
         "secret": {
             "name": description.name,
@@ -416,7 +407,6 @@ def describe_secret(
     config: Config,
     registry: Registry,
     name: str,
-    db: Database | None = None,
     *,
     impact: OperatorImpact,
     tty_access: TtyInteractionAccess,
@@ -431,11 +421,8 @@ def describe_secret(
     service-layer-is-the-authority rule). The ``hint`` attribute
     points operators at ``agw secret list``.
 
-    ``db`` is optional: when provided, the ``used_by`` field is
-    populated with the sessions whose subgraph reaches this secret
-    (via the secret kind's ``instances`` hook, shared with
-    graph's live usage projection). When ``None``, ``used_by`` stays
-    ``None`` and the renderer omits the "Used by:" section.
+    ``used_by`` comes from the finalized Registry graph and is empty when
+    no current session reaches the secret through its effective environment.
     """
     from agentworks.errors import NotFoundError
 
@@ -517,7 +504,7 @@ def describe_secret(
         description=description,
         hint=decl.hint,
         references=references,
-        used_by=used_by_for(db, registry, SECRET_KIND_NAME, decl),
+        used_by=registry.graph.compatibility_live_users_of(SECRET_KIND_NAME, name) or (),
         source_mappings=tuple(mappings),
         resolution=resolution,
         preview=preview,
@@ -555,29 +542,18 @@ def render_secret_description(desc: SecretDescription) -> None:
             seen.add(line)
             output.detail(f"- {line}")
 
-    # --- Used by (dynamic, per current config) ---
-    # Only rendered when describe_secret was called with a db. Same
-    # projection shape as the secret describe Used by section; the
-    # annotation is in the section header so the projection-vs-
-    # materialized signal is visible at-a-glance.
-    if desc.used_by is not None:
-        output.info("")
-        output.info("Used by (per current config):")
-        if not desc.used_by:
-            output.detail("(no live sessions reach this secret)")
-        else:
-            # Group by instance_kind for readability; preserve
-            # first-encounter order within a kind. Today the secret
-            # kind emits only session InstanceRefs, but grouping keeps
-            # the rendering stable within the secret describe shape
-            # so a future SDD that emits other instance kinds (agents,
-            # VMs) slots in without renderer changes.
-            grouped: dict[str, list[str]] = {}
-            for ref in desc.used_by:
-                grouped.setdefault(ref.instance_kind, []).append(ref.instance_name)
-            for instance_kind in grouped:
-                for instance_name in grouped[instance_kind]:
-                    output.detail(f"- {instance_kind}/{instance_name}")
+    # --- Used by (session-oriented compatibility view) ---
+    output.info("")
+    output.info("Used by (per current config):")
+    if not desc.used_by:
+        output.detail("(no live sessions reach this secret)")
+    else:
+        grouped: dict[str, list[str]] = {}
+        for ref in desc.used_by:
+            grouped.setdefault(ref.instance_kind, []).append(ref.instance_name)
+        for instance_kind in grouped:
+            for instance_name in grouped[instance_kind]:
+                output.detail(f"- {instance_kind}/{instance_name}")
 
     # --- Backend mappings ---
     output.info("")

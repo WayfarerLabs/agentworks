@@ -134,6 +134,7 @@ class _AgentDirectEnvScopes(NamedTuple):
 
 
 def _resolve_agent_direct_env_scopes(
+    db: Database,
     registry: Registry,
     vm: VMRow,
     agent: AgentRow,
@@ -156,15 +157,15 @@ def _resolve_agent_direct_env_scopes(
       different template than the operator's current ``--template``
       would resolve.
     """
-    from agentworks.agents.templates import resolve_template as _resolve_agent_template
-    from agentworks.vms.templates import resolve_template as _resolve_vm_template
-    from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
+    from agentworks.agents.templates import resolve_live_template as _resolve_agent_template
+    from agentworks.vms.templates import resolve_live_template as _resolve_vm_template
+    from agentworks.workspaces.templates import resolve_live_template as _resolve_ws_template
 
-    vm_tmpl = _resolve_vm_template(registry, vm.template)
-    agent_tmpl = _resolve_agent_template(registry, agent.template)
+    vm_tmpl = _resolve_vm_template(db, registry, vm.name, vm.template)
+    agent_tmpl = _resolve_agent_template(db, registry, agent.name, agent.template)
     ws_env: dict[str, EnvEntry] | None = None
     if ws is not None:
-        ws_env = _resolve_ws_template(registry, ws.template).env
+        ws_env = _resolve_ws_template(db, registry, ws.name, ws.template).env
     return _AgentDirectEnvScopes(
         vm=vm_tmpl.env,
         workspace=ws_env,
