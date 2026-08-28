@@ -286,3 +286,14 @@ class TestColorGate:
         monkeypatch.delenv("NO_COLOR", raising=False)
         monkeypatch.setattr("agentworks.cli._typer_output.non_interactive", lambda: True)
         assert TyperHandler()._color_enabled(self._stream(is_a_tty=True)) is True
+
+
+def test_prompt_secret_hides_empty_default_suffix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prompts: list[str] = []
+    monkeypatch.setattr("click.termui.hidden_prompt_func", lambda text: prompts.append(text) or "token")
+
+    assert TyperHandler().prompt_secret("Secret", 0) == "token"
+
+    assert "[]" not in prompts[0]

@@ -201,7 +201,7 @@ outcomes, not an implementation-ready design.
   Capability authors use explicit replacement when atomic behavior is the honest contract.
 - **Harness integrations make a versioned hard cutover.** Removing the imperative config-merge
   callback moves that capability contract from version 1 to version 2. Third-party authors migrate
-  through `docs/guides/upgrading-to-0.16.md`; shipped integrations already declare version 2.
+  through `docs/guides/upgrading-to-0.17.md`; shipped integrations already declare version 2.
 - **Breaking, and broadly.** Closed-world validation, strict types, and model-layer defaulting each
   reject configuration that used to load. The operator upgrade note is in
   `docs/guides/upgrading-to-0.14.md`; the commits carry `!` markers with `BREAKING CHANGE` footers

@@ -378,6 +378,11 @@ def run(
     """
     if input_text is not None and logger is not None:
         raise ValueError("SSH stdin input cannot be combined with command logging")
+    if input_text is not None and target.force_tty:
+        # A forced TTY puts a line discipline between the pipe and the remote
+        # command, which echoes input and rewrites CR, so the byte-exact
+        # promise above cannot hold. Refuse rather than corrupt a secret.
+        raise ValueError("SSH stdin input cannot be combined with a forced TTY")
 
     args = _ssh_base_args(target, env=env)
     # Fence the remote command from ssh's option parser. See

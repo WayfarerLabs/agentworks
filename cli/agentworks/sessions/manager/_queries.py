@@ -707,8 +707,8 @@ def render_session_listing(listing: SessionListing) -> None:
         elif status == "unknown":
             unknown_names.append(session.name)
 
-    headers = ["NAME", "WORKSPACE", "VM", "TEMPLATE", "HARNESS INTEGRATION", "MODE", "STATUS"]
-    for line in output.render_table(headers, rows):
+    headers = ["NAME", "WORKSPACE", "VM", "TEMPLATE", "HARNESS INT.", "MODE", "STATUS"]
+    for line in output.render_table(headers, rows, max_col_widths={headers.index("MODE"): 40}):
         output.info(line)
 
     if broken_names or unknown_names:

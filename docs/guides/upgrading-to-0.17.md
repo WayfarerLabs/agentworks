@@ -1,11 +1,11 @@
-# Upgrading to 0.16
+# Upgrading to 0.17
 
-The 0.16 boundary changes the third-party `harness-integration` author contract from version 1 to
+The 0.17 boundary changes the third-party `harness-integration` author contract from version 1 to
 version 2. Merge behavior now belongs to the config model the integration offers. Operators using
 the shipped `shell`, `claude-code`, `codex`, or `grok-build` integrations do not need to change
 configuration.
 
-**This guide is release-scoped.** It carries third-party integrations across the 0.16 boundary. The
+**This guide is release-scoped.** It carries third-party integrations across the 0.17 boundary. The
 permanent model and harness author contracts live in
 [`cli/agentworks/schema/README.md`](../../cli/agentworks/schema/README.md) and
 [`cli/agentworks/capabilities/harness_integration/README.md`](../../cli/agentworks/capabilities/harness_integration/README.md).

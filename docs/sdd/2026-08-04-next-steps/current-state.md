@@ -1,6 +1,6 @@
 # Current State
 
-- Snapshot date: 2026-08-25, post-0.15.0 (update at wave boundaries)
+- Snapshot date: 2026-08-28, post-0.15.0 and post-instance-specs (update at wave boundaries)
 - Baseline: released Agentworks 0.14.0 (2026-08-18, live on PyPI; see `phasing.md`'s release map for
   the cut's trail) plus post-release `main`. The release itself carries everything the previous
   baseline enumerated (the phase 1 TOML sunset, the 0.14 expired-compat removals, declarative-schema
@@ -12,25 +12,37 @@
 - **0.15.0 released 2026-08-25** (PR #630 merged, tag `v0.15.0`), carrying the secret-preview
   contract rewrite, the doctor indeterminate split, and the 0.15 upgrade guide. Its changelog
   carries a hand-applied operator callout pointing at `docs/guides/upgrading-to-0.15.md`, which
-  release-please destroys whenever it rewrites the release branch. Verified 2026-08-24 across four
-  merges: the bot rewrites that branch only when a merge changes what it would generate, so `docs`,
-  `chore`, and `test` merges and anything outside the `cli/` component leave the callout intact, and
-  only a `feat`, `fix`, or breaking commit under `cli/` wipes it. The durable fix is to carry
-  operator-facing text in a commit footer, which is generated content, written as a single unbroken
-  paragraph because the trailer parser stops at a continuation line beginning `word:` and fragments
-  on blank lines (this truncated the 0.14.0 entry, issue #589). The published GitHub Release body is
-  editable and is not regenerated once the release exists, so it is the fallback for correcting
-  notes after a cut. **The cut proved one thing the four-merge study could not:** the hand-applied
-  callout reached `cli/CHANGELOG.md` on `main` but **not the published GitHub Release body**,
-  because release-please builds that body from its own generated notes rather than from the file.
-  Protecting the file protects the wrong artifact if what matters is the page operators land on,
-  which makes the commit-footer approach the fix for both surfaces rather than merely the more
-  durable one. Two entries are duplicated in the 0.15.0 notes because we merge with merge commits
-  whose GitHub-default body repeats the PR title while release-please parses merge bodies expecting
-  a squash workflow; there is no config switch for this (the schema's only `merge` key concerns
-  combining release PRs), so the remedy is either squash-merging, which would destroy the
-  always-green phased commits inside one PR that this repo deliberately uses, or correcting the
-  published Release body
+  release-please destroys whenever it rewrites the release branch. **Correction, 2026-08-26:** an
+  earlier version of this entry said the branch is rewritten only by a `feat`, `fix`, or breaking
+  commit under `cli/`, and that `docs` merges leave the callout intact. That was wrong, and the saga
+  lead retracted it publicly on PR #630. It rested on a false observation, that PR #647 did not
+  render; its single `docs(cli)` commit renders in the published 0.15.0 Release body, and in fact
+  renders twice, once via its merge commit and once via the commit itself. An entry appears only
+  when it passes three independent filters, none dominant. **Window:** its committer date sorts
+  after the previous release commit in the default branch's date-ordered history, which is what
+  omitted twelve reachable commits from the 0.16.0 notes. **That omission is permanent and is not
+  repairable by scheduling** (established 2026-08-26 when a lane reasoned the opposite): both inputs
+  are already fixed, the boundary by the `v0.15.0` tag and the commits by their committer dates, so
+  holding the cut does not recover them and 0.17.0 is strictly worse because its window opens at the
+  `v0.16.0` tag. They are absent from every future generated surface. The hold on 0.16.0 rests on
+  release completeness rather than on recovering them. **Component:** it touches `cli/`, which is
+  why `fix(website)` never appears despite being a rendering type. **Type:** `feat`, `fix`, and
+  `docs` render; `chore`, `test`, and `refactor` do not. So a `docs` merge under `cli/` does rewrite
+  the branch. The durable fix is to carry operator-facing text in a commit footer, which is
+  generated content, written as a single unbroken paragraph because the trailer parser stops at a
+  continuation line beginning `word:` and fragments on blank lines (this truncated the 0.14.0 entry,
+  issue #589). The published GitHub Release body is editable and is not regenerated once the release
+  exists, so it is the fallback for correcting notes after a cut. **The cut proved one thing the
+  four-merge study could not:** the hand-applied callout reached `cli/CHANGELOG.md` on `main` but
+  **not the published GitHub Release body**, because release-please builds that body from its own
+  generated notes rather than from the file. Protecting the file protects the wrong artifact if what
+  matters is the page operators land on, which makes the commit-footer approach the fix for both
+  surfaces rather than merely the more durable one. Two entries are duplicated in the 0.15.0 notes
+  because we merge with merge commits whose GitHub-default body repeats the PR title while
+  release-please parses merge bodies expecting a squash workflow; there is no config switch for this
+  (the schema's only `merge` key concerns combining release PRs), so the remedy is either
+  squash-merging, which would destroy the always-green phased commits inside one PR that this repo
+  deliberately uses, or correcting the published Release body
 
 This document records where the system actually is, verified by code reconnaissance rather than
 assumed from the perspectives. It is the ground truth the phasing rests on; when a wave lands,
@@ -151,3 +163,11 @@ its branch is deleted. Remaining unmerged drafts on remote branches, both out of
 - Copilot's automated PR review is currently failing on monthly quota exhaustion (observed
   2026-08-05), so per the development process the fresh-eyes generic pass is substituted with a
   local reviewer until quota resets.
+
+- **No CI runner covers Windows or macOS**; every gate runs on Linux. The Windows-only `vm create`
+  break that PR #677 fixed is the case in point: no gate could have caught it, and it reached a
+  published release. The exposure is structural rather than incidental: any platform-conditional
+  path is unverified until an operator hits it, and the mechanism there
+  (`subprocess.run(..., text=True)` wrapping stdin in a `TextIOWrapper` that rewrites LF to
+  `os.linesep`) was invisible on Linux by construction. Recorded as a known gap, not a scheduled
+  item.

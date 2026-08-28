@@ -215,7 +215,19 @@ class TyperHandler:
                 # 2-space indent is preserved at level 0.
                 typer.echo(f"{_pad(level + 1)}{hint}", err=True)
             while True:
-                value = str(click.prompt(f"{_pad(level)}{label}", err=True, default="", hide_input=True))
+                # The empty default is load-bearing: without it click
+                # re-prompts silently in its own loop and the retry below
+                # never runs. The rendered "[]" suffix is pure noise, so
+                # hide it (as ``prompt`` does above).
+                value = str(
+                    click.prompt(
+                        f"{_pad(level)}{label}",
+                        err=True,
+                        default="",
+                        show_default=False,
+                        hide_input=True,
+                    )
+                )
                 if value.strip():
                     return value
                 typer.echo("(empty, try again)", err=True)

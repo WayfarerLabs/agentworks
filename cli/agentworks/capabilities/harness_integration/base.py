@@ -118,6 +118,27 @@ def require_commands(
     )
 
 
+def quote_literal_argv(value: str) -> str:
+    """Quote one shell argv value while shielding literal ``{{`` text.
+
+    The session manager applies template-variable substitution to the full
+    pane command returned by an integration. Workload fields are literal
+    harness input, so split adjacent opening braces across concatenated shell
+    quote fragments. The target shell reconstructs the exact value while the
+    manager never sees a template placeholder. Callers must continue using
+    ordinary :func:`shlex.quote` for ``extra_args``, whose placeholders are
+    intentionally expanded by the manager.
+    """
+    chunks: list[str] = []
+    start = 0
+    for index in range(1, len(value)):
+        if value[index - 1 : index + 1] == "{{":
+            chunks.append(value[start:index])
+            start = index
+    chunks.append(value[start:])
+    return "".join(shlex.quote(chunk) for chunk in chunks)
+
+
 class HarnessIntegration(Capability):
     """Capability: configures, runs, and manages one session's workload.
 

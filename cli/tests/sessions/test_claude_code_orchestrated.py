@@ -25,6 +25,7 @@ presence.
 
 from __future__ import annotations
 
+import shlex
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -403,13 +404,11 @@ def test_resume_under_another_harness_integration_leaves_the_flat_legacy_key_int
 # -- substitution-safety: the generated snippet is not mangled ---------------
 
 
-def test_substitution_leaves_the_generated_snippet_intact_and_substitutes_extra_args(
+def test_substitution_preserves_workload_values_and_substitutes_extra_args(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The claude-code snippet is the first harness integration output carrying literal
-    braces (the ``sh -c '...'`` quoting). The relocated template-var
-    substitution must not mangle the generated skeleton, while an operator
-    ``extra_args`` var still substitutes."""
+    """Workload fields are literal harness input across the real manager
+    substitution boundary, while ``extra_args`` retains template expansion."""
     from agentworks.sessions.manager import create_session
 
     db = _seed_db(tmp_path)
@@ -419,7 +418,13 @@ def test_substitution_leaves_the_generated_snippet_intact_and_substitutes_extra_
     _common_stubs(monkeypatch)
     _harness_integration_template(
         monkeypatch,
-        {"extra_args": ["--append-system-prompt", "session {{session_name}}"]},
+        {
+            "goal": "goal {{session_name}} {{component}}",
+            "initial_prompt": "prompt {{session_name}} {{component}}",
+            "agent": "agent {{session_name}} {{component}}",
+            "append_system_prompt": "system {{session_name}} {{component}}",
+            "extra_args": ["--future-flag", "extra-{{session_name}}"],
+        },
     )
     _capture_pane_command(monkeypatch, events, captured)
 
@@ -438,7 +443,13 @@ def test_substitution_leaves_the_generated_snippet_intact_and_substitutes_extra_
     assert command.startswith("sh -c ")
     assert f"--session-id {sid}" in command
     assert "exec claude" in command
-    # The operator's extra_args var WAS substituted (parity with shell).
-    assert "session s1" in command
-    assert "{{session_name}}" not in command
+    inner = shlex.split(command)[2]
+    inner_argv = shlex.split(inner)
+    argv = inner_argv[inner_argv.index("claude") + 1 :]
+    assert argv[argv.index("--agent") + 1] == "agent {{session_name}} {{component}}"
+    assert argv[argv.index("--append-system-prompt") + 1] == "system {{session_name}} {{component}}"
+    prompt = argv[-1]
+    assert "goal {{session_name}} {{component}}" in prompt
+    assert "prompt {{session_name}} {{component}}" in prompt
+    assert argv[argv.index("--future-flag") + 1] == "extra-s1"
     db.close()

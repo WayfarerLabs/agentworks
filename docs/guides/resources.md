@@ -355,11 +355,13 @@ spec:
 - Command strings support the `{{session_name}}` and `{{workspace_name}}` variables. This holds
   wherever an integration takes a command or raw arguments (`shell`'s `command` and
   `resume_command`, the `extra_args` escape hatch on `claude-code`, `codex`, and `grok-build`).
-- The integration-plus-config pair inherits as a unit: a child restating the same integration merges
-  its config keys into the parent's (child wins per key), while a child naming a _different_
-  integration starts fresh. `env`, `inherits`, and the description merge as usual. A few list fields
-  union across the chain rather than replacing, so a child adding one entry never silently drops the
-  parent's; the field reference marks which.
+- The integration-plus-config pair inherits as a unit. A child restating the same integration uses
+  that integration's config model to merge with the parent: objects and mappings recursively merge
+  by key, lists append unequal items and deduplicate equal items, and incoming scalars replace prior
+  values. Individual model fields can declare replacement instead, such as the `extra_args` fields
+  on `claude-code`, `codex`, and `grok-build`; the field reference marks these exceptions. A child
+  naming a _different_ integration starts fresh. `env`, `inherits`, and the description merge as
+  usual.
 - `agw graph show harness-integration/<name>` is the other half: the integration's declared and live
   relationships, rather than the fields it accepts.
 
@@ -382,6 +384,10 @@ spec:
     name: claude-code
     permission_mode: acceptEdits
     reasoning_effort: high
+    goal: Finish the migration with focused tests passing
+    initial_prompt: Start by inspecting the current failures
+    agent: reviewer
+    append_system_prompt: Keep the change focused and verify the result
     vim_mode: true
 ```
 
@@ -400,6 +406,16 @@ spec:
 - `reasoning_effort` forwards an effort choice to Claude for the session. Consult the documentation
   for the Claude version and model on the launch target for the current choices and fallback
   behavior.
+- `goal` and `initial_prompt` describe a fresh Claude conversation. Agentworks submits `goal`
+  through Claude's native `/goal` and sends `initial_prompt` as the first input. Claude exposes one
+  startup input, and setting `/goal` starts that first turn, so when both fields are present the
+  initial prompt is included as guidance in the goal directive. These inputs also apply when the
+  stored Agentworks session id no longer has a Claude transcript and the integration has to launch
+  fresh. They are not replayed when Claude resumes a real transcript.
+- `agent` and `append_system_prompt` are native per-process controls. Agentworks forwards them on
+  every Claude launch, including a real resume, so the resumed process retains those settings. The
+  flags, startup parser behavior, and `/goal` composition were checked locally with Claude Code
+  2.1.231; Claude still owns agent discovery and validation.
 
 The `codex` integration runs Codex the same way and ships as the opt-in `codex` system plugin.
 
@@ -424,12 +440,12 @@ first line: `session create` always reports a brand-new conversation, while the 
 outcomes belong to `session resume`, and an adoption names the Codex conversation id it chose, so
 you can see it happen and fix it (pick the right conversation from the picker, or archive the stale
 one) rather than discovering it later. Overriding `notify` yourself through `extra_args` turns the
-recording off (yours wins, because `extra_args` is appended last), which leaves resume relying on
-that fallback.
+recording off (yours wins, because `extra_args` follows generated options), which leaves resume
+relying on that fallback.
 
 Its config is all optional, and `agw resource explain harness-integration/codex` documents every
-field. Four things the field reference does not say, because they are Codex's behavior rather than
-facts about the fields:
+field. The field reference omits these details because they describe Codex behavior rather than the
+fields themselves:
 
 - **Codex sandboxes network access OFF by default**, even under `workspace-write`. A coding session
   that needs `npm install` or `git push` has to turn it on.
@@ -453,6 +469,30 @@ facts about the fields:
   a newer Codex than the target runs), or a target Codex old enough not to know the flag (it was
   verified against codex-cli 0.146.0, and an older binary rejects it as an unknown argument at
   launch).
+- **Fresh prompt setup is mediated where Codex lacks a startup control.** `initial_prompt` is
+  Codex's ordinary positional first prompt. When `goal` or `agent` is present, Agentworks prepends
+  setup that asks Codex to complete those steps before continuing with the operator prompt, and
+  warns about that mediation in the command output and pane. Goal setup creates Codex's native
+  persistent goal with exactly the declared objective and no invented token budget; `/goal` confirms
+  what is active. Agent setup looks up the custom agent whose declared `name` matches and follows
+  its `developer_instructions` in the primary thread. Codex does not support selecting that custom
+  agent for the primary thread, so its model, reasoning, sandbox, MCP, skills, and other
+  configuration do not apply. A missing or unreadable named agent is reported rather than silently
+  replaced.
+- **Direct developer instructions use Codex's native configuration.** `developer_instructions`
+  forwards through Codex's configuration override as additional model-readable instructions for the
+  process on every launch, including explicit resume and the ambiguity picker. It is not
+  prompt-mediated and is not another route for agent model, reasoning, sandbox, MCP, skills, or
+  other settings. Native config parsing and the positional `--` boundary were checked locally with
+  Codex CLI 0.149.1.
+- **Fresh prompt setup is never replayed on a real resume.** Goal, initial prompt, and
+  prompt-mediated primary-thread agent setup apply on `session create` and on an Agentworks resume
+  decision that finds no resumable Codex conversation, including the archived-or-gone fallback. The
+  ambiguity picker is different: choosing an existing conversation must not receive fresh prompt
+  setup, so Codex's own Esc path cannot receive it conditionally either. Native
+  `developer_instructions` still configure the picker process and its Esc-created conversation. If
+  you want the declared fresh prompt setup after seeing the picker, exit it, remove or archive the
+  unwanted candidates, and run `agw session resume` again so Agentworks can make the fresh decision.
 
 The only launch-target requirement is that `codex` is installed:
 
@@ -470,6 +510,8 @@ spec:
     approvals_reviewer: auto_review # optional; escalations adjudicated by Codex's reviewer subagent
     network: true # optional; sandbox network access (off by default)
     reasoning_effort: high # optional; forwarded to Codex's model_reasoning_effort setting
+    goal: Finish the migration with the focused tests passing # optional; prompt-mediated on fresh start
+    agent: reviewer # optional; follows only the named custom agent's developer_instructions
     vim_mode: true # optional; start the composer in Vim normal mode
     web_search: cached # optional; cached | indexed | live | disabled
 ```
@@ -490,6 +532,9 @@ spec:
     permission_mode: auto
     reasoning_effort: high
     sandbox: workspace
+    goal: Finish the migration with the focused tests passing
+    agent: reviewer
+    rules: Keep changes focused and verify the result
 ```
 
 Agentworks assigns the conversation a UUID. A restart resumes that UUID when Grok's local
@@ -500,11 +545,29 @@ workspace directory without reproducing Grok's cwd encoding. The pane announces 
 or started fresh.
 
 All Grok-specific settings are optional. `permission_mode`, `model`, `reasoning_effort`, and
-`sandbox` are Grok-owned open strings forwarded to the installed CLI, while `extra_args` is appended
-last for new or uncommon flags. The integration checks only that `grok` is installed. Authentication
-remains Grok's responsibility: use its browser login, `grok login --device-auth` on a remote target,
-or an `XAI_API_KEY` supplied through the session environment. The plugin's installer uses xAI's
-official stable-channel installer and adds `~/.grok/bin` to the target user's PATH.
+`sandbox` are Grok-owned open strings forwarded to the installed CLI, while `extra_args` supplies
+new or uncommon options after generated flags and before any fresh positional prompt. The
+integration checks only that `grok` is installed. Authentication remains Grok's responsibility: use
+its browser login, `grok login --device-auth` on a remote target, or an `XAI_API_KEY` supplied
+through the session environment. The plugin's installer uses xAI's official stable-channel installer
+and adds `~/.grok/bin` to the target user's PATH.
+
+`goal` and `initial_prompt` describe a fresh Grok conversation. Agentworks submits `goal` through
+Grok's native `/goal` and passes the composed startup input as one positional prompt after the
+option boundary. Grok exposes one startup input, and setting `/goal` starts that first turn, so when
+both fields are present the initial prompt is included as guidance in the goal directive. These
+inputs apply again if Grok's local session state disappears and the integration starts the UUID
+fresh, but they are not replayed when a real `summary.json` allows resume. `agent` and `rules` are
+native per-process controls, forwarded through top-level `--agent` and `--rules` on every launch
+including resume.
+
+The top-level flags, positional prompt, and `/goal` claims were checked against official Grok Build
+1.0.10 source at commit `77cd7eb` and its documentation. That parser reserves `--agent-profile` for
+the separate `grok agent` subcommand; interactive top-level identity uses `--agent`, while
+`-p`/`--single` selects headless mode rather than supplying an interactive startup prompt. No Grok
+binary is installed in the development environment, so these are source/documentation findings
+rather than local runtime verification. The runtime observations below remain pinned to the tested
+1.0.4 release.
 
 Grok Build 1.0.4 rejects repeated managed flags, so `extra_args` adds unmodeled flags rather than
 overriding a modeled field. It also fails startup for an unknown sandbox profile instead of silently
