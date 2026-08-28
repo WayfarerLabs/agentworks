@@ -98,7 +98,14 @@ def _report_contents(group: HealthGroup, database: object) -> None:
     assert isinstance(database, Database)
     vms = database.list_vms()
     workspace_count = len(database.list_workspaces())
-    group.ok("Contents", f"{len(vms)} VMs, {workspace_count} workspaces")
+    agent_count = len(database.list_agents())
+    session_count = database.count_sessions()
+    console_count = len(database.list_consoles())
+    group.ok(
+        "Contents",
+        f"{len(vms)} VMs, {workspace_count} workspaces, {agent_count} agents, "
+        f"{session_count} sessions, {console_count} consoles",
+    )
 
     def log_hint(vm_name: str) -> str:
         if not LOG_DIR.exists():

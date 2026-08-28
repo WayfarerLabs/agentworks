@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -12,9 +13,9 @@ from typing import cast
 
 import pytest
 
-from agentworks.db import LATEST_VERSION, Database
+from agentworks.db import LATEST_VERSION, Database, SessionMode
 from agentworks.doctor import HealthGroup, Status
-from agentworks.doctor_state import append_vm_site_database_checks, check_database, check_system
+from agentworks.doctor_state import _report_contents, append_vm_site_database_checks, check_database, check_system
 from agentworks.errors import StateError
 
 
@@ -122,6 +123,36 @@ def test_doctor_warns_without_echoing_an_unexpected_vm_initialization_state(
     warning = next(check for check in checks if check.name == "VM 'box'")
     assert warning.status is Status.WARN
     assert warning.message == "unexpected initialization state"
+
+
+def test_doctor_reports_each_database_backed_live_resource_count(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db.insert_vm("box", site="lima-local", hostname="box")
+    for index in range(2):
+        db.insert_workspace(f"work-{index}", f"/work/{index}", "box", f"work-{index}")
+    for index in range(3):
+        db.insert_agent(f"agent-{index}", "box", f"agent-{index}")
+    for index in range(4):
+        db.insert_session(f"session-{index}", "work-0", "default", SessionMode.ADMIN)
+    db._conn.execute(
+        "UPDATE sessions SET harness_integration_state = ? WHERE name = ?",
+        ("not-json", "session-0"),
+    )
+    db._conn.commit()
+    for index in range(5):
+        db.insert_console(f"console-{index}", "box")
+
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.output.warn", warnings.append)
+    group = HealthGroup("Database")
+    _report_contents(group, db)
+
+    assert warnings == []
+    message = group.checks[0].message
+    assert message is not None
+    assert [int(value) for value in re.findall(r"\d+", message)] == [1, 2, 3, 4, 5]
 
 
 def test_doctor_database_errors_remain_shared_actionable_facts(monkeypatch: pytest.MonkeyPatch) -> None:
