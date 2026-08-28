@@ -178,8 +178,9 @@ off whenever bandwidth allows, on its own merits and its own schedule.
   head.
 
   **0.15.1 cut 2026-08-27, artifact still unpublished:** the first release from a maintenance
-  branch. PR #677, a Windows regression that broke `vm create` for effectively every operator on
-  that platform, was cherry-picked onto a new `0.15.x` branch cut from `v0.15.0` instead of being
+  branch. PR #677, the fix for a Windows regression that broke `vm create` on that platform across
+  every cloud provider (`subprocess.run(..., text=True)` rewrote the stdin payload the tailnet join
+  depends on), was cherry-picked onto a new `0.15.x` branch cut from `v0.15.0` instead of being
   pulled forward, so the fix could reach operators without waiting on the 0.16.0 hold. Two workflow
   changes made that path durable rather than a one-off: release-please now runs on `[0-9]+.[0-9]+.x`
   branches with `target-branch` set to the triggering ref, so each maintenance branch computes its

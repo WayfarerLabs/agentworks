@@ -16,8 +16,9 @@
   earlier version of this entry said the branch is rewritten only by a `feat`, `fix`, or breaking
   commit under `cli/`, and that `docs` merges leave the callout intact. That was wrong, and the saga
   lead retracted it publicly on PR #630. It rested on a false observation, that PR #647 did not
-  render; its two `docs(cli)` commits are in the published 0.15.0 Release body. An entry appears
-  only when it passes three independent filters, none dominant. **Window:** its committer date sorts
+  render; its single `docs(cli)` commit renders in the published 0.15.0 Release body, and in fact
+  renders twice, once via its merge commit and once via the commit itself. An entry appears only
+  when it passes three independent filters, none dominant. **Window:** its committer date sorts
   after the previous release commit in the default branch's date-ordered history, which is what
   omitted twelve reachable commits from the 0.16.0 notes. **That omission is permanent and is not
   repairable by scheduling** (established 2026-08-26 when a lane reasoned the opposite): both inputs
@@ -163,18 +164,10 @@ its branch is deleted. Remaining unmerged drafts on remote branches, both out of
   2026-08-05), so per the development process the fresh-eyes generic pass is substituted with a
   local reviewer until quota resets.
 
-- **No CI runner covers Windows or macOS**; every gate runs on Linux. PR #677 was a Windows-only
-  break in `vm create` that no gate could have caught, and it reached a published release. The
-  exposure is structural rather than incidental: any platform-conditional path is unverified until
-  an operator hits it, and the mechanism there (`subprocess.run(..., text=True)` wrapping stdin in a
-  `TextIOWrapper` that rewrites LF to `os.linesep`) was invisible on Linux by construction. Recorded
-  as a known gap, not a scheduled item.
-
-- **The `input_text` byte-exact guarantee was documented but not enforced** (found 2026-08-28, fixed
-  by PR #684). `transports/base.py` stated it unconditionally while the SSH path could forward
-  `force_tty` into `ssh.run` (`transports/ssh.py:222`), which inserts `-tt` (`ssh.py:323`), and a
-  PTY's line discipline echoes input and rewrites CR. An earlier version of this entry said the
-  docstring "promises more than the code delivers", which overstated it: no caller pairs the two, so
-  nothing was broken, and the real defect was the gap between a documented guarantee and an API that
-  permitted breaking it. The fix refuses the pairing in `ssh.run`, matching the guard that already
-  refuses stdin combined with command logging, rather than narrowing the sentence.
+- **No CI runner covers Windows or macOS**; every gate runs on Linux. The Windows-only `vm create`
+  break that PR #677 fixed is the case in point: no gate could have caught it, and it reached a
+  published release. The exposure is structural rather than incidental: any platform-conditional
+  path is unverified until an operator hits it, and the mechanism there
+  (`subprocess.run(..., text=True)` wrapping stdin in a `TextIOWrapper` that rewrites LF to
+  `os.linesep`) was invisible on Linux by construction. Recorded as a known gap, not a scheduled
+  item.
