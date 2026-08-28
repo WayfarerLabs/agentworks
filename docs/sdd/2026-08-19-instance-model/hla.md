@@ -2,7 +2,7 @@
 
 - Status: R1, R2, and R4 merged; merge-strategy correction in design review; R3 and R5 pending
 - Date: 2026-08-23
-- Last revised: 2026-08-27
+- Last revised: 2026-08-28
 - FRD: [frd.md](./frd.md)
 - Assessment: [database-assessment.md](./database-assessment.md)
 - Store contract: [store-contract.md](./store-contract.md)
@@ -155,6 +155,11 @@ vocabulary is closed and registration-validated:
   discards the complete prior value at that node. An empty replaced object or list therefore clears
   that subtree or list without adding a general removal language.
 
+Conformance examines the annotation-declared structural domain without executing or inferring model
+or before validators. Those validators do not enlarge the comparison carrier: admitted raw values
+already in the carrier retain concrete-type comparison, while values outside it remain unequal and
+reach final validation.
+
 A field declares its strategy directly as typed Pydantic annotation metadata. A mapping-shaped
 structured model can declare its own root strategy for every use; a containing field override takes
 precedence over that model policy, and the shape default applies last. Explicit metadata may restate
@@ -162,15 +167,20 @@ an inherited policy without creating a second validation rule. Strategy metadata
 policy, not a manifest key, serialized desired state, or second operator-facing type system.
 Registration rejects duplicate strategy metadata, strategies incompatible with the annotated shape,
 and strategy metadata placed where the merge engine has no conflict identity. Mapping value
-annotations are valid; mapping keys and individual sequence elements are not. A merge-by-key mapping
-requires exact-string keys or must choose whole-node replacement. The v2 contract uniformly refuses
-validation aliases in participating models, including below replacement boundaries, so registration
-never depends on the path by which a model is reached. Serialization-only aliases remain valid.
+annotations and every model recursively reachable through them are traversal positions; mapping keys
+and individual sequence elements are not. A merge-by-key mapping requires exact-string keys or must
+choose whole-node replacement. The v2 contract uniformly refuses validation aliases in every
+reachable participating model, including through mapping values and below replacement boundaries, so
+registration never depends on the path by which a model is reached. Serialization-only aliases
+remain valid.
 
 For discriminated and structural unions, a containing-field replacement wins before arm selection.
-Otherwise equal selected arms apply the selected model's root policy and recurse when it permits;
-different arms, or arms that cannot be selected, replace the complete union node. An unknown schema
-key survives, but a later conflict at that key replaces the earlier raw value instead of recursively
+Otherwise the walker selects both arms. Different arms, or arms that cannot be selected, replace the
+complete union node even under a containing-field `merge`. Equal selected arms apply an explicit
+containing-field `merge` when present, then the selected model's root policy and the object default.
+Only an explicit same-arm override can therefore produce a composite that differs from the arm
+model's normal replacement policy; values from different arms never combine. An unknown schema key
+survives, but a later conflict at that key replaces the earlier raw value instead of recursively
 merging by runtime shape. A wholly unknown integration config has no usable schema, so a later
 declaration replaces its complete prior config and the Registry's miss policy reports the selector
 error. The merge engine never filters an invalid list item, converts `null`, or otherwise turns
@@ -189,20 +199,21 @@ The runner records provenance at the granularity the schema merge preserves:
 - scalar path for replacements;
 - nested leaf path for recursive object conflicts;
 - resulting list position plus contributing layers for append-deduplicated lists; and
-- a prefix reset plus the replacing layer at the node for whole-object replacement. List replacement
-  additionally records result positions so later equal items can retain distinct contributors.
+- a prefix reset plus the replacing layer at the node for whole-object or whole-list replacement.
 
 Untouched descendants retain their earlier source. A replaced subtree retains no attribution from
 the discarded value; its descendants inherit the node source through longest-prefix lookup until a
 later child merge records a narrower source. When a contribution first materializes such a narrower
 path, it seeds the record from the longest existing prefix before adding the new layer, so an equal
-list item does not erase the inherited contributor. Provenance paths use string field or mapping-key
-segments and integer list-position segments. Validation error locations normalize to that same
-shape; a non-string raw key makes a merge-by-key mapping wrong-shaped and replaces it at its owning
-container rather than leaking, hashing, or converting the key to text. All list-reference consumers
-use the resulting position instead of the authored item value. Validation errors use the longest
-applicable recorded path, so two invalid siblings inside one nested object can still name the layers
-that separately declared them.
+list item does not erase the inherited contributor. `ProvenancePath` is the single path shape
+carried by layer results and merge operations and consumed by reference ownership and validation
+attribution. String segments address fields and mapping keys; integer segments address positions in
+the final effective list, never authored item values. Every producer and consumer uses the same
+longest-prefix lookup, so a parent replacement remains authoritative until a narrower surviving
+value records another contributor. Validation error locations normalize to that shape; a non-string
+raw key makes a merge-by-key mapping wrong-shaped and replaces it at its owning container rather
+than leaking, hashing, or converting the key to text. Two invalid siblings inside one nested object
+can therefore still name the layers that separately declared them.
 
 Defaults originate in the seed and receive `defaulted` provenance. They are not represented as a
 platform layer. The existing resolved dataclasses remain compatibility projections while consumers
@@ -215,14 +226,17 @@ empty value on a `replace` node clears that complete value. This is schema polic
 instance-only tombstone.
 
 Session harness selection remains one structural transition rather than a field policy callback.
-When two layers select the same integration, its registered config model directs recursive merging.
+When two layers select the same registered integration, its config model directs recursive merging.
 When a later layer selects a different integration, the runner resets the entire config subtree and
-merges only under the new integration's model. The imperative capability `merge_config` hook and its
+merges only under the new integration's model. Repeated declarations of the same unknown selector
+instead replace the complete prior raw config, because no model exists through which to recurse;
+Registry miss handling remains authoritative. The imperative capability `merge_config` hook and its
 sentinel-based provenance inference disappear; capability authors use the same model annotations as
-core declarations. Removing that public hook increments the harness-integration capability contract
-from version 1 to version 2. Shipped integrations move with the framework, exact contract-version
-registration makes version-1 third-party integrations fail clearly, and there is no compatibility
-bridge that could preserve two merge authorities.
+core declarations. `MergedHarness` retains neither a provenance map nor a parallel selector-owner
+field. Removing that public hook increments the harness-integration capability contract from version
+1 to version 2. Shipped integrations move with the framework, exact contract-version registration
+makes version-1 third-party integrations fail clearly, and there is no compatibility bridge that
+could preserve two merge authorities.
 
 An effective-instance validator runs after the overlay fold. It reuses domain reference and
 capability rules by publishing the owning live or pending resource, without publishing the overlay

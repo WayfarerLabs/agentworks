@@ -46,6 +46,9 @@ Mapping-shaped schema models also expose a class policy for uses where no contai
 where the same object policy should follow the model everywhere:
 
 ```python
+class PlaintextEnvEntry(AgwModel):
+    merge_strategy: ClassVar[MergeStrategy] = MergeStrategy.REPLACE
+
 class SecretEnvEntry(AgwModel):
     merge_strategy: ClassVar[MergeStrategy] = MergeStrategy.REPLACE
 ```
@@ -115,9 +118,9 @@ merge(node, previous, incoming, path):
     if either arm cannot be selected or the arms differ:
       replace the complete union node
     otherwise:
-      continue under the selected arm and apply its root model policy
+      continue under the selected arm
 
-  strategy = remaining field marker, else selected model policy, else shape default
+  strategy = containing field marker, else selected model policy, else shape default
 
   if strategy is replace:
     replace the complete node
@@ -144,8 +147,8 @@ merge(node, previous, incoming, path):
 
 Whole-node replacement emits a prefix reset and records the incoming layer at the node. Object
 descendants inherit that source through longest-prefix lookup; later child merges can add narrower
-records. List replacement also records each resulting position because a later equal item may add a
-distinct contributor.
+records. List positions likewise inherit from a replaced list node; an index record materializes
+only when a later append or equal contribution differs from that parent attribution.
 
 List equality uses a closed structural, type-sensitive JSON-carrier comparison rather than Python
 equality or hashing. Exact `None`, `bool`, `int`, finite `float`, and `str` values receive distinct
@@ -186,20 +189,28 @@ validation receives and decides the value.
 
 ## Union and subtree boundaries
 
-Structural and discriminated unions must not produce hybrid objects. Their executable precedence is:
+Structural and discriminated unions must not combine values from different arms or arms that cannot
+be selected. Their executable precedence is:
 
 1. a `replace` marker on the containing field replaces without selecting an arm;
 2. otherwise the walker selects both arms using the schema package's existing introspection;
 3. different arms, or arms that cannot be selected, replace the complete value and defer any error
    to validation; and
-4. equal selected arms apply that model's root policy, then recurse only if that policy merges.
+4. equal selected arms apply a containing `merge` when present, otherwise the selected model's root
+   policy and then the object default; recurse only when that effective policy merges.
 
-Environment entries use model-level replacement so changing between secret and plaintext forms, or
-overriding one entry with another of the same form, preserves today's whole-entry replacement.
+A same-arm composite can therefore be requested deliberately by a containing field even when the
+reusable arm model normally replaces. That is ordinary field-over-model precedence, not a cross-arm
+hybrid. A containing `merge` never overrides the arm-selection safety gate.
+
+Both environment-entry arm models use model-level replacement and their containing mapping carries
+no override, so changing between secret and plaintext forms, or overriding one entry with another of
+the same form, preserves today's whole-entry replacement.
 
 An object-level replacement is a strict subtree boundary. The previous object and every child under
 it are discarded before the incoming object is recorded at the node. Child annotations inside that
-incoming object govern later layers, not the layer that replaced their parent.
+incoming object do not participate at that fixed replacement node. They still govern any merging use
+of the same model elsewhere; uniform registration conformance remains model-wide.
 
 ## Provenance
 
@@ -212,23 +223,48 @@ to own the retained provenance map.
 
 - Recursive object merge changes only incoming leaves; untouched descendants keep their sources.
 - Scalar replacement records the incoming source at the scalar path.
-- Append-deduplication records provenance by resulting list index. An equal item retains all
-  distinct contributing sources.
+- Append-deduplication records provenance by resulting list index. A newly appended index records a
+  replacement from the incoming layer, while an equal existing index records a contribution and
+  retains all distinct earlier sources.
 - Object replacement resets the node prefix and records only the incoming source at the node. Its
   descendants inherit that source by longest prefix until a later child merge adds a narrower
   record. An empty replacement still records which layer cleared the node.
-- List replacement resets the node prefix, records the node, and records its resulting positions so
-  later equal contributors can be distinguished.
+- List replacement resets the node prefix and records the node. Its positions inherit that source
+  until a later append or equal contribution materializes an index record.
 - A union-arm change is an object replacement and follows the same prefix-reset rule.
 
 Validation attribution changes from top-level-key lookup to longest-prefix lookup over the error
-location. `ProvenancePath` becomes `tuple[str | int, ...]`: string segments represent fields and
-valid mapping keys, while integer segments represent resulting list positions. Pydantic error
-locations normalize to the same representation. A non-string key in a merge-by-key mapping makes
-that raw node wrong-shaped and replaces it at the container, so normalization stops there and never
-prints or hashes the malformed key. List-reference consumers resolve against the resulting index
-instead of the authored item value. This is necessary once separate nested siblings can come from
-separate layers and keeps paths value-safe.
+location. The implementation introduces `ProvenancePath = tuple[str | int, ...]` across the complete
+provenance API: `LayeredResolution.provenance`; `LayerContribution.path` and its `replacement`,
+`contribution`, and `reset_prefix` constructors; `run_layer_fold` defaults and retained map; the
+generic merger's current path; every domain `effective_references` signature and ownership lookup;
+and capability-validation and error attribution. Their permanent docstrings migrate with their
+signatures, including removal of the current value-keyed list-path contract. All provenance reads
+use one longest-prefix helper.
+
+String segments represent fields and valid mapping keys, while integer segments represent positions
+in the returned effective list. An equal incoming item emits `contribution` at its existing result
+index so longest-prefix seeding retains the earlier owner; a newly appended item emits `replacement`
+at its new index so it does not inherit a parent owner that never contributed that value. List
+replacement resets the prefix and records only the list node; longest-prefix lookup attributes its
+positions without duplicate records. No authored item value or `repr` enters a provenance path.
+
+`validate_capability_config` and `config_error_from` accept a capability-local
+`Mapping[ProvenancePath, RefOwner]`. The session boundary projects the outer layered map into that
+shape: local `("name",)` resolves from outer `("harness_integration",)`, while outer
+`("harness_integration_config", *path)` becomes local `path`, including the empty root path, with
+the latest `LayerSource` converted to `RefOwner`. Declared-template finalize, pending creation,
+database-backed live publication, and lifecycle revalidation all use that same projection through a
+provenance-aware `validate_effective_harness`. The helper accepts an optional `SourceLocation` and
+forwards it to capability validation: declared-template finalize supplies the row location, while
+the other three paths omit it. `MergedHarness` retains neither the second provenance map nor its
+dead parallel `declared_by` ownership field.
+
+Pydantic error locations normalize to the same representation while the model-aware path walk still
+has structured segments: union-arm labels and key markers add no segment, and a non-string key in a
+merge-by-key mapping stops normalization at its container without printing or hashing the key. List
+reference consumers resolve against the resulting index. This is necessary once separate nested
+siblings can come from separate layers and keeps paths value-safe.
 
 ## Core and capability integration
 
@@ -247,9 +283,9 @@ Existing shipped behavior is preserved with model policy:
 
 Session harness selection has one necessary dynamic schema step. A same-name integration obtains the
 registered capability config model and merges through it. A changed integration name resets the
-complete config subtree before using the new model. An unknown name takes the total untyped path so
-normal Registry miss handling remains the authoritative error; its config uses the shallow
-child-wins fallback described above.
+complete config subtree before using the new model. An unknown name takes the total untyped path:
+the later config replaces the complete prior config without inspection, and normal Registry miss
+handling remains the authoritative error.
 
 The `HarnessIntegration.merge_config` callback and the resolver's sentinel-based inference are
 removed. No callable escape hatch remains for cross-field transforms; a capability represents merge
@@ -283,8 +319,12 @@ such as `FiniteFloat`; custom validators and model configuration do not establis
 `Any`, `object`, an unconstrained float, non-string mapping keys, sets, tuples, Python-specific
 scalar types, and opaque custom types fail conformance with guidance to mark that list `replace`.
 This is deliberately narrower than the harness-integration kind's general Pydantic/Python input
-domain. It makes append-deduplication honest for every valid v2 model while the
-unsupported-as-unequal rule remains only a malformed raw-input defense.
+domain. Static conformance is defined by the annotation-declared structural domain. Model and before
+validators are not consulted and cannot make an otherwise nonconforming annotation conform. At
+runtime they likewise do not enlarge the closed structural carrier: a validator-admitted raw value
+outside that carrier remains unsupported-as-unequal and reaches final validation, even if validation
+later accepts it. A validator-admitted value already inside the carrier remains comparable by its
+raw concrete type. Final validation does not retroactively repeat deduplication.
 
 Every mapping whose effective policy is `merge` likewise requires an exact-string key annotation.
 Any other key schema fails conformance with guidance to mark the complete mapping `replace`. At
@@ -299,9 +339,11 @@ includes string and generated aliases, alias choices, and alias paths, even belo
 authored field name throughout the public plugin contract and avoids context-dependent registration.
 Serialization-only aliases do not affect raw validation-key lookup and remain allowed.
 
-Mapping value annotations are traversed and validated. The dynamic session merger reads the
-registered integration's config model directly, so capability projection metadata is not a merge
-contract and receives no speculative preservation requirement.
+Mapping value annotations and every model recursively reachable through them are traversed for
+strategy placement and validation-alias conformance. A validation alias on a nested mapping-value
+model is refused even when the containing mapping or an ancestor uses whole-node replacement. The
+dynamic session merger reads the registered integration's config model directly, so capability
+projection metadata is not a merge contract and receives no speculative preservation requirement.
 
 ## Compatibility and persistence
 
@@ -331,7 +373,9 @@ The implementation must prove:
   provenance;
 - default append-deduplication, explicit list replacement, empty-list clearing, stable order, and
   duplicate contributors;
-- same-arm union recursion, arm-change replacement, and whole-entry environment parity;
+- containing replacement without arm selection, same-arm containing merge over model replacement,
+  same-arm model replacement without an override, different-arm or selection-failure replacement
+  despite containing merge, and same- and cross-arm whole-entry environment parity;
 - total handling of unknown keys, unknown arms, unknown integrations, `null`, wrong shapes, and
   invalid list items until final validation, including later raw replacement and cycle refusal;
 - type-sensitive list equality, including `true` versus `1`, `1` versus `1.0`, nested objects,
@@ -342,6 +386,9 @@ The implementation must prove:
   validation-alias refusal, non-string keys on merged mappings, and append-dedupe element types
   outside the comparable carrier, with exhaustive first-party model coverage and third-party
   registration coverage;
+- validator-admitted values outside the carrier remaining unequal until final validation,
+  carrier-resident values outside their declared annotation retaining concrete-type equality, and
+  validation-alias refusal through nested mapping values and below replacement boundaries;
 - acceptance of arbitrary mapping keys below a replacement boundary and malformed non-string raw
   keys replacing at the parent without merge-time interpretation;
 - core template-to-template and template-to-instance parity across every owning kind;
@@ -350,7 +397,9 @@ The implementation must prove:
 - string and integer validation-location normalization, wrong-shaped non-string map replacement,
   result-index list references, parent fallback for a malformed map key, and inherited parent
   provenance retained when a later equal list item contributes at a newly materialized position
-  path; and
+  path, a newly appended item refusing unrelated parent provenance, and declared-template source
+  framing through the consolidated validation helper, with no value- or `repr`-based path or
+  exact-only ownership lookup remaining; and
 - no database schema, desired-payload, persistence, or simple-case CLI change.
 
 Mutation testing covers exactly four safety mutations and shows that the focused suite fails for

@@ -4,7 +4,7 @@
 
 - Status: R1, R2, and R4 merged; merge-strategy correction in design review; R3 and R5 pending
 - Date: 2026-08-23
-- Last revised: 2026-08-27
+- Last revised: 2026-08-28
 - Requirements: [frd.md](./frd.md)
 - R1 assessment: [database-assessment.md](./database-assessment.md)
 - R2 contract: [store-contract.md](./store-contract.md)
@@ -230,6 +230,13 @@ review evidence rather than a live backend run.
       type-sensitive structural JSON equality, union-arm replacement, later raw replacement for
       unknown conflicts, cycle-safe malformed-input totality, and value-safe nested provenance in
       one schema walker used by template inheritance and final instance layers.
+- [ ] Migrate `ProvenancePath` end to end across `LayeredResolution`, every `LayerContribution`
+      constructor, `run_layer_fold` defaults and accumulation, all five `effective_references`
+      consumers, declared-template finalize, session pending, live, and lifecycle validation, and
+      the capability error bridge. Project selector and config paths into one capability-local map,
+      preserve optional source-location framing, use replacement for a new list index and
+      contribution for an equal existing index, and use one longest-prefix lookup throughout. Retain
+      no value- or `repr`-based path and no second session ownership channel.
 - [ ] Reduce VM, admin, workspace, agent, and session reducers to authored-field and seed adapters;
       replace same-integration capability callbacks with registered config-model policy while
       retaining complete config reset when the integration selector changes. Increment the
@@ -237,14 +244,16 @@ review evidence rather than a live backend run.
       clearly rather than bridging two merge authorities.
 - [ ] Annotate every existing non-default field so shipped core and capability behavior remains
       compatible, including whole-entry environment replacement and replacement argument lists.
-- [ ] Prove nested core and capability behavior, explicit empty replacement, union safety,
-      registration refusal, invalid-input preservation, typed equality, normalized validation
-      locations, result-index list references, inherited contributors at newly materialized paths,
-      uniform validation-alias refusal, unsafe append-dedupe-schema refusal, non-string merge-key
-      refusal with replacement escape, an unsupported Python object whose equality raises,
-      non-finite floats, cyclic items, and the absence of persistence or CLI schema changes.
-      Mutation-test exactly object replacement, list replacement, union reset, and longest-prefix
-      attribution.
+- [ ] Prove nested core and capability behavior, explicit empty replacement, containing replacement
+      before arm selection, same-arm field-over-model merge, same-arm model replacement,
+      different-arm or selection-failure reset despite containing merge, registration refusal,
+      invalid-input preservation, typed equality, normalized validation locations, result-index list
+      references, inherited contributors at newly materialized paths, uniform validation-alias
+      refusal through nested mapping values and replacement boundaries, unsafe append-dedupe-schema
+      refusal, non-string merge-key refusal with replacement escape, validator-admitted carrier and
+      non-carrier values, an unsupported Python object whose equality raises, non-finite floats,
+      cyclic items, and the absence of persistence or CLI schema changes. Mutation-test exactly
+      object replacement, list replacement, union reset, and longest-prefix attribution.
 - [ ] Update permanent schema, capability, harness-integration, ADR, and active upgrade collateral
       in the same implementation range that removes the imperative hook and increments its contract;
       document shipped atomic list-item behavior in the schema README and preserve model-declared

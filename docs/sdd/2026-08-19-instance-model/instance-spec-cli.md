@@ -116,21 +116,24 @@ replaced object is a subtree boundary: no child strategy inside the discarded pr
 participates in that layer. An unmarked empty object or list remains additive and therefore changes
 nothing.
 
-Discriminated and structural union values recurse only when both layers select the same arm and that
-arm does not itself replace. An arm change replaces the complete object, so a field cannot
-accidentally retain children that belong to the old arm. Raw invalid values remain raw until
-effective-spec validation; merging does not filter unknown keys, drop malformed items, or coerce a
-bad shape into a valid declaration. When the same unknown key appears twice, the later raw value
-wins rather than being recursively combined by runtime shape.
+For discriminated and structural unions, a containing `replace` wins before arm selection. Otherwise
+different arms, or arms that cannot be selected, replace the complete object even when the field
+says `merge`, so a field cannot retain children from the old arm. Equal arms use an explicit
+containing `merge` when present, then the selected arm model's policy. Raw invalid values remain raw
+until effective-spec validation; merging does not filter unknown keys, drop malformed items, or
+coerce a bad shape into a valid declaration. When the same unknown key appears twice, the later raw
+value wins rather than being recursively combined by runtime shape.
 
 The admin spec follows the same field rules after its selected admin template. Although an admin
 template does not inherit, the layer fold still distinguishes omitted fields from its concrete
 defaults, so an omitted admin-spec field leaves the selected template value intact.
 
 Session harness selection keeps one structural transition around the generic merge. Naming a
-different harness integration resets the prior integration config. Naming the same integration
-combines config through that integration's registered config model and the same annotations core
-models use. A capability does not supply an imperative merge callback.
+different harness integration resets the prior integration config. Naming the same registered
+integration combines config through that integration's model and the same annotations core models
+use. Repeating the same unknown selector replaces its complete prior raw config because there is no
+model through which to merge; the Registry reports the selector miss. A capability does not supply
+an imperative merge callback.
 
 There is deliberately no `--set PATH=VALUE`, JSON-path patch language, or generic key-value surface.
 Those shapes would create a second type system for nested values, map keys, list semantics, and
@@ -180,6 +183,9 @@ state. VM inspection distinguishes its VM and admin declaration slots. Per-value
 comparison state appear only where resolution exists; applied slices remain separately visible.
 Their JSON v1 forms add optional tagged fields without changing existing fields. Configured secret
 references may appear; resolved secret values never do.
+
+When provenance is available for a list value, it identifies that value by its position in the
+displayed resolved list after merging, not by the item's spelling or representation.
 
 Creation and reinit retain their ordinary human lifecycle output and add the declaration-result line
 above when applicable. Automation reads the structural JSON v1 description after mutation.

@@ -3,7 +3,7 @@
 - Status: Active (R1, R2, and R4 merged; merge-strategy correction in design review; R3 and R5
   pending)
 - Date: 2026-08-19
-- Last revised: 2026-08-27
+- Last revised: 2026-08-28
 - Parent: the `2026-08-04-next-steps` saga (destination 2 and the wave-4 enabling track)
 
 ## Rulings this seed rests on
@@ -170,16 +170,20 @@ an imperative merge callback.
 Default object merge preserves non-conflicting keys and recursively merges conflicts. A `replace`
 strategy on an object replaces the whole subtree, including with an empty object. A replaced list,
 including an empty list, replaces the complete prior list; an unmarked list keeps stable
-append-deduplication. A discriminated or structural union recurses only while both values select the
-same arm. An arm change replaces the complete union value, preventing invalid hybrids such as an
-environment entry containing both secret and plaintext arms. An unknown key within a known schema is
-preserved; when two layers supply that same unknown key, the later raw value replaces the earlier
-one rather than creating a second runtime-shape merge language. A wholly unknown harness integration
-has no schema or usable effective config, so its later raw config replaces its complete prior config
-and the Registry reports the selector miss. The engine preserves malformed input for the existing
-final typed validation boundary rather than filtering, coercing, or laundering it, and it must
-terminate on a cyclic Python value reaching the deliberately open capability config boundary,
-including through a YAML alias.
+append-deduplication. A `replace` strategy on a field containing a discriminated or structural union
+wins before arm selection. Otherwise, the union recurses only while both values select the same arm:
+an explicit containing-field `merge` wins there, followed by the selected arm model's policy and the
+object default. Different arms, or arms that cannot be selected, replace the complete union value
+even under a containing `merge`, preventing a composite across arms. Both shipped environment-entry
+arm models declare replacement and their containing mapping has no override, so same-arm and
+cross-arm environment conflicts retain today's whole-entry replacement. An unknown key within a
+known schema is preserved; when two layers supply that same unknown key, the later raw value
+replaces the earlier one rather than creating a second runtime-shape merge language. A wholly
+unknown harness integration has no schema or usable effective config, so its later raw config
+replaces its complete prior config and the Registry reports the selector miss. The engine preserves
+malformed input for the existing final typed validation boundary rather than filtering, coercing, or
+laundering it, and it must terminate on a cyclic Python value reaching the deliberately open
+capability config boundary, including through a YAML alias.
 
 Model-directed merging replaces the public `HarnessIntegration.merge_config` customization point.
 That is an intentional hard cutover of the harness-integration capability contract from version 1 to
@@ -248,7 +252,8 @@ discipline: existing fields preserved, additions optional and tagged.
 - Template inheritance and final instance overlays follow the same model-declared merge policy for
   core and capability config: nested objects recurse by default, an object or list marked `replace`
   discards its complete prior value, union-arm changes cannot create hybrids, and provenance
-  identifies the surviving leaf or replaced subtree without attributing discarded children.
+  identifies the surviving leaf or replaced subtree without attributing discarded children. List
+  provenance identifies positions in the final effective list, never authored item values.
 - The simple case does not get more verbose: an operator who never writes an overlay sees no new
   required ceremony.
 
