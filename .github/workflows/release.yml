@@ -25,13 +25,29 @@ jobs:
         # A published tag must sit on a release line rather than anywhere a
         # tag can be pushed. `main` is protected by the `protect-default`
         # ruleset; maintenance branches (0.15.x, 0.16.x, ...) are NOT, as of
-        # 2026-08-27, because that ruleset targets `~DEFAULT_BRANCH` only.
+        # 2026-08-28, because that ruleset targets `~DEFAULT_BRANCH` only.
         # So this accepts them on convention rather than on enforcement, and
         # anyone with write access could create `9.9.x`, push to it directly,
-        # and tag it. Extending the ruleset to `[0-9]+.[0-9]+.x` with the same
-        # pull_request and required_status_checks rules is what would make
+        # and tag it. Extending the ruleset to cover them is what would make
         # this an enforced boundary; until then the honest description is that
         # a maintenance branch is trusted, not verified.
+        #
+        # A ruleset pattern for that is `*.*.x`. Rulesets match with fnmatch,
+        # which has no `+` and no character classes, so the `[0-9]+.[0-9]+.x`
+        # spelling used by `release-please.yml` above CANNOT be reused here:
+        # that is the Actions branch-filter dialect, and as a ruleset pattern
+        # it silently matches nothing at all.
+        #
+        # This job is one of three gates, and it is not the one that decides
+        # whether a publish can run at all. The `release` environment allows
+        # deployments only from refs matching `v*` of type TAG, and an
+        # environment evaluates `github.ref`, not whatever a job checks out.
+        # So a `workflow_dispatch` re-run resolves the workflow and this guard
+        # from a branch, passes both, and is then refused at `publish`. The
+        # dispatch input below advertises a recovery path the environment
+        # forbids. Recovering a failed publish therefore means temporarily
+        # allowing the dispatch ref to deploy, publishing, and removing it
+        # again; 0.14.0 and 0.15.1 were both recovered that way.
         run: |
           git fetch --quiet origin '+refs/heads/*:refs/remotes/origin/*'
           TAG="${{ inputs.tag || github.ref_name }}"
