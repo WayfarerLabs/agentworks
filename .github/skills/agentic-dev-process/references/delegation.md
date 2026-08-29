@@ -19,16 +19,18 @@ a claim by deleting a piece and seeing what breaks needs somewhere to do that wh
 lead's tree. Pinning the head also means every lane reviewing one handoff reviews the same bytes. A
 worktree isolates git only.
 
-A delegate's worktree lives as long as the delegate session that owns it, so a follow-up round to
-the same delegate finds its scratch and fixtures already there rather than rebuilding them. It does
-not preserve the bytes a previous round's findings were made against: a follow-up re-pins to the new
-head, and a lane needing the old one re-pins to the SHA the handoff recorded. When a session closes,
-the lead drops the worktrees it owned. That owner and that event are the retirement rule for a
-review worktree, which is detached at a SHA and has no branch whose merge or abandonment could
-retire it. A worktree holding claim state retires on its own terms instead: `smol-dev-loop` gates
-that teardown on the work having landed and no unpublished state remaining, and session close is
-exactly when unpublished state strands, so those are preserved and investigated rather than
-collected.
+A delegate's worktree and the environment inside it go under the workspace, in whatever
+workspace-local directory the harness already keeps its own state in (`<workspace>/.claude` and its
+siblings), or `<workspace>/tmp` for a harness with none. It lives as long as the delegate session
+that owns it, so a follow-up round finds its scratch and fixtures already built. It does not
+preserve the bytes a previous round's findings were made against: a follow-up re-pins to the new
+head, and a lane needing the old one re-pins to the SHA the handoff recorded.
+
+The lead drops what its session owned when that session closes. That is the cleanup, and it is what
+keeps disk bounded while an effort runs. The location is the backstop for the case the lead cannot
+cover: a session that crashed or ran out of context drops nothing, and a deleted workspace takes
+everything under it. Treat that as a last resort rather than the plan. `/tmp` does not serve as one,
+because it survives until the machine reboots and these machines are long-lived.
 
 Budget for the environment, not just the tree. A worktree is cheap; what a lane needs to run
 anything is not, and in this repository a working `cli/` environment is hundreds of megabytes. A
