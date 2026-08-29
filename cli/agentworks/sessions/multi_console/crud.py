@@ -128,14 +128,28 @@ def add_sessions(
     console_name: str,
     session_specs: list[str],
     interaction: TtyInteractionPolicy,
+    start_index: int | None = None,
 ) -> None:
-    """Append sessions to an existing console in argument order. Atomic at the
-    DB layer; if the console's tmux session is live, also adds the windows
-    immediately (best-effort)."""
+    """Add sessions as one argument-ordered block, appending by default.
+
+    *start_index* is the block's zero-based final session index. Existing
+    members retain their relative order. The DB mutation is atomic; if the
+    console's tmux session is live, the windows are also added immediately
+    (best-effort).
+    """
     from agentworks.bootstrap import load_request_registry
 
     console = _require_console(db, console_name)
-    registry = load_request_registry(config, live_database=db)
+    preflight_member_count = len(db.list_console_sessions(console_name))
+    preflight_index = preflight_member_count if start_index is None else start_index
+    if not 0 <= preflight_index <= preflight_member_count:
+        raise ValidationError(
+            f"session insertion index {preflight_index} is outside the valid range "
+            f"0..{preflight_member_count} for console '{console_name}'",
+            entity_kind="console",
+            entity_name=console_name,
+        )
+
     specs = [parse_session_spec(s) for s in session_specs]
     _dedupe_specs(specs)
 
@@ -147,6 +161,8 @@ def add_sessions(
                 entity_kind="console-member",
                 entity_name=spec.name,
             )
+
+    registry = load_request_registry(config, live_database=db)
 
     # Eager-prompting orchestration: when
     # any spec carries shells > 0 the live-attach path below will open
@@ -205,8 +221,21 @@ def add_sessions(
             )
 
     with db.transaction():
+        current_order = [member.session_name for member in db.list_console_sessions(console_name)]
+        resolved_index = len(current_order) if start_index is None else start_index
+        if not 0 <= resolved_index <= len(current_order):
+            raise ValidationError(
+                f"session insertion index {resolved_index} is outside the valid range "
+                f"0..{len(current_order)} for console '{console_name}'",
+                entity_kind="console",
+                entity_name=console_name,
+            )
         for spec in specs:
             db.add_console_session(console_name, spec.name, default_shells(spec.shells))
+        if resolved_index != len(current_order):
+            added_names = [spec.name for spec in specs]
+            desired_order = current_order[:resolved_index] + added_names + current_order[resolved_index:]
+            db.reorder_console_sessions(console_name, desired_order)
 
     output.result(f"Added {len(specs)} session(s) to console '{console_name}'.")
 

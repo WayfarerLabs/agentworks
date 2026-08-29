@@ -743,7 +743,7 @@ panes you want preloaded into a session's window.
 | `agw console describe <name>`                       | Show membership and shell layout                                  |
 | `agw console attach <name>`                         | Attach (builds tmux state on first attach)                        |
 | `agw console delete <name>`                         | Tear down and remove the console                                  |
-| `agw console add-sessions <name> <sessions...>`     | Add session windows                                               |
+| `agw console add-sessions <name> <sessions...>`     | Add session windows (accepts `--to-index N`)                      |
 | `agw console remove-sessions <name> <sessions...>`  | Remove session windows (accepts `-y`/`--yes`)                     |
 | `agw console reorder-sessions <name> <sessions...>` | Reorder member sessions (`--to-index N` or `--to-back`)           |
 | `agw console add-shell <name> <session>`            | Add a shell pane to a session window (accepts `--cwd`, `--admin`) |
@@ -767,6 +767,11 @@ order of every unlisted member. By default, or with `--to-index 0`, the listed m
 front. `--to-index N` starts them at zero-based final session index `N`; valid positions range from
 zero through the number of unlisted members, inclusive. `--to-back` is the same as that upper bound.
 The two options are mutually exclusive. Session indices exclude the optional admin-shell window.
+
+`console add-sessions` appends the new sessions when placement is omitted. `--to-index N` instead
+adds them as one argument-ordered block starting at zero-based final session index `N`, while
+preserving the relative order of existing members. Valid positions range from zero through the
+current member count, inclusive. Session indices exclude the optional admin-shell window.
 
 `console list` accepts `--vm`, `--workspace`, and `--agent` to narrow the result set. Each filter
 takes a single value or a comma-separated list (`--workspace ws1,ws2`); commas within a filter are
