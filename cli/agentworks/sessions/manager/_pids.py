@@ -201,6 +201,9 @@ def ensure_pids_batch(sessions: list[SessionRow], *, db: Database, config: Confi
             if not vm or not vm.tailscale_host:
                 continue
             try:
+                from agentworks.vms.manager import require_vm_ssh_boundary
+
+                require_vm_ssh_boundary(db, config, vm)
                 vm_cache[ws.vm_name] = _mgr.transport(vm, config)
             except Exception as exc:
                 output.warn(f"Cannot reach VM '{ws.vm_name}': {exc}")

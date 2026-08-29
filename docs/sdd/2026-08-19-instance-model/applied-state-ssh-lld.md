@@ -1,6 +1,6 @@
 # R3 Applied State and SSH Identity: Low-Level Design
 
-- Status: Proposed for implementation
+- Status: Implemented and under review
 - Date: 2026-08-28
 - Requirements: R3 in `frd.md`
 - Architecture: `hla.md`, R3 applied state and SSH identity
@@ -83,9 +83,6 @@ The leaf functions are:
 ```text
 read_private_ssh_identity(path) ->
   VerifiedSSHIdentity | UnverifiableSSHIdentity
-
-read_public_ssh_identity(path) ->
-  VerifiedSSHIdentity
 
 parse_public_ssh_identity(text) -> VerifiedSSHIdentity
 
@@ -253,7 +250,6 @@ AuthorizedKeysApplied
   private_key_ref: str
 
 AuthorizedKeysUnproven
-  detail: str  # bounded authored diagnostic, never key content or captured output
 ```
 
 The non-admin owner path retains its existing raising failure contract because downstream agent
@@ -272,7 +268,7 @@ If the private identity is a recognized unverifiable format, the helper proceeds
 public key and retains an unverifiable proof. If the admin-self remote write raises `SSHError`, the
 helper preserves today's warning classification with a bounded authored summary and returns
 `AuthorizedKeysUnproven`. It does not forward captured stderr, command output, or transferred
-content through either the warning or the outcome detail. An SSH failure cannot prove whether the
+content through either the warning or zero-field outcome. An SSH failure cannot prove whether the
 remote mutation happened before acknowledgement, so the outcome deliberately does not claim that
 nothing was applied. The helper does not convert a local configuration or identity mismatch into a
 warning.
@@ -284,8 +280,8 @@ reconciliation keeps its current initializer ordering and raising contract.
 
 ### Post-write stability check
 
-After Phase B returns and before terminal persistence, `run_initialization()` reads the configured
-private identity again:
+After Phase B returns and before terminal persistence, the VM-domain slice builder reads the exact
+private-key reference retained by `AuthorizedKeysApplied` again:
 
 - verified before and after with the same fingerprint yields the verified SSH payload;
 - unverifiable before and after yields the unverifiable payload;
@@ -354,10 +350,11 @@ needed.
 `compare_vm_ssh_identity()` returns a frozen result with:
 
 - state: `not-recorded`, `unverifiable`, `match`, or `drift`;
-- VM name;
-- recorded configured private-key reference when present;
-- current configured private-key reference;
-- applied and current fingerprints when each is known.
+- VM name.
+
+The comparison consumes the configured and recorded references and fingerprints internally, but does
+not expose values that no R3 policy or diagnostic reads. A later inspection surface may add facts
+when it has a concrete consumer.
 
 Missing or malformed repository envelopes remain `StateError`, not one of the four facts. Current
 file unavailable or invalid also raises a typed configuration/state error before SSH. Every

@@ -234,9 +234,13 @@ def _make_reconcile_target(*, mktemp_path: str = "/tmp/agw-ak.AAAAAA") -> MagicM
 
 
 def _make_keys_config(tmp_path) -> MagicMock:
+    from tests.ssh_fixtures import write_test_ssh_keypair
+
+    private = tmp_path / "id_ed25519"
+    write_test_ssh_keypair(private)
     primary = tmp_path / "id_ed25519.pub"
-    primary.write_text("ssh-ed25519 AAAA primary-key\n")
     config = MagicMock()
     config.operator.ssh_public_key = primary
+    config.operator.ssh_private_key = private
     config.operator.extra_ssh_public_keys = []
     return config

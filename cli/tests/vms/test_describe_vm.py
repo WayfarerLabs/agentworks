@@ -15,10 +15,16 @@ from agentworks.config import load_config
 from agentworks.db import VMStatus
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
+from tests.conftest import stub_vm_ssh_identity
 
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
+
+
+@pytest.fixture(autouse=True)
+def _stub_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    stub_vm_ssh_identity(monkeypatch)
 
 
 @pytest.fixture
@@ -65,7 +71,8 @@ def _describe(
     )
     calls: list[str] = []
 
-    def _fake_live(vm: VMRow, cfg: Config) -> None:
+    def _fake_live(database: Database, vm: VMRow, cfg: Config) -> None:
+        assert database is db
         calls.append(vm.name)
         return None
 

@@ -521,7 +521,7 @@ def vm_description(
     # unsafe. Preserve the legacy best-effort facts unless the observation
     # definitively says the host is stopped.
     if vm.tailscale_host is not None and observed_status not in {"stopped", "deallocated"}:
-        raw_live_resources = _mgr._query_live_resources(vm, config)
+        raw_live_resources = _mgr._query_live_resources(db, vm, config)
         if raw_live_resources is not None:
             live_resources = VMLiveResources.from_mapping(raw_live_resources)
 

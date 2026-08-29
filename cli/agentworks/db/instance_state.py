@@ -14,7 +14,7 @@ from agentworks.errors import StateError
 
 if TYPE_CHECKING:
     import sqlite3
-    from collections.abc import Mapping
+    from collections.abc import Collection, Mapping
 
     from agentworks.db.database import Database
 
@@ -405,6 +405,29 @@ class InstanceStateRepository:
                 parameters,
             )
         return self.get_applied_slices(instance_kind, instance_name)
+
+    def clear_applied_slices(
+        self,
+        instance_kind: InstanceKind,
+        instance_name: str,
+        keys: Collection[AppliedStateKey],
+    ) -> None:
+        """Delete exactly the supplied registered slices for one owner."""
+        validated_kind = _validate_identity(instance_kind, instance_name)
+        unique_keys = tuple(dict.fromkeys(keys))
+        for key in unique_keys:
+            _validate_applied_key(validated_kind, key)
+        if not unique_keys:
+            return
+
+        placeholders = ", ".join("?" for _ in unique_keys)
+        with self._transaction():
+            self._connection.execute(
+                "DELETE FROM instance_records "
+                "WHERE instance_kind = ? AND instance_name = ? AND record_type = ? "
+                f"AND record_key IN ({placeholders})",
+                (instance_kind, instance_name, _APPLIED_STATE, *unique_keys),
+            )
 
     def list_applied_slices(self, instance_kind: InstanceKind) -> tuple[AppliedStateSlice, ...]:
         _validate_instance_kind(instance_kind)

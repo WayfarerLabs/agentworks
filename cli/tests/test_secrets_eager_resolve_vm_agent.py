@@ -15,9 +15,9 @@ operator-facing guarantee). This file covers the vm/agent slice:
   eager-resolve BEFORE the SSH/streaming call, and their env-chain
   SecretTarget must join the operation's ONE resolver boundary.
 - The provisioning runners themselves (VM init, agent setup) must never
-  inject operator env into install commands, and must end with
-  ``_ensure_agentworks_files_sourced`` so a dotfiles installer can't
-  silently clobber the source lines that make identity/mise reachable.
+  inject operator env into install commands. Their final profile-source
+  reconciliation follows dotfiles so an installer cannot silently clobber
+  the source lines that make identity and mise reachable.
 """
 
 from __future__ import annotations
@@ -34,6 +34,15 @@ from ._secrets_eager_support import _seed_basic_db, _stub_build_registry
 from .conftest import stub_vm_gates
 
 __all__ = ["_stub_build_registry"]
+
+
+@pytest.fixture(autouse=True)
+def _ssh_identity_outside_secret_ordering_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep these secret-ordering tests focused beyond the SSH policy gate."""
+    monkeypatch.setattr(
+        "agentworks.vms.manager.boundary.require_vm_ssh_boundary",
+        lambda *args, **kwargs: None,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -522,12 +531,11 @@ def test_vm_provisioning_runners_have_no_env_injection() -> None:
     )
 
 
-def test_phase_b_setup_ends_with_ensure_files_sourced() -> None:
-    """Defensive: ``_ensure_agentworks_files_sourced`` runs as the final
-    step of admin VM init so that source lines in shell rc files survive
+def test_phase_b_setup_reconciles_profile_sources_after_dotfiles() -> None:
+    """Defensive: ``_ensure_agentworks_files_sourced`` runs after dotfiles
+    so that source lines in shell rc files survive
     a dotfiles installer that ships its own ``.zprofile`` / ``.bashrc`` /
-    etc. The grep-or-append shape is idempotent; the rule is just that
-    the call exists at the end."""
+    etc. The grep-or-append shape is idempotent."""
     import inspect
 
     from agentworks.vms import initializer as init

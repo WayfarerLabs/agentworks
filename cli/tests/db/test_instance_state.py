@@ -285,6 +285,59 @@ def test_empty_applied_replace_is_a_no_op(db: Database, monkeypatch: pytest.Monk
     assert db.instance_state.replace_applied_slices("vm", "one", "vm-create", {}) == existing
 
 
+def test_clear_applied_slices_removes_only_requested_registered_keys(db: Database) -> None:
+    db.instance_state.replace_applied_slices(
+        "vm",
+        "one",
+        "vm-create",
+        {
+            AppliedStateKey.HARDWARE_PROVENANCE: _payload("hardware"),
+            AppliedStateKey.SSH_IDENTITY: _payload("ssh"),
+        },
+    )
+    db.instance_state.replace_applied_slices(
+        "vm",
+        "two",
+        "vm-create",
+        {AppliedStateKey.SSH_IDENTITY: _payload("other")},
+    )
+
+    db.instance_state.clear_applied_slices("vm", "one", [AppliedStateKey.SSH_IDENTITY])
+
+    assert [record.key for record in db.instance_state.get_applied_slices("vm", "one")] == [
+        AppliedStateKey.HARDWARE_PROVENANCE
+    ]
+    assert [record.key for record in db.instance_state.get_applied_slices("vm", "two")] == [
+        AppliedStateKey.SSH_IDENTITY
+    ]
+    db.instance_state.clear_applied_slices("vm", "one", [])
+    db.instance_state.clear_applied_slices("vm", "one", [AppliedStateKey.SSH_IDENTITY])
+
+
+def test_clear_applied_slices_rejects_unregistered_and_cross_kind_keys(db: Database) -> None:
+    with pytest.raises(TypeError):
+        db.instance_state.clear_applied_slices("vm", "one", ["ssh-identity"])  # type: ignore[list-item]
+    with pytest.raises(ValueError):
+        db.instance_state.clear_applied_slices("agent", "one", [AppliedStateKey.SSH_IDENTITY])
+
+
+def test_clear_applied_slices_joins_enclosing_transaction(db: Database) -> None:
+    db.instance_state.replace_applied_slices(
+        "vm",
+        "one",
+        "vm-create",
+        {AppliedStateKey.SSH_IDENTITY: _payload("ssh")},
+    )
+
+    with pytest.raises(RuntimeError), db.transaction():
+        db.instance_state.clear_applied_slices("vm", "one", [AppliedStateKey.SSH_IDENTITY])
+        raise RuntimeError("roll back")
+
+    assert [record.key for record in db.instance_state.get_applied_slices("vm", "one")] == [
+        AppliedStateKey.SSH_IDENTITY
+    ]
+
+
 @pytest.mark.parametrize("operation", ["", 1, True])
 def test_applied_replace_rejects_invalid_operation_before_writing(db: Database, operation: object) -> None:
     with pytest.raises(ValueError):
@@ -574,6 +627,16 @@ def test_persisted_unknown_applied_key_is_ignored_and_preserved(tmp_path: Path) 
             AppliedStateKey.HARDWARE_PROVENANCE,
             AppliedStateKey.SSH_IDENTITY,
         ]
+        database.instance_state.clear_applied_slices(
+            "vm",
+            "alpha",
+            [AppliedStateKey.HARDWARE_PROVENANCE, AppliedStateKey.SSH_IDENTITY],
+        )
+        remaining_keys = database._conn.execute(  # noqa: SLF001
+            "SELECT record_key FROM instance_records "
+            "WHERE instance_kind = 'vm' AND instance_name = 'alpha' AND record_type = 'applied-state'"
+        ).fetchall()
+        assert [row[0] for row in remaining_keys] == ["future-fact"]
     finally:
         database.close()
 
@@ -722,11 +785,12 @@ def test_vm_backup_snapshot_projects_exact_owner_tree_overlays(db: Database) -> 
     for kind, name in zip(kinds, other_tree, strict=True):
         db.instance_state.put_desired_overlay(kind, name, _payload(f"excluded-{kind}"))
 
-    *_, desired_overlays = db.snapshot_vm_backup_data(owner_tree[0])
+    *_, desired_overlays, applied_slices = db.snapshot_vm_backup_data(owner_tree[0])
 
     assert {(record.instance_kind, record.instance_name) for record in desired_overlays} == set(
         zip(kinds, owner_tree, strict=True)
     )
+    assert applied_slices == ()
     assert {record.payload.value["value"] for record in desired_overlays} == {f"included-{kind}" for kind in kinds}
 
 
@@ -745,8 +809,9 @@ def test_vm_owner_tree_overlay_queries_decode_only_selected_rows(db: Database) -
     assert db.instance_state.has_vm_owner_tree_desired_overlay(owner_tree[0]) is True
     records = db.instance_state.list_vm_owner_tree_desired_overlays(owner_tree[0])
     assert [(record.instance_kind, record.instance_name) for record in records] == [("vm", owner_tree[0])]
-    *_, snapshot_records = db.snapshot_vm_backup_data(owner_tree[0])
+    *_, snapshot_records, applied_slices = db.snapshot_vm_backup_data(owner_tree[0])
     assert snapshot_records == records
+    assert applied_slices == ()
 
     db._conn.execute(  # noqa: SLF001
         "UPDATE instance_records SET value_json = ? "

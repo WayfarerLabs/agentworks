@@ -48,8 +48,25 @@ def _platform_ops_ctx(
     )
 
 
+def require_vm_ssh_boundary(
+    db: Database,
+    config: Config,
+    vm: VMRow,
+    *,
+    allow_not_recorded: bool = False,
+) -> None:
+    """Require the configured SSH identity allowed by the VM's applied state."""
+    from agentworks.vms.applied_state import (
+        compare_vm_ssh_identity,
+        require_vm_ssh_identity,
+    )
+
+    comparison = compare_vm_ssh_identity(db, vm.name, config.operator.ssh_private_key)
+    require_vm_ssh_identity(comparison, allow_not_recorded=allow_not_recorded)
+
+
 @contextlib.contextmanager
-def gated_vm_boundary(
+def _gated_vm_boundary(
     db: Database,
     config: Config,
     registry: Registry,
@@ -59,7 +76,9 @@ def gated_vm_boundary(
     scope: OperationScope | None = None,
     interaction: TtyInteractionPolicy,
 ) -> Iterator[tuple[LiveVMNode, Resolver, RunContext]]:
-    """The gate-opening commands' shared composition root (vm/agent
+    """Compose a gated VM span after its caller selects SSH policy.
+
+    This is the gate-opening commands' shared implementation (vm/agent
     shell and exec, console attach, the workspace lifecycle ops):
     commands that operate interactively on one existing VM. Build the
     live VM node from its row (the site edge holds the bound
@@ -124,6 +143,55 @@ def gated_vm_boundary(
         )
         resolver.resolve()
         yield vm_node, resolver, _platform_ops_ctx(config, scope, vm_node, resolver)
+
+
+@contextlib.contextmanager
+def gated_vm_boundary(
+    db: Database,
+    config: Config,
+    registry: Registry,
+    vm: VMRow,
+    *,
+    targets: Sequence[SecretTarget] = (),
+    scope: OperationScope | None = None,
+    interaction: TtyInteractionPolicy,
+) -> Iterator[tuple[LiveVMNode, Resolver, RunContext]]:
+    """Compose an ordinary VM gate after proving its canonical SSH identity."""
+    require_vm_ssh_boundary(db, config, vm)
+    with _gated_vm_boundary(
+        db,
+        config,
+        registry,
+        vm,
+        targets=targets,
+        scope=scope,
+        interaction=interaction,
+    ) as boundary:
+        yield boundary
+
+
+@contextlib.contextmanager
+def gated_vm_platform_recovery_boundary(
+    db: Database,
+    config: Config,
+    registry: Registry,
+    vm: VMRow,
+    *,
+    targets: Sequence[SecretTarget] = (),
+    scope: OperationScope | None = None,
+    interaction: TtyInteractionPolicy,
+) -> Iterator[tuple[LiveVMNode, Resolver, RunContext]]:
+    """Compose the explicit platform-native recovery gate without SSH proof."""
+    with _gated_vm_boundary(
+        db,
+        config,
+        registry,
+        vm,
+        targets=targets,
+        scope=scope,
+        interaction=interaction,
+    ) as boundary:
+        yield boundary
 
 
 def _live_vm_boundary(

@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import VersionedPayload
+from agentworks.db import AppliedStateKey, VersionedPayload
 from agentworks.errors import BackupError, StateError
 from agentworks.instance_specs import parse_vm_instance_specs
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -76,6 +76,98 @@ def test_backup_json_refuses_existing_and_symlink_paths(tmp_path: Path) -> None:
     assert target.read_text(encoding="utf-8") == "preserve target"
 
 
+def _install_metadata_only_backup_fakes(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeSSHTransport:
+        pass
+
+    class _FakeLogger:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            self.path: Path | None = None
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(vm_backup, "gated_vm_boundary", lambda *a, **k: nullcontext())
+    monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda config, **_kwargs: object())
+    monkeypatch.setattr("agentworks.ssh.SSHLogger", _FakeLogger)
+    monkeypatch.setattr("agentworks.transports.SSHTransport", _FakeSSHTransport)
+    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: _FakeSSHTransport())
+
+
+def _replace_ssh_payload_with_malformed_known_value(db: Database, vm_name: str) -> None:
+    db.instance_state.replace_applied_slices(
+        "vm",
+        vm_name,
+        "vm-create",
+        {
+            AppliedStateKey.SSH_IDENTITY: VersionedPayload(
+                1,
+                {
+                    "fingerprint": f"SHA256:{'A' * 43}",
+                    "private_key_ref": "/keys/operator",
+                    "status": "verified",
+                },
+            )
+        },
+    )
+    db._conn.execute(  # noqa: SLF001
+        "UPDATE instance_records SET value_json = ? "
+        "WHERE instance_kind = 'vm' AND instance_name = ? "
+        "AND record_type = 'applied-state' AND record_key = 'ssh-identity'",
+        ('{"status":"verified"}', vm_name),
+    )
+    db._conn.commit()  # noqa: SLF001
+
+
+def test_backup_refuses_a_malformed_selected_applied_payload(
+    db: Database,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db.insert_vm("bvm", site="lima-local", hostname="bvm")
+    db.update_vm_tailscale("bvm", "100.64.0.8")
+    _replace_ssh_payload_with_malformed_known_value(db, "bvm")
+    _install_metadata_only_backup_fakes(monkeypatch)
+    config = SimpleNamespace(paths=SimpleNamespace(backups=tmp_path))
+
+    with pytest.raises(StateError):
+        vm_backup.backup_vm(
+            db,
+            config,  # type: ignore[arg-type]
+            "bvm",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+
+def test_backup_does_not_decode_an_unrelated_malformed_applied_payload(
+    db: Database,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db.insert_vm("bvm", site="lima-local", hostname="bvm")
+    db.update_vm_tailscale("bvm", "100.64.0.8")
+    db.instance_state.replace_applied_slices(
+        "vm",
+        "bvm",
+        "vm-create",
+        {AppliedStateKey.HARDWARE_PROVENANCE: VersionedPayload(1, {})},
+    )
+    db.insert_vm("other", site="lima-local", hostname="other")
+    _replace_ssh_payload_with_malformed_known_value(db, "other")
+    _install_metadata_only_backup_fakes(monkeypatch)
+    config = SimpleNamespace(paths=SimpleNamespace(backups=tmp_path))
+
+    destination = vm_backup.backup_vm(
+        db,
+        config,  # type: ignore[arg-type]
+        "bvm",
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    applied = loads((destination / "instance-applied-state.json").read_text(encoding="utf-8"))
+    assert [(record["instance_name"], record["key"]) for record in applied] == [("bvm", "hardware-provenance")]
+
+
 @pytest.mark.parametrize("legacy", [False, True], ids=("composite-v2", "legacy-flat-v1"))
 @pytest.mark.skipif(os.name == "nt", reason="native Windows intentionally refuses overlay-bearing backups")
 def test_vm_backup_exports_versioned_instance_specs(
@@ -97,6 +189,22 @@ def test_vm_backup_exports_versioned_instance_specs(
         assert overlays is not None
         payload = overlays.payload
     db.instance_state.put_desired_overlay("vm", "bvm", payload)
+    db.instance_state.replace_applied_slices(
+        "vm",
+        "bvm",
+        "vm-create",
+        {
+            AppliedStateKey.HARDWARE_PROVENANCE: VersionedPayload(1, {}),
+            AppliedStateKey.SSH_IDENTITY: VersionedPayload(
+                1,
+                {
+                    "fingerprint": f"SHA256:{'A' * 43}",
+                    "private_key_ref": "/keys/operator",
+                    "status": "verified",
+                },
+            ),
+        },
+    )
 
     class _FakeSSHTransport:
         pass
@@ -124,8 +232,10 @@ def test_vm_backup_exports_versioned_instance_specs(
 
     manifest = loads((destination / "manifest.json").read_text(encoding="utf-8"))
     specs = loads((destination / "instance-specs.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == 3
+    applied = loads((destination / "instance-applied-state.json").read_text(encoding="utf-8"))
+    assert manifest["version"] == 4
     assert manifest["instance_spec_count"] == 1
+    assert manifest["applied_state_count"] == 2
     expected_value = (
         {"env": {"TOKEN": {"value": "plaintext"}}}
         if legacy
@@ -142,6 +252,30 @@ def test_vm_backup_exports_versioned_instance_specs(
             "value": expected_value,
             "recorded_at": specs[0]["recorded_at"],
         }
+    ]
+    assert applied == [
+        {
+            "instance_kind": "vm",
+            "instance_name": "bvm",
+            "key": "hardware-provenance",
+            "payload_version": 1,
+            "value": {},
+            "operation": "vm-create",
+            "recorded_at": applied[0]["recorded_at"],
+        },
+        {
+            "instance_kind": "vm",
+            "instance_name": "bvm",
+            "key": "ssh-identity",
+            "payload_version": 1,
+            "value": {
+                "fingerprint": f"SHA256:{'A' * 43}",
+                "private_key_ref": "/keys/operator",
+                "status": "verified",
+            },
+            "operation": "vm-create",
+            "recorded_at": applied[1]["recorded_at"],
+        },
     ]
 
 
@@ -182,3 +316,47 @@ def test_windows_refuses_overlay_backup_before_any_json_write(
             "bvm",
             interaction=TtyInteractionPolicy.REFUSE,
         )
+
+
+def test_windows_allows_backup_with_only_nonsecret_applied_state(
+    db: Database,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db.insert_vm("bvm", site="lima-local", hostname="bvm")
+    db.update_vm_tailscale("bvm", "100.64.0.8")
+    db.instance_state.replace_applied_slices(
+        "vm",
+        "bvm",
+        "vm-create",
+        {AppliedStateKey.HARDWARE_PROVENANCE: VersionedPayload(1, {})},
+    )
+
+    class _FakeSSHTransport:
+        pass
+
+    class _FakeLogger:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            self.path: Path | None = None
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(vm_backup, "gated_vm_boundary", lambda *a, **k: nullcontext())
+    monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda config, **kwargs: object())
+    monkeypatch.setattr("agentworks.ssh.SSHLogger", _FakeLogger)
+    monkeypatch.setattr("agentworks.transports.SSHTransport", _FakeSSHTransport)
+    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: _FakeSSHTransport())
+    monkeypatch.setattr(vm_backup, "_host_supports_private_backup_permissions", lambda: False)
+    config = SimpleNamespace(paths=SimpleNamespace(backups=tmp_path))
+
+    destination = vm_backup.backup_vm(
+        db,
+        config,  # type: ignore[arg-type]
+        "bvm",
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    manifest = loads((destination / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["instance_spec_count"] == 0
+    assert manifest["applied_state_count"] == 1

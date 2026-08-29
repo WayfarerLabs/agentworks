@@ -256,6 +256,9 @@ def create_workspace(
 
     scope = _workspace_scope(db, vm, ws_name)
 
+    from agentworks.vms.manager import require_vm_ssh_boundary
+
+    require_vm_ssh_boundary(db, config, vm)
     with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
         # The preflight boundary: the sweep covers every participating
         # node, then the site's config secrets resolve in one pass (or

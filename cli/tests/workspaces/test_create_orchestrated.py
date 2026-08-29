@@ -16,12 +16,12 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.errors import ExternalError
+from agentworks.errors import ExternalError, StateError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from agentworks.workspaces import manager as workspace_manager
-from tests.conftest import ManifestDoc
+from tests.conftest import ManifestDoc, stub_vm_ssh_identity
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
@@ -35,6 +35,11 @@ WORKSPACE_ENV_TEMPLATE = ManifestDoc(
     "default",
     {"env": {"WS_TOKEN": {"secret": "ws-env-secret"}}},
 )
+
+
+@pytest.fixture(autouse=True)
+def _stub_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    stub_vm_ssh_identity(monkeypatch)
 
 
 @pytest.fixture
@@ -82,6 +87,37 @@ def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start"))
     monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: True)
     monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
+
+
+def test_create_refuses_ssh_identity_before_activation_or_mutation(
+    db: Database,
+    make_config,  # noqa: ANN001
+    mutation: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config()
+    _seed_vm(db)
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise StateError("SSH identity refusal")
+
+    monkeypatch.setattr(vm_manager, "require_vm_ssh_boundary", refuse)
+    monkeypatch.setattr(
+        "agentworks.orchestration.activation.activation_gate",
+        lambda *args, **kwargs: pytest.fail("activation started before SSH identity refusal"),
+    )
+
+    with pytest.raises(StateError):
+        workspace_manager.create_workspace(
+            db,
+            config,
+            name="ws1",
+            vm_name="box",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert mutation == {}
+    assert db.get_workspace("ws1") is None
 
 
 # -- the derived graph --------------------------------------------------------

@@ -20,6 +20,7 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from tests.conftest import ManifestDoc, write_manifests
 from tests.orchestrated_fixtures import proxmox_site
+from tests.ssh_fixtures import TEST_SSH_PUBLIC_KEY, write_test_ssh_keypair
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -39,8 +40,7 @@ system = ["proxmox"]
 @pytest.fixture
 def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     key = tmp_path / "id_ed25519"
-    key.write_text("private")
-    (tmp_path / "id_ed25519.pub").write_text("public ssh key")
+    write_test_ssh_keypair(key)
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "tskey-test")
     # Deterministic platform preflights: lima checks for limactl
     # locally; pretend the tool exists regardless of the host.
@@ -115,7 +115,7 @@ def test_create_vm_request_shape_and_row(
     assert request.system_slug is None
     assert request.cpus == 6
     assert request.admin_username == "operator"
-    assert request.ssh_public_key == "public ssh key"
+    assert request.ssh_public_key == TEST_SSH_PUBLIC_KEY
     (bound,) = captured_platform
     assert bound.site_name == "lima-local"
 
@@ -154,7 +154,7 @@ def test_create_vm_request_build_failure_unwinds_owner_and_overlay_without_outco
         lambda *args, **kwargs: pytest.fail("platform create reached after request construction failed"),
     )
 
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(ConfigError):
         vm_manager.create_vm(
             db,
             config,

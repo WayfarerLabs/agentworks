@@ -615,15 +615,23 @@ def session_listing(
 
     status_map: dict[str, SessionStatus] = {}
     status_keepalive_vms: list[VMRow] = [] if no_status else _mgr._distinct_vms_for_sessions(db, sessions)
-    with _mgr._batch_vm_boundary(
+    with _mgr._best_effort_batch_vm_boundary(
         db,
         config,
         status_keepalive_vms,
         interaction=interaction,
-    ):
+    ) as usable_vm_names:
         if not no_status:
-            sessions = _mgr.ensure_pids_batch(sessions, db=db, config=config)
-            status_map = _mgr.batch_check_all_sessions(sessions, db=db, config=config)
+            usable_sessions = [
+                session
+                for session in sessions
+                if (workspace := db.get_workspace(session.workspace_name)) is not None
+                and workspace.vm_name in usable_vm_names
+            ]
+            usable_sessions = _mgr.ensure_pids_batch(usable_sessions, db=db, config=config)
+            refreshed = {session.name: session for session in usable_sessions}
+            sessions = [refreshed.get(session.name, session) for session in sessions]
+            status_map = _mgr.batch_check_all_sessions(usable_sessions, db=db, config=config)
 
     registry = _mgr._display_registry(config)
     harness_by_template: dict[str, str] = {}

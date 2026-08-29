@@ -4,6 +4,7 @@ Apple-vz SVE trap mask."""
 from __future__ import annotations
 
 import shlex
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -11,12 +12,29 @@ from agentworks.ssh import SSHError, SSHLogger
 
 if TYPE_CHECKING:
     from agentworks.config import Config
+    from agentworks.ssh_identity import SSHIdentity
     from agentworks.transports import Transport
 
 AUTHORIZED_KEYS_HEADER = """\
 # Managed by agentworks -- manual edits will be overwritten on reinit.
 # To add keys, use operator.extra_ssh_public_keys in your agentworks config.
 """
+
+
+@dataclass(frozen=True, slots=True)
+class AuthorizedKeysApplied:
+    """The configured identity was accepted by the remote key write."""
+
+    identity: SSHIdentity
+    private_key_ref: str
+
+
+@dataclass(frozen=True, slots=True)
+class AuthorizedKeysUnproven:
+    """The admin key write could not prove its remote outcome."""
+
+
+AuthorizedKeysOutcome = AuthorizedKeysApplied | AuthorizedKeysUnproven
 
 
 def _reconcile_authorized_keys(
@@ -26,7 +44,7 @@ def _reconcile_authorized_keys(
     logger: SSHLogger,
     *,
     owner: str | None = None,
-) -> None:
+) -> AuthorizedKeysOutcome:
     """Reconcile <home>/.ssh/authorized_keys with the configured key set.
 
     Writes the primary ssh_public_key plus any extra_ssh_public_keys from
@@ -47,9 +65,16 @@ def _reconcile_authorized_keys(
     at all, so a silent failure here would leave the caller running
     downstream commands that all fail with a cryptic ``exit 255``.
     """
+    from agentworks.vms.applied_state import prepare_configured_ssh_identity
+
+    prepared = prepare_configured_ssh_identity(
+        config.operator.ssh_public_key,
+        config.operator.ssh_private_key,
+    )
+
     logger.step("SSH authorized keys")
 
-    keys: list[str] = [config.operator.ssh_public_key.read_text().strip()]
+    keys: list[str] = [prepared.public_text]
     for path in config.operator.extra_ssh_public_keys:
         keys.append(path.read_text().strip())
 
@@ -65,11 +90,15 @@ def _reconcile_authorized_keys(
         # Direct-write: the SSH user writes to its own home.
         try:
             target.write_file(f"{home}/.ssh/authorized_keys", content, mode="600")
-        except SSHError as e:
-            msg = f"authorized_keys reconciliation failed: {e}"
+        except SSHError:
+            # The transport exception may contain captured command output or
+            # transferred content. Keep both the warning and proof carrier to
+            # a bounded authored diagnostic.
+            msg = "authorized_keys reconciliation failed"
             logger.warning(msg)
             output.warn(msg)
-        return
+            return AuthorizedKeysUnproven()
+        return AuthorizedKeysApplied(prepared.identity, prepared.private_key_ref)
 
     # Stage-and-install: admin writes for a non-self uid (agent).
     quoted_owner = shlex.quote(owner)
@@ -95,6 +124,7 @@ def _reconcile_authorized_keys(
         )
     finally:
         target.run(f"rm -f {shlex.quote(staging)}", check=False)
+    return AuthorizedKeysApplied(prepared.identity, prepared.private_key_ref)
 
 
 def _preserve_ssh_host_keys(

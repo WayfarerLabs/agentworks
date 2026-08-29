@@ -27,6 +27,7 @@ from agentworks.vms.admin import AdminConfig
 from agentworks.vms.templates import ResolvedVMTemplate
 from tests.conftest import ManifestDoc, write_manifests
 from tests.orchestrated_fixtures import proxmox_site
+from tests.ssh_fixtures import write_test_ssh_keypair
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -49,8 +50,7 @@ GIT_CRED_GH = ManifestDoc("git-credential", "gh", {"provider": {"name": "github"
 @pytest.fixture
 def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     key = tmp_path / "id_ed25519"
-    key.write_text("private")
-    (tmp_path / "id_ed25519.pub").write_text("public ssh key")
+    write_test_ssh_keypair(key)
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "tskey-test")
     monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", "ghtok")
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")

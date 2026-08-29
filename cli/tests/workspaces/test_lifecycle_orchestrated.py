@@ -42,7 +42,7 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.transports import SSHTransport
 from agentworks.vms import manager as vm_manager
 from agentworks.workspaces import manager as workspace_manager
-from tests.conftest import ManifestDoc
+from tests.conftest import ManifestDoc, stub_vm_ssh_identity
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -51,6 +51,11 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
     from agentworks.db import Database
     from tests.conftest import CapturedOutput
+
+
+@pytest.fixture(autouse=True)
+def _stub_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    stub_vm_ssh_identity(monkeypatch)
 
 
 @pytest.fixture

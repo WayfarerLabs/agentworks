@@ -39,6 +39,7 @@ from .credentials import (
     verify_tailscale_available,
 )
 from .driver import (
+    VMInitializationOperation,
     _phase_a_bootstrap,
     _phase_b_setup,
     bootstrap_vm,
@@ -78,7 +79,12 @@ from .shell_env import (
     _write_sudoers_console_setenv,
     _write_sudoers_env_keep,
 )
-from .ssh_keys import AUTHORIZED_KEYS_HEADER, _apply_sve_mask, _preserve_ssh_host_keys, _reconcile_authorized_keys
+from .ssh_keys import (
+    AUTHORIZED_KEYS_HEADER,
+    _apply_sve_mask,
+    _preserve_ssh_host_keys,
+    _reconcile_authorized_keys,
+)
 
 __all__ = [
     "AGENTWORKS_IDENTITY_PROFILE_PATH",
@@ -97,6 +103,7 @@ __all__ = [
     "MISE_SOURCE_LINE",
     "SKEL_BASHRC_PATH",
     "SKEL_ZSHRC_PATH",
+    "VMInitializationOperation",
     "_apply_sve_mask",
     "_configure_apt_sources",
     "_configure_git_credentials",

@@ -1,9 +1,9 @@
 # HLA: Instance Model and State
 
-- Status: R1, R2, and R4 merged; merge-strategy correction implemented and verified; R3 and R5
-  pending
+- Status: R1, R2, and R4 merged; merge-strategy correction merged; R3 implemented and under review;
+  R5 pending
 - Date: 2026-08-23
-- Last revised: 2026-08-28
+- Last revised: 2026-08-29
 - FRD: [frd.md](./frd.md)
 - Assessment: [database-assessment.md](./database-assessment.md)
 - Store contract: [store-contract.md](./store-contract.md)
@@ -358,7 +358,7 @@ the sole identity the server accepted. Agent selection remains deliberately unre
 
 Both VM create and reinit reach `run_initialization()`. The current authorized-key reconciliation
 swallows an `SSHError` into a warning, so lifecycle return or `InitStatus.PARTIAL` alone does not
-prove that identity was applied. R3 changes that helper to return a typed applied/not-applied result
+prove that identity was applied. R3 changes that helper to return a typed applied/unproven result
 and threads the result through phase B.
 
 The terminal database checkpoint groups:

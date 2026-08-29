@@ -7,6 +7,7 @@ with the session orchestrator lives in ``agents/realize.py``.
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING, cast
 
 import agentworks.agents.manager as _mgr
@@ -185,6 +186,9 @@ def create_agent(
         agent=name,
     )
 
+    from agentworks.vms.manager import require_vm_ssh_boundary
+
+    require_vm_ssh_boundary(db, config, vm)
     with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
         # The preflight boundary: an unresolvable token fails before
         # any prompt, then git tokens and any site config secret
@@ -593,13 +597,17 @@ def reinit_agent(
         render_overlay_outcome(overlay_outcome)
         raise
 
-    with (
-        report_overlay_outcome(overlay_outcome),
-        activation_gate(
-            vm_node,
-            gate_secret_resolver(config, registry, resolver),
-        ),
-    ):
+    from agentworks.vms.manager import require_vm_ssh_boundary
+
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(report_overlay_outcome(overlay_outcome))
+        require_vm_ssh_boundary(db, config, vm)
+        stack.enter_context(
+            activation_gate(
+                vm_node,
+                gate_secret_resolver(config, registry, resolver),
+            )
+        )
         # The preflight boundary: git tokens and any site config secret
         # resolve in one prompt session. Provisioning is hermetic: no
         # operator-env secrets are prompted at reinit.

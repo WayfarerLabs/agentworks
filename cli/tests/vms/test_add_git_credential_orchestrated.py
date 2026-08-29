@@ -30,7 +30,7 @@ from agentworks.errors import StateError, TokenRejectedError, ValidationError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
-from tests.conftest import ManifestDoc
+from tests.conftest import ManifestDoc, stub_vm_ssh_identity
 from tests.orchestrated_fixtures import PLUGINS_ENABLED, proxmox_site, write_operator_config
 
 if TYPE_CHECKING:
@@ -40,6 +40,11 @@ if TYPE_CHECKING:
     from agentworks.db import Database, VMRow
 
 GIT_CRED_GH = ManifestDoc("git-credential", "gh", {"provider": {"name": "github"}})
+
+
+@pytest.fixture(autouse=True)
+def _stub_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    stub_vm_ssh_identity(monkeypatch)
 
 
 @pytest.fixture
