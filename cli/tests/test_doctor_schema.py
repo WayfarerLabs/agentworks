@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sqlite3
 import subprocess
 import sys
@@ -15,8 +14,15 @@ import pytest
 
 from agentworks.db import LATEST_VERSION, Database, SessionMode
 from agentworks.doctor import HealthGroup, Status
-from agentworks.doctor_state import _report_contents, append_vm_site_database_checks, check_database, check_system
+from agentworks.doctor_state import (
+    _live_resource_counts,
+    _report_contents,
+    append_vm_site_database_checks,
+    check_database,
+    check_system,
+)
 from agentworks.errors import StateError
+from agentworks.resources.live import LIVE_RESOURCE_KINDS
 
 
 def _installed_agw() -> Path:
@@ -144,15 +150,22 @@ def test_doctor_reports_each_database_backed_live_resource_count(
     for index in range(5):
         db.insert_console(f"console-{index}", "box")
 
+    counts = _live_resource_counts(db, db.list_vms())
+    assert set(counts) == LIVE_RESOURCE_KINDS
+    assert counts == {
+        "vm": 1,
+        "workspace": 2,
+        "agent": 3,
+        "session": 4,
+        "console": 5,
+    }
+
     warnings: list[str] = []
     monkeypatch.setattr("agentworks.output.warn", warnings.append)
     group = HealthGroup("Database")
     _report_contents(group, db)
 
     assert warnings == []
-    message = group.checks[0].message
-    assert message is not None
-    assert [int(value) for value in re.findall(r"\d+", message)] == [1, 2, 3, 4, 5]
 
 
 def test_doctor_database_errors_remain_shared_actionable_facts(monkeypatch: pytest.MonkeyPatch) -> None:
