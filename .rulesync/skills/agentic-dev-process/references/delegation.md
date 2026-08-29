@@ -19,12 +19,20 @@ a claim by deleting a piece and seeing what breaks needs somewhere to do that wh
 lead's tree. Pinning the head also means every lane reviewing one handoff reviews the same bytes. A
 worktree isolates git only.
 
-Keep a delegate's worktree after it reports rather than tearing it down. A follow-up round usually
-goes back to the same delegate, and its worktree carries the state its findings were made against; a
-worktree whose branch is merged or abandoned is cheap to drop later. An isolated delegate commits
-and pushes its own branch, reports branch and head, and leaves integration to the lead. A delegate
-in a shared checkout commits only where its charter permits. Relaunch a long-lived lead session
-before delegating work governed by rules that changed since it began.
+A delegate's worktree lives as long as the delegate session that owns it, so a follow-up round to
+the same delegate finds its scratch and fixtures already there rather than rebuilding them. It does
+not preserve the bytes a previous round's findings were made against: a follow-up re-pins to the new
+head, and a lane needing the old one re-pins to the SHA the handoff recorded. When the session
+closes, its worktrees go with it. That owner and that event are the whole retirement rule, because a
+review worktree is detached at a SHA and has no branch whose merge or abandonment could retire it.
+
+Budget for the environment, not just the tree. A worktree is cheap; what a lane needs to run
+anything is not, and in this repository a working `cli/` environment is hundreds of megabytes. A
+lane that only reads needs none, a lane that runs the suite, the CLI, or a deletion experiment sets
+up its own, and the lead is the one paying for both that setup and the disk a live session holds. An
+isolated delegate commits and pushes its own branch, reports branch and head, and leaves integration
+to the lead. A delegate in a shared checkout commits only where its charter permits. Relaunch a
+long-lived lead session before delegating work governed by rules that changed since it began.
 
 ## Capability selection
 
