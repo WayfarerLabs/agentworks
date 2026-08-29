@@ -26,7 +26,7 @@ from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import multi_console
 from agentworks.vms import manager as vm_manager
-from tests.conftest import ManifestDoc
+from tests.conftest import ManifestDoc, stub_vm_ssh_identity
 
 if TYPE_CHECKING:
     from agentworks.db import Database
@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 @pytest.fixture(autouse=True)
 def _outside_tmux(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("TMUX", raising=False)
+    stub_vm_ssh_identity(monkeypatch)
 
 
 def _seed_vm(db: Database) -> None:

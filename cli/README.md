@@ -509,12 +509,12 @@ as the VM admin, not root, and explicitly use `sudo` for privileged work.
 
 VM creation follows a two-phase lifecycle tracked by separate status columns:
 
-1. **Provisioning** (`provisioning_status`) -- one-time, platform-specific, over the provisioning
+1. **Provisioning** (`provisioning_status`): one-time, platform-specific, over the provisioning
    transport (Lima shell, SSH, or WSL2 exec): create user, install system packages, add SSH key,
    install and join Tailscale
 
-2. **Initialization** (`init_status`) -- repeatable via `vm reinit`, over Tailscale SSH: configure
-   apt sources, install apt packages, install snap packages, install mise, set shell, reconcile SSH
+2. **Initialization** (`init_status`): repeatable via `vm reinit`, over Tailscale SSH: configure apt
+   sources, install apt packages, install snap packages, install mise, set shell, reconcile SSH
    authorized keys, run system install commands, write mise config, configure PATH, configure git
    credentials, sync dotfiles, fetch mise lockfile, run mise install, run user install commands for
    the admin user
@@ -525,6 +525,14 @@ may be refined by `--spec`; the admin user starts with the selected admin templa
 refined by `--admin-spec`. `vm reinit` takes only the VM name and re-runs initialization using the
 current config and both stored final layers. See
 [Instance specs](command-reference.md#instance-specs) for the exact create and agent-reinit surface.
+
+Agentworks records the configured SSH identity only after a VM create or reinit proves the admin
+`authorized_keys` result. It does not synthesize evidence for VMs created before this tracking was
+introduced. Such a VM needs one successful `agw vm reinit NAME` before ordinary canonical SSH
+commands will use it. If the configured key no longer works, use `agw vm shell NAME --platform`
+where the platform offers a usable recovery transport, restore the configured public key, and
+reinitialize. Some platform transports also depend on the configured key; use provider-native
+recovery or recreate the VM when that path cannot connect.
 
 Non-fatal initialization failures (packages, dotfiles) produce a `partial` status rather than
 aborting. Fatal failures prompt for deletion or reinit. Use `vm describe` to view the full event

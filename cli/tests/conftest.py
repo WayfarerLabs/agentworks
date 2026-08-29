@@ -20,6 +20,7 @@ from agentworks.manifests.envelope import API_VERSION
 from agentworks.manifests.loader import RESOURCES_DIRNAME
 from agentworks.output import Role, StatusStyle, _render_header
 from agentworks.schema import CapabilityBlock
+from tests.ssh_fixtures import write_test_ssh_keypair
 
 # The orchestrated-command suites' shared fixture trio (proxmox
 # section, make_config, resolve_counter) lives in its own module so it
@@ -134,8 +135,7 @@ def write_cfg(
     """
     pub = config_dir / "id.pub"
     priv = config_dir / "id"
-    pub.write_text("ssh-ed25519 AAAA...")
-    priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
+    write_test_ssh_keypair(priv)
     path = config_dir / filename
     path.write_text(
         dedent(f"""\
@@ -510,7 +510,14 @@ def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
 
     monkeypatch.setattr("agentworks.vms.sites.resolve_site", _fake_resolve_site)
     monkeypatch.setattr("agentworks.vms.manager._is_tailscale_reachable", lambda host: True)
+    stub_vm_ssh_identity(monkeypatch)
     return platform
+
+
+def stub_vm_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub the applied SSH precondition in tests focused on later VM work."""
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *args, **kwargs: None)
+    monkeypatch.setattr("agentworks.vms.manager.boundary.require_vm_ssh_boundary", lambda *args, **kwargs: None)
 
 
 def install_fake_target(monkeypatch: pytest.MonkeyPatch, target: _FakeTarget) -> _FakeTarget:

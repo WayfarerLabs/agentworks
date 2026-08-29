@@ -1,12 +1,14 @@
 # Upgrading to 0.17
 
-The 0.17 boundary changes the third-party `harness-integration` author contract from version 1 to
-version 2. Merge behavior now belongs to the config model the integration offers. Operators using
-the shipped `shell`, `claude-code`, `codex`, or `grok-build` integrations do not need to change
-configuration.
+The 0.17 boundary has two upgrade actions. Third-party `harness-integration` authors must move from
+contract version 1 to version 2, where merge behavior belongs to the config model the integration
+offers. Separately, every VM created before 0.17 needs one successful `agw vm reinit NAME` before
+ordinary Agentworks SSH operations will use it. Operators using the shipped `shell`, `claude-code`,
+`codex`, or `grok-build` integrations do not need to change integration configuration, but the VM
+reinitialization still applies.
 
-**This guide is release-scoped.** It carries third-party integrations across the 0.17 boundary. The
-permanent model and harness author contracts live in
+**This guide is release-scoped.** It carries both existing VMs and third-party integrations across
+the 0.17 boundary. The permanent model and harness author contracts live in
 [`cli/agentworks/schema/README.md`](../../cli/agentworks/schema/README.md) and
 [`cli/agentworks/capabilities/harness_integration/README.md`](../../cli/agentworks/capabilities/harness_integration/README.md).
 
@@ -93,9 +95,29 @@ merger to interpret it.
 Final typed validation remains the error boundary for authored values. The merger does not run model
 validators, apply defaults, coerce values, or filter malformed input.
 
-## No operator-state or CLI migration
+## No config or CLI migration for merge behavior
 
-This cutover changes only the harness-integration plugin contract and how existing declaration
-layers combine. It adds no database migration, desired-payload version change, resource-manifest
-key, or CLI syntax. Existing templates and stored instance specs keep their current shape. Operators
-using only the shipped integrations have no migration action.
+The merge-policy cutover changes only the harness-integration plugin contract and how existing
+declaration layers combine. It adds no database migration, desired-payload version change,
+resource-manifest key, or CLI syntax. Existing templates and stored instance specs keep their
+current shape. Operators using only the shipped integrations have no merge-related migration action.
+
+## Reinitialize existing VMs once to establish SSH evidence
+
+Agentworks 0.17 begins recording the configured SSH identity only after a lifecycle operation proves
+that identity was written to the VM. It does not infer or synthesize this evidence for VMs created
+by an earlier release. Those VMs therefore start with SSH identity evidence not recorded, and
+ordinary canonical SSH commands refuse them until a successful reinitialization establishes it.
+
+After upgrading, while the VM still accepts the configured key, run:
+
+```bash
+agw vm reinit NAME
+```
+
+One successful reinitialization records the evidence required by later ordinary SSH commands. If the
+configured key no longer reaches the VM, try `agw vm shell NAME --platform` where the selected
+platform supports a recovery transport. Restore the configured public key on the VM, confirm the
+configured public and private paths identify the same key, and then rerun `agw vm reinit NAME`.
+Platform recovery can still depend on the configured key for some providers. If it cannot connect,
+use the provider's native recovery tooling or recreate the VM.

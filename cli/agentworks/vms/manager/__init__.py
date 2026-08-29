@@ -21,6 +21,7 @@ copy of the import.
 from __future__ import annotations
 
 from agentworks.vms.initializer import (
+    VMInitializationOperation,
     announce_git_credentials,
     bootstrap_vm,
     rejoin_tailscale,
@@ -46,7 +47,12 @@ from ._helpers import (
     _VmAdminEnvScopes,
     validate_slug,
 )
-from .boundary import _live_vm_boundary, gated_vm_boundary
+from .boundary import (
+    _live_vm_boundary,
+    gated_vm_boundary,
+    gated_vm_platform_recovery_boundary,
+    require_vm_ssh_boundary,
+)
 from .exec import add_git_credential, exec_vm, shell_vm
 from .inspect import (
     describe_vm,
@@ -97,12 +103,14 @@ __all__ = [
     "describe_vm",
     "exec_vm",
     "gated_vm_boundary",
+    "gated_vm_platform_recovery_boundary",
     "list_vms",
     "port_forward_vm",
     "reinit_vm",
     "rejoin_tailscale",
     "rekey_vm",
     "render_vm_listing",
+    "require_vm_ssh_boundary",
     "run_initialization",
     "shell_vm",
     "start_vm",
@@ -111,6 +119,7 @@ __all__ = [
     "verify_vm_connection",
     "verify_tailscale_available",
     "VMConnectionVerification",
+    "VMInitializationOperation",
     "vm_description",
     "vm_listing",
 ]

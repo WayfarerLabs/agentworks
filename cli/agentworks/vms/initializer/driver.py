@@ -21,6 +21,7 @@ from __future__ import annotations
 import shlex
 import sys
 from collections.abc import Callable
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -55,7 +56,14 @@ from .shell_env import (
     _write_sudoers_console_setenv,
     _write_sudoers_env_keep,
 )
-from .ssh_keys import _apply_sve_mask, _preserve_ssh_host_keys, _reconcile_authorized_keys
+from .ssh_keys import (
+    AuthorizedKeysApplied,
+    AuthorizedKeysOutcome,
+    AuthorizedKeysUnproven,
+    _apply_sve_mask,
+    _preserve_ssh_host_keys,
+    _reconcile_authorized_keys,
+)
 from .workspaces_dir import _setup_workspaces_directory
 
 if TYPE_CHECKING:
@@ -67,6 +75,13 @@ if TYPE_CHECKING:
     from agentworks.resources.registry import Registry
     from agentworks.vms.admin import AdminConfig
     from agentworks.vms.templates import ResolvedVMTemplate
+
+
+class VMInitializationOperation(StrEnum):
+    """Closed lifecycle operations that can establish VM applied state."""
+
+    VM_CREATE = "vm-create"
+    VM_REINIT = "vm-reinit"
 
 
 def bootstrap_vm(
@@ -237,21 +252,20 @@ def run_initialization(
     logger: SSHLogger,
     *,
     git_tokens: dict[str, str],
-    is_first_init: bool = False,
+    operation: VMInitializationOperation,
 ) -> None:
     """Run Phase B (initialization) with status tracking and event logging.
 
     This is called both from ``create_vm`` (after ``bootstrap_vm``) and
-    from ``reinit_vm`` for repeatable re-initialization. Pass
-    ``is_first_init=True`` on create so steps that expect prior state
-    (e.g. tmux socket dirs) can skip warnings on missing state.
+    from ``reinit_vm`` for repeatable re-initialization. The closed
+    ``operation`` value also drives create-only setup behavior.
     ``git_tokens`` is required (no provider-side fallback);
     callers must thread the framework-resolved dict in.
     """
     db.insert_vm_event(vm_name, "init_started")
 
     try:
-        _phase_b_setup(
+        authorized_keys = _phase_b_setup(
             db,
             config,
             registry,
@@ -264,19 +278,63 @@ def run_initialization(
             admin_username,
             logger,
             git_tokens=git_tokens,
-            is_first_init=is_first_init,
+            operation=operation,
         )
     except Exception as e:
-        db.update_vm_init_status(vm_name, InitStatus.FAILED)
-        db.insert_vm_event(vm_name, "init_failed", str(e))
+        with db.transaction():
+            db.update_vm_init_status(vm_name, InitStatus.FAILED)
+            db.insert_vm_event(vm_name, "init_failed", str(e))
         raise
 
-    if logger.has_warnings:
-        db.update_vm_init_status(vm_name, InitStatus.PARTIAL)
-        db.insert_vm_event(vm_name, "init_partial", f"{len(logger.warnings)} warning(s)")
-    else:
-        db.update_vm_init_status(vm_name, InitStatus.COMPLETE)
-        db.insert_vm_event(vm_name, "init_complete")
+    if isinstance(authorized_keys, AuthorizedKeysUnproven):
+        output.warn(
+            f"SSH identity evidence for VM '{vm_name}' is unknown, so ordinary SSH commands "
+            "will refuse to connect. If the configured key still works, retry with "
+            f"'agw vm reinit {vm_name}'. Otherwise, use "
+            f"'agw vm shell {vm_name} --platform' where supported to restore access before "
+            "reinitializing. If platform recovery is unavailable, recreate the VM."
+        )
+
+    from agentworks.db.instance_state import AppliedStateKey
+    from agentworks.vms.applied_state import build_vm_initialization_slices
+
+    applied_proof = authorized_keys if isinstance(authorized_keys, AuthorizedKeysApplied) else None
+    slices = build_vm_initialization_slices(
+        applied_proof,
+        include_hardware=operation is VMInitializationOperation.VM_CREATE,
+    )
+    ssh_identity_proven = AppliedStateKey.SSH_IDENTITY in slices
+    if applied_proof is not None and not ssh_identity_proven:
+        # File-system identity cannot be checkpointed atomically with the
+        # remote write. A changed or unreadable carrier leaves the remote
+        # result unknown, so remove any older proof.
+        msg = "configured SSH identity changed or became unavailable after authorized_keys update"
+        logger.warning(msg)
+        output.warn(msg)
+
+    final_status = InitStatus.PARTIAL if logger.has_warnings else InitStatus.COMPLETE
+    final_event = "init_partial" if logger.has_warnings else "init_complete"
+    final_detail = f"{len(logger.warnings)} warning(s)" if logger.has_warnings else None
+
+    # Do not include this checkpoint in the Phase B exception arm above: a
+    # local database failure must roll back the complete terminal result and
+    # propagate, leaving the earlier in-progress evidence intact.
+    with db.transaction():
+        db.update_vm_init_status(vm_name, final_status)
+        db.insert_vm_event(vm_name, final_event, final_detail)
+        if slices:
+            db.instance_state.replace_applied_slices(
+                "vm",
+                vm_name,
+                operation.value,
+                slices,
+            )
+        if not ssh_identity_proven:
+            db.instance_state.clear_applied_slice(
+                "vm",
+                vm_name,
+                AppliedStateKey.SSH_IDENTITY,
+            )
 
 
 def _phase_a_bootstrap(
@@ -351,8 +409,8 @@ def _phase_b_setup(
     logger: SSHLogger,
     *,
     git_tokens: dict[str, str],
-    is_first_init: bool = False,
-) -> None:
+    operation: VMInitializationOperation,
+) -> AuthorizedKeysOutcome:
     """Phase B: Setup (over Tailscale SSH). Non-fatal steps warn and continue.
 
     ``git_tokens`` is required: every provider listed in
@@ -525,7 +583,11 @@ def _phase_b_setup(
             logger.step("Agent tmux socket directories")
             output.info("Setting up agent tmux socket infrastructure...")
 
-            ensure_agent_socket_root(ts_target, admin_username, warn_if_missing=not is_first_init)
+            ensure_agent_socket_root(
+                ts_target,
+                admin_username,
+                warn_if_missing=operation is not VMInitializationOperation.VM_CREATE,
+            )
             for agent in db.list_agents(vm_name=vm_name):
                 ensure_agent_socket_dir(ts_target, agent.linux_user)
                 removed = cleanup_stale_sockets(ts_target, agent.linux_user)
@@ -557,9 +619,6 @@ def _phase_b_setup(
         # and reinit (both reach _phase_b_setup), so a pre-existing
         # world-readable admin home is repaired on the next reinit.
         _harden_admin_home(ts_target, home=home, admin_username=admin_username, logger=logger)
-
-        # Non-fatal: reconcile authorized_keys
-        _reconcile_authorized_keys(ts_target, config, home, logger)
 
         # Non-fatal: the shared workspaces parent directory and its canonical
         # ACL (recursive over all workspaces). The ACL apply and the
@@ -673,6 +732,11 @@ def _phase_b_setup(
             shell=admin_shell,
             logger=logger,
         )
+
+        # Final remote mutation: once this succeeds, no later Phase B work can
+        # make the identity proof stale before the local stability check and
+        # transactional terminal checkpoint.
+        return _reconcile_authorized_keys(ts_target, config, home, logger)
 
 
 RunCmd = Callable[[str, int], object]

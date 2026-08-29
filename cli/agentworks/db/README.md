@@ -18,7 +18,10 @@ desired or applied state cannot silently acquire a new owner. VM backup uses the
 select exactly the VM, its workspaces and agents, and those workspaces' sessions in SQL before any
 payload is decoded. A malformed selected row therefore fails the backup, while a malformed row for
 an unrelated owner cannot block it. These named predicates are part of the repository contract;
-callers do not recreate the polymorphic owner-tree query or filter a decoded global record list.
+callers do not recreate the polymorphic owner-tree query or filter a decoded global record list. The
+same backup snapshot reads the named VM's applied slices through `get_applied_slices`; R3 keys are
+VM-only, so applied state does not require a second owner-tree query. Backup then decodes and
+re-encodes each known slice through its VM-domain codec before exporting it.
 
 Because the polymorphic table deliberately has no owner foreign key, a damaged or hand-edited
 database can contain identities that normal creation paths reject. Operator-facing errors retain a
@@ -32,6 +35,38 @@ are checked on writes and persisted reads. The current VM-only keys are `hardwar
 replaces only the supplied slice keys, with one operation and one timestamp, and preserves all
 unrelated facts. Empty replacement is a no-op. Existing instances have no synthesized records:
 absence means not recorded until a lifecycle operation establishes state.
+
+The version-1 VM payloads are deliberately compact and non-secret:
+
+- `hardware-provenance` is `{}`. The row itself proves that VM create reached its successful
+  lifecycle checkpoint; row-backed CPU, memory, disk, and swap values are not duplicated.
+- A verified `ssh-identity` is
+  `{"status":"verified","private_key_ref":"...","fingerprint":"SHA256:..."}`.
+- An identity whose recognized private-key format cannot expose its public identity
+  non-interactively is `{"status":"unverifiable","private_key_ref":"..."}`. It records that the
+  authorized-key write completed, but claims neither a fingerprint nor a comparison result.
+
+Neither SSH payload stores private or public key material, passphrases, or agent state. Absence is
+different from `unverifiable`: it means no successful lifecycle checkpoint currently proves the SSH
+write. Ordinary canonical SSH operations refuse absent or drifted evidence before transport, while
+recorded-unverifiable evidence may proceed without inventing a match. VM reinit alone may establish
+an absent SSH slice; it still refuses known drift and replaces or clears only the SSH fact it can
+prove. VM create establishes both the hardware marker and, after a successful authorized-key write
+whose retained private identity remains readable and stable through the local checkpoint, the SSH
+slice. Recovery and cleanup roots such as rekey and VM delete remain available without this
+ordinary-operation proof.
+
+Both known applied payload codecs treat an unsupported payload version as version skew, distinct
+from a malformed supported-version payload. Version skew remains a strict `StateError` and directs
+the operator to a compatible or newer Agentworks release; malformed known payloads retain database
+repair or known-good-backup guidance. Backup uses the same codecs and distinction when it
+canonicalizes selected applied state.
+
+`clear_applied_slice` removes only one supplied registered key for one typed owner. It rejects
+caller-authored strings and keys registered for a different owner kind, treats an already absent key
+as a no-op, and joins an enclosing lifecycle transaction. This is the narrow path for discarding
+evidence that a lifecycle side effect made uncertain; it cannot delete a desired overlay, a future
+unknown slice, or another owner's evidence.
 
 VM desired overlays use one owner record for the paired final VM and admin layers. New writes use
 payload version 2 with explicit `vm` and `admin` components. Readers retain compatibility with the

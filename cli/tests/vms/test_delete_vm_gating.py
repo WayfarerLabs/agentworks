@@ -113,6 +113,10 @@ def test_delete_never_gates(
     _seed(db)
     counts = _fake_backend(monkeypatch)
     monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "agentworks.vms.manager.boundary.require_vm_ssh_boundary",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("delete requested SSH proof")),
+    )
 
     vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 

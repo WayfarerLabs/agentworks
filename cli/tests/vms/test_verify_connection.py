@@ -28,6 +28,10 @@ def test_verify_connection_uses_one_canonical_no_op(monkeypatch: pytest.MonkeyPa
             return "ssh:100.64.0.2"
 
     monkeypatch.setattr("agentworks.vms.sites.resolve_site", lambda site, registry: calls.append(("site", site)))
+    monkeypatch.setattr(
+        "agentworks.vms.manager.boundary.require_vm_ssh_boundary",
+        lambda db, config, candidate: calls.append(("identity", candidate.name)),
+    )
     monkeypatch.setattr("agentworks.transports.transport", lambda candidate, config: Target())
 
     result = verify_vm_connection(
@@ -39,6 +43,7 @@ def test_verify_connection_uses_one_canonical_no_op(monkeypatch: pytest.MonkeyPa
 
     assert calls == [
         ("site", "local"),
+        ("identity", "worker"),
         ("true", {"sudo": False, "tty": False, "env": None, "timeout": 10}),
     ]
     assert not hasattr(result, "connected")
@@ -97,6 +102,10 @@ def test_verify_connection_surfaces_failure_without_activation_or_mutation(
     monkeypatch.setattr("agentworks.output.prompt", forbidden_call)
     monkeypatch.setattr("agentworks.secrets.resolve.resolve_batch", forbidden_call)
     monkeypatch.setattr("agentworks.vms.sites.resolve_site", lambda site, registry: calls.append(("site", site)))
+    monkeypatch.setattr(
+        "agentworks.vms.manager.boundary.require_vm_ssh_boundary",
+        lambda db, config, candidate: calls.append(("identity", candidate.name)),
+    )
     monkeypatch.setattr("agentworks.transports.transport", lambda candidate, config: FailingTarget())
 
     with pytest.raises(type(failure), match=str(failure)):
@@ -110,6 +119,7 @@ def test_verify_connection_surfaces_failure_without_activation_or_mutation(
     assert calls == [
         ("get_vm", "worker"),
         ("site", "local"),
+        ("identity", "worker"),
         ("run", "true", {"sudo": False, "tty": False, "env": None, "timeout": 10}),
     ]
 
@@ -122,6 +132,56 @@ def test_verify_connection_missing_vm() -> None:
             cast("Registry", SimpleNamespace()),
             "missing",
         )
+
+
+def test_verify_connection_refuses_identity_state_before_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vm = SimpleNamespace(name="worker", site="local")
+    monkeypatch.setattr("agentworks.vms.sites.resolve_site", lambda site, registry: None)
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise StateError("SSH identity drift")
+
+    monkeypatch.setattr("agentworks.vms.manager.boundary.require_vm_ssh_boundary", refuse)
+    monkeypatch.setattr(
+        "agentworks.transports.transport",
+        lambda *args, **kwargs: pytest.fail("transport constructed before identity refusal"),
+    )
+
+    with pytest.raises(StateError):
+        verify_vm_connection(
+            cast("Database", SimpleNamespace(get_vm=lambda name: vm)),
+            cast("Config", SimpleNamespace()),
+            cast("Registry", SimpleNamespace()),
+            "worker",
+        )
+
+
+def test_live_resource_probe_degrades_identity_refusal_without_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.vms.manager._helpers import _query_live_resources
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise StateError("SSH identity drift")
+
+    monkeypatch.setattr("agentworks.vms.manager.boundary.require_vm_ssh_boundary", refuse)
+    monkeypatch.setattr(
+        "agentworks.transports.transport",
+        lambda *args, **kwargs: pytest.fail("transport constructed after identity refusal"),
+    )
+
+    config = SimpleNamespace()
+    vm = SimpleNamespace(name="worker")
+    assert (
+        _query_live_resources(
+            cast("Database", SimpleNamespace()),
+            vm,  # type: ignore[arg-type]
+            cast("Config", config),
+        )
+        is None
+    )
 
 
 def test_verify_connection_cli_reports_service_result(monkeypatch: pytest.MonkeyPatch) -> None:

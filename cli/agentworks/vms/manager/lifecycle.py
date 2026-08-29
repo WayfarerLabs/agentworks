@@ -224,6 +224,18 @@ def create_vm(
 
     refuse_orphan_creation_state(db, "vm", vm_name)
 
+    # Validate and retain the exact public identity before any secret
+    # resolution, local state mutation, logging, or platform work. The
+    # private carrier may be deliberately unverifiable (for example a
+    # supported encrypted legacy key), but a verifiable mismatch cannot be
+    # allowed to provision an identity this client does not hold.
+    from agentworks.vms.applied_state import prepare_configured_ssh_identity
+
+    prepared_ssh = prepare_configured_ssh_identity(
+        config.operator.ssh_public_key,
+        config.operator.ssh_private_key,
+    )
+
     # Resource settings come from the already-resolved template plus its
     # optional final instance layer; the admin-template owns the username.
     resolved_cpus = vm_tmpl.cpus
@@ -446,7 +458,7 @@ def create_vm(
                     hostname=hostname,
                     system_slug=slug,
                     admin_username=resolved_admin_username,
-                    ssh_public_key=config.operator.ssh_public_key.read_text().strip(),
+                    ssh_public_key=prepared_ssh.public_text,
                     ssh_private_key=config.operator.ssh_private_key,
                     tailscale_auth_key=tailscale_auth_key,
                     progress=logger,
@@ -563,7 +575,7 @@ def create_vm(
                 resolved_admin_username,
                 logger,
                 git_tokens=git_tokens,
-                is_first_init=True,
+                operation=_mgr.VMInitializationOperation.VM_CREATE,
             )
         except (KeyboardInterrupt, UserAbort):
             _warn_init_cancel(vm_name)
@@ -713,6 +725,23 @@ def reinit_vm(
     # (Phase 7, LLD b).
     ensure_recipe_enabled(registry, "admin-template", selected_admin_template)
 
+    # Validate the configured public/private pair after all cheap declaration
+    # and recipe checks, but before the applied-state boundary, activation,
+    # secret resolution, or transport construction. Authorized-key
+    # reconciliation repeats this read immediately before its remote write so
+    # a path replacement during the operation still fails safely.
+    from agentworks.vms.applied_state import prepare_configured_ssh_identity
+
+    prepare_configured_ssh_identity(
+        config.operator.ssh_public_key,
+        config.operator.ssh_private_key,
+    )
+
+    # Reinit is the one establishment path that may operate on a historic VM
+    # with no SSH evidence. Known drift still refuses before activation or
+    # transport construction.
+    _mgr.require_vm_ssh_boundary(db, config, vm, allow_not_recorded=True)
+
     _mgr.verify_tailscale_available()
     cred_nodes = tuple(git_credential_node(registry, cred_name) for cred_name in admin.git_credentials)
     providers = {node.provider.owner_name: node.provider for node in cred_nodes}
@@ -803,6 +832,7 @@ def reinit_vm(
                     vm.admin_username,
                     logger,
                     git_tokens=git_tokens,
+                    operation=_mgr.VMInitializationOperation.VM_REINIT,
                 )
             except KeyboardInterrupt:
                 output.warn(

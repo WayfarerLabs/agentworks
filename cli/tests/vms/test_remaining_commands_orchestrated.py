@@ -26,10 +26,16 @@ from agentworks.db import VMStatus
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
+from tests.conftest import stub_vm_ssh_identity
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
     from agentworks.db import Database
+
+
+@pytest.fixture(autouse=True)
+def _stub_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    stub_vm_ssh_identity(monkeypatch)
 
 
 def _seed_vm(db: Database, *, operator_stopped: bool = False) -> None:
@@ -66,7 +72,7 @@ def _quiet_backend_reads(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stub describe's non-status backend reads (the display name is a
     backend API render; the live-resource query SSHes to the VM)."""
     monkeypatch.setattr(ProxmoxPlatform, "display_backend_name", lambda self, row: "vmid 100")
-    monkeypatch.setattr(vm_manager, "_query_live_resources", lambda vm, config: None)
+    monkeypatch.setattr(vm_manager, "_query_live_resources", lambda db, vm, config: None)
 
 
 def test_describe_running_vm_is_one_boundary_burst_and_reads_only(
@@ -106,7 +112,7 @@ def test_describe_operator_stopped_vm_never_gates(
     _seed_vm(db, operator_stopped=True)
     events = _fake_status(monkeypatch, VMStatus.STOPPED)
 
-    def _no_live(vm: object, config: object) -> None:
+    def _no_live(db: object, vm: object, config: object) -> None:
         raise AssertionError("live SSH read must be skipped on a stopped VM")
 
     monkeypatch.setattr(vm_manager, "_query_live_resources", _no_live)

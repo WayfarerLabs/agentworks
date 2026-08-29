@@ -24,7 +24,7 @@ from agentworks.instance_specs import parse_instance_spec
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
-from tests.conftest import ManifestDoc
+from tests.conftest import ManifestDoc, stub_vm_ssh_identity
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
@@ -44,6 +44,7 @@ AGENT_ENV_TEMPLATE = ManifestDoc(
 @pytest.fixture(autouse=True)
 def _env_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AW_SECRET_AGENT_ENV_SECRET", "agent-env-val")
+    stub_vm_ssh_identity(monkeypatch)
 
 
 def _seed(db: Database) -> None:

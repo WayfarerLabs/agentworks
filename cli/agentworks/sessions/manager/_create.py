@@ -385,6 +385,9 @@ def create_session(
     # preflight sweep (so every probe reaches a live target), held
     # through the whole command, with its just-in-time values seeding
     # the boundary resolver so nothing resolves or prompts twice.
+    from agentworks.vms.manager import require_vm_ssh_boundary
+
+    require_vm_ssh_boundary(db, config, graph.vm_node.row)
     with activation_gate(graph.vm_node, gate_secret_resolver(config, registry, graph.resolver)):
         vm = _reload_vm(db, plan.target_vm_name)
         target, run_command = _build_live_transport(vm, config)
