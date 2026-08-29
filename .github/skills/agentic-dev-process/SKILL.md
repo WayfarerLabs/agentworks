@@ -16,10 +16,10 @@ Commits convention, from the first commit; this skill routes the effort.
    work. Its requirements, rulings, and plan then control the work regardless of apparent size. An
    SDD directory or repository state is context, not authority. Read the current tree before relying
    on a claim. If the governing work is unclear, ask.
-2. **Choose a track.** Small, localized, patterned, low-risk work may proceed directly. Significant,
-   cross-cutting, contractual, or hard-to-reverse work uses the `sdd` skill. Ambiguity that affects
-   a contract or is hard to reverse takes the heavier track. Direct work still receives the same
-   principles, private quality loop, delivery discipline, and escalation.
+2. **Choose a track.** Size the work: small, localized, patterned, low-risk work may proceed
+   directly. Significant, cross-cutting, contractual, or hard-to-reverse work uses the `sdd` skill.
+   Ambiguity that affects a contract or is hard to reverse takes the heavier track. Direct work
+   still receives the same principles, private quality loop, delivery discipline, and escalation.
 3. **Establish ownership.** For an SDD effort, the lead owns architecture, sequencing, the plan,
    cross-cutting invariants, and decisions. The `sdd` skill owns artifact lifecycle and the plan is
    the record of completed work. Delegate factual scouting, bounded design detail, and
@@ -28,16 +28,19 @@ Commits convention, from the first commit; this skill routes the effort.
    and work from HEAD. Apply the `development-principles` rule's **Scope discipline** before folding
    in a discovery outside the charter.
 5. **Run the private quality loop.** Before its first handoff, every development change receives an
-   independent `agentworks-reviewer` project review and a `muntz` complexity pass; a bookkeeping or
-   closeout change normally needs neither. Code-heavy work adds a third lane, a generic correctness,
-   robustness, edge-case, and security pass without project-specific priors, which may use a lighter
-   capability because it complements rather than replaces the reviewer of record; a document-only
-   change normally does not need it. Every lane runs inside this loop, so a review published by an
-   outside service is ordinary feedback under
+   independent `agentworks-reviewer` project review and a `muntz` complexity pass, closeout
+   included: nothing automated catches a premature lockfile or a checkbox that outruns its work, so
+   that catch is the project review's. A pure-bookkeeping change normally needs neither. Code-heavy
+   work adds a third lane, a generic correctness, robustness, edge-case, and security pass without
+   project-specific priors, which may use a lighter capability because it complements rather than
+   replaces the reviewer of record; a document-only change normally does not need it. Every lane
+   runs inside this loop, so a review published by an outside service is ordinary feedback under
    [Published feedback](references/delivery.md#published-feedback). Batch rounds by meaningful risk
-   or work units, not per commit. Give each lane its required invocation context; the roles define
-   those facts and their question behavior. The project review is the reviewer of record and has at
-   least the implementation capability and reasoning depth. Assess findings under **Finding
+   or work units, not per commit. Give each lane its required invocation context. The
+   `agentworks-reviewer` and `muntz` roles define what they need; the third lane is a generic
+   delegate with no role document, so hand it the diff, the governing SDD if one governs, and any
+   surface the operator has placed off limits. The project review is the reviewer of record and has
+   at least the implementation capability and reasoning depth. Assess findings under **Finding
    materiality** in `development-principles`, and send each correction to the artifact's owner.
 6. **Validate and hand off an exact state.** Before PR validation or merge, load
    `integration-testing`; it owns validation and live-evidence mechanics. Load
