@@ -229,8 +229,15 @@ def console_add_sessions(
         list[str],
         typer.Argument(help="Sessions to add. Use 'name' or 'name+N' for N default shells."),
     ],
+    to_index: Annotated[
+        int | None,
+        typer.Option(
+            "--to-index",
+            help="Start the new sessions at this zero-based session index",
+        ),
+    ] = None,
 ) -> None:
-    """Append sessions to an existing console."""
+    """Add sessions to an existing console, appending by default."""
     interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config
     from agentworks.sessions.multi_console import add_sessions
@@ -241,6 +248,7 @@ def console_add_sessions(
         console_name=name,
         session_specs=sessions,
         interaction=interaction,
+        start_index=to_index,
     )
 
 
