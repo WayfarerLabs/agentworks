@@ -326,9 +326,10 @@ write operation prove that the emitted Git credential form works with the reposi
 merely its REST API. Missing/failed/malformed/timeout cases are value-safe; a valid token for an
 identity without repository access produces Git's normal forge rejection.
 
-After design review clears and while this PR remains draft, an integration run MUST prove the
-proposed organization-username/token-password form with a real read-only Azure Repos Git operation.
-A failed or unavailable proof is not approval to begin implementation.
+Before merge, operator live testing MUST prove both new CLI-backed arms through their generated
+helpers. The Azure run MUST prove the proposed organization-username/token-password form with real
+Azure Repos Git operations. A failed or unavailable proof is not a pass and requires correction of
+the affected arm before merge.
 
 ### AC5: Selection
 

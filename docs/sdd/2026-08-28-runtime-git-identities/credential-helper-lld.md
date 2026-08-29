@@ -264,10 +264,9 @@ requires to produce its final stored credential.
 
 Microsoft's current Git guidance recommends a Bearer header. The username/password response is a
 deliberate compatibility choice for Debian Bookworm's Git 2.39 based on current Git Credential
-Manager behavior. After design review clears, a draft-only proof exercises this exact response with
-a real read-only Azure Repos Git operation before implementation; implementation later proves clone,
-fetch, and a reversible write. Failure revises the provider output, not core's generic two-shape
-contract.
+Manager behavior. Before merge, operator live testing exercises this exact response through the
+generated helper with clone, fetch, and a reversible write. Failure revises the provider output, not
+core's generic two-shape contract.
 
 ## Core Material Boundary
 
@@ -573,7 +572,6 @@ Two facts remain empirical gates:
 2. Azure Repos accepts the provider-owned username/password response built from a real `az`-issued
    Entra token.
 
-The cleared-design draft integration run proves item 2 read-only before implementation.
-Implementation later proves both through the generated state and reversible writes. Failure stops
-for design revision; it is not permission to add a compatibility layer, install another Git, or
-switch to Git Credential Manager.
+Final implementation acceptance proves both through the generated state and reversible writes.
+Failure stops for design/implementation revision; it is not permission to add a compatibility layer,
+install another Git, or switch to Git Credential Manager.

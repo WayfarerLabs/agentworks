@@ -16,25 +16,26 @@
 
 - Until design clearance, the draft PR contains only this SDD directory and carries
   `sdd:runtime-git-identities` plus the author-owned `review-requested` label. It has no merge
-  intent while design review is active. After the cleared draft-only Azure proof, the same draft
-  receives the pre-authorized implementation.
-- The operator authorized up to four published-feedback/fix iterations while findings are
-  converging. Each iteration critically evaluates the complete batch, removes `review-requested`
-  before edits, pushes one coherent corrected checkpoint, comments with dispositions/evidence, and
-  reapplies `review-requested`. A requirements change, divergent redesign, or fifth needed round
-  stops for operator direction.
+  intent while design review is active. After design clearance, the same draft receives the
+  pre-authorized implementation.
+- The operator authorized the original four published SDD feedback/fix iterations plus up to two
+  additional SDD-only rounds while findings converge. Each iteration critically evaluates the
+  complete batch, removes `review-requested` before edits, pushes one coherent corrected checkpoint,
+  comments with dispositions/evidence, and reapplies `review-requested`. A requirements change,
+  divergent redesign, or work beyond that extended budget stops for operator direction.
+- After the complete implementation is handed off, the operator separately authorizes up to four
+  implementation feedback/fix rounds while findings converge.
 - Private artifact review uses `agentworks-reviewer` and Muntz before the first public handoff.
   Document-only work does not add a generic code-correctness lane.
 - Review convergence recommends implementation but does not authorize it. The operator has
   pre-authorized implementation on this same draft PR only if the final design checkpoint is clean
   with the designated next-steps boundary reviewer (`agw-next-steps`), project reviewer, and Muntz;
   a material design disagreement stops first.
-- After design review clears and while the PR remains draft, run one bounded integration-tester
-  design proof against an authorized Azure Repos repository: obtain the Azure DevOps-audience token
-  through the active service-principal `az` identity and use the proposed
-  organization-username/token-password helper response for a read-only Git operation. Failure keeps
-  the PR draft for Azure-arm redesign; unavailable inventory is reported as blocked, never counted
-  as proof. Only a passing proof unlocks the pre-authorized implementation.
+- Before merge, the operator will live-test both new CLI-backed arms through the generated helpers.
+  The Azure proof obtains the Azure DevOps-audience token through an active service-principal `az`
+  identity and uses the proposed organization-username/token-password response for real Git
+  operations. Failed or unavailable proof is not a pass and keeps the implementation from merge;
+  failure returns the affected arm for design/implementation correction.
 - Implementation begins on this same draft branch from the exact cleared design checkpoint and lands
   in the same PR so the provider contract, callers, reconciliation, cleanup, and live behavior
   cannot land in a misleading half-state. This effort does not define a safe implementation split.
@@ -104,14 +105,18 @@ assert structure, behavior, state, and value containment; they do not police aut
       with independently provider-owned required structured `source` unions, removing shorthand and
       whole-source omission, and recording the schema break for shipped release notes. (2026-08-28:
       FRD, HLA, LLD, migration, research, and implementation plan corrected together.)
-- [ ] After design review clears but before implementation, prove the proposed Azure
-      username/password wire form with a real read-only Azure Repos Git operation while the PR
-      remains draft.
-- [ ] Collect the requested public artifact perspectives and process the separately authorized SDD
-      rounds to a clean final design checkpoint.
-- [ ] Confirm the final design checkpoint is clean with the designated next-steps boundary reviewer,
-      project reviewer, and Muntz; run the draft-only Azure proof; then begin the pre-authorized
-      implementation on this same draft PR.
+- [x] Incorporate authenticated operator correction cycle 5 by removing the premature
+      pre-implementation Azure inventory gate and requiring the operator to live-test both new arms
+      before merge. (2026-08-29: the blocked probe established that Azure VM inventory does not
+      imply Azure Repos inventory; the operator accepted both final live-proof gates and authorized
+      implementation to proceed.)
+- [x] Collect the requested public artifact perspectives and process the separately authorized SDD
+      rounds to a clean final design checkpoint. (2026-08-29: cycle 4 received exact-head clean
+      project and Muntz reviews; the next-steps lead's two published concerns were incorporated; no
+      further material feedback arrived in the one-hour window.)
+- [x] Confirm this final operator correction is clean with the project reviewer and Muntz, then
+      begin the pre-authorized implementation on this same draft PR. (2026-08-29: both exact-head
+      re-reviews were clean after one shared wording correction; implementation is unblocked.)
 
 ### Phase 0 Definition of Done
 
@@ -122,7 +127,7 @@ assert structure, behavior, state, and value containment; they do not police aut
   owns generic Git routing and total empty-state reconciliation.
 - The removed direct-add path has no replacement writer or installed-state compatibility seam.
 - Azure Git authentication and Git config precedence are named implementation proofs, not assumed
-  facts; the Azure wire shape is additionally a design-merge proof.
+  facts; both CLI arms are final generated-helper pre-merge proofs.
 - Review reports no unresolved material design or complexity finding.
 
 ## Requirement Traceability

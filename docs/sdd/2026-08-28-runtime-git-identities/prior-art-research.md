@@ -95,7 +95,7 @@ Git, though GCM owns more authentication and storage behavior than this effort n
 
 - `az-cli` runs the exact resource-ID/query/TSV command pinned in the LLD;
 - the helper returns configured organization as username and token as password, with live Git proof
-  required before implementation handoff;
+  required before merge;
 - it does not choose or mutate tenant/subscription state;
 - Agentworks documents that forge-side organization membership/permissions are prerequisites;
 - real clone/fetch/push proves the exact credential-helper response before merge.
@@ -225,10 +225,8 @@ rather than silently growing version-dependent branches.
 These do not change the accepted requirements, but must be answered at the named gates:
 
 1. Does the host-scoped reset/include sequence behave as designed on Debian Bookworm's Git 2.39?
-2. After design review clears but before implementation, does the selected GCM-style
-   username/password response work with a real `az`-issued Entra token for a read-only Azure Repos
-   Git operation? During implementation, does the generated helper then support clone, fetch, and
-   push?
+2. Before merge, does the selected GCM-style username/password response work through the generated
+   helper with a real `az`-issued Entra token for Azure Repos clone, fetch, and push?
 
 Each answer is recorded in permanent implementation documentation or tests, not left load-bearing
 only in this research file.

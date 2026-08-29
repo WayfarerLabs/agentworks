@@ -242,10 +242,9 @@ neither authenticates it nor parses its configuration.
 
 The provider returns a managed helper containing the fixed Azure DevOps resource recipe. It
 constructs organization-as-username and Entra-token-as-password itself, following current Git
-Credential Manager prior art and pending the required cleared-design draft Azure Repos wire proof.
-Core does not know that mapping. The implementation later proves the generated helper through clone,
-fetch, and a reversible write. The exact command and prior-art evidence live in the LLD and research
-artifact.
+Credential Manager prior art and pending the required operator live proof before merge. Core does
+not know that mapping. Final acceptance proves the generated helper through clone, fetch, and a
+reversible write. The exact command and prior-art evidence live in the LLD and research artifact.
 
 ## Security Boundaries
 
