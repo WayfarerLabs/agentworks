@@ -10,15 +10,16 @@ from __future__ import annotations
 
 import shlex
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.capabilities.config import capability_config_references, validate_capability_config
-from agentworks.capabilities.harness_integration import ShellIntegration, quote_literal_argv
+from agentworks.capabilities.harness_integration import HarnessIntegration, ShellIntegration, quote_literal_argv
+from agentworks.capabilities.harness_integration.shell import ShellConfig
 from agentworks.errors import ConfigError, StateError
-from agentworks.schema import RefOwner
+from agentworks.schema import RefOwner, merge_model
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -190,11 +191,21 @@ def test_construct_revalidates_config() -> None:
         _harness_integration({"nope": 1})
 
 
-# -- config vocabulary: merge_config -----------------------------------------
+# -- config vocabulary: model-directed merging -------------------------------
+
+
+def _merge(base: dict[str, object], child: dict[str, object]) -> dict[str, object]:
+    merged, _ = merge_model(ShellConfig, base, child)
+    return cast("dict[str, object]", merged)
+
+
+def test_contract_exposes_no_imperative_merge_callback() -> None:
+    assert not hasattr(HarnessIntegration, "merge_config")
+    assert not hasattr(ShellIntegration, "merge_config")
 
 
 def test_merge_child_wins_the_scalars() -> None:
-    merged = ShellIntegration.merge_config(
+    merged = _merge(
         {"command": "parent", "resume_command": "parent-r"},
         {"command": "child"},
     )
@@ -203,7 +214,7 @@ def test_merge_child_wins_the_scalars() -> None:
 
 
 def test_merge_unions_required_commands_append_dedupe() -> None:
-    merged = ShellIntegration.merge_config(
+    merged = _merge(
         {"required_commands": ["claude", "rg"]},
         {"required_commands": ["rg", "fd"]},
     )
@@ -211,11 +222,10 @@ def test_merge_unions_required_commands_append_dedupe() -> None:
 
 
 def test_merge_never_launders_an_invalid_required_commands_entry() -> None:
-    """merge_config runs on RAW declared blobs (the resolver merges before
-    the final validate), so a mixed valid/invalid list must survive the
+    """The merger runs on raw declarations, so a mixed list survives the
     merge un-filtered for validate to reject; silently dropping the bad
     entry would produce a valid-looking blob that validate passes."""
-    merged = ShellIntegration.merge_config({}, {"required_commands": ["rg", 5]})
+    merged = _merge({}, {"required_commands": ["rg", 5]})
     assert merged["required_commands"] == ["rg", 5]
     with pytest.raises(ConfigError, match="required_commands"):
         _validate(merged)
@@ -224,7 +234,7 @@ def test_merge_never_launders_an_invalid_required_commands_entry() -> None:
 def test_merge_child_overriding_only_command_keeps_parent_required() -> None:
     """The reason for the union override: a child that overrides only
     ``command`` must not silently drop the parent's required commands."""
-    merged = ShellIntegration.merge_config(
+    merged = _merge(
         {"command": "parent", "required_commands": ["claude"]},
         {"command": "child"},
     )
@@ -233,7 +243,7 @@ def test_merge_child_overriding_only_command_keeps_parent_required() -> None:
 
 
 def test_merge_default_shape_when_neither_declares_required() -> None:
-    merged = ShellIntegration.merge_config({"command": "a"}, {"command": "b"})
+    merged = _merge({"command": "a"}, {"command": "b"})
     assert "required_commands" not in merged
 
 

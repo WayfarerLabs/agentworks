@@ -37,6 +37,11 @@ contract it relies on (validate / construct / preflight / runup / ops) is docume
 > were removed in 0.14.0. `session resume`, `resume_command`, and `harness_integration` are the
 > accepted surfaces. The older vocabulary below records the decision as it stood when this ADR was
 > accepted.
+>
+> Note (2026-08-28): ADR 0023 and harness-integration contract version 2 supersede this record's
+> same-integration `merge_config` mechanism with schema-directed model policy. Selector silence and
+> integration-switch reset remain unchanged. The `merge_config` language below records the accepted
+> version-1 decision; a version-1 third-party integration is now refused at registration.
 
 ## Context
 

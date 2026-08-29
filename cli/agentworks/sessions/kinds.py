@@ -49,9 +49,11 @@ class _SessionTemplateKind:
         selects none gets `shell`, a plain login shell, so a field-less template is
         still useful.
 
-        Templates compose through `inherits`, nearest last: `env` tables merge key by
-        key and the integration's `required_commands` union rather than replacing, so a
-        child adding one never silently drops the parent's.
+        Templates compose through `inherits`, nearest last. `env` tables merge key by
+        key. Repeated use of the same integration follows its config model: objects and
+        mappings merge recursively, lists append and deduplicate by default, scalars
+        replace, and individual fields may declare replacement instead. Naming a
+        different integration starts its config fresh.
 
         Commands may use the `{{session_name}}` and `{{workspace_name}}` variables. A
         harness with no dedicated integration can often be driven through `shell` alone

@@ -23,18 +23,20 @@ if TYPE_CHECKING:
     from agentworks.resources.graph import FinalizeContext
     from agentworks.resources.inheritance import LayerSource
     from agentworks.resources.reference import ResourceReference
+    from agentworks.value_provenance import ProvenancePath
     from agentworks.workspaces.templates import ResolvedTemplate
 
 
 def effective_references(
     effective: ResolvedTemplate,
     source: tuple[str, str],
-    provenance: Mapping[tuple[str, ...], tuple[LayerSource, ...]],
+    provenance: Mapping[ProvenancePath, tuple[LayerSource, ...]],
 ) -> tuple[ResourceReference, ...]:
     """References required by one effective workspace declaration."""
+    from agentworks.value_provenance import longest_prefix_value
 
     def owner(key: str) -> tuple[str, str] | None:
-        sources = provenance.get(("env", key), ())
+        sources = longest_prefix_value(provenance, ("env", key)) or ()
         return None if not sources else (sources[-1].resource_kind, sources[-1].name)
 
     by_env = {key: declared_by for key in effective.env if (declared_by := owner(key)) is not None}

@@ -1,7 +1,8 @@
 """Workspace template resolution and processing.
 
-Handles inheritance (depth-first, left-to-right), merge rules, and the
-built-in empty template fallback.
+Orchestrates inheritance (depth-first, left-to-right), model-directed merging,
+and the built-in empty template fallback. The template models own field
+policy.
 """
 
 from __future__ import annotations
@@ -15,8 +16,8 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.db import Database
-    from agentworks.env import EnvEntry
-    from agentworks.resources.inheritance import LayerContribution, LayeredResolution
+    from agentworks.env.entry import EnvEntry
+    from agentworks.resources.inheritance import LayeredResolution
     from agentworks.resources.registry import Registry
     from agentworks.workspaces.template import WorkspaceTemplate
 
@@ -231,7 +232,7 @@ def _resolve(
     instance_name: str | None = None,
 ) -> ResolvedTemplate:
     """Resolve ``name``'s chain, defaults applied: one accumulator folded
-    over the chain's declarations, last one wins. See
+    over the chain's declarations using their model-directed policies. See
     ``vms.templates._resolve_from_dict`` for why the fold reads the
     DECLARATIONS rather than each parent's resolved template.
     """
@@ -259,6 +260,7 @@ def _resolve_with_provenance(
         resolution_layers,
         run_layer_fold,
     )
+    from agentworks.template_layers import merge_resolved_template_layer
 
     layers = [
         DeclarationLayer(
@@ -277,36 +279,8 @@ def _resolve_with_provenance(
     return run_layer_fold(
         ResolvedTemplate(name=name),
         layers,
-        _merge_template,
+        merge_resolved_template_layer,
         default_paths=(("tmuxinator",),),
         default_resource_kind="workspace-template",
         default_name=name,
     )
-
-
-def _merge_template(
-    target: ResolvedTemplate,
-    tmpl: WorkspaceTemplate,
-    _source: object,
-) -> tuple[ResolvedTemplate, tuple[LayerContribution, ...]]:
-    """Fold one declared WorkspaceTemplate into the accumulator. None =
-    not set, skip. The only writer of a ``ResolvedTemplate``'s fields."""
-    from agentworks.resources.inheritance import LayerContribution
-
-    touched: list[LayerContribution] = []
-    if tmpl.repo is not None:
-        target.repo = tmpl.repo
-        touched.append(LayerContribution.replacement("repo"))
-    if tmpl.tmuxinator is not None:
-        target.tmuxinator = tmpl.tmuxinator
-        touched.append(LayerContribution.replacement("tmuxinator"))
-    if tmpl.git_user_name is not None:
-        target.git_user_name = tmpl.git_user_name
-        touched.append(LayerContribution.replacement("git_user_name"))
-    if tmpl.git_user_email is not None:
-        target.git_user_email = tmpl.git_user_email
-        touched.append(LayerContribution.replacement("git_user_email"))
-    if tmpl.env:
-        target.env = {**target.env, **tmpl.env}
-        touched.extend(LayerContribution.replacement("env", key) for key in tmpl.env)
-    return target, tuple(touched)

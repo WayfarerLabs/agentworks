@@ -141,10 +141,11 @@ failing far from the mistake. The checks:
   under it either way.
 - **Config models**: the impl declares every model surface its descriptor names (see
   [Declaring config](#declaring-config)). Each extends its declared base and can be built; tagged
-  config models identify their implementation. A secret backend's source config cannot reference a
-  secret, and its per-secret mapping annotation tree must be JSON-native. A model that could never
-  be reached from a manifest is refused where its author can see it rather than going quietly
-  unaddressable.
+  config models identify their implementation. Both config and mapping model surfaces must satisfy
+  their `ConfigContract`'s schema-directed merge contract when that contract opts in. A secret
+  backend's source config cannot reference a secret, and its per-secret mapping annotation tree must
+  be JSON-native. A model that could never be reached from a manifest is refused where its author
+  can see it rather than going quietly unaddressable.
 - **Contract version**: the impl's `contract_version` equals the version this build supports. Every
   impl of every kind spells it; nothing defaults it, so a version claim is always made rather than
   inherited. Exact equality, so a contract change is a hard cutover.

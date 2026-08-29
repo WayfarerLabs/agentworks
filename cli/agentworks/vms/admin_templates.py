@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from pydantic import ValidationError as PydanticValidationError
 
@@ -15,29 +15,6 @@ if TYPE_CHECKING:
     from agentworks.resources.inheritance import LayerContribution, LayeredResolution
     from agentworks.resources.registry import Registry
     from agentworks.vms.admin import AdminConfig
-
-
-_SCALAR_FIELDS = (
-    "username",
-    "shell",
-    "dotfiles_source",
-    "dotfiles_destination",
-    "dotfiles_install_cmd",
-    "mise_activate",
-    "mise_lockfile",
-    "mise_allow_unlocked",
-    "mise_install_before",
-    "mise_prune_on_reinit",
-    "git_force_safe_directory",
-)
-
-_APPEND_FIELDS = (
-    "git_credentials",
-    "user_install_commands",
-    "mise_packages",
-    "claude_marketplaces",
-    "claude_plugins",
-)
 
 
 def resolve_template_with_provenance(
@@ -104,7 +81,19 @@ def resolve_from_dict_with_provenance(
         AdminConfig(name=selected),
         layers,
         _merge_template,
-        default_paths=((field,) for field in _SCALAR_FIELDS),
+        default_paths=(
+            ("username",),
+            ("shell",),
+            ("dotfiles_source",),
+            ("dotfiles_destination",),
+            ("dotfiles_install_cmd",),
+            ("mise_activate",),
+            ("mise_lockfile",),
+            ("mise_allow_unlocked",),
+            ("mise_install_before",),
+            ("mise_prune_on_reinit",),
+            ("git_force_safe_directory",),
+        ),
         default_resource_kind="admin-template",
         default_name=selected,
     )
@@ -167,39 +156,31 @@ def resolve_live_template(
     ).value
 
 
-def _append_dedupe(target: list[str], source: list[str]) -> list[str]:
-    seen = set(target)
-    result = list(target)
-    for item in source:
-        if item not in seen:
-            seen.add(item)
-            result.append(item)
-    return result
-
-
 def _merge_template(
     target: AdminConfig,
     layer: AdminConfig,
     _source: object,
 ) -> tuple[AdminConfig, tuple[LayerContribution, ...]]:
-    """Fold fields explicitly declared by an admin-template or final layer."""
-    from agentworks.resources.inheritance import LayerContribution
+    """Merge only fields explicitly authored by this admin declaration."""
+    from agentworks.env.entry import EnvEntry
+    from agentworks.instance_overlay_codec import OVERLAY_EXCLUDED_FIELDS
+    from agentworks.schema import merge_model
 
-    supplied = layer.model_fields_set
-    touched: list[LayerContribution] = []
-    updates: dict[str, object] = {}
-    for field in _SCALAR_FIELDS:
-        if field in supplied:
-            updates[field] = getattr(layer, field)
-            touched.append(LayerContribution.replacement(field))
-
-    for field in _APPEND_FIELDS:
-        if field in supplied:
-            values = getattr(layer, field)
-            updates[field] = _append_dedupe(getattr(target, field), values)
-            touched.extend(LayerContribution.contribution(field, item) for item in values)
-
-    if "env" in supplied:
-        updates["env"] = {**target.env, **layer.env}
-        touched.extend(LayerContribution.replacement("env", key) for key in layer.env)
-    return target.model_copy(update=updates), tuple(touched)
+    previous = target.model_dump(
+        mode="python",
+        exclude=set(OVERLAY_EXCLUDED_FIELDS),
+    )
+    authored = layer.model_dump(
+        mode="python",
+        exclude=set(OVERLAY_EXCLUDED_FIELDS),
+        exclude_unset=True,
+    )
+    merged, operations = merge_model(type(layer), previous, authored)
+    raw = cast("dict[str, object]", merged)
+    defaults = type(target)(name=target.name).model_dump(
+        mode="python",
+        exclude=set(OVERLAY_EXCLUDED_FIELDS),
+    )
+    raw = {**defaults, **raw}
+    raw["env"] = {key: EnvEntry.model_validate(value) for key, value in cast("dict[str, object]", raw["env"]).items()}
+    return target.model_copy(update=raw), operations

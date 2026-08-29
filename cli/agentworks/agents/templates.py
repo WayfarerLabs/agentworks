@@ -1,8 +1,8 @@
 """Agent template resolution and processing.
 
-Handles inheritance (depth-first, left-to-right), merge rules, and the
-built-in default template fallback. Follows the same pattern as VM and
-workspace templates.
+Orchestrates inheritance (depth-first, left-to-right), model-directed merging,
+and the built-in default template fallback. The template models own field
+policy. Follows the same pattern as VM and workspace templates.
 """
 
 from __future__ import annotations
@@ -17,8 +17,8 @@ if TYPE_CHECKING:
 
     from agentworks.agents.template import AgentTemplate
     from agentworks.db import Database
-    from agentworks.env import EnvEntry
-    from agentworks.resources.inheritance import LayerContribution, LayeredResolution
+    from agentworks.env.entry import EnvEntry
+    from agentworks.resources.inheritance import LayeredResolution
     from agentworks.resources.registry import Registry
 
 
@@ -216,6 +216,7 @@ def _resolve_with_provenance(
         resolution_layers,
         run_layer_fold,
     )
+    from agentworks.template_layers import merge_resolved_template_layer
 
     layers = [
         DeclarationLayer(
@@ -234,7 +235,7 @@ def _resolve_with_provenance(
     return run_layer_fold(
         ResolvedAgentTemplate(name=name),
         layers,
-        _merge_template,
+        merge_resolved_template_layer,
         default_paths=(
             (field,)
             for field in (
@@ -250,75 +251,3 @@ def _resolve_with_provenance(
         default_resource_kind="agent-template",
         default_name=name,
     )
-
-
-def _append_dedupe(target: list[str], source: list[str]) -> list[str]:
-    """Append source items to target, skipping dupes. Preserves order."""
-    seen = set(target)
-    result = list(target)
-    for item in source:
-        if item not in seen:
-            seen.add(item)
-            result.append(item)
-    return result
-
-
-def _merge_template(
-    target: ResolvedAgentTemplate,
-    tmpl: AgentTemplate,
-    _source: object,
-) -> tuple[ResolvedAgentTemplate, tuple[LayerContribution, ...]]:
-    """Fold one declared AgentTemplate into the accumulator. None = not
-    set, skip. Scalars: later layer overrides. Lists: append with dedupe.
-    The only writer of a ``ResolvedAgentTemplate``'s fields."""
-    from agentworks.resources.inheritance import LayerContribution
-
-    touched: list[LayerContribution] = []
-    if tmpl.shell is not None:
-        target.shell = tmpl.shell
-        touched.append(LayerContribution.replacement("shell"))
-    if tmpl.git_credentials is not None:
-        target.git_credentials = _append_dedupe(target.git_credentials, tmpl.git_credentials)
-        touched.extend(LayerContribution.contribution("git_credentials", item) for item in tmpl.git_credentials)
-    if tmpl.user_install_commands is not None:
-        target.user_install_commands = _append_dedupe(target.user_install_commands, tmpl.user_install_commands)
-        touched.extend(
-            LayerContribution.contribution("user_install_commands", item) for item in tmpl.user_install_commands
-        )
-    if tmpl.dotfiles_source is not None:
-        target.dotfiles_source = tmpl.dotfiles_source
-        touched.append(LayerContribution.replacement("dotfiles_source"))
-    if tmpl.dotfiles_destination is not None:
-        target.dotfiles_destination = tmpl.dotfiles_destination
-        touched.append(LayerContribution.replacement("dotfiles_destination"))
-    if tmpl.dotfiles_install_cmd is not None:
-        target.dotfiles_install_cmd = tmpl.dotfiles_install_cmd
-        touched.append(LayerContribution.replacement("dotfiles_install_cmd"))
-    if tmpl.mise_activate is not None:
-        target.mise_activate = tmpl.mise_activate
-        touched.append(LayerContribution.replacement("mise_activate"))
-    if tmpl.mise_packages is not None:
-        target.mise_packages = _append_dedupe(target.mise_packages, tmpl.mise_packages)
-        touched.extend(LayerContribution.contribution("mise_packages", item) for item in tmpl.mise_packages)
-    if tmpl.mise_lockfile is not None:
-        target.mise_lockfile = tmpl.mise_lockfile
-        touched.append(LayerContribution.replacement("mise_lockfile"))
-    if tmpl.mise_allow_unlocked is not None:
-        target.mise_allow_unlocked = tmpl.mise_allow_unlocked
-        touched.append(LayerContribution.replacement("mise_allow_unlocked"))
-    if tmpl.mise_install_before is not None:
-        target.mise_install_before = tmpl.mise_install_before
-        touched.append(LayerContribution.replacement("mise_install_before"))
-    if tmpl.mise_prune_on_reinit is not None:
-        target.mise_prune_on_reinit = tmpl.mise_prune_on_reinit
-        touched.append(LayerContribution.replacement("mise_prune_on_reinit"))
-    if tmpl.claude_marketplaces is not None:
-        target.claude_marketplaces = _append_dedupe(target.claude_marketplaces, tmpl.claude_marketplaces)
-        touched.extend(LayerContribution.contribution("claude_marketplaces", item) for item in tmpl.claude_marketplaces)
-    if tmpl.claude_plugins is not None:
-        target.claude_plugins = _append_dedupe(target.claude_plugins, tmpl.claude_plugins)
-        touched.extend(LayerContribution.contribution("claude_plugins", item) for item in tmpl.claude_plugins)
-    if tmpl.env:
-        target.env = {**target.env, **tmpl.env}
-        touched.extend(LayerContribution.replacement("env", key) for key in tmpl.env)
-    return target, tuple(touched)

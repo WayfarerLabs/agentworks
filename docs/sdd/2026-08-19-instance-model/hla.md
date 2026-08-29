@@ -1,8 +1,9 @@
 # HLA: Instance Model and State
 
-- Status: R2 accepted; R4 correction complete pending merge; R3 and R5 design in progress
+- Status: R1, R2, and R4 merged; merge-strategy correction implemented and verified; R3 and R5
+  pending
 - Date: 2026-08-23
-- Last revised: 2026-08-27
+- Last revised: 2026-08-28
 - FRD: [frd.md](./frd.md)
 - Assessment: [database-assessment.md](./database-assessment.md)
 - Store contract: [store-contract.md](./store-contract.md)
@@ -11,15 +12,15 @@
 ## Architectural summary
 
 The feature adds one database-backed desired/applied instance-state seam, one shared typed layer
-runner, domain-owned payload codecs, and projections into existing lifecycle and inspection
-surfaces. It does not add an ORM, a second declaration frontend, a generic record API, or a new
-platform-default layer.
+runner with schema-directed field policy, domain-owned payload codecs, and projections into existing
+lifecycle and inspection surfaces. It does not add an ORM, a second declaration frontend, a generic
+record API, or a new platform-default layer.
 
 ```text
 template declarations --> existing inheritance linearization -+
                                                              |
 optional DB overlay ----------------------------------------+--> typed layer runner
-                                                                  + domain reducer
+                                                                  + model-directed merge
                                                                   + value provenance
                                                                           |
                                                                           v
@@ -135,18 +136,58 @@ requirements.
 
 The four inheriting template kinds already share one inheritance linearization in
 `agentworks.resources.inheritance`: parents depth-first and left-to-right, each declaration once at
-its earliest position, and the selected row last. They differ only in their typed reducers:
+its earliest position, and the selected row last. A shared typed layer runner accepts the resulting
+ordered `(source, declaration)` layers and a domain seed containing defaults. Existing template
+resolution supplies the inheritance layers; live instance resolution appends one optional overlay
+layer. The same runner produces both, so an overlay does not create a fifth merge implementation.
 
-- VM and agent use scalar replacement, map child-wins, and ordered list append-deduplication.
-- Workspace uses scalar replacement and map child-wins.
-- Session also owns integration selection, integration-specific config merging, and per-key
-  provenance.
+The merge-strategy correction replaces the five hand-written field-policy reducers with one schema
+walker. Declaration models own policy for both core fields and capability config. The strategy
+vocabulary is closed and registration-validated:
 
-R4 generalizes the execution of those reducers, not the reducer policies. A shared typed layer
-runner accepts an ordered sequence of `(source, declaration)` layers, a domain seed containing
-defaults, and a domain reducer. Existing template resolution supplies the inheritance layers. Live
-instance resolution appends one optional overlay layer. The same runner produces both, so an overlay
-does not create a fifth merge implementation.
+- `merge` is the default for objects and mappings. It preserves non-conflicting keys and recursively
+  consults the schema node for every conflicting key.
+- `append-dedupe` is the default for lists. It preserves first-seen order and records every layer
+  that contributes an equal item. Equality is structural and concrete-type-sensitive over the exact
+  JSON carrier; an opaque or cyclic Python value is never equal and never executes authored equality
+  code. Conformance requires an append-deduped list's element schema to stay within that comparable
+  carrier or tells its author to mark the list `replace`.
+- `replace` is the default for scalars and the explicit alternative for an object or list. It
+  discards the complete prior value at that node. An empty replaced object or list therefore clears
+  that subtree or list without adding a general removal language.
+
+Conformance examines the annotation-declared structural domain without executing or inferring model
+or before validators. Those validators do not enlarge the comparison carrier: admitted raw values
+already in the carrier retain concrete-type comparison, while values outside it remain unequal and
+reach final validation.
+
+A field declares its strategy directly as typed Pydantic annotation metadata. A mapping-shaped
+structured model can declare its own root strategy for every use; a containing field override takes
+precedence over that model policy, and the shape default applies last. Explicit metadata may restate
+an inherited policy without creating a second validation rule. Strategy metadata is code-owned model
+policy, not a manifest key, serialized desired state, or second operator-facing type system.
+Registration rejects duplicate strategy metadata, strategies incompatible with the annotated shape,
+and strategy metadata placed where the merge engine has no conflict identity. Mapping value
+annotations and every model recursively reachable through them are traversal positions; mapping keys
+and individual sequence elements are not. A merge-by-key mapping requires exact-string keys or must
+choose whole-node replacement. The v2 contract uniformly refuses validation aliases in every
+reachable participating model, including through mapping values and below replacement boundaries, so
+registration never depends on the path by which a model is reached. Serialization-only aliases
+remain valid.
+
+For discriminated and structural unions, a containing-field replacement wins before arm selection.
+Otherwise the walker selects both arms. Different arms, or arms that cannot be selected, replace the
+complete union node even under a containing-field `merge`. Equal selected arms apply an explicit
+containing-field `merge` when present, then the selected model's root policy and the object default.
+Only an explicit same-arm override can therefore produce a composite that differs from the arm
+model's normal replacement policy; values from different arms never combine. An unknown schema key
+survives, but a later conflict at that key replaces the earlier raw value instead of recursively
+merging by runtime shape. A wholly unknown integration config has no usable schema, so a later
+declaration replaces its complete prior config and the Registry's miss policy reports the selector
+error. The merge engine never filters an invalid list item, converts `null`, or otherwise turns
+invalid authored or persisted data into a valid effective declaration. An active-identity guard
+makes the walk terminate if the deliberately open `CapabilityBlock` boundary supplies a cyclic
+container.
 
 The VM owner has two declaration slots. Its VM slot resolves the selected `vm-template` chain plus
 the final VM layer. Its admin slot resolves the selected, non-inheriting `admin-template` plus the
@@ -154,12 +195,26 @@ final admin layer through the same runner. The admin template's concrete default
 only fields explicitly supplied by the admin layer contribute. This models two declarations without
 inventing a second merge mechanism.
 
-The runner records provenance at the granularity the merge preserves:
+The runner records provenance at the granularity the schema merge preserves:
 
 - scalar path for replacements;
-- map key for child-wins maps;
-- item plus contributing layers for append-deduplicated lists; and
-- domain-provided output paths for transforms such as session integration config merging.
+- nested leaf path for recursive object conflicts;
+- resulting list position plus contributing layers for append-deduplicated lists; and
+- a prefix reset plus the replacing layer at the node for whole-object or whole-list replacement.
+
+Untouched descendants retain their earlier source. A replaced subtree retains no attribution from
+the discarded value; its descendants inherit the node source through longest-prefix lookup until a
+later child merge records a narrower source. When a contribution first materializes such a narrower
+path, it seeds the record from the longest existing prefix before adding the new layer, so an equal
+list item does not erase the inherited contributor. `ProvenancePath` is the single path shape
+carried by layer results and merge operations and consumed by reference ownership and validation
+attribution. String segments address fields and mapping keys; integer segments address positions in
+the final effective list, never authored item values. Every producer and consumer uses the same
+longest-prefix lookup, so a parent replacement remains authoritative until a narrower surviving
+value records another contributor. Validation error locations normalize to that shape; a non-string
+raw key makes a merge-by-key mapping wrong-shaped and replaces it at its owning container rather
+than leaking, hashing, or converting the key to text. Two invalid siblings inside one nested object
+can therefore still name the layers that separately declared them.
 
 Defaults originate in the seed and receive `defaulted` provenance. They are not represented as a
 platform layer. The existing resolved dataclasses remain compatibility projections while consumers
@@ -167,8 +222,22 @@ move to the resolved-value-plus-provenance result.
 
 Overlay payloads reuse each declaration slot's strict template spec model but exclude `name`,
 `inherits`, metadata, and framework provenance. Their merge semantics match templates. In
-particular, an empty additive list or map does not invent a removal tombstone that template
-inheritance does not have.
+particular, an empty default-merged object or append-deduplicated list changes nothing, while an
+empty value on a `replace` node clears that complete value. This is schema policy rather than an
+instance-only tombstone.
+
+Session harness selection remains one structural transition rather than a field policy callback.
+When two layers select the same registered integration, its config model directs recursive merging.
+When a later layer selects a different integration, the runner resets the entire config subtree and
+merges only under the new integration's model. Repeated declarations of the same unknown selector
+instead replace the complete prior raw config, because no model exists through which to recurse;
+Registry miss handling remains authoritative. The imperative capability `merge_config` hook and its
+sentinel-based provenance inference disappear; capability authors use the same model annotations as
+core declarations. `MergedHarness` retains neither a provenance map nor a parallel selector-owner
+field. Removing that public hook increments the harness-integration capability contract from version
+1 to version 2. Shipped integrations move with the framework, exact contract-version registration
+makes version-1 third-party integrations fail clearly, and there is no compatibility bridge that
+could preserve two merge authorities.
 
 An effective-instance validator runs after the overlay fold. It reuses domain reference and
 capability rules by publishing the owning live or pending resource, without publishing the overlay

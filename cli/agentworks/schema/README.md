@@ -25,6 +25,7 @@ model config. This document covers the derivation layer.
 | D10 | Reference prose                 | Kind and capability `TopicProse`                   |
 | D11 | Manifest envelope validation    | `manifests/envelope.py`                            |
 | D12 | YAML 1.1 spelling support       | `manifests/emit.py` spelling tables                |
+| D13 | Layer merge policy              | `merge.py` and model annotation metadata           |
 
 The field tree, `explain`, and generated samples consume D3. Add a consumer of D3 when possible
 instead of walking models again.
@@ -45,6 +46,9 @@ instead of walking models again.
   current model instead of pinning both sides as independent literals.
 - **Envelope and YAML corrections have independent checks.** D11 is compared with the emitted
   document schema. D12 is rebuilt from pyyaml's resolver in tests.
+- **Merge policy comes from the model.** D13 reads the same nested annotations for core and
+  capability config. Registration rejects a model whose declared input domain cannot honor its
+  policy safely.
 
 The main comparators are:
 
@@ -68,6 +72,74 @@ filling, and extraction on the same selector.
 
 Scalar shorthand remains valid for marker-free arms. Reference markers belong on fields inside an
 arm. See the capability modeling tiers for when a structural union is appropriate.
+
+## Schema-directed layer merging
+
+Template inheritance and final instance layers use `merge_model()` over raw values. The model tree
+is the only merge-policy authority. Merge strategy is code-owned metadata: it is not accepted from
+YAML, inline JSON, desired state, or emitted JSON Schema.
+
+The shape defaults are:
+
+- object models and mappings merge by key, recursively applying the child schema on conflicts;
+- lists append unequal items in stable order and deduplicate equal items; and
+- scalars replace with the incoming value.
+
+An object or list can instead replace its complete previous value, including with `{}` or `[]`:
+
+```python
+from typing import Annotated, ClassVar
+
+from agentworks.schema import AgwModel, MergeStrategy
+
+
+class AuthConfig(AgwModel):
+    merge_strategy: ClassVar[MergeStrategy] = MergeStrategy.REPLACE
+
+
+class ToolConfig(AgwModel):
+    auth: AuthConfig
+    extra_args: Annotated[list[str], MergeStrategy.REPLACE]
+```
+
+Policy precedence at any node is the containing field's `MergeStrategy` metadata, then a selected
+mapping-shaped model's `merge_strategy`, then the shape default. A field override can therefore
+merge a same-arm union value even when that arm model normally replaces. Mapping value annotations
+also participate because the map key identifies each conflict:
+
+```python
+services: dict[str, Annotated[ServiceConfig, MergeStrategy.REPLACE]]
+```
+
+A containing `REPLACE` wins before union selection. Otherwise both values must select the same
+discriminated or structural arm before recursive merging is allowed. Different or unreadable arms
+replace the complete union value, even when the containing field says `MERGE`, so values from two
+arms cannot form a hybrid. A conflict on an unknown key within a known object likewise replaces that
+raw child instead of inventing a merge policy from its runtime shape.
+
+Append-deduplicated list items are atomic. Equality is structural and concrete-type-sensitive over
+the closed JSON carrier: exact `None`, `bool`, `int`, finite `float`, and `str`, plus nested lists
+and exact-string-keyed dictionaries composed from those values. It never invokes an item's Python
+equality implementation. Values outside that carrier, including cycles and non-finite floats, are
+unequal and remain available to final validation. There is no list-item identity or recursive item
+merge contract today;
+[ADR 0023](../../../docs/adrs/0023-declared-schemas-and-the-kind-descriptor.md) records the future
+direction without specifying an API.
+
+`merge_contract_error()` validates the static annotation contract. In particular:
+
+- `MERGE` applies only to object-shaped nodes, and `APPEND_DEDUPE` only to lists;
+- merged mappings require exact `str` keys, while `REPLACE` is the escape for other key types;
+- an append-deduplicated list's element annotation must fit the closed comparison carrier;
+- strategy metadata may annotate a field or mapping value, not a mapping key, list element, or
+  individual union arm; and
+- every reachable participating model refuses `validation_alias`, including below replacement
+  boundaries. `serialization_alias` remains valid.
+
+The merger does not validate, construct defaults, coerce, filter, or mutate its inputs. Wrong-shaped
+values, `null`, unknown keys, and other malformed raw data survive to the existing final Pydantic
+validation boundary. Whole-node replacement is also the safe policy when an author intentionally
+uses a model domain broader than the recursive merge contract can interpret.
 
 ## Adding or changing a derivation
 

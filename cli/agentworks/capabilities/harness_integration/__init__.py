@@ -26,8 +26,6 @@ from agentworks.capabilities.harness_integration.base import HarnessIntegration,
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from agentworks.resources import Registry
 
 __all__ = [
@@ -36,7 +34,6 @@ __all__ = [
     "ShellIntegration",
     "ensure_harness_integration_enabled",
     "harness_integration_for",
-    "merged_config",
     "quote_literal_argv",
     "require_commands",
 ]
@@ -45,8 +42,7 @@ __all__ = [
 # The capability registry (the canonical harness integration list): harness integration name ->
 # implementation class. ``validate`` (blob validation) and
 # ``dependencies`` (implied references) are invoked through this dict at
-# each source's blob boundary, and ``merge_config`` through it at
-# resolve; descriptor rows publish from it.
+# each source's blob boundary; descriptor rows publish from it.
 #
 # ``shell`` is the sole core built-in (and the default harness integration). The
 # ``claude-code`` harness integration now ships as the ``claude`` system plugin
@@ -75,37 +71,6 @@ def harness_integration_for(name: str) -> type[HarnessIntegration]:
     except KeyError:
         known = ", ".join(sorted(HARNESS_INTEGRATION_REGISTRY)) or "(none)"
         raise ConfigError(f"unknown harness integration {name!r}; known harness integrations: {known}") from None
-
-
-def merged_config(name: str, base: Mapping[str, object], child: Mapping[str, object]) -> dict[str, object]:
-    """``base`` under ``child``, merged by ``name``'s own inheritance
-    semantics, TOTALLY.
-
-    The same merge :meth:`HarnessIntegration.merge_config` defines, reached
-    by name instead of by class so the caller does not have to hold one,
-    and never raising on a name with no registration: the finalize build
-    walk merges an inheritance chain before anything has validated the
-    names in it, and it must not raise there (a ``dependencies`` walk is
-    total by contract). An unregistered name falls back to the base
-    contract's own default, shallow child-wins, which is the honest answer
-    when there is no capability to ask for a richer one. The name itself
-    is still reported: the kind's ``error`` miss policy fails the dangling
-    ``harness-integration`` edge at finalize, before any of this is used.
-
-    Distinct from :func:`harness_integration_for`, which is the lookup for
-    callers that need the CLASS and for whom an unknown name is a genuine
-    (defense-in-depth) error.
-
-    What this does NOT do is contain an implementation that misbehaves.
-    ``merge_config`` is contractually pure and non-raising (see this
-    package's ``README.md``), and neither property is checkable at
-    registration, so an implementation that raises here takes
-    ``build_registry`` down with its own traceback. Catching it would be
-    worse: the merge feeds edge extraction, so a swallowed exception means
-    a graph that builds while quietly missing a secret.
-    """
-    integration = HARNESS_INTEGRATION_REGISTRY.get(name, HarnessIntegration)
-    return integration.merge_config(base, child)
 
 
 def ensure_harness_integration_enabled(registry: Registry, name: str) -> None:

@@ -28,19 +28,21 @@ if TYPE_CHECKING:
         ResourceReference,
         SecretReference,
     )
+    from agentworks.value_provenance import ProvenancePath
     from agentworks.vms.templates import ResolvedVMTemplate
 
 
 def effective_references(
     effective: ResolvedVMTemplate,
     source: tuple[str, str],
-    provenance: Mapping[tuple[str, ...], tuple[LayerSource, ...]],
+    provenance: Mapping[ProvenancePath, tuple[LayerSource, ...]],
 ) -> tuple[ResourceReference, ...]:
     """References required by one effective VM declaration."""
     from agentworks.resources.reference import ResourceReference as _ResourceReq
+    from agentworks.value_provenance import longest_prefix_value
 
-    def owner(path: tuple[str, ...]) -> tuple[str, str] | None:
-        sources = provenance.get(path, ())
+    def owner(path: ProvenancePath) -> tuple[str, str] | None:
+        sources = longest_prefix_value(provenance, path) or ()
         return None if not sources else (sources[-1].resource_kind, sources[-1].name)
 
     by_env = {key: declared_by for key in effective.env if (declared_by := owner(("env", key))) is not None}
@@ -51,9 +53,9 @@ def effective_references(
             kind="apt-package",
             usage="an apt package",
             source=source,
-            declared_by=owner(("apt_packages", name)),
+            declared_by=owner(("apt_packages", index)),
         )
-        for name in effective.apt_packages
+        for index, name in enumerate(effective.apt_packages)
     )
     refs.extend(
         _ResourceReq(
@@ -61,9 +63,9 @@ def effective_references(
             kind="system-install-command",
             usage="a system install command",
             source=source,
-            declared_by=owner(("system_install_commands", name)),
+            declared_by=owner(("system_install_commands", index)),
         )
-        for name in effective.system_install_commands
+        for index, name in enumerate(effective.system_install_commands)
     )
     refs.append(
         tailscale_secret_reference(

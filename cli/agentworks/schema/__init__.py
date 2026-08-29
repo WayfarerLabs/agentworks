@@ -17,6 +17,9 @@ hand-validated lives here:
   at registration so a marker nothing could honor is never declared.
 - :class:`CapabilityBlock`, the tagged table a hosting kind's spec field
   holds: the capability's name plus that capability's own config.
+- :class:`MergeStrategy`, the closed field and model policy vocabulary,
+  plus :func:`merge_model` and :func:`merge_contract_error`, the raw layer
+  walker and its registration-time model check.
 - :func:`filled_defaults`, the boundary fill that renders a marker's
   owner-templated default into a raw blob, so validation and extraction
   both read the one filled blob and neither needs an owner of its own.
@@ -32,9 +35,9 @@ hand-validated lives here:
   reads.
 
 **This package is a LEAF, and that is load-bearing rather than tidy.** It
-imports ``agentworks.errors``, ``agentworks.source_location`` and
-``agentworks.path_rendering``, all top-level leaves themselves, and
-nothing else of ours. In particular it
+imports ``agentworks.errors``, ``agentworks.source_location``,
+``agentworks.path_rendering``, and ``agentworks.value_provenance``, all
+top-level leaves themselves, and nothing else of ours. In particular it
 imports nothing under ``agentworks.resources``, because importing any
 module of that package runs its ``__init__``, which loads every kind
 module, which loads every capability package. Capability modules declare
@@ -95,6 +98,7 @@ from agentworks.schema.markers import (
     ResourceRef,
     SecretRef,
 )
+from agentworks.schema.merge import MergeStrategy, merge_contract_error, merge_model
 from agentworks.schema.shorthand import ScalarShorthand, UnionScalarShorthand
 from agentworks.schema.structural import StructuralUnion
 
@@ -109,6 +113,7 @@ __all__ = [
     "CapabilityBlock",
     "FieldDoc",
     "ModelDoc",
+    "MergeStrategy",
     "NonBlankStr",
     "NonEmptyStr",
     "PositiveInt",
@@ -128,6 +133,8 @@ __all__ = [
     "located",
     "location_text",
     "marker_of",
+    "merge_contract_error",
+    "merge_model",
     "model_doc",
     "model_is_complete",
     "reference_marker_error",

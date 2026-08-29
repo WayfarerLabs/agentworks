@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from textwrap import dedent
-from typing import Literal
+from typing import Annotated, ClassVar, Literal
 
 import pytest
 from pydantic import Field
@@ -23,13 +23,14 @@ from pydantic import Field
 from agentworks.bootstrap import build_registry
 from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY, HarnessIntegration
 from agentworks.config import load_config
+from agentworks.env.entry import EnvEntry
 from agentworks.errors import ConfigError
 from agentworks.manifests import load_manifests
 from agentworks.resources import GraphDirection, show_graph
 from agentworks.resources.access import ResourceIdentity
 from agentworks.resources.graph import FinalizeContext
 from agentworks.resources.reference import RefRelationship
-from agentworks.schema import AgwModel, CapabilityBlock
+from agentworks.schema import AgwModel, CapabilityBlock, MergeStrategy
 from agentworks.sessions.template import SessionTemplate
 from agentworks.sessions.templates import resolve_from_dict, resolve_from_dict_with_provenance
 
@@ -42,7 +43,8 @@ class _FakeConfig(AgwModel):
 
     name: Literal["fake"]
     marker: str | None = None
-    items: list[str] = Field(default_factory=list)
+    nested: dict[str, str] = Field(default_factory=dict)
+    items: Annotated[list[str], MergeStrategy.REPLACE] = Field(default_factory=list)
 
 
 class _FakeHarnessIntegration(HarnessIntegration):
@@ -52,7 +54,7 @@ class _FakeHarnessIntegration(HarnessIntegration):
 
     name = "fake"
     description = "test double harness"
-    contract_version = 1
+    contract_version = 2
     config_model = _FakeConfig
 
     def start(self, ctx):  # type: ignore[no-untyped-def]
@@ -63,6 +65,10 @@ class _FakeHarnessIntegration(HarnessIntegration):
 
     def _probe_target(self, transport):  # type: ignore[no-untyped-def]
         return None
+
+
+class _ReplacingSessionTemplate(SessionTemplate):
+    merge_strategy: ClassVar[MergeStrategy] = MergeStrategy.REPLACE
 
 
 @pytest.fixture()
@@ -208,6 +214,59 @@ def test_child_same_harness_integration_merges_child_wins_and_unions_required() 
     assert resolved.harness_integration_config["required_commands"] == ["claude", "rg"]  # union
 
 
+def test_same_registered_integration_recurses_through_its_model(
+    fake_harness_integration: None,
+) -> None:
+    templates = {
+        "base": SessionTemplate(
+            name="base",
+            harness_integration=CapabilityBlock.of(
+                "fake",
+                **{"nested": {"left": "base", "shared": "base"}},
+            ),
+        ),
+        "child": SessionTemplate(
+            name="child",
+            inherits=["base"],
+            harness_integration=CapabilityBlock.of(
+                "fake",
+                **{"nested": {"right": "child", "shared": "child"}},
+            ),
+        ),
+    }
+
+    resolved = resolve_from_dict(templates, "child")
+    assert resolved.harness_integration_config["nested"] == {
+        "left": "base",
+        "right": "child",
+        "shared": "child",
+    }
+
+
+def test_same_unknown_integration_replaces_the_complete_raw_config() -> None:
+    templates = {
+        "base": SessionTemplate(
+            name="base",
+            harness_integration=CapabilityBlock.of(
+                "not-installed",
+                **{"left": "base", "nested": {"old": True}},
+            ),
+        ),
+        "child": SessionTemplate(
+            name="child",
+            inherits=["base"],
+            harness_integration=CapabilityBlock.of(
+                "not-installed",
+                **{"right": "child"},
+            ),
+        ),
+    }
+
+    resolved = resolve_from_dict(templates, "child")
+    assert resolved.harness_integration == "not-installed"
+    assert resolved.harness_integration_config == {"right": "child"}
+
+
 def test_harness_list_provenance_tracks_union_and_child_wins(
     fake_harness_integration: None,
 ) -> None:
@@ -219,7 +278,7 @@ def test_harness_list_provenance_tracks_union_and_child_wins(
         "shell-child": SessionTemplate(
             name="shell-child",
             inherits=["shell-base"],
-            harness_integration=CapabilityBlock.of("shell", **{"required_commands": ["rg"]}),
+            harness_integration=CapabilityBlock.of("shell", **{"required_commands": ["git", "rg"]}),
         ),
         "fake-base": SessionTemplate(
             name="fake-base",
@@ -255,14 +314,15 @@ def test_harness_list_provenance_tracks_union_and_child_wins(
     same = resolve_from_dict_with_provenance(templates, "same-child")
     shape = resolve_from_dict_with_provenance(templates, "shape-child")
 
-    assert union.provenance[("harness_integration_config", "required_commands", repr("git"))][0].name == "shell-base"
-    assert union.provenance[("harness_integration_config", "required_commands", repr("rg"))][0].name == "shell-child"
-    assert ("harness_integration_config", "items", repr("parent")) not in replaced.provenance
-    assert replaced.provenance[("harness_integration_config", "items", repr("child"))][0].name == "fake-child"
-    assert [source.name for source in same.provenance[("harness_integration_config", "items", repr("same"))]] == [
-        "same-child"
+    assert [source.name for source in union.provenance[("harness_integration_config", "required_commands", 0)]] == [
+        "shell-base",
+        "shell-child",
     ]
-    assert ("harness_integration_config", "items") not in shape.provenance
+    assert union.provenance[("harness_integration_config", "required_commands", 1)][0].name == "shell-child"
+    assert ("harness_integration_config", "items", 0) not in replaced.provenance
+    assert replaced.provenance[("harness_integration_config", "items")][0].name == "fake-child"
+    assert same.provenance[("harness_integration_config", "items")][0].name == "same-child"
+    assert shape.provenance[("harness_integration_config", "items")][0].name == "shape-child"
 
 
 def test_child_silent_inherits_the_pair_unchanged() -> None:
@@ -273,6 +333,26 @@ def test_child_silent_inherits_the_pair_unchanged() -> None:
     resolved = resolve_from_dict(templates, "child")
     assert resolved.harness_integration == "shell"
     assert resolved.harness_integration_config == {"command": "claude"}
+
+
+def test_root_replacement_resets_all_omitted_session_fields() -> None:
+    templates = {
+        "base": SessionTemplate(
+            name="base",
+            description="Parent session",
+            env={"MODE": EnvEntry.model_validate("parent")},
+            harness_integration=CapabilityBlock.of("shell", **{"command": "parent-command"}),
+        ),
+        "child": _ReplacingSessionTemplate(name="child", inherits=["base"]),
+    }
+
+    resolution = resolve_from_dict_with_provenance(templates, "child")
+
+    assert resolution.value.description == "Login shell"
+    assert resolution.value.env == {}
+    assert resolution.value.harness_integration == "shell"
+    assert resolution.value.harness_integration_config == {}
+    assert all(source.name != "base" for sources in resolution.provenance.values() for source in sources)
 
 
 # A child naming a DIFFERENT harness integration starting from an empty
@@ -313,9 +393,16 @@ def test_a_switch_inside_one_parents_chain_discards_an_earlier_parents_blob(
         ),
         "child": SessionTemplate(name="child", inherits=["shell-parent", "back-to-shell"]),
     }
-    resolved = resolve_from_dict(templates, "child")
+    layered = resolve_from_dict_with_provenance(templates, "child")
+    resolved = layered.value
     assert resolved.harness_integration == "shell"
     assert resolved.harness_integration_config == {"resume_command": "from-second"}
+    assert all(
+        source.name != "shell-parent"
+        for path, sources in layered.provenance.items()
+        if path[:1] == ("harness_integration_config",)
+        for source in sources
+    )
 
 
 def test_multi_parent_silent_parent_does_not_wipe(tmp_path: Path) -> None:
@@ -358,6 +445,30 @@ def test_multi_parent_silent_parent_does_not_wipe(tmp_path: Path) -> None:
     assert resolved.harness_integration == "shell"
     assert resolved.harness_integration_config == {"command": "run-me"}
     assert resolved.env["FOO"].value == "bar"
+
+
+def test_session_env_values_merge_as_complete_env_entry_models() -> None:
+    templates = {
+        "base": SessionTemplate(
+            name="base",
+            env={
+                "TOKEN": EnvEntry({"secret": "base-token"}),
+                "BASE_ONLY": EnvEntry({"value": "preserved"}),
+            },
+        ),
+        "child": SessionTemplate(
+            name="child",
+            inherits=["base"],
+            env={"TOKEN": EnvEntry({"value": "child-token"})},
+        ),
+    }
+
+    resolved = resolve_from_dict(templates, "child")
+
+    assert resolved.env == {
+        "TOKEN": EnvEntry({"value": "child-token"}),
+        "BASE_ONLY": EnvEntry({"value": "preserved"}),
+    }
 
 
 def test_undeclared_default_resolves_to_shell_empty() -> None:

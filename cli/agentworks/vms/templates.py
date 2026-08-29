@@ -1,8 +1,8 @@
 """VM template resolution and processing.
 
-Handles inheritance (depth-first, left-to-right), merge rules, and the
-built-in default template fallback. Follows the same pattern as workspace
-templates.
+Orchestrates inheritance (depth-first, left-to-right), model-directed merging,
+and the built-in default template fallback. The template models own field
+policy. Follows the same pattern as workspace templates.
 """
 
 from __future__ import annotations
@@ -16,8 +16,8 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.db import Database
-    from agentworks.env import EnvEntry
-    from agentworks.resources.inheritance import LayerContribution, LayeredResolution
+    from agentworks.env.entry import EnvEntry
+    from agentworks.resources.inheritance import LayeredResolution
     from agentworks.resources.registry import Registry
     from agentworks.vms.template import VMTemplate
 
@@ -100,7 +100,8 @@ def _resolve_from_dict(
 
     ONE accumulator, folded over the chain's declarations. That is what
     keeps a silent parent silent: every write goes through
-    :func:`_merge_template`, which skips an undeclared field, so there is
+    :func:`~agentworks.template_layers.merge_resolved_template_layer`,
+    which skips an undeclared field, so there is
     never a second defaults-applied template for a later parent to
     overwrite an earlier one's real value with. Resolving each parent to
     its own ``ResolvedVMTemplate`` first would destroy that distinction
@@ -134,6 +135,7 @@ def _resolve_with_provenance(
         resolution_layers,
         run_layer_fold,
     )
+    from agentworks.template_layers import merge_resolved_template_layer
 
     layers = [
         DeclarationLayer(
@@ -152,7 +154,7 @@ def _resolve_with_provenance(
     return run_layer_fold(
         ResolvedVMTemplate(name=name),
         layers,
-        _merge_template,
+        merge_resolved_template_layer,
         default_paths=((field,) for field in ("cpus", "memory", "disk", "swap", "tailscale_auth_key")),
         default_resource_kind="vm-template",
         default_name=name,
@@ -269,65 +271,3 @@ def resolve_live_template_with_provenance(
         overlay=None if overlay is None else cast("VMTemplate", overlay.declaration),
         instance_name=instance_name,
     )
-
-
-def _append_dedupe(target: list[str], source: list[str]) -> list[str]:
-    """Append source items to target, skipping dupes. Preserves order."""
-    seen = set(target)
-    result = list(target)
-    for item in source:
-        if item not in seen:
-            seen.add(item)
-            result.append(item)
-    return result
-
-
-def _merge_template(
-    target: ResolvedVMTemplate,
-    tmpl: VMTemplate,
-    _source: object,
-) -> tuple[ResolvedVMTemplate, tuple[LayerContribution, ...]]:
-    """Fold one declared VMTemplate into the accumulator. None = not set,
-    skip. Scalars: later layer overrides. Lists: append with dedupe.
-
-    The ONLY writer of a ``ResolvedVMTemplate``'s fields, which is what
-    makes "a layer that declares nothing changes nothing" hold by
-    construction rather than by two parallel field lists agreeing about
-    every field forever.
-    """
-    from agentworks.resources.inheritance import LayerContribution
-
-    touched: list[LayerContribution] = []
-    if tmpl.cpus is not None:
-        target.cpus = tmpl.cpus
-        touched.append(LayerContribution.replacement("cpus"))
-    if tmpl.memory is not None:
-        target.memory = tmpl.memory
-        touched.append(LayerContribution.replacement("memory"))
-    if tmpl.disk is not None:
-        target.disk = tmpl.disk
-        touched.append(LayerContribution.replacement("disk"))
-    if tmpl.swap is not None:
-        target.swap = tmpl.swap
-        touched.append(LayerContribution.replacement("swap"))
-    if tmpl.apt is not None:
-        target.apt = _append_dedupe(target.apt, tmpl.apt)
-        touched.extend(LayerContribution.contribution("apt", item) for item in tmpl.apt)
-    if tmpl.apt_packages is not None:
-        target.apt_packages = _append_dedupe(target.apt_packages, tmpl.apt_packages)
-        touched.extend(LayerContribution.contribution("apt_packages", item) for item in tmpl.apt_packages)
-    if tmpl.snap is not None:
-        target.snap = _append_dedupe(target.snap, tmpl.snap)
-        touched.extend(LayerContribution.contribution("snap", item) for item in tmpl.snap)
-    if tmpl.system_install_commands is not None:
-        target.system_install_commands = _append_dedupe(target.system_install_commands, tmpl.system_install_commands)
-        touched.extend(
-            LayerContribution.contribution("system_install_commands", item) for item in tmpl.system_install_commands
-        )
-    if tmpl.env:
-        target.env = {**target.env, **tmpl.env}
-        touched.extend(LayerContribution.replacement("env", key) for key in tmpl.env)
-    if tmpl.tailscale_auth_key is not None:
-        target.tailscale_auth_key = tmpl.tailscale_auth_key
-        touched.append(LayerContribution.replacement("tailscale_auth_key"))
-    return target, tuple(touched)

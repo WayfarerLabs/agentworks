@@ -35,15 +35,15 @@ import json
 import os
 import shlex
 import subprocess
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.capabilities.config import capability_config_references, validate_capability_config
 from agentworks.errors import ConfigError, StateError
-from agentworks.plugins.codex.harness_integration import CodexIntegration
-from agentworks.schema import RefOwner
+from agentworks.plugins.codex.harness_integration import CodexConfig, CodexIntegration
+from agentworks.schema import RefOwner, merge_model
 from tests.conftest import _FakeResult, _FakeTarget
 
 if TYPE_CHECKING:
@@ -1030,11 +1030,12 @@ def test_new_fields_reject_wrong_types() -> None:
             _validate({field: bad})
 
 
-def test_merge_config_unions_writable_dirs_and_child_wins_the_rest() -> None:
+def test_model_merge_unions_writable_dirs_and_child_wins_the_rest() -> None:
     """`writable_dirs` is an additive grant list (like shell's
     required_commands): a child adding one dir must not drop the
     parent's. Scalars/bools and extra_args child-win."""
-    merged = CodexIntegration.merge_config(
+    merged, _ = merge_model(
+        CodexConfig,
         {
             "writable_dirs": ["/srv/a"],
             "network": True,
@@ -1054,6 +1055,7 @@ def test_merge_config_unions_writable_dirs_and_child_wins_the_rest() -> None:
             "extra_args": ["--y"],
         },
     )
+    merged = cast("dict[str, object]", merged)
     assert merged["writable_dirs"] == ["/srv/a", "/srv/b"]
     assert merged["network"] is False
     assert merged["reasoning_effort"] == "high"
@@ -1064,12 +1066,12 @@ def test_merge_config_unions_writable_dirs_and_child_wins_the_rest() -> None:
     assert merged["extra_args"] == ["--y"]
 
 
-def test_merge_config_never_launders_an_invalid_writable_dirs_entry() -> None:
-    """merge_config runs on RAW declared blobs (the resolver merges before
-    the final validate), so a mixed valid/invalid list must survive the
+def test_model_merge_never_launders_an_invalid_writable_dirs_entry() -> None:
+    """The merger runs on raw declarations, so a mixed list survives the
     merge un-filtered for validate to reject; silently dropping the bad
     entry would produce a valid-looking blob that validate passes."""
-    merged = CodexIntegration.merge_config({}, {"writable_dirs": ["/srv/a", 5]})
+    raw, _ = merge_model(CodexConfig, {}, {"writable_dirs": ["/srv/a", 5]})
+    merged = cast("dict[str, object]", raw)
     assert merged["writable_dirs"] == ["/srv/a", 5]
     with pytest.raises(ConfigError, match="writable_dirs"):
         _validate(merged)

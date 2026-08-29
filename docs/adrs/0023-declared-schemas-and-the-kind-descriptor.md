@@ -127,17 +127,81 @@ operations, config model, contract version. The check is structural and never co
 implementation. A non-conforming implementation is a typed error naming the plugin, and seating
 stays all-or-nothing.
 
+### 5. Merge policy is declared by the model
+
+Template inheritance and final instance layers read merge policy from the same core model or
+capability-offered model that declares the value's shape. A capability offers that model through
+`config_for()` (normally from `config_model`). When its core-owned `ConfigContract` says the config
+participates in layered merging, registration checks that exact offered model. No capability merge
+callback decides how raw config combines, and kinds without a layered config surface do not acquire
+an unrelated merge constraint.
+
+The framework keeps the offered-model selection stable while an implementation's declared
+`config_model` identity is unchanged. Registration, merging, validation, reference extraction, and
+schema assembly therefore consume one model rather than observing different answers from a stateful
+hook.
+
+The closed `MergeStrategy` vocabulary has three values. Objects and mappings default to recursive
+`merge`, lists default to stable `append-dedupe`, and scalars default to `replace`. A field can
+override its node with `Annotated` metadata. A mapping-shaped model can declare its root policy as a
+class variable. The containing field wins over the selected model, and the shape default applies
+last.
+
+Whole-object and whole-list replacement discards the complete prior subtree, including when the
+incoming value is empty. Mapping value annotations participate because the map key identifies a
+conflict. Mapping keys and individual list elements have no independent policy position.
+
+A containing replacement wins before union-arm selection. Otherwise values recurse only when both
+select the same discriminated or structural arm. Different or unreadable arms replace the complete
+union, preventing a hybrid. Unknown conflicting object keys replace at that raw child rather than
+acquiring a second runtime-shape merge language.
+
+For an opted-in capability config, registration checks the complete reachable annotation contract.
+It rejects duplicate or shape-incompatible strategies, merged mappings without exact-string keys,
+append-deduplicated lists whose element schemas exceed the closed comparison carrier, and validation
+aliases anywhere in a participating model, including below replacement boundaries. Serialization
+aliases remain valid. Replacement is the escape for a list or mapping whose declared Python domain
+is intentionally broader than recursive merging can interpret safely.
+
+The raw merger neither validates nor invokes model validators. Wrong-shaped, unknown, cyclic, and
+otherwise malformed input remains available to final typed validation instead of being filtered,
+coerced, or repaired by merging.
+
+### 6. List items are atomic; model-owned identity remains a future direction
+
+Schema-directed append-deduplication treats each list item as one atomic value. No item-identity
+declaration, callback, or protocol exists, and this ADR does not design one.
+
+If a future model needs identity-aware list merging, the approved semantic direction is:
+
+- equal values deduplicate;
+- different identities append in stable order; and
+- matching identity with unequal values recursively merges through the item model's existing field-,
+  model-, and shape-directed strategies.
+
+Without a readable identity, atomic equality and append remain the fallback. The representation of
+identity and the rules for duplicate identities, identity mutation, union arms, and provenance stay
+deliberately unresolved until a concrete model requires the feature. This records the intended
+outcomes, not an implementation-ready design.
+
 ## Consequences
 
 - **A capability author adding a field touches one file.** Validation, reference extraction,
-  defaulting, `agw resource sample`, `agw resource describe-kind`, and emitted JSON Schema all
-  reflect it with no further edits. A test proves this end to end for a fixture capability.
+  defaulting, merge policy, `agw resource sample`, `agw resource describe-kind`, and emitted JSON
+  Schema all reflect it with no further edits. A test proves this end to end for a fixture
+  capability.
 - **Hand-maintained duplication of schema facts is gone for modeled kinds.** The bundled sample YAML
   files are deleted and rendered live instead; prose blurbs carry no field lists; the guides carry
   pointers to the rendered surfaces plus what is genuinely not a fact about a field. The rot this
   ADR's Context describes is now structurally impossible for those facts.
 - **A misbehaving plugin cannot break the finalize pass.** Graph construction reads models and raw
   blobs and invokes no user code at all.
+- **Model changes can be merge-contract changes.** Registration rejects a model whose recursive
+  merge or append-deduplication policy cannot be honored over its declared structural input domain.
+  Capability authors use explicit replacement when atomic behavior is the honest contract.
+- **Harness integrations make a versioned hard cutover.** Removing the imperative config-merge
+  callback moves that capability contract from version 1 to version 2. Third-party authors migrate
+  through `docs/guides/upgrading-to-0.17.md`; shipped integrations already declare version 2.
 - **Breaking, and broadly.** Closed-world validation, strict types, and model-layer defaulting each
   reject configuration that used to load. The operator upgrade note is in
   `docs/guides/upgrading-to-0.14.md`; the commits carry `!` markers with `BREAKING CHANGE` footers
@@ -152,9 +216,10 @@ stays all-or-nothing.
   into core logic to be worth anything, so making the table extensible would offer a promise the
   rest of the system could not keep.
 - **A pydantic dependency, at the framework's core.** The model layer is a leaf package importing
-  nothing of ours but `errors` and `source_location`, so a capability module can declare its model
-  at import time without dragging in the kind registry. That constraint is real and load-bearing;
-  see `cli/agentworks/schema/__init__.py`.
+  only Agentworks' top-level `errors`, `path_rendering`, `source_location`, and `value_provenance`
+  leaves, and nothing under `resources`. A capability module can therefore declare its model at
+  import time without dragging in the kind registry. That constraint is real and load-bearing; see
+  `cli/agentworks/schema/__init__.py`.
 - **The former secret-backend asymmetry is resolved.** Its registry and graph now retain the exact
   implementation class, like the other capability kinds. Configured `secret-source` resources own
   per-instance config and bounded client construction, so the descriptor needs no constructed

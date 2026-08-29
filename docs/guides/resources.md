@@ -355,11 +355,13 @@ spec:
 - Command strings support the `{{session_name}}` and `{{workspace_name}}` variables. This holds
   wherever an integration takes a command or raw arguments (`shell`'s `command` and
   `resume_command`, the `extra_args` escape hatch on `claude-code`, `codex`, and `grok-build`).
-- The integration-plus-config pair inherits as a unit: a child restating the same integration merges
-  its config keys into the parent's (child wins per key), while a child naming a _different_
-  integration starts fresh. `env`, `inherits`, and the description merge as usual. A few list fields
-  union across the chain rather than replacing, so a child adding one entry never silently drops the
-  parent's; the field reference marks which.
+- The integration-plus-config pair inherits as a unit. A child restating the same integration uses
+  that integration's config model to merge with the parent: objects and mappings recursively merge
+  by key, lists append unequal items and deduplicate equal items, and incoming scalars replace prior
+  values. Individual model fields can declare replacement instead, such as the `extra_args` fields
+  on `claude-code`, `codex`, and `grok-build`; the field reference marks these exceptions. A child
+  naming a _different_ integration starts fresh. `env`, `inherits`, and the description merge as
+  usual.
 - `agw graph show harness-integration/<name>` is the other half: the integration's declared and live
   relationships, rather than the fields it accepts.
 

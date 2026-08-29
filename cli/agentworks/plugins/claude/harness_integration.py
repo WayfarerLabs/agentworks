@@ -30,13 +30,13 @@ from __future__ import annotations
 import json
 import shlex
 import uuid
-from typing import TYPE_CHECKING, ClassVar, Literal
+from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 
 from pydantic import Field
 
 from agentworks.capabilities.harness_integration.base import HarnessIntegration, quote_literal_argv, require_commands
 from agentworks.errors import StateError
-from agentworks.schema import AgwModel
+from agentworks.schema import AgwModel, MergeStrategy
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
@@ -104,12 +104,13 @@ class ClaudeCodeConfig(AgwModel):
     later and replaces this generated setting. False (the default) adds no
     override. A child template's value replaces its parent's."""
 
-    extra_args: list[str] = Field(default_factory=list)
+    extra_args: Annotated[list[str], MergeStrategy.REPLACE] = Field(default_factory=list)
     """Appended verbatim after every generated CLI option, so it can carry
     any flag this integration does not model. Claude uses the last
     ``--settings`` occurrence, so a raw one here replaces all generated
     session settings. On a fresh launch with an initial input, only the
-    ``--`` prompt separator and prompt value follow these option tokens."""
+    ``--`` prompt separator and prompt value follow these option tokens. A
+    child template's declared list replaces its parent's."""
 
 
 # The transcript's config root. ``CLAUDE_CONFIG_DIR`` is the CLI's own
@@ -122,7 +123,7 @@ _PROJECTS_DIR = "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"
 class ClaudeCodeIntegration(HarnessIntegration):
     """Runs Claude Code, resuming or launching fresh per on-disk state."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 2
     name: ClassVar[str] = "claude-code"
     description: ClassVar[str] = "Run Claude Code, resuming its session when one exists"
     config_model: ClassVar[type[ClaudeCodeConfig]] = ClaudeCodeConfig

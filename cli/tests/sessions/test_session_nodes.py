@@ -324,7 +324,7 @@ class _SecretHarnessIntegration(HarnessIntegration):
 
     name = "scanner"
     description = "test double harness that declares a config secret"
-    contract_version = 1
+    contract_version = 2
     config_model = _ScannerConfig
 
     def start(self, ctx):  # type: ignore[no-untyped-def]
@@ -889,7 +889,7 @@ def _toy_harness_integration(harness_integration_name: str) -> type:
     class _ToyIntegration(HarnessIntegration):
         name: ClassVar[str] = harness_integration_name
         description: ClassVar[str] = "toy"
-        contract_version: ClassVar[int] = 1
+        contract_version: ClassVar[int] = 2
         config_model: ClassVar[type[AgwModel]] = _ToyConfig
 
         def start(self, ctx: RunContext) -> str:

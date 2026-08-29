@@ -152,7 +152,7 @@ def project_session_live_resource(
         *(() if agent_name is None else (_selected(source, "agent", agent_name, "the session agent"),)),
     )
     if layered is not None:
-        validate_effective_harness(layered.value, source)
+        validate_effective_harness(layered.value, source, layered.provenance)
     desired = (
         *(
             ()

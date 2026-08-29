@@ -2,16 +2,19 @@
 
 <!-- cspell:ignore sdds -->
 
-- Status: R2 merged; R4 correction complete pending merge; R3 and R5 pending
+- Status: R1, R2, and R4 merged; merge-strategy correction implemented and verified; R3 and R5
+  pending
 - Date: 2026-08-23
-- Last revised: 2026-08-27
+- Last revised: 2026-08-28
 - Requirements: [frd.md](./frd.md)
 - R1 assessment: [database-assessment.md](./database-assessment.md)
 - R2 contract: [store-contract.md](./store-contract.md)
 - Instance-spec CLI: [instance-spec-cli.md](./instance-spec-cli.md)
-- Code basis: `20e7b6e2`, based on `main` with accepted R1 PR #632 and R2 PR #636 merged
-- Delivery vehicle: merged R1 artifact PR #632; merged R2 store and accepted R4 design PR #636;
-  remaining phases as independently green PRs from `main`, stacked only for actual dependencies
+- Merge strategy: [merge-strategy-lld.md](./merge-strategy-lld.md)
+- Code basis: `56f9687b`, merged PR #670 on `main`
+- Delivery vehicle: merged R1 artifact PR #632, merged R2 store and R4 design PR #636, merged R4
+  implementation PR #670; merge-strategy SDD checkpoint and implementation on one draft-to-ready PR
+  from `main`; remaining phases as independently green PRs, stacked only for actual dependencies
 
 ## Delivery posture
 
@@ -21,10 +24,11 @@ contract needed by this effort and wave 4 without exposing the later SSH, merge,
 risk in the same review. Its accepted R4 design artifacts remain response material for the later
 implementation.
 
-After PR #636 merges, each remaining delivery starts from `main` and is independently complete,
-reviewed, and green. Stack a PR only when its implementation actually depends on an unmerged
-predecessor, and merge the stack bottom-up. Each PR receives the validation appropriate to the
-behavior it introduces before merge intent.
+PR #670 merged the complete R4 overlay and live-publication work. The merge-strategy correction uses
+one PR in two explicit stages: an SDD-only draft checkpoint under `review-requested`, followed after
+checkpoint convergence by implementation on the same draft PR. The PR becomes ready only at the
+complete implementation handoff. Each later delivery starts from `main` and is independently
+complete, reviewed, and green. Stack only actual dependencies and merge a stack bottom-up.
 
 Completed checkboxes are immutable. The effort lead updates them only after the named behavior,
 tests, permanent collateral, and independent review are complete.
@@ -213,6 +217,73 @@ session-oriented usage, clearing, last-owner removal, absent and unreadable comp
 a pending disabled-resource refusal with no durable publication or provider work. No authorized
 provider inventory was available, so successful provider-backed creation remains covered by unit and
 review evidence rather than a live backend run.
+
+### R4 correction: schema-directed merge strategies
+
+- [x] Amend the R4 requirements and architecture so core model definitions and capability model
+      definitions that participate in layered merging, rather than five domain policy reducers or
+      capability callbacks, own merge behavior at arbitrary nesting depth.
+- [x] Define and registration-validate one closed strategy vocabulary with object merge,
+      append-deduplicated list, and scalar replacement defaults plus field-level and model-level
+      overrides, mapping-value annotations, and rejection of duplicate or shape-incompatible
+      placements.
+- [x] Implement recursive object merge, whole-node replacement, stable list append-deduplication,
+      type-sensitive structural JSON equality, union-arm replacement, later raw replacement for
+      unknown conflicts, cycle-safe malformed-input totality, and value-safe nested provenance in
+      one schema walker used by template inheritance and final instance layers.
+- [x] Migrate `ProvenancePath` end to end across `LayeredResolution`, every `LayerContribution`
+      constructor, `run_layer_fold` defaults and accumulation, all five `effective_references`
+      consumers, declared-template finalize, session pending, live, and lifecycle validation, and
+      the capability error bridge. Project selector and config paths into one capability-local map,
+      preserve optional source-location framing, use replacement for a new list index and
+      contribution for an equal existing index, and use one longest-prefix lookup throughout. Retain
+      no value- or `repr`-based path and no second session ownership channel.
+- [x] Reduce VM, admin, workspace, agent, and session reducers to authored-field and seed adapters;
+      replace same-integration capability callbacks with registered config-model policy while
+      retaining complete config reset when the integration selector changes. Increment the
+      harness-integration capability contract from version 1 to version 2 and refuse old plugins
+      clearly rather than bridging two merge authorities.
+- [x] Annotate every existing non-default field so shipped core and capability behavior remains
+      compatible, including whole-entry environment replacement and replacement argument lists.
+- [x] Prove nested core and capability behavior, explicit empty replacement, containing replacement
+      before arm selection, same-arm field-over-model merge, same-arm model replacement,
+      different-arm or selection-failure reset despite containing merge, registration refusal,
+      invalid-input preservation, typed equality, normalized validation locations, result-index list
+      references, inherited contributors at newly materialized paths, uniform validation-alias
+      refusal through nested mapping values and replacement boundaries, unsafe append-dedupe-schema
+      refusal, non-string merge-key refusal with replacement escape, validator-admitted carrier and
+      non-carrier values, an unsupported Python object whose equality raises, non-finite floats,
+      cyclic items, and the absence of persistence or CLI schema changes. Mutation-test exactly
+      object replacement, list replacement, union reset, and longest-prefix attribution.
+- [x] Update permanent schema, capability, harness-integration, ADR, and active upgrade collateral
+      in the same implementation range that removes the imperative hook and increments its contract;
+      document shipped atomic list-item behavior in the schema README and preserve model-declared
+      list-item identity as unsupported future direction in ADR 0023.
+- [x] Complete the SDD-only checkpoint review, then the implementation private review, fresh-eyes,
+      complexity, test-quality, full-gate, and isolated shipped-CLI passes before merge intent.
+
+Completed on 2026-08-28. One iterative schema walker now owns nested field behavior and value-path
+provenance across the five core layer adapters and opted-in capability config. Harness integration
+contract version 2 removes its executable merge callback; existing argument-vector and environment
+replacement behavior is model-declared, and no database, desired-payload, or CLI contract changed.
+The private project, fresh-eyes, and complexity loops converged with no material finding. All four
+required safety mutations were killed by focused tests: forcing model replacement to merge failed
+`test_model_replacement_discards_the_complete_previous_subtree`; forcing marked list replacement to
+append failed `test_objects_recurse_lists_dedupe_and_marked_lists_replace`; removing union reset
+failed `test_different_or_unselectable_union_arms_replace_whole_values`; and disabling prefix
+seeding failed `test_a_new_contribution_seeds_sources_from_its_longest_prefix`. The exact
+non-integration suite passed 7,948 tests with one skip, alongside Ruff, formatting, Mypy, Typer
+isolation, file lint, Rulesync, locked-SDD, website, and deterministic-build gates. An isolated-home
+shipped-CLI pass proved nested core list/map merging, complete environment-entry replacement,
+same-integration harness finalization, merged-list error indexing, bounded malformed-input recovery,
+empty live tables, and complete scratch cleanup. No provider inventory was authorized, so provider,
+VM, SSH, and session-launch behavior was deliberately not exercised; this correction does not change
+those surfaces.
+
+Definition of done: every template and instance layer resolves through one schema-directed field
+policy at arbitrary depth; object replacement is an honest subtree boundary; capability authors use
+their config models rather than executable merge hooks; current shipped fields retain their
+behavior; and no database migration, payload-version change, or new operator syntax is introduced.
 
 ## Phase 4: R3 applied instance state and SSH proving slice
 

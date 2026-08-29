@@ -21,20 +21,27 @@ meaningful over a blob more than one template wrote.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, Literal
+from typing import TYPE_CHECKING, ClassVar, Literal, cast
 
 import pytest
 
 from agentworks.errors import ConfigError
 from agentworks.plugins import Plugin, capability_adapters, seated_plugin
 from agentworks.resources import Origin, Registry
-from agentworks.schema import AgwModel, CapabilityBlock
-from agentworks.sessions.template import SessionTemplate
-from agentworks.sessions.templates import effective_template
+from agentworks.resources.inheritance import LayerSource, LayerSourceKind
+from agentworks.schema import AgwModel, CapabilityBlock, RefOwner
+from agentworks.sessions.template import SessionTemplate, _capability_provenance
+from agentworks.source_location import SourceLocation
+from agentworks.value_provenance import longest_prefix_value
 from tests.plugins._fixtures import ConformingHarnessIntegration
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
+
+    from pydantic import BaseModel
+    from pydantic import ValidationError as PydanticValidationError
+
+    from agentworks.value_provenance import ProvenancePath
 
 PLUGIN = "effective-config-fixture"
 
@@ -54,12 +61,28 @@ class _NeedyIntegration(ConformingHarnessIntegration):
     config_model: ClassVar[type[AgwModel]] = _NeedyConfig
 
 
+class _NestedOptions(AgwModel):
+    retry_count: int
+    labels: list[str]
+
+
+class _NestedConfig(AgwModel):
+    name: Literal["nested"]
+    options: _NestedOptions
+
+
+class _NestedIntegration(ConformingHarnessIntegration):
+    name: ClassVar[str] = "nested"
+    description: ClassVar[str] = "a harness integration with nested config"
+    config_model: ClassVar[type[AgwModel]] = _NestedConfig
+
+
 @pytest.fixture()
 def seated() -> Iterator[None]:
     plugin = Plugin(
         name=PLUGIN,
         description="seats the needy harness integration",
-        capabilities={"harness-integration": (_NeedyIntegration,)},
+        capabilities={"harness-integration": (_NeedyIntegration, _NestedIntegration)},
     )
     with seated_plugin(plugin):
         yield
@@ -70,18 +93,27 @@ def _registry(*templates: SessionTemplate) -> Registry:
     integration's capability row (so the selector edge resolves)."""
     registry = Registry.empty()
     plugin_origin = Origin.system_plugin(plugin=PLUGIN, source=f"agentworks.plugins.{PLUGIN}")
-    registry.add(
-        "harness-integration",
-        "needy",
-        capability_adapters()["harness-integration"].build_row("needy", plugin_origin),
-        plugin_origin,
-    )
+    for name in ("needy", "nested"):
+        registry.add(
+            "harness-integration",
+            name,
+            capability_adapters()["harness-integration"].build_row(name, plugin_origin),
+            plugin_origin,
+        )
     for index, template in enumerate(templates):
         registry.add(
             "session-template", template.name, template, Origin.operator_declared(file=Path("t.yaml"), line=index + 1)
         )
     registry.finalize()
     return registry
+
+
+def test_selector_provenance_uses_the_root_owner_as_a_fallback() -> None:
+    root = LayerSource(LayerSourceKind.TEMPLATE, "session-template", "base")
+
+    projected = _capability_provenance({(): (root,)})
+
+    assert projected[("name",)] == RefOwner(kind="session-template", name="base")
 
 
 def test_a_child_completed_by_its_parent_validates(seated: None) -> None:
@@ -164,138 +196,57 @@ def test_a_key_the_child_overrode_is_not_attributed_to_the_parent(seated: None) 
     assert "inherited from" not in message
 
 
-# -- The provenance invariant, over merges that move keys around --------------
-#
-# The tests above read provenance through the error message, which only ever
-# exercises a key some template did declare against the surviving
-# integration. What ``_merge_pair`` promises is stronger, and both halves of
-# it were unpinned: the restriction to surviving keys (dropping it survived
-# the whole suite) and the reset on a capability switch (same).
-#
-# Neither is reachable through a shipped integration, because every shipped
-# ``merge_config`` is shallow child-wins: it never drops a key and never adds
-# one. So the surface is a fixture, as the required field above is.
+def test_a_nested_inherited_error_uses_the_parent_owner_and_child_location(
+    seated: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Capability-local projection keeps nested ownership and row framing."""
+    captured: dict[str, object] = {}
 
+    def capture_config_error(
+        validation: PydanticValidationError,
+        *,
+        model_cls: type[BaseModel],
+        owner: RefOwner,
+        location: SourceLocation | None = None,
+        hint: str | None = None,
+        provenance: Mapping[str, RefOwner] | Mapping[ProvenancePath, RefOwner] | None = None,
+    ) -> ConfigError:
+        captured.update(
+            validation=validation,
+            model_cls=model_cls,
+            owner=owner,
+            location=location,
+            hint=hint,
+            provenance=provenance,
+        )
+        return ConfigError("captured", entity_kind=owner.kind, entity_name=owner.name)
 
-class _ModalConfig(AgwModel):
-    """Config for an integration whose merge moves keys around."""
-
-    name: Literal["modal"]
-    mode: str = "plain"
-    detail: str = ""
-
-
-class _ModalIntegration(ConformingHarnessIntegration):
-    """Two ordinary inheritance rules which, between them, are the two ways
-    a merged blob's keys stop matching what the lineage declared.
-
-    ``detail`` is scoped to the ``mode`` it was written for, so a child
-    changing ``mode`` DROPS the parent's; and a merged blob always names
-    its mode, so one no template wrote comes out ``plain``, which ADDS a
-    key no declaration stands behind.
-    """
-
-    name: ClassVar[str] = "modal"
-    description: ClassVar[str] = "a harness integration whose merge drops and adds keys"
-    config_model: ClassVar[type[AgwModel]] = _ModalConfig
-
-    @classmethod
-    def merge_config(cls, base: Mapping[str, object], child: Mapping[str, object]) -> dict[str, object]:
-        if "mode" in child and base.get("mode", "plain") != child["mode"]:
-            base = {key: value for key, value in base.items() if key != "detail"}
-        return {"mode": "plain", **base, **child}
-
-
-class _PlainConfig(AgwModel):
-    """A second integration carrying a ``mode`` of its own, which is what
-    makes the switch reset observable: the lineage has to leave a key
-    behind under a name the integration it switches TO also uses."""
-
-    name: Literal["plain"]
-    mode: str = "plain"
-
-
-class _PlainIntegration(ConformingHarnessIntegration):
-    name: ClassVar[str] = "plain"
-    description: ClassVar[str] = "a harness integration that merges its config shallowly"
-    config_model: ClassVar[type[AgwModel]] = _PlainConfig
-
-
-MODAL_PLUGIN = "modal-merge-fixture"
-
-
-@pytest.fixture
-def seated_modal() -> Iterator[None]:
-    plugin = Plugin(
-        name=MODAL_PLUGIN,
-        description="seats the two integrations the provenance invariant needs",
-        capabilities={"harness-integration": (_ModalIntegration, _PlainIntegration)},
+    monkeypatch.setattr("agentworks.capabilities.config.config_error_from", capture_config_error)
+    child = SessionTemplate(
+        name="kid",
+        inherits=["base"],
+        harness_integration=CapabilityBlock.of(
+            "nested",
+            **{"options": {"labels": ["child"]}},
+        ),
     )
-    with seated_plugin(plugin):
-        yield
+    parent = SessionTemplate(
+        name="base",
+        harness_integration=CapabilityBlock.of(
+            "nested",
+            **{"options": {"retry_count": "soon", "labels": ["base"]}},
+        ),
+    )
+    with pytest.raises(ConfigError) as exc:
+        _registry(child, parent)
 
-
-def _lineages() -> dict[str, dict[str, SessionTemplate]]:
-    """One lineage per way a merged key can stop standing for a
-    declaration. Both resolve ``kid``."""
-    return {
-        "the merge dropped a key": {
-            "base": SessionTemplate(
-                name="base",
-                harness_integration=CapabilityBlock.of("modal", **{"mode": "fast", "detail": "sized for fast"}),
-            ),
-            "kid": SessionTemplate(
-                name="kid",
-                inherits=["base"],
-                harness_integration=CapabilityBlock.of("modal", **{"mode": "slow"}),
-            ),
-        },
-        "the merge added a key across a switch": {
-            "base": SessionTemplate(
-                name="base",
-                harness_integration=CapabilityBlock.of("plain", **{"mode": "fast"}),
-            ),
-            "kid": SessionTemplate(
-                name="kid",
-                inherits=["base"],
-                harness_integration=CapabilityBlock.of("modal", **{"detail": "whatever the mode is"}),
-            ),
-        },
-    }
-
-
-def test_provenance_only_ever_names_a_template_that_declared_the_surviving_key(seated_modal: None) -> None:
-    """Provenance decides which file an operator is sent to for a bad key,
-    so an entry that does not stand for a declaration is a wrong answer to
-    the only question provenance is asked.
-
-    Stated as the invariant rather than as the map each lineage happens to
-    produce: every entry names a template whose OWN block selects the
-    integration that survived and declares that key. Read off the
-    declarations, never off the merge, so a merge that starts inventing
-    attributions cannot agree with itself here.
-
-    The two lineages are the two ways an entry can come loose, and each
-    fails a different clause:
-
-    - a merge that DROPS a key leaves the parent blamed for a value no
-      longer in the blob, which the containment clause catches;
-    - a merge that ADDS one across a capability SWITCH lands a key the
-      previous integration also used, so stale provenance survives
-      containment and is caught by naming the wrong block.
-    """
-    loose: list[str] = []
-    for label, templates in _lineages().items():
-        harness = effective_template(templates, "kid").harness
-        for key, owner in harness.provenance.items():
-            block = templates[owner.name].harness_integration
-            if key not in harness.config:
-                loose.append(f"{label}: {key!r} did not survive the merge and is still blamed on {owner.name}")
-            elif block is None or block.name != harness.name:
-                loose.append(
-                    f"{label}: {key!r} is blamed on {owner.name}, whose block selects "
-                    f"{None if block is None else block.name!r}, not the surviving {harness.name!r}"
-                )
-            elif key not in block.config:
-                loose.append(f"{label}: {key!r} is blamed on {owner.name}, which never declared it")
-    assert not loose, "\n".join(loose)
+    assert exc.value.entity_kind == "session-template"
+    assert exc.value.entity_name == "kid"
+    validation = cast("PydanticValidationError", captured["validation"])
+    assert any(tuple(problem["loc"][-2:]) == ("options", "retry_count") for problem in validation.errors())
+    assert captured["location"] == SourceLocation(file=Path("t.yaml"), line=1)
+    provenance = cast("Mapping[ProvenancePath, RefOwner]", captured["provenance"])
+    assert longest_prefix_value(provenance, ("options", "retry_count")) == RefOwner(
+        kind="session-template", name="base"
+    )

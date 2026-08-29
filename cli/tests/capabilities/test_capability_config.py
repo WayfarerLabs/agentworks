@@ -43,6 +43,7 @@ if TYPE_CHECKING:
 
 OWNER = RefOwner(kind="vm-site", name="lab")
 WHERE = SourceLocation(file=Path("sites.yaml"), line=12)
+BASE_OWNER = RefOwner(kind="vm-site", name="base")
 
 
 class FixtureConfig(AgwModel):
@@ -96,6 +97,28 @@ class SolePlatform(ConformingVMPlatform):
     name: ClassVar[str] = "sole-platform"
     description: ClassVar[str] = "the only registered platform"
     config_model: ClassVar[type[AgwModel]] = SoleConfig
+
+
+class StatefulFirstConfig(AgwModel):
+    name: Literal["stateful-platform"]
+    first: str | None = None
+
+
+class StatefulSecondConfig(AgwModel):
+    name: Literal["stateful-platform"]
+    second: str | None = None
+
+
+class StatefulPlatform(ConformingVMPlatform):
+    name: ClassVar[str] = "stateful-platform"
+    description: ClassVar[str] = "offers a stateful model selection hook"
+    config_model: ClassVar[type[AgwModel]] = StatefulFirstConfig
+    selection_calls: ClassVar[int] = 0
+
+    @classmethod
+    def config_for(cls) -> type[BaseModel]:
+        cls.selection_calls += 1
+        return StatefulFirstConfig if cls.selection_calls == 1 else StatefulSecondConfig
 
 
 def _arm_names(kind: str = "vm-platform") -> set[str]:
@@ -177,6 +200,15 @@ def test_a_seated_capability_answers_with_the_model_it_declares(seated: None) ->
     assert capability_config_model("vm-platform", "fixture-platform") is FixtureConfig
 
 
+def test_registration_and_later_consumers_share_one_stateful_model_selection() -> None:
+    with seated_plugin(Plugin(name="stateful", capabilities={"vm-platform": (StatefulPlatform,)})):
+        assert StatefulPlatform.selection_calls == 1
+        assert capability_config_model("vm-platform", StatefulPlatform.name) is StatefulFirstConfig
+        capability_config_union("vm-platform")
+        assert offered_model(StatefulPlatform) is StatefulFirstConfig
+        assert StatefulPlatform.selection_calls == 1
+
+
 def test_an_unseated_name_answers_none_rather_than_raising(seated: None) -> None:
     """The dangling capability edge is what reports an unknown name, as a
     hard finalize miss; reporting it twice in two vocabularies would be
@@ -184,6 +216,27 @@ def test_an_unseated_name_answers_none_rather_than_raising(seated: None) -> None
     assert capability_config_model("vm-platform", "nope") is None
     assert _validate({}, name="nope") is None
     assert _refs({}, name="nope") == ()
+
+
+def test_capability_validation_attributes_a_union_arms_field_from_tuple_provenance(seated: None) -> None:
+    with pytest.raises(ConfigError) as unmerged:
+        validate_capability_config(
+            kind="vm-platform",
+            config={"name": "fixture-platform", "region": 8},
+            owner=OWNER,
+            location=WHERE,
+        )
+    with pytest.raises(ConfigError) as merged:
+        validate_capability_config(
+            kind="vm-platform",
+            config={"name": "fixture-platform", "region": 8},
+            owner=OWNER,
+            location=WHERE,
+            provenance={("region",): BASE_OWNER},
+        )
+
+    assert BASE_OWNER.display not in str(unmerged.value)
+    assert BASE_OWNER.display in str(merged.value)
 
 
 def test_the_base_hook_answers_with_the_declared_model() -> None:

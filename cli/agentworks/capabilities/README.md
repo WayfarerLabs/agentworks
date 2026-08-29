@@ -277,9 +277,11 @@ host kind would end up encoding what its capabilities accept, which is the coupl
 exists to avoid.
 
 `config_for()` is how the core asks which config a capability offers, and every read of a
-capability's config goes through it rather than off `config_model` directly. Every capability today
-offers ONE config shared by all of its operations, so it declares `config_model` and the base hook
-answers with it.
+capability's config goes through the selected result rather than off `config_model` directly. The
+framework keeps that selection stable while the implementation's declared `config_model` identity is
+unchanged, so registration and later consumers see the same model. Every capability today offers ONE
+config shared by all of its operations, so it declares `config_model` and the base hook answers with
+it.
 
 Config is offered per FACET by contract: a facet is the level a capability is driven at (`vm`,
 `user`, `workspace`, `session`), pairing that level's methods with that level's config. CONSUMERS
@@ -299,6 +301,55 @@ feed the registry's reference graph; during preflight and doctor, core runs valu
 provider preview; at runtime, their _values_ are fetched only by the framework's one batched resolve
 pass as soon as preflight passes (described under ops), and delivered through the context.
 References are never value-resolved at command entry.
+
+#### Merge Policy Is Declared Too
+
+When a capability config participates in template inheritance or an instance layer, the model that
+capability offers also owns the merge policy. A capability normally offers its `config_model`
+through the inherited `config_for()` hook; an override must return the model the other derived
+surfaces use too. The framework does not call capability code to combine two config blobs. This
+keeps core and third-party models on the same recursive contract and keeps merge callbacks out of
+registry finalization.
+
+The defaults follow the schema shape: objects and mappings merge recursively by key, lists
+append-deduplicate atomic values in stable order, and scalars replace. A non-default field policy is
+typed annotation metadata:
+
+```python
+from typing import Annotated, ClassVar
+
+from agentworks.schema import AgwModel, MergeStrategy
+
+
+class Credentials(AgwModel):
+    merge_strategy: ClassVar[MergeStrategy] = MergeStrategy.REPLACE
+
+
+class ExampleConfig(AgwModel):
+    credentials: Credentials
+    extra_args: Annotated[list[str], MergeStrategy.REPLACE]
+```
+
+The containing field wins over a mapping-shaped model's `merge_strategy`; the schema default is
+last. `REPLACE` discards the complete prior object or list, so an explicit empty value clears it.
+Mapping value annotations are supported, but list elements and mapping keys do not have independent
+merge-policy slots. List items remain atomic rather than recursively merged.
+
+A capability kind whose config participates in layered merging declares that fact in its core-owned
+`ConfigContract`. Registration then calls `merge_contract_error()` on the exact model `config_for()`
+offers before the plugin registry is mutated. That check rejects invalid strategy placement,
+append-deduplicated item types outside the closed structural JSON comparison carrier, and merged
+mappings without exact `str` keys. Mark the complete list or mapping `REPLACE` when its model
+intentionally needs a broader input domain. The check also refuses `validation_alias` on every
+reachable participating model, including mapping values and models below replacement boundaries. Use
+field names for validation; `serialization_alias` remains available for output. Capability kinds
+without a layered config surface do not opt in and retain their existing model contract.
+
+The raw merger preserves malformed values for final typed validation rather than invoking model
+validators, applying defaults, filtering values, or coercing them. For union fields, whole-field
+replacement wins before arm selection; otherwise only values selecting the same arm may recurse. See
+[`../schema/README.md`](../schema/README.md#schema-directed-layer-merging) for the complete
+strategy, equality, union, and malformed-input contract.
 
 #### Stage 2: Construct
 
@@ -505,10 +556,12 @@ implementation of it:
   migrated. Supporting two at once would need a supported-range field and a compatibility rule,
   which is a decision to make when a real migration needs it, not before.
 - **`config_schema`** (a `ConfigContract`), what a config model offered for this kind must BE: its
-  base, discriminator, input domain, and forbidden reference kinds. A descriptor may separately
-  declare **`mapping_schema`** and **`mapping_host`** for a map-key-selected consuming surface.
-  Secret backends use tagged `AgwModel` source config plus an untagged, JSON-native `AgwRootModel`
-  per-secret mapping. **The kind states the contracts; implementations declare the models.**
+  base, discriminator, input domain, forbidden reference kinds, and whether its model participates
+  in schema-directed layers. A descriptor may separately declare **`mapping_schema`**, with the same
+  contract facts for its mapping model, and **`mapping_host`** for a map-key-selected consuming
+  surface. Secret backends use tagged `AgwModel` source config plus an untagged, JSON-native
+  `AgwRootModel` per-secret mapping. **The kind states the contracts; implementations declare the
+  models.**
 - **`implementation_contract`, `required_operations`, `required_attributes`**, what an
   implementation must satisfy. All four kinds declare nominal bases, and every registered
   implementation must derive from its kind's contract.
@@ -532,7 +585,8 @@ Because the descriptor states the contract, the contract is checkable, and it is
 anything is seated. Every implementation is run against its kind's record
 (`capabilities/conformance.py`) at registration: the base it derives from, its metadata, the
 non-operation members the framework reads off it, that nothing would stop it being constructed, the
-domain operations, the config model against `config_schema`, and the contract version.
+domain operations, the config model against `config_schema`, the mapping model against
+`mapping_schema` when present, each model's opted-in merge contract, and the contract version.
 [`../plugins/README.md`](../plugins/README.md#contract-conformance) enumerates the checks; this is
 the one place they are listed.
 

@@ -114,7 +114,7 @@ def _readiness(name: str, impl: Any) -> Readiness:
 
 HARNESS_INTEGRATION_DESCRIPTOR = CapabilityKindDescriptor(
     kind="harness-integration",
-    contract_version=1,
+    contract_version=2,
     implementation_contract=HarnessIntegration,
     registry=_registry,
     required_operations=frozenset({"start", "resume"}),
@@ -124,7 +124,7 @@ HARNESS_INTEGRATION_DESCRIPTOR = CapabilityKindDescriptor(
     entry_factory=_entry,
     readiness=_readiness,
     publisher_source="agentworks.capabilities.harness_integration",
-    config_schema=ConfigContract(base=AgwModel, discriminator="name"),
+    config_schema=ConfigContract(base=AgwModel, discriminator="name", layered_merge=True),
     manifest_section=HostSurface(
         host_kind="session-template",
         naming_field="harness_integration",

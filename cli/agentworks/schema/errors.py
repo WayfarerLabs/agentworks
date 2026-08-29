@@ -46,14 +46,16 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from functools import cache
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, Final, cast
 
 from pydantic import RootModel
+from pydantic.fields import FieldInfo
 
 from agentworks.errors import ConfigError
 from agentworks.path_rendering import format_host_path
 from agentworks.schema._shape import (
     Collection,
+    element_annotation,
     is_hidden,
     is_model,
     model_fields_of,
@@ -62,6 +64,7 @@ from agentworks.schema._shape import (
 )
 from agentworks.schema.base import NON_BLANK_PATTERN
 from agentworks.source_location import SYNTHESIZED_PATH
+from agentworks.value_provenance import longest_prefix_value
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -70,9 +73,10 @@ if TYPE_CHECKING:
     from pydantic import ValidationError as PydanticValidationError
     from pydantic_core import ErrorDetails
 
-    from agentworks.schema._shape import FieldShape, UnionArmType
+    from agentworks.schema._shape import UnionArmType
     from agentworks.schema.markers import RefOwner
     from agentworks.source_location import SourceLocation
+    from agentworks.value_provenance import ProvenancePath
 
 #: The most error lines a raised ``ConfigError`` body carries. The header
 #: always states the TRUE count, so a capped batch never hides how bad
@@ -134,7 +138,7 @@ def config_error_from(
     owner: RefOwner,
     location: SourceLocation | None = None,
     hint: str | None = None,
-    provenance: Mapping[str, RefOwner] | None = None,
+    provenance: Mapping[str, RefOwner] | Mapping[ProvenancePath, RefOwner] | None = None,
 ) -> ConfigError:
     """The ``ConfigError`` a caller raises for ``exc``, framed by
     ``location``.
@@ -157,15 +161,17 @@ def config_error_from(
     resource's ``validate_config`` raises comes from here, so the finalize
     pass has one framing to leave alone rather than two to tell apart.
 
-    ``provenance`` maps a top-level key of the validated blob to the owner
-    that DECLARED it, for a blob assembled by merging an inheritance chain.
-    A problem on a key some other owner declared renders with an
+    ``provenance`` maps normalized field, mapping-key, and list-index paths
+    in the validated blob to the owners that DECLARED them. A problem on a
+    value some other owner declared renders with an
     ``(inherited from <owner>)`` tail, so the operator is sent to the file
     that has the mistake in it rather than to the child that inherited it.
-    Omitted for every unmerged surface, where the owner already is the
-    declarer.
+    A legacy top-level string key is accepted as ``(key,)`` at this public
+    boundary. Internal callers use tuple paths. Omitted for every unmerged
+    surface, where the owner already is the declarer.
     """
-    problems = _problems(exc, model_cls, owner, provenance)
+    normalized = None if provenance is None else _normalized_provenance(provenance)
+    problems = _problems(exc, model_cls, owner, normalized)
     return ConfigError(
         _framed_batch(problems, owner, location),
         entity_kind=owner.kind,
@@ -236,22 +242,25 @@ def _problems(
     exc: PydanticValidationError,
     model_cls: type[BaseModel],
     owner: RefOwner,
-    provenance: Mapping[str, RefOwner] | None = None,
+    provenance: Mapping[ProvenancePath, RefOwner] | None = None,
 ) -> list[_Problem]:
-    return _collapsed([_problem(model_cls, detail, owner, provenance) for detail in exc.errors(include_url=False)])
+    details = exc.errors(include_url=False)
+    unsafe_mapping_prefixes = _unsafe_mapping_prefixes(model_cls, details)
+    return _collapsed([_problem(model_cls, detail, owner, provenance, unsafe_mapping_prefixes) for detail in details])
 
 
 def _problem(
     model_cls: type[BaseModel],
     detail: ErrorDetails,
     owner: RefOwner,
-    provenance: Mapping[str, RefOwner] | None,
+    provenance: Mapping[ProvenancePath, RefOwner] | None,
+    unsafe_mapping_prefixes: tuple[tuple[int | str, ...], ...],
 ) -> _Problem:
-    address = _resolve_path(model_cls, detail["loc"])
+    address = _resolve_path(model_cls, detail["loc"], unsafe_mapping_prefixes)
     return _Problem(
         path=address.path,
         message=_message(detail, address),
-        inherited_from=_inherited_from(address.path, owner, provenance),
+        inherited_from=_inherited_from(address.provenance_path, owner, provenance),
         alternatives=_alternatives(detail) if address.at_union else (),
         union_path=address.union_path,
         structural_arms=address.structural_arms,
@@ -259,6 +268,32 @@ def _problem(
         union_input=detail.get("input"),
         unknown_field=detail["type"] == "extra_forbidden",
     )
+
+
+def _unsafe_mapping_prefixes(
+    model_cls: type[BaseModel],
+    details: Sequence[ErrorDetails],
+) -> tuple[tuple[int | str, ...], ...]:
+    """Locations Pydantic made unsafe by rendering a non-string map key.
+
+    Pydantic preserves an integer key in ``loc`` but renders other
+    non-string keys into strings. The related value error then carries the
+    same rendered segment with no key marker and no raw key. Classifying the
+    complete batch first lets every error sharing that prefix stop at the
+    owning mapping. Only the marker and the raw key's concrete type are
+    inspected; the authored key is never compared, hashed, or rendered.
+    """
+    prefixes: list[tuple[int | str, ...]] = []
+    for detail in details:
+        loc = detail["loc"]
+        if (
+            loc
+            and loc[-1] == _KEY_MARKER
+            and type(detail.get("input")) is not str
+            and _resolve_path(model_cls, loc).terminal_key_marker
+        ):
+            prefixes.append(loc[:-1])
+    return tuple(prefixes)
 
 
 def _collapsed(problems: list[_Problem]) -> list[_Problem]:
@@ -415,29 +450,35 @@ def _one_of(items: Sequence[str]) -> str:
     return ", ".join(items[:-1]) + f", or {items[-1]}"
 
 
-def _inherited_from(path: str, owner: RefOwner, provenance: Mapping[str, RefOwner] | None) -> str | None:
+def _normalized_provenance(
+    provenance: Mapping[str, RefOwner] | Mapping[ProvenancePath, RefOwner],
+) -> dict[ProvenancePath, RefOwner]:
+    """Normalize the error bridge's legacy top-level string keys once."""
+    return {(path,) if isinstance(path, str) else path: declarer for path, declarer in provenance.items()}
+
+
+def _inherited_from(
+    path: ProvenancePath,
+    owner: RefOwner,
+    provenance: Mapping[ProvenancePath, RefOwner] | None,
+) -> str | None:
     """The owner that declared the value at ``path``, when that is someone
     other than ``owner``; ``None`` otherwise.
 
     ``None`` covers the three uninteresting cases together: the blob was
-    not merged (no provenance at all), the key has no recorded declarer
-    (a ``missing`` error, where nobody wrote the key by construction), or
-    the declarer is the owner already named at the head of the line, where
-    a tail would only repeat it.
-
-    Provenance is per TOP-LEVEL key, because that is the granularity a
-    merge has: a capability's merge combines whole values, so ``command``
-    has a declarer and ``sandbox.writable_dirs`` inherits its parent key's.
+    not merged (no provenance at all), the path has no recorded declarer,
+    or the declarer is the owner already named at the head of the line,
+    where a tail would only repeat it. Longest-prefix lookup lets a child
+    inherit attribution from a replaced parent or the capability root.
     """
-    if not path or not provenance:
+    if not provenance:
         return None
-    key = path.split(".", 1)[0].split("[", 1)[0]
-    declarer = provenance.get(key)
+    declarer = longest_prefix_value(provenance, path)
     return None if declarer is None or declarer == owner else declarer.display
 
 
 def _owner_framed(owner: RefOwner, problem: _Problem) -> str:
-    return f"{owner.display}.{problem.render()}" if problem.path else f"{owner.display}: {problem.message}"
+    return f"{owner.display}.{problem.render()}" if problem.path else f"{owner.display}: {problem.render()}"
 
 
 def _framed_batch(
@@ -819,25 +860,16 @@ class _AtElement:
     """The next ``loc`` segment addresses one element of a collection: a
     list index or a table key, both of which the operator DID write."""
 
-    item_model: type[BaseModel] | None
-    item_union_members: tuple[object, ...] = ()
-    """What one element holds when it is an undiscriminated union, so the
-    walk can step into :class:`_AtUnion` rather than losing track and
-    rendering pydantic's member labels (``backend_mappings.b.str``)."""
+    item_annotation: object
+    """The annotation at the next depth.
 
-    item_arms: tuple[UnionArmType, ...] = ()
-    """What one element may BE when it is a discriminated union, so the
-    walk can step into :class:`_AtTag` and drop the tag pydantic inserts,
-    exactly as it does for a tagged union written directly on a field."""
+    Keeping the annotation rather than a one-level projection lets the
+    cursor classify another collection, union, or model only when the walk
+    reaches it. That preserves arbitrary collection depth without building
+    a parallel recursive shape model.
+    """
 
-    item_discriminator: str | None = None
-    """:attr:`_AtTag.discriminator` one level down: the tag field an
-    ELEMENT is dispatched on."""
-
-    item_structural_arms: tuple[type[BaseModel], ...] = ()
-    """Structural union arms one collection-element level down."""
-
-    mapping: bool = False
+    mapping: bool
     """Whether the elements are addressed by an operator-written KEY.
     Only a mapping can produce pydantic's ``[key]`` marker, so this is
     what lets the marker be dropped without also dropping a table key
@@ -858,6 +890,14 @@ class _Address:
     """The dotted address the operator wrote, empty for a whole-document
     problem."""
 
+    provenance_path: ProvenancePath
+    """The same address as normalized model-aware path segments.
+
+    Unlike :attr:`path`, this is data rather than presentation. It is
+    assembled during the walk so rendered dots and brackets are never
+    parsed back into field names, mapping keys, or list positions.
+    """
+
     container: type[BaseModel] | None
     """The model that CONTAINS the last segment, which is what an
     unknown-key message lists the valid fields of."""
@@ -871,6 +911,14 @@ class _Address:
     """The address of the OUTERMOST undiscriminated union the walk passed
     through, whether it ended there or carried on into a member. ``None``
     when it passed through none. See :attr:`_Problem.union_path`."""
+
+    terminal_key_marker: bool
+    """Whether the final ``loc`` segment is Pydantic's key marker.
+
+    The spelling alone is insufficient because an operator may write a
+    valid mapping key literally named ``[key]``. Only the model-aware walk
+    can distinguish that key from Pydantic's following marker segment.
+    """
 
     arms: tuple[UnionArmType, ...] = ()
     """The arms of the DISCRIMINATED union the walk ended standing on,
@@ -895,7 +943,11 @@ class _Address:
     union_member: type[BaseModel] | None = None
 
 
-def _resolve_path(model_cls: type[BaseModel], loc: tuple[int | str, ...]) -> _Address:
+def _resolve_path(
+    model_cls: type[BaseModel],
+    loc: tuple[int | str, ...],
+    unsafe_mapping_prefixes: tuple[tuple[int | str, ...], ...] = (),
+) -> _Address:
     """``loc`` as the address the operator can act on.
 
     Walking the model alongside the loc is what makes every adjustment
@@ -904,6 +956,8 @@ def _resolve_path(model_cls: type[BaseModel], loc: tuple[int | str, ...]) -> _Ad
     an index becomes ``[i]`` on the field that holds the collection.
     """
     parts: list[str] = []
+    provenance_parts: list[str | int] = []
+    provenance_open = True
     cursor: _Cursor = _initial_cursor(model_cls)
     container: type[BaseModel] | None = None
     at_union = False
@@ -911,14 +965,21 @@ def _resolve_path(model_cls: type[BaseModel], loc: tuple[int | str, ...]) -> _Ad
     structural_arms: tuple[type[BaseModel], ...] = ()
     union_member: type[BaseModel] | None = None
     after_mapping_key = False
+    terminal_key_marker = False
     last = len(loc) - 1
     for index, segment in enumerate(loc):
+        if any(_same_location(loc[: index + 1], prefix) for prefix in unsafe_mapping_prefixes):
+            break
         # Pydantic appends the key marker AFTER the key it is about, so it
-        # is always the final segment. Requiring that, and not just that
-        # the walk stands past a mapping key, is what keeps a table whose
-        # key really is ``[key]`` from having it dropped: nested one level
-        # down, that key is not last and the marker after it is.
+        # is always the final segment. A mapping whose values are mappings
+        # creates one unavoidable ambiguity: a malformed outer key's marker
+        # and a literal inner key named ``[key]`` have the same location.
+        # Treating it as the marker is the value-safe answer because it keeps
+        # a rendered malformed key out of both address forms. A direct
+        # mapping key named ``[key]`` is unambiguous because there is no
+        # preceding mapping key.
         if segment == _KEY_MARKER and after_mapping_key and index == last:
+            terminal_key_marker = True
             continue
         container = cursor.model if isinstance(cursor, _AtModel) else None
         at_union = isinstance(cursor, _AtUnion)
@@ -932,6 +993,8 @@ def _resolve_path(model_cls: type[BaseModel], loc: tuple[int | str, ...]) -> _Ad
         if isinstance(cursor, _AtUnion) and isinstance(segment, str) and union_member is None:
             candidate = next((m for m in cursor.members if getattr(m, "__name__", None) == segment), None)
             union_member = candidate if is_model(candidate) else None
+        if provenance_open:
+            provenance_open = _append_provenance_segment(provenance_parts, cursor, segment)
         after_mapping_key = isinstance(cursor, _AtElement) and cursor.mapping
         keep, cursor = _advance(cursor, segment)
         if not keep:
@@ -942,9 +1005,11 @@ def _resolve_path(model_cls: type[BaseModel], loc: tuple[int | str, ...]) -> _Ad
             parts.append(segment)
     return _Address(
         path=".".join(parts),
+        provenance_path=tuple(provenance_parts),
         container=container,
         at_union=at_union,
         union_path=union_path,
+        terminal_key_marker=terminal_key_marker,
         # Where the walk STOPPED, rather than the cursor each segment was
         # read against: both union messages are reported on the field that
         # HOLDS the union, so the last segment consumed is what lands the
@@ -956,7 +1021,47 @@ def _resolve_path(model_cls: type[BaseModel], loc: tuple[int | str, ...]) -> _Ad
     )
 
 
-def _initial_cursor(model_cls: type[BaseModel]) -> _Cursor:
+def _same_location(left: tuple[int | str, ...], right: tuple[int | str, ...]) -> bool:
+    """Type-sensitive equality for Pydantic-owned location segments."""
+    return len(left) == len(right) and all(type(a) is type(b) and a == b for a, b in zip(left, right, strict=True))
+
+
+def _append_provenance_segment(
+    parts: list[str | int],
+    cursor: _Cursor,
+    segment: int | str,
+) -> bool:
+    """Append one model-addressable segment, returning whether to continue.
+
+    Union member labels and tags are dispatch detail rather than authored
+    path segments. A malformed non-string mapping key is neither a string
+    field nor a list position, so attribution stops at the owning mapping
+    without interpreting the key or any location below it.
+    """
+    if isinstance(cursor, (_AtTag, _AtUnion)):
+        return True
+    if isinstance(cursor, _AtModel):
+        if not isinstance(segment, str):
+            return False
+        parts.append(segment)
+        return True
+    if isinstance(cursor, _AtElement):
+        if cursor.mapping:
+            if not isinstance(segment, str):
+                return False
+            parts.append(segment)
+            return True
+        if not isinstance(segment, int):
+            return False
+        parts.append(segment)
+        return True
+    return False
+
+
+def _initial_cursor(
+    model_cls: type[BaseModel],
+    unwrapping_roots: tuple[type[BaseModel], ...] = (),
+) -> _Cursor:
     """Where the walk starts.
 
     A root model's value IS the document, so pydantic's loc never
@@ -966,9 +1071,11 @@ def _initial_cursor(model_cls: type[BaseModel]) -> _Cursor:
     """
     if not issubclass(model_cls, RootModel):
         return _AtModel(model_cls)
+    if any(seen is model_cls for seen in unwrapping_roots):
+        return None
     fields = model_fields_of(model_cls)
     root = fields.get("root") if fields is not None else None
-    return _cursor_for(shape_of(root)) if root is not None else None
+    return _cursor_for(root, (*unwrapping_roots, model_cls)) if root is not None else None
 
 
 def _advance(cursor: _Cursor, segment: int | str) -> tuple[bool, _Cursor]:
@@ -991,34 +1098,25 @@ def _advance(cursor: _Cursor, segment: int | str) -> tuple[bool, _Cursor]:
         member = next((m for m in cursor.members if getattr(m, "__name__", None) == segment), None)
         return False, _initial_cursor(member) if is_model(member) else None
     if isinstance(cursor, _AtElement):
-        if cursor.item_model is not None:
-            return True, _initial_cursor(cursor.item_model)
-        if cursor.item_arms:
-            return True, _AtTag(cursor.item_arms, cursor.item_discriminator)
-        return (
-            True,
-            _AtUnion(cursor.item_union_members, cursor.item_structural_arms) if cursor.item_union_members else None,
-        )
+        return True, _cursor_for(FieldInfo.from_annotation(cast("Any", cursor.item_annotation)))
     if isinstance(cursor, _AtModel) and isinstance(segment, str):
         fields = model_fields_of(cursor.model)
         field = fields.get(segment) if fields is not None else None
-        return True, None if field is None else _cursor_for(shape_of(field))
+        return True, None if field is None else _cursor_for(field)
     return True, None
 
 
-def _cursor_for(shape: FieldShape) -> _Cursor:
+def _cursor_for(
+    field: FieldInfo,
+    unwrapping_roots: tuple[type[BaseModel], ...] = (),
+) -> _Cursor:
     """Where a walk stands once it has entered a field of this shape."""
+    shape = shape_of(field)
     if shape.nested_model is not None:
-        return _initial_cursor(shape.nested_model)
+        return _initial_cursor(shape.nested_model, unwrapping_roots)
     if shape.collection is not None:
-        return _AtElement(
-            shape.item_model,
-            item_union_members=shape.item_union_members,
-            item_arms=shape.item_arms,
-            item_discriminator=shape.item_discriminator,
-            item_structural_arms=shape.item_structural_arms,
-            mapping=shape.collection is Collection.MAPPING,
-        )
+        item = element_annotation(field.annotation)
+        return None if item is None else _AtElement(item, mapping=shape.collection is Collection.MAPPING)
     if shape.arms:
         return _AtTag(shape.arms, shape.discriminator)
     if shape.union_members:

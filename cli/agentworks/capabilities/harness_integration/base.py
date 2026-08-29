@@ -245,18 +245,6 @@ class HarnessIntegration(Capability):
         seam stays integration-agnostic.
         """
 
-    @classmethod
-    def merge_config(cls, base: Mapping[str, object], child: Mapping[str, object]) -> dict[str, object]:
-        """Inheritance-time blob merge for a parent/child using the same harness integration
-        pair (FRD R5). Default: shallow child-wins. Overridden per
-        capability where a key needs richer combination (``shell`` unions
-        ``required_commands``). Runs classmethod-side from the resolver's
-        ``_merge_pair`` walk with no instance yet, over RAW declared blobs:
-        merging is inheritance semantics, not validation, and it runs
-        before the merged blob is validated.
-        """
-        return {**base, **child}
-
     def launch_note(self) -> str | None:
         """A human-facing one-line note about what the last ``start`` /
         ``resume`` decided, surfaced by the session manager in its op

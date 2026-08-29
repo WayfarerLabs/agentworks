@@ -29,21 +29,24 @@ if TYPE_CHECKING:
     from agentworks.resources.inheritance import LayerSource
     from agentworks.resources.reference import ResourceReference
     from agentworks.sessions.templates import EffectiveSessionTemplate, ResolvedSessionTemplate
+    from agentworks.source_location import SourceLocation
+    from agentworks.value_provenance import ProvenancePath
 
 
 def effective_references(
     effective: ResolvedSessionTemplate | EffectiveSessionTemplate,
     source: tuple[str, str],
-    provenance: Mapping[tuple[str, ...], tuple[LayerSource, ...]],
+    provenance: Mapping[ProvenancePath, tuple[LayerSource, ...]],
 ) -> tuple[ResourceReference, ...]:
     """References required by one effective session declaration."""
     from agentworks.capabilities.config import capability_config_references
     from agentworks.resources.reference import ResourceReference as _ResourceRef
     from agentworks.resources.reference import sourced_references
     from agentworks.sessions.templates import EffectiveSessionTemplate
+    from agentworks.value_provenance import longest_prefix_value
 
-    def owner(path: tuple[str, ...]) -> tuple[str, str] | None:
-        sources = provenance.get(path, ())
+    def owner(path: ProvenancePath) -> tuple[str, str] | None:
+        sources = longest_prefix_value(provenance, path) or ()
         return None if not sources else (sources[-1].resource_kind, sources[-1].name)
 
     if isinstance(effective, EffectiveSessionTemplate):
@@ -83,14 +86,53 @@ def effective_references(
     return tuple(refs)
 
 
-def validate_effective_harness(effective: ResolvedSessionTemplate, source: tuple[str, str]) -> None:
-    """Validate the merged instance harness block through its capability model."""
+def _capability_provenance(
+    provenance: Mapping[ProvenancePath, tuple[LayerSource, ...]],
+) -> dict[ProvenancePath, RefOwner]:
+    """Project session-layer paths into the harness config's local model."""
+    from agentworks.value_provenance import longest_prefix_value
+
+    local: dict[ProvenancePath, RefOwner] = {}
+    selector = longest_prefix_value(provenance, ("harness_integration",)) or ()
+    if selector:
+        source = selector[-1]
+        local[("name",)] = RefOwner(kind=source.resource_kind, name=source.name)
+    prefix = ("harness_integration_config",)
+    for path, sources in provenance.items():
+        if sources and path[:1] == prefix:
+            source = sources[-1]
+            local[path[1:]] = RefOwner(kind=source.resource_kind, name=source.name)
+    return local
+
+
+def validate_effective_harness(
+    effective: ResolvedSessionTemplate | EffectiveSessionTemplate,
+    source: tuple[str, str],
+    provenance: Mapping[ProvenancePath, tuple[LayerSource, ...]],
+    *,
+    location: SourceLocation | None = None,
+) -> None:
+    """Validate one merged harness block with its projected ownership."""
     from agentworks.capabilities.config import validate_capability_config
+    from agentworks.sessions.templates import EffectiveSessionTemplate
+
+    if isinstance(effective, EffectiveSessionTemplate):
+        name = effective.harness.name
+        config = effective.harness.config
+    else:
+        name = effective.harness_integration
+        config = effective.harness_integration_config
+    if name is None:
+        from agentworks.sessions.templates import DEFAULT_HARNESS_INTEGRATION
+
+        name = DEFAULT_HARNESS_INTEGRATION
 
     validate_capability_config(
         kind="harness-integration",
-        config={"name": effective.harness_integration, **effective.harness_integration_config},
+        config={"name": name, **config},
         owner=RefOwner(kind=source[0], name=source[1]),
+        location=location,
+        provenance=_capability_provenance(provenance),
     )
 
 
@@ -194,15 +236,16 @@ class SessionTemplate(DeclaredResource):
         edge records what the operator named, while validation checks what
         the session will actually run.
         """
-        from agentworks.capabilities.config import validate_capability_config
-        from agentworks.sessions.templates import DEFAULT_HARNESS_INTEGRATION, effective_template
+        from agentworks.sessions.templates import effective_template_with_provenance
 
-        effective = effective_template({**context.rows_of("session-template"), self.name: self}, self.name)
-        name = effective.harness.name or DEFAULT_HARNESS_INTEGRATION
-        validate_capability_config(
-            kind="harness-integration",
-            config={"name": name, **effective.harness.config},
-            owner=RefOwner(kind="session-template", name=self.name),
+        layered = effective_template_with_provenance(
+            {**context.rows_of("session-template"), self.name: self},
+            self.name,
+        )
+        effective = layered.value
+        validate_effective_harness(
+            effective,
+            ("session-template", self.name),
+            layered.provenance,
             location=self.error_location,
-            provenance=effective.harness.provenance,
         )

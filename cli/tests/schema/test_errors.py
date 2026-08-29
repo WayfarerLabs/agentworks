@@ -16,7 +16,7 @@ so the multi-error case is asserted explicitly.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 import pytest
 from pydantic import Field, model_validator
@@ -57,6 +57,8 @@ if TYPE_CHECKING:
 
 OWNER = RefOwner(kind="vm-site", name="lab")
 WHERE = SourceLocation(file=Path("sites.yaml"), line=12)
+BASE_OWNER = RefOwner(kind="vm-site", name="base")
+OTHER_BASE_OWNER = RefOwner(kind="vm-site", name="other-base")
 
 #: One blob producing three problems in one arm: a wrong type and two
 #: unknown keys. The multi-error framing has nothing to say on a
@@ -483,25 +485,363 @@ class NestedShoutyTable(AgwModel):
 
 
 @pytest.mark.parametrize(
-    ("key", "expected"),
+    ("key", "expected_path"),
     [
-        # The drop is conditioned on the marker being the LAST segment as
-        # well as on standing past a mapping key, and that is what this
-        # shape needs: one level down, the operator's literal ``[key]`` is
-        # not last and pydantic's marker after it is. Without the
-        # last-segment condition the operator's own key was the one dropped.
-        ("[key]", "vm-site/lab.outer.a.[key].[key]: invalid key '[key]' (must be upper case)"),
-        # The half this does NOT fix, said out loud. The walk loses track
-        # at a collection whose elements are themselves a collection, so it
-        # cannot tell the marker from a segment the operator wrote and
-        # keeps it. Noise in the path, never a wrong one, and no kind spec
-        # has this shape: the env table is the only constrained-key mapping
-        # and its values are models.
-        ("low", "vm-site/lab.outer.a.low.[key]: invalid key 'low' (must be upper case)"),
+        ("[key]", "outer.a.[key]"),
+        ("low", "outer.a.low"),
     ],
 )
-def test_a_nested_tables_key_keeps_the_segments_the_walk_cannot_tell_apart(key: str, expected: str) -> None:
-    assert _lines(NestedShoutyTable, {"outer": {"a": {key: 1}}}) == [expected]
+def test_a_nested_tables_key_drops_only_pydantics_key_marker(key: str, expected_path: str) -> None:
+    problems = _problems(_fails(NestedShoutyTable, {"outer": {"a": {key: 1}}}), NestedShoutyTable, OWNER)
+
+    assert [problem.path for problem in problems] == [expected_path]
+
+
+# -- Provenance paths ---------------------------------------------------------
+
+
+class OwnedValue(AgwModel):
+    """One nested value whose sibling may have a different declarer."""
+
+    value: str
+
+
+class SeparatelyOwnedSiblings(AgwModel):
+    """Two sibling objects merged from independently attributed layers."""
+
+    primary: OwnedValue
+    fallback: OwnedValue
+
+
+class StringKeyTable(AgwModel):
+    """A merged mapping whose authored keys must be strings."""
+
+    entries: dict[str, int] = Field(default_factory=dict)
+
+
+class NestedStringKeyTables(AgwModel):
+    """A mapping nested directly in another mapping."""
+
+    entries: dict[str, dict[str, int]] = Field(default_factory=dict)
+
+
+class MixedNestedCollections(AgwModel):
+    """Lists and mappings alternating below one field."""
+
+    entries: list[list[dict[str, dict[str, int]]]] = Field(default_factory=list)
+
+
+# Dynamic construction avoids a Pydantic mypy-plugin crash on a class whose
+# generic root argument directly names the class under construction.
+RecursiveRoot = cast(
+    "type[AgwRootModel[object]]",
+    type(
+        "RecursiveRoot",
+        (AgwRootModel,),
+        {
+            "__annotations__": {"root": "RecursiveRoot"},
+            "__module__": __name__,
+        },
+    ),
+)
+RecursiveRoot.model_rebuild()
+
+RecursiveRootHolder = cast(
+    "type[AgwModel]",
+    type(
+        "RecursiveRootHolder",
+        (AgwModel,),
+        {
+            "__annotations__": {"node": RecursiveRoot},
+            "__module__": __name__,
+        },
+    ),
+)
+
+
+def test_nested_sibling_errors_use_their_own_exact_declarers() -> None:
+    problems = _problems(
+        _fails(SeparatelyOwnedSiblings, {"primary": {"value": 1}, "fallback": {"value": 2}}),
+        SeparatelyOwnedSiblings,
+        OWNER,
+        {
+            ("primary", "value"): BASE_OWNER,
+            ("fallback", "value"): OTHER_BASE_OWNER,
+        },
+    )
+
+    assert [(problem.path, problem.inherited_from) for problem in problems] == [
+        ("primary.value", BASE_OWNER.display),
+        ("fallback.value", OTHER_BASE_OWNER.display),
+    ]
+
+
+def test_a_list_error_uses_its_result_index_for_attribution() -> None:
+    blob = {"vm_sizes": [{"cpus": 1, "memory": 1.0, "size": "s"}, {"cpus": "two", "memory": 1.0, "size": "s"}]}
+    problems = _problems(
+        _fails(CatalogLike, blob),
+        CatalogLike,
+        OWNER,
+        {("vm_sizes", 1, "cpus"): BASE_OWNER},
+    )
+
+    assert [(problem.path, problem.inherited_from) for problem in problems] == [
+        ("vm_sizes[1].cpus", BASE_OWNER.display)
+    ]
+
+
+def test_a_nested_error_falls_back_to_its_nearest_parent_owner() -> None:
+    problems = _problems(
+        _fails(SeparatelyOwnedSiblings, {"primary": {"value": 1}, "fallback": {"value": "ok"}}),
+        SeparatelyOwnedSiblings,
+        OWNER,
+        {("primary",): BASE_OWNER, (): OTHER_BASE_OWNER},
+    )
+
+    assert [problem.inherited_from for problem in problems] == [BASE_OWNER.display]
+
+
+def test_a_whole_document_error_falls_back_to_the_root_owner() -> None:
+    exc = _fails(StringRoot, {"not": "a string"})
+    problems = _problems(exc, StringRoot, OWNER, {(): BASE_OWNER})
+    error = config_error_from(exc, model_cls=StringRoot, owner=OWNER, provenance={(): BASE_OWNER})
+
+    assert [(problem.path, problem.inherited_from) for problem in problems] == [("", BASE_OWNER.display)]
+    assert BASE_OWNER.display in str(error)
+
+
+def test_a_non_string_mapping_key_stops_the_provenance_path_at_its_container() -> None:
+    exc = _fails(StringKeyTable, {"entries": {1: "bad"}})
+    problems = _problems(
+        exc,
+        StringKeyTable,
+        OWNER,
+        {("entries",): BASE_OWNER, ("entries", 1): OTHER_BASE_OWNER},
+    )
+
+    assert {problem.path for problem in problems} == {"entries"}
+    assert {problem.inherited_from for problem in problems} == {BASE_OWNER.display}
+
+
+def test_an_ambiguous_nested_literal_key_marker_collapses_at_the_outer_mapping() -> None:
+    exc = _fails(NestedStringKeyTables, {"entries": {"outer": {"[key]": None}}})
+    problems = _problems(
+        exc,
+        NestedStringKeyTables,
+        OWNER,
+        {
+            ("entries",): BASE_OWNER,
+            ("entries", "outer", "[key]"): OTHER_BASE_OWNER,
+        },
+    )
+
+    assert [(problem.path, problem.inherited_from) for problem in problems] == [("entries", BASE_OWNER.display)]
+
+
+def test_a_direct_literal_key_marker_with_a_wrong_value_remains_precise() -> None:
+    exc = _fails(StringKeyTable, {"entries": {"[key]": None}})
+    problems = _problems(
+        exc,
+        StringKeyTable,
+        OWNER,
+        {("entries",): BASE_OWNER, ("entries", "[key]"): OTHER_BASE_OWNER},
+    )
+
+    assert [(problem.path, problem.inherited_from) for problem in problems] == [
+        ("entries.[key]", OTHER_BASE_OWNER.display)
+    ]
+
+
+@pytest.mark.parametrize("key", [1.5, ("a", "b")], ids=["float", "tuple"])
+def test_a_stringified_non_string_key_stops_every_related_error_at_the_mapping(key: object) -> None:
+    exc = _fails(StringKeyTable, {"entries": {key: "bad"}})
+    key_error = next(detail for detail in exc.errors(include_url=False) if detail["loc"][-1] == "[key]")
+    rendered_prefix = key_error["loc"][:-1]
+    problems = _problems(
+        exc,
+        StringKeyTable,
+        OWNER,
+        {("entries",): BASE_OWNER, rendered_prefix: OTHER_BASE_OWNER},
+    )
+
+    assert {problem.path for problem in problems} == {"entries"}
+    assert {problem.inherited_from for problem in problems} == {BASE_OWNER.display}
+
+
+class HostileKey:
+    """An opaque key whose authored behavior must not run in the bridge."""
+
+    def __init__(self) -> None:
+        self.hash_calls = 0
+
+    def __hash__(self) -> int:
+        self.hash_calls += 1
+        return object.__hash__(self)
+
+    def __eq__(self, other: object) -> bool:
+        raise AssertionError(f"compared with {type(other).__name__}")
+
+    def __repr__(self) -> str:
+        raise AssertionError("rendered")
+
+
+def test_an_opaque_key_is_not_hashed_compared_or_rendered_by_the_bridge() -> None:
+    key = HostileKey()
+    exc = _fails(StringKeyTable, {"entries": {key: "bad"}})
+    hash_calls_after_validation = key.hash_calls
+
+    problems = _problems(exc, StringKeyTable, OWNER, {("entries",): BASE_OWNER})
+
+    assert key.hash_calls == hash_calls_after_validation
+    assert {problem.path for problem in problems} == {"entries"}
+    assert {problem.inherited_from for problem in problems} == {BASE_OWNER.display}
+
+
+class AddressBearingKey:
+    """An opaque key whose default representation contains its address."""
+
+    __hash__ = object.__hash__
+
+
+def test_opaque_key_addresses_cannot_make_error_paths_nondeterministic() -> None:
+    paths = []
+    for key in (AddressBearingKey(), AddressBearingKey()):
+        problems = _problems(_fails(StringKeyTable, {"entries": {key: "bad"}}), StringKeyTable, OWNER)
+        paths.append([problem.path for problem in problems])
+
+    assert paths == [["entries", "entries"], ["entries", "entries"]]
+
+
+@pytest.mark.parametrize(
+    "key",
+    [pytest.param(1.5, id="float"), pytest.param(AddressBearingKey(), id="opaque-address")],
+)
+def test_a_malformed_outer_key_on_nested_mapping_values_cannot_leak_into_paths(key: object) -> None:
+    exc = _fails(NestedStringKeyTables, {"entries": {key: {"inner": 1}}})
+    problems = _problems(exc, NestedStringKeyTables, OWNER, {("entries",): BASE_OWNER})
+
+    assert [(problem.path, problem.inherited_from) for problem in problems] == [("entries", BASE_OWNER.display)]
+
+
+def test_a_valid_string_key_colliding_with_a_malformed_rendered_location_stops_conservatively() -> None:
+    exc = _fails(StringKeyTable, {"entries": {1.5: "bad-float", "1.5": "bad-string"}})
+    problems = _problems(
+        exc,
+        StringKeyTable,
+        OWNER,
+        {("entries",): BASE_OWNER, ("entries", "1.5"): OTHER_BASE_OWNER},
+    )
+
+    assert {problem.path for problem in problems} == {"entries"}
+    assert {problem.inherited_from for problem in problems} == {BASE_OWNER.display}
+
+
+@pytest.mark.parametrize(
+    ("model_cls", "blob", "path", "rendered"),
+    [
+        (
+            NestedStringKeyTables,
+            {"entries": {"outer": {"inner": "bad"}}},
+            ("entries", "outer", "inner"),
+            "entries.outer.inner",
+        ),
+        (
+            MixedNestedCollections,
+            {"entries": [[{"outer": {"inner": "bad"}}]]},
+            ("entries", 0, 0, "outer", "inner"),
+            "entries[0][0].outer.inner",
+        ),
+    ],
+    ids=["map-map", "list-list-map-map"],
+)
+def test_arbitrary_collection_depth_retains_the_deepest_modeled_attribution(
+    model_cls: type[BaseModel],
+    blob: object,
+    path: tuple[str | int, ...],
+    rendered: str,
+) -> None:
+    problems = _problems(_fails(model_cls, blob), model_cls, OWNER, {path: BASE_OWNER})
+
+    assert [(problem.path, problem.inherited_from) for problem in problems] == [(rendered, BASE_OWNER.display)]
+
+
+@pytest.mark.parametrize(
+    ("model_cls", "wrapped", "expected_path"),
+    [
+        (RecursiveRoot, False, ""),
+        (RecursiveRootHolder, True, "node"),
+    ],
+    ids=["root", "named-outer-field"],
+)
+def test_a_recursive_root_validation_cycle_reaches_config_error_without_path_recursion(
+    model_cls: type[BaseModel],
+    wrapped: bool,
+    expected_path: str,
+) -> None:
+    cycle: list[object] = []
+    cycle.append(cycle)
+    payload: object = {"node": cycle} if wrapped else cycle
+    with pytest.raises(PydanticValidationError) as caught:
+        model_cls.model_validate(payload)
+
+    problems = _problems(caught.value, model_cls, OWNER)
+    error = config_error_from(caught.value, model_cls=model_cls, owner=OWNER)
+
+    assert [problem.path for problem in problems] == [expected_path]
+    assert type(error) is ConfigError
+
+
+@pytest.mark.parametrize("key", ["a.b", "value[0]"])
+def test_mapping_key_punctuation_is_not_parsed_out_of_the_rendered_address(key: str) -> None:
+    exc = _fails(StringKeyTable, {"entries": {key: "bad"}})
+    problems = _problems(exc, StringKeyTable, OWNER, {("entries", key): BASE_OWNER})
+
+    assert [problem.inherited_from for problem in problems] == [BASE_OWNER.display]
+
+
+@pytest.mark.parametrize(
+    ("model_cls", "blob", "path"),
+    [
+        (SiteLike, {"platform": {"name": "lima", "vm_host": 8}}, ("platform", "vm_host")),
+        (TableWithConstrainedKeys, {"env": {"lower": "x"}}, ("env", "lower")),
+    ],
+    ids=["union-arm", "mapping-key-marker"],
+)
+def test_internal_location_labels_do_not_enter_provenance_paths(
+    model_cls: type[BaseModel],
+    blob: object,
+    path: tuple[str | int, ...],
+) -> None:
+    problems = _problems(_fails(model_cls, blob), model_cls, OWNER, {path: BASE_OWNER})
+
+    assert {problem.inherited_from for problem in problems} == {BASE_OWNER.display}
+
+
+def test_the_public_bridge_still_accepts_legacy_top_level_string_provenance() -> None:
+    exc = _fails(PrincipalLike, {"client_id": 8, "tenant_id": "t"})
+    legacy = config_error_from(
+        exc,
+        model_cls=PrincipalLike,
+        owner=OWNER,
+        provenance={"client_id": BASE_OWNER},
+    )
+    normalized = config_error_from(
+        exc,
+        model_cls=PrincipalLike,
+        owner=OWNER,
+        provenance={("client_id",): BASE_OWNER},
+    )
+
+    assert str(legacy) == str(normalized)
+
+
+def test_omitted_empty_and_self_provenance_leave_rendering_unchanged() -> None:
+    exc = _fails(PrincipalLike, {"client_id": 8, "tenant_id": "t"})
+    without = config_error_from(exc, model_cls=PrincipalLike, owner=OWNER)
+    empty = config_error_from(exc, model_cls=PrincipalLike, owner=OWNER, provenance={})
+    own = config_error_from(exc, model_cls=PrincipalLike, owner=OWNER, provenance={("client_id",): OWNER})
+
+    assert str(empty) == str(own) == str(without)
 
 
 def test_a_value_matching_no_alternative_of_a_union_is_one_problem() -> None:

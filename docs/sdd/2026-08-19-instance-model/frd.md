@@ -1,8 +1,9 @@
 # Instance Model and State: Functional Requirements
 
-- Status: Active (R1 and R2 accepted; R4 correction complete pending merge; R3 and R5 pending)
+- Status: Active (R1, R2, and R4 merged; merge-strategy correction implemented and verified; R3 and
+  R5 pending)
 - Date: 2026-08-19
-- Last revised: 2026-08-27
+- Last revised: 2026-08-28
 - Parent: the `2026-08-04-next-steps` saga (destination 2 and the wave-4 enabling track)
 
 ## Rulings this seed rests on
@@ -51,6 +52,13 @@
   and refines the VM declaration; `--admin-template` and `--admin-spec` do the same for the VM's
   admin declaration. Do not add `--vm-template` or `--vm-spec`. Both pairs form one lifecycle
   decision and are persisted atomically for later reinit.
+- **Merge policy belongs to the declared model (authenticated operator channel to the instance-model
+  effort lead, 2026-08-27):** template inheritance and final instance layers use one schema-directed
+  merge contract across core and capability-owned models. Objects merge by key by default and
+  recursively consult each conflicting child's schema. A model or field at any object depth can
+  select an alternative strategy; `replace` discards the complete previous subtree, so none of its
+  child strategies participate in that layer. Lists retain stable append-deduplication by default
+  and can select replacement. Scalars replace by default.
 
 ## Why now
 
@@ -154,8 +162,34 @@ spec. An empty JSON object or the exact empty CLI value clears an agent's prior 
 
 The overlay is applied after the template chain and is correspondingly visible in the declarative
 model. It participates in the shared layer stack introduced by R4, never a bespoke instance-only
-merge. The shared runner owns ordering and provenance while the five domain reducers retain their
-field semantics; this removes the duplicated fold without pretending the field policies are generic.
+merge. The shared runner owns ordering and provenance, and the typed model tree owns field policy
+through one closed merge-strategy vocabulary. The same schema walker applies to core declaration
+models and capability-owned config models that participate in layered merging, at arbitrary nesting
+depth; a capability does not receive an imperative merge callback.
+
+Default object merge preserves non-conflicting keys and recursively merges conflicts. A `replace`
+strategy on an object replaces the whole subtree, including with an empty object. A replaced list,
+including an empty list, replaces the complete prior list; an unmarked list keeps stable
+append-deduplication. A `replace` strategy on a field containing a discriminated or structural union
+wins before arm selection. Otherwise, the union recurses only while both values select the same arm:
+an explicit containing-field `merge` wins there, followed by the selected arm model's policy and the
+object default. Different arms, or arms that cannot be selected, replace the complete union value
+even under a containing `merge`, preventing a composite across arms. The environment-table mapping
+value declares replacement at each per-key conflict, so same-arm and cross-arm environment conflicts
+retain today's whole-entry replacement without attaching mapping-only policy to a scalar-shorthand
+arm. An unknown key within a known schema is preserved; when two layers supply that same unknown
+key, the later raw value replaces the earlier one rather than creating a second runtime-shape merge
+language. A wholly unknown harness integration has no schema or usable effective config, so its
+later raw config replaces its complete prior config and the Registry reports the selector miss. The
+engine preserves malformed input for the existing final typed validation boundary rather than
+filtering, coercing, or laundering it, and it must terminate on a cyclic Python value reaching the
+deliberately open capability config boundary, including through a YAML alias.
+
+Model-directed merging replaces the public `HarnessIntegration.merge_config` customization point.
+That is an intentional hard cutover of the harness-integration capability contract from version 1 to
+version 2: shipped integrations move to annotations, version-1 third-party integrations fail clearly
+at registration, and no compatibility bridge or second merge authority remains.
+
 The resolved result is what R3 records on apply and R5 shows on demand. Validation matches template
 validation: an overlay that would produce an invalid effective spec fails at declaration time with
 the same error quality templates get. One adjacent idea, recorded here so it is inheritable rather
@@ -215,6 +249,11 @@ discipline: existing fields preserved, additions optional and tagged.
   resource is present on the same list, describe, verify, doctor, and graph surfaces as one
   referenced by a YAML declaration. Candidate references participate during creation without
   surviving a failed command.
+- Template inheritance and final instance overlays follow the same model-declared merge policy for
+  core and capability config: nested objects recurse by default, an object or list marked `replace`
+  discards its complete prior value, union-arm changes cannot create hybrids, and provenance
+  identifies the surviving leaf or replaced subtree without attributing discarded children. List
+  provenance identifies positions in the final effective list, never authored item values.
 - The simple case does not get more verbose: an operator who never writes an overlay sees no new
   required ceremony.
 
