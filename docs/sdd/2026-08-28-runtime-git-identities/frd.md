@@ -267,6 +267,10 @@ write operation prove that the emitted Git credential form works with the reposi
 merely its REST API. Missing/failed/malformed/timeout cases are value-safe; a valid token for an
 identity without repository access produces Git's normal forge rejection.
 
+Before this design merges, a ready-PR integration run MUST prove the proposed
+organization-username/token-password form with a real read-only Azure Repos Git operation. A failed
+or unavailable proof is not approval to begin implementation.
+
 ### AC5: Selection
 
 Secret and CLI-backed helpers can coexist on one host. Exact-repository, owner/organization, and

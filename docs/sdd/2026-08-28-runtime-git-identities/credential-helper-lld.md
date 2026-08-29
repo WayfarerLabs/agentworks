@@ -234,8 +234,9 @@ Microsoft's current Git guidance recommends a Bearer header. The conventional re
 deliberate compatibility choice for Debian Bookworm's Git 2.39: current Git Credential Manager's
 Azure Repos provider returns the same Entra access token as a `GitCredential` username/password
 pair, including for service-principal identities. The implementation still proves this exact form
-against live Azure Repos before handoff. It does not expose resource/scope, extra CLI flags, or
-arbitrary executable paths as configuration.
+against live Azure Repos before handoff, and the design PR first proves the wire form through a real
+read-only Git operation when it becomes ready. It does not expose resource/scope, extra CLI flags,
+or arbitrary executable paths as configuration.
 
 ## Core Material Model
 

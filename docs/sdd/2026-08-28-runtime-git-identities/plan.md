@@ -26,6 +26,11 @@
   Document-only work does not add a generic code-correctness lane.
 - Review convergence recommends promotion but does not authorize it. The operator decides when the
   design PR becomes ready and merges.
+- The first ready transition triggers one bounded integration-tester design proof against an
+  authorized Azure Repos repository: obtain the Azure DevOps-audience token through the active
+  service-principal `az` identity and use the proposed organization-username/token-password helper
+  response for a read-only Git operation. Failure returns the PR to draft for Azure-arm redesign;
+  unavailable inventory is reported as blocked, never counted as proof.
 - Implementation begins from the merged design on current `main` and lands in one feature PR so the
   provider contract, callers, reconciliation, cleanup, and live behavior cannot land in a misleading
   half-state. This effort does not define a safe implementation split.
@@ -80,6 +85,8 @@ assert structure, behavior, state, and value containment; they do not police aut
       create or apply `sdd:runtime-git-identities`, and apply `review-requested`. (2026-08-28: draft
       PR #691 opened from `docs/git-credential-runtime-identities`; the review-requested signal was
       applied after this final bookkeeping commit.)
+- [ ] On the operator-authorized ready transition, prove the proposed Azure username/password wire
+      form with a real read-only Azure Repos Git operation before the design merges.
 - [ ] Collect the requested public artifact perspectives and process at most four authorized
       converging iterations.
 - [ ] Receive operator direction to promote and merge the design checkpoint before implementation.
@@ -92,7 +99,7 @@ assert structure, behavior, state, and value containment; they do not police aut
 - The provider/core ownership boundary and total empty-state reconciliation are explicit.
 - The removed direct-add path has no replacement writer or installed-state compatibility seam.
 - Azure Git authentication and Git config precedence are named implementation proofs, not assumed
-  facts.
+  facts; the Azure wire shape is additionally a design-merge proof.
 - Review reports no unresolved material design or complexity finding.
 
 ## Requirement Traceability

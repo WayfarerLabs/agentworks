@@ -220,8 +220,9 @@ its configuration.
 
 The provider supplies the fixed Azure DevOps resource recipe. The response uses organization as
 username and the Entra token as password, following current Git Credential Manager prior art and
-pending the required real Azure Repos proof. The exact command and evidence live in the LLD and
-research artifact.
+pending the required design-ready Azure Repos wire proof. The implementation later proves the
+generated helper through clone, fetch, and a reversible write. The exact command and prior-art
+evidence live in the LLD and research artifact.
 
 ## Security Boundaries
 

@@ -192,11 +192,12 @@ rather than silently growing version-dependent branches.
 
 ## Open Questions for Implementation Evidence
 
-These do not change the accepted requirements, but must be answered before implementation handoff:
+These do not change the accepted requirements, but must be answered at the named gates:
 
 1. Does the host-scoped reset/include sequence behave as designed on Debian Bookworm's Git 2.39?
-2. Does the selected GCM-style username/password response work with a real `az`-issued Entra token
-   for Azure Repos clone, fetch, and push?
+2. At design-ready review, does the selected GCM-style username/password response work with a real
+   `az`-issued Entra token for a read-only Azure Repos Git operation? During implementation, does
+   the generated helper then support clone, fetch, and push?
 
 Each answer is recorded in permanent implementation documentation or tests, not left load-bearing
 only in this research file.
