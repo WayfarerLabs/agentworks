@@ -13,7 +13,7 @@
 R3 adds two VM-owned, version-1 applied-state codecs outside `agentworks.db`: an empty marker
 proving that a successful create established the hardware values already stored on the VM row, and
 an SSH identity payload recording the configured private-key reference plus either its authoritative
-OpenSSH SHA-256 fingerprint or a closed unverifiable reason.
+OpenSSH SHA-256 fingerprint or an explicit unverifiable marker.
 
 A standard-library leaf parser extracts the one public blob from a native `openssh-key-v1` private
 envelope without decrypting its private section. The same fingerprint function parses the configured
@@ -65,19 +65,18 @@ configuration, transport, output, or VM lifecycle code. Its public carriers are 
 ```text
 VerifiedSSHIdentity
   fingerprint: str
-  public_blob: bytes
 
 UnverifiableSSHIdentity
-  reason: SSHIdentityUnverifiableReason
 
 SSHIdentityReadError(Exception)
   kind: invalid | unavailable
   detail: str  # bounded authored diagnostic, never source bytes
 ```
 
-`SSHIdentityUnverifiableReason` initially has one value:
-`private-format-has-no-exposed-public-identity`. It covers recognized private-key armor outside the
-native OpenSSH envelope. It does not claim whether a passphrase is present.
+`UnverifiableSSHIdentity` is a zero-field arm covering recognized private-key armor outside the
+native OpenSSH envelope. It does not claim whether a passphrase is present or why an installed SSH
+client accepts the legacy envelope. A future cause that needs different behavior or operator
+guidance adds a new payload version rather than persisting a constant reason preemptively.
 
 The leaf functions are:
 
@@ -210,16 +209,17 @@ Unverifiable identity encodes as:
 ```json
 {
   "private_key_ref": "/configured/path",
-  "reason": "private-format-has-no-exposed-public-identity",
   "status": "unverifiable"
 }
 ```
 
 The two arms are closed and disjoint. The verified arm requires exactly `status`, `private_key_ref`,
-and `fingerprint`; the unverifiable arm requires exactly `status`, `private_key_ref`, and `reason`.
-The reference must be nonempty printable text. The fingerprint must be `SHA256:` plus the
-43-character base64 encoding without padding of a 32-byte digest. A recorded unverifiable payload
-has no fingerprint. Absence is represented only by absence of the slice.
+and `fingerprint`; the unverifiable arm requires exactly `status` and `private_key_ref`. The
+explicit status remains required even though fingerprint presence could appear to distinguish the
+arms: inferring status from an omitted field would let malformed persisted data masquerade as a
+valid unverifiable record. The reference must be nonempty printable text. The fingerprint must be
+`SHA256:` plus the 43-character base64 encoding without padding of a 32-byte digest. A recorded
+unverifiable payload has no fingerprint. Absence is represented only by absence of the slice.
 
 Codecs return `VersionedPayload` only after domain validation. Decode failures at the persisted-data
 boundary raise `StateError` naming the VM and the malformed or unsupported payload. Backup decodes
@@ -288,8 +288,8 @@ After Phase B returns and before terminal persistence, `run_initialization()` re
 private identity again:
 
 - verified before and after with the same fingerprint yields the verified SSH payload;
-- unverifiable before and after with the same reason yields the unverifiable payload;
-- any change of arm, fingerprint, reason, invalid state, or unavailable state adds an initialization
+- unverifiable before and after yields the unverifiable payload;
+- any change of arm or fingerprint, invalid state, or unavailable state adds an initialization
   warning and marks an existing SSH slice for removal.
 
 This catches ordinary replacement of the configured private path during initialization. It does not
@@ -357,8 +357,7 @@ needed.
 - VM name;
 - recorded configured private-key reference when present;
 - current configured private-key reference;
-- applied and current fingerprints when each is known; and
-- a closed reason when identity derivation is unverifiable.
+- applied and current fingerprints when each is known.
 
 Missing or malformed repository envelopes remain `StateError`, not one of the four facts. Current
 file unavailable or invalid also raises a typed configuration/state error before SSH. Every
