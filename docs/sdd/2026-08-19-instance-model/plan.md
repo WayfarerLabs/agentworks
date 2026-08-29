@@ -311,7 +311,8 @@ behavior; and no database migration, payload-version change, or new operator syn
       does not silently omit the hardware or SSH provenance it claims to preserve.
 - [ ] Prove matching, replaced private key at the same path, stale or mismatched adjacent public
       key, encrypted OpenSSH key, encrypted legacy PEM, missing/unreadable key, absent historic
-      state, successful capture, failed-operation non-capture, and atomic lifecycle behavior.
+      state, successful capture, failed-operation non-capture, atomic lifecycle behavior, and
+      diagnostic non-disclosure without prose-policing assertions.
 - [ ] Publish the payload and comparison contract in the permanent store documentation.
 
 Definition of done: the identity used at apply time is recorded and compared with the identity the

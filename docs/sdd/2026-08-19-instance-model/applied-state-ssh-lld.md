@@ -72,7 +72,7 @@ UnverifiableSSHIdentity
 
 SSHIdentityReadError(Exception)
   kind: invalid | unavailable
-  detail: str
+  detail: str  # bounded authored diagnostic, never source bytes
 ```
 
 `SSHIdentityUnverifiableReason` initially has one value:
@@ -95,7 +95,10 @@ fingerprint_public_blob(blob) -> str
 
 The leaf never raises a VM-domain error. File and parse failures raise its own typed
 `SSHIdentityReadError`, which the VM-domain boundary translates to the relevant `ConfigError` or
-`StateError`. It never logs private bytes, public blobs, passphrases, or complete file contents.
+`StateError`. Its detail names the failed stage and, where useful, a path, byte offset, declared
+length, or exception class. It never contains a byte representation, decoded fragment, base64 text,
+passphrase, complete or partial file contents, or captured upstream output. The same prohibition
+applies to every log and operator-facing diagnostic built from the error.
 
 ### `agentworks.vms.applied_state`
 
@@ -250,7 +253,7 @@ AuthorizedKeysApplied
   private_key_ref: str
 
 AuthorizedKeysUnproven
-  detail: str
+  detail: str  # bounded authored diagnostic, never key content or captured output
 ```
 
 The non-admin owner path retains its existing raising failure contract because downstream agent
@@ -267,10 +270,12 @@ Before its remote write, the helper:
 
 If the private identity is a recognized unverifiable format, the helper proceeds with the configured
 public key and retains an unverifiable proof. If the admin-self remote write raises `SSHError`, the
-helper preserves today's warning behavior and returns `AuthorizedKeysUnproven`. An SSH failure
-cannot prove whether the remote mutation happened before acknowledgement, so the outcome
-deliberately does not claim that nothing was applied. The helper does not convert a local
-configuration or identity mismatch into a warning.
+helper preserves today's warning classification with a bounded authored summary and returns
+`AuthorizedKeysUnproven`. It does not forward captured stderr, command output, or transferred
+content through either the warning or the outcome detail. An SSH failure cannot prove whether the
+remote mutation happened before acknowledgement, so the outcome deliberately does not claim that
+nothing was applied. The helper does not convert a local configuration or identity mismatch into a
+warning.
 
 For the admin-self path, authorized-key reconciliation moves to the last remote mutation in Phase B.
 Earlier setup can therefore fail without making the recorded SSH identity stale, while a successful
@@ -356,8 +361,10 @@ needed.
 - a closed reason when identity derivation is unverifiable.
 
 Missing or malformed repository envelopes remain `StateError`, not one of the four facts. Current
-file unavailable or invalid also raises a typed configuration/state error before SSH. Values used in
-operator messages are bounded and path-rendered; private bytes and public blobs never appear.
+file unavailable or invalid also raises a typed configuration/state error before SSH. Every
+operator-facing value is bounded and path-rendered. Diagnostics may include safe fingerprints,
+paths, offsets, lengths, and authored failure classes, but never private bytes, public blobs,
+passphrases, source fragments, or captured upstream output.
 
 Comparison rules are:
 
@@ -496,7 +503,9 @@ archive restore consumer to update.
 - strict payload round trips, extra fields, wrong types, bad fingerprint shape, unsupported version,
   and absence distinct from recorded-unverifiable; and
 - assertions that encoded payloads contain no private bytes, public key text, passphrase, or
-  row-backed hardware values.
+  row-backed hardware values;
+- sensitive sentinels in malformed input and captured transport failures never appear in exception
+  text, warnings, logs, or terminal diagnostics, without asserting authored prose wording.
 
 ### Lifecycle and transaction tests
 
