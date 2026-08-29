@@ -33,11 +33,15 @@ session, and whoever posts it signs as themselves. A delegate that commits, push
 own rather than handing back does exactly that: it signs and trails as itself, not as its lead,
 since the point is to say which worker produced the thing. A delegate inherits its lead's
 environment, so `AGENTWORKS_SESSION` names the lead and nothing in that environment names the
-delegate. The lead supplies it: charter each delegate with `AGENTWORKS_DELEGATE`, set to the same
-identifier that namespaces its scratch, fixture, and live-test resources, since something must
-already assign that or concurrent delegates collide. Nothing is invented, because the lead assigns
-and the delegate reads. The trailer is then one value under the existing key, so an effort's commits
-stay findable as a set and a delegate's stay distinguishable within it:
+delegate. The lead supplies it: charter each delegate with `AGENTWORKS_DELEGATE`, holding the
+**complete** identifier the delegate uses verbatim, not a fragment it joins to something else. A
+lead with a namespace for that delegate's scratch and fixtures has the obvious value to hand it.
+Nothing is invented and nothing is composed, because the lead assigns and the delegate reads.
+
+A delegate acting on its own uses `AGENTWORKS_DELEGATE` for both surfaces, its signature and its
+`Agentworks-Session` trailer; everything else uses `AGENTWORKS_SESSION`. One value under the
+existing key keeps an effort's commits findable as a set while a delegate's stay distinguishable
+within it, which is why a lead composing that value usually builds it from its own session name:
 
 ```text
 Agentworks-Session: agw-ns-instance-model/dev-3
