@@ -85,6 +85,12 @@ assert structure, behavior, state, and value containment; they do not police aut
       create or apply `sdd:runtime-git-identities`, and apply `review-requested`. (2026-08-28: draft
       PR #691 opened from `docs/git-credential-runtime-identities`; the review-requested signal was
       applied after this final bookkeeping commit.)
+- [x] Incorporate public feedback cycle 2 by making providers own secret interpretation, final Git
+      credential construction, and forge-to-HTTPS-scope translation; limit core to scoped delivery,
+      generic routing, validation, and reconciliation; add the runtime-only executable check; and
+      remove speculative launcher ABI/versioned-root promises while retaining the current adjacent
+      pairing proof. (2026-08-28: FRD, HLA, LLD, migration, research, and implementation plan
+      corrected together.)
 - [ ] On the operator-authorized ready transition, prove the proposed Azure username/password wire
       form with a real read-only Azure Repos Git operation before the design merges.
 - [ ] Collect the requested public artifact perspectives and process at most four authorized
@@ -96,7 +102,8 @@ assert structure, behavior, state, and value containment; they do not police aut
 - Every requirement maps to architecture, detailed design, migration, implementation work, and an
   objective proof.
 - Secret-backed validation and runtime CLI acquisition have distinct, unambiguous lifecycle rules.
-- The provider/core ownership boundary and total empty-state reconciliation are explicit.
+- Providers own secret interpretation, acquisition, forge scope translation, and final output; core
+  owns generic Git routing and total empty-state reconciliation.
 - The removed direct-add path has no replacement writer or installed-state compatibility seam.
 - Azure Git authentication and Git config precedence are named implementation proofs, not assumed
   facts; the Azure wire shape is additionally a design-merge proof.
@@ -106,10 +113,10 @@ assert structure, behavior, state, and value containment; they do not police aut
 
 | Requirement | Design authority                     | Planned proof                                      |
 | ----------- | ------------------------------------ | -------------------------------------------------- |
-| R1, R2      | HLA models; helper LLD contract      | phase 1 contract/config/graph tests                |
-| R3          | HLA lifecycle; helper LLD runup      | phases 1 and 2 static-token policy tests           |
-| R4, R5      | HLA runtime; helper LLD source rules | phases 2, 3, and 5 runtime/locking/live tests      |
-| R6          | HLA builder; helper LLD dispatcher   | phases 2 and 4 selection/collision tests           |
+| R1, R2      | HLA models; helper LLD contract      | phase 1 contract/config/context tests              |
+| R3          | HLA lifecycle; helper LLD runup      | phases 1 and 2 provider-policy tests               |
+| R4, R5      | HLA runtime; helper LLD helper rules | phases 2, 3, and 5 runtime/locking/live tests      |
+| R6          | HLA builder; helper LLD scope router | phases 2 and 4 generic selection/collision tests   |
 | R7, R8      | HLA reconciler/config boundary       | phases 3 and 4 idempotence/ownership tests         |
 | R9          | HLA one-write-path decision          | phase 4 removed-command and residual tests         |
 | R10         | HLA security; helper LLD containment | phases 2 through 6 adversarial/value scans         |
@@ -119,48 +126,61 @@ assert structure, behavior, state, and value containment; they do not police aut
 ## Phase 1: Provider Contract and Configuration
 
 - [ ] Add provider-owned closed acquisition unions: GitHub `secret | gh-cli`, Azure DevOps
-      `secret | az-cli`; preserve secret omission/scalar/full forms.
-- [ ] Prove only `secret` emits a secret reference and CLI arms reject secret fields and
-      cross-provider modes.
-- [ ] Add frozen selector/source/helper-definition types with safe construction and value-safe
-      representations.
+      `secret | az-cli`; preserve secret omission/scalar/full forms and structurally derive each
+      provider's complete secret-reference set.
+- [ ] Prove current CLI arms declare no secret, secret arms declare their configured reference, a
+      synthetic provider may declare several, and scoped delivery refuses every undeclared read.
+- [ ] Add frozen generic HTTPS-scope, stored-credential, managed-helper, and credential-material
+      types with value-safe construction and representations.
 - [ ] Cut the capability descriptor and all in-tree providers atomically to contract version 3 and
-      the single `helper_definition` operation.
-- [ ] Delete v2 `helper_entry`, `credential_lines`, static-store username routing, and universal
-      `secret_name` assumptions.
-- [ ] Retain provider-specific static-token verification and `defaults.runup_git_credentials`; make
-      CLI-backed runup a structural no-op.
+      the single context-taking `credential_material` operation.
+- [ ] Delete v2 `helper_entry`, `credential_lines`, static-store username routing, universal
+      `secret_name`, naked-token calls, and core token-map assumptions.
+- [ ] Retain provider-owned static validation and `defaults.runup_git_credentials`; make current
+      CLI-backed runup a provider no-op.
 - [ ] Update schema/resource samples and provider contract tests without asserting authored prose.
 
 ### Phase 1 Definition of Done
 
-- Every provider config validates through the framework and produces exactly one inert helper
-  definition.
-- Graph edges and runup behavior follow acquisition shape without caller special cases.
+- Every provider config validates through the framework and produces exactly one final material
+  value from its scoped context.
+- Graph edges, scoped delivery, and runup behavior follow provider declarations without core
+  acquisition special cases.
 - No contract-version-2 implementation or adapter remains.
 
 ## Phase 2: Runtime Helpers and State Builder
 
-- [ ] Implement the static-token source using a core-owned mode-0600 store and line-safety checks at
-      final materialization.
-- [ ] Implement one core bounded runtime-command executor using the guaranteed coreutils `timeout`;
-      feed it the fixed GitHub and Azure provider recipes and value-safe diagnostics.
-- [ ] Pin GitHub to `gh auth token --hostname github.com` and Azure to the exact
-      resource-ID/query/TSV command plus organization-username/token-password response.
-- [ ] Build the deterministic dispatcher, host-specific Git include, generation layout, and atomic
-      `current` symlink activation from helper definitions.
-- [ ] Preserve exact-repository, owner/organization, and default selection; reject scope collisions
-      and unsafe provider output.
-- [ ] Add fake CLI/protocol tests for success, missing executable, nonzero command, timeout, empty,
-      multiline/control output, noisy stderr, unsupported operations, and no-match cases.
-- [ ] Prove no token appears in dispatcher, include, representations, errors, logs, or test
-      artifacts.
+- [ ] Make GitHub and Azure secret arms read their scoped context, retain provider-owned validation,
+      and return final `StoredCredential` values; add a synthetic multi-secret exchange provider to
+      prove core remains acquisition-agnostic.
+- [ ] Make GitHub and Azure CLI arms return fixed provider-owned `ManagedHelper` programs that
+      declare `gh`/`az`, emit complete Git credential responses, handle dependency execution
+      failure, and perform no provisioning-time CLI checks.
+- [ ] Pin the GitHub helper to `gh auth token --hostname github.com` and the Azure helper to the
+      exact resource-ID/query/TSV command plus provider-owned organization-username/token-password
+      response.
+- [ ] Implement one core bounded managed-helper envelope using guaranteed coreutils `timeout`; pass
+      the Git request, check the declared executable on the runtime `PATH`, validate only response
+      protocol shape, suppress upstream output, and emit generic missing-tool or provider-fixed
+      value-safe failure guidance.
+- [ ] Build the generic longest-path dispatcher, host-specific Git include, generation layout, and
+      atomic `current` activation from final provider materials.
+- [ ] Prove providers translate GitHub repository/owner and Azure organization into generic path
+      tuples; preserve selection outcomes, reject duplicate nonempty scopes, and retain released
+      multiple-host-default behavior.
+- [ ] Add fake helper/protocol tests for success, missing executable, nonzero, timeout, malformed or
+      control-bearing response, noisy stderr, unsupported operations, and no-match cases.
+- [ ] Prove no credential appears in dispatcher, include, representations, errors, logs, process
+      arguments, managed-helper programs, or test artifacts; reject any delivered secret value in
+      managed-helper fields, forbid derived credentials in the provider contract, and cover every
+      built-in managed-helper program.
 
 ### Phase 2 Definition of Done
 
-- The complete desired per-user state can be built before any target mutation.
-- Runtime helpers acquire credentials only on a matching Git `get` and fail safely otherwise.
-- Selection is independent of static-store usernames.
+- The complete desired per-user state can be built from final provider material before any target
+  mutation.
+- Managed helpers acquire credentials only on a matching Git `get` and fail safely otherwise.
+- Core selection is generic HTTPS context and independent of provider vocabulary or store usernames.
 
 ## Phase 3: Atomic Per-user Reconciliation
 
@@ -177,8 +197,10 @@ assert structure, behavior, state, and value containment; they do not police aut
       rejected-last-static, mixed, malformed legacy, staged failure, and empty states.
 - [ ] Prove concurrent helper/swap/empty cleanup never mixes generations or deletes files under an
       in-flight helper.
-- [ ] Prove both previous/current launcher-dispatcher ABI pairings and a fault between their atomic
-      replacements retain one executable generation contract.
+- [ ] Prove current-launcher/previous-dispatcher and previous-launcher/current-dispatcher pairings,
+      plus a fault between their two atomic replacements, retain one complete-generation read; keep
+      the fixed lock descriptor as this implementation's mechanism without a permanent ABI/versioned
+      root contract.
 - [ ] Fault every mixed legacy/new mutation boundary and prove stale credentials are never
       reactivated; prove helper/reconciler lock timeouts and child-descriptor closure.
 
@@ -196,8 +218,9 @@ assert structure, behavior, state, and value containment; they do not police aut
       private Git-backed setup.
 - [ ] Make agent creation/reinitialization use the same builder/reconciler unconditionally and
       delete its duplicate writer/config logic.
-- [ ] Change composition roots to require resolved values only for static sources and preserve
-      static resolution failures plus rejected-token skip/partial behavior.
+- [ ] Change composition roots to resolve the provider-declared union once, construct a
+      `ScopedSecrets` context per provider, collect final material, and preserve secret-resolution
+      failures plus rejected-provider skip/partial behavior.
 - [ ] Delete `vm add-git-credential`, its manager path, tests, completion/help/docs entries, and
       static-store append/fallback behavior; teach the declarative template plus reinit path.
 - [ ] Delete conditional provider gates, duplicate constants/comments, installed-state speculation,
@@ -233,8 +256,9 @@ assert structure, behavior, state, and value containment; they do not police aut
 
 ## Phase 6: Permanent Collateral, Review, and Delivery
 
-- [ ] Rewrite `capabilities/git_credential/README.md` around scoped helper definitions, static and
-      runtime sources, secret-only runup, reconciliation ownership, and provider-authoring rules.
+- [ ] Rewrite `capabilities/git_credential/README.md` around provider-owned acquisition, generic
+      HTTPS scopes, stored credentials, managed helpers, scoped contexts, reconciliation ownership,
+      and provider-authoring rules.
 - [ ] Update capability/resource prose, schemas, examples, sample config/manifest disposition,
       command reference, guide concepts, CLI README, upgrade guide, and plugin documentation.
 - [ ] Document the exact `gh`/`az` runtime commands, active-identity prerequisite, Azure

@@ -59,20 +59,23 @@ credential list, scoped secret delivery, transport, logger, and initialization s
 
 ### 1. Introduce final types and builders in one implementation branch
 
-Add provider-owned acquisition unions, version-3 helper definitions, the state builder, the
-reconciler, and migration cleanup. Tests use the new types directly while production remains on the
-old path only within the working branch.
+Add provider-owned acquisition unions, generic HTTPS scopes, the two version-3 material shapes, the
+state builder, the reconciler, and migration cleanup. Tests use the new types directly while
+production remains on the old path only within the working branch.
 
 ### 2. Convert both providers
 
-Convert GitHub and Azure DevOps to `helper_definition`; retain secret verification under a
-secret-only branch and add their CLI helper sources. Update descriptor contract version and required
-operation in the same commit or tightly adjacent commits that never form a mergeable partial.
+Convert GitHub and Azure DevOps to `credential_material(ctx)`. Each provider translates its own
+scope fields, reads only its scoped declared secrets, retains provider-owned validation for the
+secret arm, and returns either a final stored credential or its fixed CLI managed helper. Update the
+descriptor contract version and required operation in the same commit or tightly adjacent commits
+that never form a mergeable partial.
 
 ### 3. Convert graph and boundary assumptions
 
-Allow credential nodes with no secret edges. Thread resolved values only for static sources. Keep
-the existing secret-runup caller policies.
+Allow credential nodes with zero, one, or several secret edges. Resolve the operation-wide union and
+construct one `ScopedSecrets` context per provider. Delete core's resolved-token map and keep the
+existing provider-runup caller policies.
 
 ### 4. Cut admin and agent initialization together
 
@@ -93,8 +96,9 @@ internal unreleased names.
 
 ### 7. Update permanent collateral and validate live
 
-Rewrite the provider README around helper definitions, update resource/schema/sample/guide/command
-and upgrade surfaces, then run GitHub and Azure live acceptance before merge intent.
+Rewrite the provider README around stored credentials, managed helpers, provider-owned acquisition,
+and generic core scope. Update resource/schema/sample/guide/command and upgrade surfaces, then run
+GitHub and Azure live acceptance before merge intent.
 
 ## Legacy File Ownership
 
@@ -151,15 +155,15 @@ duplicates, missing files, and malformed Agentworks files. Every case preserves 
 
 The following transitions are explicit acceptance cases:
 
-| Before                     | Desired after init  | Required result                                       |
-| -------------------------- | ------------------- | ----------------------------------------------------- |
-| one static                 | none                | token/store/helper/include removed                    |
-| one CLI helper             | none                | runtime recipe/include removed                        |
-| mixed static and CLI       | none                | credential/routing state removed; inert lock may stay |
-| rejected last static token | none survives       | prior installed credential removed, init partial      |
-| static                     | matching CLI arm    | static token removed, runtime helper installed        |
-| CLI arm                    | matching static arm | runtime helper removed, validated static token stored |
-| scoped helper              | narrower scope      | old selector absent after one run                     |
+| Before                   | Desired after init  | Required result                                       |
+| ------------------------ | ------------------- | ----------------------------------------------------- |
+| one stored credential    | none                | store/helper/include removed                          |
+| one managed helper       | none                | provider helper/include removed                       |
+| mixed stored and managed | none                | credential/routing state removed; inert lock may stay |
+| rejected last provider   | none survives       | prior installed credential removed, init partial      |
+| stored                   | matching CLI arm    | stored value removed, managed helper installed        |
+| CLI arm                  | matching stored arm | managed helper removed, provider credential stored    |
+| scoped material          | narrower scope      | old generic path scope absent after one run           |
 
 ## Migration Definition of Done
 

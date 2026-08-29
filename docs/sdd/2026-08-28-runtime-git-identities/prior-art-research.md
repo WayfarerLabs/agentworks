@@ -7,8 +7,8 @@
 
 Git's credential-helper protocol is expressly designed for generated credentials and supports
 multiple helpers, path-aware selection, host-specific configuration, and safe non-support of
-`store`/`erase`. This validates keeping a core dispatcher while letting providers supply static or
-runtime sources.
+`store`/`erase`. This validates keeping a generic core scope router while providers return either a
+final stored credential or their own managed helper behavior.
 
 GitHub CLI provides a direct command for printing the active host/account token and a documented
 non-interactive environment posture. Azure CLI can issue short-lived Microsoft Entra tokens for the
@@ -28,23 +28,27 @@ and accepts credential attributes on stdout. A helper may return no values, may 
 stderr, and may safely ignore unsupported operations. Shell snippets and absolute helper paths are
 supported. Multiple helpers are tried until Git has a complete credential.
 
-Git normally ignores HTTP path when matching credentials; `credential.useHttpPath=true` makes
-repository-level selection possible. URL-specific credential sections constrain configuration to a
-host/path context. An empty helper value resets helpers accumulated at lower-priority configuration
-levels, which gives the generated include a way to own configured hosts without deleting unrelated
-global configuration.
+Git normally ignores HTTP path when matching credentials; `credential.useHttpPath=true` makes the
+path available to helpers. URL-specific credential sections constrain configuration to a host/path
+context, but the target Debian Bookworm Git 2.39 requires exact config-path matches and therefore
+cannot itself express today's owner/organization prefix fallback. A small generic dispatcher can do
+segment-aware longest-prefix matching without learning forge vocabulary. An empty helper value
+resets helpers accumulated at lower-priority configuration levels, which gives the generated include
+a way to own configured hosts without deleting unrelated global configuration.
 
 **Design decisions:**
 
 - retain one deterministic Agentworks dispatcher;
 - register it through host-specific contexts in one Agentworks-owned include;
-- preserve exact-repository/owner/default selection;
+- represent matching as exact HTTPS host plus longest segment-aware path prefix, letting providers
+  translate repository/owner/organization configuration without core knowing those concepts;
 - let the dispatcher ignore `store` and avoid destructive `erase`;
 - prove config precedence on Debian Bookworm's Git 2.39.
 
 Sources:
 
 - [Git credential documentation](https://git-scm.com/docs/gitcredentials)
+- [Git 2.39 credential documentation](https://git-scm.com/docs/gitcredentials/2.39.0)
 - [Git credential plumbing and helper capabilities](https://git-scm.com/docs/git-credential)
 - [Git configuration includes](https://git-scm.com/docs/git-config)
 
@@ -111,16 +115,16 @@ Sources:
 The current implementation already has several parts worth preserving:
 
 - one tagged secret acquisition arm intentionally created for future additive modes;
-- core-derived secret graph edges;
+- structurally derived provider secret graph edges and scoped `RunContext` delivery;
 - provider-specific secret-token probes;
-- deterministic exact-repository, owner/organization, and default routing;
+- deterministic path-based routing outcomes;
 - a core-owned helper that refuses destructive erase;
 - atomic material building before remote writes;
 - per-user admin and agent state.
 
 The parts to retire are accidental PAT assumptions and lifecycle duplication:
 
-- universal `secret_name` and token mapping;
+- universal `secret_name`, naked-token calls, and core token mapping;
 - `credential_lines` as the provider's main output;
 - duplicated admin/agent writes;
 - skipping setup when desired state is empty;
@@ -128,7 +132,8 @@ The parts to retire are accidental PAT assumptions and lifecycle duplication:
 - direct-add's static unscoped append path.
 
 **Design decision:** evolve the existing dispatcher/provider boundary rather than add a parallel CLI
-credential system.
+credential system. Providers own acquisition and final output; core owns only generic routing,
+boundary validation, and state reconciliation.
 
 ## Alternatives Considered
 
@@ -161,10 +166,18 @@ Rejected by operator ruling. Secret-backed tokens are already available at runup
 provider-specific probe gives useful early feedback. The asymmetry follows real acquisition
 semantics: static material can be validated now; CLI material does not exist until runtime.
 
-### Let providers emit executable helper scripts
+### Let providers mutate user Git state directly
 
-Rejected. Both runtime arms need the same bounded process behavior. Providers return fixed argv,
-environment additions, and response username; one core helper owns execution and diagnostics.
+Rejected. Provider-specific writes would make removed providers impossible to clean up reliably and
+would recreate separate admin/agent state protocols. Providers return declarative stored credentials
+or managed-helper definitions; one core reconciler owns installation and removal.
+
+### Let operator configuration supply arbitrary helper commands
+
+Rejected. A trusted provider implementation may return its own fixed or safely rendered helper
+program, but operator configuration cannot inject a program, executable path, or arguments. This
+preserves provider extensibility without turning a credential resource into a command-execution
+surface.
 
 ### Replace all global helpers as today
 

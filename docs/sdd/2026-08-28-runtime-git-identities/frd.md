@@ -15,11 +15,13 @@ user initialization it verifies the token, writes it into a managed credential s
 scope-selecting Git credential helper, and registers that helper globally. This works for PATs but
 does not represent dedicated identities already authenticated through GitHub CLI or Azure CLI.
 
-Git credential providers will become narrowly responsible for producing scoped Git credential helper
-definitions. A credential may continue to obtain a static token from an Agentworks secret, or it may
-delegate runtime token acquisition to the authenticated identity of `gh` or `az`. Core Agentworks
-code will reconcile every Agentworks-owned helper and Git configuration artifact on every admin or
-agent user initialization, including the transition to no configured credentials.
+Git credential providers will own credential acquisition and translate their forge-specific
+configuration into generic HTTPS credential scopes. During user initialization, core passes each
+provider only the resolved secrets it declared. The provider may return a final credential for the
+standard Agentworks store or a declarative provider-owned helper that acquires credentials later.
+Core does not interpret the provider's secrets or authentication flow; it validates the returned
+boundary shapes and reconciles every Agentworks-owned helper and Git configuration artifact,
+including the transition to no configured credentials.
 
 Secret-backed tokens retain their current runup validation. CLI-backed credentials deliberately do
 not check tool installation or authentication during provisioning; their helpers acquire a fresh
@@ -30,11 +32,13 @@ unauthenticated.
 
 1. Support GitHub CLI and Azure CLI identities without storing their short-lived access tokens in
    Agentworks configuration or on-VM credential files.
-2. Make the provider contract describe Git helper output rather than PAT provisioning.
-3. Preserve useful early validation for secret-backed static tokens.
+2. Make the provider contract return final Git credential material rather than expose PAT-specific
+   acquisition details to core.
+3. Preserve useful provider-owned early validation for secret-backed static tokens.
 4. Make Agentworks-owned Git credential state converge exactly on every user initialization,
    including complete removal.
-5. Preserve repository-, owner/organization-, and host-default selection.
+5. Preserve repository-, owner/organization-, and host-default outcomes through generic HTTPS path
+   scopes rather than forge vocabulary in core.
 6. Coexist with operator-managed Git configuration and helpers outside the hosts Agentworks owns.
 7. Remove the imperative credential-install path instead of creating a second source of desired
    state beside declarative user initialization.
@@ -46,12 +50,17 @@ unauthenticated.
   `azdo`.
 - **Acquisition mode**: the `token.mode` arm that says where a helper gets its credential: `secret`,
   `gh-cli`, or `az-cli` as allowed by that provider.
-- **Selector**: a provider-owned, validated host plus optional repository or owner/organization
-  scope used to choose one helper for a Git request.
-- **Helper definition**: inert provider output describing the selector and one core-static or
-  provider-runtime helper implementation.
+- **HTTPS scope**: a normalized protocol, host, and optional segment-aware path prefix used to match
+  one Git credential context. Providers translate forge concepts such as a GitHub owner or Azure
+  DevOps organization into this generic shape.
+- **Stored credential**: provider output containing one or more HTTPS scopes plus the final username
+  and password/token that core installs in the standard Agentworks credential store.
+- **Managed helper**: provider output containing one or more HTTPS scopes plus a declarative,
+  provider-owned Git credential helper implementation that core installs and reconciles.
+- **Credential materialization**: the provider operation that receives its scoped resolved secrets,
+  performs any required validation, exchange, or derivation, and returns one of those two shapes.
 - **Reconciliation**: rebuilding the complete Agentworks-owned per-user Git credential state from
-  desired helper definitions.
+  desired provider material.
 - **User initialization**: admin initialization/reinitialization or agent creation/reinitialization
   for the target Linux user. It does not mean authenticating a third-party CLI.
 
@@ -71,8 +80,9 @@ obtain a short-lived Entra token at runtime.
 
 ### Operator retaining a secret-backed PAT
 
-The operator keeps the existing omitted, scalar, or explicit `secret` token spelling and receives
-the same secret resolution and provider-specific token validation before the helper is installed.
+The operator keeps the existing omitted, scalar, or explicit `secret` token spelling. Core delivers
+that resolved secret only to the declaring provider; the provider performs its current validation
+and returns the final stored credential.
 
 ### Operator removing credentials
 
@@ -84,12 +94,15 @@ reference. No stale Agentworks credential remains available.
 
 ### R1: Narrow provider purpose
 
-A git credential provider MUST validate its provider-specific configuration and emit an inert,
-scoped Git credential helper definition. It MUST NOT write user files, alter Git configuration,
-install or authenticate a CLI, or resolve secrets itself.
+A git credential provider MUST validate its provider-specific configuration, declare every secret it
+needs, and translate its configuration into generic HTTPS scopes. At credential-materialization
+time, core MUST invoke it with a `RunContext` that exposes only those resolved secrets. The provider
+MUST own every authentication-specific step, including validation, exchange, and derivation, and
+return either a final stored credential or a declarative managed helper.
 
-The provider contract MAY validate a materialized secret-backed token during runup. That is the only
-acquisition-mode-specific provisioning operation in this effort.
+The provider MUST NOT write target-user files, alter Git configuration, install or authenticate a
+CLI, or read an undeclared secret. Core MUST NOT interpret a provider's secret names, assume a
+secret is itself a Git token, or implement forge-specific acquisition.
 
 ### R2: Closed acquisition arms
 
@@ -101,24 +114,37 @@ The existing `token` discriminated union remains the configuration surface:
 - Every non-secret arm requires its explicit discriminator.
 - A provider rejects acquisition modes it does not implement.
 
-Only the `secret` arm declares a `secret` reference. CLI-backed arms MUST add no synthetic secret
-edge and MUST NOT accept a secret field.
+The current `secret` arm declares its configured secret reference. CLI-backed arms add no synthetic
+secret edge and accept no secret field. The provider contract remains general: a future provider
+configuration may declare several secrets and use them to derive one final stored credential without
+changing core.
 
 ### R3: Secret-backed runup validation
 
-For `token.mode: secret`, initialization MUST resolve and line-safety-check the declared token and
-MUST retain the provider-specific authenticated runup check. A definitive rejection keeps the
-current multi-credential user-initialization semantics: skip that credential, warn, and record
-partial initialization. Network indeterminacy warns and continues unverified.
+For the current `token.mode: secret` arms, initialization MUST resolve the declared secret and
+deliver it only through the provider's scoped context. The provider MUST retain its authenticated
+runup check and MUST return the final username/password response; core MUST enforce Git protocol
+line/control safety on that returned boundary. A definitive rejection keeps the current
+multi-credential user-initialization semantics: skip that credential, warn, and record partial
+initialization. Network indeterminacy warns and continues unverified.
 
 `defaults.runup_git_credentials = false` continues to disable only this static-token verification.
 It has no effect on runtime CLI acquisition.
 
 ### R4: Runtime CLI acquisition
 
-For `gh-cli` and `az-cli`, initialization MUST emit and install a helper without testing whether the
+For `gh-cli` and `az-cli`, the provider MUST return a managed helper without testing whether the
 corresponding executable is installed, whether it is authenticated, or whether it can reach the
-forge. This avoids coupling helper installation to tool-install and login ordering.
+forge. Core installs the returned helper as opaque provider-owned behavior. This avoids coupling
+helper installation to tool-install and login ordering.
+
+The managed-helper definition MUST contain the provider-owned helper program. When that program
+delegates to an external executable, it MUST name the executable as a generic runtime dependency.
+Core MUST install the program, check any declared dependency on the target user's `PATH` immediately
+before helper invocation, and report a clear value-safe missing-tool error. Core does not invoke the
+dependency itself. This is a Git-runtime check, not provisioning readiness; the provider program
+invokes the dependency and still MUST handle execution failure because availability can change after
+the check.
 
 At each matching Git `get` request:
 
@@ -132,34 +158,36 @@ selected CLI are allowed; Agentworks does not reimplement or control them.
 
 ### R5: Runtime failure contract
 
-A CLI-backed helper MUST fail nonzero with one concise, actionable stderr diagnostic when its CLI is
-missing, the CLI command fails, returns an empty or malformed token, or times out. It MUST NOT print
-a token or include captured token output in an error. Repository authorization is the forge's
-decision; a valid token for the wrong identity fails through Git's normal authentication path and
-the existing fixed selected-credential diagnosis.
+A CLI-backed helper MUST fail nonzero with one concise, actionable stderr diagnostic when its
+declared executable is missing, the helper command fails, returns an empty or malformed response, or
+times out. It MUST NOT print a token or include captured token output in an error. Repository
+authorization is the forge's decision; a valid token for the wrong identity fails through Git's
+normal authentication path and the existing fixed selected-credential diagnosis.
 
 Unsupported `store`, `erase`, and future Git helper operations MUST be safely ignored unless the
 existing Agentworks rejection diagnosis applies. Runtime acquisition MUST be non-interactive and
 bounded. Waiting for the stable credential-state lock MUST also be bounded and fail with fixed retry
 guidance rather than hanging Git.
 
-### R6: Scope selection
+### R6: Generic scope selection
 
-The existing deterministic selection order remains:
+Core MUST route only on normalized Git credential context: protocol, exact host, and an optional
+segment-aware path prefix. Providers MUST translate their own configuration into those scopes. For
+the current providers, exact repository becomes a longer path prefix, owner or Azure DevOps
+organization becomes its parent prefix, and host default has no path prefix. Longest matching path
+wins, preserving the existing repository-before-owner/organization-before-host outcome without
+teaching core those concepts.
 
-1. exact repository;
-2. owner or Azure DevOps organization;
-3. host default.
-
-Scope collisions remain configuration errors. Helper selection MUST NOT depend on a static-store
-username; a selected helper supplies the forge-appropriate credential response directly.
+Identical nonempty path claims remain configuration errors. Multiple host-default claims retain the
+released first-declared behavior. Selection MUST NOT depend on a stored username; the selected
+stored credential or managed helper supplies the complete provider response directly.
 
 ### R7: Total per-user reconciliation
 
 Admin and agent initialization MUST always invoke the Agentworks Git credential reconciler, even
 when the desired credential list is empty or every secret-backed credential was rejected.
 
-The reconciler MUST rebuild the complete Agentworks-owned state from desired helper definitions. On
+The reconciler MUST rebuild the complete Agentworks-owned state from desired provider material. On
 an empty desired state it MUST remove every provably Agentworks-owned helper, static-token store,
 generation, Git include, and exact include reference left by current or legacy Agentworks versions.
 One empty stable lock file MAY remain solely to serialize concurrent reconciliations and helper
@@ -187,8 +215,8 @@ remain untouched. When Agentworks manages no credentials, its include reference 
 
 ### R9: One declarative write path
 
-Admin users and agent users MUST consume the same helper-definition builder and reconciler. Their
-only differences are transport and home path.
+Admin users and agent users MUST consume the same material builder and reconciler. Their only
+differences are transport and home path.
 
 The imperative `vm add-git-credential` command MUST be removed. Operators declare credentials on the
 admin or agent template and run initialization/reinitialization. The implementation MUST NOT add an
@@ -196,11 +224,14 @@ installed-state manifest, target-side merge protocol, or another credential writ
 
 ### R10: Security and containment
 
-- Static tokens remain in mode-0600 Agentworks-owned storage and never enter helper scripts or Git
-  configuration.
+- Stored credentials remain in mode-0600 Agentworks-owned storage and never enter helper scripts or
+  Git configuration.
+- Managed-helper programs and metadata MUST NOT contain a delivered secret or a credential derived
+  from one; runtime credentials come only from the provider program's target-user dependency.
 - Runtime tokens exist only in helper process memory and the Git credential-protocol response.
-- Provider-derived paths, selectors, argv/environment recipes, usernames, generated paths, and
-  emitted protocol fields are validated before use.
+- Provider-returned scopes, stored protocol fields, managed-helper metadata/content, and generated
+  paths are validated at the core boundary before use. Provider-owned executable content is never
+  accepted from operator configuration.
 - Reconciliation stages files in a private per-user location and does not expose partially written
   credentials.
 - One stable shared/exclusive lock protects generation selection, helper reads, activation, and
@@ -215,8 +246,8 @@ The implementation MUST update the provider-authoring README, generated resource
 examples, sample configuration where applicable, resource/guide teaching, command reference, and
 upgrade guidance in the same change that alters behavior.
 
-The permanent provider README MUST lead with the narrow helper-definition purpose and describe
-static and runtime helper implementations without making PATs the universal model.
+The permanent provider README MUST lead with the two-shape materialization purpose and describe
+stored credentials and managed helpers without making PATs the universal model.
 
 ### R12: Future authentication features remain separate
 
@@ -242,15 +273,18 @@ runtime Git use. They consume this contract but are neither required nor impleme
 
 ### AC1: Configuration and graph
 
-Existing secret spellings remain valid and produce the same secret edge. Explicit `gh-cli` and
-`az-cli` declarations validate only under their owning providers, produce no secret edge, and appear
-accurately in schema/resource descriptions without exposing identity data.
+Existing secret spellings remain valid and produce the same secret edge. Each provider receives only
+its declared resolved secrets. Explicit `gh-cli` and `az-cli` declarations validate only under their
+owning providers, produce no secret edge, and appear accurately in schema/resource descriptions
+without exposing identity data.
 
 ### AC2: Secret validation
 
-Focused tests prove that secret-backed credentials resolve, line-safety-check, and run their
-provider probe under the existing enabled/disabled and skip/partial policies. CLI-backed modes
-perform none of those operations during provisioning.
+Focused tests prove that secret-backed providers receive their scoped secret context, perform their
+own validation/acquisition, and return final stored credentials under the existing enabled/disabled
+and skip/partial policies. A synthetic provider proves that several declared secrets may produce one
+stored credential without core understanding the exchange. CLI-backed modes receive no secrets and
+perform no CLI check during provisioning.
 
 ### AC3: Runtime GitHub identity
 
@@ -273,9 +307,11 @@ or unavailable proof is not approval to begin implementation.
 
 ### AC5: Selection
 
-Secret and CLI-backed helpers can coexist on one host. Exact-repository, owner/organization, and
-default selection, collision refusal, embedded-username advisories, and no-match behavior remain
-deterministic.
+Stored credentials and managed helpers can coexist on one host. Generic longest-path matching
+preserves exact-repository, owner/organization, and default outcomes; duplicate nonempty-path
+refusal, released first-declared host-default behavior, and no-match behavior remain deterministic.
+An embedded remote username MUST NOT override path-based selection; provider-owned remote-review
+advisories remain available where the forge gives embedded usernames special meaning.
 
 ### AC6: Reconciliation
 

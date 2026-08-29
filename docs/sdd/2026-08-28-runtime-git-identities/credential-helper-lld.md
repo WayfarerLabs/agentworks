@@ -1,4 +1,4 @@
-# Low-Level Design: Scoped Runtime Git Credential Helpers
+# Low-Level Design: Provider-owned Git Credential Material
 
 - Status: Draft for design review
 - Date: 2026-08-28
@@ -7,13 +7,14 @@
 
 ## Design Principles
 
-1. Providers emit inert helper definitions; core owns every write and Git config mutation.
-2. Acquisition mode is configuration shape, not runtime guesswork.
-3. Secret-backed and CLI-backed credentials share selection and reconciliation, not lifecycle work.
-4. One declarative full rebuild is the only write path; the imperative direct-add command is
-   removed.
-5. Generated state is simple, value-contained, and replaceable. No compatibility adapter survives
-   the migration.
+1. Providers declare their dependencies, receive only those resolved secrets, and own credential
+   acquisition end to end.
+2. Providers return one of two final shapes: a stored credential or a managed credential helper.
+3. Core understands generic Git HTTPS scope and safe installation, never forge-specific
+   authentication semantics.
+4. Providers never mutate target-user state; one core reconciler owns every write and removal.
+5. One declarative full rebuild is the only write path. No adapter, installed-state manifest, or
+   speculative versioned ABI survives the migration.
 
 ## Configuration Contract
 
@@ -58,8 +59,8 @@ spec:
 ```
 
 `gh-cli` has no additional fields. It targets `github.com` and the active account selected by GitHub
-CLI. A future enterprise-host requirement adds a provider configuration field deliberately; version
-1 does not infer one from ambient state.
+CLI. A future enterprise-host requirement adds a provider configuration field deliberately; this
+effort does not infer one from ambient state.
 
 ### Azure CLI arm
 
@@ -76,11 +77,12 @@ spec:
     org: example-org
 ```
 
-`az-cli` has no additional fields. The existing required `org` remains the selection scope. The
-helper uses Azure CLI's active identity and requests the Azure DevOps resource
-`499b84ac-1321-427f-aa17-267ca6975798`. It does not accept arbitrary resource/scope command text.
+`az-cli` has no additional fields. The existing required `org` remains provider configuration. The
+provider translates it to a generic HTTPS path scope and its helper requests Azure DevOps resource
+`499b84ac-1321-427f-aa17-267ca6975798`. Operator configuration cannot supply resource, command, or
+helper-program text.
 
-### Models
+### Models and secret references
 
 ```python
 class SecretToken(AgwModel):
@@ -94,178 +96,191 @@ class GitHubCliToken(AgwModel):
 
 class AzureCliToken(AgwModel):
     mode: Literal["az-cli"]
-
-
-GitHubTokenAcquisition = Annotated[
-    SecretToken | GitHubCliToken,
-    UnionScalarShorthand(discriminator="mode", arm=SecretToken),
-]
-
-AzDOTokenAcquisition = Annotated[
-    SecretToken | AzureCliToken,
-    UnionScalarShorthand(discriminator="mode", arm=SecretToken),
-]
-
-
-class GitHubConfig(TokenAcquiringConfig):
-    token: GitHubTokenAcquisition = Field(default={"mode": "secret"})
-
-
-class AzDOConfig(TokenAcquiringConfig):
-    token: AzDOTokenAcquisition = Field(default={"mode": "secret"})
 ```
 
-The explicit raw secret-arm default on each concrete field is normative: Pydantic does not inherit
-the base field default after the annotation is overridden, and the owner boundary fills the secret
-name template before validation. Shared shorthand logic preserves scalar input. Schema, reference
-extraction, and samples derive from these models. No mode is accepted by a provider merely because
-another provider implements it.
+Each concrete provider keeps the existing discriminated union and scalar shorthand. Only the current
+secret arm carries `SecretRef`; the CLI arms declare none. This is configuration truth, not a core
+special case. Reference extraction continues to derive the provider's complete declared secret set
+from its model. A future provider may declare several secret references and use them to produce one
+credential without changing the capability contract.
 
 ## Provider Contract Version 3
 
-### Types
+### Generic scope and output types
+
+Names are illustrative; the closed ownership and behavior are normative.
 
 ```python
 @dataclass(frozen=True)
-class CredentialSelector:
+class HttpsCredentialScope:
     host: str
-    repos: tuple[str, ...] = ()
-    owner: str | None = None
+    path_prefix: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
-class StaticTokenSource:
-    secret_name: str
-    username: str
+class StoredCredential:
+    username: str = field(repr=False)
+    password: str = field(repr=False)
 
 
 @dataclass(frozen=True)
-class RuntimeCommandSource:
-    username: str
-    argv: tuple[str, ...]
-    environment: tuple[tuple[str, str], ...] = ()
+class ManagedHelper:
+    program: bytes = field(repr=False)
+    required_executable: str | None = None
+    failure_hint: str = "the selected credential helper failed"
 
 
-CredentialSource = StaticTokenSource | RuntimeCommandSource
+CredentialPayload = StoredCredential | ManagedHelper
 
 
 @dataclass(frozen=True)
-class HelperDefinition:
+class CredentialMaterial:
     credential_name: str
-    selector: CredentialSelector
-    source: CredentialSource
+    scopes: tuple[HttpsCredentialScope, ...]
+    payload: CredentialPayload = field(repr=False)
 ```
 
-Names are illustrative; implementation may choose equivalent concise names. The closed fields and
-ownership are normative. Providers emit a fixed command recipe, not executable script text. Core
-derives identifiers and diagnostics from the provider and credential names and executes every
-runtime recipe through one helper implementation.
+`HttpsCredentialScope` represents Git credential context, not provider vocabulary. Protocol is fixed
+to `https` in this effort. Host is exact. `path_prefix` is a tuple of normalized, nonempty path
+segments; empty means host default. Core strips a leading slash and one terminal `.git` suffix from
+the incoming Git path, splits it into segments, and selects the matching scope with the greatest
+segment count. GitHub translates an owner to one segment and a repository to two. Azure DevOps
+translates its organization to one segment. Core sees only tuples.
+
+`StoredCredential` contains the final Git username/password response. Core neither knows which
+secret supplied it nor assumes the password is the resolved secret unchanged. Both fields are
+sensitive and excluded from representations.
+
+`ManagedHelper` is a provider-authored executable helper program that emits a complete Git
+credential protocol response. It is fixed or safely rendered by trusted provider code, not supplied
+as operator-authored command text. Core writes it into the managed generation, provides the common
+bounded process envelope, and validates the response syntax, but it does not translate CLI stdout
+into a forge credential. A future provider may return a bridge to any runtime identity tool through
+this same shape. The program and metadata MUST NOT contain any resolved secret or credential derived
+from one; managed helpers acquire credentials only from their target-user runtime dependency.
+
+When present, `required_executable` is one normalized bare command name. Core checks it on the
+target user's runtime `PATH` immediately before invoking the installed provider helper and emits a
+generic missing-tool diagnosis naming the credential and executable. Core does not invoke that
+dependency itself, and it is not checked during provisioning. The provider helper invokes the
+dependency and remains responsible for the check/execute race and its safe failure behavior.
 
 ### Required operation
 
-`GitCredentialProvider.helper_definition() -> HelperDefinition` is the only credential-material
-operation required by the descriptor. It is config-only and deterministic. It performs no secret
-read, network request, subprocess, filesystem access, or target mutation.
+```python
+GitCredentialProvider.credential_material(ctx: RunContext) -> CredentialMaterial
+```
 
-The descriptor advances to contract version 3 and requires `helper_definition`. The version-2
-`helper_entry`, `credential_lines`, `store_username`, and universal `secret_name` assumptions are
-deleted atomically.
+This is the only credential-material operation required by the version-3 descriptor. The composition
+root constructs `ctx` with `ScopedSecrets(resolved_values, node.secret_refs())` and no admin or
+agent transport. The provider may read only names its configuration declared and has no
+target-mutation power. It owns any required validation, API exchange, derivation, and final response
+construction.
+
+The operation performs no target-user filesystem or Git configuration mutation. For the current
+secret arms it returns a `StoredCredential`; for the current CLI arms it returns a `ManagedHelper`
+without executing the CLI at provisioning time.
+
+The descriptor deletes version-2 `helper_entry`, `credential_lines`, `store_username`, and the
+universal `secret_name` assumption atomically. Core no longer receives a token map or calls a
+provider method with a naked token.
 
 ### Runup
 
-The base provider exposes acquisition inspection and a secret-only runup path:
+When `defaults.runup_git_credentials` is enabled, the credential node calls provider `runup(ctx)`
+before materialization. The same scoped context is used. Providers decide whether their configured
+arm has optional readiness work:
 
 ```text
-if acquisition is SecretToken:
-    resolve/deliver secret through existing node edge
-    validate line safety
-    provider verifies token when runup setting is enabled
-else:
-    no secret edge
-    no runup operation
+current secret arm -> provider performs its existing authenticated probe
+current CLI arm    -> provider does nothing
 ```
 
-The GitHub and Azure DevOps `_verify_token` implementations remain provider-specific. Their success
-details and rejection classification remain unchanged except that diagnostics say static token where
-needed and no code assumes every credential has a secret.
+A definitive rejection retains current skip/warn/partial semantics. Network indeterminacy warns and
+continues. Disabling runup skips optional validation only; it never skips materialization a provider
+requires to produce its final stored credential.
 
-## Built-in Helper Definitions
+## Built-in Provider Output
 
 ### GitHub secret
 
-- selector host: `github.com`
-- exact repositories: deduplicated configured `repos`
-- owner: configured `owner`
-- static username: resource name when scoped, otherwise `x-access-token` for released compatibility
-- source: `StaticTokenSource`
+- scopes: `github.com` plus provider-translated `repos` and optional `owner` path prefixes;
+- payload: `StoredCredential`;
+- username: credential resource name when scoped, otherwise released-compatible `x-access-token`;
+- password: the final value the provider derives from its declared secret after optional runup.
 
 ### GitHub CLI
 
-- same selector construction as GitHub secret
-- source: `RuntimeCommandSource` with username `x-access-token`, argv
-  `gh auth token --hostname github.com`, and environment `GH_PROMPT_DISABLED=1`
-- stdout: exactly one nonempty line, accepted only after line/control validation
-- captured stderr: never forwarded verbatim
+- same generic scope translation;
+- payload: fixed provider-owned `ManagedHelper`;
+- required executable: `gh`;
+- helper runs `gh auth token --hostname github.com` with `GH_PROMPT_DISABLED=1`, validates one
+  nonempty line, and emits `username=x-access-token` plus `password=<token>`;
+- captured upstream stderr and token output never enter its diagnostic.
 
 ### Azure DevOps secret
 
-- selector host: `dev.azure.com`
-- owner: configured `org`
-- static username: configured `org`
-- source: `StaticTokenSource`
+- scopes: `dev.azure.com` with configured `org` translated to one path-prefix segment;
+- payload: `StoredCredential`;
+- username: configured `org`;
+- password: the final value the provider derives from its declared secret after optional runup.
 
 ### Azure CLI
 
-- same selector construction as Azure DevOps secret
-- source: `RuntimeCommandSource` with username set to the configured organization
-- exact argv:
+- same generic scope translation;
+- payload: fixed provider-owned `ManagedHelper`;
+- required executable: `az`;
+- helper runs:
 
   ```console
   az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 \
     --query accessToken --output tsv
   ```
 
-- response: conventional Git helper `username=<org>` and `password=<access-token>` fields
-- no subscription or tenant mutation; the current Azure CLI account owns identity selection
-- stdout: exactly one nonempty line, accepted only after line/control validation
-- captured stderr: never forwarded verbatim
+- helper validates one nonempty line and emits `username=<org>` plus `password=<access-token>`;
+- it performs no subscription or tenant mutation; Azure CLI's current account owns identity
+  selection; captured upstream stderr and token output never enter its diagnostic.
 
-Microsoft's current Git guidance recommends a Bearer header. The conventional response above is a
-deliberate compatibility choice for Debian Bookworm's Git 2.39: current Git Credential Manager's
-Azure Repos provider returns the same Entra access token as a `GitCredential` username/password
-pair, including for service-principal identities. The implementation still proves this exact form
-against live Azure Repos before handoff, and the design PR first proves the wire form through a real
-read-only Git operation when it becomes ready. It does not expose resource/scope, extra CLI flags,
-or arbitrary executable paths as configuration.
+Microsoft's current Git guidance recommends a Bearer header. The username/password response is a
+deliberate compatibility choice for Debian Bookworm's Git 2.39 based on current Git Credential
+Manager behavior. The design PR proves this exact response with a real read-only Azure Repos Git
+operation before it becomes ready; implementation later proves clone, fetch, and a reversible write.
+Failure revises the provider output, not core's generic two-shape contract.
 
-## Core Material Model
+## Core Material Boundary
+
+Core validates provider output once:
+
+1. credential name is the expected declared resource;
+2. at least one scope exists;
+3. host and path segments are normalized, bounded, and free of separators, dot segments, controls,
+   and unsafe generated-config characters;
+4. duplicate nonempty scopes are rejected across materials; released first-declared behavior is
+   retained for multiple host defaults;
+5. stored username/password fields satisfy Git's newline/NUL restrictions and are never represented;
+6. managed-helper required executable, program, and hint are bounded; executable/hint fields are
+   line/control safe; the program came from trusted provider code rather than an operator-configured
+   command field; and no delivered secret value appears in any managed-helper field. Providers also
+   attest that no derived credential was embedded;
+7. output ordering is deterministic by host, descending path length, path, then declaration order.
+
+Core does not validate whether a secret is a PAT, exchange one secret for another token, construct a
+forge authorization header, or infer provider scope.
 
 ```python
 @dataclass(frozen=True)
 class UserCredentialState:
     include_content: str
     dispatcher_script: str
-    static_store_content: str | None = field(default=None, repr=False)
+    stored_credentials: bytes | None = field(default=None, repr=False)
 ```
 
-`UserCredentialState` exists only in the provisioning process and may contain final static-store
-bytes. The normative `repr=False` (or a value-safe custom representation) keeps that field out of
-representations and diagnostics.
-
-`build_user_credential_state(definitions, resolved_static_tokens)`:
-
-1. validates every host, scope, username, command recipe, and credential name at the sink;
-2. requires exactly one resolved token for each static source and none for runtime sources;
-3. rejects duplicate `(host, repo)` and `(host, owner)` claims;
-4. preserves released first-declared behavior for multiple unscoped credentials on one host;
-5. orders host, exact repo, owner, default, and helper records deterministically;
-6. renders the private static store, generation-owned dispatcher, and include.
-
-No token is interpolated into the dispatcher or include.
+`build_user_credential_state(materials)` renders the private store, generation-owned dispatcher, and
+include. Stored values never enter the dispatcher or Git configuration. Each managed-helper program
+is installed as a private generation-owned executable without any operator-configured command escape
+hatch.
 
 ## Managed Layout
-
-The new per-user root is:
 
 ```text
 ~/.agentworks/git-credentials/
@@ -274,57 +289,38 @@ The new per-user root is:
   current -> generations/<generation-id>
   generations/
     <generation-id>/
-      config.gitconfig       0600
-      dispatch               0700, selectors and fixed runtime recipes
-      static-credentials     0600, omitted when unused
+      config.gitconfig          0600
+      dispatch                  0700, generic scope router
+      helpers/                  0700, private directory
+        <credential-id>         0700, provider-owned managed-helper program
+      stored-credentials        0600, omitted when unused
 ```
 
-The exact root is Agentworks-owned. The safe generation ID is unrelated to content. A target-local
-comparison discards an identical staged generation without returning credential bytes to the
-workstation. Credential names are not used directly as unchecked path components.
+The root is wholly Agentworks-owned. A safe generation ID is unrelated to content. Credential names
+never become unchecked path components. Target-local comparison discards an identical staged
+generation without returning sensitive bytes to the workstation.
 
-After building the complete bytes locally, the reconciler takes a 30-second bounded exclusive
-`flock` on the stable lock file. Under that lock it cleans the one fixed abandoned-stage path,
-stages the complete private generation, compares it to active state, atomically replaces the stable
-launcher when its fixed implementation changed, and atomically replaces `current` with GNU coreutils
-`mv -T` when desired state changed. Keeping staging inside the lock means concurrent reconcilers
-need no stage ownership, PID, or lease protocol.
+After building complete bytes locally, the reconciler takes a 30-second bounded exclusive `flock` on
+the stable lock. Under it, the reconciler cleans the one abandoned-stage path, stages the private
+generation, compares it to active state, atomically replaces `launch` when its current
+implementation changed, and atomically replaces `current` with GNU `mv -T` when desired state
+changed. Staging inside the lock needs no PID, lease, or ownership protocol.
 
-The stable launcher opens the lock descriptor itself and waits at most 10 seconds for a shared lock.
-It resolves and executes `current/dispatch` while retaining that descriptor. The generation-owned
-dispatcher therefore always runs with code, selectors, recipes, and optional static values from one
-generation. It loads the selected value or runtime recipe into process memory, closes the lock
-descriptor, and only then prints the static response or starts `gh`/`az`. CLI descendants cannot
-retain the lock. Contention fails with one fixed value-safe retry diagnostic. `flock` (util-linux),
-GNU `mv`, and coreutils `timeout` are standard Debian Bookworm dependencies already present before
-optional initialization packages.
+The launcher waits at most 10 seconds for a shared lock, using file descriptor 9 in this
+implementation, then executes `current/dispatch` with Git's operation arguments unchanged. The
+dispatcher loads the selected stored value or managed-helper path from one generation before closing
+descriptor 9. Its common runtime envelope then invokes that generation-owned provider helper. CLI
+descendants cannot retain the lock. Contention fails with fixed value-safe retry guidance.
 
-The launcher/dispatcher ABI is immutable version 1: Git's operation remains the dispatcher's first
-argument, the launcher's shared-lock descriptor is always file descriptor 9, and the dispatcher must
-close descriptor 9 only after loading everything it needs from its generation. The launcher executes
-`current/dispatch` with all Git arguments unchanged and no configuration-derived argument. Any
-future launcher-content change must work with both the previous and current generation dispatcher;
-otherwise it requires a new versioned managed root. Cross-version pairing tests cover both
-directions and a failure between launcher replacement and `current` activation.
+The observable invariant is that one helper request reads exactly one complete generation. The
+launcher and `current` are separate atomic replacements, so this implementation must support and
+test both adjacent launcher/dispatcher pairings plus a fault between replacements. File descriptor 9
+is the present mechanism, not a public or permanently versioned ABI. No future versioned root or
+compatibility regime is specified.
 
-If staged bytes match the active generation, the stage is discarded. A failed symlink activation
-leaves the prior link in place; startup removes abandoned stages and inactive generations while
-holding the exclusive lock.
-
-Legacy cutover disables stale service before activating desired state: delete the wholly
-Agentworks-owned legacy `~/.git-credentials`, replace/remove the exact old custom helper, and remove
-its exact registration. A generic `credential.helper=store` possibly installed by old direct add is
-not distinguishable from operator configuration and is not removed; with the owned store deleted it
-cannot serve an old Agentworks token. For nonempty desired state, the reconciler then activates the
-generation and adds the new include before collection. For empty desired state, it removes the new
-include, symlink, and generations after legacy credential material is disabled. Fault injection at
-every boundary may leave authentication temporarily absent but must never reactivate a stale
-credential. The launcher is also removed; only the empty stable lock may remain for concurrent
-callers. A crash can leave dormant owned files but cannot expose a partial credential set; the next
-initialization finishes cleanup.
-
-Transport primitives may require a small shared remote-reconcile operation rather than shell text
-assembled at call sites. Admin and agent call that one operation.
+An activation failure leaves the prior link in place. Startup removes abandoned stages and inactive
+generations while holding the exclusive lock. A crash may leave dormant owned files but never an
+active partial generation; the next initialization finishes cleanup.
 
 ## Agentworks Git Include
 
@@ -334,7 +330,7 @@ The only global Git mutation is the exact include value:
 ~/.agentworks/git-credentials/current/config.gitconfig
 ```
 
-The generated file contains one context per managed host, conceptually:
+For each managed host, the generated include conceptually contains:
 
 ```gitconfig
 [credential "https://github.com"]
@@ -343,187 +339,196 @@ The generated file contains one context per managed host, conceptually:
     useHttpPath = true
 ```
 
-The empty value resets helpers accumulated for that host; the following value registers the stable
-launcher. The implementation must verify with real Git that URL-context matching confines this reset
-to the managed host and that repository paths reach the dispatcher.
+The empty helper resets inherited helper values only in that exact host context; the following value
+registers Agentworks. `useHttpPath` ensures the generic dispatcher receives the remote path. Real
+Git 2.39 tests, not generated-text inspection alone, prove host confinement and path delivery.
 
-Reconciliation removes duplicate instances of the exact include value and adds it once when state is
-nonempty. It never removes other includes. When desired state is empty, it leaves no reference to
-the managed root.
+Reconciliation removes duplicate instances of the exact include path and adds it once for nonempty
+state. It never removes other includes or unqualified helper values. Empty desired state removes the
+include reference.
 
-## Launcher and Dispatcher Protocol
+## Dispatcher and Managed-helper Protocol
 
-The stable launcher takes the Git operation as its first argument, acquires the bounded shared lock,
-and executes the dispatcher from the resolved current generation. The generation-owned dispatcher
-reads bounded `key=value` lines from stdin through the blank terminator. It needs only protocol,
-host, path, and username for selection and diagnostics. Unknown fields are ignored without
-evaluation.
+The dispatcher reads bounded Git `key=value` input through the blank terminator. It uses only
+`protocol`, `host`, `path`, and optional `username`; unknown fields are ignored without evaluation.
 
-For `get`, while holding the launcher's shared lock:
+For `get`:
 
-1. require `https` and a managed host, otherwise return no values;
-2. normalize the Git remote path using the existing bounded rules;
-3. reject an embedded username that violates provider semantics using the existing advisory shape;
-4. select exact repository, then owner/org, then host default;
-5. read the selected static token or runtime command recipe into memory from that generation;
-6. close the lock descriptor before executing a child process;
-7. return the credential response without logging it.
+1. require `https` and an exactly managed host, otherwise return no values;
+2. normalize the path into safe segments and strip one terminal `.git` suffix;
+3. ignore an embedded username for scope selection; provider `review_remote` remains the config-time
+   home for forge-specific advisories;
+4. choose the longest matching path prefix, then the first declared host default;
+5. load the selected payload from the same generation;
+6. close the shared-lock descriptor after the required data is resident;
+7. return a stored response directly, or execute the selected managed helper in the common bounded
+   envelope and relay only a syntactically valid Git credential response.
 
-For `store`, do nothing. For `erase`, retain a fixed diagnosis naming the selected credential and
-its source mode but do not delete declarative state. Any other operation returns success with no
-output.
+For `store`, do nothing. For `erase`, retain the fixed selected-credential diagnosis but do not
+delete declarative state. Unknown operations return success with no output.
 
-If a selected runtime source fails, it writes one fixed diagnostic to stderr and the dispatcher
-returns nonzero with no credential attributes. Upstream stdout/stderr is captured; neither is
-included in the diagnostic.
+The common managed-helper envelope:
 
-## Runtime Helper Process Contract
-
-The one core dispatcher executes each runtime recipe under the same contract:
-
-- uses an explicit command name (`gh` or `az`) found through the target user's runtime `PATH`;
-- disables interactive prompting where the CLI supports it;
-- runs through coreutils `timeout` with a fixed 10-second bound; both are guaranteed on standard
-  Debian Bookworm targets and `timeout` is already used by bootstrap before optional packages;
+- invokes the installed provider-authored helper program in the target user's environment;
+- when declared, checks the provider-declared bare executable on that runtime `PATH` immediately
+  before launch and emits a fixed generic missing-tool error;
+- uses coreutils `timeout` with a fixed 10-second bound;
+- provides the bounded Git request on stdin;
 - captures stdout and stderr separately;
-- accepts exactly one nonempty, line-safe token;
-- prints only final Git credential protocol attributes;
-- never persists or caches the token itself;
-- never invokes a login command;
-- reports missing executable, command failure, timeout, and invalid output through distinct fixed
-  diagnostics. A valid credential rejected by the forge uses Git's normal failure and the existing
-  fixed selected-credential diagnosis.
+- accepts only a bounded, newline/NUL-safe Git credential response containing a username and
+  password for `get`;
+- never forwards captured upstream stderr or includes response values in diagnostics;
+- prints the provider's fixed value-safe failure hint on missing executable, nonzero exit, timeout,
+  or malformed response;
+- never invokes login or persists/cache credentials itself.
+
+The provider helper, not core, invokes its declared runtime dependency and decides how CLI output
+becomes the username/password response. It MUST independently handle an execution failure after
+core's preflight check, disable prompting where supported, and avoid forwarding upstream output.
+Built-in provider tests prove those semantics and value containment.
 
 ## Reconciliation Algorithm
 
-### Full user initialization
-
 ```text
-definitions = providers.map(helper_definition)
-static = definitions.filter(StaticTokenSource)
-runup survivors = validate static tokens under current policy
-surviving definitions = runtime definitions + surviving static definitions
-state = build_user_credential_state(surviving definitions, static values)
+nodes = resolve declared git-credential nodes and held providers
+resolved = resolve union(nodes.secret_refs())
+
+for each node/provider:
+    ctx = RunContext(secrets=ScopedSecrets(resolved, node.secret_refs()))
+    if runup policy enabled:
+        provider.runup(ctx)
+    material = provider.credential_material(ctx)
+    validate material at core boundary
+
+state = build_user_credential_state(surviving materials)
 reconcile_user_git_credentials(target_user, state)
 ```
 
-The final call always occurs. If no definition survives, it removes Agentworks credential/routing
-state and exact legacy registrations, retaining only the empty stable lock. Thus a rejected last
-static credential cannot leave an older credential active.
+The final reconcile always occurs. A definitively rejected provider is skipped under current partial
+semantics. If no material survives, reconciliation removes all provably Agentworks-owned
+credential/routing state and retains only the inert stable lock. Rejection of the last credential
+therefore cannot leave an older credential active.
 
 ## Legacy Cleanup
 
-Every full reconcile removes only these known legacy artifacts/values:
+Every full reconcile removes only known legacy Agentworks artifacts and values:
 
-- global `credential.helper` equal to `!~/.agentworks-git-cred-helper.sh`;
-- global `include.path` equal to `~/.agentworks-git-scopes.gitconfig`;
+- global `credential.helper` exactly equal to `!~/.agentworks-git-cred-helper.sh`;
+- global `include.path` exactly equal to `~/.agentworks-git-scopes.gitconfig`;
 - `~/.agentworks-git-cred-helper.sh`;
 - `~/.agentworks-git-scopes.gitconfig`;
 - the Agentworks-owned `~/.git-credentials` generated by the released implementation;
-- the older warn-only `~/.agentworks-git-cred-warn.sh` helper if still present.
+- the older warn-only `~/.agentworks-git-cred-warn.sh`, if present.
 
-Cleanup does not use `--replace-all` without an exact value matcher. Released initialization owns
-and overwrites the whole `~/.git-credentials` path; migration therefore deletes that exact file
-instead of parsing secrets or retaining stale active lines. This preserves today's ownership rule.
+Cleanup never uses unqualified `--replace-all`. A generic `credential.helper=store` installed by old
+direct add is indistinguishable from operator configuration and remains, but the owned credential
+file it read is deleted without inspection. Legacy credential bytes are disabled before new
+activation or registration cleanup. Faults may leave authentication absent, never stale-active.
+
+For nonempty state, reconciliation activates the complete generation and adds the include before
+garbage collection. For empty state it removes the include, launcher, symlink, and generations after
+legacy material is disabled. Only the empty lock may remain for concurrent callers.
 
 ## Call-site Changes
 
-### Admin init/reinit
+### Admin and agent initialization
 
-`_phase_b_setup` calls credential reconciliation unconditionally. Provider resolution may return an
-empty map. The resolved token map contains only static sources. The Git credential step stays before
-private Git-backed dotfiles/mise work.
+Both composition roots:
 
-### Agent create/reinit
+1. resolve providers, including an empty set;
+2. resolve the operation-wide union of provider-declared secrets;
+3. give each provider its own scoped context for runup and materialization;
+4. collect final materials without building a token map;
+5. invoke the same builder/reconciler unconditionally before private Git-backed user setup.
 
-The agent initializer invokes the same builder/reconciler unconditionally after the target user
-exists and before private Git-backed user setup. The current duplicated material writing and global
-Git commands are deleted.
+The agent's duplicated material writer and global Git commands are deleted. Transport and home path
+are the only admin/agent differences.
 
 ### Removed imperative command
 
-`vm add-git-credential` and its manager function are deleted. The command reference and guide point
-operators to the admin/agent declaration plus reinit path.
+`vm add-git-credential` and its manager function are deleted. Operators declare credentials on the
+admin or agent template and run reinit.
 
 ### Graph and orchestration
 
-`GitCredentialNode.secret_refs()` remains structurally derived and may be empty. `runup()` becomes a
-no-op for runtime sources. Composition roots stop requiring a token for every provider and prove
-that every static source received exactly its declared secret.
+`GitCredentialNode.secret_refs()` remains structurally derived and may contain zero, one, or several
+names. Scoped delivery enforces that `credential_material(ctx)` cannot read beyond them. Core has no
+`secret_name`, static-source filter, or resolved-token map.
 
 ## Validation Matrix
 
-### Configuration
+### Provider contract
 
 - omitted/scalar/explicit secret parity;
-- valid provider-owned CLI arm;
-- cross-provider CLI arm rejection;
-- extra field rejection;
-- secret edge present only for secret arm;
+- valid provider-owned CLI arm and cross-provider rejection;
+- zero-, one-, and synthetic multi-secret declarations;
+- scoped context denies undeclared reads;
+- a synthetic multi-secret provider derives one stored credential while core remains agnostic;
+- provider materialization cannot mutate target state through its operation surface;
 - schema, sample, resource show, and graph projection.
 
-### Build and selection
+### Scope and build
 
-- mixed static/CLI exact, owner/org, and default selection;
-- collision refusal and deterministic output;
-- no token in dispatcher/include/representations/errors;
-- unsafe provider output rejected by core wrapper;
-- no-match and embedded-username behavior.
+- GitHub repository/owner and Azure organization translate to generic path tuples;
+- longest segment-aware prefix, host default, `.git` normalization, no match, and deterministic
+  ordering;
+- duplicate nonempty scope refusal and released multiple-default behavior;
+- mixed stored/helper output on one host;
+- no credential in dispatcher/include/representations/errors;
+- malformed scope, stored protocol fields, managed-helper metadata, and operator command injection
+  rejected at the core boundary.
 
-### Runtime
+### Managed-helper runtime
 
-- fake `gh`/`az` success, missing executable, nonzero command, timeout, empty, multiline/control
-  output, and noisy stderr;
-- unsupported Git operations;
-- environment belongs to target user;
-- actual Git credential fill and HTTP operation behavior.
+- fake GitHub/Azure helpers cover success, missing declared executable, post-check execution race,
+  nonzero, timeout, malformed or control-bearing protocol output, and noisy stderr;
+- provider tests prove the exact `gh`/`az` command and username/password construction;
+- unsupported Git operations, embedded username not overriding selection, and retained
+  provider-owned remote advisories;
+- target-user environment and actual Git credential fill/HTTPS operation behavior;
+- consecutive fake helper responses differ, proving per-`get` acquisition.
 
 ### Reconciliation
 
-- fresh install, same-input rerun, add, remove, scope change, source-mode switch, last-item removal;
-- admin/agent parity;
-- zero desired and zero runup survivors;
-- legacy migration;
-- unrelated helpers/includes preserved;
-- staged-write/symlink-activation failure leaves the old complete state;
-- concurrent helper/swap/cleanup and empty-state transitions use the same shared/exclusive lock;
-- lock contention timeout and proof that a fake CLI child cannot retain the shared lock;
-- previous-launcher/current-dispatcher and current-launcher/previous-dispatcher ABI pairings, plus a
-  fault between the two atomic replacements;
-- mixed legacy/new fault injection after every cleanup/activation mutation;
-- two-reconciler staging/cleanup and empty-state removal.
+- fresh, same-input, add, remove, scope change, payload-shape switch, last removal;
+- admin/agent parity, empty desired state, and zero survivors;
+- legacy/mixed-state cleanup with unrelated helpers/includes preserved;
+- staged-write and activation faults retain one complete prior state;
+- concurrent helper/swap/cleanup and empty transitions use the same shared/exclusive lock;
+- lock timeouts and proof that managed-helper descendants cannot retain the descriptor;
+- current launch with previous dispatch and previous launch with current dispatch, plus a fault
+  between their two atomic replacements;
+- mutation-boundary fault injection, concurrent reconcilers, and abandoned-stage cleanup.
 
 ### Live integration
 
-- GitHub CLI identity: clone/fetch and reversible branch/tag or scratch-repository push/delete under
-  the test environment's permission and cleanup budget;
+- GitHub CLI identity: clone/fetch and reversible write under the authorized budget;
 - Azure CLI service-principal identity: clone/fetch and equivalent reversible write against a
   disposable Azure Repos repository;
-- fake CLIs return different values on consecutive invocations, proving acquisition happens on each
-  `get` without manipulating live login or cache state;
-- no credential values in captured logs, test artifacts, process arguments, or retained files.
+- real Git proves generic path routing and host-scoped config precedence on Git 2.39;
+- no credential values in logs, process arguments, test artifacts, or retained files.
 
 ## Deletions
 
-The implementation removes, rather than adapts:
+The implementation removes rather than adapts:
 
 - contract-version-2 operation methods and descriptor requirements;
-- duplicated admin/agent material writers;
-- the conditional "only if providers" reconciliation gates;
-- the `vm add-git-credential` command and manager path;
-- unconditional provider `secret_name`/token-map assumptions;
-- comments and tests describing providers as universally PAT-backed;
-- unqualified global helper replacement;
-- stale-file behavior when desired credentials become empty.
+- core `secret_name`, static-source, token-map, and forge-specific selector assumptions;
+- the core token-to-protocol mapper and built-in CLI command recipes;
+- duplicated admin/agent material writers and conditional reconciliation gates;
+- `vm add-git-credential` and its manager path;
+- unqualified global helper replacement and stale-empty-state behavior;
+- permanent launcher/dispatcher ABI versioning and speculative future managed roots.
 
 ## Open Implementation Proofs, Not Open Requirements
 
-Two facts must be proven before implementation can hand off:
+Two facts remain empirical gates:
 
-1. the chosen host-scoped Git include/reset sequence behaves correctly on Debian Bookworm's Git
-   2.39; and
-2. Azure Repos accepts the helper response produced from a real `az`-issued Entra token for clone,
-   fetch, and push.
+1. the host-scoped include/reset and generic longest-path router behave correctly on Debian
+   Bookworm's Git 2.39; and
+2. Azure Repos accepts the provider-owned username/password response built from a real `az`-issued
+   Entra token.
 
-Failure of either proof is a design stop, not permission to add a compatibility layer, install a new
-Git, or switch to Git Credential Manager without operator direction.
+The design-ready integration run proves item 2 read-only. Implementation later proves both through
+the generated state and reversible writes. Failure stops for design revision; it is not permission
+to add a compatibility layer, install another Git, or switch to Git Credential Manager.
