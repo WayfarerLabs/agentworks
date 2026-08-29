@@ -403,13 +403,20 @@ visible sequence instead of two review streams); **coordinated non-stacked PRs**
 independent slices, and are the only form available across repositories in a poly-repo environment.
 Record the choice in the plan.
 
-Every PR belonging to an SDD effort carries an `sdd:<slug>` label, where the slug is the spec
-directory without its date prefix (`sdd:simplification-pass`) and the spec is the one whose work the
-PR does, not whichever directory its diff happens to touch. A PR executing a plan item often touches
-no artifact at all, so the label is what lets the operator scan open PRs and see which spec each
+Except for the saga-owned artifact PRs below, every PR belonging to an SDD effort carries an
+`sdd:<slug>` label for each spec that governs it, where the slug is the spec directory without its
+date prefix (`sdd:simplification-pass`). The specs are the ones whose work the PR does, not
+whichever directories its diff happens to touch. A PR doing work that genuinely belongs to two
+specs, recording one operator ruling across both, say, carries both labels; a PR needing more than
+two is usually a PR that should have been split. A PR executing a plan item often touches no
+artifact at all, so the label is what lets the operator scan open PRs and see which spec each
 answers to. The effort applies it when it opens the PR; the label itself is created with the effort,
 under the direction that established it. A saga's own artifact PRs take `saga:<name>` alone, which
 already names them.
+
+The convention binds PRs opened after it lands on `main`. An older PR still in flight is not in
+violation; label it when the effort next touches it, so adopting the convention does not open with a
+wave of findings against work that predates it.
 
 ## PR Review
 
