@@ -410,11 +410,11 @@ Except for the saga-owned artifact PRs below, every PR belonging to an SDD effor
 date prefix (`sdd:simplification-pass`). The specs are the ones whose work the PR does, not
 whichever directories its diff happens to touch. A PR doing work that genuinely belongs to two
 specs, recording one operator ruling across both, say, carries both labels; more than two governing
-specs makes ownership unclear, and the fix is usually to narrow what the PR does rather than to make
-it smaller. A PR executing a plan item often touches no artifact at all, so the label is what lets
-the operator scan open PRs and see which spec each answers to. The effort applies it when it opens
-the PR; the label itself is created with the effort, under the direction that established it. A
-saga's own artifact PRs take `saga:<name>` alone, which already names them.
+specs makes ownership unclear, and the fix is usually to reduce how many specs the PR answers to,
+not how large it is. A PR executing a plan item often touches no artifact at all, so the label is
+what lets the operator scan open PRs and see which spec each answers to. The effort applies it when
+it opens the PR; the label itself is created with the effort, under the direction that established
+it. A saga's own artifact PRs take `saga:<name>` alone, which already names them.
 
 ## PR Review
 
