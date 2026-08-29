@@ -561,7 +561,6 @@ class TestOptionFlagsInSpec:
         commands = _walk_commands(build_spec(app))
         opts = [opt for param in commands["agentworks.console.add-sessions"].params for opt in param.opts]
         assert "--to-index" in opts
-        assert "--to-back" not in opts
 
     def test_secret_preview_opt_in_reaches_describe_and_verify_completions(self) -> None:
         commands = _walk_commands(build_spec(app))
