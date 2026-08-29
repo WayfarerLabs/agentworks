@@ -1,6 +1,6 @@
 # Instance Spec CLI Contract
 
-- Status: Implemented in R4; merge-strategy correction in design review
+- Status: R4 implemented and verified, including the merge-strategy correction; R5 pending
 - Date: 2026-08-24
 - Requirements: R4 and R5 in `frd.md`
 
@@ -175,17 +175,19 @@ A creation path that unwinds its owner and desired layer never emits a `set` lin
 pre-lifecycle persistence is the retry contract. The line reports final desired declaration, not
 remote application or applied state.
 
-## Inspection and machine output
+Creation and reinit retain their ordinary human lifecycle output and add the declaration-result line
+above when applicable.
+
+## Inspection and machine output (planned R5)
 
 The existing `vm describe`, `workspace describe`, `agent describe`, and `session describe` surfaces
-show the stored instance spec and either the current fully resolved spec or an explicit unresolved
-state. VM inspection distinguishes its VM and admin declaration slots. Per-value provenance and
-comparison state appear only where resolution exists; applied slices remain separately visible.
-Their JSON v1 forms add optional tagged fields without changing existing fields. Configured secret
-references may appear; resolved secret values never do.
+will show the stored instance spec and either the current fully resolved spec or an explicit
+unresolved state. VM inspection will distinguish its VM and admin declaration slots. Per-value
+provenance and comparison state will appear only where resolution exists; applied slices will remain
+separately visible. Their JSON v1 forms will add optional tagged fields without changing existing
+fields. Configured secret references may appear; resolved secret values never do.
 
-When provenance is available for a list value, it identifies that value by its position in the
+When provenance is available for a list value, it will identify that value by its position in the
 displayed resolved list after merging, not by the item's spelling or representation.
 
-Creation and reinit retain their ordinary human lifecycle output and add the declaration-result line
-above when applicable. Automation reads the structural JSON v1 description after mutation.
+Automation will read the structural JSON v1 description after mutation.

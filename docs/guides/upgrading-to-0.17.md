@@ -33,6 +33,14 @@ override, helper import, and callback-specific test. The framework now combines 
 declarations through the model the registered integration offers via `config_for()` (normally its
 `config_model`).
 
+Version 1's default callback performed a shallow child-wins merge: each incoming top-level key
+replaced that key's complete prior value. Only an integration's `merge_config` override changed that
+default; shipped `shell.required_commands` and `codex.writable_dirs` append-deduplicated. Merely
+changing `contract_version` to 2 can therefore change behavior: an unannotated list now
+append-deduplicates, and an unannotated nested object now recursively merges. Compare every field
+with its version-1 callback and mark complete values `REPLACE` wherever child replacement must
+remain.
+
 The model defaults are:
 
 - objects and mappings recursively merge by key;

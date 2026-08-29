@@ -2,7 +2,8 @@
 
 <!-- cspell:ignore sdds -->
 
-- Status: R1, R2, and R4 merged; merge-strategy correction in design review; R3 and R5 pending
+- Status: R1, R2, and R4 merged; merge-strategy correction implemented and verified; R3 and R5
+  pending
 - Date: 2026-08-23
 - Last revised: 2026-08-28
 - Requirements: [frd.md](./frd.md)
@@ -266,14 +267,18 @@ provenance across the five core layer adapters and opted-in capability config. H
 contract version 2 removes its executable merge callback; existing argument-vector and environment
 replacement behavior is model-declared, and no database, desired-payload, or CLI contract changed.
 The private project, fresh-eyes, and complexity loops converged with no material finding. All four
-required safety mutations were killed by focused tests. The exact non-integration suite passed 7,894
-tests with one skip, alongside Ruff, formatting, Mypy, Typer isolation, file lint, Rulesync,
-locked-SDD, website, and deterministic-build gates. An isolated-home shipped-CLI pass proved nested
-core list/map merging, complete environment-entry replacement, same-integration harness
-finalization, merged-list error indexing, bounded malformed-input recovery, empty live tables, and
-complete scratch cleanup. No provider inventory was authorized, so provider, VM, SSH, and
-session-launch behavior was deliberately not exercised; this correction does not change those
-surfaces.
+required safety mutations were killed by focused tests: forcing model replacement to merge failed
+`test_model_replacement_discards_the_complete_previous_subtree`; forcing marked list replacement to
+append failed `test_objects_recurse_lists_dedupe_and_marked_lists_replace`; removing union reset
+failed `test_different_or_unselectable_union_arms_replace_whole_values`; and disabling prefix
+seeding failed `test_a_new_contribution_seeds_sources_from_its_longest_prefix`. The exact
+non-integration suite passed 7,948 tests with one skip, alongside Ruff, formatting, Mypy, Typer
+isolation, file lint, Rulesync, locked-SDD, website, and deterministic-build gates. An isolated-home
+shipped-CLI pass proved nested core list/map merging, complete environment-entry replacement,
+same-integration harness finalization, merged-list error indexing, bounded malformed-input recovery,
+empty live tables, and complete scratch cleanup. No provider inventory was authorized, so provider,
+VM, SSH, and session-launch behavior was deliberately not exercised; this correction does not change
+those surfaces.
 
 Definition of done: every template and instance layer resolves through one schema-directed field
 policy at arbitrary depth; object replacement is an honest subtree boundary; capability authors use

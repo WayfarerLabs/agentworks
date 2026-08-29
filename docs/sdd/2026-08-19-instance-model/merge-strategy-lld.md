@@ -1,6 +1,6 @@
 # Schema-Directed Merge Strategies
 
-- Status: Proposed for SDD checkpoint review
+- Status: Implemented and verified
 - Date: 2026-08-27
 - Requirements: R4 in [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
@@ -8,9 +8,10 @@
 
 ## Purpose
 
-Template inheritance and final instance layers already share ordering and provenance machinery, but
-five reducers and an imperative capability hook still decide field behavior. This correction makes
-the typed model tree the single merge-policy authority for both core and capability-owned models.
+Before this correction, template inheritance and final instance layers shared ordering and
+provenance machinery, but five reducers and an imperative capability hook still decided field
+behavior. This correction makes the typed model tree the single merge-policy authority for both core
+and capability-owned models.
 
 The design must satisfy four constraints together:
 

@@ -59,9 +59,11 @@ class _VMTemplateKind:
         init. `agw vm create --template` selects one, and the `default` template applies
         when the flag is omitted.
 
-        Templates compose through `inherits`, nearest last: a child's values win, and
-        `env` tables merge key by key. That is how a small `dev` template says only what
-        differs from `default`.
+        Templates compose through `inherits`, nearest last. Their models recursively
+        merge objects and mappings, append and deduplicate lists, and replace scalars by
+        default; individual fields may replace complete values instead. `env` tables
+        merge key by key. That is how a small `dev` template says only what differs from
+        `default`.
         """,
     )
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"

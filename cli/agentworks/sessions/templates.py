@@ -1,8 +1,9 @@
 """Session template resolution and processing.
 
-Handles inheritance (depth-first, left-to-right), merge rules, and the
-built-in default template fallback. Follows the same pattern as VM,
-workspace, and agent templates.
+Orchestrates inheritance (depth-first, left-to-right), model-directed merging,
+and the built-in default template fallback. The selected integration model
+owns config field policy. Follows the same pattern as VM, workspace, and agent
+templates.
 
 Two entry points over one walk, because the framework and the session
 resolver want the merge at different moments and in different shapes:
@@ -18,7 +19,7 @@ resolver want the merge at different moments and in different shapes:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING, cast
 
@@ -372,7 +373,11 @@ def _merge_session_layer(
     tmpl: SessionTemplate,
     source: LayerSource,
 ) -> tuple[_SessionAccumulator, tuple[LayerContribution, ...]]:
+    from agentworks.resources.inheritance import LayerContributionKind
+
     target.resolved, template_paths = _merge_template(target.resolved, tmpl, source)
+    if any(operation.kind is LayerContributionKind.RESET_PREFIX and not operation.path for operation in template_paths):
+        target.harness = MergedHarness()
     declared = _declared_pair(tmpl)
     if declared.name is None:
         return target, template_paths
@@ -431,6 +436,10 @@ def _merge_template(
         incoming["env"] = {key: entry.model_dump(mode="python") for key, entry in tmpl.env.items()}
     merged, operations = merge_model(type(tmpl), previous, incoming)
     raw = cast("dict[str, object]", merged)
-    target.description = cast("str", raw["description"])
-    target.env = {key: EnvEntry.model_validate(value) for key, value in cast("dict[str, object]", raw["env"]).items()}
-    return target, operations
+    defaults = ResolvedSessionTemplate(name=target.name)
+    description = cast("str", raw.get("description", defaults.description))
+    env = {
+        key: EnvEntry.model_validate(value)
+        for key, value in cast("dict[str, object]", raw.get("env", defaults.env)).items()
+    }
+    return replace(target, description=description, env=env), operations

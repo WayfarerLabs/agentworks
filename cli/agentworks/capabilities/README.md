@@ -556,10 +556,12 @@ implementation of it:
   migrated. Supporting two at once would need a supported-range field and a compatibility rule,
   which is a decision to make when a real migration needs it, not before.
 - **`config_schema`** (a `ConfigContract`), what a config model offered for this kind must BE: its
-  base, discriminator, input domain, and forbidden reference kinds. A descriptor may separately
-  declare **`mapping_schema`** and **`mapping_host`** for a map-key-selected consuming surface.
-  Secret backends use tagged `AgwModel` source config plus an untagged, JSON-native `AgwRootModel`
-  per-secret mapping. **The kind states the contracts; implementations declare the models.**
+  base, discriminator, input domain, forbidden reference kinds, and whether its model participates
+  in schema-directed layers. A descriptor may separately declare **`mapping_schema`**, with the same
+  contract facts for its mapping model, and **`mapping_host`** for a map-key-selected consuming
+  surface. Secret backends use tagged `AgwModel` source config plus an untagged, JSON-native
+  `AgwRootModel` per-secret mapping. **The kind states the contracts; implementations declare the
+  models.**
 - **`implementation_contract`, `required_operations`, `required_attributes`**, what an
   implementation must satisfy. All four kinds declare nominal bases, and every registered
   implementation must derive from its kind's contract.
@@ -583,9 +585,10 @@ Because the descriptor states the contract, the contract is checkable, and it is
 anything is seated. Every implementation is run against its kind's record
 (`capabilities/conformance.py`) at registration: the base it derives from, its metadata, the
 non-operation members the framework reads off it, that nothing would stop it being constructed, the
-domain operations, the config model against `config_schema` and its opted-in merge contract, and the
-contract version. [`../plugins/README.md`](../plugins/README.md#contract-conformance) enumerates the
-checks; this is the one place they are listed.
+domain operations, the config model against `config_schema`, the mapping model against
+`mapping_schema` when present, each model's opted-in merge contract, and the contract version.
+[`../plugins/README.md`](../plugins/README.md#contract-conformance) enumerates the checks; this is
+the one place they are listed.
 
 The check is **nominal and never constructs the implementation**, so it says the same thing for
 every class registry. It replaced an `isinstance(impl, type)` gate and a `cast`, under which a class

@@ -1,14 +1,14 @@
 """Agent template resolution and processing.
 
-Handles inheritance (depth-first, left-to-right), merge rules, and the
-built-in default template fallback. Follows the same pattern as VM and
-workspace templates.
+Orchestrates inheritance (depth-first, left-to-right), model-directed merging,
+and the built-in default template fallback. The template models own field
+policy. Follows the same pattern as VM and workspace templates.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields
-from typing import TYPE_CHECKING, Any, cast
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from agentworks.errors import unknown_template_error
 
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from agentworks.agents.template import AgentTemplate
     from agentworks.db import Database
     from agentworks.env.entry import EnvEntry
-    from agentworks.resources.inheritance import LayerContribution, LayeredResolution
+    from agentworks.resources.inheritance import LayeredResolution
     from agentworks.resources.registry import Registry
 
 
@@ -216,6 +216,7 @@ def _resolve_with_provenance(
         resolution_layers,
         run_layer_fold,
     )
+    from agentworks.template_layers import merge_resolved_template_layer
 
     layers = [
         DeclarationLayer(
@@ -234,7 +235,7 @@ def _resolve_with_provenance(
     return run_layer_fold(
         ResolvedAgentTemplate(name=name),
         layers,
-        _merge_template,
+        merge_resolved_template_layer,
         default_paths=(
             (field,)
             for field in (
@@ -249,33 +250,4 @@ def _resolve_with_provenance(
         ),
         default_resource_kind="agent-template",
         default_name=name,
-    )
-
-
-def _merge_template(
-    target: ResolvedAgentTemplate,
-    tmpl: AgentTemplate,
-    _source: object,
-) -> tuple[ResolvedAgentTemplate, tuple[LayerContribution, ...]]:
-    """Merge one declaration, preserving the domain's ``None``-as-absence rule."""
-    from agentworks.env.entry import EnvEntry
-    from agentworks.instance_overlay_codec import OVERLAY_EXCLUDED_FIELDS
-    from agentworks.schema import merge_model
-
-    resolved_fields = fields(ResolvedAgentTemplate)
-    previous = {field.name: getattr(target, field.name) for field in resolved_fields if field.name != "name"}
-    previous["env"] = {key: entry.model_dump(mode="python") for key, entry in target.env.items()}
-    dumped = tmpl.model_dump(
-        mode="python",
-        exclude=set(OVERLAY_EXCLUDED_FIELDS),
-        exclude_unset=True,
-    )
-    authored = {name: value for name, value in dumped.items() if value is not None}
-    merged, operations = merge_model(type(tmpl), previous, authored)
-    raw = cast("dict[str, object]", merged)
-    raw["env"] = {key: EnvEntry.model_validate(value) for key, value in cast("dict[str, object]", raw["env"]).items()}
-    raw["name"] = target.name
-    return (
-        ResolvedAgentTemplate(**cast("dict[str, Any]", raw)),
-        operations,
     )

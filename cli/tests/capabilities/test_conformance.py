@@ -21,6 +21,7 @@ So this module calls ``conformance_error`` the way the self-test does.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from typing import Annotated, ClassVar, Literal
 
 import pytest
@@ -31,6 +32,7 @@ from agentworks.capabilities.descriptor import descriptor_for
 from agentworks.manifests.spec_model import metadata_model, spec_model
 from agentworks.schema import (
     AgwModel,
+    AgwRootModel,
     RefOwner,
     ScalarShorthand,
     SecretRef,
@@ -325,6 +327,37 @@ def test_every_core_layer_model_conforms_to_schema_merge() -> None:
     models = (VMTemplate, AdminConfig, WorkspaceTemplate, AgentTemplate, SessionTemplate)
     faults = [f"{model.__name__}: {reason}" for model in models if (reason := merge_contract_error(model))]
     assert not faults, "\n".join(faults)
+
+
+def test_a_layered_mapping_contract_is_merge_checked_at_registration() -> None:
+    """Mapping-valued capability config observes its own merge contract flag."""
+
+    class AliasedValue(AgwModel):
+        value: str = Field(validation_alias="accepted-value")
+
+    class AliasedMapping(AgwRootModel[AliasedValue]):
+        pass
+
+    backend = descriptor_for("secret-backend")
+    assert backend.mapping_schema is not None
+    impl = type(
+        "_LayeredMappingBackend",
+        (ConformingSecretBackend,),
+        {
+            "name": "layered-mapping",
+            "description": "a backend with mapping config under test",
+            "mapping_model": AliasedMapping,
+        },
+    )
+
+    assert conformance_error(backend, impl) is None
+    layered = replace(
+        backend,
+        mapping_schema=replace(backend.mapping_schema, layered_merge=True),
+    )
+    reason = conformance_error(layered, impl)
+
+    assert reason is not None
 
 
 def test_overlapping_structural_arms_are_refused_at_registration_without_markers() -> None:

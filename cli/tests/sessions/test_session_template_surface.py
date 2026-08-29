@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from textwrap import dedent
-from typing import Annotated, Literal
+from typing import Annotated, ClassVar, Literal
 
 import pytest
 from pydantic import Field
@@ -65,6 +65,10 @@ class _FakeHarnessIntegration(HarnessIntegration):
 
     def _probe_target(self, transport):  # type: ignore[no-untyped-def]
         return None
+
+
+class _ReplacingSessionTemplate(SessionTemplate):
+    merge_strategy: ClassVar[MergeStrategy] = MergeStrategy.REPLACE
 
 
 @pytest.fixture()
@@ -329,6 +333,26 @@ def test_child_silent_inherits_the_pair_unchanged() -> None:
     resolved = resolve_from_dict(templates, "child")
     assert resolved.harness_integration == "shell"
     assert resolved.harness_integration_config == {"command": "claude"}
+
+
+def test_root_replacement_resets_all_omitted_session_fields() -> None:
+    templates = {
+        "base": SessionTemplate(
+            name="base",
+            description="Parent session",
+            env={"MODE": EnvEntry.model_validate("parent")},
+            harness_integration=CapabilityBlock.of("shell", **{"command": "parent-command"}),
+        ),
+        "child": _ReplacingSessionTemplate(name="child", inherits=["base"]),
+    }
+
+    resolution = resolve_from_dict_with_provenance(templates, "child")
+
+    assert resolution.value.description == "Login shell"
+    assert resolution.value.env == {}
+    assert resolution.value.harness_integration == "shell"
+    assert resolution.value.harness_integration_config == {}
+    assert all(source.name != "base" for sources in resolution.provenance.values() for source in sources)
 
 
 # A child naming a DIFFERENT harness integration starting from an empty

@@ -4,7 +4,9 @@ Date: 2026-03-08
 
 ## Status
 
-Accepted
+Accepted. The body below records the original decision. ADR 0022 supersedes its TOML declaration
+front end, and ADR 0023 supersedes its type-only merge rules with schema-directed nested policy. The
+shared template and inheritance pattern remains in force.
 
 ## Context
 

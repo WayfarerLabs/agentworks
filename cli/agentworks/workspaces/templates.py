@@ -1,13 +1,14 @@
 """Workspace template resolution and processing.
 
-Handles inheritance (depth-first, left-to-right), merge rules, and the
-built-in empty template fallback.
+Orchestrates inheritance (depth-first, left-to-right), model-directed merging,
+and the built-in empty template fallback. The template models own field
+policy.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields
-from typing import TYPE_CHECKING, Any, cast
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from agentworks.errors import ConfigError, NotFoundError, unknown_template_error
 
@@ -16,7 +17,7 @@ if TYPE_CHECKING:
 
     from agentworks.db import Database
     from agentworks.env.entry import EnvEntry
-    from agentworks.resources.inheritance import LayerContribution, LayeredResolution
+    from agentworks.resources.inheritance import LayeredResolution
     from agentworks.resources.registry import Registry
     from agentworks.workspaces.template import WorkspaceTemplate
 
@@ -231,7 +232,7 @@ def _resolve(
     instance_name: str | None = None,
 ) -> ResolvedTemplate:
     """Resolve ``name``'s chain, defaults applied: one accumulator folded
-    over the chain's declarations, last one wins. See
+    over the chain's declarations using their model-directed policies. See
     ``vms.templates._resolve_from_dict`` for why the fold reads the
     DECLARATIONS rather than each parent's resolved template.
     """
@@ -259,6 +260,7 @@ def _resolve_with_provenance(
         resolution_layers,
         run_layer_fold,
     )
+    from agentworks.template_layers import merge_resolved_template_layer
 
     layers = [
         DeclarationLayer(
@@ -277,37 +279,8 @@ def _resolve_with_provenance(
     return run_layer_fold(
         ResolvedTemplate(name=name),
         layers,
-        _merge_template,
+        merge_resolved_template_layer,
         default_paths=(("tmuxinator",),),
         default_resource_kind="workspace-template",
         default_name=name,
-    )
-
-
-def _merge_template(
-    target: ResolvedTemplate,
-    tmpl: WorkspaceTemplate,
-    _source: object,
-) -> tuple[ResolvedTemplate, tuple[LayerContribution, ...]]:
-    """Merge one declaration, preserving the domain's ``None``-as-absence rule."""
-    from agentworks.env.entry import EnvEntry
-    from agentworks.instance_overlay_codec import OVERLAY_EXCLUDED_FIELDS
-    from agentworks.schema import merge_model
-
-    resolved_fields = fields(ResolvedTemplate)
-    previous = {field.name: getattr(target, field.name) for field in resolved_fields if field.name != "name"}
-    previous["env"] = {key: entry.model_dump(mode="python") for key, entry in target.env.items()}
-    dumped = tmpl.model_dump(
-        mode="python",
-        exclude=set(OVERLAY_EXCLUDED_FIELDS),
-        exclude_unset=True,
-    )
-    authored = {name: value for name, value in dumped.items() if value is not None}
-    merged, operations = merge_model(type(tmpl), previous, authored)
-    raw = cast("dict[str, object]", merged)
-    raw["env"] = {key: EnvEntry.model_validate(value) for key, value in cast("dict[str, object]", raw["env"]).items()}
-    raw["name"] = target.name
-    return (
-        ResolvedTemplate(**cast("dict[str, Any]", raw)),
-        operations,
     )

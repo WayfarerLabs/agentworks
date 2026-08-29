@@ -43,11 +43,12 @@ matching new owner. The command reports whether an instance layer was set, repla
 cleared, or explicitly absent, along with recognized field names when available. It never prints the
 JSON or environment values.
 
-Instance specs use the fields and merge rules of their matching template kind. Scalars replace the
-template value, map keys use child-wins merge, and list fields use that kind's stable append and
-deduplication behavior. Run `agw resource explain vm-template`, `workspace-template`,
-`agent-template`, or `session-template` for the accepted fields. Use
-`agw resource explain admin-template` for `--admin-spec` fields.
+Instance specs use the fields and model-directed merge rules of their matching template. Objects and
+mappings recursively merge by key, lists append unequal atomic items in stable order and deduplicate
+equal items, and incoming scalars replace prior values. A field or nested model may declare
+replacement instead. Run `agw resource explain vm-template`, `workspace-template`, `agent-template`,
+or `session-template` for the accepted fields. Use `agw resource explain admin-template` for
+`--admin-spec` fields.
 
 ### Machine-readable output
 
@@ -1005,11 +1006,13 @@ spec:
     network: true
 ```
 
-The integration-plus-config pair inherits as a unit: a child that restates the same integration
-merges its config block into the parent's (child wins per key; `shell` unions `required_commands`
-and `codex` unions `writable_dirs`), while a child naming a _different_ integration starts from a
-fresh config (the parent's block was addressed to a different tool). `env`, `inherits`, and the
-description merge as usual.
+The integration-plus-config pair inherits as a unit. A child that restates the same integration uses
+that integration's config model: objects and mappings recursively merge by key, lists append unequal
+items and deduplicate equal items, and incoming scalars replace prior values. Individual fields may
+declare replacement instead. Shipped `required_commands` and `writable_dirs` append-deduplicate,
+while `extra_args` on `claude-code`, `codex`, and `grok-build` replace. A child naming a _different_
+integration starts from a fresh config because the parent's block addressed another tool. `env`,
+`inherits`, and the description merge as usual.
 
 **TOML session-template sections are removed.** `config.toml` is settings only, so
 `[session_templates.<name>]` no longer loads: any resource-declaring section is now a hard error at

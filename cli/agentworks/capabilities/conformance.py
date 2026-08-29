@@ -72,10 +72,14 @@ def conformance_error(descriptor: CapabilityKindDescriptor, impl: type) -> str |
             model_label,
             descriptor.config_schema,
             model=model,
-            check_merge_contract=descriptor.config_schema.layered_merge,
         )
         or (
-            _model_error(descriptor, impl, "mapping_model", descriptor.mapping_schema)
+            _model_error(
+                descriptor,
+                impl,
+                "mapping_model",
+                descriptor.mapping_schema,
+            )
             if descriptor.mapping_schema is not None
             else None
         )
@@ -175,7 +179,6 @@ def _model_error(
     contract: ConfigContract,
     *,
     model: object = _MISSING,
-    check_merge_contract: bool = False,
 ) -> str | None:
     if model is _MISSING:
         model = getattr(impl, attribute_name, None)
@@ -215,7 +218,7 @@ def _model_error(
                 f"its {attribute_name} {model.__name__} accepts {problem} {label} at {path}; "
                 f"{descriptor.kind} mapping input is limited to JSON-native types"
             )
-    if check_merge_contract:
+    if contract.layered_merge:
         merge_contract = merge_contract_error(model)
         if merge_contract is not None:
             return f"its {attribute_name} declares an invalid merge contract: {merge_contract}"

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, field
+from typing import ClassVar
 
 from agentworks.agents.template import AgentTemplate
 from agentworks.agents.template import effective_references as agent_references
@@ -10,6 +11,8 @@ from agentworks.agents.templates import ResolvedAgentTemplate
 from agentworks.agents.templates import resolve_from_dict_with_provenance as resolve_agent
 from agentworks.env.entry import EnvEntry
 from agentworks.resources.inheritance import LayerSource, LayerSourceKind
+from agentworks.schema import AgwModel, MergeStrategy
+from agentworks.template_layers import merge_resolved_template_layer
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.admin import effective_references as admin_references
 from agentworks.vms.admin_templates import resolve_from_dict_with_provenance as resolve_admin
@@ -27,6 +30,58 @@ def _without_name(
     value: ResolvedVMTemplate | ResolvedTemplate | ResolvedAgentTemplate,
 ) -> dict[str, object]:
     return {name: field_value for name, field_value in asdict(value).items() if name != "name"}
+
+
+@dataclass
+class _ResolvedProjection:
+    name: str
+    values: list[str] = field(default_factory=list)
+    mode: str = "default"
+    resolved_only: str = "retained"
+
+
+class _ProjectionDeclaration(AgwModel):
+    name: str
+    values: list[str] | None = None
+    mode: str | None = None
+    declaration_only: str | None = None
+
+
+class _ReplacingProjectionDeclaration(_ProjectionDeclaration):
+    merge_strategy: ClassVar[MergeStrategy] = MergeStrategy.REPLACE
+
+
+class _ReplacingAdminConfig(AdminConfig):
+    merge_strategy: ClassVar[MergeStrategy] = MergeStrategy.REPLACE
+
+
+def test_resolved_layer_projection_does_not_require_identical_field_sets() -> None:
+    target = _ResolvedProjection(name="selected", values=["base"])
+    declaration = _ProjectionDeclaration(
+        name="declaration-name",
+        values=["base", "child"],
+        declaration_only="not part of the resolved value",
+    )
+
+    resolved, _operations = merge_resolved_template_layer(target, declaration, object())
+
+    assert resolved.name == "selected"
+    assert resolved.values == ["base", "child"]
+    assert resolved.resolved_only == "retained"
+    assert not hasattr(resolved, "declaration_only")
+    assert target.values == ["base"]
+
+
+def test_root_replacement_resets_omitted_resolved_fields_without_touching_resolved_only_fields() -> None:
+    target = _ResolvedProjection(name="selected", values=["base"], mode="parent", resolved_only="retained")
+    declaration = _ReplacingProjectionDeclaration(name="declaration-name")
+
+    resolved, _operations = merge_resolved_template_layer(target, declaration, object())
+
+    assert resolved.values == []
+    assert resolved.mode == "default"
+    assert resolved.resolved_only == "retained"
+    assert target.values == ["base"]
 
 
 def test_vm_template_and_instance_layers_share_schema_merge_semantics() -> None:
@@ -162,6 +217,23 @@ def test_admin_omissions_do_not_materialize_layer_defaults() -> None:
         ("user-install-command", "base-command"): ("vm", "vm-1"),
         ("user-install-command", "instance-command"): ("vm", "vm-1"),
     }
+
+
+def test_admin_root_replacement_resets_omitted_parent_fields() -> None:
+    base = AdminConfig(
+        name="ops",
+        shell="zsh",
+        git_credentials=["base"],
+        user_install_commands=["base-command"],
+    )
+    overlay = _ReplacingAdminConfig(name="overlay", git_credentials=["instance"])
+
+    resolution = resolve_admin({"ops": base}, "ops", overlay=overlay, instance_name="vm-1")
+
+    assert resolution.value.shell == "bash"
+    assert resolution.value.git_credentials == ["instance"]
+    assert resolution.value.user_install_commands == []
+    assert all(source.name != "ops" for sources in resolution.provenance.values() for source in sources)
 
 
 def test_list_reference_owners_follow_result_indices_and_duplicate_contributors() -> None:

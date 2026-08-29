@@ -177,5 +177,10 @@ def _merge_template(
     )
     merged, operations = merge_model(type(layer), previous, authored)
     raw = cast("dict[str, object]", merged)
+    defaults = type(target)(name=target.name).model_dump(
+        mode="python",
+        exclude=set(OVERLAY_EXCLUDED_FIELDS),
+    )
+    raw = {**defaults, **raw}
     raw["env"] = {key: EnvEntry.model_validate(value) for key, value in cast("dict[str, object]", raw["env"]).items()}
     return target.model_copy(update=raw), operations

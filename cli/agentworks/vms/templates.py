@@ -1,14 +1,14 @@
 """VM template resolution and processing.
 
-Handles inheritance (depth-first, left-to-right), merge rules, and the
-built-in default template fallback. Follows the same pattern as workspace
-templates.
+Orchestrates inheritance (depth-first, left-to-right), model-directed merging,
+and the built-in default template fallback. The template models own field
+policy. Follows the same pattern as workspace templates.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields
-from typing import TYPE_CHECKING, Any, cast
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from agentworks.errors import unknown_template_error
 
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
     from agentworks.db import Database
     from agentworks.env.entry import EnvEntry
-    from agentworks.resources.inheritance import LayerContribution, LayeredResolution
+    from agentworks.resources.inheritance import LayeredResolution
     from agentworks.resources.registry import Registry
     from agentworks.vms.template import VMTemplate
 
@@ -100,7 +100,8 @@ def _resolve_from_dict(
 
     ONE accumulator, folded over the chain's declarations. That is what
     keeps a silent parent silent: every write goes through
-    :func:`_merge_template`, which skips an undeclared field, so there is
+    :func:`~agentworks.template_layers.merge_resolved_template_layer`,
+    which skips an undeclared field, so there is
     never a second defaults-applied template for a later parent to
     overwrite an earlier one's real value with. Resolving each parent to
     its own ``ResolvedVMTemplate`` first would destroy that distinction
@@ -134,6 +135,7 @@ def _resolve_with_provenance(
         resolution_layers,
         run_layer_fold,
     )
+    from agentworks.template_layers import merge_resolved_template_layer
 
     layers = [
         DeclarationLayer(
@@ -152,7 +154,7 @@ def _resolve_with_provenance(
     return run_layer_fold(
         ResolvedVMTemplate(name=name),
         layers,
-        _merge_template,
+        merge_resolved_template_layer,
         default_paths=((field,) for field in ("cpus", "memory", "disk", "swap", "tailscale_auth_key")),
         default_resource_kind="vm-template",
         default_name=name,
@@ -268,33 +270,4 @@ def resolve_live_template_with_provenance(
         template_name,
         overlay=None if overlay is None else cast("VMTemplate", overlay.declaration),
         instance_name=instance_name,
-    )
-
-
-def _merge_template(
-    target: ResolvedVMTemplate,
-    tmpl: VMTemplate,
-    _source: object,
-) -> tuple[ResolvedVMTemplate, tuple[LayerContribution, ...]]:
-    """Merge one declaration, preserving the domain's ``None``-as-absence rule."""
-    from agentworks.env.entry import EnvEntry
-    from agentworks.instance_overlay_codec import OVERLAY_EXCLUDED_FIELDS
-    from agentworks.schema import merge_model
-
-    resolved_fields = fields(ResolvedVMTemplate)
-    previous = {field.name: getattr(target, field.name) for field in resolved_fields if field.name != "name"}
-    previous["env"] = {key: entry.model_dump(mode="python") for key, entry in target.env.items()}
-    dumped = tmpl.model_dump(
-        mode="python",
-        exclude=set(OVERLAY_EXCLUDED_FIELDS),
-        exclude_unset=True,
-    )
-    authored = {name: value for name, value in dumped.items() if value is not None}
-    merged, operations = merge_model(type(tmpl), previous, authored)
-    raw = cast("dict[str, object]", merged)
-    raw["env"] = {key: EnvEntry.model_validate(value) for key, value in cast("dict[str, object]", raw["env"]).items()}
-    raw["name"] = target.name
-    return (
-        ResolvedVMTemplate(**cast("dict[str, Any]", raw)),
-        operations,
     )

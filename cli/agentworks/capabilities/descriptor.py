@@ -43,7 +43,7 @@ class ModelInputDomain(Enum):
 
 @dataclass(frozen=True)
 class ConfigContract:
-    """What a config model offered for this kind must BE.
+    """What a model offered for this capability contract must BE.
 
     The kind states the contract; IMPLEMENTATIONS declare the models. This
     is the thing registration conformance checks a declared model against,
@@ -52,10 +52,9 @@ class ConfigContract:
     """
 
     base: type[BaseModel]
-    """The base every offered model extends. ``AgwModel`` where the config
+    """The base every offered model extends. ``AgwModel`` where the model
     is mapping-shaped, ``AgwRootModel`` where it is not: a secret backend's
-    per-secret mapping may be a bare string, which no ``BaseModel`` can
-    be."""
+    per-secret mapping may be a bare string, which no ``BaseModel`` can be."""
 
     discriminator: str | None
     """The field carrying the capability's own name, for a kind whose
@@ -68,10 +67,10 @@ class ConfigContract:
     """The annotation vocabulary the model may expose at its input boundary."""
 
     forbidden_reference_kinds: frozenset[str] = frozenset()
-    """Reference-marker kinds this config layer is not allowed to contain."""
+    """Reference-marker kinds this model layer is not allowed to contain."""
 
     layered_merge: bool = False
-    """Whether this primary config model participates in schema-directed layers."""
+    """Whether this contract's model participates in schema-directed layers."""
 
 
 @dataclass(frozen=True)
