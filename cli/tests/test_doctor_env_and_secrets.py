@@ -13,11 +13,20 @@ from agentworks.bootstrap import build_registry
 from agentworks.capabilities.secret_backend import BlockReason, TtyInteractionAccess
 from agentworks.config import load_config
 from agentworks.db import LATEST_VERSION, Database, VersionedPayload
-from agentworks.doctor import Status, _build_doctor_registry, _check_config, _check_secrets, checks_for_resource
+from agentworks.doctor import (
+    SecretSourceStatus,
+    Status,
+    _build_doctor_registry,
+    _check_config,
+    _check_secrets,
+    _secret_source_check,
+    checks_for_resource,
+)
 from agentworks.errors import ConfigError, StateError
 from agentworks.manifests import load_manifests
 from agentworks.resources.access import ResourceIdentity
 from agentworks.secrets.preview import PreviewStatus
+from agentworks.secrets.sources import SourceProvenance
 from tests.conftest import ManifestDoc, write_manifests
 
 if TYPE_CHECKING:
@@ -148,6 +157,35 @@ def test_focused_admin_dotfiles_matches_bulk_and_empty_source_has_no_check(
     )
     assert len(focused) == 1
     assert focused[0] in bulk_group.checks
+
+
+@pytest.mark.parametrize(
+    ("active", "enabled", "not_ready_reason", "expected"),
+    [
+        (True, True, None, Status.OK),
+        (False, True, None, Status.INFO),
+        (True, False, None, Status.INFO),
+        (True, True, "unavailable", Status.INFO),
+    ],
+)
+def test_secret_source_is_ok_only_when_active_enabled_and_ready(
+    active: bool,
+    enabled: bool,
+    not_ready_reason: str | None,
+    expected: Status,
+) -> None:
+    check = _secret_source_check(
+        SecretSourceStatus(
+            name="fixture",
+            backend="fixture",
+            provenance=SourceProvenance.DECLARED,
+            active=active,
+            enabled=enabled,
+            not_ready_reason=not_ready_reason,
+        )
+    )
+
+    assert check.status is expected
 
 
 # ---------------------------------------------------------------------------
