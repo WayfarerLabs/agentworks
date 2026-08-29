@@ -116,6 +116,7 @@ list_vm_owner_tree_desired_overlays(vm_name) -> tuple[DesiredOverlayRecord, ...]
 
 get_applied_slices(instance_kind, instance_name) -> tuple[AppliedStateSlice, ...]
 replace_applied_slices(instance_kind, instance_name, operation, slices: Mapping[AppliedStateKey, VersionedPayload]) -> tuple[AppliedStateSlice, ...]
+clear_applied_slices(instance_kind, instance_name, keys: Collection[AppliedStateKey]) -> None
 list_applied_slices(instance_kind) -> tuple[AppliedStateSlice, ...]
 ```
 
@@ -141,6 +142,12 @@ Slices not established by that operation remain unchanged. An empty input is a n
 to erase unrelated evidence. This is what lets VM reinit replace only the facts it actually
 reapplied and keeps workspace repair from manufacturing convergence.
 
+`clear_applied_slices` accepts only registered applied keys valid for the supplied instance kind and
+deletes exactly those keys for one instance. An empty collection and already-absent keys are no-ops.
+This narrow mutation removes evidence that a lifecycle knows became uncertain after a remote side
+effect. It does not accept unknown strings, expose record types, or turn absence into an applied
+state. Like replacement, it joins an enclosing lifecycle transaction.
+
 ## Connection and transaction rules
 
 `Database.instance_state` returns the repository over the same connection. Repository reads
@@ -149,8 +156,9 @@ therefore participate in an enclosing read-only snapshot, and writes participate
 
 Each standalone repository mutation commits before returning. Inside an explicit transaction it
 defers the commit to the outer boundary. Multi-slice replacement always creates or joins a
-transaction, so callers never observe only part of one lifecycle checkpoint. Owner deletion and its
-private record cleanup use the same connection and transaction.
+transaction, and applied-slice clearing joins one when present, so callers never observe only part
+of one lifecycle checkpoint. Owner deletion and its private record cleanup use the same connection
+and transaction.
 
 The repository opens no connection, sidecar, cache, unit of work, or independent transaction
 manager.

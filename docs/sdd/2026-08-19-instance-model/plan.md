@@ -287,6 +287,9 @@ behavior; and no database migration, payload-version change, or new operator syn
 
 ## Phase 4: R3 applied instance state and SSH proving slice
 
+- [x] Complete the authoritative OpenSSH research and low-level design in `prior-art-research.md`
+      and `applied-state-ssh-lld.md`, including the password-protected-key, transaction,
+      comparison-boundary, backup, and ssh-agent non-goal decisions.
 - [ ] Add domain-owned versioned codecs for row-backed hardware provenance and provisioned SSH
       identity slices, without storing secrets, private key bytes, passphrases, or duplicate CPU,
       memory, disk, and swap values.
@@ -297,11 +300,11 @@ behavior; and no database migration, payload-version change, or new operator syn
       verifiable, so a successful public-key write cannot create a false private-identity record.
 - [ ] Represent encrypted formats that cannot expose an identity non-interactively as unverifiable,
       not mismatch or unsupported; leave ssh-agent selection unresolved.
-- [ ] Make authorized-key reconciliation return a typed applied/not-applied outcome instead of
+- [ ] Make authorized-key reconciliation return a typed applied/unproven outcome instead of
       inferring proof from lifecycle success or unrelated warnings.
-- [ ] Capture only slices proven by successful VM create and reinit operations, with one operation
-      and timestamp, and write lifecycle-row plus applied-state changes in one honest transaction
-      where they compose.
+- [ ] Capture only slices proven by successful VM create and reinit operations, remove stale SSH
+      proof after an unproven remote write or unstable final identity, and write lifecycle-row plus
+      applied-state changes in one honest transaction where they compose.
 - [ ] Add preflight comparison before SSH transport and structural diagnostic facts for not
       recorded, unverifiable, match, and drift without remediation.
 - [ ] Extend the VM backup projection with the non-secret R3 applied records and prove the archive

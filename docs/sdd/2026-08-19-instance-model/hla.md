@@ -365,7 +365,8 @@ The terminal database checkpoint groups:
 
 - final init status;
 - the terminal VM event; and
-- only the applied slices whose typed outcomes prove success.
+- only the applied slices whose typed outcomes prove success, plus removal of prior SSH evidence
+  when the remote write outcome or final configured identity became uncertain.
 
 The existing status and event methods become transaction-aware only where required for this
 composition. Remote work cannot be atomic with SQLite. If the remote key write succeeds and the
@@ -374,14 +375,21 @@ retry path; it never fabricates a successful record.
 
 Before committing an SSH fingerprint, the lifecycle re-derives the configured identity and compares
 it with the pre-application result. This detects ordinary path replacement during the operation but
-does not claim filesystem and OpenSSH path access are atomic.
+does not claim filesystem and OpenSSH path access are atomic. Authorized-key reconciliation is the
+last Phase B remote mutation. A failed write has an ambiguous remote outcome, so it removes prior
+SSH evidence. A successful write followed by an unstable proof does the same in the terminal
+transaction rather than allowing stale evidence to authorize later SSH.
 
 Operational checks use an explicit comparison service at SSH-using boundaries. They do not gate all
 `LiveVMNode.preflight()` calls because start, stop, delete, and establishment reinit have different
-transport needs. Reinit permits not-recorded state so existing VMs can establish it. Cleanup remains
-possible. `verify_vm_connection` and ordinary live-SSH compositions are the first consumers; direct
-transport call sites receive explicit coverage rather than assuming one boundary owns every
-connection.
+transport needs. The ordinary gated VM boundary is safe by default; platform-native recovery uses an
+explicitly named exception. Native cloud transport may itself use the configured SSH key; the
+exception exists because rekey, Tailscale repair, platform shell, and delete cleanup must remain
+attemptable, not because native routing proves a different identity. Reinit permits not-recorded
+state so existing VMs can establish it. Cleanup remains possible. `verify_vm_connection` and
+ordinary live-SSH compositions are the first consumers; direct transport call sites receive explicit
+coverage rather than assuming one boundary owns every connection. Drift guidance names restoration
+or recreation rather than implying native shell changes persisted evidence.
 
 ## R5: resolved and applied projections
 
