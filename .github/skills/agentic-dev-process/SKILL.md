@@ -35,13 +35,16 @@ Commits convention, from the first commit; this skill routes the effort.
    project-specific priors, which may use a lighter capability because it complements rather than
    replaces the reviewer of record; a document-only change normally does not need it. Every lane
    runs inside this loop, so a review published by an outside service is ordinary feedback under
-   [Published feedback](references/delivery.md#published-feedback). Batch rounds by meaningful risk
-   or work units, not per commit. Give each lane its required invocation context. The
-   `agentworks-reviewer` and `muntz` roles define what they need; the third lane is a generic
-   delegate with no role document, so hand it the diff, the governing SDD if one governs, and any
-   surface the operator has placed off limits. The project review is the reviewer of record and has
-   at least the implementation capability and reasoning depth. Assess findings under **Finding
-   materiality** in `development-principles`, and send each correction to the artifact's owner.
+   [Published feedback](references/delivery.md#published-feedback). Each lane is a delegate, so each
+   gets its own worktree at one pinned head ([Delegation](references/delegation.md)): the lanes run
+   concurrently, and a lane proving a claim by deleting a piece must not be doing it in the tree
+   another lane is reading. Batch rounds by meaningful risk or work units, not per commit. Give each
+   lane its required invocation context. The `agentworks-reviewer` and `muntz` roles define what
+   they need; the third lane is a generic delegate with no role document, so hand it the diff, the
+   governing SDD if one governs, and any surface the operator has placed off limits. The project
+   review is the reviewer of record and has at least the implementation capability and reasoning
+   depth. Assess findings under **Finding materiality** in `development-principles`, and send each
+   correction to the artifact's owner.
 6. **Validate and hand off an exact state.** Before PR validation or merge, load
    `integration-testing`; it owns validation and live-evidence mechanics. Load
    [Delivery](references/delivery.md) before choosing a PR vehicle, publishing a handoff, consuming
