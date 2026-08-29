@@ -29,16 +29,84 @@ Git config, and per-user files on existing VMs.
 
 ## Compatibility Decisions
 
-### Configuration stays compatible
+### Configuration cuts cleanly to provider-owned sources
 
-Released forms remain unchanged:
+The manifest schema change is intentionally breaking:
 
-- omitted `token` selects the default secret;
-- scalar `token: <secret-name>` selects the secret arm;
-- explicit `{mode: secret, secret: ...}` remains valid;
-- provider scope fields retain their meanings.
+- both built-in providers retire `token` and require a structured `source` table;
+- `source.mode` is required;
+- scalar source shorthand and omission of the complete source are invalid;
+- `source: {mode: secret}` retains the existing `git-token-<credential-name>` default;
+- provider scope fields retain their meanings;
+- GitHub adds `source.mode: gh-cli`, while Azure DevOps adds `source.mode: az-cli`.
 
-`gh-cli` and `az-cli` are additive explicit arms. No migration tool or dual reader is needed.
+There is no migration tool, dual reader, alias, or warning period. Invalid old manifests fail
+through normal schema validation before mutation. The changelog/release notes and upgrade guide
+label the change as breaking and provide these exact rewrites:
+
+```yaml
+# Old default secret
+provider:
+  name: github
+```
+
+```yaml
+# New default secret
+provider:
+  name: github
+  source:
+    mode: secret
+```
+
+```yaml
+# Old named secret
+provider:
+  name: azdo
+  token: my-azdo-token
+  org: example-org
+```
+
+```yaml
+# New named secret
+provider:
+  name: azdo
+  source:
+    mode: secret
+    secret: my-azdo-token
+  org: example-org
+```
+
+CLI identity sources use the same required table with `mode: gh-cli` or `mode: az-cli`. GitHub and
+Azure DevOps own these similar schemas independently; core adds no shared `source` model.
+
+### Operational manifest cutover and rollback
+
+The old and new binaries intentionally have no common Git-credential manifest spelling. The upgrade
+guide therefore treats them as one maintenance-window cutover rather than suggesting manifests can
+be migrated gradually:
+
+1. Record the exact installed Agentworks version and make a recoverable copy of the complete config
+   directory, including every resource manifest. Inventory every `git-credential` declaration; a
+   partial file selection is insufficient because normal registry construction loads the complete
+   resource directory.
+2. Prepare a complete rewritten resource directory beside the active one. Rewrite every built-in
+   provider declaration, including implicit-default declarations, before changing the active tree.
+3. Stop concurrent Agentworks commands for that workstation. Upgrade the CLI and atomically replace
+   the active resource directory with the prepared directory as one operator-controlled cutover. A
+   short validation outage between those two operations is expected: the new binary rejects old
+   manifests and the old binary rejects new ones. Existing VM Git state remains unchanged until a
+   user reinitialization runs.
+4. Run config/registry validation with the new CLI before initializing any user. Then reinitialize
+   one selected admin or agent as the canary before continuing the rollout.
+5. Before any successful new-format user reinitialization, rollback means restoring the recorded old
+   CLI version and complete old config directory together. Never restore only one side. After a
+   successful new-format reinitialization, old Agentworks no longer understands the installed
+   credential layout; downgrade is not an active-management recovery path, so failures fix forward
+   with the new CLI.
+
+The implementation's upgrade guide supplies concrete commands for the supported installation path
+and safe directory replacement. It does not add a dual reader, manifest rewriter, or background
+fleet mutation.
 
 ### Provider implementation contract cuts atomically
 
@@ -67,11 +135,11 @@ production remains on the old path only within the working branch.
 
 Convert GitHub and Azure DevOps to `credential_material(ctx)`. Each provider translates its own
 scope fields, reads only its scoped declared secrets, retains provider-owned validation for the
-secret arm, and returns either a final stored credential or its fixed CLI managed helper. Core
-accepts a managed helper only when the provider configuration declares no secrets; every
-secret-bearing configuration returns a stored credential. Update the descriptor contract version and
-required operation in the same commit or tightly adjacent commits that never form a mergeable
-partial.
+secret arm, and returns either a final stored credential or its fixed CLI managed helper. Input
+dependencies and output variants remain independent; synthetic coverage proves a secret-bearing
+provider may return either shape without core interpreting the relationship. Update the descriptor
+contract version and required operation in the same commit or tightly adjacent commits that never
+form a mergeable partial.
 
 ### 3. Convert graph and boundary assumptions
 
@@ -149,9 +217,9 @@ duplicates, missing files, and malformed Agentworks files. Every case preserves 
   no-credential state; existing logger semantics mark initialization partial.
 - If new helpers fail at runtime, the operator authenticates/fixes the CLI identity and retries Git;
   reinit is needed only for config/helper changes.
-- Downgrading Agentworks after new-format reconciliation is unsupported as an active-management
-  workflow; the upgrade guide directs operators to reinit after restoring the older version if they
-  deliberately downgrade.
+- Downgrading Agentworks after new-format reconciliation is unsupported as an active-management or
+  recovery workflow. Paired binary/config rollback is available only before the first successful
+  new-format reinit; afterward recovery fixes forward with the new CLI.
 
 ## Removal of Credentials
 
@@ -169,7 +237,8 @@ The following transitions are explicit acceptance cases:
 
 ## Migration Definition of Done
 
-- Every released resource-manifest spelling loads unchanged.
+- Every released `token` spelling is rejected with an actionable schema path; every documented
+  structured `source` rewrite loads.
 - Provider contract v2 has no live implementation or adapter.
 - Admin and agent zero-credential init removes all provably Agentworks-owned credential/routing
   state; only the inert stable lock may remain. An indistinguishable generic
@@ -178,5 +247,8 @@ The following transitions are explicit acceptance cases:
 - Operator-managed Git configuration outside exact Agentworks-owned paths survives.
 - The imperative direct-add command and all of its state-writing code are absent.
 - Same-input initialization is byte-stable after the first migration.
-- Upgrade collateral explains runtime CLI authentication, cleanup, and downgrade posture.
+- Changelog/release notes prominently label the schema break, and upgrade collateral explains the
+  exact manifest rewrites, runtime CLI authentication, cleanup, and downgrade posture.
+- Upgrade collateral gives the paired binary/resource-directory cutover, expected validation outage,
+  pre-reinit rollback boundary, and post-reinit fix-forward rule.
 - GitHub and Azure live tests prove useful Git operations after migration.

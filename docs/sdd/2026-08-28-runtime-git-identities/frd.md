@@ -48,8 +48,8 @@ unauthenticated.
 
 - **Provider**: the code capability selected by a `git-credential` resource, currently `github` or
   `azdo`.
-- **Acquisition mode**: the `token.mode` arm that says where a helper gets its credential: `secret`,
-  `gh-cli`, or `az-cli` as allowed by that provider.
+- **Acquisition mode**: a provider-owned `source.mode` arm that says where that provider begins
+  credential acquisition: `secret`, `gh-cli`, or `az-cli` as allowed by that provider.
 - **HTTPS scope**: a normalized protocol, host, and optional segment-aware path prefix used to match
   one Git credential context. Providers translate forge concepts such as a GitHub owner or Azure
   DevOps organization into this generic shape.
@@ -69,20 +69,21 @@ unauthenticated.
 ### Operator using dedicated GitHub identities
 
 The operator authenticates `gh` as the intended identity in an agent or admin user's environment,
-configures a GitHub credential with `token.mode: gh-cli`, and expects later HTTPS Git operations to
+configures a GitHub credential with `source.mode: gh-cli`, and expects later HTTPS Git operations to
 use the token exposed by that user's active `gh` identity.
 
 ### Operator using an Entra service principal for Azure DevOps
 
 The operator authenticates `az` as a service principal, configures an Azure DevOps credential with
-`token.mode: az-cli`, and expects Git operations against the declared Azure DevOps organization to
+`source.mode: az-cli`, and expects Git operations against the declared Azure DevOps organization to
 obtain a short-lived Entra token at runtime.
 
 ### Operator retaining a secret-backed PAT
 
-The operator keeps the existing omitted, scalar, or explicit `secret` token spelling. Core delivers
-that resolved secret only to the declaring provider; the provider performs its current validation
-and returns the final stored credential.
+The operator explicitly selects `source.mode: secret`, optionally names a secret instead of using
+the provider's default, and expects the provider to turn its scoped input into Git credentials. Core
+delivers that resolved secret only to the declaring provider; the provider performs its current
+validation and returns the final stored credential.
 
 ### Operator removing credentials
 
@@ -104,25 +105,33 @@ The provider MUST NOT write target-user files, alter Git configuration, install 
 CLI, or read an undeclared secret. Core MUST NOT interpret a provider's secret names, assume a
 secret is itself a Git token, or implement forge-specific acquisition.
 
-### R2: Closed acquisition arms
+### R2: Provider-owned source configuration
 
-The existing `token` discriminated union remains the configuration surface:
+GitHub and Azure DevOps each independently define a required `source` field with their own closed
+`source.mode` union:
 
 - `github` accepts `secret` and `gh-cli`.
 - `azdo` accepts `secret` and `az-cli`.
-- Omission and scalar shorthand continue to select `secret` exactly as they do today.
-- Every non-secret arm requires its explicit discriminator.
+- `source` and `source.mode` are required. There is no scalar shorthand and omitting the complete
+  source is invalid.
+- For `source.mode: secret`, omitting only `source.secret` selects that provider's existing
+  `git-token-<credential-name>` default.
+- The retired `token` field is invalid.
 - A provider rejects acquisition modes it does not implement.
 
-The current `secret` arm declares its configured secret reference. CLI-backed arms add no synthetic
-secret edge and accept no secret field. Any provider configuration with one or more declared secrets
-MUST return a stored credential; only a zero-secret configuration may return a managed helper. A
-future provider may declare several secrets and use them to derive one final stored credential
-without changing core.
+These similarly named fields are provider configuration, not a shared core model. Another provider
+may use a different config shape or no `source` branch at all. Structural reference extraction
+derives every declared secret from the provider's complete config without requiring core to know
+that `source` exists or what a mode means.
+
+Input dependencies and output shapes are independent. A provider with zero, one, or several declared
+secrets may return either a stored credential or a managed helper. It owns any validation, API
+exchange, derivation, and decision between those outputs; core neither assumes a declared secret is
+the final Git token nor infers output provenance from secret presence.
 
 ### R3: Secret-backed runup validation
 
-For the current `token.mode: secret` arms, initialization MUST resolve the declared secret and
+For the current `source.mode: secret` arms, initialization MUST resolve the declared secret and
 deliver it only through the provider's scoped context. The provider MUST retain its authenticated
 runup check and MUST return the final username/password response; core MUST enforce Git protocol
 line/control safety on that returned boundary. A definitive rejection keeps the current
@@ -226,10 +235,16 @@ installed-state manifest, target-side merge protocol, or another credential writ
 
 - Stored credentials remain in mode-0600 Agentworks-owned storage and never enter helper scripts or
   Git configuration.
-- Core MUST reject `ManagedHelper` from any provider configuration with a declared secret. Every
-  secret-bearing configuration returns `StoredCredential`; current CLI-backed configurations are
-  zero-secret and obtain runtime credentials only from the target user's CLI identity.
-- Runtime tokens exist only in helper process memory and the Git credential-protocol response.
+- Provider-returned stored credentials and managed-helper programs are both sensitive boundary
+  values. Core MUST validate their generic shape, keep them out of representations and diagnostics,
+  and reconcile them without trying to trace them back to provider inputs.
+- The only managed-helper ingestion path is `credential_material()` on a seated provider
+  implementation, and built-in provider schemas expose no executable field. Provider-authoring rules
+  forbid operator-authored command text. The provider owns safe use of every capability and secret
+  granted through its declared operation boundary; core MUST NOT claim to prove authorship, scan
+  helper bytes for input values, or require an unverifiable provenance attestation.
+- Tokens acquired by the current CLI helpers exist only in helper process memory and the Git
+  credential-protocol response.
 - Provider-returned scopes, stored protocol fields, managed-helper metadata/content, and generated
   paths are validated at the core boundary before use. Provider-owned executable content is never
   accepted from operator configuration.
@@ -243,12 +258,21 @@ installed-state manifest, target-side merge protocol, or another credential writ
 
 ### R11: Operator and authoring surfaces
 
-The implementation MUST update the provider-authoring README, generated resource schema and
-examples, sample configuration where applicable, resource/guide teaching, command reference, and
-upgrade guidance in the same change that alters behavior.
+The implementation MUST update the provider-authoring README, the root capabilities README,
+generated resource schema and examples, sample configuration where applicable, resource/guide
+teaching, command reference, and upgrade guidance in the same change that alters behavior.
 
-The permanent provider README MUST lead with the two-shape materialization purpose and describe
-stored credentials and managed helpers without making PATs the universal model.
+The `token` to required structured `source` migration is an intentional breaking configuration
+change. The implementation MUST carry a breaking Conventional Commit marker and one-paragraph
+`BREAKING CHANGE:` footer so Release Please generates the breaking release-note entry. Permanent
+upgrade guidance MUST show the exact rewrites for default, named-secret, GitHub CLI, and Azure CLI
+sources and state that there is no compatibility alias or scalar source shorthand.
+
+The permanent provider README MUST lead with the two-shape materialization purpose and sharpen both
+prose and requirements around provider-owned production of final Git credential material and
+core-owned validation/reconciliation. It MUST describe stored credentials and managed helpers
+without making PATs the universal model. The root capabilities README MUST summarize the same
+boundary consistently at the capability-system level.
 
 ### R12: Future authentication features remain separate
 
@@ -274,19 +298,18 @@ runtime Git use. They consume this contract but are neither required nor impleme
 
 ### AC1: Configuration and graph
 
-Existing secret spellings remain valid and produce the same secret edge. Each provider receives only
-its declared resolved secrets. Explicit `gh-cli` and `az-cli` declarations validate only under their
-owning providers, produce no secret edge, and appear accurately in schema/resource descriptions
-without exposing identity data.
+The retired `token` field, an omitted `source`, a scalar `source`, and cross-provider modes fail
+closed. Explicit provider-owned source tables validate, `source.mode: secret` with an omitted inner
+secret produces the existing default edge, and CLI modes produce no secret edge. Schema/resource
+descriptions expose the breaking shape without identity data.
 
 ### AC2: Secret validation
 
 Focused tests prove that secret-backed providers receive their scoped secret context, perform their
 own validation/acquisition, and return final stored credentials under the existing enabled/disabled
-and skip/partial policies. A synthetic provider proves that several declared secrets may produce one
-stored credential without core understanding the exchange. Core rejects a managed helper from every
-secret-bearing configuration. CLI-backed modes receive no secrets and perform no CLI check during
-provisioning.
+and skip/partial policies. Synthetic providers prove that several declared secrets may produce a
+stored credential or a managed helper without core understanding the exchange or correlating inputs
+with output shape. CLI-backed modes receive no secrets and perform no CLI check during provisioning.
 
 ### AC3: Runtime GitHub identity
 
@@ -303,9 +326,9 @@ write operation prove that the emitted Git credential form works with the reposi
 merely its REST API. Missing/failed/malformed/timeout cases are value-safe; a valid token for an
 identity without repository access produces Git's normal forge rejection.
 
-Before this design merges, a ready-PR integration run MUST prove the proposed
-organization-username/token-password form with a real read-only Azure Repos Git operation. A failed
-or unavailable proof is not approval to begin implementation.
+After design review clears and while this PR remains draft, an integration run MUST prove the
+proposed organization-username/token-password form with a real read-only Azure Repos Git operation.
+A failed or unavailable proof is not approval to begin implementation.
 
 ### AC5: Selection
 

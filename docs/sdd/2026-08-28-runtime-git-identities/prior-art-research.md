@@ -114,7 +114,7 @@ Sources:
 
 The current implementation already has several parts worth preserving:
 
-- one tagged secret acquisition arm intentionally created for future additive modes;
+- tagged provider configuration as the natural place for acquisition modes;
 - structurally derived provider secret graph edges and scoped `RunContext` delivery;
 - provider-specific secret-token probes;
 - deterministic path-based routing outcomes;
@@ -124,6 +124,7 @@ The current implementation already has several parts worth preserving:
 
 The parts to retire are accidental PAT assumptions and lifecycle duplication:
 
+- the `token` field, its scalar shorthand, and its implicit whole-source default;
 - universal `secret_name`, naked-token calls, and core token mapping;
 - `credential_lines` as the provider's main output;
 - duplicated admin/agent writes;
@@ -180,6 +181,21 @@ program, but operator configuration cannot inject a program, executable path, or
 preserves provider extensibility without turning a credential resource into a command-execution
 surface.
 
+### Infer provider output from declared secret presence
+
+Rejected by operator ruling. A provider may need one or several secrets to authenticate to an API,
+exchange credentials, or construct a runtime helper; a declared secret is not necessarily the final
+Git token. Core can enforce scoped access to declared inputs and validate the generic returned
+shape, but it cannot prove the lineage of derived output. Restricting secret-bearing providers to
+stored output would encode a false assumption and block valid providers. The provider implementation
+owns the relationship between its authorized inputs and either returned output variant.
+
+### Share one source model across providers
+
+Rejected. GitHub and Azure DevOps happen to call a similar provider-local field `source`, but core
+does not interpret it and future providers may use a different schema. Separate closed unions keep
+mode validity with the implementation that owns it and avoid a central acquisition vocabulary.
+
 ### Replace all global helpers as today
 
 Rejected. It deletes operator-managed Git configuration and is unnecessary. An Agentworks-owned
@@ -209,9 +225,10 @@ rather than silently growing version-dependent branches.
 These do not change the accepted requirements, but must be answered at the named gates:
 
 1. Does the host-scoped reset/include sequence behave as designed on Debian Bookworm's Git 2.39?
-2. At design-ready review, does the selected GCM-style username/password response work with a real
-   `az`-issued Entra token for a read-only Azure Repos Git operation? During implementation, does
-   the generated helper then support clone, fetch, and push?
+2. After design review clears but before implementation, does the selected GCM-style
+   username/password response work with a real `az`-issued Entra token for a read-only Azure Repos
+   Git operation? During implementation, does the generated helper then support clone, fetch, and
+   push?
 
 Each answer is recorded in permanent implementation documentation or tests, not left load-bearing
 only in this research file.

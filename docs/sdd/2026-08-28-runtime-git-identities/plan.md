@@ -10,13 +10,14 @@
 - Migration: [migration-strategy.md](./migration-strategy.md)
 - Research: [prior-art-research.md](./prior-art-research.md)
 - Design baseline: `4c47f9c70a58f62f3a2e366f2870013d5fa032b8`
-- Delivery vehicle: design-only draft PR first; exactly one implementation PR
+- Delivery vehicle: one draft PR carries design review and, after design clearance, implementation
 
 ## Delivery Rules
 
-- The design PR contains only this SDD directory. It stays draft and carries
+- Until design clearance, the draft PR contains only this SDD directory and carries
   `sdd:runtime-git-identities` plus the author-owned `review-requested` label. It has no merge
-  intent while design review is active.
+  intent while design review is active. After the cleared draft-only Azure proof, the same draft
+  receives the pre-authorized implementation.
 - The operator authorized up to four published-feedback/fix iterations while findings are
   converging. Each iteration critically evaluates the complete batch, removes `review-requested`
   before edits, pushes one coherent corrected checkpoint, comments with dispositions/evidence, and
@@ -24,18 +25,21 @@
   stops for operator direction.
 - Private artifact review uses `agentworks-reviewer` and Muntz before the first public handoff.
   Document-only work does not add a generic code-correctness lane.
-- Review convergence recommends promotion but does not authorize it. The operator decides when the
-  design PR becomes ready and merges.
-- The first ready transition triggers one bounded integration-tester design proof against an
-  authorized Azure Repos repository: obtain the Azure DevOps-audience token through the active
-  service-principal `az` identity and use the proposed organization-username/token-password helper
-  response for a read-only Git operation. Failure returns the PR to draft for Azure-arm redesign;
-  unavailable inventory is reported as blocked, never counted as proof.
-- Implementation begins from the merged design on current `main` and lands in one feature PR so the
-  provider contract, callers, reconciliation, cleanup, and live behavior cannot land in a misleading
-  half-state. This effort does not define a safe implementation split.
-- No implementation checkbox is checked by the design-only PR. Completed checkboxes remain immutable
-  after merge.
+- Review convergence recommends implementation but does not authorize it. The operator has
+  pre-authorized implementation on this same draft PR only if the final design checkpoint is clean
+  with the designated next-steps boundary reviewer (`agw-next-steps`), project reviewer, and Muntz;
+  a material design disagreement stops first.
+- After design review clears and while the PR remains draft, run one bounded integration-tester
+  design proof against an authorized Azure Repos repository: obtain the Azure DevOps-audience token
+  through the active service-principal `az` identity and use the proposed
+  organization-username/token-password helper response for a read-only Git operation. Failure keeps
+  the PR draft for Azure-arm redesign; unavailable inventory is reported as blocked, never counted
+  as proof. Only a passing proof unlocks the pre-authorized implementation.
+- Implementation begins on this same draft branch from the exact cleared design checkpoint and lands
+  in the same PR so the provider contract, callers, reconciliation, cleanup, and live behavior
+  cannot land in a misleading half-state. This effort does not define a safe implementation split.
+- No implementation checkbox is checked before design clearance. Completed checkboxes remain
+  immutable after merge.
 - The effort lead does not merge its own PR.
 
 ## Full Gates
@@ -95,11 +99,19 @@ assert structure, behavior, state, and value containment; they do not police aut
       cycle 2, putting command detection and actionable fixed failure guidance in each provider
       helper, and structurally limiting managed helpers to zero-secret configurations. (2026-08-28:
       accepted the Muntz findings with the saga lead's diagnostic and enforceability refinements.)
-- [ ] On the operator-authorized ready transition, prove the proposed Azure username/password wire
-      form with a real read-only Azure Repos Git operation before the design merges.
-- [ ] Collect the requested public artifact perspectives and process at most four authorized
-      converging iterations.
-- [ ] Receive operator direction to promote and merge the design checkpoint before implementation.
+- [x] Incorporate authenticated operator correction cycle 4 by making provider inputs and outputs
+      orthogonal, removing core's secret-presence/output restriction, replacing built-in `token`
+      with independently provider-owned required structured `source` unions, removing shorthand and
+      whole-source omission, and recording the schema break for shipped release notes. (2026-08-28:
+      FRD, HLA, LLD, migration, research, and implementation plan corrected together.)
+- [ ] After design review clears but before implementation, prove the proposed Azure
+      username/password wire form with a real read-only Azure Repos Git operation while the PR
+      remains draft.
+- [ ] Collect the requested public artifact perspectives and process the separately authorized SDD
+      rounds to a clean final design checkpoint.
+- [ ] Confirm the final design checkpoint is clean with the designated next-steps boundary reviewer,
+      project reviewer, and Muntz; run the draft-only Azure proof; then begin the pre-authorized
+      implementation on this same draft PR.
 
 ### Phase 0 Definition of Done
 
@@ -129,16 +141,20 @@ assert structure, behavior, state, and value containment; they do not police aut
 
 ## Phase 1: Provider Contract and Configuration
 
-- [ ] Add provider-owned closed acquisition unions: GitHub `secret | gh-cli`, Azure DevOps
-      `secret | az-cli`; preserve secret omission/scalar/full forms and structurally derive each
+- [ ] Replace `token` with independently provider-owned required structured `source` unions: GitHub
+      `secret | gh-cli`, Azure DevOps `secret | az-cli`; reject outer omission/scalar shorthand
+      while retaining only the explicit secret arm's inner default, and structurally derive each
       provider's complete secret-reference set.
 - [ ] Prove current CLI arms declare no secret, secret arms declare their configured reference, a
       synthetic provider may declare several, scoped delivery refuses every undeclared read, and
-      core rejects managed-helper output from any secret-bearing configuration.
+      both stored and managed-helper outputs are accepted independently of secret presence.
 - [ ] Add frozen generic HTTPS-scope, stored-credential, managed-helper, and credential-material
-      types with value-safe construction and representations.
+      types with value-safe construction and representations; require every managed helper to
+      provide fixed value-safe failure guidance, and keep the provider result free of a redundant
+      provider-echoed credential name.
 - [ ] Cut the capability descriptor and all in-tree providers atomically to contract version 3 and
-      the single context-taking `credential_material` operation.
+      the single context-taking `credential_material` operation; each provider descriptor uses
+      `AgwModel` directly and owns its complete schema without a shared source/config base.
 - [ ] Delete v2 `helper_entry`, `credential_lines`, static-store username routing, universal
       `secret_name`, naked-token calls, and core token-map assumptions.
 - [ ] Retain provider-owned static validation and `defaults.runup_git_credentials`; make current
@@ -157,7 +173,8 @@ assert structure, behavior, state, and value containment; they do not police aut
 
 - [ ] Make GitHub and Azure secret arms read their scoped context, retain provider-owned validation,
       and return final `StoredCredential` values; add a synthetic multi-secret exchange provider to
-      prove core remains acquisition-agnostic.
+      prove core remains acquisition-agnostic, plus a secret-bearing managed-helper fixture to prove
+      core does not infer output from input shape.
 - [ ] Make GitHub and Azure CLI arms return fixed provider-owned `ManagedHelper` programs that
       declare `gh`/`az`, emit complete Git credential responses, handle dependency execution
       failure, and perform no provisioning-time CLI checks.
@@ -168,15 +185,19 @@ assert structure, behavior, state, and value containment; they do not police aut
       the Git request, validate only response protocol shape, suppress upstream output, and emit the
       provider-fixed value-safe failure guidance.
 - [ ] Build the generic longest-path dispatcher, host-specific Git include, generation layout, and
-      atomic `current` activation from final provider materials.
+      atomic `current` activation from final provider materials; store each static credential as an
+      exact private Git-protocol record and carry explicit immutable stored-credential and
+      managed-helper file sets in the desired-state model.
 - [ ] Prove providers translate GitHub repository/owner and Azure organization into generic path
       tuples; preserve selection outcomes, reject duplicate nonempty scopes, and retain released
       multiple-host-default behavior.
 - [ ] Add fake helper/protocol tests for success, missing command, nonzero, timeout, malformed or
       control-bearing response, noisy stderr, unsupported operations, and no-match cases.
-- [ ] Prove no credential appears in dispatcher, include, representations, errors, logs, process
-      arguments, managed-helper programs, or test artifacts; reject `ManagedHelper` from every
-      secret-bearing configuration and cover every built-in managed-helper program.
+- [ ] Prove stored credential values containing Git/URL delimiters such as `:`, `@`, `/`, `%`, `?`,
+      `#`, `=`, and `\` round-trip literally without URL parsing or serialization.
+- [ ] Prove built-in credentials appear in no dispatcher, include, representations, errors, logs,
+      process arguments, managed-helper programs, or test artifacts; cover every built-in
+      managed-helper program without adding secret-lineage scans or provider attestations.
 
 ### Phase 2 Definition of Done
 
@@ -259,11 +280,18 @@ assert structure, behavior, state, and value containment; they do not police aut
 
 ## Phase 6: Permanent Collateral, Review, and Delivery
 
-- [ ] Rewrite `capabilities/git_credential/README.md` around provider-owned acquisition, generic
-      HTTPS scopes, stored credentials, managed helpers, scoped contexts, reconciliation ownership,
-      and provider-authoring rules.
+- [ ] Rewrite `capabilities/git_credential/README.md` prose and requirements around provider-owned
+      acquisition and final materialization, generic HTTPS scopes, stored credentials, managed
+      helpers, scoped contexts, reconciliation ownership, and provider-authoring rules; align the
+      Git-credential section of the root `capabilities/README.md` to the same sharp boundary.
 - [ ] Update capability/resource prose, schemas, examples, sample config/manifest disposition,
-      command reference, guide concepts, CLI README, upgrade guide, and plugin documentation.
+      command reference, guide concepts, CLI README, upgrade guide, and plugin documentation; the
+      upgrade guide must pin the paired CLI/full-resource-directory cutover, short validation
+      outage, pre-reinitialization rollback, and post-reinitialization fix-forward boundary.
+- [ ] Make the implementation's release-visible feature commit a breaking Conventional Commit and
+      add one paragraph `BREAKING CHANGE:` footer describing required structured `source`; verify
+      Release Please derives exactly one breaking release-note entry. Do not edit its generated
+      changelog directly or duplicate the marker through the PR title.
 - [ ] Document the exact `gh`/`az` runtime commands, active-identity prerequisite, Azure
       organization permission prerequisite, and recovery path.
 - [ ] Add no prose-policing tests; retain structural schema/generation/command/helper/collateral

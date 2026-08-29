@@ -40,19 +40,21 @@ generic longest-path selection, Git registration, migration, and complete reconc
 
 ### Provider acquisition models
 
-`TokenAcquiringConfig.token` remains a discriminated union, but the union is no longer one shared
-global set of arms. Each provider's concrete config closes the modes it supports:
+Each provider independently owns its complete config schema. GitHub and Azure DevOps happen to use
+the same required field name, `source`, but there is no shared source base or global arm set:
 
 ```text
-GitHubConfig.token = SecretToken | GitHubCliToken
-AzDOConfig.token   = SecretToken | AzureCliToken
+GitHubConfig.source = GitHubSecretSource | GitHubCliSource
+AzDOConfig.source   = AzDOSecretSource | AzureCliSource
 ```
 
-The existing omission and scalar-shorthand behavior belongs to `SecretToken` and remains stable.
-Only that arm carries `SecretRef` in the current providers. Structural reference extraction derives
-the graph from each provider configuration without requiring core to know what any secret means. A
-future provider may declare several secret references and derive one credential from them without a
-contract change.
+The outer `source` and its `mode` are required. Scalar shorthand and whole-source omission are
+removed; an explicitly selected secret source may still omit only its `secret` field to use the
+provider's owner-derived default. Only the secret arms carry `SecretRef` in the current providers.
+Structural reference extraction derives the graph from each provider's complete configuration
+without requiring core to know that a source field exists or what any secret means. Another provider
+may choose a different config vocabulary, declare several secret references anywhere in its model,
+or have no acquisition branch at all.
 
 The provider capability contract advances atomically from version 2 to version 3. There is no
 compatibility adapter inside the capability registry: every in-tree implementation migrates in the
@@ -84,9 +86,9 @@ materialization operation receives that context, owns any validation/exchange/de
 returns the final shape. A stored password/token is sensitive final material, never an inert secret
 reference for core to interpret. A managed helper is declarative provider output: provider code owns
 its behavior while core owns installation, registration, replacement, and removal. Operator
-configuration cannot supply commands or executable bodies. Core accepts a managed helper only from a
-provider configuration whose structurally derived secret-reference set is empty; every
-secret-bearing provider returns a stored credential.
+configuration cannot supply commands or executable bodies. A provider's declared inputs do not
+constrain which payload variant it may return. Core treats both variants as sensitive provider
+output and does not infer, scan, or attest their provenance.
 
 Scopes contain only Git's HTTPS credential context. GitHub translates `repos` and `owner` to path
 prefixes; Azure DevOps translates `org` to a path prefix. Core does not know those source concepts.
@@ -98,9 +100,10 @@ coupling between routing and static-store usernames.
 Core builds one complete `UserCredentialState` for a target user:
 
 - validated generic scopes and provider-returned payloads;
-- the private credential store, containing only `StoredCredential` values;
-- a generation-owned dispatcher and optional static store;
-- provider-owned managed-helper implementations embedded in the generation;
+- private per-credential Git-protocol records, containing only `StoredCredential` values without URL
+  serialization;
+- a generation-owned dispatcher and optional private `stored/` directory;
+- an immutable file set of provider-owned managed-helper implementations embedded in the generation;
 - an Agentworks-owned Git include;
 - legacy cleanup targets.
 
@@ -180,8 +183,8 @@ no secret refs and can pass preflight without a secret source.
 
 Composition roots resolve the plan's complete secret union once and deliver each provider a
 `RunContext` backed by `ScopedSecrets(node.secret_refs())`. Core neither builds a token mapping nor
-assumes what the values mean. A provider cannot read an undeclared secret, and a zero-secret
-provider receives an empty scoped view. The context deliberately contains no admin or agent
+assumes what the values mean. A provider cannot read an undeclared secret, and a provider with no
+declared secrets receives an empty scoped view. The context deliberately contains no admin or agent
 transport, so the materialization operation has no target-mutation power.
 
 ### Runup
@@ -199,9 +202,9 @@ remain:
 
 Core calls each surviving provider's materialization operation with its scoped context. The provider
 returns final `CredentialMaterial`; core then validates generic scopes, line/control safety for
-stored protocol fields, the secret-reference/payload relationship, bounded managed-helper shape, and
-collisions. It renders the deterministic state and reconciles even if the surviving set is empty.
-Core never performs authentication-specific mapping or exchange.
+stored protocol fields, bounded managed-helper shape, and collisions. It does not correlate declared
+inputs with payload shape. It renders the deterministic state and reconciles even if the surviving
+set is empty. Core never performs authentication-specific mapping or exchange.
 
 ### Git operation
 
@@ -239,21 +242,21 @@ neither authenticates it nor parses its configuration.
 
 The provider returns a managed helper containing the fixed Azure DevOps resource recipe. It
 constructs organization-as-username and Entra-token-as-password itself, following current Git
-Credential Manager prior art and pending the required design-ready Azure Repos wire proof. Core does
-not know that mapping. The implementation later proves the generated helper through clone, fetch,
-and a reversible write. The exact command and prior-art evidence live in the LLD and research
+Credential Manager prior art and pending the required cleared-design draft Azure Repos wire proof.
+Core does not know that mapping. The implementation later proves the generated helper through clone,
+fetch, and a reversible write. The exact command and prior-art evidence live in the LLD and research
 artifact.
 
 ## Security Boundaries
 
 - Provider configuration can choose only closed acquisition arms; it cannot inject commands.
-- Current runtime helpers execute no login and receive no Agentworks secret.
+- Current CLI runtime helpers execute no login and require no Agentworks secret.
 - Provider-owned static validation remains after scoped secret resolution and before target writes.
 - Provider materialization can read only declared secrets; core never interprets their values.
 - Stored credentials and managed-helper bodies are sensitive provider output and are never logged or
   represented verbatim.
-- Runtime token stdout is captured separately from diagnostics, validated as one line, and emitted
-  only through the Git protocol.
+- Current CLI token stdout is captured separately from diagnostics, validated as one line, and
+  emitted only through the Git protocol.
 - Upstream stderr is summarized, not copied blindly.
 - The managed directory and staged replacement are private to the target user.
 - A stable shared/exclusive `flock` prevents cross-generation reads and cleanup races.
@@ -276,12 +279,15 @@ artifact.
 
 ## Compatibility and Migration
 
-The configuration change is additive: all released omitted, scalar, and explicit secret spellings
-remain valid. The provider capability contract changes atomically because the internal operation
-surface changes.
+The configuration change is intentionally breaking. Both built-in providers replace `token` with a
+required structured `source`; whole-source omission and scalar shorthand are removed. The explicit
+secret source keeps the owner-derived default when only its inner `secret` field is omitted. There
+is no dual reader or compatibility alias. The provider capability contract changes atomically
+because the internal operation surface changes.
 
-Existing VMs migrate on their next admin or agent initialization. The upgrade guide and
-command-removal release note direct operators to declarative configuration and reinit.
+Existing VMs migrate on their next admin or agent initialization after their manifests are updated.
+The changelog/release notes and upgrade guide prominently label the config break, give exact
+`token`-to-`source` rewrites, and direct operators to declarative configuration and reinit.
 Reconciliation removes the legacy direct `credential.helper` value, old include, old helper script,
 and Agentworks-owned `~/.git-credentials`, then installs the new layout. An empty declared list also
 runs this cleanup.
@@ -293,6 +299,8 @@ No background fleet mutation, database migration, or implicit CLI authentication
 Before closeout, load-bearing behavior moves to:
 
 - `cli/agentworks/capabilities/git_credential/README.md` for provider authors;
+- `cli/agentworks/capabilities/README.md` for the capability-system summary of the same ownership
+  and materialization boundary;
 - the closest core Git credential README/module documentation for reconciliation ownership;
 - resource schema, sample manifests/config, command reference, guide concepts, and upgrade guide;
 - integration-testing evidence for GitHub and Azure runtime identities.

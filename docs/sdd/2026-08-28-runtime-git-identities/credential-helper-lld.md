@@ -18,29 +18,40 @@
 
 ## Configuration Contract
 
-### Shared secret arm
+### GitHub secret source
 
-The existing arm and shorthand remain:
-
-```yaml
-spec:
-  provider:
-    name: github
-    token: my-github-token
-```
-
-is equivalent to:
+The explicit GitHub source table is:
 
 ```yaml
 spec:
   provider:
     name: github
-    token:
+    source:
       mode: secret
       secret: my-github-token
 ```
 
-Omitting `token` continues to select `{mode: secret, secret: git-token-<credential-name>}`.
+`source` and `source.mode` are required. A scalar source and the retired `token` field are invalid.
+Only `source.secret` may be omitted, selecting the existing `git-token-<credential-name>` provider
+default.
+
+### Azure DevOps secret source
+
+Azure DevOps owns the same spelling independently:
+
+```yaml
+spec:
+  provider:
+    name: azdo
+    source:
+      mode: secret
+      secret: my-azdo-token
+    org: example-org
+```
+
+Its `source` and `source.mode` are likewise required, and omission of only `source.secret` selects
+the same owner-derived default convention. This parallel shape does not create a shared core source
+contract.
 
 ### GitHub CLI arm
 
@@ -52,7 +63,7 @@ metadata:
 spec:
   provider:
     name: github
-    token:
+    source:
       mode: gh-cli
     repos:
       - WayfarerLabs/agentworks
@@ -72,7 +83,7 @@ metadata:
 spec:
   provider:
     name: azdo
-    token:
+    source:
       mode: az-cli
     org: example-org
 ```
@@ -85,24 +96,35 @@ helper-program text.
 ### Models and secret references
 
 ```python
-class SecretToken(AgwModel):
+class GitHubSecretSource(AgwModel):
     mode: Literal["secret"]
     secret: Annotated[NonEmptyStr, SecretRef(...)]
 
 
-class GitHubCliToken(AgwModel):
+class GitHubCliSource(AgwModel):
     mode: Literal["gh-cli"]
 
 
-class AzureCliToken(AgwModel):
+class AzDOSecretSource(AgwModel):
+    mode: Literal["secret"]
+    secret: Annotated[NonEmptyStr, SecretRef(...)]
+
+
+class AzureCliSource(AgwModel):
     mode: Literal["az-cli"]
 ```
 
-Each concrete provider keeps the existing discriminated union and scalar shorthand. Only the current
-secret arm carries `SecretRef`; the CLI arms declare none. This is configuration truth, not a core
-special case. Reference extraction continues to derive the provider's complete declared secret set
-from its model. A future provider may declare several secret references and use them to produce one
-credential without changing the capability contract.
+`GitHubConfig.source` and `AzDOConfig.source` are separate provider-owned discriminated unions. They
+share a field name because the providers happen to have similar configuration, not because core
+defines a `Source` abstraction. Only the current secret arms carry `SecretRef`; the CLI arms declare
+none. Reference extraction continues to derive each provider's complete declared secret set from its
+entire model. A future provider may use a different field, declare several secret references in any
+shape, or need no acquisition branch at all.
+
+The capability descriptor replaces `ConfigContract(base=TokenAcquiringConfig, discriminator="name")`
+with `ConfigContract(base=AgwModel, discriminator="name")`, matching the existing provider-neutral
+VM-platform and harness-integration contracts. No replacement shared Git credential config base is
+introduced.
 
 ## Provider Contract Version 3
 
@@ -126,7 +148,7 @@ class StoredCredential:
 @dataclass(frozen=True)
 class ManagedHelper:
     program: bytes = field(repr=False)
-    failure_hint: str = "the selected credential helper failed"
+    failure_hint: str
 
 
 CredentialPayload = StoredCredential | ManagedHelper
@@ -134,7 +156,6 @@ CredentialPayload = StoredCredential | ManagedHelper
 
 @dataclass(frozen=True)
 class CredentialMaterial:
-    credential_name: str
     scopes: tuple[HttpsCredentialScope, ...]
     payload: CredentialPayload = field(repr=False)
 ```
@@ -151,13 +172,15 @@ secret supplied it nor assumes the password is the resolved secret unchanged. Bo
 sensitive and excluded from representations.
 
 `ManagedHelper` is a provider-authored executable helper program that emits a complete Git
-credential protocol response. It is fixed or safely rendered by trusted provider code, not supplied
-as operator-authored command text. Core writes it into the managed generation, provides the common
-bounded process envelope, and validates the response syntax, but it does not translate CLI stdout
-into a forge credential. A future provider may return a bridge to any runtime identity tool through
-this same shape. Core accepts this payload only when the provider configuration declares no secrets.
-Every secret-bearing provider MUST return `StoredCredential`; a future secret-backed runtime-helper
-shape is designed when one is actually needed.
+credential protocol response. Built-in provider schemas expose no executable, path, argument, or
+command-text field, and provider-authoring rules require programs to be fixed or safely rendered by
+the provider implementation. Core does not prove that provenance. It writes the returned program
+into the managed generation, provides the common bounded process envelope, and validates the
+response syntax, but it does not translate CLI stdout into a forge credential. A future provider may
+return a bridge to any runtime identity tool through this same shape. A provider may return it
+whether its configuration declares zero, one, or several secrets. Core treats the program as
+sensitive output but does not inspect it for input values or require the provider to attest how it
+was derived.
 
 ### Required operation
 
@@ -171,9 +194,11 @@ agent transport. The provider may read only names its configuration declared and
 target-mutation power. It owns any required validation, API exchange, derivation, and final response
 construction.
 
-The operation performs no target-user filesystem or Git configuration mutation. For any provider
-configuration with one or more secret references it returns a `StoredCredential`; for the current
-zero-secret CLI arms it returns a `ManagedHelper` without executing the CLI at provisioning time.
+The operation performs no target-user filesystem or Git configuration mutation. Its declared input
+set and returned output variant are orthogonal: the provider may return either payload after using
+any subset of the capabilities granted through its scoped operation context. The current secret arms
+return stored credentials, and the current CLI arms return managed helpers without executing the CLI
+at provisioning time, but those are provider choices rather than core rules.
 
 The descriptor deletes version-2 `helper_entry`, `credential_lines`, `store_username`, and the
 universal `secret_name` assumption atomically. Core no longer receives a token map or calls a
@@ -239,41 +264,59 @@ requires to produce its final stored credential.
 
 Microsoft's current Git guidance recommends a Bearer header. The username/password response is a
 deliberate compatibility choice for Debian Bookworm's Git 2.39 based on current Git Credential
-Manager behavior. The design PR proves this exact response with a real read-only Azure Repos Git
-operation before it becomes ready; implementation later proves clone, fetch, and a reversible write.
-Failure revises the provider output, not core's generic two-shape contract.
+Manager behavior. After design review clears, a draft-only proof exercises this exact response with
+a real read-only Azure Repos Git operation before implementation; implementation later proves clone,
+fetch, and a reversible write. Failure revises the provider output, not core's generic two-shape
+contract.
 
 ## Core Material Boundary
 
 Core validates provider output once:
 
-1. credential name is the expected declared resource;
-2. at least one scope exists;
-3. host and path segments are normalized, bounded, and free of separators, dot segments, controls,
+1. at least one scope exists;
+2. host and path segments are normalized, bounded, and free of separators, dot segments, controls,
    and unsafe generated-config characters;
-4. duplicate nonempty scopes are rejected across materials; released first-declared behavior is
+3. duplicate nonempty scopes are rejected across materials; released first-declared behavior is
    retained for multiple host defaults;
-5. stored username/password fields satisfy Git's newline/NUL restrictions and are never represented;
-6. managed-helper program and hint are bounded; the hint is line/control safe; the program came from
-   trusted provider code rather than an operator-configured command field; and the declaring
-   provider configuration has no secret references;
-7. output ordering is deterministic by host, descending path length, path, then declaration order.
+4. stored username/password fields satisfy Git's newline/NUL restrictions and are never represented;
+5. managed-helper program and required hint are bounded, and the hint is line/control safe;
+6. output ordering is deterministic by host, descending path length, path, then declaration order.
 
 Core does not validate whether a secret is a PAT, exchange one secret for another token, construct a
-forge authorization header, or infer provider scope.
+forge authorization header, infer provider scope, correlate secret presence with payload type, or
+trace output bytes back to provider inputs.
 
 ```python
 @dataclass(frozen=True)
 class UserCredentialState:
     include_content: str
     dispatcher_script: str
-    stored_credentials: bytes | None = field(default=None, repr=False)
+    stored_credential_files: tuple[tuple[str, bytes], ...] = field(repr=False)
+    managed_helper_files: tuple[tuple[str, bytes], ...] = field(repr=False)
 ```
 
-`build_user_credential_state(materials)` renders the private store, generation-owned dispatcher, and
-include. Stored values never enter the dispatcher or Git configuration. Each managed-helper program
-is installed as a private generation-owned executable without any operator-configured command escape
-hatch.
+Core collects `(known_node_name, material)` pairs; the provider does not echo the name core already
+knows. `build_user_credential_state(materials)` renders the private per-credential records,
+generation-owned dispatcher, helper file set, and include. Each tuple uses a safe generated relative
+name unrelated to the credential name. Stored values never enter the dispatcher or Git
+configuration. The reconciler writes stored records mode 0600 and provider-returned helpers
+mode 0700.
+
+Each stored record is the exact bounded Git credential-protocol response encoded as UTF-8:
+
+```text
+username=<line-safe username>
+password=<line-safe password>
+
+```
+
+The dispatcher opens the selected record within its generation, reads exactly those two prefixed
+lines plus the blank terminator and EOF while the shared lock is held, strips only the fixed
+`username=` and `password=` prefixes, closes the record and shared-lock descriptors, then reproduces
+the same response. It does not parse a credential URL. `:`, `@`, `/`, `%`, `?`, `#`, `=`, and
+backslash therefore round-trip literally; newline, carriage return, NUL, other controls,
+missing/duplicate fields, extra lines, and invalid UTF-8 are rejected before installation or at the
+bounded reader.
 
 ## Managed Layout
 
@@ -288,7 +331,8 @@ hatch.
       dispatch                  0700, generic scope router
       helpers/                  0700, private directory
         <credential-id>         0700, provider-owned managed-helper program
-      stored-credentials        0600, omitted when unused
+      stored/                   0700, omitted when unused
+        <credential-id>         0600, one Git-protocol record
 ```
 
 The root is wholly Agentworks-owned. A safe generation ID is unrelated to content. Credential names
@@ -392,6 +436,7 @@ for each node/provider:
         provider.runup(ctx)
     material = provider.credential_material(ctx)
     validate material at core boundary
+    collect (node.name, material)
 
 state = build_user_credential_state(surviving materials)
 reconcile_user_git_credentials(target_user, state)
@@ -452,12 +497,12 @@ names. Scoped delivery enforces that `credential_material(ctx)` cannot read beyo
 
 ### Provider contract
 
-- omitted/scalar/explicit secret parity;
+- required structured `source`, rejected `token`/omitted/scalar source, and defaulted inner secret;
 - valid provider-owned CLI arm and cross-provider rejection;
 - zero-, one-, and synthetic multi-secret declarations;
 - scoped context denies undeclared reads;
-- a synthetic multi-secret provider derives one stored credential while core remains agnostic;
-- managed helper accepted only for zero-secret configuration; stored credential required otherwise;
+- synthetic multi-secret providers return stored and managed-helper outputs while core remains
+  agnostic;
 - provider materialization cannot mutate target state through its operation surface;
 - schema, sample, resource show, and graph projection.
 
@@ -468,9 +513,13 @@ names. Scoped delivery enforces that `credential_material(ctx)` cannot read beyo
   ordering;
 - duplicate nonempty scope refusal and released multiple-default behavior;
 - mixed stored/helper output on one host;
-- no credential in dispatcher/include/representations/errors;
-- malformed scope, stored protocol fields, managed-helper metadata, and operator command injection
-  rejected at the core boundary.
+- no credential in dispatcher/include/representations/errors for built-in outputs;
+- stored-record round trips for every URL/protocol delimiter, with exact rejection of malformed
+  framing, controls, extra lines, and invalid UTF-8;
+- malformed scope, stored protocol fields, and managed-helper metadata rejected at the core
+  boundary;
+- built-in schemas expose no helper program or command field; operator-authored executable input is
+  rejected as unknown provider configuration before materialization.
 
 ### Managed-helper runtime
 
@@ -507,7 +556,8 @@ names. Scoped delivery enforces that `credential_material(ctx)` cannot read beyo
 The implementation removes rather than adapts:
 
 - contract-version-2 operation methods and descriptor requirements;
-- core `secret_name`, static-source, token-map, and forge-specific selector assumptions;
+- core `secret_name`, static-source, token-map, source-mode, and forge-specific selector
+  assumptions;
 - the core token-to-protocol mapper and built-in CLI command recipes;
 - duplicated admin/agent material writers and conditional reconciliation gates;
 - `vm add-git-credential` and its manager path;
@@ -523,6 +573,7 @@ Two facts remain empirical gates:
 2. Azure Repos accepts the provider-owned username/password response built from a real `az`-issued
    Entra token.
 
-The design-ready integration run proves item 2 read-only. Implementation later proves both through
-the generated state and reversible writes. Failure stops for design revision; it is not permission
-to add a compatibility layer, install another Git, or switch to Git Credential Manager.
+The cleared-design draft integration run proves item 2 read-only before implementation.
+Implementation later proves both through the generated state and reversible writes. Failure stops
+for design revision; it is not permission to add a compatibility layer, install another Git, or
+switch to Git Credential Manager.
