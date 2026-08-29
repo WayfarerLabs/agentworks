@@ -91,6 +91,10 @@ assert structure, behavior, state, and value containment; they do not police aut
       remove speculative launcher ABI/versioned-root promises while retaining the current adjacent
       pairing proof. (2026-08-28: FRD, HLA, LLD, migration, research, and implementation plan
       corrected together.)
+- [x] Incorporate public feedback cycle 3 by removing the duplicate core executable probe added in
+      cycle 2, putting command detection and actionable fixed failure guidance in each provider
+      helper, and structurally limiting managed helpers to zero-secret configurations. (2026-08-28:
+      accepted the Muntz findings with the saga lead's diagnostic and enforceability refinements.)
 - [ ] On the operator-authorized ready transition, prove the proposed Azure username/password wire
       form with a real read-only Azure Repos Git operation before the design merges.
 - [ ] Collect the requested public artifact perspectives and process at most four authorized
@@ -129,7 +133,8 @@ assert structure, behavior, state, and value containment; they do not police aut
       `secret | az-cli`; preserve secret omission/scalar/full forms and structurally derive each
       provider's complete secret-reference set.
 - [ ] Prove current CLI arms declare no secret, secret arms declare their configured reference, a
-      synthetic provider may declare several, and scoped delivery refuses every undeclared read.
+      synthetic provider may declare several, scoped delivery refuses every undeclared read, and
+      core rejects managed-helper output from any secret-bearing configuration.
 - [ ] Add frozen generic HTTPS-scope, stored-credential, managed-helper, and credential-material
       types with value-safe construction and representations.
 - [ ] Cut the capability descriptor and all in-tree providers atomically to contract version 3 and
@@ -160,20 +165,18 @@ assert structure, behavior, state, and value containment; they do not police aut
       exact resource-ID/query/TSV command plus provider-owned organization-username/token-password
       response.
 - [ ] Implement one core bounded managed-helper envelope using guaranteed coreutils `timeout`; pass
-      the Git request, check the declared executable on the runtime `PATH`, validate only response
-      protocol shape, suppress upstream output, and emit generic missing-tool or provider-fixed
-      value-safe failure guidance.
+      the Git request, validate only response protocol shape, suppress upstream output, and emit the
+      provider-fixed value-safe failure guidance.
 - [ ] Build the generic longest-path dispatcher, host-specific Git include, generation layout, and
       atomic `current` activation from final provider materials.
 - [ ] Prove providers translate GitHub repository/owner and Azure organization into generic path
       tuples; preserve selection outcomes, reject duplicate nonempty scopes, and retain released
       multiple-host-default behavior.
-- [ ] Add fake helper/protocol tests for success, missing executable, nonzero, timeout, malformed or
+- [ ] Add fake helper/protocol tests for success, missing command, nonzero, timeout, malformed or
       control-bearing response, noisy stderr, unsupported operations, and no-match cases.
 - [ ] Prove no credential appears in dispatcher, include, representations, errors, logs, process
-      arguments, managed-helper programs, or test artifacts; reject any delivered secret value in
-      managed-helper fields, forbid derived credentials in the provider contract, and cover every
-      built-in managed-helper program.
+      arguments, managed-helper programs, or test artifacts; reject `ManagedHelper` from every
+      secret-bearing configuration and cover every built-in managed-helper program.
 
 ### Phase 2 Definition of Done
 

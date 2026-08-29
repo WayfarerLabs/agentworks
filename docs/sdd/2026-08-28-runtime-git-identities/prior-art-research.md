@@ -158,7 +158,8 @@ CLI identity.
 
 Rejected. Tool installation and manual/future-feature authentication can occur later in the same
 user lifecycle. A check during provisioning races that ordering and still cannot guarantee future
-runtime success.
+runtime success. The provider-owned runtime helper checks and invokes its own command and returns
+fixed, value-safe failure guidance; core adds no duplicate dependency field or `PATH` probe.
 
 ### Remove static token validation for symmetry
 

@@ -126,7 +126,6 @@ class StoredCredential:
 @dataclass(frozen=True)
 class ManagedHelper:
     program: bytes = field(repr=False)
-    required_executable: str | None = None
     failure_hint: str = "the selected credential helper failed"
 
 
@@ -156,14 +155,9 @@ credential protocol response. It is fixed or safely rendered by trusted provider
 as operator-authored command text. Core writes it into the managed generation, provides the common
 bounded process envelope, and validates the response syntax, but it does not translate CLI stdout
 into a forge credential. A future provider may return a bridge to any runtime identity tool through
-this same shape. The program and metadata MUST NOT contain any resolved secret or credential derived
-from one; managed helpers acquire credentials only from their target-user runtime dependency.
-
-When present, `required_executable` is one normalized bare command name. Core checks it on the
-target user's runtime `PATH` immediately before invoking the installed provider helper and emits a
-generic missing-tool diagnosis naming the credential and executable. Core does not invoke that
-dependency itself, and it is not checked during provisioning. The provider helper invokes the
-dependency and remains responsible for the check/execute race and its safe failure behavior.
+this same shape. Core accepts this payload only when the provider configuration declares no secrets.
+Every secret-bearing provider MUST return `StoredCredential`; a future secret-backed runtime-helper
+shape is designed when one is actually needed.
 
 ### Required operation
 
@@ -177,9 +171,9 @@ agent transport. The provider may read only names its configuration declared and
 target-mutation power. It owns any required validation, API exchange, derivation, and final response
 construction.
 
-The operation performs no target-user filesystem or Git configuration mutation. For the current
-secret arms it returns a `StoredCredential`; for the current CLI arms it returns a `ManagedHelper`
-without executing the CLI at provisioning time.
+The operation performs no target-user filesystem or Git configuration mutation. For any provider
+configuration with one or more secret references it returns a `StoredCredential`; for the current
+zero-secret CLI arms it returns a `ManagedHelper` without executing the CLI at provisioning time.
 
 The descriptor deletes version-2 `helper_entry`, `credential_lines`, `store_username`, and the
 universal `secret_name` assumption atomically. Core no longer receives a token map or calls a
@@ -213,9 +207,10 @@ requires to produce its final stored credential.
 
 - same generic scope translation;
 - payload: fixed provider-owned `ManagedHelper`;
-- required executable: `gh`;
-- helper runs `gh auth token --hostname github.com` with `GH_PROMPT_DISABLED=1`, validates one
-  nonempty line, and emits `username=x-access-token` plus `password=<token>`;
+- helper checks and runs `gh auth token --hostname github.com` with `GH_PROMPT_DISABLED=1`,
+  validates one nonempty line, and emits `username=x-access-token` plus `password=<token>`;
+- fixed failure guidance names `gh` and tells the operator to check installation, the target-user
+  `PATH`, and GitHub CLI authentication;
 - captured upstream stderr and token output never enter its diagnostic.
 
 ### Azure DevOps secret
@@ -229,8 +224,7 @@ requires to produce its final stored credential.
 
 - same generic scope translation;
 - payload: fixed provider-owned `ManagedHelper`;
-- required executable: `az`;
-- helper runs:
+- helper checks and runs:
 
   ```console
   az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 \
@@ -238,6 +232,8 @@ requires to produce its final stored credential.
   ```
 
 - helper validates one nonempty line and emits `username=<org>` plus `password=<access-token>`;
+- fixed failure guidance names `az` and tells the operator to check installation, the target-user
+  `PATH`, and Azure CLI authentication;
 - it performs no subscription or tenant mutation; Azure CLI's current account owns identity
   selection; captured upstream stderr and token output never enter its diagnostic.
 
@@ -258,10 +254,9 @@ Core validates provider output once:
 4. duplicate nonempty scopes are rejected across materials; released first-declared behavior is
    retained for multiple host defaults;
 5. stored username/password fields satisfy Git's newline/NUL restrictions and are never represented;
-6. managed-helper required executable, program, and hint are bounded; executable/hint fields are
-   line/control safe; the program came from trusted provider code rather than an operator-configured
-   command field; and no delivered secret value appears in any managed-helper field. Providers also
-   attest that no derived credential was embedded;
+6. managed-helper program and hint are bounded; the hint is line/control safe; the program came from
+   trusted provider code rather than an operator-configured command field; and the declaring
+   provider configuration has no secret references;
 7. output ordering is deterministic by host, descending path length, path, then declaration order.
 
 Core does not validate whether a secret is a PAT, exchange one secret for another token, construct a
@@ -370,22 +365,20 @@ delete declarative state. Unknown operations return success with no output.
 The common managed-helper envelope:
 
 - invokes the installed provider-authored helper program in the target user's environment;
-- when declared, checks the provider-declared bare executable on that runtime `PATH` immediately
-  before launch and emits a fixed generic missing-tool error;
 - uses coreutils `timeout` with a fixed 10-second bound;
 - provides the bounded Git request on stdin;
 - captures stdout and stderr separately;
 - accepts only a bounded, newline/NUL-safe Git credential response containing a username and
   password for `get`;
 - never forwards captured upstream stderr or includes response values in diagnostics;
-- prints the provider's fixed value-safe failure hint on missing executable, nonzero exit, timeout,
-  or malformed response;
+- prints the provider's fixed value-safe failure hint on nonzero exit, timeout, or malformed
+  response;
 - never invokes login or persists/cache credentials itself.
 
-The provider helper, not core, invokes its declared runtime dependency and decides how CLI output
-becomes the username/password response. It MUST independently handle an execution failure after
-core's preflight check, disable prompting where supported, and avoid forwarding upstream output.
-Built-in provider tests prove those semantics and value containment.
+The provider helper, not core, checks and invokes its required command and decides how CLI output
+becomes the username/password response. It MUST handle command absence and execution failure,
+disable prompting where supported, and avoid forwarding upstream output. Built-in provider tests
+prove those semantics and value containment.
 
 ## Reconciliation Algorithm
 
@@ -464,6 +457,7 @@ names. Scoped delivery enforces that `credential_material(ctx)` cannot read beyo
 - zero-, one-, and synthetic multi-secret declarations;
 - scoped context denies undeclared reads;
 - a synthetic multi-secret provider derives one stored credential while core remains agnostic;
+- managed helper accepted only for zero-secret configuration; stored credential required otherwise;
 - provider materialization cannot mutate target state through its operation surface;
 - schema, sample, resource show, and graph projection.
 
@@ -480,8 +474,8 @@ names. Scoped delivery enforces that `credential_material(ctx)` cannot read beyo
 
 ### Managed-helper runtime
 
-- fake GitHub/Azure helpers cover success, missing declared executable, post-check execution race,
-  nonzero, timeout, malformed or control-bearing protocol output, and noisy stderr;
+- fake GitHub/Azure helpers cover success, required command absent, nonzero, timeout, malformed or
+  control-bearing protocol output, and noisy stderr;
 - provider tests prove the exact `gh`/`az` command and username/password construction;
 - unsupported Git operations, embedded username not overriding selection, and retained
   provider-owned remote advisories;

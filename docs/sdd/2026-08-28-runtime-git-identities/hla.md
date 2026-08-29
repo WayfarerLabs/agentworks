@@ -75,7 +75,7 @@ CredentialMaterial
       password/token
     ManagedHelper
       bounded provider-owned helper program
-      optional required_executable
+      fixed value-safe failure hint
 ```
 
 Core first resolves the operation-wide secret union, then constructs one `RunContext` per credential
@@ -84,7 +84,9 @@ materialization operation receives that context, owns any validation/exchange/de
 returns the final shape. A stored password/token is sensitive final material, never an inert secret
 reference for core to interpret. A managed helper is declarative provider output: provider code owns
 its behavior while core owns installation, registration, replacement, and removal. Operator
-configuration cannot supply commands or executable bodies.
+configuration cannot supply commands or executable bodies. Core accepts a managed helper only from a
+provider configuration whose structurally derived secret-reference set is empty; every
+secret-bearing provider returns a stored credential.
 
 Scopes contain only Git's HTTPS credential context. GitHub translates `repos` and `owner` to path
 prefixes; Azure DevOps translates `org` to a path prefix. Core does not know those source concepts.
@@ -151,10 +153,10 @@ The dispatcher is a read-only generator:
 
 - **Stored credential** reads the selected provider-returned username/password from mode-0600
   managed storage and returns it without knowing how the provider acquired it.
-- **Managed helper** checks any declared executable on the target user's runtime `PATH`, then
-  invokes the installed provider-owned helper program through the bounded common execution envelope
-  and relays only a valid Git credential protocol response. The GitHub and Azure providers own their
-  fixed CLI commands, response construction, safe diagnostics, and the check/execute race.
+- **Managed helper** invokes the installed provider-owned helper program through the bounded common
+  execution envelope and relays only a valid Git credential protocol response. The GitHub and Azure
+  provider programs own their command lookup and invocation, response construction, and fixed safe
+  failure guidance.
 
 The helper ignores unsupported `store`/`erase` operations except for the existing safe rejection
 diagnosis. It does not cache, log, or write the runtime token.
@@ -197,13 +199,13 @@ remain:
 
 Core calls each surviving provider's materialization operation with its scoped context. The provider
 returns final `CredentialMaterial`; core then validates generic scopes, line/control safety for
-stored protocol fields, bounded managed-helper shape, and collisions. It renders the deterministic
-state and reconciles even if the surviving set is empty. Core never performs authentication-specific
-mapping or exchange.
+stored protocol fields, the secret-reference/payload relationship, bounded managed-helper shape, and
+collisions. It renders the deterministic state and reconciles even if the surviving set is empty.
+Core never performs authentication-specific mapping or exchange.
 
 ### Git operation
 
-The runtime helper sees the target user's environment. Missing executable, CLI command failure,
+The runtime helper sees the target user's environment. Missing command, CLI command failure,
 timeout, empty output, or malformed output produces a safe runtime-helper failure; no provisioning
 status is retroactively changed. A valid token for an unauthorized identity is rejected by the forge
 through Git's normal authentication flow. Reinitialization repairs configuration, not third-party
@@ -266,7 +268,7 @@ artifact.
 | Missing declared secret                    | resolution   | existing secret-resolution failure                          |
 | Provider rejects or cannot materialize     | runup/op     | existing skip/partial or initialization failure semantics   |
 | Static probe network indeterminate         | runup        | warning; helper is installed                                |
-| required executable absent/helper fails    | Git runtime  | nonzero helper with fixed value-safe diagnostic             |
+| required command absent/helper fails       | Git runtime  | nonzero helper with fixed value-safe diagnostic             |
 | Shared/exclusive lock contention           | runtime/init | bounded failure with fixed value-safe retry guidance        |
 | CLI token empty, malformed, or timed out   | Git runtime  | nonzero helper with fixed value-safe diagnostic             |
 | Valid token lacks repository permission    | forge/Git    | normal Git rejection plus fixed selected-credential context |

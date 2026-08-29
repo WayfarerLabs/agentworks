@@ -67,9 +67,11 @@ production remains on the old path only within the working branch.
 
 Convert GitHub and Azure DevOps to `credential_material(ctx)`. Each provider translates its own
 scope fields, reads only its scoped declared secrets, retains provider-owned validation for the
-secret arm, and returns either a final stored credential or its fixed CLI managed helper. Update the
-descriptor contract version and required operation in the same commit or tightly adjacent commits
-that never form a mergeable partial.
+secret arm, and returns either a final stored credential or its fixed CLI managed helper. Core
+accepts a managed helper only when the provider configuration declares no secrets; every
+secret-bearing configuration returns a stored credential. Update the descriptor contract version and
+required operation in the same commit or tightly adjacent commits that never form a mergeable
+partial.
 
 ### 3. Convert graph and boundary assumptions
 

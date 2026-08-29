@@ -115,9 +115,10 @@ The existing `token` discriminated union remains the configuration surface:
 - A provider rejects acquisition modes it does not implement.
 
 The current `secret` arm declares its configured secret reference. CLI-backed arms add no synthetic
-secret edge and accept no secret field. The provider contract remains general: a future provider
-configuration may declare several secrets and use them to derive one final stored credential without
-changing core.
+secret edge and accept no secret field. Any provider configuration with one or more declared secrets
+MUST return a stored credential; only a zero-secret configuration may return a managed helper. A
+future provider may declare several secrets and use them to derive one final stored credential
+without changing core.
 
 ### R3: Secret-backed runup validation
 
@@ -138,13 +139,11 @@ corresponding executable is installed, whether it is authenticated, or whether i
 forge. Core installs the returned helper as opaque provider-owned behavior. This avoids coupling
 helper installation to tool-install and login ordering.
 
-The managed-helper definition MUST contain the provider-owned helper program. When that program
-delegates to an external executable, it MUST name the executable as a generic runtime dependency.
-Core MUST install the program, check any declared dependency on the target user's `PATH` immediately
-before helper invocation, and report a clear value-safe missing-tool error. Core does not invoke the
-dependency itself. This is a Git-runtime check, not provisioning readiness; the provider program
-invokes the dependency and still MUST handle execution failure because availability can change after
-the check.
+The managed-helper definition MUST contain the provider-owned helper program and a fixed,
+actionable, value-safe failure hint. Core installs and invokes that program but does not model or
+probe its command dependencies. At Git runtime the provider program MUST check and invoke its own
+dependencies, handle command absence and execution failure, suppress unsafe upstream output, and
+fail through its fixed hint. No dependency check occurs during provisioning.
 
 At each matching Git `get` request:
 
@@ -159,8 +158,9 @@ selected CLI are allowed; Agentworks does not reimplement or control them.
 ### R5: Runtime failure contract
 
 A CLI-backed helper MUST fail nonzero with one concise, actionable stderr diagnostic when its
-declared executable is missing, the helper command fails, returns an empty or malformed response, or
-times out. It MUST NOT print a token or include captured token output in an error. Repository
+required command is missing, the command fails, returns an empty or malformed response, or times
+out. The diagnostic MUST identify the provider-owned command and the relevant install/PATH or
+authentication remediation without printing a token or captured command output. Repository
 authorization is the forge's decision; a valid token for the wrong identity fails through Git's
 normal authentication path and the existing fixed selected-credential diagnosis.
 
@@ -226,8 +226,9 @@ installed-state manifest, target-side merge protocol, or another credential writ
 
 - Stored credentials remain in mode-0600 Agentworks-owned storage and never enter helper scripts or
   Git configuration.
-- Managed-helper programs and metadata MUST NOT contain a delivered secret or a credential derived
-  from one; runtime credentials come only from the provider program's target-user dependency.
+- Core MUST reject `ManagedHelper` from any provider configuration with a declared secret. Every
+  secret-bearing configuration returns `StoredCredential`; current CLI-backed configurations are
+  zero-secret and obtain runtime credentials only from the target user's CLI identity.
 - Runtime tokens exist only in helper process memory and the Git credential-protocol response.
 - Provider-returned scopes, stored protocol fields, managed-helper metadata/content, and generated
   paths are validated at the core boundary before use. Provider-owned executable content is never
@@ -283,8 +284,9 @@ without exposing identity data.
 Focused tests prove that secret-backed providers receive their scoped secret context, perform their
 own validation/acquisition, and return final stored credentials under the existing enabled/disabled
 and skip/partial policies. A synthetic provider proves that several declared secrets may produce one
-stored credential without core understanding the exchange. CLI-backed modes receive no secrets and
-perform no CLI check during provisioning.
+stored credential without core understanding the exchange. Core rejects a managed helper from every
+secret-bearing configuration. CLI-backed modes receive no secrets and perform no CLI check during
+provisioning.
 
 ### AC3: Runtime GitHub identity
 
