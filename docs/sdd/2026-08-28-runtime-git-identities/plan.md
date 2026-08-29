@@ -76,8 +76,10 @@ assert structure, behavior, state, and value containment; they do not police aut
       (2026-08-28: four converging private passes removed the direct writer/manifest, bounded and
       unified helper execution/reconciliation, closed stale-state and concurrency gaps, and ended
       with no unresolved material finding.)
-- [ ] Commit with the current Agentworks session trailer, push, open the design-only draft PR,
-      create or apply `sdd:runtime-git-identities`, and apply `review-requested`.
+- [x] Commit with the current Agentworks session trailer, push, open the design-only draft PR,
+      create or apply `sdd:runtime-git-identities`, and apply `review-requested`. (2026-08-28: draft
+      PR #691 opened from `docs/git-credential-runtime-identities`; the review-requested signal was
+      applied after this final bookkeeping commit.)
 - [ ] Collect the requested public artifact perspectives and process at most four authorized
       converging iterations.
 - [ ] Receive operator direction to promote and merge the design checkpoint before implementation.
