@@ -56,7 +56,13 @@ whose retained private identity remains readable and stable through the local ch
 slice. Recovery and cleanup roots such as rekey and VM delete remain available without this
 ordinary-operation proof.
 
-`clear_applied_slices` removes only one supplied registered key for one typed owner. It rejects
+Both known applied payload codecs treat an unsupported payload version as version skew, distinct
+from a malformed supported-version payload. Version skew remains a strict `StateError` and directs
+the operator to a compatible or newer Agentworks release; malformed known payloads retain database
+repair or known-good-backup guidance. Backup uses the same codecs and distinction when it
+canonicalizes selected applied state.
+
+`clear_applied_slice` removes only one supplied registered key for one typed owner. It rejects
 caller-authored strings and keys registered for a different owner kind, treats an already absent key
 as a no-op, and joins an enclosing lifecycle transaction. This is the narrow path for discarding
 evidence that a lifecycle side effect made uncertain; it cannot delete a desired overlay, a future

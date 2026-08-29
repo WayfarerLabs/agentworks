@@ -219,9 +219,12 @@ valid unverifiable record. The reference must be nonempty printable text. The fi
 unverifiable payload has no fingerprint. Absence is represented only by absence of the slice.
 
 Codecs return `VersionedPayload` only after domain validation. Decode failures at the persisted-data
-boundary raise `StateError` naming the VM and the malformed or unsupported payload. Backup decodes
-known payloads before exporting them so corrupt JSON cannot be laundered into an archive that claims
-the R3 non-secret contract.
+boundary remain strict `StateError`, but distinguish two operator actions. An unsupported version is
+version skew and points to a compatible or newer Agentworks release. A malformed payload at the
+supported version is corrupt state and retains repair or known-good-backup guidance. Both paths name
+the VM without rendering payload values. Backup decodes known payloads before exporting them so
+corrupt or unsupported JSON cannot be laundered into an archive that claims the R3 non-secret
+contract.
 
 ## Apply-time identity proof
 
@@ -334,10 +337,9 @@ applied slices. A crash or database failure after the remote write is the unavoi
 window and retains conservative old or absent state. The checkpoint exception propagates; it is not
 caught and rewritten as a second initialization failure checkpoint.
 
-The repository adds one closed `clear_applied_slices(instance_kind, instance_name, key)` mutation.
-It accepts one registered key valid for that instance kind, deletes exactly that slice, is a no-op
-when it is absent, and joins an enclosing transaction. It is not a public arbitrary-record delete
-API.
+The repository adds one closed `clear_applied_slice(instance_kind, instance_name, key)` mutation. It
+accepts one registered key valid for that instance kind, deletes exactly that slice, is a no-op when
+it is absent, and joins an enclosing transaction. It is not a public arbitrary-record delete API.
 
 Only `update_vm_init_status()` and `insert_vm_event()` change from direct commit to
 `_commit_unless_in_tx()`. Standalone callers retain current commit behavior. No schema change is
@@ -526,7 +528,9 @@ archive restore consumer to update.
 - backup exports valid applied records in the same snapshot, increments manifest version/count, and
   leaves `instance-specs.json` compatible;
 - malformed selected applied payload fails backup, while malformed state owned by another VM does
-  not; and
+  not;
+- unsupported selected applied versions fail backup as version skew, with compatible-release
+  guidance rather than corruption-repair guidance; and
 - applied-only backup remains allowed on native Windows.
 
 ### Gates and live evidence

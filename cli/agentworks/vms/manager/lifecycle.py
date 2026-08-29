@@ -725,6 +725,18 @@ def reinit_vm(
     # (Phase 7, LLD b).
     ensure_recipe_enabled(registry, "admin-template", selected_admin_template)
 
+    # Validate the configured public/private pair after all cheap declaration
+    # and recipe checks, but before the applied-state boundary, activation,
+    # secret resolution, or transport construction. Authorized-key
+    # reconciliation repeats this read immediately before its remote write so
+    # a path replacement during the operation still fails safely.
+    from agentworks.vms.applied_state import prepare_configured_ssh_identity
+
+    prepare_configured_ssh_identity(
+        config.operator.ssh_public_key,
+        config.operator.ssh_private_key,
+    )
+
     # Reinit is the one establishment path that may operate on a historic VM
     # with no SSH evidence. Known drift still refuses before activation or
     # transport construction.

@@ -139,6 +139,36 @@ def test_backup_refuses_a_malformed_selected_applied_payload(
         )
 
 
+def test_backup_refuses_an_unsupported_selected_applied_payload_version(
+    db: Database,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db.insert_vm("bvm", site="lima-local", hostname="bvm")
+    db.update_vm_tailscale("bvm", "100.64.0.8")
+    db.instance_state.replace_applied_slices(
+        "vm",
+        "bvm",
+        "vm-create",
+        {AppliedStateKey.HARDWARE_PROVENANCE: VersionedPayload(2, {})},
+    )
+    _install_metadata_only_backup_fakes(monkeypatch)
+    config = SimpleNamespace(paths=SimpleNamespace(backups=tmp_path))
+
+    with pytest.raises(StateError) as caught:
+        vm_backup.backup_vm(
+            db,
+            config,  # type: ignore[arg-type]
+            "bvm",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert type(caught.value) is StateError
+    assert caught.value.entity_kind == "vm"
+    assert caught.value.entity_name == "bvm"
+    assert caught.value.hint is not None
+
+
 def test_backup_does_not_decode_an_unrelated_malformed_applied_payload(
     db: Database,
     tmp_path: Path,

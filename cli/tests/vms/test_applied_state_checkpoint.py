@@ -259,6 +259,7 @@ def test_unproven_reinit_clears_prior_ssh_evidence(
     db,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
+    captured_output,
 ) -> None:
     _insert_vm(db)
     db.instance_state.replace_applied_slices(
@@ -288,6 +289,7 @@ def test_unproven_reinit_clears_prior_ssh_evidence(
     records = {record.key for record in db.instance_state.get_applied_slices("vm", "box")}
     assert records == {AppliedStateKey.HARDWARE_PROVENANCE}
     assert db.get_vm("box").init_status == InitStatus.PARTIAL.value
+    assert len(captured_output.warnings) == 1
 
 
 def test_fatal_phase_b_failure_preserves_prior_applied_evidence(

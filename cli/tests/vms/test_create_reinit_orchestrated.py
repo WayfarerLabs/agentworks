@@ -19,7 +19,7 @@ import pytest
 from agentworks.capabilities.vm_platform import ProvisionResult
 from agentworks.config import load_config
 from agentworks.db import VersionedPayload, VMStatus
-from agentworks.errors import StateError
+from agentworks.errors import ConfigError, StateError
 from agentworks.output import Role
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
@@ -794,6 +794,36 @@ def test_reinit_runs_initialization_through_the_gate(
         0,
         "VM 'rvm' reinitialized successfully!",
     ) in captured_output.lines
+
+
+def test_reinit_refuses_invalid_configured_identity_before_activation_or_transport(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config()
+    _seed_provisioned_vm(db)
+    failure = ConfigError("invalid test identity")
+    prepare = MagicMock(side_effect=failure)
+    activate = MagicMock()
+    make_transport = MagicMock()
+    monkeypatch.setattr(
+        "agentworks.vms.applied_state.prepare_configured_ssh_identity",
+        prepare,
+    )
+    monkeypatch.setattr("agentworks.orchestration.activation.activation_gate", activate)
+    monkeypatch.setattr("agentworks.transports.transport", make_transport)
+
+    with pytest.raises(ConfigError) as caught:
+        vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert caught.value is failure
+    prepare.assert_called_once_with(
+        config.operator.ssh_public_key,
+        config.operator.ssh_private_key,
+    )
+    activate.assert_not_called()
+    make_transport.assert_not_called()
 
 
 def test_reinit_resolves_the_stored_admin_template(

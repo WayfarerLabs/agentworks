@@ -91,9 +91,9 @@ def decode_hardware_provenance(record: AppliedStateSlice) -> HardwareProvenance:
     """Decode a persisted VM hardware marker at its trust boundary."""
     _require_vm_slice(record, AppliedStateKey.HARDWARE_PROVENANCE)
     if record.payload.payload_version != _PAYLOAD_VERSION:
-        raise _stored_state_error(record, f"unsupported payload version {record.payload.payload_version}")
+        raise _unsupported_payload_version_error(record)
     if record.payload.value:
-        raise _stored_state_error(record, "payload must be an empty object")
+        raise _malformed_stored_state_error(record, "payload must be an empty object")
     return HardwareProvenance()
 
 
@@ -119,31 +119,31 @@ def decode_ssh_identity(record: AppliedStateSlice) -> SSHAppliedState:
     """Decode persisted VM SSH evidence at its trust boundary."""
     _require_vm_slice(record, AppliedStateKey.SSH_IDENTITY)
     if record.payload.payload_version != _PAYLOAD_VERSION:
-        raise _stored_state_error(record, f"unsupported payload version {record.payload.payload_version}")
+        raise _unsupported_payload_version_error(record)
 
     value = record.payload.value
     status = value.get("status")
     if status == "verified":
         if set(value) != {"fingerprint", "private_key_ref", "status"}:
-            raise _stored_state_error(record, "verified payload has invalid fields")
+            raise _malformed_stored_state_error(record, "verified payload has invalid fields")
         private_key_ref = value["private_key_ref"]
         fingerprint = value["fingerprint"]
         try:
             validated_ref = _validated_private_key_ref(private_key_ref)
             validated_fingerprint = _validated_fingerprint(fingerprint)
         except (TypeError, ValueError) as error:
-            raise _stored_state_error(record, str(error)) from error
+            raise _malformed_stored_state_error(record, str(error)) from error
         return VerifiedSSHAppliedState(validated_ref, validated_fingerprint)
     if status == "unverifiable":
         if set(value) != {"private_key_ref", "status"}:
-            raise _stored_state_error(record, "unverifiable payload has invalid fields")
+            raise _malformed_stored_state_error(record, "unverifiable payload has invalid fields")
         private_key_ref = value["private_key_ref"]
         try:
             validated_ref = _validated_private_key_ref(private_key_ref)
         except (TypeError, ValueError) as error:
-            raise _stored_state_error(record, str(error)) from error
+            raise _malformed_stored_state_error(record, str(error)) from error
         return UnverifiableSSHAppliedState(validated_ref)
-    raise _stored_state_error(record, "payload status is invalid")
+    raise _malformed_stored_state_error(record, "payload status is invalid")
 
 
 def prepare_configured_ssh_identity(
@@ -340,7 +340,26 @@ def _validated_fingerprint(value: object) -> str:
     return value
 
 
-def _stored_state_error(record: AppliedStateSlice, detail: str) -> StateError:
+def _unsupported_payload_version_error(record: AppliedStateSlice) -> StateError:
+    version = record.payload.payload_version
+    if _is_safe_diagnostic_name(record.instance_name):
+        message = (
+            f"stored VM {record.instance_name!r} {record.key.value} applied state "
+            f"uses unsupported payload version {version}"
+        )
+        entity_name = record.instance_name
+    else:
+        message = f"stored VM {record.key.value} applied state uses unsupported payload version {version}"
+        entity_name = None
+    return StateError(
+        message,
+        entity_kind="vm",
+        entity_name=entity_name,
+        hint="Use a compatible or newer Agentworks release to read this applied state.",
+    )
+
+
+def _malformed_stored_state_error(record: AppliedStateSlice, detail: str) -> StateError:
     if _is_safe_diagnostic_name(record.instance_name):
         message = f"stored VM {record.instance_name!r} {record.key.value} applied state is malformed: {detail}"
         entity_name = record.instance_name

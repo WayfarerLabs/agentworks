@@ -26,15 +26,17 @@ from __future__ import annotations
 
 import contextlib
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
 from agentworks.db import PID_STOPPED, SessionMode, VMStatus
 from agentworks.errors import NotFoundError, StateError
+from agentworks.output import Role
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager as session_manager
+from agentworks.sessions.manager._queries import session_listing_data
 from agentworks.vms import manager as vm_manager
 from tests.conftest import stub_vm_ssh_identity
 
@@ -196,6 +198,40 @@ def test_best_effort_status_and_pid_repair_skip_identity_refusal_before_transpor
 
     assert session_manager.batch_check_all_sessions([session], db=db, config=SimpleNamespace()) == {}
     assert session_manager.ensure_pids_batch([session], db=db, config=SimpleNamespace()) == [session]
+
+
+def test_list_status_reports_identity_refusal_as_unknown_without_transport(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    _seed_vm(db, "vm-a", "100.64.0.11")
+    db.insert_session("s-a", "ws-vm-a", "default", SessionMode.ADMIN, socket_path="/tmp/s-a.sock")
+    db.update_session_pid("s-a", 4321, boot_id="boot-a")
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise StateError("SSH identity drift")
+
+    monkeypatch.setattr(vm_manager, "require_vm_ssh_boundary", refuse)
+    monkeypatch.setattr(
+        session_manager,
+        "transport",
+        lambda *args, **kwargs: pytest.fail("transport constructed after identity refusal"),
+    )
+
+    listing = session_manager.session_listing(
+        db,
+        make_config(),
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    assert listing.sessions[0].status == "unknown"
+    json_rows = cast("list[dict[str, object]]", session_listing_data(listing)["sessions"])
+    assert json_rows[0]["status"] == "unknown"
+
+    session_manager.render_session_listing(listing)
+    assert sum(role is Role.WARNING for role, _level, _message in captured_output.lines) == 1
 
 
 class _FakeTarget:

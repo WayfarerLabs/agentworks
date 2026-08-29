@@ -59,6 +59,7 @@ from .shell_env import (
 from .ssh_keys import (
     AuthorizedKeysApplied,
     AuthorizedKeysOutcome,
+    AuthorizedKeysUnproven,
     _apply_sve_mask,
     _preserve_ssh_host_keys,
     _reconcile_authorized_keys,
@@ -285,6 +286,15 @@ def run_initialization(
             db.insert_vm_event(vm_name, "init_failed", str(e))
         raise
 
+    if isinstance(authorized_keys, AuthorizedKeysUnproven):
+        output.warn(
+            f"SSH identity evidence for VM '{vm_name}' is unknown, so ordinary SSH commands "
+            "will refuse to connect. If the configured key still works, retry with "
+            f"'agw vm reinit {vm_name}'. Otherwise, use "
+            f"'agw vm shell {vm_name} --platform' where supported to restore access before "
+            "reinitializing. If platform recovery is unavailable, recreate the VM."
+        )
+
     from agentworks.db.instance_state import AppliedStateKey
     from agentworks.vms.applied_state import build_vm_initialization_slices
 
@@ -320,7 +330,7 @@ def run_initialization(
                 slices,
             )
         if not ssh_identity_proven:
-            db.instance_state.clear_applied_slices(
+            db.instance_state.clear_applied_slice(
                 "vm",
                 vm_name,
                 AppliedStateKey.SSH_IDENTITY,

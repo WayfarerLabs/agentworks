@@ -615,6 +615,7 @@ def session_listing(
 
     status_map: dict[str, SessionStatus] = {}
     status_keepalive_vms: list[VMRow] = [] if no_status else _mgr._distinct_vms_for_sessions(db, sessions)
+    status_vm_names = frozenset(vm.name for vm in status_keepalive_vms)
     with _mgr._best_effort_batch_vm_boundary(
         db,
         config,
@@ -632,6 +633,7 @@ def session_listing(
             refreshed = {session.name: session for session in usable_sessions}
             sessions = [refreshed.get(session.name, session) for session in sessions]
             status_map = _mgr.batch_check_all_sessions(usable_sessions, db=db, config=config)
+    identity_refused_vm_names = status_vm_names - usable_vm_names
 
     registry = _mgr._display_registry(config)
     harness_by_template: dict[str, str] = {}
@@ -660,7 +662,7 @@ def session_listing(
             status = "unavailable"
         elif session.pid == PID_STOPPED:
             status = "stopped"
-        elif session.pid is None or session.boot_id is None:
+        elif resolved_vm_name in identity_refused_vm_names or session.pid is None or session.boot_id is None:
             status = "unknown"
         elif session.name in status_map:
             status = {

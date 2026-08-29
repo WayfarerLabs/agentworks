@@ -285,7 +285,7 @@ def test_empty_applied_replace_is_a_no_op(db: Database, monkeypatch: pytest.Monk
     assert db.instance_state.replace_applied_slices("vm", "one", "vm-create", {}) == existing
 
 
-def test_clear_applied_slices_removes_only_requested_registered_keys(db: Database) -> None:
+def test_clear_applied_slice_removes_only_requested_registered_key(db: Database) -> None:
     db.instance_state.replace_applied_slices(
         "vm",
         "one",
@@ -302,7 +302,7 @@ def test_clear_applied_slices_removes_only_requested_registered_keys(db: Databas
         {AppliedStateKey.SSH_IDENTITY: _payload("other")},
     )
 
-    db.instance_state.clear_applied_slices("vm", "one", AppliedStateKey.SSH_IDENTITY)
+    db.instance_state.clear_applied_slice("vm", "one", AppliedStateKey.SSH_IDENTITY)
 
     assert [record.key for record in db.instance_state.get_applied_slices("vm", "one")] == [
         AppliedStateKey.HARDWARE_PROVENANCE
@@ -310,17 +310,17 @@ def test_clear_applied_slices_removes_only_requested_registered_keys(db: Databas
     assert [record.key for record in db.instance_state.get_applied_slices("vm", "two")] == [
         AppliedStateKey.SSH_IDENTITY
     ]
-    db.instance_state.clear_applied_slices("vm", "one", AppliedStateKey.SSH_IDENTITY)
+    db.instance_state.clear_applied_slice("vm", "one", AppliedStateKey.SSH_IDENTITY)
 
 
-def test_clear_applied_slices_rejects_unregistered_and_cross_kind_keys(db: Database) -> None:
+def test_clear_applied_slice_rejects_unregistered_and_cross_kind_keys(db: Database) -> None:
     with pytest.raises(TypeError):
-        db.instance_state.clear_applied_slices("vm", "one", "ssh-identity")  # type: ignore[arg-type]
+        db.instance_state.clear_applied_slice("vm", "one", "ssh-identity")  # type: ignore[arg-type]
     with pytest.raises(ValueError):
-        db.instance_state.clear_applied_slices("agent", "one", AppliedStateKey.SSH_IDENTITY)
+        db.instance_state.clear_applied_slice("agent", "one", AppliedStateKey.SSH_IDENTITY)
 
 
-def test_clear_applied_slices_joins_enclosing_transaction(db: Database) -> None:
+def test_clear_applied_slice_joins_enclosing_transaction(db: Database) -> None:
     db.instance_state.replace_applied_slices(
         "vm",
         "one",
@@ -329,7 +329,7 @@ def test_clear_applied_slices_joins_enclosing_transaction(db: Database) -> None:
     )
 
     with pytest.raises(RuntimeError), db.transaction():
-        db.instance_state.clear_applied_slices("vm", "one", AppliedStateKey.SSH_IDENTITY)
+        db.instance_state.clear_applied_slice("vm", "one", AppliedStateKey.SSH_IDENTITY)
         raise RuntimeError("roll back")
 
     assert [record.key for record in db.instance_state.get_applied_slices("vm", "one")] == [
@@ -626,8 +626,8 @@ def test_persisted_unknown_applied_key_is_ignored_and_preserved(tmp_path: Path) 
             AppliedStateKey.HARDWARE_PROVENANCE,
             AppliedStateKey.SSH_IDENTITY,
         ]
-        database.instance_state.clear_applied_slices("vm", "alpha", AppliedStateKey.HARDWARE_PROVENANCE)
-        database.instance_state.clear_applied_slices("vm", "alpha", AppliedStateKey.SSH_IDENTITY)
+        database.instance_state.clear_applied_slice("vm", "alpha", AppliedStateKey.HARDWARE_PROVENANCE)
+        database.instance_state.clear_applied_slice("vm", "alpha", AppliedStateKey.SSH_IDENTITY)
         remaining_keys = database._conn.execute(  # noqa: SLF001
             "SELECT record_key FROM instance_records "
             "WHERE instance_kind = 'vm' AND instance_name = 'alpha' AND record_type = 'applied-state'"

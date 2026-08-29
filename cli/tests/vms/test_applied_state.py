@@ -38,8 +38,18 @@ def test_hardware_marker_codec_is_strict_and_empty() -> None:
         applied_state.decode_hardware_provenance(
             _slice(AppliedStateKey.HARDWARE_PROVENANCE, VersionedPayload(1, {"unexpected": True}))
         )
-    with pytest.raises(StateError):
-        applied_state.decode_hardware_provenance(_slice(AppliedStateKey.HARDWARE_PROVENANCE, VersionedPayload(2, {})))
+
+
+def test_hardware_marker_codec_refuses_an_unsupported_version_as_version_skew() -> None:
+    record = _slice(AppliedStateKey.HARDWARE_PROVENANCE, VersionedPayload(2, {}))
+
+    with pytest.raises(StateError) as caught:
+        applied_state.decode_hardware_provenance(record)
+
+    assert type(caught.value) is StateError
+    assert caught.value.entity_kind == "vm"
+    assert caught.value.entity_name == "alpha"
+    assert caught.value.hint is not None
 
 
 @pytest.mark.parametrize(
@@ -83,6 +93,23 @@ def test_ssh_payload_codec_round_trips_closed_arms(
 def test_ssh_payload_decoder_rejects_malformed_or_extra_fields(value: dict[str, str]) -> None:
     with pytest.raises(StateError):
         applied_state.decode_ssh_identity(_slice(AppliedStateKey.SSH_IDENTITY, VersionedPayload(1, value)))
+
+
+def test_ssh_payload_codec_refuses_an_unsupported_version_before_decoding_value() -> None:
+    sensitive_value = "do-not-render-this-forward-payload"
+    record = _slice(
+        AppliedStateKey.SSH_IDENTITY,
+        VersionedPayload(2, {"future_field": sensitive_value}),
+    )
+
+    with pytest.raises(StateError) as caught:
+        applied_state.decode_ssh_identity(record)
+
+    assert type(caught.value) is StateError
+    assert caught.value.entity_kind == "vm"
+    assert caught.value.entity_name == "alpha"
+    assert caught.value.hint is not None
+    assert sensitive_value not in str(caught.value)
 
 
 def test_prepare_configured_identity_retains_public_text_and_refuses_verified_mismatch(

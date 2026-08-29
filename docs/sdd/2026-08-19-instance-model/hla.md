@@ -380,6 +380,12 @@ last Phase B remote mutation. A failed write has an ambiguous remote outcome, so
 SSH evidence. A successful write followed by an unstable proof does the same in the terminal
 transaction rather than allowing stale evidence to authorize later SSH.
 
+Reinit performs an additional configured public/private identity check after its cheap declaration
+and recipe checks but before the applied-state boundary, activation, secret resolution, or transport
+construction. Authorized-key reconciliation deliberately validates again immediately before the
+remote write. The first check prevents avoidable backend work; the second retains the time-of-check
+protection when a configured path changes during the operation.
+
 Operational checks use an explicit comparison service at SSH-using boundaries. They do not gate all
 `LiveVMNode.preflight()` calls because start, stop, delete, and establishment reinit have different
 transport needs. The ordinary gated VM boundary is safe by default; platform-native recovery uses an
@@ -420,6 +426,12 @@ describes provisioned hardware. The applied marker supplies operation and time p
 duplicating those values. Its absence on a historic row remains visibly not recorded. VM reinit does
 not provision hardware again and must not create or replace that marker merely because other
 initialization steps succeeded.
+
+Historic VMs receive no synthesized SSH evidence. Ordinary canonical SSH paths refuse them until one
+successful reinit establishes the slice. An unproven final admin key write clears older SSH evidence
+and immediately tells the operator that routine SSH is unavailable, to retry reinit only when the
+installed key still works, and otherwise to attempt platform or provider recovery before
+reinitializing or recreating the VM.
 
 ## Failure and integrity behavior
 

@@ -303,9 +303,14 @@ behavior; and no database migration, payload-version change, or new operator syn
       not mismatch or unsupported; leave ssh-agent selection unresolved.
 - [x] Make authorized-key reconciliation return a typed applied/unproven outcome instead of
       inferring proof from lifecycle success or unrelated warnings.
+- [x] Validate the configured public/private pair on reinit after cheap declaration checks and
+      before activation, secret resolution, or transport work, while retaining the fresh validation
+      at the final remote write.
 - [x] Capture only slices proven by successful VM create and reinit operations, remove stale SSH
       proof after an unproven remote write or unstable final identity, and write lifecycle-row plus
       applied-state changes in one honest transaction where they compose.
+- [x] Document the one-time reinit required for historic VMs and emit cautious recovery guidance
+      immediately when the final admin key write leaves SSH evidence unproven.
 - [x] Add preflight comparison before SSH transport and structural diagnostic facts for not
       recorded, unverifiable, match, and drift without remediation.
 - [x] Extend the VM backup projection with the non-secret R3 applied records and prove the archive
@@ -316,14 +321,17 @@ behavior; and no database migration, payload-version change, or new operator syn
       diagnostic non-disclosure without prose-policing assertions.
 - [x] Publish the payload and comparison contract in the permanent store documentation.
 
-Implementation evidence: the complete non-integration suite passed 8,040 tests with one skip. Ruff,
+Implementation evidence: the complete non-integration suite passed 8,045 tests with one skip. Ruff,
 formatting, Mypy, Typer isolation, file lint, Rulesync, locked-SDD, website, and deterministic build
 gates also passed. The first independent implementation review found no production blocker but
 identified stale checkpoint-construction surface, missing high-risk lifecycle and backup cases, and
 an incomplete permanent contract. The implementation now derives persistence from the exact
 post-write proof, removes unused API and comparison surface, and directly covers the identified
 password-protected, instability, atomicity, deletion, malformed-backup, and diagnostic
-non-disclosure cases.
+non-disclosure cases. A subsequent review identified missing early reinit validation and transition
+guidance. Reinit now refuses an invalid configured identity before activation or transport, and the
+release guide plus permanent CLI documentation explain the one successful reinit historic VMs need
+and the recovery choices when their installed key no longer works.
 
 Definition of done: the identity used at apply time is recorded and compared with the identity the
 current transport will present, and no password-protected-key path regresses.

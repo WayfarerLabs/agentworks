@@ -530,6 +530,13 @@ ask again. Non-interactive runs never prompt (a later interactive create still a
 Changes to config (new packages, different install commands, etc.) are picked up automatically. It
 consumes both stored VM and admin instance specs but cannot change or clear either one.
 
+VMs created before SSH applied-state tracking have no synthesized identity evidence. Ordinary
+canonical SSH commands refuse that unknown state until one successful `agw vm reinit <name>` proves
+and records the configured identity. Run that reinit after upgrading while the installed key still
+works. If it no longer works, try `agw vm shell <name> --platform` where supported, restore the
+configured public key, and rerun reinit. A platform-native transport can itself depend on the
+configured key, so use provider-native recovery tooling or recreate the VM if it cannot connect.
+
 `vm delete` requires `--force` if the VM has workspaces, agents, or sessions. The confirmation
 message shows what will be deleted. Pass `--yes` to skip the prompt.
 
