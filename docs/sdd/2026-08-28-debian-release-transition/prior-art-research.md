@@ -36,7 +36,8 @@ sources, a minimal upgrade, a full upgrade, and a reboot.
 Design consequences:
 
 - `vm upgrade` accepts only a verified Bookworm guest or an already-Trixie guest being adopted.
-- The transition policy is explicit `(bookworm, trixie)`, not a generic version increment.
+- Trixie's profile owns an explicit upgrade-from-Bookworm policy, not a generic version increment or
+  arbitrary pair graph.
 - The command brings Bookworm current before changing suites.
 - The preliminary plan and first confirmation authorize only bringing Bookworm current. Agentworks
   then recomputes the complete source/removal/package plan from that changed state and requires a
@@ -115,9 +116,10 @@ ends on 2030-06-30.
 Design consequences:
 
 - New Bookworm creation ends immediately when the feature ships.
-- Full Bookworm compatibility gets a six-month product transition.
-- The supported upgrade path remains available through Bookworm's LTS end, avoiding a migration trap
-  after ordinary compatibility ends.
+- Upstream dates remain useful release-planning and diagnostic facts, but do not define a second
+  Agentworks support clock.
+- Agentworks supports the release immediately before current, including its adjacent upgrade, and
+  treats current-2 or older VMs as best effort with warnings and no supported upgrade.
 
 Sources: [Bookworm release lifecycle](https://www.debian.org/releases/bookworm/),
 [Trixie release lifecycle](https://www.debian.org/releases/trixie/)
@@ -216,10 +218,23 @@ so a cross-platform Debian lifecycle fact does not belong there. `ProvisionReque
 common fully resolved create input, and every manager-built request passes through it immediately
 before platform dispatch.
 
-Design consequence: add a nullable first-class VM column and a required internal request value.
+The manager currently wraps every ordinary exception from `platform.create` as a
+`ProvisioningError`, which would discard a typed missing-map error's remediation hint. It also ends
+the create unwind window as soon as the platform returns and only then persists platform metadata. A
+defensive result mismatch detected at that point therefore needs a retained row with its cleanup
+identifiers, not row deletion that could orphan the returned backend. The plugin-author guide still
+advertises vm-platform contract version 2 and teaches the version 2 request.
+
+Design consequence: add a nullable first-class VM column and a required internal request value. Core
+passes its concrete current release; each platform resolves that value through its own map rather
+than inferring current. The vm-platform contract version changes so old plugins fail conformance,
+while a contract-current platform missing the requested key fails clearly before backend mutation.
+The manager preserves those focused errors. A returned mismatch retains backend metadata in a failed
+row, and the capability plus plugin-author documentation changes with the contract.
 
 Evidence: `cli/agentworks/db/models.py`, `cli/agentworks/db/converters.py`,
-`cli/agentworks/db/database.py`, and `cli/agentworks/capabilities/vm_platform/base.py`.
+`cli/agentworks/db/database.py`, `cli/agentworks/capabilities/vm_platform/base.py`,
+`cli/agentworks/vms/manager/lifecycle.py`, and `cli/agentworks/plugins/README.md`.
 
 ### No release probe exists
 
@@ -290,7 +305,8 @@ Evidence: `cli/agentworks/vms/backup.py`, `cli/agentworks/workspaces/manager/cop
 - **Automatically re-enable every third-party source:** vendor support cannot be inferred from a
   codename.
 - **Build a generic multi-release upgrader now:** only one adjacent transition is researched and
-  testable; a closed transition map preserves extension without pretending generality.
+  testable; the target profile's upgrade-from-previous policy preserves extension without creating
+  an arbitrary release graph.
 
 ## Source quality
 

@@ -9,26 +9,23 @@
 This is a forward product cutover with two different populations:
 
 - **New VMs:** Trixie only, immediately when the implementation release ships.
-- **Existing VMs:** last verified release is discovered live; Bookworm remains compatible for a
-  bounded period and can move through `vm upgrade`.
+- **Existing VMs:** last verified release is discovered live; Bookworm is `current-1` after the
+  cutover and can move through `vm upgrade`.
 
 There is no period in which the operator selects Bookworm or Trixie for creation. There is no
 database rewrite pretending every old VM is Bookworm. There is no automatic whole-VM rollback.
-
-The implementation release publishes the two calendar values that change future behavior:
-
-- `BOOKWORM_FULL_COMPATIBILITY_ENDS`: six months after the release, no later than 2028-06-30; and
-- `BOOKWORM_UPGRADE_SUPPORT_ENDS`: 2028-06-30.
-
-They appear in the release profile, CLI diagnostics, release notes, and permanent upgrade guide.
+Support derives only from position in one ordered profile registry whose final entry is current:
+current is fully supported, current-1 is supported and upgradable, and current-2 or older is best
+effort with warnings and no newly started upgrade. Debian lifecycle dates do not change those tiers.
 
 ## 2. Database transition
 
 ### Schema migration
 
 The state migration adds nullable `debian_release` and `debian_release_observed_at` columns with the
-closed constraint described in the HLA. It updates the safer-migrations exact version-shape map and
-all migration fixtures in the same commit.
+pair-null constraint described in the HLA. It does not enumerate codenames in SQL, so a future
+release promotion changes the code registry rather than the schema. It updates the safer-migrations
+exact version-shape map and all migration fixtures in the same commit.
 
 The migration does not inspect live guests, network, platform configuration, or historical events.
 Every existing row receives `(NULL, NULL)`. A new database creates the columns through the ordinary
@@ -36,11 +33,13 @@ migration ladder.
 
 ### Population rules
 
-- New create writes Trixie after the platform verifies the guest and before Phase B starts.
-- A release-sensitive operation probes an unknown existing row and records a supported observation.
+- New create writes the requested current release after the platform verifies the guest and before
+  Phase B starts.
+- A release-sensitive operation probes an unknown existing row and records a recognized observation.
 - `vm list` and database open never probe the network.
 - A recorded/live mismatch blocks ordinary release-sensitive mutation.
-- `vm upgrade` is the explicit adoption path for a healthy externally upgraded Trixie guest.
+- `vm upgrade` is the explicit adoption path for a healthy guest manually upgraded from current-1 to
+  current.
 
 The observation timestamp makes the value's meaning explicit: it is the last verified live fact, not
 a continuously synchronized claim.
@@ -58,14 +57,37 @@ before a release-sensitive mutation.
 
 ## 3. Creation cutover
 
-All platform selector maps and create-time live validation land before the core current-release
-constant switches to Trixie. The commits remain independently green by using explicit test fixtures
-until the final cutover commit wires the constant.
+All platform selector maps, the vm-platform version 3 request/result contract, and create-time live
+validation land before Trixie's certified profile is appended to the active registry. The commits
+remain independently green by using explicit candidate-profile test fixtures until the final cutover
+commit performs that one append. Before the append, a live Trixie guest is an unrecognized release
+and release-sensitive mutation refuses with guidance to use a supporting Agentworks build; there is
+no separate ahead-of-current tier.
+
+The VM manager supplies the concrete current release in every `ProvisionRequest`; platforms do not
+infer it. Exact capability conformance rejects an installed version 2 platform before use. A version
+3 platform resolves the request through its own map before backend mutation. A missing code-owned
+key reports that the platform or plugin is out of date; a missing operator-owned Proxmox key names
+the exact vm-site setting. Neither failure chooses a different release.
+
+The manager's provisioning wrapper preserves those two typed errors and their remediation hints. A
+platform's live mismatch must raise while the platform can still roll back. If a nonconforming
+platform returns a mismatched release, the defensive manager check first retains the platform
+metadata, then leaves one failed, uninitialized row with delete/retry guidance. This keeps the
+backend addressable for cleanup instead of unwinding its only database handle.
 
 The release is not publishable until each platform's artifact lookup and create rollback behavior is
-certified. At runtime, a missing image or architecture produces a typed platform readiness or create
+certified. At runtime, a missing image or architecture produces a typed platform or configuration
 error. It never falls back to Bookworm. The cutover deletes Bookworm platform image selectors; real
 upgrade certification uses prebuilt Bookworm fixtures rather than a hidden create route.
+
+The contract change updates `cli/agentworks/capabilities/README.md`,
+`cli/agentworks/capabilities/vm_platform/README.md`, and `cli/agentworks/plugins/README.md` in the
+same implementation merge unit. The base guide explains the domain-owned request value and hard
+contract-version cutover. The specific guide documents release-map lookup, missing-key errors, live
+verification, result matching, and the tests required of built-in and plugin platforms. The plugin
+guide changes its example and create-contract teaching from version 2 to version 3. Topic prose and
+docstrings move with them.
 
 Existing VMs retain the platform metadata recorded at their original creation. Image mappings are
 used only to create a new backend VM; changing a map does not mutate or relabel an existing one.
@@ -83,9 +105,10 @@ template_vmids:
   trixie: 9001
 ```
 
-Through 2028-06-30, the old scalar remains loadable as a Bookworm-only value. It supports resolving
-the site for existing VM operations but does not satisfy a Trixie create. A new create on that site
-fails with a focused message that names `template_vmids.trixie` and the setup guide.
+The old scalar remains loadable as a Bookworm-only value under ordinary configuration compatibility.
+It supports resolving the site for existing VM operations but does not satisfy a Trixie create. A
+new create on that site fails with a focused message that names `template_vmids.trixie` and the
+setup guide.
 
 The CLI does not automatically rewrite operator YAML. The guide instructs the operator to:
 
@@ -95,9 +118,10 @@ The CLI does not automatically rewrite operator YAML. The guide instructs the op
 4. keep the old Bookworm template until existing recovery/checkpoint needs end; and
 5. remove `template_vmid` after every Agentworks installation that reads the config is upgraded.
 
-The compatibility parser warns with the 2028-06-30 removal date. Keeping it through upgrade support
-avoids a second config migration that could strand recovery commands on unchanged sites. There is no
-alias that silently reinterprets the old VMID as Trixie.
+The compatibility parser warns that the scalar is historical and cannot satisfy current creation.
+There is no Debian-date removal promise and no alias that silently reinterprets the old VMID as
+Trixie. Any future removal follows the repository's configuration-compatibility policy rather than
+the guest release support classifier.
 
 ## 5. APT resource schema transition
 
@@ -114,7 +138,7 @@ Shipped resources migrate in place:
   release-neutral.
 
 Operator manifests with a genuinely release-neutral scalar keep working. A scalar containing a
-supported Debian codename becomes invalid and reports the equivalent `sources` shape. This is an
+registered Debian codename becomes invalid and reports the equivalent `sources` shape. This is an
 intentional validation cutover: silently treating a Bookworm stanza as Trixie-compatible is the bug
 the new model prevents. The scalar remains an operator assertion of release independence, not a
 claim that Agentworks can prove every vendor URL or suite is portable.
@@ -122,39 +146,42 @@ claim that Agentworks can prove every vendor URL or suite is portable.
 The permanent resource guide and generated sample are updated in the same commit. Historical SDDs
 and changelog entries keep their old examples.
 
-## 6. Existing Bookworm VM behavior
+## 6. Existing VM support as current advances
 
-During the full compatibility window, an observed Bookworm VM retains:
+After the Trixie cutover, an observed Bookworm VM is `current-1` and retains:
 
 - start, stop, delete, shell, exec, backup, and inspection;
 - workspace, agent, and session lifecycle behavior supported by the implementation release;
 - Phase B `vm reinit` using Bookworm APT mappings; and
 - `vm upgrade` to Trixie.
 
-No Bookworm VM is recreated or upgraded automatically. Doctor and describe show the support date and
-recommend `vm upgrade`.
+No Bookworm VM is recreated or upgraded automatically. Doctor and describe show its previous-release
+status and recommend `vm upgrade`.
 
-After full compatibility ends, the guaranteed surface narrows to inspection, recovery access,
-backup, delete, and `vm upgrade`. Commands that would converge new guest configuration refuse with a
-support-window error rather than applying newly developed Trixie assumptions to Bookworm. The record
-and existing data remain accessible.
+When a later promotion makes Bookworm `current-2`, ordinary commands still attempt best-effort
+operation and emit one legacy warning before access. Release age alone does not block start, stop,
+inspect, shell, exec, backup, delete, reinit, or another lifecycle action. Concrete platform,
+package, and missing-map failures remain honest failures; best effort is not a compatibility claim.
 
-The shared operation-policy gate owns that decision for every release-sensitive mutation. Its exact
-compatibility date and enforcement remain dormant until the final Trixie cutover commit sets the
-date, keeping earlier implementation units truthful.
-
-`vm upgrade` remains supported through Bookworm LTS end. After that date, current releases identify
-Bookworm and point to the last supporting Agentworks release; they do not claim a freshly tested
-upgrade.
+The current Agentworks `vm upgrade` refuses to start a Bookworm upgrade once it is `current-2`. It
+does not chain Bookworm-to-Trixie and Trixie-to-current. An incomplete Bookworm-to-Trixie journal
+that Agentworks created earlier remains resumable or diagnosable through that one direct policy;
+this recovery exception cannot create a second journal or begin another edge. Guidance for a legacy
+VM with no journal points to a new current VM and data copy. The VM row remains readable and no
+calendar event rewrites or invalidates it.
 
 ## 7. In-place upgrade transition
 
 ### Before irreversible work
 
-`vm upgrade` performs the HLA preflight, updates no Debian suites, and shows a preliminary plan. It
-then creates the Agentworks backup and Debian recovery bundle, records the operator's external
-checkpoint reference identifying the actual artifact, and receives confirmation to bring Bookworm
-current.
+After activation provides guest access, `vm upgrade` first scans for an incomplete Agentworks
+upgrade journal. Exactly one journal resumes or diagnoses its validated adjacent pair before current
+eligibility is considered; multiple journals fail with repair guidance. Only without a journal does
+the command prove that the observed release is current-1 and select the final target profile's
+upgrade-from-previous policy. It performs the HLA preflight, updates no Debian suites, and shows a
+preliminary plan. It then creates the Agentworks backup and Debian recovery bundle, records the
+operator's external checkpoint reference identifying the actual artifact, and receives confirmation
+to bring the source release current within its existing suite.
 
 After that update it closes and reopens the VM operation boundary, reruns the complete preflight and
 simulation, shows every material difference, and receives a second confirmation before switching
@@ -166,28 +193,30 @@ local backup is not accepted as a gate.
 
 ### During package transition
 
-The durable guest journal records last-completed progress separately from the active attempt and its
-outcome under `/var/lib/agentworks`. Intent is durable before each mutation. The original APT source
-files and final plan are preserved both remotely and in the local recovery bundle. Re-running the
-command takes the same journal lock used by the package service, then inspects the systemd unit,
-native package locks, active attempt, postcondition, and logs before it performs any action or
-writes journal state. A Bookworm-safe abort or verified healthy Trixie completion restores the
-recorded automatic APT timer state. After source-switch intent, a mixed or unhealthy state keeps the
-timers inhibited until forward repair or external restore.
+The durable guest journal stores last-completed progress separately from the active attempt and its
+outcome under `/var/lib/agentworks/debian-upgrades/{source}-to-{target}`. The validated directory is
+the only stored source/target identity. `plan.json` keeps the computed upgrade plan, and
+`state.json` keeps progress, without another pair field in either. Intent is durable before each
+mutation. The original APT source files and final plan are preserved both remotely and in the local
+recovery bundle. Re-running the command takes the same journal lock used by the package service,
+then inspects the systemd unit, native package locks, active attempt, postcondition, and logs before
+it performs any action or writes journal state. A source-safe abort or verified healthy target
+completion restores the recorded automatic APT timer state. After source-switch intent, a mixed or
+unhealthy state keeps the timers inhibited until forward repair or external restore.
 
-There is no source-level rollback once Trixie packages may have installed. Restoring Bookworm source
-files onto a partially Trixie package set is specifically forbidden. The supported choices are:
+There is no source-level rollback once target packages may have installed. Restoring source-release
+files onto a partially upgraded package set is specifically forbidden. The supported choices are:
 
 - repair and resume forward using the stage/log guidance; or
 - restore the operator's external VM checkpoint.
 
 ### After reboot
 
-The database updates to Trixie as soon as a live probe proves Trixie, even if Tailscale repair,
+The database updates to the target as soon as a live probe proves it, even if Tailscale repair,
 health verification, or Phase B later fails. Existing init state and a `repair-required` event own
 the remaining outcome; remote progress does not duplicate Trixie observation or Phase B completion.
 
-Selected Agentworks APT sources are recreated from Trixie mappings. Unmanaged sources remain
+Selected Agentworks APT sources are recreated from target mappings. Unmanaged sources remain
 disabled and are listed for manual review. Old source backups and upgrade logs remain until the
 operator completes the documented cleanup after validating the VM and external checkpoint policy.
 
@@ -225,17 +254,19 @@ the payload.
 
 The implementation lands in independently reviewable phases:
 
-1. core release type, database observation, release-keyed Phase B values, output, and no-selector
-   contract as one merge unit;
+1. ordered core release type, relative support classifier, database observation, release-keyed Phase
+   B values, output, and no-selector contract as one merge unit;
 2. disk-backed staging corrections;
-3. platform image maps, Proxmox transition, and Trixie create validation;
-4. the durable `vm upgrade` workflow and permanent recovery teaching;
-5. live platform certification, exact support dates, superseding ADR, and release cutover.
+3. vm-platform version 3 request/result contract, platform image maps, Proxmox transition,
+   capability READMEs, and Trixie create validation;
+4. the adjacent durable `vm upgrade` workflow and permanent recovery teaching;
+5. live platform certification, relative support teaching, superseding ADR, and release cutover.
 
-Before phase 5, builds still create the prior current release on the integration branch. Phase 3's
-shared provider contract and all six implementations land through one green merge unit; provider
-branches are stacked review inputs, not independently mergeable changes. The final cutover switches
-the one core constant and deletes Bookworm platform selectors only after all gates pass.
+Before phase 5, builds still create the prior final registry profile on the integration branch.
+Phase 3's shared provider contract and all six implementations land through one green merge unit;
+provider branches are stacked review inputs, not independently mergeable changes. The final cutover
+atomically appends the certified Trixie profile and deletes Bookworm platform selectors only after
+all gates pass. Current then derives from the new tail; no second setting changes.
 
 Rolling back code before any VM upgrade uses the existing database-restore procedure. Rolling back
 an already upgraded guest requires the operator's external checkpoint; changing the Agentworks
@@ -243,23 +274,18 @@ constant, database row, or APT sources is not a guest rollback.
 
 ## 11. Residual and removal policy
 
-At full Bookworm compatibility end, remove:
+Release promotion changes support position, not data readability. When a release becomes
+`current-2`, current documentation stops claiming supported convergence or upgrade for it and starts
+teaching best-effort access plus fresh-VM/data-copy recovery. The implementation keeps:
 
-- Bookworm Phase B compatibility tests not required by the still-supported upgrade preflight; and
-- current docs that teach ordinary Bookworm convergence.
+- release recognition and display for persisted VMs;
+- operational release mappings that still enable honest best-effort work;
+- the legacy Proxmox parser while ordinary configuration compatibility requires it; and
+- backup, access, delete, and reconstruction guidance.
 
-Keep through 2028-06-30:
-
-- Bookworm detection and display;
-- the Bookworm release profile and source values required by the upgrade;
-- the Bookworm-to-Trixie upgrade policy; and
-- the legacy Proxmox `template_vmid` parser needed to keep old sites loadable for recovery; and
-- backup/recovery/delete guidance.
-
-The cutover commit creates a dated cleanup issue owned by the release maintainer, linked from the
-superseding ADR and support-policy code. It tracks the six-month documentation/Phase B cleanup, the
-2028 Proxmox adapter and upgrade-policy cleanup, and the last supporting Agentworks release pointer.
-
-After upgrade support ends, Bookworm remains a recognized historical/observed value. Removing its
-enum value or database constraint would make existing state unreadable and is not part of this
-transition.
+Create-only selectors for a non-current release can be deleted because core never requests them. An
+old target profile's adjacent policy is no longer eligible to start an upgrade once its source is
+not current-1, but its policy and journal reader remain available to recover an incomplete journal
+that predates promotion. Retaining that direct recovery data must not make a new or multi-hop path
+callable. Removal of old recognition or operational data requires a separately authorized
+compatibility decision, not a date embedded in this effort.
