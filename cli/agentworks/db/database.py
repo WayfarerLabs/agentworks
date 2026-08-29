@@ -762,6 +762,11 @@ class Database:
         ).fetchone()
         return _to_session(row) if row else None
 
+    def count_sessions(self) -> int:
+        """Count stored sessions without decoding their opaque state."""
+        row = self._conn.execute("SELECT COUNT(*) FROM sessions").fetchone()
+        return int(row[0])
+
     def list_sessions(
         self,
         *,

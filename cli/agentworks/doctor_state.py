@@ -10,7 +10,7 @@ from agentworks.path_rendering import format_host_path
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from agentworks.db import Database
+    from agentworks.db import Database, VMRow
     from agentworks.doctor import HealthGroup
     from agentworks.vms.sites import VMSiteDecl
 
@@ -90,6 +90,16 @@ def check_database() -> HealthGroup:
     return group
 
 
+def _live_resource_counts(database: Database, vms: list[VMRow]) -> dict[str, int]:
+    return {
+        "vm": len(vms),
+        "workspace": len(database.list_workspaces()),
+        "agent": len(database.list_agents()),
+        "session": database.count_sessions(),
+        "console": len(database.list_consoles()),
+    }
+
+
 def _report_contents(group: HealthGroup, database: object) -> None:
     """Report stored counts and flag VMs in non-complete states."""
     from agentworks.db import Database, InitStatus
@@ -97,8 +107,12 @@ def _report_contents(group: HealthGroup, database: object) -> None:
 
     assert isinstance(database, Database)
     vms = database.list_vms()
-    workspace_count = len(database.list_workspaces())
-    group.ok("Contents", f"{len(vms)} VMs, {workspace_count} workspaces")
+    counts = _live_resource_counts(database, vms)
+    group.ok(
+        "Contents",
+        f"{counts['vm']} VMs, {counts['workspace']} workspaces, {counts['agent']} agents, "
+        f"{counts['session']} sessions, {counts['console']} consoles",
+    )
 
     def log_hint(vm_name: str) -> str:
         if not LOG_DIR.exists():
