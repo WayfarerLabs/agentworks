@@ -29,13 +29,18 @@ version control and the systems that produce them.
 
 The boundary is the session: a subagent's report returned to its invoking session is conversation,
 not an outward message, and needs no signature; the signature attaches when content leaves the
-session, and whoever posts it signs as themselves. Git commits need no signature line, but an agent
-session's commits must carry a session trailer. In an Agentworks workload that trailer is
-`Agentworks-Session: <session name>` with the name read from `AGENTWORKS_SESSION`, mandatory
-whenever the variable is set; harness-added trailers (this history's `Claude-Session: <url>`) may
-ride along but do not substitute for it. When `AGENTWORKS_SESSION` is absent, the environment's own
-stable harness or session trailer satisfies the requirement on its own; never invent a session name.
-Outside Agentworks, use the environment's own stable session identifier as the trailer. Author
-identity plus the trailer is the commit-side equivalent of the signature. When one session posts in
-several roles (for example, authoring work and relaying a review), the role descriptor is what
-disambiguates; keep it honest and current.
+session, and whoever posts it signs as themselves. A delegate that commits, pushes, or posts on its
+own rather than handing back does exactly that: it signs and trails as itself, not as its lead,
+since the point is to say which worker produced the thing. A delegate inherits its lead's
+environment, so `AGENTWORKS_SESSION` names the lead; a delegate committing its own branch appends
+its own identifier rather than shipping commits that claim to be the lead's. Most delegates never
+hit this, because most report back and the lead is what speaks outward. Git commits need no
+signature line, but an agent session's commits must carry a session trailer. In an Agentworks
+workload that trailer is `Agentworks-Session: <session name>` with the name read from
+`AGENTWORKS_SESSION`, mandatory whenever the variable is set; harness-added trailers (this history's
+`Claude-Session: <url>`) may ride along but do not substitute for it. When `AGENTWORKS_SESSION` is
+absent, the environment's own stable harness or session trailer satisfies the requirement on its
+own; never invent a session name. Outside Agentworks, use the environment's own stable session
+identifier as the trailer. Author identity plus the trailer is the commit-side equivalent of the
+signature. When one session posts in several roles (for example, authoring work and relaying a
+review), the role descriptor is what disambiguates; keep it honest and current.
