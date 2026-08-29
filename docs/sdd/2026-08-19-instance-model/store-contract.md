@@ -116,7 +116,7 @@ list_vm_owner_tree_desired_overlays(vm_name) -> tuple[DesiredOverlayRecord, ...]
 
 get_applied_slices(instance_kind, instance_name) -> tuple[AppliedStateSlice, ...]
 replace_applied_slices(instance_kind, instance_name, operation, slices: Mapping[AppliedStateKey, VersionedPayload]) -> tuple[AppliedStateSlice, ...]
-clear_applied_slices(instance_kind, instance_name, keys: Collection[AppliedStateKey]) -> None
+clear_applied_slices(instance_kind, instance_name, key: AppliedStateKey) -> None
 list_applied_slices(instance_kind) -> tuple[AppliedStateSlice, ...]
 ```
 
@@ -142,11 +142,11 @@ Slices not established by that operation remain unchanged. An empty input is a n
 to erase unrelated evidence. This is what lets VM reinit replace only the facts it actually
 reapplied and keeps workspace repair from manufacturing convergence.
 
-`clear_applied_slices` accepts only registered applied keys valid for the supplied instance kind and
-deletes exactly those keys for one instance. An empty collection and already-absent keys are no-ops.
-This narrow mutation removes evidence that a lifecycle knows became uncertain after a remote side
-effect. It does not accept unknown strings, expose record types, or turn absence into an applied
-state. Like replacement, it joins an enclosing lifecycle transaction.
+`clear_applied_slices` accepts one registered applied key valid for the supplied instance kind and
+deletes exactly that key for one instance. An already-absent key is a no-op. This narrow mutation
+removes evidence that a lifecycle knows became uncertain after a remote side effect. It does not
+accept unknown strings, expose record types, or turn absence into an applied state. Like
+replacement, it joins an enclosing lifecycle transaction.
 
 ## Connection and transaction rules
 

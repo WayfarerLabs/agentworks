@@ -323,7 +323,7 @@ def run_initialization(
             db.instance_state.clear_applied_slices(
                 "vm",
                 vm_name,
-                [AppliedStateKey.SSH_IDENTITY],
+                AppliedStateKey.SSH_IDENTITY,
             )
 
 

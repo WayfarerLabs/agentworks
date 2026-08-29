@@ -56,11 +56,11 @@ whose retained private identity remains readable and stable through the local ch
 slice. Recovery and cleanup roots such as rekey and VM delete remain available without this
 ordinary-operation proof.
 
-`clear_applied_slices` removes only the supplied registered keys for one typed owner. It rejects
-caller-authored strings and keys registered for a different owner kind, treats empty or already
-absent key sets as no-ops, and joins an enclosing lifecycle transaction. This is the narrow path for
-discarding evidence that a lifecycle side effect made uncertain; it cannot delete a desired overlay,
-a future unknown slice, or another owner's evidence.
+`clear_applied_slices` removes only one supplied registered key for one typed owner. It rejects
+caller-authored strings and keys registered for a different owner kind, treats an already absent key
+as a no-op, and joins an enclosing lifecycle transaction. This is the narrow path for discarding
+evidence that a lifecycle side effect made uncertain; it cannot delete a desired overlay, a future
+unknown slice, or another owner's evidence.
 
 VM desired overlays use one owner record for the paired final VM and admin layers. New writes use
 payload version 2 with explicit `vm` and `admin` components. Readers retain compatibility with the

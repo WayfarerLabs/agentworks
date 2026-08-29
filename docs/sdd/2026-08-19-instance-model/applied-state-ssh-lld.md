@@ -334,10 +334,10 @@ applied slices. A crash or database failure after the remote write is the unavoi
 window and retains conservative old or absent state. The checkpoint exception propagates; it is not
 caught and rewritten as a second initialization failure checkpoint.
 
-The repository adds one closed `clear_applied_slices(instance_kind, instance_name, keys)` mutation.
-It accepts only registered keys valid for that instance kind, deletes exactly those slices, is a
-no-op when they are absent, and joins an enclosing transaction. It is not a public arbitrary-record
-delete API.
+The repository adds one closed `clear_applied_slices(instance_kind, instance_name, key)` mutation.
+It accepts one registered key valid for that instance kind, deletes exactly that slice, is a no-op
+when it is absent, and joins an enclosing transaction. It is not a public arbitrary-record delete
+API.
 
 Only `update_vm_init_status()` and `insert_vm_event()` change from direct commit to
 `_commit_unless_in_tx()`. Standalone callers retain current commit behavior. No schema change is
