@@ -36,11 +36,20 @@ not an outward message, and needs no signature; the signature attaches when cont
 session, and whoever posts it signs as themselves. A delegate that commits, pushes, or posts on its
 own rather than handing back does exactly that: it signs and trails as itself, not as its lead,
 since the point is to say which worker produced the thing. A delegate inherits its lead's
-environment, so `AGENTWORKS_SESSION` names the lead; a delegate committing its own branch appends
-its own identifier rather than shipping commits that claim to be the lead's. Most delegates never
-hit this, because most report back and the lead is what speaks outward. Git commits need no
-signature line, but an agent session's commits must carry a session trailer. In an Agentworks
-workload that trailer is `Agentworks-Session: <session name>` with the name read from
+environment, so `AGENTWORKS_SESSION` names the lead and nothing in that environment names the
+delegate. The lead supplies it: charter each delegate with `AGENTWORKS_DELEGATE`, set to the same
+identifier that namespaces its scratch, fixture, and live-test resources, since something must
+already assign that or concurrent delegates collide. Nothing is invented, because the lead assigns
+and the delegate reads. The trailer is then one value under the existing key, so an effort's commits
+stay findable as a set and a delegate's stay distinguishable within it:
+
+```text
+Agentworks-Session: agw-ns-instance-model/dev-3
+```
+
+Most delegates never hit this, because most report back and the lead is what speaks outward. Git
+commits need no signature line, but an agent session's commits must carry a session trailer. In an
+Agentworks workload that trailer is `Agentworks-Session: <session name>` with the name read from
 `AGENTWORKS_SESSION`, mandatory whenever the variable is set; harness-added trailers (this history's
 `Claude-Session: <url>`) may ride along but do not substitute for it. When `AGENTWORKS_SESSION` is
 absent, the environment's own stable harness or session trailer satisfies the requirement on its
