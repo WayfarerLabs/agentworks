@@ -222,6 +222,14 @@ def add_sessions(
 
     with db.transaction():
         current_order = [member.session_name for member in db.list_console_sessions(console_name)]
+        current_names = set(current_order)
+        for spec in specs:
+            if spec.name in current_names:
+                raise AlreadyExistsError(
+                    f"session '{spec.name}' is already a member of console '{console_name}'",
+                    entity_kind="console-member",
+                    entity_name=spec.name,
+                )
         resolved_index = len(current_order) if start_index is None else start_index
         if not 0 <= resolved_index <= len(current_order):
             raise ValidationError(

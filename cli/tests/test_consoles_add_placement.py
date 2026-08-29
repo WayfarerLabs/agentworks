@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 from agentworks.cli import app
 from agentworks.cli.commands import console as console_commands
 from agentworks.db import Database
-from agentworks.errors import ValidationError
+from agentworks.errors import AlreadyExistsError, ValidationError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import multi_console
 from agentworks.sessions.multi_console import add_sessions, create_console
@@ -173,6 +173,37 @@ def test_manager_recomputes_explicit_end_after_membership_changes(
     )
 
     assert [member.session_name for member in db.list_console_sessions("con")] == ["a", "b", "d", "c"]
+
+
+def test_manager_reports_typed_conflict_when_requested_membership_changes(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks import bootstrap
+
+    _seed_vm(db)
+    _seed_sessions(db, ["a", "b", "c", "d"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a", "b"])
+    load_registry = bootstrap.load_request_registry
+
+    def load_registry_after_concurrent_add(*args: object, **kwargs: object) -> object:
+        db.add_console_session("con", "c", [])
+        return load_registry(*args, **kwargs)
+
+    monkeypatch.setattr(bootstrap, "load_request_registry", load_registry_after_concurrent_add)
+
+    with pytest.raises(AlreadyExistsError) as exc_info:
+        add_sessions(
+            db,
+            _StubConfig(),
+            console_name="con",
+            session_specs=["c", "d"],
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert exc_info.value.entity_kind == "console-member"
+    assert exc_info.value.entity_name == "c"
+    assert [member.session_name for member in db.list_console_sessions("con")] == ["a", "b", "c"]
 
 
 def test_live_sync_matches_indexed_database_order(
