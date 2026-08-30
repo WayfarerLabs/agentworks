@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import AppliedStateKey, VersionedPayload
+from agentworks.db import AppliedStateKey, SessionMode, VersionedPayload
+from agentworks.errors import ConfigError, StateError, ValidationError
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -135,6 +136,144 @@ def test_workspace_and_agent_descriptions_include_current_final_layers(
     assert agent_slot.current.status == "resolved"
     assert agent_slot.current.spec["shell"] == "/bin/fish"
     assert agent.instance_state.lifecycle_evidence == ()
+
+
+def test_workspace_and_agent_descriptions_retain_database_facts_when_registry_is_unavailable(
+    db: Database,
+    make_config,  # noqa: ANN001
+) -> None:
+    from agentworks.agents.manager import agent_description
+    from agentworks.agents.manager.inspect import agent_description_data
+    from agentworks.instance_description import InstanceStateIssueCode
+    from agentworks.instance_specs import parse_instance_spec, parse_vm_instance_specs
+    from agentworks.workspaces.manager import workspace_description
+    from agentworks.workspaces.manager.create import workspace_description_data
+
+    _seed_vm(db)
+    db.insert_vm("bad-box", "proxmox", "bad-box")
+    invalid_admin = parse_vm_instance_specs(None, '{"mise_install_before":"operator-value-marker"}')
+    assert invalid_admin is not None
+    db.instance_state.put_desired_overlay("vm", "bad-box", invalid_admin.payload)
+
+    db.insert_workspace("work", "/srv/work", "box", "ws-work")
+    db.insert_agent("dev", "box", "agt-dev")
+    db.insert_agent_grant("dev", "work", "explicit")
+    db.insert_session(
+        "run",
+        "work",
+        "default",
+        SessionMode.AGENT,
+        agent_name="dev",
+        socket_path="/tmp/run.sock",
+    )
+    workspace_overlay = parse_instance_spec("workspace", '{"tmuxinator":false}')
+    agent_overlay = parse_instance_spec("agent", '{"shell":"/bin/fish"}')
+    db.instance_state.put_desired_overlay("workspace", "work", workspace_overlay.payload)
+    db.instance_state.put_desired_overlay("agent", "dev", agent_overlay.payload)
+
+    config = make_config()
+    workspace = workspace_description(db, config, "work")
+    agent = agent_description(db, config, name="dev")
+
+    assert workspace.workspace.name == "work"
+    assert [session.name for session in workspace.sessions] == ["run"]
+    assert [item.name for item in workspace.agents] == ["dev"]
+    assert agent.name == "dev"
+    assert agent.explicit_grants == ("work",)
+    assert [session.name for session in agent.sessions] == ["run"]
+    assert "operator-value-marker" not in json.dumps(workspace_description_data(workspace))
+    assert "operator-value-marker" not in json.dumps(agent_description_data(agent))
+
+    for state, expected_spec in (
+        (workspace.instance_state, {"tmuxinator": False}),
+        (agent.instance_state, {"shell": "/bin/fish"}),
+    ):
+        slot = state.declarations[0]
+        assert slot.instance_spec.status == "present"
+        assert slot.instance_spec.spec == expected_spec
+        assert slot.current.status == "unresolved"
+        assert slot.current.reason == "registry-unavailable"
+        assert [(issue.code, issue.slot) for issue in state.issues] == [
+            (InstanceStateIssueCode.REGISTRY_UNAVAILABLE, slot.name)
+        ]
+
+
+@pytest.mark.parametrize("error", [ConfigError("marker"), ValidationError("marker")])
+def test_tolerant_registry_loader_degrades_only_expected_operator_data_errors(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    error: BaseException,
+) -> None:
+    from unittest.mock import Mock
+
+    from agentworks import bootstrap
+    from agentworks.instance_description import (
+        load_instance_description_registry,
+        load_tolerant_instance_description_registry,
+    )
+
+    loader = Mock(side_effect=error)
+    monkeypatch.setattr(bootstrap, "load_request_registry", loader)
+    config = make_config()
+
+    assert load_tolerant_instance_description_registry(db, config, "workspace", "work") is None
+    with pytest.raises(type(error)) as raised:
+        load_instance_description_registry(db, config, "vm", "box")
+    assert raised.value is error
+
+
+def test_tolerant_registry_loader_preserves_focused_owner_state_fallback(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import Mock
+
+    from agentworks import bootstrap
+    from agentworks.instance_description import load_tolerant_instance_description_registry
+    from agentworks.resources import Registry
+
+    fallback = Registry.empty()
+    loader = Mock(
+        side_effect=[
+            StateError("marker", entity_kind="workspace", entity_name="work"),
+            fallback,
+        ]
+    )
+    monkeypatch.setattr(bootstrap, "load_request_registry", loader)
+
+    registry = load_tolerant_instance_description_registry(db, make_config(), "workspace", "work")
+
+    assert registry is fallback
+    assert loader.call_count == 2
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        RuntimeError("marker"),
+        AssertionError("marker"),
+        StateError("marker"),
+        StateError("marker", entity_kind="database"),
+    ],
+)
+def test_tolerant_registry_loader_propagates_unexpected_failures(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    error: BaseException,
+) -> None:
+    from unittest.mock import Mock
+
+    from agentworks import bootstrap
+    from agentworks.instance_description import load_tolerant_instance_description_registry
+
+    monkeypatch.setattr(bootstrap, "load_request_registry", Mock(side_effect=error))
+
+    with pytest.raises(type(error)) as raised:
+        load_tolerant_instance_description_registry(db, make_config(), "workspace", "work")
+    assert raised.value is error
 
 
 def test_workspace_description_retains_unavailable_stored_spec(

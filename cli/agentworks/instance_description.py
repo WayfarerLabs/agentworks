@@ -114,6 +114,7 @@ class InstanceStateIssueCode(StrEnum):
     INSTANCE_SPEC_MALFORMED = "instance-spec-malformed"
     INSTANCE_SPEC_UNSUPPORTED = "instance-spec-unsupported"
     CURRENT_DECLARATION_UNRESOLVED = "current-declaration-unresolved"
+    REGISTRY_UNAVAILABLE = "registry-unavailable"
     APPLIED_RECORD_MALFORMED = "applied-record-malformed"
     APPLIED_RECORD_UNSUPPORTED = "applied-record-unsupported"
     LIFECYCLE_EVIDENCE_UNAVAILABLE = "lifecycle-evidence-unavailable"
@@ -159,6 +160,21 @@ def load_instance_description_registry(
         # A config-only registry still lets its stored and applied siblings be
         # inspected without weakening failures from any other publisher.
         return load_request_registry(config, include_live_resources=False)
+
+
+def load_tolerant_instance_description_registry(
+    db: Database,
+    config: Config,
+    instance_kind: Literal["workspace", "agent"],
+    instance_name: str,
+) -> Registry | None:
+    """Load workspace or agent resolution input without hiding stored facts."""
+    from agentworks.errors import ConfigError, ValidationError
+
+    try:
+        return load_instance_description_registry(db, config, instance_kind, instance_name)
+    except (ConfigError, ValidationError):
+        return None
 
 
 def inspected_desired_record(inspection: InstanceStateInspection) -> DesiredOverlayRecord | None:
@@ -208,7 +224,7 @@ def single_declaration_instance_state[T: BaseModel, R](
     instance_kind: Literal["workspace", "agent", "session"],
     selection: ResourceIdentity,
     inspection: InstanceStateInspection,
-    resolve: Callable[[T | None], LayeredResolution[R]],
+    resolve: Callable[[T | None], LayeredResolution[R]] | None,
 ) -> InstanceStateDescription:
     """Collect one non-VM declaration slot from a singular DB inspection."""
     from agentworks.errors import NotFoundError, StateError
@@ -258,8 +274,17 @@ def single_declaration_instance_state[T: BaseModel, R](
                 )
             )
 
+    current: SpecResolution
     if unavailable:
-        current: SpecResolution = UnresolvedSpec(selection, "instance-spec-unavailable")
+        current = UnresolvedSpec(selection, "instance-spec-unavailable")
+    elif resolve is None:
+        current = UnresolvedSpec(selection, "registry-unavailable")
+        issues.append(
+            InstanceStateIssue(
+                InstanceStateIssueCode.REGISTRY_UNAVAILABLE,
+                slot=instance_kind,
+            )
+        )
     else:
         try:
             current = project_resolved_spec(resolve(declaration), selection)

@@ -239,9 +239,9 @@ def agent_description(
                 entity_kind="agent",
                 entity_name=name,
             )
-        from agentworks.instance_description import load_instance_description_registry
+        from agentworks.instance_description import load_tolerant_instance_description_registry
 
-        registry = load_instance_description_registry(db, config, "agent", name)
+        registry = load_tolerant_instance_description_registry(db, config, "agent", name)
         inspection = db.instance_state.inspect_owner_state("agent", name)
         instance_state = _agent_instance_state(registry, agent, inspection)
 
@@ -265,7 +265,7 @@ def agent_description(
 
 
 def _agent_instance_state(
-    registry: Registry,
+    registry: Registry | None,
     agent: AgentRow,
     inspection: InstanceStateInspection,
 ) -> InstanceStateDescription:
@@ -281,11 +281,15 @@ def _agent_instance_state(
         instance_kind="agent",
         selection=selection,
         inspection=inspection,
-        resolve=lambda overlay: resolve_template_with_provenance(
-            registry,
-            agent.template,
-            overlay=cast("AgentTemplate | None", overlay),
-            instance_name=agent.name,
+        resolve=(
+            None
+            if registry is None
+            else lambda overlay: resolve_template_with_provenance(
+                registry,
+                agent.template,
+                overlay=cast("AgentTemplate | None", overlay),
+                instance_name=agent.name,
+            )
         ),
     )
 

@@ -313,9 +313,9 @@ def workspace_description(db: Database, config: Config, name: str) -> WorkspaceD
                 entity_kind="workspace",
                 entity_name=name,
             )
-        from agentworks.instance_description import load_instance_description_registry
+        from agentworks.instance_description import load_tolerant_instance_description_registry
 
-        registry = load_instance_description_registry(db, config, "workspace", name)
+        registry = load_tolerant_instance_description_registry(db, config, "workspace", name)
         inspection = db.instance_state.inspect_owner_state("workspace", name)
         instance_state = _workspace_instance_state(registry, ws, inspection)
 
@@ -342,7 +342,7 @@ def workspace_description(db: Database, config: Config, name: str) -> WorkspaceD
 
 
 def _workspace_instance_state(
-    registry: Registry,
+    registry: Registry | None,
     workspace: WorkspaceRow,
     inspection: InstanceStateInspection,
 ) -> InstanceStateDescription:
@@ -358,11 +358,15 @@ def _workspace_instance_state(
         instance_kind="workspace",
         selection=selection,
         inspection=inspection,
-        resolve=lambda overlay: resolve_template_with_provenance(
-            registry,
-            workspace.template,
-            overlay=cast("WorkspaceTemplate | None", overlay),
-            instance_name=workspace.name,
+        resolve=(
+            None
+            if registry is None
+            else lambda overlay: resolve_template_with_provenance(
+                registry,
+                workspace.template,
+                overlay=cast("WorkspaceTemplate | None", overlay),
+                instance_name=workspace.name,
+            )
         ),
     )
 

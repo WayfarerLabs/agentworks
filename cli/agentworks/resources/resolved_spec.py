@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 
 type ResolvedValueRole = Literal["defaulted", "inherited", "declared", "overlaid"]
-type UnresolvedSpecReason = Literal["missing-selection", "instance-spec-unavailable"]
+type UnresolvedSpecReason = Literal["missing-selection", "instance-spec-unavailable", "registry-unavailable"]
 
 _JSON_ADAPTER: TypeAdapter[Any] = TypeAdapter(Any)
 
