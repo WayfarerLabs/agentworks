@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+import yaml
 
 from agentworks.db import AppliedStateKey, SessionMode, VersionedPayload
 from agentworks.errors import ConfigError, StateError, ValidationError
@@ -868,14 +869,14 @@ def test_live_instance_human_facts_are_terminal_safe(
     )
 
 
-def test_live_instance_structured_values_render_as_ascii_json(
+def test_live_instance_structured_values_render_as_ascii_yaml(
     captured_output,  # noqa: ANN001
 ) -> None:
-    from agentworks.instance_description import _render_json_object
+    from agentworks.instance_description import _render_yaml_object
 
     value = {"ordinary-unicode": "snowman \u2603", "unsafe": "line\ncontrol\x1b\u202e"}
 
-    _render_json_object(value)
+    _render_yaml_object(value)
 
     assert all(line.isascii() for line in captured_output.detail)
-    assert json.loads("\n".join(captured_output.detail)) == value
+    assert yaml.safe_load("\n".join(captured_output.detail)) == value

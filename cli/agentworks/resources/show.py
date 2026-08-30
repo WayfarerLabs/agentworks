@@ -13,8 +13,6 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, assert_never
 
-import yaml
-
 from agentworks import output
 from agentworks.declared_resource import FRAMEWORK_FIELDS, METADATA_FIELDS, DeclaredResource, EnvelopeMetadata
 from agentworks.doctor import HealthCheck, checks_for_resource, health_check_data
@@ -31,7 +29,7 @@ from agentworks.resources.graph_query import (
 )
 from agentworks.resources.inspect import ResourceSummary, summarize_resource
 from agentworks.resources.kind import ResolvedSpecKind
-from agentworks.resources.render import format_origin_line, sanitize_fact_line
+from agentworks.resources.render import format_origin_line, sanitize_fact_line, yaml_document_lines
 from agentworks.resources.resolved_spec import ResolvedSpec, resolved_spec_data
 
 if TYPE_CHECKING:
@@ -247,14 +245,8 @@ def render_resource_show(shown: ResourceShow) -> None:
 
     if shown.resolution is not None:
         output.info("Resolved spec:")
-        document = yaml.safe_dump(
-            shown.resolution.spec,
-            allow_unicode=False,
-            default_flow_style=False,
-            sort_keys=False,
-        )
         with output.section():
-            for line in document.rstrip("\n").split("\n"):
+            for line in yaml_document_lines(shown.resolution.spec):
                 output.info(line)
         output.info("Resolved spec provenance:")
         with output.section():
@@ -270,14 +262,8 @@ def render_resource_show(shown: ResourceShow) -> None:
         return
 
     output.info("Declaration:")
-    document = yaml.safe_dump(
-        shown.declaration,
-        allow_unicode=False,
-        default_flow_style=False,
-        sort_keys=False,
-    )
     with output.section():
-        for line in document.rstrip("\n").split("\n"):
+        for line in yaml_document_lines(shown.declaration):
             output.info(line)
 
 

@@ -8,7 +8,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Literal, cast
 
 from agentworks import output
-from agentworks.resources.render import sanitize_fact_line
+from agentworks.resources.render import sanitize_fact_line, yaml_document_lines
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -406,7 +406,7 @@ def render_instance_state(state: InstanceStateDescription) -> None:
             if spec.status == "present":
                 output.detail(sanitize_fact_line(f"Instance spec: recorded {spec.recorded_at}"))
                 assert spec.spec is not None
-                _render_json_object(spec.spec)
+                _render_yaml_object(spec.spec)
             elif spec.status == "unavailable":
                 output.detail(sanitize_fact_line(f"Instance spec: unavailable ({spec.reason})"))
             else:
@@ -417,7 +417,7 @@ def render_instance_state(state: InstanceStateDescription) -> None:
                 output.detail(sanitize_fact_line(f"Current spec: unresolved ({current.reason})"))
             else:
                 output.detail("Current spec:")
-                _render_json_object(current.spec)
+                _render_yaml_object(current.spec)
 
     output.info("\nLifecycle evidence:")
     if not state.lifecycle_evidence:
@@ -430,7 +430,7 @@ def render_instance_state(state: InstanceStateDescription) -> None:
             output.detail(sanitize_fact_line(f"{fact.key}: {fact.status}{suffix}"))
             if fact.value:
                 with output.section():
-                    _render_json_object(fact.value)
+                    _render_yaml_object(fact.value)
 
     output.info("\nComparisons:")
     if not state.comparisons:
@@ -463,7 +463,7 @@ def render_instance_state(state: InstanceStateDescription) -> None:
             output.detail(sanitize_fact_line(f"{issue.code.value}{f' ({context})' if context else ''}"))
 
 
-def _render_json_object(value: JsonObject) -> None:
+def _render_yaml_object(value: JsonObject) -> None:
     with output.section():
-        for line in json.dumps(value, ensure_ascii=True, indent=2).splitlines():
+        for line in yaml_document_lines(value):
             output.detail(line)

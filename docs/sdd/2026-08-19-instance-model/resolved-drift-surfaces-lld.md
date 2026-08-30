@@ -262,6 +262,12 @@ Configured secret references may appear, but no secret lookup occurs and no reso
 may enter the projection. Lifecycle result lines remain value-free because they are mutation
 receipts, not explicit inspection requests.
 
+Human live-instance descriptions render each structured instance spec, current resolved spec, and
+lifecycle-evidence value object as safe block YAML with declaration order retained and non-ASCII
+content escaped. This matches the human `resource show` configuration-document convention without
+changing JSON v1. Comparison differences remain compact JSON because they are paired values inside
+one diagnostic line rather than standalone configuration documents.
+
 VM descriptions contain `vm` and `admin` declaration slots. Workspace, agent, and session contain
 one slot named for their kind. The VM slot resolves its selected VM template plus VM overlay; the
 admin slot resolves its selected admin template plus admin overlay. The composite VM desired record

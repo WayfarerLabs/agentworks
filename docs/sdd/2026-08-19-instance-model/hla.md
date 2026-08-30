@@ -435,8 +435,10 @@ JSON v1 retains every existing field and adds tagged objects. Current producers 
 `instance_state` for the four live description commands, while additive JSON v1 compatibility still
 allows older producers to omit it. Human and JSON forms project the same structural facts. Resolved
 specs include configured secret references only, never resolved secret values. Human describe keeps
-the complete current spec but omits exhaustive per-leaf value-source rows; its JSON projection and
-template `resource show` retain complete provenance.
+the complete current spec but omits exhaustive per-leaf value-source rows. Its structured instance
+specs, current specs, and lifecycle-evidence values use safe block YAML, matching human
+`resource show`; compact comparison values remain JSON. Its JSON projection and template
+`resource show` retain complete provenance.
 
 A missing or removed template is unresolved current declaration, not the built-in default. A later
 edit to the selected VM template can change currently resolved hardware while the VM row still

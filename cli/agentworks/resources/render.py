@@ -19,10 +19,13 @@ from __future__ import annotations
 import unicodedata
 from typing import TYPE_CHECKING
 
+import yaml
+
 from agentworks.path_rendering import format_host_path
 from agentworks.terminal import sanitize_terminal_output
 
 if TYPE_CHECKING:
+    from agentworks.machine_output import JsonObject
     from agentworks.origin import Origin
     from agentworks.resources.reference import ReferenceEntry
 
@@ -36,6 +39,17 @@ def sanitize_fact_line(value: str) -> str:
     return "".join(
         character for character in sanitized if unicodedata.category(character) not in _UNSAFE_LINE_CATEGORIES
     )
+
+
+def yaml_document_lines(value: JsonObject) -> tuple[str, ...]:
+    """Serialize one JSON-compatible object as terminal-safe block YAML lines."""
+    document = yaml.safe_dump(
+        value,
+        allow_unicode=False,
+        default_flow_style=False,
+        sort_keys=False,
+    )
+    return tuple(document.rstrip("\n").split("\n"))
 
 
 def format_reference_entry(entry: ReferenceEntry) -> str:
@@ -87,4 +101,4 @@ def format_origin_line(origin: Origin | None) -> str:
     raise AssertionError(f"unhandled Origin variant: {origin.variant!r}")
 
 
-__all__ = ["format_origin_line", "sanitize_fact_line"]
+__all__ = ["format_origin_line", "sanitize_fact_line", "yaml_document_lines"]
