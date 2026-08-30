@@ -538,6 +538,14 @@ ask again. Non-interactive runs never prompt (a later interactive create still a
 Changes to config (new packages, different install commands, etc.) are picked up automatically. It
 consumes both stored VM and admin instance specs but cannot change or clear either one.
 
+VMs created before SSH applied-state tracking have no synthesized identity evidence. Ordinary
+canonical SSH commands refuse that unknown state until one successful `agw vm reinit <name>` proves
+and records the configured identity. After upgrading Agentworks, run that reinit while the installed
+key still works. If it no longer works, try `agw vm shell <name> --platform` where supported,
+restore the configured public key, and rerun reinit. A platform-native transport can itself depend
+on the configured key, so use provider-native recovery tooling or recreate the VM if it cannot
+connect.
+
 `vm upgrade` is the supported in-place Debian release transition. It accepts only the release
 immediately before Agentworks' current release and has no target or force option. It completes local
 data and Debian-state backups, requires a reference to an operator-created checkpoint that can boot,
@@ -761,7 +769,7 @@ panes you want preloaded into a session's window.
 | `agw console describe <name>`                       | Show membership and shell layout                                  |
 | `agw console attach <name>`                         | Attach (builds tmux state on first attach)                        |
 | `agw console delete <name>`                         | Tear down and remove the console                                  |
-| `agw console add-sessions <name> <sessions...>`     | Add session windows                                               |
+| `agw console add-sessions <name> <sessions...>`     | Add session windows (accepts `--to-index N`)                      |
 | `agw console remove-sessions <name> <sessions...>`  | Remove session windows (accepts `-y`/`--yes`)                     |
 | `agw console reorder-sessions <name> <sessions...>` | Reorder member sessions (`--to-index N` or `--to-back`)           |
 | `agw console add-shell <name> <session>`            | Add a shell pane to a session window (accepts `--cwd`, `--admin`) |
@@ -785,6 +793,11 @@ order of every unlisted member. By default, or with `--to-index 0`, the listed m
 front. `--to-index N` starts them at zero-based final session index `N`; valid positions range from
 zero through the number of unlisted members, inclusive. `--to-back` is the same as that upper bound.
 The two options are mutually exclusive. Session indices exclude the optional admin-shell window.
+
+`console add-sessions` appends the new sessions when placement is omitted. `--to-index N` instead
+adds them as one argument-ordered block starting at zero-based final session index `N`, while
+preserving the relative order of existing members. Valid positions range from zero through the
+current member count, inclusive. Session indices exclude the optional admin-shell window.
 
 `console list` accepts `--vm`, `--workspace`, and `--agent` to narrow the result set. Each filter
 takes a single value or a comma-separated list (`--workspace ws1,ws2`); commas within a filter are

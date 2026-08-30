@@ -14,12 +14,18 @@ from agentworks.cli import app
 from agentworks.db import PID_STOPPED, SessionMode, SessionStatus, VMRow, WorkspaceRow
 from agentworks.debian import DebianRelease
 from agentworks.secrets.policy import TtyInteractionPolicy
+from tests.conftest import stub_vm_ssh_identity
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow
+
+
+@pytest.fixture(autouse=True)
+def _stub_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    stub_vm_ssh_identity(monkeypatch)
 
 
 def _document_bytes(command: str, data: object) -> bytes:
@@ -508,11 +514,11 @@ def test_session_json_status_repairs_and_no_status_are_preserved(
         _vms: object,
         *,
         interaction: TtyInteractionPolicy,
-    ) -> Iterator[None]:
+    ) -> Iterator[frozenset[str]]:
         assert interaction is TtyInteractionPolicy.ALLOW
         nonlocal boundary_calls
         boundary_calls += 1
-        yield
+        yield frozenset({"box"})
 
     repairs = 0
 
@@ -523,7 +529,7 @@ def test_session_json_status_repairs_and_no_status_are_preserved(
         db.update_session_pid("live", 4321, boot_id="secret-boot-live")
         return db.list_sessions()
 
-    monkeypatch.setattr(manager, "_batch_vm_boundary", boundary)
+    monkeypatch.setattr(manager, "_best_effort_batch_vm_boundary", boundary)
     monkeypatch.setattr(manager, "ensure_pids_batch", repair)
     monkeypatch.setattr(
         manager,

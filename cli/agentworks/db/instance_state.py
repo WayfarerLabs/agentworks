@@ -406,6 +406,24 @@ class InstanceStateRepository:
             )
         return self.get_applied_slices(instance_kind, instance_name)
 
+    def clear_applied_slice(
+        self,
+        instance_kind: InstanceKind,
+        instance_name: str,
+        key: AppliedStateKey,
+    ) -> None:
+        """Delete one registered applied slice for one owner."""
+        validated_kind = _validate_identity(instance_kind, instance_name)
+        _validate_applied_key(validated_kind, key)
+
+        with self._transaction():
+            self._connection.execute(
+                "DELETE FROM instance_records "
+                "WHERE instance_kind = ? AND instance_name = ? AND record_type = ? "
+                "AND record_key = ?",
+                (instance_kind, instance_name, _APPLIED_STATE, key),
+            )
+
     def list_applied_slices(self, instance_kind: InstanceKind) -> tuple[AppliedStateSlice, ...]:
         _validate_instance_kind(instance_kind)
         rows = self._connection.execute(

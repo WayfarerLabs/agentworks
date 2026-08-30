@@ -1,9 +1,9 @@
 # HLA: Instance Model and State
 
-- Status: R1, R2, and R4 merged; merge-strategy correction implemented and verified; R3 and R5
-  pending
+- Status: R1, R2, and R4 merged; merge-strategy correction merged; R3 implemented and under review;
+  R5 pending
 - Date: 2026-08-23
-- Last revised: 2026-08-28
+- Last revised: 2026-08-29
 - FRD: [frd.md](./frd.md)
 - Assessment: [database-assessment.md](./database-assessment.md)
 - Store contract: [store-contract.md](./store-contract.md)
@@ -358,14 +358,15 @@ the sole identity the server accepted. Agent selection remains deliberately unre
 
 Both VM create and reinit reach `run_initialization()`. The current authorized-key reconciliation
 swallows an `SSHError` into a warning, so lifecycle return or `InitStatus.PARTIAL` alone does not
-prove that identity was applied. R3 changes that helper to return a typed applied/not-applied result
+prove that identity was applied. R3 changes that helper to return a typed applied/unproven result
 and threads the result through phase B.
 
 The terminal database checkpoint groups:
 
 - final init status;
 - the terminal VM event; and
-- only the applied slices whose typed outcomes prove success.
+- only the applied slices whose typed outcomes prove success, plus removal of prior SSH evidence
+  when the remote write outcome or final configured identity became uncertain.
 
 The existing status and event methods become transaction-aware only where required for this
 composition. Remote work cannot be atomic with SQLite. If the remote key write succeeds and the
@@ -374,14 +375,27 @@ retry path; it never fabricates a successful record.
 
 Before committing an SSH fingerprint, the lifecycle re-derives the configured identity and compares
 it with the pre-application result. This detects ordinary path replacement during the operation but
-does not claim filesystem and OpenSSH path access are atomic.
+does not claim filesystem and OpenSSH path access are atomic. Authorized-key reconciliation is the
+last Phase B remote mutation. A failed write has an ambiguous remote outcome, so it removes prior
+SSH evidence. A successful write followed by an unstable proof does the same in the terminal
+transaction rather than allowing stale evidence to authorize later SSH.
+
+Reinit performs an additional configured public/private identity check after its cheap declaration
+and recipe checks but before the applied-state boundary, activation, secret resolution, or transport
+construction. Authorized-key reconciliation deliberately validates again immediately before the
+remote write. The first check prevents avoidable backend work; the second retains the time-of-check
+protection when a configured path changes during the operation.
 
 Operational checks use an explicit comparison service at SSH-using boundaries. They do not gate all
 `LiveVMNode.preflight()` calls because start, stop, delete, and establishment reinit have different
-transport needs. Reinit permits not-recorded state so existing VMs can establish it. Cleanup remains
-possible. `verify_vm_connection` and ordinary live-SSH compositions are the first consumers; direct
-transport call sites receive explicit coverage rather than assuming one boundary owns every
-connection.
+transport needs. The ordinary gated VM boundary is safe by default; platform-native recovery uses an
+explicitly named exception. Native cloud transport may itself use the configured SSH key; the
+exception exists because rekey, Tailscale repair, platform shell, and delete cleanup must remain
+attemptable, not because native routing proves a different identity. Reinit permits not-recorded
+state so existing VMs can establish it. Cleanup remains possible. `verify_vm_connection` and
+ordinary live-SSH compositions are the first consumers; direct transport call sites receive explicit
+coverage rather than assuming one boundary owns every connection. Drift guidance names restoration
+or recreation rather than implying native shell changes persisted evidence.
 
 ## R5: resolved and applied projections
 
@@ -412,6 +426,12 @@ describes provisioned hardware. The applied marker supplies operation and time p
 duplicating those values. Its absence on a historic row remains visibly not recorded. VM reinit does
 not provision hardware again and must not create or replace that marker merely because other
 initialization steps succeeded.
+
+Historic VMs receive no synthesized SSH evidence. Ordinary canonical SSH paths refuse them until one
+successful reinit establishes the slice. An unproven final admin key write clears older SSH evidence
+and immediately tells the operator that routine SSH is unavailable, to retry reinit only when the
+installed key still works, and otherwise to attempt platform or provider recovery before
+reinitializing or recreating the VM.
 
 ## Failure and integrity behavior
 

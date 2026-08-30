@@ -35,8 +35,15 @@ from agentworks.secrets.orchestration import (
 )
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.manager._scope import _regenerate_tmuxinator as _real_regenerate_tmuxinator
+from agentworks.vms import manager as vm_manager
 
-from ..conftest import ManifestDoc, stub_build_registry, stub_session_resolvers, stub_vm_gates
+from ..conftest import (
+    ManifestDoc,
+    stub_build_registry,
+    stub_session_resolvers,
+    stub_vm_gates,
+    stub_vm_ssh_identity,
+)
 from ..orchestrated_fixtures import PLUGINS_ENABLED, proxmox_site, write_operator_config
 
 if TYPE_CHECKING:
@@ -46,6 +53,7 @@ if TYPE_CHECKING:
 @pytest.fixture(autouse=True)
 def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     stub_build_registry(monkeypatch)
+    stub_vm_ssh_identity(monkeypatch)
 
 
 class _Result:
@@ -239,6 +247,36 @@ def test_resume_probe_fires_at_preflight_before_the_kill(tmp_path: Path, monkeyp
     db.close()
 
 
+def test_resume_refuses_ssh_identity_before_activation_or_probe(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.sessions.manager import resume_session
+
+    db, events = _resume_fixture(tmp_path, monkeypatch)
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise StateError("SSH identity drift")
+
+    monkeypatch.setattr(vm_manager, "require_vm_ssh_boundary", refuse)
+    monkeypatch.setattr(
+        "agentworks.orchestration.activation.activation_gate",
+        lambda *args, **kwargs: pytest.fail("activation started before SSH identity refusal"),
+    )
+
+    with pytest.raises(StateError):
+        resume_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+            name="s1",
+            yes=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )  # type: ignore[arg-type]
+
+    assert events == []
+    db.close()
+
+
 def test_resume_missing_binary_aborts_with_the_old_session_running(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -417,6 +455,39 @@ def test_create_ephemeral_agent_defers_probe_until_realized(tmp_path: Path, monk
         f"the probe must defer past preflight and fire once, right after the agent realizes; got {events}"
     )
     assert db.get_session("s1") is not None
+    db.close()
+
+
+def test_create_refuses_ssh_identity_before_activation_or_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.sessions.manager import create_session
+
+    events: list[str] = []
+    db = _create_stubs(tmp_path, monkeypatch, events)
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise StateError("SSH identity drift")
+
+    monkeypatch.setattr(vm_manager, "require_vm_ssh_boundary", refuse)
+    monkeypatch.setattr(
+        "agentworks.orchestration.activation.activation_gate",
+        lambda *args, **kwargs: pytest.fail("activation started before SSH identity refusal"),
+    )
+
+    with pytest.raises(StateError):
+        create_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+            name="s1",
+            workspace="ws1",
+            admin=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )  # type: ignore[arg-type]
+
+    assert events == []
+    assert db.get_session("s1") is None
     db.close()
 
 

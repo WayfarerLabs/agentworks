@@ -9,6 +9,7 @@ import agentworks.sessions.manager as _mgr
 from agentworks import output
 from agentworks.db import PID_STOPPED, SessionStatus
 from agentworks.errors import (
+    AgentworksError,
     StateError,
 )
 from agentworks.ssh import SSH_TRANSPORT_ERROR
@@ -216,7 +217,13 @@ def batch_check_all_sessions(
             vm = db.get_vm(ws.vm_name)
             if not vm or not vm.tailscale_host:
                 continue
-            vm_targets[ws.vm_name] = _mgr.transport(vm, config)
+            try:
+                from agentworks.vms.manager import require_vm_ssh_boundary
+
+                require_vm_ssh_boundary(db, config, vm)
+                vm_targets[ws.vm_name] = _mgr.transport(vm, config)
+            except AgentworksError:
+                continue
         by_vm.setdefault(ws.vm_name, []).append(s)
 
     if not by_vm:

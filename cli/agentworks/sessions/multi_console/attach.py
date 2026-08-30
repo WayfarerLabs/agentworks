@@ -298,6 +298,9 @@ def _live_target(db: Database, config: Config, vm_name: str) -> tuple[VMRow, Tra
     vm = db.get_vm(vm_name)
     if vm is None or vm.tailscale_host is None:
         return None
+    from agentworks.vms.manager import require_vm_ssh_boundary
+
+    require_vm_ssh_boundary(db, config, vm)
     return vm, transport(vm, config)
 
 

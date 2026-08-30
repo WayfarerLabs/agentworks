@@ -13,6 +13,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from agentworks.vms.initializer import _apply_sve_mask, _preserve_ssh_host_keys
+from tests.ssh_fixtures import TEST_SSH_PUBLIC_KEY
 
 from ._initializer_support import _make_keys_config, _make_reconcile_target, _make_sve_target
 
@@ -281,7 +282,7 @@ def test_reconcile_authorized_keys_direct_write_when_owner_none(tmp_path) -> Non
     assert len(target.write_log) == 1
     path, content = target.write_log[0]
     assert path == "/home/admin/.ssh/authorized_keys"
-    assert "primary-key" in content
+    assert TEST_SSH_PUBLIC_KEY in content
     # No install, no mktemp, no sudo dance.
     assert not any("install" in cmd for cmd in target.run_log)
     assert not any(cmd.startswith("mktemp") for cmd in target.run_log)
@@ -315,7 +316,7 @@ def test_reconcile_authorized_keys_stage_and_install_when_owner_set(tmp_path) ->
     assert len(target.write_log) == 1
     staging_path, content = target.write_log[0]
     assert staging_path == "/tmp/agw-ak.XXXXYY"
-    assert "primary-key" in content
+    assert TEST_SSH_PUBLIC_KEY in content
 
     # install -o claude -g claude -m 0600 ... authorized_keys
     install_calls = [c for c in target.run_log if c.startswith("install ") and "authorized_keys" in c and "0600" in c]

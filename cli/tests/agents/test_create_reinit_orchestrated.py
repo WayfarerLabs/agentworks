@@ -25,7 +25,7 @@ from agentworks.output import Role
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
-from tests.conftest import ManifestDoc
+from tests.conftest import ManifestDoc, stub_vm_ssh_identity
 from tests.orchestrated_fixtures import PLUGINS_ENABLED, proxmox_site, write_operator_config
 
 if TYPE_CHECKING:
@@ -39,6 +39,11 @@ AGENT_MANIFESTS = [
     ManifestDoc("agent-template", "default", {"git_credentials": ["gh"]}),
     ManifestDoc("agent-template", "other", {"git_credentials": ["gh"]}),
 ]
+
+
+@pytest.fixture(autouse=True)
+def _stub_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    stub_vm_ssh_identity(monkeypatch)
 
 
 @pytest.fixture
@@ -113,6 +118,48 @@ def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start"))
     monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: True)
     monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
+
+
+@pytest.mark.parametrize("operation", ["create", "reinit"])
+def test_agent_mutation_refuses_ssh_identity_before_activation(
+    db: Database,
+    make_config,
+    mutation: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    config = make_config()
+    _seed_vm(db)
+    if operation == "reinit":
+        db.insert_agent("dev", "box", "agt-dev", template="default")
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise StateError("SSH identity drift")
+
+    monkeypatch.setattr(vm_manager, "require_vm_ssh_boundary", refuse)
+    monkeypatch.setattr(
+        "agentworks.orchestration.activation.activation_gate",
+        lambda *args, **kwargs: pytest.fail("activation started before SSH identity refusal"),
+    )
+
+    with pytest.raises(StateError):
+        if operation == "create":
+            agent_manager.create_agent(
+                db,
+                config,
+                name="dev",
+                vm_name="box",
+                interaction=TtyInteractionPolicy.REFUSE,
+            )
+        else:
+            agent_manager.reinit_agent(
+                db,
+                config,
+                name="dev",
+                interaction=TtyInteractionPolicy.REFUSE,
+            )
+
+    assert mutation == {}
 
 
 def test_create_and_reinit_loggers_receive_all_git_tokens(

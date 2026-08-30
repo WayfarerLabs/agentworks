@@ -25,7 +25,11 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-    from agentworks.db.instance_state import DesiredOverlayRecord, InstanceStateRepository
+    from agentworks.db.instance_state import (
+        AppliedStateSlice,
+        DesiredOverlayRecord,
+        InstanceStateRepository,
+    )
     from agentworks.db.models import (
         AgentGrantRow,
         AgentRow,
@@ -368,7 +372,7 @@ class Database:
 
     def update_vm_init_status(self, name: str, status: InitStatus) -> None:
         self._conn.execute("UPDATE vms SET init_status = ? WHERE name = ?", (status.value, name))
-        self._conn.commit()
+        self._commit_unless_in_tx()
 
     def update_vm_tailscale(self, name: str, tailscale_host: str) -> None:
         self._conn.execute("UPDATE vms SET tailscale_host = ? WHERE name = ?", (tailscale_host, name))
@@ -1133,7 +1137,7 @@ class Database:
             "INSERT INTO vm_events (vm_name, event, detail) VALUES (?, ?, ?)",
             (vm_name, event, detail),
         )
-        self._conn.commit()
+        self._commit_unless_in_tx()
 
     def list_vm_events(self, vm_name: str) -> list[VMEventRow]:
         rows = self._conn.execute(
@@ -1153,11 +1157,12 @@ class Database:
         list[VMEventRow],
         dict[str, list[AgentGrantRow]],
         tuple[DesiredOverlayRecord, ...],
+        tuple[AppliedStateSlice, ...],
     ]:
         """Read the currently exported VM backup rows in one transaction.
 
         Returns (vm, agents, workspaces, sessions, events,
-        grants_by_agent, desired_overlays).
+        grants_by_agent, desired_overlays, applied_slices).
         """
         self._conn.execute("BEGIN")
         try:
@@ -1172,6 +1177,16 @@ class Database:
             for agent in agents:
                 grants_by_agent[agent.name] = self.list_agent_grants(agent.name)
             desired_overlays = self.instance_state.list_vm_owner_tree_desired_overlays(vm_name)
+            applied_slices = self.instance_state.get_applied_slices("vm", vm_name)
         finally:
             self._conn.execute("COMMIT")
-        return vm, agents, workspaces, sessions, events, grants_by_agent, desired_overlays
+        return (
+            vm,
+            agents,
+            workspaces,
+            sessions,
+            events,
+            grants_by_agent,
+            desired_overlays,
+            applied_slices,
+        )

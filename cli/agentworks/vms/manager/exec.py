@@ -16,7 +16,10 @@ from ._helpers import (
     _resolve_workspace_for_vm,
     _vm_scope,
 )
-from .boundary import gated_vm_boundary
+from .boundary import (
+    gated_vm_boundary,
+    gated_vm_platform_recovery_boundary,
+)
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -114,9 +117,10 @@ def shell_vm(
     registry = load_request_registry(config, live_database=db)
     scopes = _mgr._resolve_vm_admin_env_scopes(db, registry, vm, ws=ws)
 
+    boundary = gated_vm_platform_recovery_boundary if platform_transport else gated_vm_boundary
     with contextlib.ExitStack() as stack:
         vm_node, resolver, ops_ctx = stack.enter_context(
-            gated_vm_boundary(
+            boundary(
                 db,
                 config,
                 registry,
@@ -281,6 +285,7 @@ def add_git_credential(
     context (``ctx.secret``, with the gate's scoped reader as the
     source for gate-driven ops).
     """
+    import agentworks.vms.manager as _mgr
     from agentworks.bootstrap import load_request_registry
     from agentworks.git_credentials.nodes import git_credential_node
     from agentworks.orchestration.activation import (
@@ -341,6 +346,7 @@ def add_git_credential(
 
     scope = _vm_scope(db, name)
 
+    _mgr.require_vm_ssh_boundary(db, config, vm)
     with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
         # PREFLIGHT-ALL against the one command-start context, then the
         # boundary resolve: the walk-away point.

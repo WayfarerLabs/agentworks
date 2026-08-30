@@ -3,16 +3,24 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 from agentworks.config import OperatorConfig
+from agentworks.ssh import SSHError
 from agentworks.vms.initializer import AUTHORIZED_KEYS_HEADER, _reconcile_authorized_keys
+from agentworks.vms.initializer.ssh_keys import AuthorizedKeysUnproven
+from tests.ssh_fixtures import TEST_SSH_PUBLIC_KEY, write_test_ssh_keypair
+
+if TYPE_CHECKING:
+    from tests.conftest import CapturedOutput
 
 
 def _make_config(tmp_path: Path, extra_keys: list[str] | None = None) -> MagicMock:
     """Build a mock Config with real key files on disk."""
+    private = tmp_path / "id"
+    write_test_ssh_keypair(private)
     pub = tmp_path / "id.pub"
-    pub.write_text("ssh-ed25519 AAAA-primary\n")
 
     extra_paths: list[Path] = []
     for i, content in enumerate(extra_keys or []):
@@ -22,7 +30,7 @@ def _make_config(tmp_path: Path, extra_keys: list[str] | None = None) -> MagicMo
 
     operator = OperatorConfig(
         ssh_public_key=pub,
-        ssh_private_key=tmp_path / "id",
+        ssh_private_key=private,
         extra_ssh_public_keys=extra_paths,
     )
     config = MagicMock()
@@ -41,7 +49,7 @@ def test_primary_key_only(tmp_path: Path) -> None:
     target.write_file.assert_called_once()
     path, content = target.write_file.call_args.args
     assert path == "/home/agentworks/.ssh/authorized_keys"
-    assert "ssh-ed25519 AAAA-primary" in content
+    assert TEST_SSH_PUBLIC_KEY in content
     assert content.startswith(AUTHORIZED_KEYS_HEADER)
 
 
@@ -60,7 +68,7 @@ def test_primary_plus_extra_keys(tmp_path: Path) -> None:
     _reconcile_authorized_keys(target, config, "/home/agentworks", logger)
 
     content = target.write_file.call_args.args[1]
-    assert "ssh-ed25519 AAAA-primary" in content
+    assert TEST_SSH_PUBLIC_KEY in content
     assert "ssh-rsa BBBB-extra1" in content
     assert "ssh-ed25519 CCCC-extra2" in content
     assert content.startswith(AUTHORIZED_KEYS_HEADER)
@@ -104,6 +112,29 @@ def test_full_overwrite_semantics(tmp_path: Path) -> None:
     # Should have exactly the header + 2 keys (primary + 1 extra), each on its own line
     lines = [ln for ln in content.splitlines() if not ln.startswith("#") and ln.strip()]
     assert len(lines) == 2
+
+
+def test_direct_write_failure_does_not_expose_transport_detail(
+    tmp_path: Path,
+    captured_output: CapturedOutput,
+) -> None:
+    sentinel = "sensitive-transport-diagnostic-sentinel"
+    config = _make_config(tmp_path)
+    target = MagicMock()
+    target.write_file.side_effect = SSHError(sentinel)
+    logger = MagicMock()
+
+    outcome = _reconcile_authorized_keys(target, config, "/home/agentworks", logger)
+
+    assert isinstance(outcome, AuthorizedKeysUnproven)
+    diagnostics = (
+        repr(outcome),
+        repr(getattr(outcome, "args", ())),
+        repr(logger.warning.call_args_list),
+        repr(captured_output.warnings),
+        repr(captured_output.lines),
+    )
+    assert all(sentinel not in diagnostic for diagnostic in diagnostics)
 
 
 # -- owner= (stage-and-install) path ---------------------------------------
@@ -159,8 +190,6 @@ def test_owner_branch_stages_then_installs(tmp_path: Path) -> None:
 
 def test_owner_branch_cleans_up_on_install_failure(tmp_path: Path) -> None:
     """If install -o ... fails, the staging rm -f still runs (try/finally)."""
-    from agentworks.ssh import SSHError
-
     config = _make_config(tmp_path)
     target = MagicMock()
     run_calls: list[str] = []
@@ -201,8 +230,6 @@ def test_owner_branch_raises_on_failure(tmp_path: Path) -> None:
     rather than continuing with downstream agent SSH calls that all fail
     with cryptic exit 255 errors.
     """
-    from agentworks.ssh import SSHError
-
     config = _make_config(tmp_path)
     target = MagicMock()
 

@@ -11,6 +11,11 @@ cannot enter this workflow. Create a current VM and copy its workspaces and data
 ## Before you start
 
 Stop every Agentworks session on the VM and resolve any package-manager work already in progress.
+The upgrade uses the VM's canonical SSH identity. If the VM predates SSH identity tracking, run one
+successful `agw vm reinit NAME` while the configured key still works before starting the upgrade. If
+it no longer works, restore the configured public key through a supported platform recovery
+transport or provider-native recovery tooling, then reinitialize.
+
 The command checks the recorded and observed Debian releases, package-database health, package
 holds, kernel meta-package where the guest owns its kernel, OpenSSH version, APT pins and mixed
 suites, modified package configuration files, partition-aware disk estimates, package removals,

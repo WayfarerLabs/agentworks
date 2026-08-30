@@ -315,11 +315,18 @@ def _lookup_or_synthesize_secret(registry: Registry, name: str) -> SecretDecl:
         return SecretDecl(name=name, description="")
 
 
-def _query_live_resources(vm: VMRow, config: Config) -> dict[str, str] | None:
+def _query_live_resources(db: Database, vm: VMRow, config: Config) -> dict[str, str] | None:
     """Query live resource usage from a VM over SSH."""
+    from agentworks.errors import AgentworksError
     from agentworks.transports import transport
 
-    target = transport(vm, config)
+    try:
+        from agentworks.vms.manager.boundary import require_vm_ssh_boundary
+
+        require_vm_ssh_boundary(db, config, vm)
+        target = transport(vm, config)
+    except AgentworksError:
+        return None
     cmd = (
         "nproc && "
         "uptime | grep -oP 'load average: \\K[^,]+' && "

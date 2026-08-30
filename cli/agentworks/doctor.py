@@ -240,7 +240,7 @@ def _secret_source_check(status: SecretSourceStatus) -> HealthCheck:
     readiness = f"not ready: {status.not_ready_reason}" if status.not_ready_reason is not None else "ready"
     return HealthCheck(
         status.name,
-        Status.INFO,
+        Status.OK if status.active and status.enabled and status.not_ready_reason is None else Status.INFO,
         f"backend {status.backend}; {participation}; {enablement}; {provenance_labels[status.provenance]}; {readiness}",
     )
 

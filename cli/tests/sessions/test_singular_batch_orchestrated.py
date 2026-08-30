@@ -26,20 +26,28 @@ from __future__ import annotations
 
 import contextlib
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
 from agentworks.db import PID_STOPPED, SessionMode, VMStatus
 from agentworks.errors import NotFoundError, StateError
+from agentworks.output import Role
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager as session_manager
+from agentworks.sessions.manager._queries import session_listing_data
 from agentworks.vms import manager as vm_manager
+from tests.conftest import stub_vm_ssh_identity
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
     from agentworks.db import Database
+
+
+@pytest.fixture(autouse=True)
+def _stub_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    stub_vm_ssh_identity(monkeypatch)
 
 
 def _seed_vm(db: Database, name: str, host: str | None, *, site: str = "proxmox") -> None:
@@ -100,6 +108,130 @@ def _record_holds(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
             events.append(f"hold-close:{row.name}")  # type: ignore[attr-defined]
 
     monkeypatch.setattr(ProxmoxPlatform, "vm_active", _recording_hold)
+
+
+def test_strict_batch_refuses_identity_before_any_activation(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_vm(db, "vm-a", "100.64.0.11")
+    vm = db.get_vm("vm-a")
+    assert vm is not None
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise StateError("SSH identity drift")
+
+    monkeypatch.setattr(vm_manager, "require_vm_ssh_boundary", refuse)
+    monkeypatch.setattr(
+        "agentworks.orchestration.activation.activation_gate",
+        lambda *args, **kwargs: pytest.fail("activation started before SSH identity refusal"),
+    )
+
+    with (
+        pytest.raises(StateError),
+        session_manager._batch_vm_boundary(
+            db,
+            SimpleNamespace(),
+            [vm],
+            interaction=TtyInteractionPolicy.REFUSE,
+        ),
+    ):
+        pass
+
+
+def test_best_effort_batch_activates_only_usable_ssh_identities(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_vm(db, "vm-a", "100.64.0.11")
+    _seed_vm(db, "vm-b", "100.64.0.12")
+    vms = [vm for name in ("vm-a", "vm-b") if (vm := db.get_vm(name)) is not None]
+    activated: list[str] = []
+
+    def require(db: object, config: object, vm: object) -> None:
+        if vm.name == "vm-b":  # type: ignore[attr-defined]
+            raise StateError("SSH identity drift")
+
+    @contextlib.contextmanager
+    def fake_batch(
+        db: object,
+        config: object,
+        candidates: list[object],
+        *,
+        interaction: TtyInteractionPolicy,
+    ):  # noqa: ANN202
+        activated.extend(candidate.name for candidate in candidates)  # type: ignore[attr-defined]
+        yield
+
+    monkeypatch.setattr(vm_manager, "require_vm_ssh_boundary", require)
+    monkeypatch.setattr("agentworks.sessions.manager._scope._batch_vm_boundary_impl", fake_batch)
+
+    with session_manager._best_effort_batch_vm_boundary(
+        db,
+        SimpleNamespace(),
+        vms,
+        interaction=TtyInteractionPolicy.REFUSE,
+    ) as usable:
+        assert usable == frozenset({"vm-a"})
+
+    assert activated == ["vm-a"]
+
+
+def test_best_effort_status_and_pid_repair_skip_identity_refusal_before_transport(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_vm(db, "vm-a", "100.64.0.11")
+    db.insert_session("s-a", "ws-vm-a", "default", SessionMode.ADMIN, socket_path="/tmp/s-a.sock")
+    session = db.get_session("s-a")
+    assert session is not None
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise StateError("SSH identity drift")
+
+    monkeypatch.setattr(vm_manager, "require_vm_ssh_boundary", refuse)
+    monkeypatch.setattr(
+        session_manager,
+        "transport",
+        lambda *args, **kwargs: pytest.fail("transport constructed after identity refusal"),
+    )
+
+    assert session_manager.batch_check_all_sessions([session], db=db, config=SimpleNamespace()) == {}
+    assert session_manager.ensure_pids_batch([session], db=db, config=SimpleNamespace()) == [session]
+
+
+def test_list_status_reports_identity_refusal_as_unknown_without_transport(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    _seed_vm(db, "vm-a", "100.64.0.11")
+    db.insert_session("s-a", "ws-vm-a", "default", SessionMode.ADMIN, socket_path="/tmp/s-a.sock")
+    db.update_session_pid("s-a", 4321, boot_id="boot-a")
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise StateError("SSH identity drift")
+
+    monkeypatch.setattr(vm_manager, "require_vm_ssh_boundary", refuse)
+    monkeypatch.setattr(
+        session_manager,
+        "transport",
+        lambda *args, **kwargs: pytest.fail("transport constructed after identity refusal"),
+    )
+
+    listing = session_manager.session_listing(
+        db,
+        make_config(),
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    assert listing.sessions[0].status == "unknown"
+    json_rows = cast("list[dict[str, object]]", session_listing_data(listing)["sessions"])
+    assert json_rows[0]["status"] == "unknown"
+
+    session_manager.render_session_listing(listing)
+    assert sum(role is Role.WARNING for role, _level, _message in captured_output.lines) == 1
 
 
 class _FakeTarget:

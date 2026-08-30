@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, NoReturn
 from agentworks import output
 from agentworks.errors import BackupError, NotFoundError, StateError
 from agentworks.path_rendering import format_host_path
+from agentworks.vms.applied_state import canonicalize_vm_applied_slice
 from agentworks.vms.manager import gated_vm_boundary
 
 if TYPE_CHECKING:
@@ -103,6 +104,7 @@ def backup_vm(
                     events,
                     grants_by_agent,
                     desired_overlays,
+                    applied_slices,
                 ) = db.snapshot_vm_backup_data(vm_name)
                 if not _host_supports_private_backup_permissions() and desired_overlays:
                     _raise_windows_overlay_backup_error(vm_name)
@@ -174,7 +176,26 @@ def backup_vm(
                 ]
                 _write_json(backup_dir / "instance-specs.json", overlay_data)
 
-                # 7. Workspace files -- single archive of all workspace paths.
+                # 7. Applied-state evidence is non-secret, but still passes
+                # through its domain codec so corrupt persisted JSON cannot
+                # be laundered into an apparently valid archive.
+                applied_state_data = []
+                for record in applied_slices:
+                    payload = canonicalize_vm_applied_slice(record)
+                    applied_state_data.append(
+                        {
+                            "instance_kind": record.instance_kind,
+                            "instance_name": record.instance_name,
+                            "key": record.key.value,
+                            "payload_version": payload.payload_version,
+                            "value": payload.value,
+                            "operation": record.operation,
+                            "recorded_at": record.recorded_at,
+                        }
+                    )
+                _write_json(backup_dir / "instance-applied-state.json", applied_state_data)
+
+                # 8. Workspace files -- single archive of all workspace paths.
                 # _archive_workspaces catches its own KeyboardInterrupt during the
                 # long tar phase and converts it to UserAbort (an AgentworksError),
                 # which the outer except below treats as a backup_failed event.
@@ -192,9 +213,9 @@ def backup_vm(
                 else:
                     output.info("No VM workspaces to archive.")
 
-                # 8. Manifest
+                # 9. Manifest
                 manifest = {
-                    "version": 3,
+                    "version": 4,
                     "vm_name": vm_name,
                     "timestamp": timestamp,
                     "agent_count": len(agents_data),
@@ -202,6 +223,7 @@ def backup_vm(
                     "session_count": len(sessions),
                     "event_count": len(events),
                     "instance_spec_count": len(overlay_data),
+                    "applied_state_count": len(applied_state_data),
                     "archived_paths": archived_paths,
                     "skipped_paths": skipped_paths,
                 }

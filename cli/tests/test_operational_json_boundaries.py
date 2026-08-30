@@ -18,6 +18,7 @@ from agentworks.db import PID_STOPPED, SessionMode, SessionStatus, VMStatus
 from agentworks.resources.graph import Readiness
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolve import ActiveSource, ResolutionBatch
+from tests.conftest import stub_vm_ssh_identity
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -26,6 +27,11 @@ if TYPE_CHECKING:
     from agentworks.db import Database, SessionRow
     from agentworks.resources.registry import Registry
     from agentworks.secrets.base import SecretDecl
+
+
+@pytest.fixture(autouse=True)
+def _stub_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    stub_vm_ssh_identity(monkeypatch)
 
 
 def _install_skipped_backend(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -75,7 +81,7 @@ def _platform_fast_path(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(manager, "_is_tailscale_reachable", lambda _host: True)
     monkeypatch.setattr(ProxmoxPlatform, "display_backend_name", lambda self, vm: "pve1/101")
     monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, vm, ctx: VMStatus.RUNNING)
-    monkeypatch.setattr(manager, "_query_live_resources", lambda vm, config: None)
+    monkeypatch.setattr(manager, "_query_live_resources", lambda db, vm, config: None)
 
 
 def _resolution_spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[tuple[str, ...], tuple[str, ...], str, bool]]:
@@ -431,7 +437,7 @@ def test_vm_platform_status_issue_retains_successful_bounded_live_resources(
         "disk_used": "64 GiB",
         "disk_pct": "25%",
     }
-    monkeypatch.setattr(manager, "_query_live_resources", lambda vm, config: live)
+    monkeypatch.setattr(manager, "_query_live_resources", lambda db, vm, config: live)
 
     result = CliRunner().invoke(app, ["vm", "describe", "box", "--output", "json"])
 

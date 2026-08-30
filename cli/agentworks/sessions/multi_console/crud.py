@@ -128,14 +128,28 @@ def add_sessions(
     console_name: str,
     session_specs: list[str],
     interaction: TtyInteractionPolicy,
+    start_index: int | None = None,
 ) -> None:
-    """Append sessions to an existing console in argument order. Atomic at the
-    DB layer; if the console's tmux session is live, also adds the windows
-    immediately (best-effort)."""
+    """Add sessions as one argument-ordered block, appending by default.
+
+    *start_index* is the block's zero-based final session index. Existing
+    members retain their relative order. The DB mutation is atomic; if the
+    console's tmux session is live, the windows are also added immediately
+    (best-effort).
+    """
     from agentworks.bootstrap import load_request_registry
 
     console = _require_console(db, console_name)
-    registry = load_request_registry(config, live_database=db)
+    preflight_member_count = len(db.list_console_sessions(console_name))
+    preflight_index = preflight_member_count if start_index is None else start_index
+    if not 0 <= preflight_index <= preflight_member_count:
+        raise ValidationError(
+            f"session insertion index {preflight_index} is outside the valid range "
+            f"0..{preflight_member_count} for console '{console_name}'",
+            entity_kind="console",
+            entity_name=console_name,
+        )
+
     specs = [parse_session_spec(s) for s in session_specs]
     _dedupe_specs(specs)
 
@@ -147,6 +161,9 @@ def add_sessions(
                 entity_kind="console-member",
                 entity_name=spec.name,
             )
+
+    live = _mc._live_target(db, config, console.vm_name)
+    registry = load_request_registry(config, live_database=db)
 
     # Eager-prompting orchestration: when
     # any spec carries shells > 0 the live-attach path below will open
@@ -205,13 +222,33 @@ def add_sessions(
             )
 
     with db.transaction():
+        current_order = [member.session_name for member in db.list_console_sessions(console_name)]
+        current_names = set(current_order)
+        for spec in specs:
+            if spec.name in current_names:
+                raise AlreadyExistsError(
+                    f"session '{spec.name}' is already a member of console '{console_name}'",
+                    entity_kind="console-member",
+                    entity_name=spec.name,
+                )
+        resolved_index = len(current_order) if start_index is None else start_index
+        if not 0 <= resolved_index <= len(current_order):
+            raise ValidationError(
+                f"session insertion index {resolved_index} is outside the valid range "
+                f"0..{len(current_order)} for console '{console_name}'",
+                entity_kind="console",
+                entity_name=console_name,
+            )
         for spec in specs:
             db.add_console_session(console_name, spec.name, default_shells(spec.shells))
+        if resolved_index != len(current_order):
+            added_names = [spec.name for spec in specs]
+            desired_order = current_order[:resolved_index] + added_names + current_order[resolved_index:]
+            db.reorder_console_sessions(console_name, desired_order)
 
     output.result(f"Added {len(specs)} session(s) to console '{console_name}'.")
 
     with _live_best_effort(f"add-sessions to '{console_name}'", console_name=console_name):
-        live = _mc._live_target(db, config, console.vm_name)
         if live is None:
             return
         vm, target = live
@@ -274,13 +311,13 @@ def remove_sessions(
                 entity_kind="console-member",
                 entity_name=n,
             )
+    live = _mc._live_target(db, config, console.vm_name)
     with db.transaction():
         for n in session_names:
             db.remove_console_session(console_name, n)
     output.result(f"Removed {len(session_names)} session(s) from console '{console_name}'.")
 
     with _live_best_effort(f"remove-sessions from '{console_name}'", console_name=console_name):
-        live = _mc._live_target(db, config, console.vm_name)
         if live is not None:
             _vm, target = live
             # kill_session_windows lives in .attach but is called through the
@@ -378,13 +415,13 @@ def reorder_sessions(
         output.info(f"Console '{console_name}' is already in the requested order; nothing to do.")
         return
 
+    live = _mc._live_target(db, config, console.vm_name)
     db.reorder_console_sessions(console_name, desired_order)
     output.result(
         f"Reordered {len(session_names)} session(s) starting at index {resolved_index} of console '{console_name}'."
     )
 
     with _live_best_effort(f"reorder-sessions in '{console_name}'", console_name=console_name):
-        live = _mc._live_target(db, config, console.vm_name)
         if live is None:
             return
         _vm, target = live
@@ -435,7 +472,6 @@ def add_shell(
 
     _validate_cwd(cwd)
     console = _require_console(db, console_name)
-    registry = load_request_registry(config, live_database=db)
     cs = db.get_console_session(console_name, session_name)
     if cs is None:
         raise NotFoundError(
@@ -443,6 +479,9 @@ def add_shell(
             entity_kind="console-member",
             entity_name=session_name,
         )
+
+    live = _mc._live_target(db, config, console.vm_name)
+    registry = load_request_registry(config, live_database=db)
 
     # Eager-prompting orchestration: resolve any
     # secrets referenced by this pane's env chain BEFORE the DB write +
@@ -489,7 +528,6 @@ def add_shell(
     output.result(f"Added {user_tag} shell at {cwd or '<workspace>'} to '{session_name}' in console '{console_name}'.")
 
     with _live_best_effort(f"add-shell to '{console_name}:{session_name}'", console_name=console_name):
-        live = _mc._live_target(db, config, console.vm_name)
         if live is None:
             return
         vm, target = live

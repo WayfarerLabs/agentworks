@@ -28,8 +28,8 @@ re-handed off. Across repositories, use coordinated PRs with an agreed landing o
 ## Handoff contract
 
 Open a ready PR only when work is close to merge-ready. Ready means a complete handoff with merge
-intent. A draft PR is workspace without merge intent; use it for SDD artifact review or another
-coherent checkpoint that needs review before merge intent.
+intent. A draft PR is work in progress without merge intent; use it for SDD artifact review or
+another coherent checkpoint that needs review before merge intent.
 
 A handoff is exactly:
 
@@ -42,7 +42,7 @@ Private quality-loop reviews never appear as PR state; when their outcome is loa
 evidence lives in the handoff comment or the plan.
 
 Before changing a handed-off ready head, return the PR to draft. Reapply ready only after the whole
-round is pushed and described. Between handoffs, the head is private workspace and PR-level
+round is pushed and described. Between handoffs, the head is private working state and PR-level
 consumers review neither arbitrary pushes nor unfinished work. A consumer that sees an unexplained
 new head on a ready PR reports the missing handoff instead of reviewing or ignoring it.
 Bot-maintained head changes are not handoff violations, but still require review before merge.
@@ -109,6 +109,8 @@ did, or what it declined and why, then:
 - Resolve the round's own information-only comments at once, its summary included, since they record
   rather than ask.
 
-Close each round as an ordinary handoff whose summary names the round number, the budget, and what
-changed. A round that changed nothing has no head to hand off, so it posts that summary and ends the
-loop there.
+A round that changes the proposed head re-runs the private quality loop lanes that change requires
+before it hands off, because that loop binds the first handoff and a round produces a later one that
+nothing else covers; the round's summary says which lanes ran. Close each round as an ordinary
+handoff whose summary names the round number, the budget, and what changed. A round that changed
+nothing has no head to hand off, so it posts that summary and ends the loop there.

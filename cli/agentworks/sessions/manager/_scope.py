@@ -226,7 +226,7 @@ def _distinct_vms_for_sessions(db: Database, sessions: list[SessionRow]) -> list
 
 
 @contextlib.contextmanager
-def _batch_vm_boundary(
+def _batch_vm_boundary_impl(
     db: Database,
     config: Config,
     vms: Sequence[VMRow],
@@ -348,3 +348,43 @@ def _batch_vm_boundary(
         for vm_node in vm_nodes:
             stack.enter_context(activation_gate(vm_node, _gate_resolver(vm_node)))
         yield
+
+
+@contextlib.contextmanager
+def _batch_vm_boundary(
+    db: Database,
+    config: Config,
+    vms: Sequence[VMRow],
+    *,
+    interaction: TtyInteractionPolicy,
+) -> Iterator[None]:
+    """Open a strict batch gate after proving every VM's SSH identity."""
+    from agentworks.vms.manager import require_vm_ssh_boundary
+
+    for vm in vms:
+        require_vm_ssh_boundary(db, config, vm)
+    with _batch_vm_boundary_impl(db, config, vms, interaction=interaction):
+        yield
+
+
+@contextlib.contextmanager
+def _best_effort_batch_vm_boundary(
+    db: Database,
+    config: Config,
+    vms: Sequence[VMRow],
+    *,
+    interaction: TtyInteractionPolicy,
+) -> Iterator[frozenset[str]]:
+    """Open gates only for VMs whose canonical SSH identity is usable."""
+    from agentworks.errors import AgentworksError
+    from agentworks.vms.manager import require_vm_ssh_boundary
+
+    usable_vms: list[VMRow] = []
+    for vm in vms:
+        try:
+            require_vm_ssh_boundary(db, config, vm)
+        except AgentworksError:
+            continue
+        usable_vms.append(vm)
+    with _batch_vm_boundary_impl(db, config, usable_vms, interaction=interaction):
+        yield frozenset(vm.name for vm in usable_vms)

@@ -2,19 +2,20 @@
 
 <!-- cspell:ignore sdds -->
 
-- Status: R1, R2, and R4 merged; merge-strategy correction implemented and verified; R3 and R5
-  pending
+- Status: R1, R2, and R4 merged; merge-strategy correction merged; R3 implemented and under review;
+  R5 pending
 - Date: 2026-08-23
-- Last revised: 2026-08-28
+- Last revised: 2026-08-29
 - Requirements: [frd.md](./frd.md)
 - R1 assessment: [database-assessment.md](./database-assessment.md)
 - R2 contract: [store-contract.md](./store-contract.md)
 - Instance-spec CLI: [instance-spec-cli.md](./instance-spec-cli.md)
 - Merge strategy: [merge-strategy-lld.md](./merge-strategy-lld.md)
-- Code basis: `56f9687b`, merged PR #670 on `main`
+- Code basis: `8c9057ce` on `main`
 - Delivery vehicle: merged R1 artifact PR #632, merged R2 store and R4 design PR #636, merged R4
-  implementation PR #670; merge-strategy SDD checkpoint and implementation on one draft-to-ready PR
-  from `main`; remaining phases as independently green PRs, stacked only for actual dependencies
+  implementation PR #670; merged merge-strategy SDD checkpoint and implementation PR #686; R3 SDD
+  checkpoint and implementation on draft PR #700 from `main`; remaining phases as independently
+  green PRs, stacked only for actual dependencies
 
 ## Delivery posture
 
@@ -287,29 +288,50 @@ behavior; and no database migration, payload-version change, or new operator syn
 
 ## Phase 4: R3 applied instance state and SSH proving slice
 
-- [ ] Add domain-owned versioned codecs for row-backed hardware provenance and provisioned SSH
+- [x] Complete the authoritative OpenSSH research and low-level design in `prior-art-research.md`
+      and `applied-state-ssh-lld.md`, including the password-protected-key, transaction,
+      comparison-boundary, backup, and ssh-agent non-goal decisions.
+- [x] Add domain-owned versioned codecs for row-backed hardware provenance and provisioned SSH
       identity slices, without storing secrets, private key bytes, passphrases, or duplicate CPU,
       memory, disk, and swap values.
-- [ ] Parse the authoritative public blob directly from `openssh-key-v1` private files and derive
+- [x] Parse the authoritative public blob directly from `openssh-key-v1` private files and derive
       the OpenSSH SHA-256 fingerprint without consulting an adjacent public key or spawning a
       passphrase prompt.
-- [ ] Compare the configured public and private identities before remote application when both are
+- [x] Compare the configured public and private identities before remote application when both are
       verifiable, so a successful public-key write cannot create a false private-identity record.
-- [ ] Represent encrypted formats that cannot expose an identity non-interactively as unverifiable,
+- [x] Represent encrypted formats that cannot expose an identity non-interactively as unverifiable,
       not mismatch or unsupported; leave ssh-agent selection unresolved.
-- [ ] Make authorized-key reconciliation return a typed applied/not-applied outcome instead of
+- [x] Make authorized-key reconciliation return a typed applied/unproven outcome instead of
       inferring proof from lifecycle success or unrelated warnings.
-- [ ] Capture only slices proven by successful VM create and reinit operations, with one operation
-      and timestamp, and write lifecycle-row plus applied-state changes in one honest transaction
-      where they compose.
-- [ ] Add preflight comparison before SSH transport and structural diagnostic facts for not
+- [x] Validate the configured public/private pair on reinit after cheap declaration checks and
+      before activation, secret resolution, or transport work, while retaining the fresh validation
+      at the final remote write.
+- [x] Capture only slices proven by successful VM create and reinit operations, remove stale SSH
+      proof after an unproven remote write or unstable final identity, and write lifecycle-row plus
+      applied-state changes in one honest transaction where they compose.
+- [x] Document the one-time reinit required for historic VMs and emit cautious recovery guidance
+      immediately when the final admin key write leaves SSH evidence unproven.
+- [x] Add preflight comparison before SSH transport and structural diagnostic facts for not
       recorded, unverifiable, match, and drift without remediation.
-- [ ] Extend the VM backup projection with the non-secret R3 applied records and prove the archive
+- [x] Extend the VM backup projection with the non-secret R3 applied records and prove the archive
       does not silently omit the hardware or SSH provenance it claims to preserve.
-- [ ] Prove matching, replaced private key at the same path, stale or mismatched adjacent public
+- [x] Prove matching, replaced private key at the same path, stale or mismatched adjacent public
       key, encrypted OpenSSH key, encrypted legacy PEM, missing/unreadable key, absent historic
-      state, successful capture, failed-operation non-capture, and atomic lifecycle behavior.
-- [ ] Publish the payload and comparison contract in the permanent store documentation.
+      state, successful capture, failed-operation non-capture, atomic lifecycle behavior, and
+      diagnostic non-disclosure without prose-policing assertions.
+- [x] Publish the payload and comparison contract in the permanent store documentation.
+
+Implementation evidence: the complete non-integration suite passed 8,045 tests with one skip. Ruff,
+formatting, Mypy, Typer isolation, file lint, Rulesync, locked-SDD, website, and deterministic build
+gates also passed. The first independent implementation review found no production blocker but
+identified stale checkpoint-construction surface, missing high-risk lifecycle and backup cases, and
+an incomplete permanent contract. The implementation now derives persistence from the exact
+post-write proof, removes unused API and comparison surface, and directly covers the identified
+password-protected, instability, atomicity, deletion, malformed-backup, and diagnostic
+non-disclosure cases. A subsequent review identified missing early reinit validation and transition
+guidance. Reinit now refuses an invalid configured identity before activation or transport, and the
+release guide plus permanent CLI documentation explain the one successful reinit historic VMs need
+and the recovery choices when their installed key no longer works.
 
 Definition of done: the identity used at apply time is recorded and compared with the identity the
 current transport will present, and no password-protected-key path regresses.

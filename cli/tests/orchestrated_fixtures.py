@@ -75,10 +75,10 @@ def write_operator_config(
     ``make_config``."""
     from agentworks.config import load_config
     from tests.conftest import write_manifests
+    from tests.ssh_fixtures import write_test_ssh_keypair
 
     key = tmp_path / "id_ed25519"
-    key.write_text("private")
-    (tmp_path / "id_ed25519.pub").write_text("public")
+    write_test_ssh_keypair(key)
     path = tmp_path / "config.toml"
     path.write_text(f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n' + body)
     if manifests:

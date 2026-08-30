@@ -568,6 +568,11 @@ class TestOptionFlagsInSpec:
         opts = [opt for param in resource_list.params for opt in param.opts]
         assert "--include-disabled" in opts
 
+    def test_console_add_sessions_placement_reaches_the_completion_spec(self) -> None:
+        commands = _walk_commands(build_spec(app))
+        opts = [opt for param in commands["agentworks.console.add-sessions"].params for opt in param.opts]
+        assert "--to-index" in opts
+
     def test_secret_preview_opt_in_reaches_describe_and_verify_completions(self) -> None:
         commands = _walk_commands(build_spec(app))
         for path in ("agentworks.secret.describe", "agentworks.secret.verify"):

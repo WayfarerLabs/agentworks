@@ -47,6 +47,10 @@ def verify_vm_connection(
 
     resolve_site(vm.site, registry)
 
+    from agentworks.vms.manager.boundary import require_vm_ssh_boundary
+
+    require_vm_ssh_boundary(db, config, vm)
+
     import agentworks.transports as transports
 
     target = transports.transport(vm, config)

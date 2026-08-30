@@ -12,6 +12,7 @@ orchestrated batch composition in
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -49,6 +50,70 @@ def _seed_vm(db: Database, site: str) -> VMRow:
     vm = db.get_vm("v1")
     assert vm is not None
     return vm
+
+
+def test_ordinary_gate_requires_ssh_identity_before_activation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ordinary boundary refuses unsafe identity state before its gate."""
+    from agentworks.vms.manager import boundary
+
+    calls: list[str] = []
+
+    @contextlib.contextmanager
+    def fake_boundary(*args: object, **kwargs: object):  # noqa: ANN202
+        calls.append("activation")
+        yield object(), object(), object()
+
+    monkeypatch.setattr(
+        boundary,
+        "require_vm_ssh_boundary",
+        lambda *args, **kwargs: calls.append("identity"),
+    )
+    monkeypatch.setattr(boundary, "_gated_vm_boundary", fake_boundary)
+
+    with boundary.gated_vm_boundary(
+        object(),
+        object(),
+        object(),
+        object(),
+        interaction=TtyInteractionPolicy.REFUSE,
+    ):
+        pass
+
+    assert calls == ["identity", "activation"]
+
+
+def test_platform_recovery_gate_does_not_require_canonical_ssh_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The named platform recovery boundary remains available during SSH drift."""
+    from agentworks.vms.manager import boundary
+
+    calls: list[str] = []
+
+    @contextlib.contextmanager
+    def fake_boundary(*args: object, **kwargs: object):  # noqa: ANN202
+        calls.append("activation")
+        yield object(), object(), object()
+
+    monkeypatch.setattr(
+        boundary,
+        "require_vm_ssh_boundary",
+        lambda *args, **kwargs: calls.append("identity"),
+    )
+    monkeypatch.setattr(boundary, "_gated_vm_boundary", fake_boundary)
+
+    with boundary.gated_vm_platform_recovery_boundary(
+        object(),
+        object(),
+        object(),
+        object(),
+        interaction=TtyInteractionPolicy.REFUSE,
+    ):
+        pass
+
+    assert calls == ["activation"]
 
 
 def test_no_site_secrets_skips_the_resolve_pass(
@@ -121,6 +186,7 @@ def test_env_targets_join_the_site_secret_pass(
 
     monkeypatch.setenv("AW_SECRET_API_KEY", "k")
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
+    monkeypatch.setattr("agentworks.vms.manager.boundary.require_vm_ssh_boundary", lambda *args, **kwargs: None)
     config = make_config(
         PLUGINS_ENABLED,
         manifests=[proxmox_site(), ManifestDoc("secret", "api-key", description="workload key")],
@@ -159,6 +225,7 @@ def test_command_owned_named_secret_joins_the_boundary_pass(
 
     monkeypatch.setenv("AW_SECRET_RECONNECT_KEY", "key")
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
+    monkeypatch.setattr("agentworks.vms.manager.boundary.require_vm_ssh_boundary", lambda *args, **kwargs: None)
     config = make_config(manifests=[ManifestDoc("secret", "reconnect-key", description="reconnect credential")])
     registry = build_registry(config)
     with vm_manager.gated_vm_boundary(

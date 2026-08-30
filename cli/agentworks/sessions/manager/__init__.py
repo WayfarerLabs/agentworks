@@ -127,6 +127,9 @@ from ._scope import (
     _batch_vm_boundary as _batch_vm_boundary,
 )
 from ._scope import (
+    _best_effort_batch_vm_boundary as _best_effort_batch_vm_boundary,
+)
+from ._scope import (
     _distinct_vms_for_sessions as _distinct_vms_for_sessions,
 )
 from ._scope import (
