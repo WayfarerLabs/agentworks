@@ -185,7 +185,6 @@ def test_desired_overlay_round_trip_upsert_clear_and_canonical_storage(tmp_path:
 
         second = database.instance_state.put_desired_overlay("vm", "alpha", _payload("new", version=3))
         assert database.instance_state.get_desired_overlay("vm", "alpha") == second
-        assert len(database.instance_state.list_desired_overlays("vm")) == 1
 
         raw = _raw_rows(path)[0]
         assert raw["value_json"] == '{"value":"new"}'
@@ -218,7 +217,7 @@ def test_desired_mutation_rejects_invalid_owner_name_before_writing(
             _payload("intent"),
         )
 
-    assert db.instance_state.list_desired_overlays("vm") == ()
+    assert db.instance_state.get_desired_overlay("vm", "alpha") is None
 
 
 def test_applied_partial_replace_preserves_unrelated_slices_and_orders_results(
@@ -259,19 +258,6 @@ def test_applied_partial_replace_preserves_unrelated_slices_and_orders_results(
     assert by_key[AppliedStateKey.HARDWARE_PROVENANCE].payload == _payload("new-hardware", version=2)
     assert by_key[AppliedStateKey.HARDWARE_PROVENANCE].recorded_at == "2026-08-23T12:01:00Z"
     assert by_key[AppliedStateKey.HARDWARE_PROVENANCE].operation == "vm-reinit"
-
-    db.instance_state.replace_applied_slices(
-        "vm",
-        "zeta",
-        "vm-create",
-        {AppliedStateKey.SSH_IDENTITY: _payload("z")},
-    )
-    listed = db.instance_state.list_applied_slices("vm")
-    assert [(record.instance_name, record.key) for record in listed] == [
-        ("alpha", AppliedStateKey.HARDWARE_PROVENANCE),
-        ("alpha", AppliedStateKey.SSH_IDENTITY),
-        ("zeta", AppliedStateKey.SSH_IDENTITY),
-    ]
 
 
 def test_empty_applied_replace_is_a_no_op(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -609,10 +595,6 @@ def test_persisted_unknown_applied_key_is_ignored_and_preserved(tmp_path: Path) 
         assert [record.key for record in database.instance_state.get_applied_slices("vm", "alpha")] == [
             AppliedStateKey.HARDWARE_PROVENANCE
         ]
-        assert [record.key for record in database.instance_state.list_applied_slices("vm")] == [
-            AppliedStateKey.HARDWARE_PROVENANCE
-        ]
-
         database.instance_state.replace_applied_slices(
             "vm",
             "alpha",
@@ -920,71 +902,6 @@ def test_applied_operation_is_safe_on_write_and_inspection(db: Database) -> None
 
     assert malformed.diagnostic is InstanceRecordDiagnostic.INVALID_APPLIED_OPERATION
     assert "vm-create\nforged" not in repr(malformed)
-
-
-@pytest.mark.parametrize("unsafe_name", ["bad\nname", "x" * 1_000])
-def test_malformed_unsafe_owner_identity_retains_kind_context(tmp_path: Path, unsafe_name: str) -> None:
-    path = tmp_path / "state.db"
-    Database(path).close()
-    connection = sqlite3.connect(path)
-    secret = "do-not-disclose-this-persisted-value"
-    connection.execute(
-        "INSERT INTO instance_records "
-        "(instance_kind, instance_name, record_type, record_key, payload_version, "
-        "value_json, recorded_at, operation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        ("vm", unsafe_name, "desired-overlay", "spec", 1, secret, "2026-08-23T12:00:00Z", None),
-    )
-    connection.commit()
-    connection.close()
-
-    database = Database(path, read_only=True)
-    try:
-        with pytest.raises(StateError) as raised:
-            database.instance_state.list_desired_overlays("vm")
-        assert raised.value.entity_kind == "vm"
-        assert raised.value.entity_name is None
-        assert raised.value.hint is not None
-        assert unsafe_name not in str(raised.value)
-        assert secret not in str(raised.value)
-    finally:
-        database.close()
-
-
-@pytest.mark.parametrize(
-    ("instance_kind", "instance_name"),
-    [
-        ("session", _HISTORIC_SESSION_NAME),
-        ("vm", "legacy.vm"),
-    ],
-)
-def test_malformed_printable_legacy_owner_is_attributed(
-    tmp_path: Path,
-    instance_kind: str,
-    instance_name: str,
-) -> None:
-    path = tmp_path / f"{instance_kind}.db"
-    Database(path).close()
-    connection = sqlite3.connect(path)
-    secret = "do-not-disclose-this-persisted-value"
-    connection.execute(
-        "INSERT INTO instance_records "
-        "(instance_kind, instance_name, record_type, record_key, payload_version, "
-        "value_json, recorded_at, operation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (instance_kind, instance_name, "desired-overlay", "spec", 1, secret, "2026-08-23T12:00:00Z", None),
-    )
-    connection.commit()
-    connection.close()
-
-    database = Database(path, read_only=True)
-    try:
-        with pytest.raises(StateError) as raised:
-            database.instance_state.list_desired_overlays(instance_kind)  # type: ignore[arg-type]
-        assert raised.value.entity_kind == instance_kind
-        assert raised.value.entity_name == instance_name
-        assert instance_name in str(raised.value)
-        assert secret not in str(raised.value)
-    finally:
-        database.close()
 
 
 def _create_owner_tree(database: Database, suffix: str = "") -> tuple[str, str, str, str]:

@@ -19,22 +19,10 @@
 
 ## Delivery posture
 
-R1 is an independently reviewed coordination artifact merged through PR #632. R2 is an independently
-valuable, always-green persistence increment merged through PR #636: it establishes the store
-contract needed by this effort and wave 4 without exposing the later SSH, merge, CLI, and diagnostic
-risk in the same review. Its accepted R4 design artifacts remain response material for the later
-implementation.
-
-PR #670 merged the complete R4 overlay and live-publication work. The merge-strategy correction uses
-one PR in two explicit stages: an SDD-only draft checkpoint under `review-requested`, followed after
-checkpoint convergence by implementation on the same draft PR. The PR becomes ready only at the
-complete implementation handoff. Each later delivery starts from `main` and is independently
-complete, reviewed, and green. Stack only actual dependencies and merge a stack bottom-up.
-
-PRs #686, #700, #703, and #706 completed the merge-policy correction, lifecycle-evidence slice,
-inspection surfaces, and final YAML presentation correction. The final closeout PR contains no new
-runtime behavior. It promotes any remaining permanent teaching, records the final evidence, and
-locks the child SDD only after ready-stage live validation and saga review converge.
+PRs #632, #636, #670, #686, #700, #703, and #706 delivered the effort as independently green,
+reviewed increments from `main`. The final closeout records permanent teaching and exact evidence,
+removes unused contract surface identified by the final complexity review, and locks the child SDD
+only after ready-stage live validation and saga review converge.
 
 Completed checkboxes are immutable. The effort lead updates them only after the named behavior,
 tests, permanent collateral, and independent review are complete.
@@ -407,7 +395,6 @@ SDD is ready to lock with the final implementation.
 
 ## Research disposition
 
-External prior-art research is unnecessary for R2. The governing facts are the repository's SQLite
-migration, backup, transaction, and typed-facade mechanics. SSH private-key envelope parsing will be
-checked against the OpenSSH format specification during R3 design rather than inferred from local
-examples alone.
+External prior-art research was unnecessary for R2. The governing facts were the repository's SQLite
+migration, backup, transaction, and typed-facade mechanics. R3 checked SSH private-key envelope
+parsing against the OpenSSH format specification rather than inferring it from local examples alone.

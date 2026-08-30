@@ -179,16 +179,16 @@ remote application or applied state.
 Creation and reinit retain their ordinary human lifecycle output and add the declaration-result line
 above when applicable.
 
-## Inspection and machine output (planned R5)
+## Inspection and machine output
 
 The existing `vm describe`, `workspace describe`, `agent describe`, and `session describe` surfaces
-will show the stored instance spec and either the current fully resolved spec or an explicit
-unresolved state. VM inspection will distinguish its VM and admin declaration slots. Per-value
-provenance and comparison state will appear only where resolution exists; applied slices will remain
-separately visible. Their JSON v1 forms will add optional tagged fields without changing existing
-fields. Configured secret references may appear; resolved secret values never do.
+show the stored instance spec and either the current fully resolved spec or an explicit unresolved
+state. VM inspection distinguishes its VM and admin declaration slots. Per-value provenance and
+comparison state appear only where resolution exists; applied slices remain separately visible.
+Their JSON v1 forms add optional tagged fields without changing existing fields. Configured secret
+references may appear; resolved secret values never do.
 
-When provenance is available for a list value, it will identify that value by its position in the
+When provenance is available for a list value, it identifies that value by its position in the
 displayed resolved list after merging, not by the item's spelling or representation.
 
-Automation will read the structural JSON v1 description after mutation.
+Automation reads the structural JSON v1 description after mutation.

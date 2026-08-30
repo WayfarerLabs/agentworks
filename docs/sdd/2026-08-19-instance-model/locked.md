@@ -12,36 +12,42 @@ the lock.
 
 - PR #632 assessed the persistence estate and settled the smallest typed repository boundary.
 - PR #636 added migration 32, the closed `InstanceStateRepository`, desired instance overlays,
-  lifecycle-evidence slices, backup projection, and owner-transaction cleanup without a backfill.
+  lifecycle-evidence slices, and owner-transaction cleanup without a backfill.
 - PR #670 added final inline instance specs, paired VM and admin layers, durable and prospective
-  live-resource publication, and one collect-then-finalize resource graph.
+  live-resource publication, desired-overlay backup projection, and one collect-then-finalize
+  resource graph.
 - PR #686 replaced per-domain merge policy with schema-directed recursive merging for core and
   capability models, including nested replacement, union boundaries, path provenance, and the
   harness-integration version-2 cutover.
-- PR #700 added successful-operation hardware-request evidence, passphrase-safe OpenSSH identity
-  derivation, SSH write proof, preflight comparison, backup support, and honest unknown or
-  unverifiable states.
+- PR #700 added successful-operation VM hardware evidence, passphrase-safe OpenSSH identity
+  derivation, SSH write proof, preflight comparison, applied-state backup support, and honest
+  unknown or unverifiable states.
 - PR #703 added resolved template specs, live-instance declaration and lifecycle-evidence
-  inspection, additive JSON v1 instance state, and batch doctor diagnostics.
+  inspection, the public `hardware-request` projection, additive JSON v1 instance state, and batch
+  doctor diagnostics.
 - PR #706 made human live-instance configuration documents safe block YAML while leaving the JSON v1
   machine contract unchanged.
+- The final closeout removes two unused by-kind list methods and a value-less hardware marker
+  carrier. Named owner-tree, exact-owner, and fleet inspection reads remain the complete shipped
+  repository surface; storage and operator behavior are unchanged.
 
 ## Verification state
 
-Every implementation PR completed its focused, full repository, isolated-home CLI, private project,
-fresh-eyes, and complexity gates at the exact handed-off head. The final merged implementation basis
-is `9444c5f47948229f4492ff438a0466fa26c17362` on `main`.
+Each increment completed the scaled review and validation recorded in its phase evidence in
+`plan.md`. The final merged implementation basis is `9444c5f47948229f4492ff438a0466fa26c17362` on
+`main`.
 
-The closeout candidate is not merge-complete until both remaining Phase 6 boxes are supported by
-exact-head evidence:
+The closeout candidate is not merge-complete until both remaining external validation and review
+gates are supported by exact-head evidence:
 
 1. Live VM acceptance covers create-time capture, matching preflight, deliberate identity drift, a
    passphrase-protected OpenSSH key, safe cleanup, and independent residue verification.
 2. The parent saga's final review campaign accepts the complete child effort and its plan-checkbox
    accounting.
 
-The final closeout update records those reports and the closeout head before merge. The operator
-owns the merge; this effort does not merge its own PR.
+The final closeout update records those reports and the closeout head before merge, which also
+closes the final evidence-and-handoff plan item. The operator owns the merge; this effort does not
+merge its own PR.
 
 ## Permanent homes
 
