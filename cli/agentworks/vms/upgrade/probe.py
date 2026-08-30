@@ -366,7 +366,7 @@ def _package_origin_inventory(target: Transport) -> tuple[tuple[str, ...], tuple
     command = r"""
 dpkg-query -W -f='${binary:Package}\t${Version}\n' |
 while IFS="$(printf '\t')" read -r package version; do
-  debian_origin='(^|[[:space:]])https?://(deb\.debian\.org|security\.debian\.org|ftp\.debian\.org)(:|/|[[:space:]]|$)'
+  debian_origin='(^|[[:space:]])https?://(deb\.debian\.org|security\.debian\.org|ftp\.debian\.org)(:[0-9]+)?(/|[[:space:]]|$)'
   matches=$(apt-cache madison "$package" | awk -F '|' -v wanted="$version" '
     {
       candidate=$2

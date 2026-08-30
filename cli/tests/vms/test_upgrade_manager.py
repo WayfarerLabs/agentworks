@@ -459,7 +459,13 @@ def test_timer_restore_keeps_all_timers_stopped_until_configuration_succeeds() -
 
 @pytest.mark.parametrize(
     ("failure_stage", "restoration_proved"),
-    (("decline", False), ("prompt", True), ("plan", True)),
+    (
+        ("decline", False),
+        ("prompt", True),
+        ("plan", True),
+        ("keyboard", True),
+        ("keyboard-unproved", False),
+    ),
 )
 def test_source_safe_planning_exit_restores_timers_or_records_repair(
     monkeypatch: pytest.MonkeyPatch,
@@ -485,11 +491,13 @@ def test_source_safe_planning_exit_restores_timers_or_records_repair(
         "preliminary_material_plan": {},
     }
     target = object()
-    original_error: Exception | None = None
+    original_error: BaseException | None = None
     if failure_stage == "prompt":
         original_error = UserAbort("interrupted")
     elif failure_stage == "plan":
         original_error = StateError("plan update failed")
+    elif failure_stage.startswith("keyboard"):
+        original_error = KeyboardInterrupt("interrupted")
 
     class _Journal:
         def __init__(self, candidate: object) -> None:
@@ -526,6 +534,13 @@ def test_source_safe_planning_exit_restores_timers_or_records_repair(
     final = SimpleNamespace(material_plan=lambda: {}, to_plan=lambda: {})
     restore_attempts: list[object] = []
 
+    def _probe(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        if failure_stage.startswith("keyboard"):
+            assert original_error is not None
+            raise original_error
+        return final
+
     def _restore(*args: object) -> bool:
         restore_attempts.append(args)
         return restoration_proved
@@ -541,7 +556,7 @@ def test_source_safe_planning_exit_restores_timers_or_records_repair(
     monkeypatch.setattr(upgrade_manager, "RemoteJournal", _Journal)
     monkeypatch.setattr(upgrade_manager, "_execution", lambda *args: _Execution())
     monkeypatch.setattr(upgrade_manager, "_tailscale_auth_key_name", lambda *args: "tailscale-key")
-    monkeypatch.setattr(upgrade_manager, "_probe", lambda *args, **kwargs: final)
+    monkeypatch.setattr(upgrade_manager, "_probe", _probe)
     monkeypatch.setattr(upgrade_manager, "_require_safe_preflight", lambda *args: None)
     monkeypatch.setattr(upgrade_manager, "_render_plan", lambda *args, **kwargs: None)
     monkeypatch.setattr(upgrade_manager, "_restore_timers_after_source_safe_failure", _restore)
@@ -549,7 +564,13 @@ def test_source_safe_planning_exit_restores_timers_or_records_repair(
     monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda *args, **kwargs: object())
     monkeypatch.setattr("agentworks.transports.transport", lambda *args, **kwargs: target)
 
-    expected_error = UserAbort if failure_stage == "prompt" else StateError
+    expected_error: type[BaseException]
+    if failure_stage == "prompt":
+        expected_error = UserAbort
+    elif failure_stage == "keyboard" and restoration_proved:
+        expected_error = KeyboardInterrupt
+    else:
+        expected_error = StateError
     with pytest.raises(expected_error) as raised:
         upgrade_manager._resume_after_source_update(
             db,

@@ -389,16 +389,6 @@ def _initialize_and_update_source(
         journal.initialize(transition.pair, plan)
         try:
             _inhibit_apt_timers(target)
-        except Exception:
-            _restore_timers_or_record(
-                db,
-                vm,
-                target,
-                fresh.apt_timer_states,
-                transition,
-            )
-            raise
-        try:
             db.insert_vm_event(
                 vm.name,
                 "debian_upgrade_started",
@@ -406,13 +396,14 @@ def _initialize_and_update_source(
             )
             execution = _execution(target, journal, transition)
             execution.install_script()
-        except Exception:
-            _restore_timers_or_record(
+        except (Exception, KeyboardInterrupt) as error:
+            _restore_timers_or_raise_repair(
                 db,
                 vm,
                 target,
                 fresh.apt_timer_states,
                 transition,
+                error,
             )
             raise
         _advance_source_action(
@@ -464,8 +455,8 @@ def _resume_after_source_update(
             timers = _timer_states_from_plan(plan)
             try:
                 _inhibit_apt_timers(target)
-            except Exception:
-                _restore_timers_or_record(db, vm, target, timers, transition)
+            except (Exception, KeyboardInterrupt) as error:
+                _restore_timers_or_raise_repair(db, vm, target, timers, transition, error)
                 raise
             _advance_source_action(db, vm, journal, execution, transition, target, timers)
             state = journal.load(transition.pair)
@@ -497,15 +488,8 @@ def _resume_after_source_update(
                 plan["final_plan"] = final.to_plan()
                 journal.update_plan(transition.pair, plan)
                 _inhibit_apt_timers(target)
-            except Exception as error:
-                restored = _restore_timers_or_record(db, vm, target, timer_states, transition)
-                if not restored:
-                    raise StateError(
-                        "Automatic APT timer state needs repair before the Debian upgrade can pause",
-                        entity_kind="vm",
-                        entity_name=vm.name,
-                        hint="Restore apt-daily.timer and apt-daily-upgrade.timer to their recorded states.",
-                    ) from error
+            except (Exception, KeyboardInterrupt) as error:
+                _restore_timers_or_raise_repair(db, vm, target, timer_states, transition, error)
                 raise
 
         for action in (
@@ -934,6 +918,24 @@ def _restore_timers_or_record(
     except Exception as error:
         output.warn(f"Could not record the automatic APT timer repair requirement ({type(error).__name__}).")
     return False
+
+
+def _restore_timers_or_raise_repair(
+    db: Database,
+    vm: VMRow,
+    target: Transport,
+    states: dict[str, tuple[str, str]],
+    transition: _Transition,
+    error: BaseException,
+) -> None:
+    if _restore_timers_or_record(db, vm, target, states, transition):
+        return
+    raise StateError(
+        "Automatic APT timer state needs repair before the Debian upgrade can pause",
+        entity_kind="vm",
+        entity_name=vm.name,
+        hint="Restore apt-daily.timer and apt-daily-upgrade.timer to their recorded states.",
+    ) from error
 
 
 def _source_state_is_safe_for_timer_restore(
