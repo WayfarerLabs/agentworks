@@ -2,7 +2,7 @@
 
 <!-- cspell:ignore sdds -->
 
-- Status: R1-R4 and merge strategy merged; R5 implemented, final verification pending
+- Status: Implementation complete; closeout validation pending
 - Date: 2026-08-23
 - Last revised: 2026-08-30
 - Requirements: [frd.md](./frd.md)
@@ -11,11 +11,11 @@
 - Instance-spec CLI: [instance-spec-cli.md](./instance-spec-cli.md)
 - Merge strategy: [merge-strategy-lld.md](./merge-strategy-lld.md)
 - R5 design: [resolved-drift-surfaces-lld.md](./resolved-drift-surfaces-lld.md)
-- Code basis: `79e555a6` on `main`
-- Delivery vehicle: merged R1 artifact PR #632, merged R2 store and R4 design PR #636, merged R4
-  implementation PR #670; merged merge-strategy SDD checkpoint and implementation PR #686; merged R3
-  SDD checkpoint and implementation PR #700; R5 SDD checkpoint and implementation on one draft PR
-  from `main`
+- Code basis: `9444c5f4` on `main`
+- Delivery vehicle: merged R1 artifact PR #632; merged R2 store and R4 design PR #636; merged R4
+  overlay and live-publication PR #670; merged merge-strategy SDD and implementation PR #686; merged
+  R3 SDD and implementation PR #700; merged R5 SDD and implementation PR #703; merged R5 YAML
+  correction PR #706; final closeout PR from `main`
 
 ## Delivery posture
 
@@ -30,6 +30,11 @@ one PR in two explicit stages: an SDD-only draft checkpoint under `review-reques
 checkpoint convergence by implementation on the same draft PR. The PR becomes ready only at the
 complete implementation handoff. Each later delivery starts from `main` and is independently
 complete, reviewed, and green. Stack only actual dependencies and merge a stack bottom-up.
+
+PRs #686, #700, #703, and #706 completed the merge-policy correction, lifecycle-evidence slice,
+inspection surfaces, and final YAML presentation correction. The final closeout PR contains no new
+runtime behavior. It promotes any remaining permanent teaching, records the final evidence, and
+locks the child SDD only after ready-stage live validation and saga review converge.
 
 Completed checkboxes are immutable. The effort lead updates them only after the named behavior,
 tests, permanent collateral, and independent review are complete.
@@ -379,7 +384,7 @@ provider-realized hardware.
       doctor comparison output, malformed state, and JSON v1 compatibility.
 - [ ] Run live VM validation for create-time capture, matching preflight, deliberate identity drift,
       password-protected OpenSSH keys, safe cleanup, and independent residue verification.
-- [ ] Promote all load-bearing contract and operator teaching into permanent docs, confirm no
+- [x] Promote all load-bearing contract and operator teaching into permanent docs, confirm no
       permanent artifact depends on this SDD path, and add `locked.md` only in the final PR.
 - [ ] Record exact evidence, commit with the required session trailer, push, hand off the green
       head, and set ready only when the operator supplies merge intent.

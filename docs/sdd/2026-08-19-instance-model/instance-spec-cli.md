@@ -1,6 +1,6 @@
 # Instance Spec CLI Contract
 
-- Status: R4 implemented and verified; R5 implemented, final verification pending
+- Status: Implemented and verified
 - Date: 2026-08-24
 - Requirements: R4 and R5 in `frd.md`
 - R5 inspection design: `resolved-drift-surfaces-lld.md`
