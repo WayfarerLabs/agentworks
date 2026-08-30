@@ -39,6 +39,11 @@ from tests.conftest import _FakeResult, _FakeTarget
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
 
+
+def _refuse_live_target(*args: object, **kwargs: object) -> None:
+    raise ConnectivityError("SSH identity unavailable")
+
+
 # -- Orchestration: create_console -----------------------------------------
 
 
@@ -264,18 +269,96 @@ def test_reorder_sessions_bumps_listed_to_front(db: Database) -> None:
     assert [m.session_name for m in members] == ["d", "b", "a", "c", "e"]
 
 
-def test_reorder_sessions_noop_when_already_in_requested_order(db: Database, captured_output: CapturedOutput) -> None:
+def test_reorder_sessions_noop_when_already_in_requested_order(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
     """Asking to bump the sessions that are already at the front in that
     order is a clean no-op: no position writes, informational message."""
     _seed_vm(db)
     _seed_sessions(db, ["a", "b", "c"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a", "b", "c"])
+    monkeypatch.setattr(
+        "agentworks.sessions.multi_console._live_target",
+        lambda *args, **kwargs: pytest.fail("a no-op reorder must not preflight live sync"),
+    )
 
     reorder_sessions(db, _StubConfig(), console_name="con", session_names=["a", "b"])
 
     members = db.list_console_sessions("con")
     assert [m.session_name for m in members] == ["a", "b", "c"]
     assert any("already in the requested order" in m for m in captured_output.info)
+
+
+def test_add_sessions_live_preflight_refusal_preserves_membership(
+    db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+    monkeypatch.setattr(
+        "agentworks.sessions.multi_console._live_target",
+        _refuse_live_target,
+    )
+
+    with pytest.raises(ConnectivityError):
+        add_sessions(
+            db, _StubConfig(), console_name="con", session_specs=["b"], interaction=TtyInteractionPolicy.REFUSE
+        )
+
+    assert [member.session_name for member in db.list_console_sessions("con")] == ["a"]
+
+
+def test_remove_sessions_live_preflight_refusal_preserves_membership(
+    db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a", "b"])
+    monkeypatch.setattr(
+        "agentworks.sessions.multi_console._live_target",
+        _refuse_live_target,
+    )
+
+    with pytest.raises(ConnectivityError):
+        remove_sessions(db, _StubConfig(), console_name="con", session_names=["b"])
+
+    assert [member.session_name for member in db.list_console_sessions("con")] == ["a", "b"]
+
+
+def test_reorder_sessions_live_preflight_refusal_preserves_order(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a", "b"])
+    monkeypatch.setattr(
+        "agentworks.sessions.multi_console._live_target",
+        _refuse_live_target,
+    )
+
+    with pytest.raises(ConnectivityError):
+        reorder_sessions(db, _StubConfig(), console_name="con", session_names=["b"])
+
+    assert [member.session_name for member in db.list_console_sessions("con")] == ["a", "b"]
+
+
+def test_add_shell_live_preflight_refusal_preserves_shells(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a+1"])
+    original_shells = db.get_console_session("con", "a")
+    assert original_shells is not None
+    monkeypatch.setattr(
+        "agentworks.sessions.multi_console._live_target",
+        _refuse_live_target,
+    )
+
+    with pytest.raises(ConnectivityError):
+        add_shell(db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE)
+
+    member = db.get_console_session("con", "a")
+    assert member is not None
+    assert member.shells == original_shells.shells
 
 
 def test_reorder_sessions_rejects_non_member(db: Database) -> None:

@@ -220,6 +220,7 @@ def add_sessions(
                 interaction=interaction,
             )
 
+    live = _mc._live_target(db, config, console.vm_name)
     with db.transaction():
         current_order = [member.session_name for member in db.list_console_sessions(console_name)]
         current_names = set(current_order)
@@ -248,7 +249,6 @@ def add_sessions(
     output.result(f"Added {len(specs)} session(s) to console '{console_name}'.")
 
     with _live_best_effort(f"add-sessions to '{console_name}'", console_name=console_name):
-        live = _mc._live_target(db, config, console.vm_name)
         if live is None:
             return
         vm, target = live
@@ -311,13 +311,13 @@ def remove_sessions(
                 entity_kind="console-member",
                 entity_name=n,
             )
+    live = _mc._live_target(db, config, console.vm_name)
     with db.transaction():
         for n in session_names:
             db.remove_console_session(console_name, n)
     output.result(f"Removed {len(session_names)} session(s) from console '{console_name}'.")
 
     with _live_best_effort(f"remove-sessions from '{console_name}'", console_name=console_name):
-        live = _mc._live_target(db, config, console.vm_name)
         if live is not None:
             _vm, target = live
             # kill_session_windows lives in .attach but is called through the
@@ -415,13 +415,13 @@ def reorder_sessions(
         output.info(f"Console '{console_name}' is already in the requested order; nothing to do.")
         return
 
+    live = _mc._live_target(db, config, console.vm_name)
     db.reorder_console_sessions(console_name, desired_order)
     output.result(
         f"Reordered {len(session_names)} session(s) starting at index {resolved_index} of console '{console_name}'."
     )
 
     with _live_best_effort(f"reorder-sessions in '{console_name}'", console_name=console_name):
-        live = _mc._live_target(db, config, console.vm_name)
         if live is None:
             return
         _vm, target = live
@@ -519,6 +519,7 @@ def add_shell(
                 interaction=interaction,
             )
 
+    live = _mc._live_target(db, config, console.vm_name)
     new_shell: ShellEntry = {"cwd": cwd, "admin": admin}
     new_shells = [*cs.shells, new_shell]
     db.update_console_shells(console_name, session_name, new_shells)
@@ -526,7 +527,6 @@ def add_shell(
     output.result(f"Added {user_tag} shell at {cwd or '<workspace>'} to '{session_name}' in console '{console_name}'.")
 
     with _live_best_effort(f"add-shell to '{console_name}:{session_name}'", console_name=console_name):
-        live = _mc._live_target(db, config, console.vm_name)
         if live is None:
             return
         vm, target = live

@@ -123,6 +123,7 @@ def test_console_add_shell_promotes_admin_for_admin_mode_session(
 
     monkeypatch.setattr(multi_console, "_pane_secret_target", _spy_target)
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
+    monkeypatch.setattr(multi_console, "_live_target", lambda *args, **kwargs: None)
 
     config = SimpleNamespace()
 
