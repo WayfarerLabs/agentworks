@@ -624,10 +624,13 @@ _PROXMOX_TEST_CASES: list[dict[str, Any]] = [
         "check": None,
     },
     {
-        "id": "missing_template_vmid",
+        "id": "empty_release_map_loads",
         "platform_config": {"api_url": "https://pve:8006", "node": "pve", "token_id": "u@p!t"},
-        "expect_error": r"vm-site/proxmox\.template_vmid: is required",
-        "check": None,
+        "expect_error": None,
+        "check": lambda registry: (
+            "template_vmid" not in registry.lookup("vm-site", "proxmox").platform.config
+            and "template_vmids" not in registry.lookup("vm-site", "proxmox").platform.config
+        ),
     },
 ]
 

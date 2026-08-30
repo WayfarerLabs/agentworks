@@ -42,6 +42,7 @@ from .packages import (
     _configure_apt_sources,
     _install_apt_packages,
     _install_system_packages,
+    _resolve_apt_sources,
     _run_install_commands,
 )
 from .shell_env import (
@@ -376,6 +377,16 @@ def _phase_b_setup(
         system_install_commands = kind_dict(registry, "system-install-command")
         user_install_commands = kind_dict(registry, "user-install-command")
 
+        # Resolve every selected release map before Phase B touches the
+        # guest. A missing mapping is a configuration boundary, not a
+        # partial initialization after unrelated convergence already ran.
+        resolved_apt_sources = _resolve_apt_sources(
+            vm_template,
+            apt_packages,
+            apt_sources,
+            debian_release=debian_release,
+        )
+
         # Non-fatal: ensure cloud-init won't regenerate SSH host keys on reboot.
         # Runs first so VMs predating the create-time bootstrap step are
         # repaired on reinit even if a later step warns. Idempotent overwrite
@@ -466,6 +477,7 @@ def _phase_b_setup(
             apt_sources,
             logger,
             debian_release=debian_release,
+            resolved_sources=resolved_apt_sources,
         )
 
         # Non-fatal: apt packages (direct list + apt-package entries)

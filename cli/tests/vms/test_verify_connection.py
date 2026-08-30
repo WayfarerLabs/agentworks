@@ -17,7 +17,7 @@ from agentworks.vms.manager.verification import verify_vm_connection
 
 
 def test_verify_connection_uses_one_canonical_no_op(monkeypatch: pytest.MonkeyPatch) -> None:
-    vm = SimpleNamespace(name="worker", site="local")
+    vm = SimpleNamespace(name="worker", site="local", debian_release=None)
     calls: list[tuple[object, ...]] = []
 
     class Target:
@@ -58,7 +58,7 @@ def test_verify_connection_surfaces_failure_without_activation_or_mutation(
     monkeypatch: pytest.MonkeyPatch,
     failure: Exception,
 ) -> None:
-    vm = SimpleNamespace(name="worker", site="local")
+    vm = SimpleNamespace(name="worker", site="local", debian_release=None)
     calls: list[tuple[object, ...]] = []
 
     class DatabaseSpy:

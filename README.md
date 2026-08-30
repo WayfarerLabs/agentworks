@@ -22,9 +22,9 @@ when done. One `agw` CLI drives all of it declaratively via an **SSH-over-Tailsc
 The operator runs the `agw` CLI on their workstation. VMs are created at declared **vm-sites**
 (configured places to create VMs), each backed by a **vm-platform** that knows how to work with a
 given provider (Lima, WSL2, Proxmox, Azure VMs, AWS EC2, and Google Compute Engine today).
-Regardless of the platform, every VM runs the same base operating system (the current Debian stable
-release, Trixie), is joined to the same Tailscale tailnet, and is accessible over SSH at its
-Tailscale IP address using the operator's keys.
+Regardless of the platform, every managed VM runs Debian, joins the same Tailscale tailnet, and is
+accessible over SSH at its Tailscale IP address using the operator's keys. New VMs use the current
+Debian stable release, Trixie; existing Bookworm VMs remain operable and can upgrade in place.
 
 ![Agentworks topology: the operator's workstation runs the agw CLI, which creates VMs at declared sites across local platforms (Lima or WSL2), a remote SSH VM site (e.g. Lima), Azure, AWS EC2, and Proxmox, with a placeholder for future VM platforms. Every VM and the workstation itself join a shared Tailnet overlay, which is how the CLI reaches them all.](docs/images/agw-topology.png)
 

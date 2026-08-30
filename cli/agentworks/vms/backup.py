@@ -248,6 +248,7 @@ def _archive_workspaces(
     archive = f"{tmp_dir}/workspaces.tar.zst"
     q_archive = shlex.quote(archive)
     detached_dir: str | None = None
+    staging_paths: str | None = None
 
     try:
         # Verify workspace paths exist on the VM
@@ -391,6 +392,8 @@ def _archive_workspaces(
 
     finally:
         target.run(f"rm -rf {q_tmp}", sudo=True, check=False)
+        if staging_paths is not None:
+            target.run(f"rm -f {shlex.quote(staging_paths)}", check=False)
         if detached_dir is not None:
             target.run(f"rm -rf {shlex.quote(detached_dir)}", check=False)
 

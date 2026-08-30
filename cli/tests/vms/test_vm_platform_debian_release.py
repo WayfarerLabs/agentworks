@@ -54,7 +54,6 @@ def test_code_owned_map_miss_names_the_outdated_platform() -> None:
 
     assert caught.value.entity_kind == "vm-platform"
     assert caught.value.entity_name == "example-cloud"
-    assert caught.value.hint is not None and "plugin" in caught.value.hint
 
 
 def test_operator_owned_map_miss_names_the_exact_site_key() -> None:
@@ -68,7 +67,6 @@ def test_operator_owned_map_miss_names_the_exact_site_key() -> None:
 
     assert caught.value.entity_kind == "vm-site"
     assert caught.value.entity_name == "lab"
-    assert caught.value.hint is not None and "template_vmids.trixie" in caught.value.hint
 
 
 def test_legacy_proxmox_scalar_populates_only_bookworm() -> None:

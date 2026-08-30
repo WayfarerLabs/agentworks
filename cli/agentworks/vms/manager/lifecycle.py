@@ -26,7 +26,7 @@ from agentworks import output
 from agentworks.capabilities.base import RunContext
 from agentworks.config import validate_admin_username
 from agentworks.db import SYSTEM_SLUG_KEY, InitStatus, ProvisioningStatus
-from agentworks.debian import CURRENT_DEBIAN_RELEASE
+from agentworks.debian import CURRENT_DEBIAN_RELEASE, DebianRelease
 from agentworks.errors import (
     AlreadyExistsError,
     ConfigError,
@@ -519,6 +519,19 @@ def create_vm(
             except BaseException:
                 render_overlay_outcome(overlay_outcome)
                 raise
+
+            if not isinstance(result.debian_release, DebianRelease):
+                # A third-party implementation can violate the annotated
+                # result shape at runtime. Keep its backend identifiers and
+                # the failed row addressable without rendering the untrusted
+                # value or leaking an AttributeError through the boundary.
+                db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
+                raise StateError(
+                    f"vm-platform/{platform_obj.name} returned an invalid Debian release proof",
+                    entity_kind="vm",
+                    entity_name=vm_name,
+                    hint=f"Run 'agw vm delete {vm_name}' to remove the unverified VM, then update the platform.",
+                )
 
             if result.debian_release is not request.debian_release:
                 # This is the safety net for a nonconforming platform that

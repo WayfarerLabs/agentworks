@@ -155,11 +155,6 @@ class ProxmoxPlatform(VMPlatform):
 
     def __init__(self, owner_name: str, config: Mapping[str, object]) -> None:
         super().__init__(owner_name, config)
-        if "template_vmid" in config:
-            output.warn(
-                f"vm-site/{owner_name} uses legacy template_vmid; it is Bookworm-only and cannot satisfy "
-                "current VM creation. Configure template_vmids.trixie."
-            )
         # The op client, built on FIRST need by :meth:`_api` and reused
         # for the instance's remaining ops.
         self._api_cached: ProxmoxAPI | None = None

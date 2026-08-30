@@ -237,7 +237,18 @@ COMP_CWORD={len(words) - 1}
 _agentworks
 printf '%s\\n' "${{COMPREPLY[@]}}"
 """
-            completed = subprocess.run(["bash"], input=invocation, capture_output=True, text=True, check=True)
+            env = {
+                **os.environ,
+                "PATH": f"{Path(sys.executable).parent}{os.pathsep}{os.environ.get('PATH', '')}",
+            }
+            completed = subprocess.run(
+                ["bash"],
+                input=invocation,
+                capture_output=True,
+                text=True,
+                check=True,
+                env=env,
+            )
             return [candidate for candidate in completed.stdout.splitlines() if candidate]
 
         assert complete(["agw", "guide", ""]) == ["list", "show", "--agent", "--human", "--help"]

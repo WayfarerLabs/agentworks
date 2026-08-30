@@ -22,6 +22,7 @@ from agentworks.vms.initializer import (
     _install_apt_packages,
     _run_install_commands,
 )
+from agentworks.vms.initializer.driver import _phase_b_setup
 
 from ._initializer_support import _make_entries, _make_target, _make_vm_template
 
@@ -138,6 +139,50 @@ def test_configure_apt_sources_resolves_all_mappings_before_guest_mutation() -> 
 
     assert caught.value.entity_kind == "apt-source"
     target.run.assert_not_called()
+
+
+def test_phase_b_resolves_all_release_maps_before_any_guest_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    target = MagicMock()
+    vm_template = _make_vm_template(apt_packages=["test-pkg"])
+    entries = _make_entries()
+    entries.apt_sources["test-source"] = AptSourceEntry(
+        name="test-source",
+        key_url="https://example.com/key.gpg",
+        key_path="/etc/apt/keyrings/test.gpg",
+        sources={DebianRelease.TRIXIE: "deb https://example.com trixie main"},
+        source_file="test.list",
+    )
+    resources = {
+        "apt-source": entries.apt_sources,
+        "apt-package": entries.apt_packages,
+        "system-install-command": entries.system_install_commands,
+        "user-install-command": entries.user_install_commands,
+    }
+    monkeypatch.setattr(
+        "agentworks.resources.access.kind_dict",
+        lambda registry, kind: resources[kind],
+    )
+
+    with pytest.raises(ConfigError) as caught:
+        _phase_b_setup(
+            MagicMock(),
+            MagicMock(),
+            MagicMock(),
+            vm_template,
+            MagicMock(),
+            "mapped-vm",
+            target,
+            {},
+            "/home/operator",
+            "operator",
+            MagicMock(),
+            git_tokens={},
+            debian_release=DebianRelease.BOOKWORM,
+        )
+
+    assert caught.value.entity_kind == "apt-source"
+    target.run.assert_not_called()
+    target.write_file.assert_not_called()
 
 
 # -- Apt package tests --

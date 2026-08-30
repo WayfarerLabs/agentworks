@@ -54,11 +54,14 @@ class _VMPlatformKind:
         A vm-platform knows how to create, start, stop, and delete VMs on one backend,
         and how to reach them over SSH once they exist.
 
-        Contract version 2 makes creation complete-or-raise: a platform completes its
-        Tailscale join before returning, reports bootstrap through the manager-owned
-        progress sink, and rolls back partial backend state before propagating failure.
-        A successful result may omit only the Tailscale IP; the VM domain then retries
-        IP discovery and verifies Tailscale SSH without replaying bootstrap.
+        Contract version 3 receives core's concrete current Debian release, resolves it
+        to a platform-owned artifact, and returns the matching release observed from the
+        live guest while backend rollback is still possible. Missing mappings fail before
+        backend mutation; a platform completes its Tailscale join before returning,
+        reports bootstrap through the manager-owned progress sink, and rolls back partial
+        backend state before propagating failure. A successful result may omit only the
+        Tailscale IP; the VM domain then retries IP discovery and verifies Tailscale SSH
+        without replaying bootstrap.
 
         Platforms are code, not config: a vm-site selects one by writing its name inside
         `spec.platform`, and the keys allowed beside that name are the platform's own,

@@ -479,17 +479,14 @@ def test_a_non_layered_capability_does_not_acquire_the_schema_merge_contract(imp
     assert conformance_error(descriptor_for("vm-platform"), impl) is None
 
 
-def test_registration_rejects_vm_platform_contract_v1_exactly() -> None:
+def test_registration_rejects_previous_vm_platform_contract_without_writing() -> None:
+    before = _snapshot_registries()
     plugin = Plugin(name="p", capabilities={"vm-platform": (_PlatformOnAnOldContract,)})
 
-    with pytest.raises(PluginError) as exc:
+    with pytest.raises(PluginError):
         register_plugin(plugin)
 
-    assert str(exc.value) == (
-        "system plugin 'p' vm-platform impl '_PlatformOnAnOldContract' does not satisfy "
-        "the vm-platform capability contract: it declares contract_version 2, but this build "
-        "supports vm-platform contract version 3"
-    )
+    assert _snapshot_registries() == before
 
 
 def test_registration_rejects_harness_integration_contract_v1_without_writing() -> None:

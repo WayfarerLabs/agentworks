@@ -297,12 +297,56 @@ def test_create_vm_returned_release_mismatch_retains_failed_addressable_row(
             interaction=TtyInteractionPolicy.REFUSE,
         )
 
-    assert "bookworm" in str(caught.value)
-    assert "trixie" in str(caught.value)
-    assert "vm delete wrong-release" in (caught.value.hint or "")
+    assert caught.value.entity_kind == "vm"
+    assert caught.value.entity_name == "wrong-release"
     row = db.get_vm("wrong-release")
     assert row is not None
     assert row.platform_metadata == {"instance_name": "wrong-release"}
+    assert row.provisioning_status == ProvisioningStatus.FAILED.value
+    assert row.init_status == InitStatus.PENDING.value
+    assert row.debian_release is None
+
+
+@pytest.mark.parametrize("invalid_release", ["trixie", None], ids=("string", "null"))
+def test_create_vm_invalid_release_proof_retains_failed_addressable_row(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: object,
+    invalid_release: object,
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.db import InitStatus, ProvisioningStatus
+
+    monkeypatch.setattr(
+        LimaPlatform,
+        "create",
+        lambda *args, **kwargs: ProvisionResult(
+            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
+            debian_release=invalid_release,  # type: ignore[arg-type]
+            platform_metadata={"instance_name": "invalid-proof"},
+            tailscale_ip="100.64.0.7",
+        ),
+    )
+    monkeypatch.setattr(
+        vm_manager,
+        "bootstrap_vm",
+        lambda *args, **kwargs: pytest.fail("Phase A reached after an invalid release proof"),
+    )
+
+    with pytest.raises(StateError) as caught:
+        vm_manager.create_vm(
+            db,
+            make_config(),
+            name="invalid-proof",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert caught.value.entity_kind == "vm"
+    assert caught.value.entity_name == "invalid-proof"
+    row = db.get_vm("invalid-proof")
+    assert row is not None
+    assert row.platform_metadata == {"instance_name": "invalid-proof"}
     assert row.provisioning_status == ProvisioningStatus.FAILED.value
     assert row.init_status == InitStatus.PENDING.value
     assert row.debian_release is None

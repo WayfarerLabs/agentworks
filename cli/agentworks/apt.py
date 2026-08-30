@@ -38,6 +38,10 @@ from agentworks.topics import TopicProse
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from pydantic import GetJsonSchemaHandler
+    from pydantic.json_schema import JsonSchemaValue
+    from pydantic_core import CoreSchema
+
     from agentworks.resources.graph import FinalizeContext
     from agentworks.resources.reference import ResourceReference
 
@@ -77,9 +81,8 @@ class AptSourceEntry(DeclaredResource):
     """Absolute path the fetched key is installed to on the VM."""
 
     source: str | None = Field(
-        default=None,
         examples=[
-            "deb [arch={arch} signed-by=/etc/apt/keyrings/my-repo.gpg] https://apt.example.com/debian bookworm main"
+            "deb [arch={arch} signed-by=/etc/apt/keyrings/my-repo.gpg] https://apt.example.com/debian stable main"
         ],
     )
     """The apt source-list stanza, verbatim (``deb [signed-by=...] ...``).
@@ -117,6 +120,47 @@ class AptSourceEntry(DeclaredResource):
             return {DebianRelease(key) if isinstance(key, str) else key: source for key, source in value.items()}
         except ValueError as exc:
             raise ValueError("sources keys must be recognized Debian codenames") from exc
+
+    @model_validator(mode="before")
+    @classmethod
+    def _make_scalar_sample_arm_structural(cls, value: object) -> object:
+        """Keep ``source`` live in samples while allowing the mapped arm.
+
+        Pydantic's field requiredness drives the generated sample.  The
+        scalar arm is its safe default, while this boundary fills its null
+        sentinel when a document selects ``sources`` (or selects neither,
+        so the after-validator owns the one-of diagnostic).
+        """
+        if not isinstance(value, dict) or "source" in value:
+            return value
+        return {**value, "source": None}
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls,
+        core_schema: CoreSchema,
+        handler: GetJsonSchemaHandler,
+    ) -> JsonSchemaValue:
+        """Emit the same exact-one shape enforced by runtime validation."""
+        schema = handler(core_schema)
+        required = [name for name in schema.get("required", ()) if name != "source"]
+        if required:
+            schema["required"] = required
+        else:
+            schema.pop("required", None)
+        schema["oneOf"] = [
+            {
+                "required": ["source"],
+                "properties": {"source": {"not": {"type": "null"}}},
+                "not": {"required": ["sources"]},
+            },
+            {
+                "required": ["sources"],
+                "properties": {"sources": {"not": {"type": "null"}}},
+                "not": {"required": ["source"]},
+            },
+        ]
+        return schema
 
     @model_validator(mode="after")
     def _validate_source_shape(self) -> Self:
