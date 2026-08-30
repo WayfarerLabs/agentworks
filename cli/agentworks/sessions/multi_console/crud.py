@@ -162,6 +162,7 @@ def add_sessions(
                 entity_name=spec.name,
             )
 
+    live = _mc._live_target(db, config, console.vm_name)
     registry = load_request_registry(config, live_database=db)
 
     # Eager-prompting orchestration: when
@@ -248,7 +249,6 @@ def add_sessions(
     output.result(f"Added {len(specs)} session(s) to console '{console_name}'.")
 
     with _live_best_effort(f"add-sessions to '{console_name}'", console_name=console_name):
-        live = _mc._live_target(db, config, console.vm_name)
         if live is None:
             return
         vm, target = live
@@ -311,13 +311,13 @@ def remove_sessions(
                 entity_kind="console-member",
                 entity_name=n,
             )
+    live = _mc._live_target(db, config, console.vm_name)
     with db.transaction():
         for n in session_names:
             db.remove_console_session(console_name, n)
     output.result(f"Removed {len(session_names)} session(s) from console '{console_name}'.")
 
     with _live_best_effort(f"remove-sessions from '{console_name}'", console_name=console_name):
-        live = _mc._live_target(db, config, console.vm_name)
         if live is not None:
             _vm, target = live
             # kill_session_windows lives in .attach but is called through the
@@ -415,13 +415,13 @@ def reorder_sessions(
         output.info(f"Console '{console_name}' is already in the requested order; nothing to do.")
         return
 
+    live = _mc._live_target(db, config, console.vm_name)
     db.reorder_console_sessions(console_name, desired_order)
     output.result(
         f"Reordered {len(session_names)} session(s) starting at index {resolved_index} of console '{console_name}'."
     )
 
     with _live_best_effort(f"reorder-sessions in '{console_name}'", console_name=console_name):
-        live = _mc._live_target(db, config, console.vm_name)
         if live is None:
             return
         _vm, target = live
@@ -472,7 +472,6 @@ def add_shell(
 
     _validate_cwd(cwd)
     console = _require_console(db, console_name)
-    registry = load_request_registry(config, live_database=db)
     cs = db.get_console_session(console_name, session_name)
     if cs is None:
         raise NotFoundError(
@@ -480,6 +479,9 @@ def add_shell(
             entity_kind="console-member",
             entity_name=session_name,
         )
+
+    live = _mc._live_target(db, config, console.vm_name)
+    registry = load_request_registry(config, live_database=db)
 
     # Eager-prompting orchestration: resolve any
     # secrets referenced by this pane's env chain BEFORE the DB write +
@@ -526,7 +528,6 @@ def add_shell(
     output.result(f"Added {user_tag} shell at {cwd or '<workspace>'} to '{session_name}' in console '{console_name}'.")
 
     with _live_best_effort(f"add-shell to '{console_name}:{session_name}'", console_name=console_name):
-        live = _mc._live_target(db, config, console.vm_name)
         if live is None:
             return
         vm, target = live

@@ -117,7 +117,7 @@ After vetting succeeds, refresh the issue, perform the required snapshot compari
 competing branch, human assignment, or pull request appeared. Record the claim in the ledger, then
 create a dedicated worktree containing the deterministic branch from fresh `main` and allocate a
 distinct resource namespace. Record its absolute path and the namespace before delegating. The
-loop's primary checkout remains separate and is never the developer's mutation workspace. If a race
+loop's primary checkout remains separate and is never the developer's mutation checkout. If a race
 is detected, create no duplicate work and report it.
 
 ## Build and privately validate
