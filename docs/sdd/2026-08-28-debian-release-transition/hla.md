@@ -115,19 +115,26 @@ contract version 2 to 3 makes every built-in and plugin implementation migrate a
 exact registration conformance rejects a version-2 implementation and names the incompatible
 platform/plugin.
 
-No platform defines or imports a platform-local current release. Its first create action resolves
-`request.debian_release` through its own release map. A shared resolver shapes two missing-key
-failures before backend mutation:
+No platform defines or imports a platform-local current release. Core passes one concrete release to
+the pending create node and later uses that same value in `ProvisionRequest`. Before the command's
+secret-resolution phase, the pending node calls the platform's pure, offline
+`validate_create_release(release)` hook. The default is a no-op for code-owned catalogs. A platform
+with an operator-owned catalog overrides it so a missing entry fails before authenticated `runup`,
+while its config remains loadable for operations on existing VMs. The platform repeats the release
+lookup as its first create action, so every mapping is enforced before backend mutation.
+
+A shared resolver shapes two missing-key failures:
 
 - a missing code-owned selector raises a typed state error naming `vm-platform/<name>`, the
   requested codename, and the need to update Agentworks or the plugin; and
 - a missing operator-owned selector raises a typed configuration error naming the vm-site and exact
   release-keyed field, such as `template_vmids.trixie`.
 
-There is no fallback key, default selector, or reinterpretation of another release's artifact. The
-manager's provisioning exception boundary preserves the type, message, and remediation hint of these
-two release-map misses after unwinding the provisional database row. Other platform failures retain
-the existing `ProvisioningError` wrapper and durable log reference.
+There is no fallback key, default selector, or reinterpretation of another release's artifact. An
+operator-owned miss propagates from pending-create preflight before secret resolution or a
+provisional database row. A code-owned miss propagates from `create`; the manager preserves its
+type, message, and remediation hint after unwinding the provisional row. Other platform failures
+retain the existing `ProvisioningError` wrapper and durable log reference.
 
 Each platform calls one shared release probe with `request.debian_release` over the create-time
 transport it already controls. The probe runs after the guest boots and before the platform returns
@@ -186,8 +193,8 @@ unchanged site remains loadable for existing VM operations. It never fills the T
 adapter is governed by ordinary configuration compatibility rather than a Debian support date; its
 presence cannot make a non-current release creatable.
 
-The Proxmox setup script takes an explicit supported release and emits the corresponding official
-cloud image URL and template name. Its documentation teaches a Trixie template by default.
+The Proxmox setup script builds core's current release and exposes no release argument. It emits the
+corresponding official cloud image URL and template name.
 
 ## Persistence and observed state
 
@@ -660,10 +667,13 @@ semantics.
   version 3 cutover;
 - every platform mapping contains Trixie values for each exposed architecture and uses the request
   release rather than a local default;
-- a missing code-owned release mapping produces the platform-update error before backend mutation,
-  while a missing Proxmox site mapping names the exact configuration key;
-- the provisioning wrapper preserves both typed release-map errors, their remediation hints, and
-  provisional-row unwind;
+- a missing code-owned release mapping produces the platform-update error before backend mutation;
+- pending-create preflight receives core's concrete release, while an empty or legacy Proxmox
+  catalog remains loadable and a missing current mapping fails with the exact configuration key
+  before boundary secret resolution, authenticated `runup`, provisional-row insertion, or backend
+  access;
+- Proxmox repeats the same mapping lookup inside `create`, and the manager preserves typed create
+  failures, their remediation hints, and provisional-row unwind;
 - every create path passes the request to the shared verifier and returns its matching live result
   before success;
 - a nonconforming platform that returns a mismatched result leaves one failed, uninitialized row

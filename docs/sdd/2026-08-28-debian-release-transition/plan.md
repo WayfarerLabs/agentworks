@@ -395,6 +395,8 @@ the product cannot ship consistently within the agreed scope.
 - [x] Pass the concrete core-selected release through pending-create preflight, resolve the Proxmox
       template through one shared lookup, and fail before secret resolution or authenticated `runup`
       when the mapping is missing.
+- [x] Correct the governing HLA to record the operation-specific preflight seam and the Proxmox
+      setup script's no-selector current-release behavior.
 - [ ] Reconcile current `main`, run the complete focused and repository gates, and obtain exact-head
       project, correctness, and complexity reviews before the signed round 2 of 4 ready handoff.
 
