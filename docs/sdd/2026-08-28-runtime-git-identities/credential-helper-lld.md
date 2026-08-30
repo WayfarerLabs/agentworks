@@ -295,10 +295,11 @@ class UserCredentialState:
 
 Core collects `(known_node_name, static_scopes, payload)` tuples; the provider does not echo the
 name core already knows. `build_user_credential_state(materials)` renders the private per-credential
-records, generation-owned dispatcher, helper file set, and include. Each tuple uses a safe generated
-relative name unrelated to the credential name. Stored values never enter the dispatcher or Git
-configuration. The reconciler writes stored records mode 0600 and provider-returned helpers
-mode 0700.
+records, generation-owned dispatcher, helper file set, and include. Static scopes are frozen after
+the preparation boundary; the builder trusts them and validates only the later payload rather than
+repeating scope validation. Each tuple uses a safe generated relative name unrelated to the
+credential name. Stored values never enter the dispatcher or Git configuration. The reconciler
+writes stored records mode 0600 and provider-returned helpers mode 0700.
 
 Each stored record is the exact bounded Git credential-protocol response encoded as UTF-8:
 
@@ -415,7 +416,8 @@ For `get`:
 2. normalize the path into safe segments and strip one terminal `.git` suffix;
 3. ignore an embedded username for scope selection; provider `review_remote` remains the config-time
    home for forge-specific advisories;
-4. choose the longest matching path prefix, then the first declared host default;
+4. choose the longest matching path prefix, including the sole host default when no longer prefix
+   matches;
 5. load a stored response from the same generation, or open the selected managed helper there;
 6. close the shared-lock descriptor after the stored data is resident or the managed-helper
    descriptor is open;

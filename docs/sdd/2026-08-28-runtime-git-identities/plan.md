@@ -173,8 +173,8 @@ assert structure, behavior, state, and value containment; they do not police aut
 
 ### Phase 1 Definition of Done
 
-- Every provider config validates through the framework and produces exactly one final material
-  value from its scoped context.
+- Every provider config validates through the framework, declares one static scope set, and produces
+  exactly one final payload from its scoped context.
 - Graph edges, scoped delivery, and runup behavior follow provider declarations without core
   acquisition special cases.
 - No contract-version-2 implementation or adapter remains.
@@ -317,7 +317,10 @@ assert structure, behavior, state, and value containment; they do not police aut
       require the exact legacy helper-registration witness before removing `~/.git-credentials`;
       sanitize reconcile diagnostics; remove provider/route counts; and document target-user CLI
       identity mutability. (2026-08-30: structural and orchestration regressions cover every
-      corrected boundary; live acceptance and final delivery remain open below.)
+      corrected boundary. This supersedes the completed Phase 1/2 descriptions of a combined
+      credential-material wrapper, one required provider operation, and retained multiple-default
+      tie-breaking while preserving that history. Live acceptance and final delivery remain open
+      below.)
 - [ ] Run focused and full Python, static, lint, locked-SDD, Rulesync, website, installed-wheel, and
       live integration gates.
 - [ ] Obtain private `agentworks-reviewer`, Muntz, and generic correctness/security reviews; resolve

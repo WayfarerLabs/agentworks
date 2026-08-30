@@ -31,7 +31,11 @@ from agentworks.git_credentials.reconcile import (
     _state_archive,
     reconcile_user_git_credentials,
 )
-from agentworks.git_credentials.state import UserCredentialState, build_user_credential_state
+from agentworks.git_credentials.state import (
+    UserCredentialState,
+    build_user_credential_state,
+    validate_credential_scope_claims,
+)
 from agentworks.orchestration.secrets import ScopedSecrets
 from agentworks.plugins.azure.azdo import (
     AzDOCredentialProvider,
@@ -223,39 +227,26 @@ def test_builder_routes_longest_prefix(tmp_path: Path) -> None:
 def test_duplicate_nonempty_scope_is_rejected() -> None:
     scope = HttpsCredentialScope("github.com", ("acme",))
     with pytest.raises(ConfigError):
-        build_user_credential_state(
-            [
-                ("one", (scope,), StoredCredential("one", "one")),
-                ("two", (scope,), StoredCredential("two", "two")),
-            ]
-        )
+        validate_credential_scope_claims([("one", (scope,)), ("two", (scope,))])
 
 
 def test_duplicate_host_default_scope_is_rejected() -> None:
     scope = HttpsCredentialScope("github.com")
     with pytest.raises(ConfigError):
-        build_user_credential_state(
-            [
-                ("one", (scope,), StoredCredential("one", "one")),
-                ("two", (scope,), StoredCredential("two", "two")),
-            ]
-        )
+        validate_credential_scope_claims([("one", (scope,)), ("two", (scope,))])
 
 
 @pytest.mark.parametrize(
-    "material",
+    "scopes",
     [
-        ((), StoredCredential("user", "value")),
-        ((HttpsCredentialScope("UPPER.example"),), StoredCredential("user", "value")),
-        ((HttpsCredentialScope("example.com", ("..",)),), StoredCredential("user", "value")),
+        (),
+        (HttpsCredentialScope("UPPER.example"),),
+        (HttpsCredentialScope("example.com", ("..",)),),
     ],
 )
-def test_core_rejects_malformed_provider_scopes(
-    material: tuple[tuple[HttpsCredentialScope, ...], StoredCredential],
-) -> None:
-    scopes, payload = material
+def test_preparation_rejects_malformed_provider_scopes(scopes: tuple[HttpsCredentialScope, ...]) -> None:
     with pytest.raises(ConfigError):
-        build_user_credential_state([("bad", scopes, payload)])
+        validate_credential_scope_claims([("bad", scopes)])
 
 
 @pytest.mark.parametrize("password", ["a:b", "a@b", "a/b", "a%b", "a?b", "a#b", "a=b", r"a\b"])
@@ -887,60 +878,53 @@ def test_launchers_share_parent_handoff_while_reconciliation_is_excluded(tmp_pat
     assert _install(tmp_path, state).returncode == 0
     root = tmp_path / ".agentworks/git-credentials"
     launcher_path = root / "launch"
-    launcher = launcher_path.read_text()
-    entered = tmp_path / "parent-entered"
-    release = tmp_path / "parent-release"
-    marker = (
-        "if ! flock -s -w 10 7; then\n"
-        '    echo "agentworks: Git credential state is busy; retry the Git operation" >&2\n'
-        "    exit 1\n"
-        "fi\n"
-    )
-    instrumented = launcher.replace(
-        marker,
-        marker
-        + f"touch {shlex.quote(str(entered))}.$$\n"
-        + f"while [ ! -e {shlex.quote(str(release))} ]; do sleep 0.01; done\n",
-        1,
-    )
-    assert instrumented != launcher
-    launcher_path.write_text(instrumented)
+    lock_path = root / "lock"
 
-    processes: list[subprocess.Popen[str]] = []
-    for _ in range(2):
-        process = subprocess.Popen(
-            [str(launcher_path), "get"],
-            stdin=subprocess.PIPE,
+    def reached_stable_lock(process: subprocess.Popen[str]) -> bool:
+        descriptor = Path(f"/proc/{process.pid}/fd/9")
+        try:
+            return descriptor.samefile(lock_path)
+        except FileNotFoundError:
+            return False
+
+    with lock_path.open("r+") as external_lock:
+        fcntl.flock(external_lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        launchers: list[subprocess.Popen[str]] = []
+        for _ in range(2):
+            launcher = subprocess.Popen(
+                [str(launcher_path), "get"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=os.environ | {"HOME": str(tmp_path)},
+            )
+            assert launcher.stdin is not None
+            launcher.stdin.write(_request("example.com"))
+            launcher.stdin.close()
+            launchers.append(launcher)
+
+        deadline = time.monotonic() + 2
+        while not all(reached_stable_lock(launcher) for launcher in launchers) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert all(reached_stable_lock(launcher) for launcher in launchers)
+
+        reconcile = subprocess.Popen(
+            ["bash", "-c", _RECONCILE_SCRIPT.replace("@DESIRED@", "empty")],
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             env=os.environ | {"HOME": str(tmp_path)},
         )
-        assert process.stdin is not None
-        process.stdin.write(_request("example.com"))
-        process.stdin.close()
-        processes.append(process)
+        time.sleep(0.1)
+        assert reconcile.poll() is None
 
-    deadline = time.monotonic() + 2
-    while len(list(tmp_path.glob("parent-entered.*"))) < 2 and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert len(list(tmp_path.glob("parent-entered.*"))) == 2
-
-    fast_reconcile = _RECONCILE_SCRIPT.replace("flock -x -w 30 7", "flock -x -w 0.1 7")
-    blocked = subprocess.run(
-        ["bash", "-c", fast_reconcile.replace("@DESIRED@", "empty")],
-        text=True,
-        env=os.environ | {"HOME": str(tmp_path)},
-        capture_output=True,
-        check=False,
-    )
-    assert blocked.returncode == 21
-
-    release.touch()
-    for process in processes:
-        assert process.wait(timeout=2) == 0
-        assert process.stdout is not None
-        assert process.stdout.read() == "username=user\npassword=value\n\n"
+    for launcher in launchers:
+        assert launcher.wait(timeout=2) == 0
+        assert launcher.stdout is not None
+        assert launcher.stdout.read() == "username=user\npassword=value\n\n"
+    assert reconcile.wait(timeout=2) == 0
 
 
 def test_desired_state_representations_and_scripts_do_not_contain_stored_values() -> None:
@@ -1016,6 +1000,34 @@ def test_reconciliation_is_idempotent_and_empty_removes_owned_state_only(tmp_pat
     ).stdout.splitlines()
     assert "~/.agentworks/git-credentials/current/config.gitconfig" not in includes
     assert includes == ["~/.operator-gitconfig"]
+
+
+@pytest.mark.skipif(shutil.which("zsh") is None, reason="zsh is not installed")
+def test_legacy_cleanup_runs_under_zsh_without_mutating_command_lookup(tmp_path: Path) -> None:
+    subprocess.run(
+        ["git", "config", "--global", "--add", "credential.helper", "!~/.agentworks-git-cred-helper.sh"],
+        env=os.environ | {"HOME": str(tmp_path)},
+        check=True,
+    )
+    legacy_paths = (
+        tmp_path / ".git-credentials",
+        tmp_path / ".agentworks-git-cred-helper.sh",
+        tmp_path / ".agentworks-git-scopes.gitconfig",
+        tmp_path / ".agentworks-git-cred-warn.sh",
+    )
+    for legacy_path in legacy_paths:
+        legacy_path.write_text("legacy")
+
+    result = subprocess.run(
+        ["zsh", "-c", _RECONCILE_SCRIPT.replace("@DESIRED@", "empty")],
+        text=True,
+        env=os.environ | {"HOME": str(tmp_path)},
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert all(not legacy_path.exists() for legacy_path in legacy_paths)
 
 
 def test_empty_reconciliation_removes_directory_shaped_legacy_paths(tmp_path: Path) -> None:

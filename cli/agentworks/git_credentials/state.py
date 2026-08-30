@@ -82,13 +82,12 @@ def _validate_scope(host: str, path_prefix: tuple[str, ...]) -> None:
 
 def validate_credential_scope_claims(
     claims: Iterable[tuple[str, tuple[HttpsCredentialScope, ...]]],
-) -> tuple[tuple[str, tuple[HttpsCredentialScope, ...]], ...]:
+) -> None:
     """Validate static provider scopes and reject every exact collision."""
     from agentworks.capabilities.git_credential.base import HttpsCredentialScope
 
-    validated = tuple(claims)
     claimed: dict[tuple[str, tuple[str, ...]], str] = {}
-    for credential_name, scopes in validated:
+    for credential_name, scopes in claims:
         _require_line_value(credential_name, label="name", max_bytes=255)
         if not isinstance(scopes, tuple):
             raise ConfigError(f"git credential {credential_name!r} scopes must be a tuple")
@@ -107,7 +106,6 @@ def validate_credential_scope_claims(
                     f"scope {scope.host}{suffix}; scopes must be unambiguous"
                 )
             claimed[key] = credential_name
-    return validated
 
 
 def _stored_record(username: str, password: str) -> bytes:
@@ -140,13 +138,11 @@ def build_user_credential_state(
     bindings = tuple(materials)
     if not bindings:
         return UserCredentialState("", "", (), ())
-    validated_scopes = validate_credential_scope_claims((name, scopes) for name, scopes, _payload in bindings)
 
     routes: list[_Route] = []
     payloads: dict[str, bytes] = {}
 
-    for declaration_order, (credential_name, _scopes, payload) in enumerate(bindings):
-        scopes = validated_scopes[declaration_order][1]
+    for declaration_order, (credential_name, scopes, payload) in enumerate(bindings):
         credential_id = f"credential-{declaration_order:04d}"
         if isinstance(payload, StoredCredential):
             payload_kind: Literal["stored", "helper"] = "stored"

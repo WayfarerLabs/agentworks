@@ -181,11 +181,11 @@ remove_config_value() {
 }
 
 remove_owned_path() {
-    path=$1
-    if [ -L "$path" ] || [ -d "$path" ]; then
-        rm -rf -- "$path"
+    owned_path=$1
+    if [ -L "$owned_path" ] || [ -d "$owned_path" ]; then
+        rm -rf -- "$owned_path"
     else
-        rm -f -- "$path"
+        rm -f -- "$owned_path"
     fi
 }
 

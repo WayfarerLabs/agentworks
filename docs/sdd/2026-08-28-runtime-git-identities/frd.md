@@ -204,10 +204,10 @@ when the desired credential list is empty or every secret-backed credential was 
 The reconciler MUST rebuild the complete Agentworks-owned state from desired provider material. On
 an empty desired state it MUST remove every provably Agentworks-owned helper, static-token store,
 generation, Git include, and exact include reference left by current or legacy Agentworks versions.
-starts. A generic `credential.helper=store` value that is indistinguishable from operator
-configuration MAY remain. The released `~/.git-credentials` path is removed only when the exact
-legacy Agentworks helper registration was present at the start of reconciliation; without that
-ownership witness, the path and its contents MUST remain untouched.
+A generic `credential.helper=store` value that is indistinguishable from operator configuration MAY
+remain. The released `~/.git-credentials` path is removed only when the exact legacy Agentworks
+helper registration was present at the start of reconciliation; without that ownership witness, the
+path and its contents MUST remain untouched.
 
 Repeated initialization with the same desired inputs MUST be idempotent. Removing, adding, changing
 scope, or changing an acquisition mode MUST converge in one run without preserving stale material.
