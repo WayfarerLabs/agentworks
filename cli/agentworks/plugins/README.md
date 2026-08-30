@@ -214,6 +214,11 @@ exact vm-site field. A successful result may omit the Tailscale IP only when joi
 discovery did not; the manager then performs IP-only rediscovery and Tailscale SSH verification.
 There is no older-contract adapter.
 
+An operator-owned release catalog also overrides the pure `validate_create_release(release)` hook.
+Core calls it with the concrete selection before resolving secrets or running authenticated platform
+readiness, while `create()` repeats the lookup before mutation. Do not turn that operation-specific
+requirement into load-time rejection when the same site can still operate existing VMs.
+
 A site then writes `platform: {name: example-cloud, region: us-west-2}`, and `api_token` resolves to
 the `example-cloud-token` secret because the field was omitted. An OMITTED reference field and an
 explicit `null` both mean "the owner-templated default", so leaving it out is how an operator takes

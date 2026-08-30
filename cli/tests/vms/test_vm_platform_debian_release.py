@@ -91,6 +91,26 @@ def test_legacy_proxmox_scalar_populates_only_bookworm() -> None:
         )
 
 
+def test_proxmox_create_release_validation_preserves_config_loadability() -> None:
+    platform = ProxmoxPlatform(
+        "lab",
+        {
+            "name": "proxmox",
+            "api_url": "https://pve.example.test:8006",
+            "node": "pve1",
+            "token_id": "agentworks@pam!agw",
+            "token_secret": "proxmox-token",
+        },
+    )
+
+    assert platform.config.template_vmids == {}
+    with pytest.raises(ConfigError) as caught:
+        platform.validate_create_release(DebianRelease.TRIXIE)
+
+    assert caught.value.entity_kind == "vm-site"
+    assert caught.value.entity_name == "lab"
+
+
 def test_shared_verifier_passes_the_expected_release_to_the_core_probe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

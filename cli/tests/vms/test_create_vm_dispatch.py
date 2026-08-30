@@ -769,3 +769,44 @@ def test_proxmox_token_resolves_end_to_end(
     assert captured["token"] == "pve-token-value"
     # Rollback removed the row after the failed provisioning.
     assert db.get_vm("pvm") is None
+
+
+def test_proxmox_missing_create_release_fails_before_resolve_and_runup(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+    resolve_counter: list[list[str]],
+) -> None:
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+
+    site = proxmox_site()
+    platform_config = site.spec["platform"]
+    assert isinstance(platform_config, dict)
+    platform_config.pop("template_vmids")
+    monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
+    config = make_config(PLUGINS_ENABLED, manifests=[site])
+
+    monkeypatch.setattr(
+        ProxmoxPlatform,
+        "runup",
+        lambda *args, **kwargs: pytest.fail("runup reached with a missing create release"),
+    )
+    monkeypatch.setattr(
+        ProxmoxPlatform,
+        "create",
+        lambda *args, **kwargs: pytest.fail("create reached with a missing create release"),
+    )
+
+    with pytest.raises(ConfigError) as caught:
+        vm_manager.create_vm(
+            db,
+            config,
+            name="missing-release",
+            site="proxmox",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert caught.value.entity_kind == "vm-site"
+    assert caught.value.entity_name == "proxmox"
+    assert resolve_counter == []
+    assert db.get_vm("missing-release") is None

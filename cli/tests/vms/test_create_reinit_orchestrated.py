@@ -133,7 +133,7 @@ def test_create_graph_derives_from_declared_resources(make_config, db: Database)
     creds = tuple(git_credential_node(registry, name) for name in admin.git_credentials)
     template = vm_template_node(resolve_template(registry, None))
     site = vm_site_node(registry, "proxmox")
-    pending = pending_vm_node(db, "nvm", template, site, creds)
+    pending = pending_vm_node(db, "nvm", DebianRelease.TRIXIE, template, site, creds)
     nodes = walk(pending)
 
     assert [n.key for n in nodes] == [

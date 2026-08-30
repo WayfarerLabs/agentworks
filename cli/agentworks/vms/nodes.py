@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
+    from agentworks.debian import DebianRelease
     from agentworks.git_credentials.nodes import GitCredentialNode
     from agentworks.orchestration.node import Node
     from agentworks.resources.reference import ResourceReference
@@ -363,12 +364,14 @@ class PendingVMNode:
         self,
         db: Database,
         name: str,
+        debian_release: DebianRelease,
         template: VMTemplateNode,
         site: VMSiteNode,
         credentials: tuple[GitCredentialNode, ...],
     ) -> None:
         self._db = db
         self._name = name
+        self._debian_release = debian_release
         self._template = template
         self._site = site
         self._credentials = credentials
@@ -387,7 +390,8 @@ class PendingVMNode:
     def config_secret_refs(self) -> tuple[ResourceReference, ...]:
         return ()
 
-    def preflight(self, ctx: RunContext) -> None: ...
+    def preflight(self, ctx: RunContext) -> None:
+        self._site.platform.validate_create_release(self._debian_release)
 
     def runup(self, ctx: RunContext) -> None: ...
 
@@ -479,6 +483,7 @@ def vm_template_node(tmpl: ResolvedVMTemplate) -> VMTemplateNode:
 def pending_vm_node(
     db: Database,
     name: str,
+    debian_release: DebianRelease,
     template: VMTemplateNode,
     site: VMSiteNode,
     credentials: tuple[GitCredentialNode, ...],
@@ -488,4 +493,4 @@ def pending_vm_node(
     with (the resolved template, the chosen site, the admin template's
     declared credentials), and every edge holder shares those same
     objects (one object per node)."""
-    return PendingVMNode(db, name, template, site, credentials)
+    return PendingVMNode(db, name, debian_release, template, site, credentials)

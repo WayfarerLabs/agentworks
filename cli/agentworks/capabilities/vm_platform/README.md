@@ -308,6 +308,13 @@ reads live). An omitted IP means discovery failed after a successful join, not t
 incomplete. Phase A retries only `tailscale ip -4` before it records the address and verifies
 Tailscale SSH.
 
+Before the create boundary resolves secrets, the pending VM node calls
+`validate_create_release(release)` with that same concrete core selection. The hook is pure and
+offline. Its default is a no-op for code-owned catalogs; a platform with an operator-owned catalog
+overrides it so a missing create entry fails before authenticated `runup`. `create()` resolves the
+mapping again before mutation. This timing does not make the current artifact a load-time config
+requirement, so a legacy site can still load for operations on existing VMs.
+
 Add a platform-specific **input** by adding a field to `ProvisionRequest`, not by changing the
 protocol. But note the opposite pattern is also right: purely internal translation stays inside the
 platform. Azure's VM-size selection (mapping the request's `cpus`/`memory_gib`/`disk_gib` onto a
@@ -703,12 +710,14 @@ YAML block scalar, remote shell). Two traps that have already occurred:
    the non-constructing `not_ready(config)` handles per-site tool checks (Lima with no `limactl`).
    `legacy_platform_metadata` is needed only when pre-migration rows must be mapped.
 5. Only the transport and lifecycle hooks required by the backend override their defaults.
-6. `create()` resolves `request.debian_release` before mutation, completes Tailscale bootstrap,
-   verifies the live guest through the shared release probe, and returns the observed release, or
-   raises after rollback. Use `bootstrap_script.py` / `cloud_init.py` for the create-time payload
-   instead of a platform-specific reinvention. Keep any provider-retained payload credential-free
-   and deliver the resolved key through the platform's ephemeral mechanism. Return an optional IP
-   only after a successful join; Phase A owns IP-only rediscovery and Tailscale SSH verification.
+6. An operator-owned release catalog overrides `validate_create_release(release)` with a pure
+   lookup, while `create()` resolves `request.debian_release` again before mutation, completes
+   Tailscale bootstrap, verifies the live guest through the shared release probe, and returns the
+   observed release or raises after rollback. Use `bootstrap_script.py` / `cloud_init.py` for the
+   create-time payload instead of a platform-specific reinvention. Keep any provider-retained
+   payload credential-free and deliver the resolved key through the platform's ephemeral mechanism.
+   Return an optional IP only after a successful join; Phase A owns IP-only rediscovery and
+   Tailscale SSH verification.
 7. Dispatch, idempotency, and, where applicable, template-render tests belong under
    `cli/tests/vms/`; the next section lists the existing references.
 8. The implementation is checked against the preceding platform-development considerations before it

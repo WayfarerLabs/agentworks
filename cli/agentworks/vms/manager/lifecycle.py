@@ -279,7 +279,15 @@ def create_vm(
 
     template_node = vm_template_node(vm_tmpl)
     site_node = vm_site_node(registry, site)
-    pending_vm = pending_vm_node(db, vm_name, template_node, site_node, cred_nodes)
+    creation_release = CURRENT_DEBIAN_RELEASE
+    pending_vm = pending_vm_node(
+        db,
+        vm_name,
+        creation_release,
+        template_node,
+        site_node,
+        cred_nodes,
+    )
     nodes = walk(pending_vm)
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
@@ -459,7 +467,7 @@ def create_vm(
             try:
                 request = ProvisionRequest(
                     vm_name=vm_name,
-                    debian_release=CURRENT_DEBIAN_RELEASE,
+                    debian_release=creation_release,
                     hostname=hostname,
                     system_slug=slug,
                     admin_username=resolved_admin_username,

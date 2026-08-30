@@ -1,6 +1,6 @@
 # Plan: Debian Release Transition
 
-- Status: Ready-triggered feedback round 1 corrections complete; ready handoff pending
+- Status: Ready-triggered feedback round 2 correction in progress
 - Date: 2026-08-28
 - Governing artifacts: `frd.md`, `hla.md`, `prior-art-research.md`, and `migration-strategy.md`
 
@@ -385,8 +385,18 @@ the product cannot ship consistently within the agreed scope.
       retain the approved interactive and legacy-site boundaries.
 - [x] Replace the duplicate remote journal scanner with one temporarily staged execution of the
       canonical guest journal implementation.
-- [ ] Reconcile current `main`, run the complete gate and independent review lanes on the corrected
+- [x] Reconcile current `main`, run the complete gate and independent review lanes on the corrected
       exact head, then publish the signed round 1 of 4 ready handoff for external revalidation.
+
+### Ready-triggered feedback round 2
+
+- [x] Critically accept operation-specific early Proxmox mapping validation while preserving config
+      loading and best-effort existing-VM operations for legacy sites.
+- [x] Pass the concrete core-selected release through pending-create preflight, resolve the Proxmox
+      template through one shared lookup, and fail before secret resolution or authenticated `runup`
+      when the mapping is missing.
+- [ ] Reconcile current `main`, run the complete focused and repository gates, and obtain exact-head
+      project, correctness, and complexity reviews before the signed round 2 of 4 ready handoff.
 
 - [ ] After live certification or an authenticated disposition, create `locked.md`, record the final
       evidence, and leave the exact green reviewed head ready to merge.

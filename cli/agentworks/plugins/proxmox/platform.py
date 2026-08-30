@@ -128,7 +128,8 @@ class ProxmoxPlatform(VMPlatform):
         overview="""
         Clones a prepared template VM on a Proxmox VE cluster and configures it through
         cloud-init. The release-keyed template (`template_vmids.<release>`) has to exist on the node already;
-        agentworks does not build it.
+        agentworks does not build it. A create missing the core-selected release fails during
+        preflight, before the API token is delivered to the platform or authenticated.
 
         The API token value is a secret, `proxmox-token` unless the site names another,
         resolved through the configured source chain like any other secret. The token id is not a
@@ -286,14 +287,20 @@ class ProxmoxPlatform(VMPlatform):
             )
         return int(vmid)
 
-    def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
-        node = self.config.node
-        template_vmid = operator_owned_release_value(
+    def _template_vmid(self, release: DebianRelease) -> int:
+        return operator_owned_release_value(
             self.config.template_vmids,
-            request.debian_release,
+            release,
             site_name=self.site_name,
             field="template_vmids",
         )
+
+    def validate_create_release(self, release: DebianRelease) -> None:
+        self._template_vmid(release)
+
+    def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
+        node = self.config.node
+        template_vmid = self._template_vmid(request.debian_release)
         pool = self.config.pool
         storage = self.config.storage
 

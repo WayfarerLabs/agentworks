@@ -200,6 +200,20 @@ class VMPlatform(Capability):
         """
         return {}
 
+    def validate_create_release(self, release: DebianRelease) -> None:
+        """Validate create-time release inputs before secret resolution.
+
+        This operation-specific preflight is pure and offline. Platforms whose
+        operator-owned configuration maps releases to artifacts override it so
+        a missing entry fails before ``runup`` authenticates to the backend.
+        The default is a no-op because code-owned catalogs ship with the
+        implementation and remain covered by conformance tests and ``create``.
+
+        ``create`` still resolves the same value before mutation. This early
+        boundary improves failure ordering without making a current-release
+        artifact a load-time requirement for sites used only by existing VMs.
+        """
+
     @abstractmethod
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
         """Create the backend-side VM.

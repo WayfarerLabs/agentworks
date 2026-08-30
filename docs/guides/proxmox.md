@@ -132,6 +132,10 @@ you gave the current template. `node` is the node name in the Proxmox UI sidebar
 old `template_vmid` scalar remains readable only as a legacy Bookworm mapping and cannot satisfy
 current Trixie creation.
 
+A site without `template_vmids.trixie` remains loadable for best-effort operations on existing VMs.
+New VM creation validates the concrete core-selected release during preflight and fails before the
+command's secret-resolution phase or Proxmox API authentication when that mapping is missing.
+
 For 0.13 configuration migration, see [Upgrading to 0.14](upgrading-to-0.14.md).
 
 The API token value is an ordinary agentworks secret named `proxmox-token` (auto-declared; rename
