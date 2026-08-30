@@ -349,6 +349,7 @@ class JournalStore:
 
     def read_states(self, retained_pairs: Sequence[UpgradePair]) -> dict[UpgradePair, JournalState]:
         """Read and validate the retained journal inventory without mutation."""
+        _reject_symlink_ancestors(self.root)
         try:
             self.root.lstat()
         except FileNotFoundError:

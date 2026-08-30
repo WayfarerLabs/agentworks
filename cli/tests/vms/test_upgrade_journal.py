@@ -189,6 +189,16 @@ def test_inventory_rejects_a_dangling_symlink_root(tmp_path, pair: UpgradePair) 
         JournalStore(root).read_states((pair,))
 
 
+def test_inventory_rejects_a_symlinked_root_ancestor(tmp_path, pair: UpgradePair) -> None:
+    actual = tmp_path / "actual"
+    actual.mkdir()
+    linked = tmp_path / "linked"
+    linked.symlink_to(actual, target_is_directory=True)
+
+    with pytest.raises(JournalError):
+        JournalStore(linked / "debian-upgrades").read_states((pair,))
+
+
 def test_one_nonblocking_lock_excludes_every_other_writer(tmp_path, pair: UpgradePair) -> None:
     store = JournalStore(tmp_path)
     store.initialize(pair, {})
