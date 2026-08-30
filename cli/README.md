@@ -537,9 +537,12 @@ recovery or recreate the VM when that path cannot connect.
 
 Non-fatal initialization failures (packages, dotfiles) produce a `partial` status rather than
 aborting. Fatal failures prompt for deletion or reinit. Use `vm describe` to view the full event
-log, current VM and admin declarations, recorded applied facts, and structural drift. Workspace,
-agent, and session `describe` commands show the same current-declaration and stored-instance-layer
-facts without inventing applied evidence those lifecycles do not record.
+log, current VM and admin declarations, recorded lifecycle evidence, and structural drift. The
+hardware evidence is the provisioning request associated with successful creation, not a provider
+observation of realized hardware. Workspace, agent, and session `describe` commands show the same
+current-declaration and stored-instance-layer facts without inventing lifecycle evidence those
+operations do not record. Human describe keeps the complete current spec compact by omitting
+per-leaf Value sources; JSON describe and template `resource show` retain full provenance.
 
 ## Shell Completion
 

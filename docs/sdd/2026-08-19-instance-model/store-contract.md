@@ -2,7 +2,7 @@
 
 - Status: Accepted and implemented by R2; desired-overlay policy extended by R4
 - Date: 2026-08-23
-- Revised: 2026-08-29
+- Revised: 2026-08-30
 - Requirements: R2 and the storage boundary required by R3 through R5 in `frd.md`
 - Basis: `database-assessment.md`
 
@@ -22,23 +22,24 @@ the physical envelope as a general-purpose bag.
 
 The additive `instance_records` table has this semantic shape:
 
-| Column            | Contract                                                                                          |
-| ----------------- | ------------------------------------------------------------------------------------------------- |
-| `instance_kind`   | One of `vm`, `workspace`, `agent`, or `session`.                                                  |
-| `instance_name`   | The stable name used by the owning instance table.                                                |
-| `record_type`     | A private repository discriminator, initially `desired-overlay` or `applied-state`.               |
-| `record_key`      | `spec` for the one desired declaration record, or an enumerated applied-slice key.                |
-| `payload_version` | A positive version selected by the consuming domain's codec.                                      |
-| `value_json`      | Canonical JSON object encoding of the domain payload.                                             |
-| `recorded_at`     | UTC time at which this value became authoritative.                                                |
-| `operation`       | The lower-kebab lifecycle operation that established applied state; null for desired declaration. |
+| Column            | Contract                                                                                         |
+| ----------------- | ------------------------------------------------------------------------------------------------ |
+| `instance_kind`   | One of `vm`, `workspace`, `agent`, or `session`.                                                 |
+| `instance_name`   | The stable name used by the owning instance table.                                               |
+| `record_type`     | A private repository discriminator, initially `desired-overlay` or `applied-state`.              |
+| `record_key`      | `spec` for the one desired declaration record, or an enumerated applied-slice key.               |
+| `payload_version` | A positive version selected by the consuming domain's codec.                                     |
+| `value_json`      | Canonical JSON object encoding of the domain payload.                                            |
+| `recorded_at`     | UTC time at which this value became authoritative.                                               |
+| `operation`       | The lower-kebab lifecycle operation that established the snapshot or evidence; null for desired. |
 
 The primary key is `(instance_kind, instance_name, record_type, record_key)`. An index beginning
 with `(instance_kind, record_type)` serves batch reads. The migration creates no rows. Existing VM
-hardware columns remain the authority for as-provisioned values, but they do not prove when or by
-which operation those values were applied. They therefore do not justify synthesizing new applied
-provenance for historic instances. Current declarations and template resolution are not applied
-evidence either.
+hardware columns remain the authority for the provisioning request Agentworks recorded, not for
+provider-observed realized hardware. Only a `hardware-provenance` marker associates those row values
+with a successful post-R3 create operation and timestamp. The columns alone therefore do not justify
+synthesizing new lifecycle evidence for historic instances. Current declarations and template
+resolution are not lifecycle evidence either.
 
 Database constraints enforce the desired-overlay and applied-state envelopes but do not impose
 operation semantics on unknown future private record types. Their owning consumers define those
@@ -91,9 +92,10 @@ The repository boundary uses three frozen lifecycle value records:
 - `DesiredOverlayRecord(instance_kind, instance_name, payload, recorded_at)` is desired declaration
   only. Its absence means no instance overlay. A payload may contain multiple typed declaration
   slots when its owner lifecycle selects them together, as VM creation does for VM and admin.
-- `AppliedStateSlice(instance_kind, instance_name, key, payload, operation, recorded_at)` is
-  evidence established by one completed lifecycle operation. Its key uses the closed
-  `AppliedStateKey` type. Its absence means not recorded.
+- `AppliedStateSlice(instance_kind, instance_name, key, payload, operation, recorded_at)` is a
+  configuration-snapshot slice established by one completed lifecycle operation, including any
+  slice-specific evidence that its work succeeded. Its key uses the closed `AppliedStateKey` type.
+  Its absence means not recorded.
 
 Inspection adds closed carriers without exposing a generic record API:
 
@@ -152,8 +154,8 @@ and admin declaration slots together through this projection.
 `replace_applied_slices` canonical-encodes every supplied payload before writing. It then inserts or
 replaces the supplied slice keys with one operation and one timestamp in a single transaction.
 Slices not established by that operation remain unchanged. An empty input is a no-op, not a request
-to erase unrelated evidence. This is what lets VM reinit replace only the facts it actually
-reapplied and keeps workspace repair from manufacturing convergence.
+to erase unrelated evidence. This is what lets VM reinit replace only the lifecycle evidence it
+establishes and keeps workspace repair from manufacturing convergence.
 
 `clear_applied_slice` accepts one registered applied key valid for the supplied instance kind and
 deletes exactly that key for one instance. An already-absent key is a no-op. This narrow mutation
@@ -192,7 +194,8 @@ A new consumer is complete only when it adds all of the following together:
 2. A private record-type discriminator owned by the repository.
 3. Closed, consumer-named repository methods with the minimum required query shapes.
 4. Persisted-boundary tests for absent, valid, malformed, and unsupported-version data.
-5. Lifecycle or declaration integration that writes only facts the operation can prove.
+5. Lifecycle or declaration integration that writes only successful configuration-snapshot slices
+   the operation establishes, including any slice-specific outcome evidence.
 6. Permanent documentation updates beside the code.
 
 A new slice within an existing record type also adds its repository-owned closed key and valid
@@ -213,5 +216,6 @@ The store does not provide:
 - arbitrary filters or caller-authored SQL;
 - backfill of applied state;
 - drift comparison or remediation;
+- provider-realized hardware observation or consistency checking;
 - SSH identity selection or agent behavior; or
 - full transactional convergence for unrelated legacy CRUD.

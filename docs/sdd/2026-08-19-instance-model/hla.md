@@ -2,7 +2,7 @@
 
 - Status: R1-R4 and merge strategy merged; R5 implemented, final verification pending
 - Date: 2026-08-23
-- Last revised: 2026-08-29
+- Last revised: 2026-08-30
 - FRD: [frd.md](./frd.md)
 - Assessment: [database-assessment.md](./database-assessment.md)
 - Store contract: [store-contract.md](./store-contract.md)
@@ -11,10 +11,10 @@
 
 ## Architectural summary
 
-The feature adds one database-backed desired/applied instance-state seam, one shared typed layer
-runner with schema-directed field policy, domain-owned payload codecs, and projections into existing
-lifecycle and inspection surfaces. It does not add an ORM, a second declaration frontend, a generic
-record API, or a new platform-default layer.
+The feature adds one database-backed desired/lifecycle-evidence instance-state seam, one shared
+typed layer runner with schema-directed field policy, domain-owned payload codecs, and projections
+into existing lifecycle and inspection surfaces. It does not add an ORM, a second declaration
+frontend, a generic record API, or a new platform-default layer.
 
 ```text
 template declarations --> existing inheritance linearization -+
@@ -26,23 +26,25 @@ optional DB overlay ----------------------------------------+--> typed layer run
                                                                           v
                                                                current resolved spec
                                                                   |              |
-                                                        lifecycle apply      R5 inspection
+                                                        lifecycle work       R5 inspection
                                                                   |
-                                         proven successful slices only
+                                      successful configuration snapshots only
                                                                   |
                                                                   v
 Database connection --> InstanceStateRepository --> instance_records
        |                       |                           |
        |                       +--> desired overlay        +--> versioned JSON objects
-       |                       +--> applied slices         +--> operation + time
+       |                       +--> applied-state slices   +--> operation + time
        |                       +--> typed deletion
        |
        +--> existing instance rows, transactions, read snapshots, migration safety
 ```
 
 The physical table is generic only as storage. Its consumer surface is closed and enumerated.
-Desired overlays and applied facts remain distinct even when they share the table. An overlay is
-current intent; only a successful lifecycle operation can establish applied state.
+Desired overlays and lifecycle evidence remain distinct even when they share the table. An overlay
+is current intent; only a successful lifecycle operation can establish a configuration snapshot.
+Some slices additionally require evidence that their corresponding work succeeded. The private
+storage discriminator remains `applied-state`.
 
 ## R2: instance state repository
 
@@ -60,7 +62,7 @@ record_key       spec or a repository-enumerated slice key
 payload_version  positive domain payload version
 value_json       canonical JSON object
 recorded_at      authoritative UTC timestamp
-operation        lifecycle provenance for applied state; null for desired declaration
+operation        lifecycle provenance for the snapshot or evidence; null for desired declaration
 ```
 
 An index beginning with `(instance_kind, record_type)` serves doctor and show batch reads. No row is
@@ -107,7 +109,8 @@ applied.
 Standalone writes commit before returning. Inside `Database.transaction()` they defer to the outer
 boundary. Applied-slice replacement encodes the complete input first, then inserts or replaces the
 supplied keys with one operation and timestamp in one transaction. It leaves unrelated slices
-untouched. This is partial replacement by proof, not whole-instance convergence.
+untouched. This is partial replacement by successful lifecycle evidence, not whole-instance
+convergence.
 
 VM, workspace, agent, and session delete paths remove corresponding records in the same transaction.
 VM deletion also removes state for the agents, workspaces, and sessions it deletes; workspace
@@ -313,16 +316,22 @@ the declaration slot and names sorted top-level fields without echoing values, b
 data may include plaintext environment values. This is desired-state feedback, not a claim that
 remote work applied the declaration.
 
-## R3: applied state and SSH identity
+## R3: lifecycle evidence and SSH identity
 
 ### Domain slices
 
 Domain payloads live outside `agentworks.db`. The first VM codecs cover:
 
-- an applied-provenance marker for row-backed hardware that a post-R3 VM create actually
-  established, without copying the CPU, memory, disk, or swap values out of the VM row; and
+- a `hardware-provenance` storage marker associating row-backed CPU, memory, disk, and swap request
+  values with a successful post-R3 VM create, without copying those values out of the VM row; and
 - provisioned SSH identity, including the configured private-key reference and either an
   authoritative public fingerprint or a recorded unverifiable outcome.
+
+Together, the hardware marker and row values are the successful provisioning request snapshot: what
+Agentworks asked the platform to create. They are not provider-observed hardware and do not detect
+provider normalization or inconsistency. R5 projects this private storage key as the public
+`hardware-request` lifecycle-evidence fact and compares its recorded request with the current
+declaration.
 
 Absence and recorded-unverifiable are different. Absence means no operation recorded this slice.
 Recorded-unverifiable means an operation applied the configured public identity but the configured
@@ -365,8 +374,9 @@ The terminal database checkpoint groups:
 
 - final init status;
 - the terminal VM event; and
-- only the applied slices whose typed outcomes prove success, plus removal of prior SSH evidence
-  when the remote write outcome or final configured identity became uncertain.
+- only the successful configuration-snapshot slices whose typed outcomes satisfy their required
+  evidence, plus removal of prior SSH evidence when the remote write outcome or final configured
+  identity became uncertain.
 
 The existing status and event methods become transaction-aware only where required for this
 composition. Remote work cannot be atomic with SQLite. If the remote key write succeeds and the
@@ -397,7 +407,7 @@ ordinary live-SSH compositions are the first consumers; direct transport call si
 coverage rather than assuming one boundary owns every connection. Drift guidance names restoration
 or recreation rather than implying native shell changes persisted evidence.
 
-## R5: resolved and applied projections
+## R5: resolved declaration and lifecycle-evidence projections
 
 Template `resource show` gains an optional typed resolution hook on the four inheriting kinds and
 the independently selectable `admin-template` kind. The generic show service projects resolved
@@ -408,11 +418,12 @@ combine:
 
 - current template plus overlay resolution;
 - the persisted desired overlay;
-- row-backed applied hardware values plus applied slices from the same database snapshot; and
+- row-backed recorded hardware-request values plus applied-state slices from the same database
+  snapshot; and
 - structural comparison states: not recorded, unverifiable, match, or drift.
 
 Each describe collector reads the registry publication, owner rows, overlay, current resolution, and
-applied records in one explicit database snapshot. Describe uses its existing writable command
+lifecycle records in one explicit database snapshot. Describe uses its existing writable command
 database, so the registry publisher's nested snapshot composes without a second SQLite `BEGIN`. The
 retained live graph owns relationships, not resolved values, so current declaration is resolved from
 the same registry and typed overlay inside that snapshot. Cheap offline host-readiness checks may
@@ -420,15 +431,19 @@ run during registry finalization; remote, provider, secret, prompt, and runtime 
 only after it closes. Doctor reads applied SSH slices in one batch, derives the current configured
 private identity once per run, and reports per-VM state without an N+1 query.
 
-JSON v1 retains every existing field and adds optional tagged objects. Human and JSON forms project
-the same structural facts. Resolved specs include configured secret references only, never resolved
-secret values.
+JSON v1 retains every existing field and adds tagged objects. Current producers always include
+`instance_state` for the four live description commands, while additive JSON v1 compatibility still
+allows older producers to omit it. Human and JSON forms project the same structural facts. Resolved
+specs include configured secret references only, never resolved secret values. Human describe keeps
+the complete current spec but omits exhaustive per-leaf value-source rows; its JSON projection and
+template `resource show` retain complete provenance.
 
 A missing or removed template is unresolved current declaration, not the built-in default. A later
 edit to the selected VM template can change currently resolved hardware while the VM row still
-describes provisioned hardware. The applied marker supplies operation and time proof without
-duplicating those values. Its absence on a historic row remains visibly not recorded. VM reinit does
-not provision hardware again and must not create or replace that marker merely because other
+describes the provisioning request recorded at create. The hardware marker associates that request
+with the successful create operation and time without duplicating its values. It does not assert
+provider-realized hardware. Its absence on a historic row remains visibly not recorded. VM reinit
+does not provision hardware again and must not create or replace that marker merely because other
 initialization steps succeeded.
 
 Historic VMs receive no synthesized SSH evidence. Ordinary canonical SSH paths refuse them until one
@@ -439,17 +454,17 @@ reinitializing or recreating the VM.
 
 ## Failure and integrity behavior
 
-| Condition                                          | Outcome                                                      |
-| -------------------------------------------------- | ------------------------------------------------------------ |
-| No persisted slice                                 | Visible not recorded                                         |
-| Valid recorded-unverifiable SSH payload            | Visible unverifiable, neither match nor drift                |
-| Malformed persisted envelope or payload            | `StateError` and database-damage diagnostic                  |
-| Present record whose owner no longer exists        | Orphan database-damage diagnostic                            |
-| Current key differs from applied fingerprint       | Drift and clean preflight refusal                            |
-| Authorized-key reconciliation warns/fails          | No SSH applied slice written                                 |
-| Lifecycle remote success, database checkpoint fail | Conservative old/absent state; retry through lifecycle       |
-| Candidate spec validation or reference check fails | No desired record written                                    |
-| Agent declaration persisted, reinit later fails    | Desired retained; applied old/absent; lifecycle is retryable |
+| Condition                                          | Outcome                                                       |
+| -------------------------------------------------- | ------------------------------------------------------------- |
+| No persisted slice                                 | Visible not recorded                                          |
+| Valid recorded-unverifiable SSH payload            | Visible unverifiable, neither match nor drift                 |
+| Malformed persisted envelope or payload            | `StateError` and database-damage diagnostic                   |
+| Present record whose owner no longer exists        | Orphan database-damage diagnostic                             |
+| Current key differs from recorded fingerprint      | Drift and clean preflight refusal                             |
+| Authorized-key reconciliation warns/fails          | No SSH applied slice written                                  |
+| Lifecycle remote success, database checkpoint fail | Conservative old/absent state; retry through lifecycle        |
+| Candidate spec validation or reference check fails | No desired record written                                     |
+| Agent declaration persisted, reinit later fails    | Desired retained; evidence old/absent; lifecycle is retryable |
 
 ## Deliberate boundaries
 
@@ -462,6 +477,7 @@ This architecture does not:
 - create YAML instance manifests or a second instance authority;
 - add removal semantics absent from template inheritance;
 - remediate drift;
+- observe provider-realized hardware or detect provider-side normalization or inconsistency;
 - resolve ssh-agent identity selection;
 - force `IdentitiesOnly=yes`; or
 - design integration or artifact payloads before their owning waves.

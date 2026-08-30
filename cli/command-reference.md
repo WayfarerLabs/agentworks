@@ -242,13 +242,13 @@ These frozen JSON v1 vocabularies do not expand when domain enums gain members. 
 projection, `unknown` is the stable sentinel for an invalid persisted value and never echoes that
 stored value.
 
-The VM, workspace, agent, and session description records append the optional JSON v1
-`instance_state` object:
+The VM, workspace, agent, and session description records append the JSON v1 `instance_state`
+object. Current producers always include it; older JSON v1 producers may omit this additive field:
 
 ```text
 {
   declarations: {SLOT: {selection: {kind, name}, instance_spec, current}...},
-  applied: {facts: [fact...]},
+  lifecycle_evidence: [fact...],
   comparisons: [comparison...],
   unconsumed_records: [record...],
   issues: [issue...]
@@ -258,13 +258,18 @@ The VM, workspace, agent, and session description records append the optional JS
 `instance_spec` is tagged `absent`; `present` with `recorded_at` and the canonical partial `spec`;
 or `unavailable` with reason `malformed` or `unsupported-version`. `current` is the resolved shape
 documented for `resource show`, or `{status: "unresolved", selection: {kind, name}, reason}` where
-reason is `missing-selection` or `instance-spec-unavailable`. A fact is `{key, status}` with status
-`not-recorded` or `unavailable`, or status `recorded` plus `recorded_at`, `operation`, and a typed
-`value` object. Comparisons are `{key, state, differences?}`; differences are
-`{field, applied, current}`. Unconsumed records carry only safe type, key, version, and timestamp
+reason is `missing-selection`, `instance-spec-unavailable`, or `registry-unavailable`. A fact is
+`{key, status}` with status `not-recorded` or `unavailable`, or status `recorded` plus
+`recorded_at`, `operation`, and a typed `value` object. Each entry is a successful lifecycle
+operation's configuration-snapshot slice and may include evidence that its corresponding work
+succeeded. Comparisons are `{key, state, differences?}`; differences are
+`{field, recorded, current}`. Unconsumed records carry only safe type, key, version, and timestamp
 metadata. An issue contains a closed `code` plus optional `slot` or `record_key`. These explicit
 inspection commands can show authored plaintext declaration values, but never resolved secret
-values; handle their human and JSON output as sensitive.
+values; handle their human and JSON output as sensitive. Human describe renders the complete current
+spec without the exhaustive per-leaf Value sources. JSON describe and both human and JSON template
+`resource show` retain full provenance. Human describe calls the recorded-fact section
+`Lifecycle evidence`.
 
 `agw vm describe NAME --output json` uses command `vm.describe` and data `{vm, issues}`. `vm` has
 this ordered shape:
@@ -273,7 +278,7 @@ this ordered shape:
 {name, created_at, site, platform, backend, observed_status, status_disposition,
  operator_stopped, hostname, system_slug, system_slug_state, template, admin_template,
  admin_username, provisioning_status, initialization_status, tailscale_host, last_seen_at,
- provisioned_resources, live_resources, agents, workspaces, events, instance_state?}
+ provisioned_resources, live_resources, agents, workspaces, events, instance_state}
 ```
 
 `platform`, `backend`, `observed_status`, `status_disposition`, `system_slug`, `template`,
@@ -281,7 +286,9 @@ this ordered shape:
 `observed_status` is `running`, `stopped`, `deallocated`, or `unknown`; `status_disposition` is
 `manual` or `idle` only for stopped or deallocated VMs; and `system_slug_state` is `set`,
 `declined`, or `unset`. `provisioned_resources` is `{cpus, memory_gib, disk_gib, swap_gib}` with
-nullable integers. `live_resources` is null or this record:
+nullable integers. It is the provisioning request recorded by Agentworks, not provider-observed
+realized hardware. Human VM describe labels these persisted values `Requested`. `live_resources` is
+null or this record:
 
 ```text
 {cpus, load_average, memory_total, memory_used, memory_percent, swap_total,
@@ -301,9 +308,11 @@ echoing them. These arrays retain database order. `issues[]` is `{source, code}`
 source is `site_lookup`, `preflight`, `secret_resolution`, or `platform_status`, and code is always
 `unavailable`. Issues do not carry backend text or exception details.
 
-VM instance state has `vm` and `admin` declaration slots. Its defined applied facts are
-`hardware-provenance` and `ssh-identity`; their comparisons use `not-recorded`, `unverifiable`,
-`match`, or `drift` only when the available evidence supports that state.
+VM instance state has `vm` and `admin` declaration slots. Its defined lifecycle-evidence facts are
+`hardware-request` and `ssh-identity`; their comparisons use `not-recorded`, `unverifiable`,
+`match`, or `drift` only when the available evidence supports that state. `hardware-request` is the
+recorded request associated with successful VM creation, compared with the current declaration. It
+does not claim provider-observed realized hardware.
 
 ```bash
 agw vm list --output json
@@ -316,8 +325,8 @@ agw vm describe build-vm --output json
 `{workspaces: [{name, vm_name, template, created_at}]}`. `template` is nullable and order remains
 workspace name order after filtering. `agw workspace describe NAME --output json` uses
 `workspace.describe` and `{workspace}`; workspace is
-`{name, vm_name, template, path, created_at, sessions, agents, instance_state?}`. Session entries
-are `{name, template, mode, agent_name}` and agent entries are `{name, linux_user}`. `template` and
+`{name, vm_name, template, path, created_at, sessions, agents, instance_state}`. Session entries are
+`{name, template, mode, agent_name}` and agent entries are `{name, linux_user}`. `template` and
 `agent_name` are nullable, and mode is `admin`, `agent`, or `unknown`. An invalid persisted mode
 maps to `unknown` without exposing its raw value in this workspace JSON projection.
 
@@ -326,8 +335,14 @@ maps to `unknown` without exposing its raw value in this workspace JSON projecti
 boolean, and grant entries are `{workspace_name, grant_type}` where grant type is `explicit`,
 `implicit`, or `both`. Agents retain VM then agent name order.
 `agw agent describe NAME --output json` uses `agent.describe` and `{agent}`; agent is
-`{name, vm_name, linux_user, template, grant_all, created_at, explicit_grants, sessions, instance_state?}`,
+`{name, vm_name, linux_user, template, grant_all, created_at, explicit_grants, sessions, instance_state}`,
 with nullable `template` and session entries `{name, template, workspace_name}`.
+
+Workspace and agent describe preserve their database-backed facts, including the stored instance
+spec, when configuration or registry construction fails with an expected operator-data error. In
+that degraded result, the current declaration is unresolved with reason `registry-unavailable` and
+the issue list names the affected declaration slot. Unexpected programming or infrastructure
+failures still fail the command.
 
 #### Session and console JSON schemas
 
@@ -343,7 +358,7 @@ Rows retain workspace then session name order. `agw session describe NAME --outp
 
 ```text
 {name, workspace_name, vm_name, template, harness_integration, mode, agent_name,
- status, pid, created_at, updated_at, consoles, instance_state?}
+ status, pid, created_at, updated_at, consoles, instance_state}
 ```
 
 `pid` is a positive integer or null. Opaque harness state, socket paths, and boot identifiers are
@@ -389,7 +404,7 @@ An instance-state check adds this optional value-free object:
  recorded_at, comparison, owner_exists}
 ```
 
-Nullable fields remain null when unsafe or irrelevant. `fact_type` is `applied-comparison`,
+Nullable fields remain null when unsafe or irrelevant. `fact_type` is `lifecycle-comparison`,
 `coverage`, `malformed-record`, `orphan-record`, or `unconsumed-record`. Doctor never includes
 record payloads or resolved secret values.
 
@@ -584,7 +599,7 @@ ask again. Non-interactive runs never prompt (a later interactive create still a
 Changes to config (new packages, different install commands, etc.) are picked up automatically. It
 consumes both stored VM and admin instance specs but cannot change or clear either one.
 
-VMs created before SSH applied-state tracking have no synthesized identity evidence. Ordinary
+VMs created before SSH lifecycle-evidence tracking have no synthesized identity evidence. Ordinary
 canonical SSH commands refuse that unknown state until one successful `agw vm reinit <name>` proves
 and records the configured identity. Run that reinit after upgrading while the installed key still
 works. If it no longer works, try `agw vm shell <name> --platform` where supported, restore the

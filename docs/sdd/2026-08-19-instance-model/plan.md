@@ -4,7 +4,7 @@
 
 - Status: R1-R4 and merge strategy merged; R5 implemented, final verification pending
 - Date: 2026-08-23
-- Last revised: 2026-08-29
+- Last revised: 2026-08-30
 - Requirements: [frd.md](./frd.md)
 - R1 assessment: [database-assessment.md](./database-assessment.md)
 - R2 contract: [store-contract.md](./store-contract.md)
@@ -286,14 +286,14 @@ policy at arbitrary depth; object replacement is an honest subtree boundary; cap
 their config models rather than executable merge hooks; current shipped fields retain their
 behavior; and no database migration, payload-version change, or new operator syntax is introduced.
 
-## Phase 4: R3 applied instance state and SSH proving slice
+## Phase 4: R3 lifecycle evidence and SSH proving slice
 
 - [x] Complete the authoritative OpenSSH research and low-level design in `prior-art-research.md`
       and `applied-state-ssh-lld.md`, including the password-protected-key, transaction,
       comparison-boundary, backup, and ssh-agent non-goal decisions.
-- [x] Add domain-owned versioned codecs for row-backed hardware provenance and provisioned SSH
-      identity slices, without storing secrets, private key bytes, passphrases, or duplicate CPU,
-      memory, disk, and swap values.
+- [x] Add domain-owned versioned codecs for the row-backed successful hardware-request snapshot and
+      provisioned SSH identity slices, without storing secrets, private key bytes, passphrases, or
+      duplicate CPU, memory, disk, and swap values.
 - [x] Parse the authoritative public blob directly from `openssh-key-v1` private files and derive
       the OpenSSH SHA-256 fingerprint without consulting an adjacent public key or spawning a
       passphrase prompt.
@@ -306,9 +306,10 @@ behavior; and no database migration, payload-version change, or new operator syn
 - [x] Validate the configured public/private pair on reinit after cheap declaration checks and
       before activation, secret resolution, or transport work, while retaining the fresh validation
       at the final remote write.
-- [x] Capture only slices proven by successful VM create and reinit operations, remove stale SSH
-      proof after an unproven remote write or unstable final identity, and write lifecycle-row plus
-      applied-state changes in one honest transaction where they compose.
+- [x] Capture only successful configuration-snapshot slices whose required evidence is established
+      by VM create and reinit operations, remove stale SSH proof after an unproven remote write or
+      unstable final identity, and write lifecycle-row plus applied-state changes in one honest
+      transaction where they compose.
 - [x] Document the one-time reinit required for historic VMs and emit cautious recovery guidance
       immediately when the final admin key write leaves SSH evidence unproven.
 - [x] Add preflight comparison before SSH transport and structural diagnostic facts for not
@@ -333,8 +334,10 @@ guidance. Reinit now refuses an invalid configured identity before activation or
 release guide plus permanent CLI documentation explain the one successful reinit historic VMs need
 and the recovery choices when their installed key no longer works.
 
-Definition of done: the identity used at apply time is recorded and compared with the identity the
-current transport will present, and no password-protected-key path regresses.
+Definition of done: the identity established by the successful authorized-key write is recorded and
+compared with the identity the current transport will present, the successful VM provisioning
+request is recorded without claiming provider-observed hardware, and no password-protected-key path
+regresses.
 
 ## Phase 5: R5 resolved-spec and drift surfaces
 
@@ -342,28 +345,31 @@ current transport will present, and no password-protected-key path regresses.
       key, or list-item provenance sufficient to distinguish declared, inherited, defaulted, and
       overlaid contributors truthfully.
 - [x] Extend existing VM, workspace, agent, and session `describe` with current declared resolution,
-      applied slices, and explicit not recorded, match, drift, or unverifiable comparison state in
-      one structural read snapshot.
+      lifecycle evidence, and explicit not recorded, match, drift, or unverifiable comparison state
+      in one structural read snapshot.
 - [x] Add doctor batch reads, owner-existence validation for orphaned records, visibility for
       unconsumed newer-release records, and structural SSH drift checks without opening a sidecar or
       repeating one query per instance.
-- [x] Preserve JSON v1 fields and add only optional tagged data; keep human and JSON facts
-      reconciled without prose-policing tests.
-- [x] Prove effective CPU, memory, disk, and swap are available before `vm create`; template and
-      instance provenance; applied/current comparison; batch query behavior; and no overlay ceremony
-      in the simple case.
+- [x] Preserve JSON v1 fields, add tagged `instance_state` to every current live-description
+      producer under additive compatibility, and keep human and JSON facts reconciled without
+      prose-policing tests.
+- [x] Prove effective CPU, memory, disk, and swap requests are available before `vm create`;
+      template and instance provenance; recorded/current comparison; batch query behavior; and no
+      overlay ceremony in the simple case.
 - [x] Update permanent resource, machine-output, doctor, command-reference, and guide collateral.
 
-Definition of done: an operator or agent can inspect effective pre-mutation specs and honest
-post-apply drift, including visible ignorance, from the supported CLI surfaces.
+Definition of done: an operator or agent can inspect effective pre-mutation specs and honest drift
+between current declarations and recorded lifecycle evidence, including visible ignorance, from the
+supported CLI surfaces. Hardware evidence describes the successful provisioning request, not
+provider-realized hardware.
 
 ## Phase 6: complete verification and closeout
 
 - [x] Run focused tests after every phase and the full gate on the complete exact head.
-- [x] Run equal-capability project review, independent fresh-eyes review, and the saga review
+- [ ] Run equal-capability project review, independent fresh-eyes review, and the saga review
       campaign scaled to the final blast radius; resolve every material finding.
 - [x] Run isolated-home CLI acceptance for overlay declaration, resolved template and instance show,
-      doctor tri-state output, malformed state, and JSON v1 compatibility.
+      doctor comparison output, malformed state, and JSON v1 compatibility.
 - [ ] Run live VM validation for create-time capture, matching preflight, deliberate identity drift,
       password-protected OpenSSH keys, safe cleanup, and independent residue verification.
 - [ ] Promote all load-bearing contract and operator teaching into permanent docs, confirm no

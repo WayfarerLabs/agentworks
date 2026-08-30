@@ -36,21 +36,28 @@ closed diagnostic code, never the decoder exception or traceback. The fleet read
 deterministically and computes owner existence in the same snapshot, without one query per owner.
 Domain payload codecs remain outside the database package.
 
-Desired overlays express current intent. Applied slices are evidence from a completed lifecycle
-operation. Applied slices use a repository-owned closed key type whose valid instance-kind/key pairs
-are checked on writes and persisted reads. The current VM-only keys are `hardware-provenance` and
-`ssh-identity`; workspace, agent, and session currently accept none. `replace_applied_slices`
+Desired overlays express current intent. Applied-state slices store successful configuration
+snapshots from completed lifecycle operations, including any slice-specific evidence that the work
+succeeded. They use a repository-owned closed key type whose valid instance-kind/key pairs are
+checked on writes and persisted reads. The current VM-only storage keys are `hardware-provenance`
+and `ssh-identity`; workspace, agent, and session currently accept none. `replace_applied_slices`
 replaces only the supplied slice keys, with one operation and one timestamp, and preserves all
-unrelated facts. Empty replacement is a no-op. Existing instances have no synthesized records:
-absence means not recorded until a lifecycle operation establishes state.
+unrelated evidence. Empty replacement is a no-op. Existing instances have no synthesized records:
+absence means not recorded until a lifecycle operation establishes evidence.
+
+Operator-facing inspection groups these records under `lifecycle_evidence`. The `applied-state`
+record type and `hardware-provenance` key are private storage vocabulary and do not become public
+fact names.
 
 Applied operations use the same bounded lower-kebab grammar as applied keys. Inspection classifies
 an unsafe persisted operation as malformed instead of allowing it into human or machine output.
 
 The version-1 VM payloads are deliberately compact and non-secret:
 
-- `hardware-provenance` is `{}`. The row itself proves that VM create reached its successful
-  lifecycle checkpoint; row-backed CPU, memory, disk, and swap values are not duplicated.
+- `hardware-provenance` is `{}`. The marker associates the row-backed CPU, memory, disk, and swap
+  request with a successful VM create checkpoint; those values are not duplicated. This is the
+  provisioning request Agentworks expected the platform to create, not provider-observed realized
+  hardware. Inspection projects it publicly as `hardware-request` lifecycle evidence.
 - A verified `ssh-identity` is
   `{"status":"verified","private_key_ref":"...","fingerprint":"SHA256:..."}`.
 - An identity whose recognized private-key format cannot expose its public identity
@@ -62,9 +69,9 @@ different from `unverifiable`: it means no successful lifecycle checkpoint curre
 write. Ordinary canonical SSH operations refuse absent or drifted evidence before transport, while
 recorded-unverifiable evidence may proceed without inventing a match. VM reinit alone may establish
 an absent SSH slice; it still refuses known drift and replaces or clears only the SSH fact it can
-prove. VM create establishes both the hardware marker and, after a successful authorized-key write
-whose retained private identity remains readable and stable through the local checkpoint, the SSH
-slice. Recovery and cleanup roots such as rekey and VM delete remain available without this
+prove. VM create establishes both the hardware-request marker and, after a successful authorized-key
+write whose retained private identity remains readable and stable through the local checkpoint, the
+SSH slice. Recovery and cleanup roots such as rekey and VM delete remain available without this
 ordinary-operation proof.
 
 Both known applied payload codecs treat an unsupported payload version as version skew, distinct
@@ -113,7 +120,8 @@ A new consumer adds all of these together:
 2. A private record-type discriminator in `InstanceStateRepository`.
 3. Consumer-named repository methods for only the required reads and writes.
 4. Boundary tests for absent, valid, malformed, and unsupported-version data.
-5. Lifecycle or declaration integration that records only facts the operation can prove.
+5. Lifecycle or declaration integration that records only successful configuration-snapshot slices
+   the operation establishes, including any slice-specific outcome evidence.
 
 A new slice on an existing record type adds its closed key and valid owner-kind pairing in
 repository code; callers cannot mint keys by spelling a new string. This extension remains backward

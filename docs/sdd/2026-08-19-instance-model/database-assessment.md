@@ -2,7 +2,7 @@
 
 - Status: Revised for saga-lead re-review
 - Date: 2026-08-21
-- Last revised: 2026-08-23
+- Last revised: 2026-08-30
 - Requirement: R1 in `frd.md`
 - Scope: the current persistence estate and the storage needs of R3 through R5
 - Code basis: schema version 31
@@ -23,26 +23,27 @@ not create SQL bypasses or justify an ORM. The smallest R2 is recognition of `Da
 existing repository boundary, plus one concrete, typed instance-state repository inside the
 `agentworks.db` package for the new cross-kind record.
 
-The new repository should expose consumer-shaped methods for desired instance overlays, applied
-state, and drift-oriented batch reads. Its persisted carrier should identify an instance by kind and
-name, discriminate the record slice, carry a versioned JSON payload, and record operation and time.
-The public API should remain typed; callers should never read or write arbitrary records or SQL.
-This gives wave 4 a stable place for integration applied-state without inventing integration fields
-now, and it leaves room for later artifact-ownership records without designing those records here.
+The new repository should expose consumer-shaped methods for desired instance overlays, lifecycle
+evidence, and drift-oriented batch reads. Its persisted carrier should identify an instance by kind
+and name, discriminate the record slice, carry a versioned JSON payload, and record operation and
+time. The private storage discriminator for lifecycle evidence is `applied-state`. The public API
+should remain typed; callers should never read or write arbitrary records or SQL. This gives wave 4
+a stable place for integration applied-state without inventing integration fields now, and it leaves
+room for later artifact-ownership records without designing those records here.
 
 Four findings constrain the design:
 
-1. The VM row already stores one applied slice: `insert_vm()` writes the resolved CPU, memory, disk,
-   and swap values at create time, and no update method rewrites them
+1. The VM row already stores one configuration slice: `insert_vm()` writes the requested CPU,
+   memory, disk, and swap values at create time, and no update method rewrites them
    (`cli/agentworks/vms/manager/lifecycle.py:169-181`,
    `cli/agentworks/vms/manager/lifecycle.py:341-359`, `cli/agentworks/db/database.py:292-374`).
-   Those columns do not record when or by which operation the values were applied, and no current
-   column covers the SSH identity or anything reinit reapplies. Under the no-backfill ruling,
-   historic rows do not acquire synthesized provenance and remain not recorded for the new
-   applied-state comparison.
-2. Missing applied records are ordinary unknowns. They are not matches and not drift. Workspace
-   repair is not full convergence, so it cannot create a complete applied record merely because it
-   returned successfully.
+   Those columns record the provisioning request, not provider-observed realized hardware. They do
+   not establish when or by which successful operation the request was used, and no current column
+   covers the SSH identity or anything reinit reapplies. Under the no-backfill ruling, historic rows
+   do not acquire synthesized provenance and remain not recorded for the new comparison.
+2. Missing lifecycle records are ordinary unknowns. They are not matches and not drift. Workspace
+   repair is not full convergence, so it cannot create a complete lifecycle snapshot merely because
+   it returned successfully.
 3. `Database.transaction()` is not a general composition guarantee today. Only methods using
    `_commit_unless_in_tx()` defer commits, while many older methods call `commit()` directly
    (`cli/agentworks/db/database.py:134-186`, `cli/agentworks/db/database.py:292-393`). New state
@@ -90,7 +91,7 @@ the current estate.
 | Table                    | Current shape                                                                                                                                                                                                                                                                               | Readers and query shapes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Writers and mutation shapes                                                                                                                                                                                                                                                                                                                        |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `schema_version`         | `version`, `applied_at`                                                                                                                                                                                                                                                                     | Database open, schema inspection, backup qualification, and restore validation read `MAX(version)` (`cli/agentworks/db/database.py:87-114`, `cli/agentworks/db/backup.py:512-521`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `_migrate()` creates the table and appends one row after each successful version (`cli/agentworks/db/database.py:232-286`).                                                                                                                                                                                                                        |
-| `vms`                    | `name`, `site`, `template`, `extra_packages`, `provisioning_status`, `init_status`, `ssh_public_key`, `tailscale_host`, `cpus`, `memory_gib`, `disk_gib`, `swap_gib`, `admin_username`, `hostname`, `platform_metadata`, `operator_stopped`, `created_at`, `last_seen_at`, `admin_template` | Exact name and ordered list; resource usage filters list results by template, admin template, or site; managers join through workspace ownership; doctor lists all; VM inspection and backup read one VM and related rows (`cli/agentworks/db/database.py:328-334`, `cli/agentworks/vms/kinds.py:102-111`, `cli/agentworks/vms/kinds.py:158-168`, `cli/agentworks/vms/kinds.py:213-218`, `cli/agentworks/doctor_state.py:93-115`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | VM create inserts the as-provisioned row before backend creation; initializer and power operations update statuses, host, platform metadata, and stop state; delete manually removes dependents first (`cli/agentworks/vms/manager/lifecycle.py:341-366`, `cli/agentworks/db/database.py:292-393`).                                                |
+| `vms`                    | `name`, `site`, `template`, `extra_packages`, `provisioning_status`, `init_status`, `ssh_public_key`, `tailscale_host`, `cpus`, `memory_gib`, `disk_gib`, `swap_gib`, `admin_username`, `hostname`, `platform_metadata`, `operator_stopped`, `created_at`, `last_seen_at`, `admin_template` | Exact name and ordered list; resource usage filters list results by template, admin template, or site; managers join through workspace ownership; doctor lists all; VM inspection and backup read one VM and related rows (`cli/agentworks/db/database.py:328-334`, `cli/agentworks/vms/kinds.py:102-111`, `cli/agentworks/vms/kinds.py:158-168`, `cli/agentworks/vms/kinds.py:213-218`, `cli/agentworks/doctor_state.py:93-115`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | VM create inserts the provisioning-request row before backend creation; initializer and power operations update statuses, host, platform metadata, and stop state; delete manually removes dependents first (`cli/agentworks/vms/manager/lifecycle.py:341-366`, `cli/agentworks/db/database.py:292-393`).                                          |
 | `workspaces`             | `name`, `vm_name`, `template`, `workspace_path`, `linux_group`, `created_at`                                                                                                                                                                                                                | Exact name; ordered list, optionally by VM; counts by VM and agent; resource usage filters the list by template; sessions and grants resolve workspace ownership (`cli/agentworks/db/database.py:433-478`, `cli/agentworks/workspaces/kinds.py:69-77`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Workspace create and copy insert after remote realization; rehome updates path; delete removes sessions and grants before the row (`cli/agentworks/workspaces/realize.py:114-126`, `cli/agentworks/db/database.py:416-460`).                                                                                                                       |
 | `agents`                 | `name`, `vm_name`, `linux_user`, `created_at`, `template`, `grant_all`                                                                                                                                                                                                                      | Exact name; ordered list, optionally by VM; resource usage filters by template; grant and session flows look up agent ownership and use (`cli/agentworks/db/database.py:499-538`, `cli/agentworks/agents/kinds.py:80-88`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Agent create inserts after remote realization; reinit can change the selected template; grants toggle `grant_all`; delete removes the row after remote cleanup (`cli/agentworks/agents/realize.py:129-143`, `cli/agentworks/agents/manager/lifecycle.py:452-462`, `cli/agentworks/db/database.py:482-530`).                                        |
 | `agent_workspace_grants` | `agent_name`, `workspace_name`, `grant_type`, `session_name`, `created_at`                                                                                                                                                                                                                  | Existence counts; lists by agent; distinct workspace names; grant-type aggregation; explicit-granter join to agents; counts by workspace (`cli/agentworks/db/database.py:586-660`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Grant commands insert and delete explicit rows; session create/delete manages implicit rows; agent and workspace deletion cascade or remove related rows (`cli/agentworks/db/database.py:542-584`, `cli/agentworks/agents/grants.py:81-192`).                                                                                                      |
@@ -246,15 +247,16 @@ record and its codecs in one concrete `InstanceStateRepository` beside `Database
 and transaction ownership controlled by `Database`. Do not add a protocol, unit of work, generic
 query builder, or second connection.
 
-### P5: the VM row mixes applied hardware with legacy columns
+### P5: the VM row mixes requested hardware with legacy columns
 
 `vms.cpus`, `memory_gib`, `disk_gib`, and `swap_gib` are the opposite of dead compatibility fields:
-VM create writes the resolved provisioning values once, and no update path rewrites them
+VM create writes the resolved provisioning request once, and no update path rewrites it
 (`cli/agentworks/vms/manager/lifecycle.py:169-181`,
 `cli/agentworks/vms/manager/lifecycle.py:341-359`, `cli/agentworks/db/database.py:292-374`). They
-are the current authority for as-provisioned hardware. Copying those values into a second writable
-applied-state payload would create two sources of truth whose disagreement would be
-indistinguishable from the drift R3 exists to report.
+are the current authority for what Agentworks requested, not for provider-observed realized
+hardware. Copying those values into a second writable applied-state payload would create two sources
+of truth whose disagreement would be indistinguishable from the declaration drift R3 exists to
+report.
 
 `vms.extra_packages`, `vms.ssh_public_key`, and `vms.last_seen_at` remain in the version-31 shape
 (`cli/agentworks/db/migrations.py:635-647`). `insert_vm()` writes none of them
@@ -264,12 +266,13 @@ indistinguishable from the drift R3 exists to report.
 caller. The live VM inspector still renders `last_seen_at` when present
 (`cli/agentworks/vms/manager/inspect.py:654-655`).
 
-Recommendation: keep the VM row as the applied hardware-value authority. R3 records the missing
-operation and time proof for new hardware application, and R5 composes that proof with the row
-values. It does not duplicate the values. Historic rows receive no provenance backfill and remain
-not recorded under the operator ruling. Never repurpose the legacy columns for R3. Removing
-write-dead columns is reasonable only if the design phase prices the table rebuild and test trim as
-cheaper than carrying them; it is not a prerequisite. The deferred rebuild is tracked in
+Recommendation: keep the VM row as the provisioning-request value authority. R3 records the missing
+operation and time evidence that a post-R3 create succeeded with that request, and R5 composes the
+marker with the row values. It does not duplicate the values or claim provider-realized hardware.
+Historic rows receive no provenance backfill and remain not recorded under the operator ruling.
+Never repurpose the legacy columns for R3. Removing write-dead columns is reasonable only if the
+design phase prices the table rebuild and test trim as cheaper than carrying them; it is not a
+prerequisite. The deferred rebuild is tracked in
 [issue 634](https://github.com/WayfarerLabs/agentworks/issues/634) with each current reader and
 writer.
 
@@ -286,7 +289,7 @@ state in the same transaction as the owner row. That requires converting the fou
 paths to transaction-aware commit and is a justified R2 cleanup, not an unrelated transaction
 rewrite. It should not introduce a synthetic universal instance table merely to obtain a foreign
 key. Owner-scoped reads may remain resilient to unrelated corruption, but repository validation or
-doctor must report every orphaned record as database damage. An absent applied record is a
+doctor must report every orphaned record as database damage. An absent lifecycle record is a
 legitimate unknown; a present record with no owner is an invariant violation.
 
 ### P7: the database test estate is costly and contains inherited prose pins
@@ -324,28 +327,31 @@ surfaces remain the simplification effort's responsibility unless this effort re
 
 ## Storage needs of R3 through R5
 
-### R3: applied instance state
+### R3: successful lifecycle snapshots and evidence
 
 The VM vertical slice needs:
 
 - exact lookup by `(instance_kind, instance_name, record_type, record_key)`;
-- atomic replacement of the slices proven by one successful operation;
+- atomic replacement of the successful configuration-snapshot slices established by one operation,
+  including any slice-specific outcome evidence;
 - a normalized, versioned JSON value so the stored effective spec survives model evolution;
 - `recorded_at` and an operation discriminator such as `vm-create` or `vm-reinit`;
 - batch listing by instance kind and record type for doctor and show surfaces;
 - typed decoding that distinguishes absent, present, and malformed records; and
 - deletion tied to instance lifecycle without assuming that every historic row has state.
 
-Applied state is sliced rather than one all-or-nothing document. A VM create can record operation
-and time proof for row-backed hardware plus stored values for slices such as the trusted SSH
-identity when those become facts. Reinit replaces only what it actually reapplies. Sessions can
-later record a resume-established slice. Workspace repair records no complete applied spec unless
-its contract grows into full convergence. Absence remains unknown.
+Lifecycle evidence is sliced rather than one all-or-nothing document. A VM create can record the
+row-backed provisioning-request snapshot plus the configured SSH identity whose successful write is
+independently evidenced. Reinit replaces only the configuration snapshot it establishes. Sessions
+can later record a resume-established slice. Workspace repair records no complete lifecycle snapshot
+unless its contract grows into full convergence. Absence remains unknown.
 
-The VM hardware slice is split deliberately across existing and new storage without duplicating its
-values. The VM row remains the value authority; a new applied record supplies operation and time
-proof for hardware established after R3 ships. R5 treats a historic row with no such proof as not
-recorded rather than manufacturing provenance from `created_at` or the current template.
+The VM hardware-request slice is split deliberately across existing and new storage without
+duplicating its values. The VM row remains the request authority; a new `hardware-provenance`
+storage marker supplies operation and time evidence that a post-R3 create succeeded with that
+request. R5 projects the pair as public `hardware-request` lifecycle evidence. It treats a historic
+row with no such marker as not recorded rather than manufacturing provenance from `created_at` or
+the current template. Neither the row nor marker claims provider-observed realized hardware.
 
 The existing `_parse_vm_json()` converter is the error-quality precedent for typed decoding: absent
 or empty legacy JSON gets an explicit fallback, while malformed JSON or a wrong payload shape raises
@@ -379,21 +385,21 @@ the four current per-kind mergers named in the FRD. R1 finds no database reason 
 also provides no evidence that the merge generalization is small. Design must price that separately
 and must route R4 rather than add a fifth merge if it is too large.
 
-### R5: current and applied resolved specs
+### R5: current declarations and lifecycle evidence
 
 R5 writes nothing new. It needs:
 
 - current resolved values and per-value provenance from the registry and layer stack;
 - one exact overlay read while resolving a live instance;
-- one exact applied-state read for live-instance show;
-- batch applied-state reads for doctor drift reporting; and
-- stable tri-state comparison: not recorded, match, or drift.
+- one exact applied-state storage read for live-instance describe;
+- batch applied-state storage reads for doctor drift reporting; and
+- stable comparison states: not recorded, unverifiable, match, or drift.
 
 `resource show` already holds one read snapshot and preserves absent live state as an explicit
 source state (`cli/agentworks/resources/graph_query.py:266-301`). The repository should participate
 in that same connection and snapshot. It must not open a sidecar or a second database. Both doctor
-and live-instance show must render an absent applied record as not recorded; omitting the row would
-quietly imply agreement where the system has no evidence.
+and live-instance describe must render an absent lifecycle record as not recorded; omitting the row
+would quietly imply agreement where the system has no evidence.
 
 ## Recommended minimum repository shape
 
@@ -409,7 +415,7 @@ and JSON envelope details, but the minimum semantic fields are:
 | `payload_version`                | Select the typed decoder for the payload without colliding with the database's `schema_version` table.                                          |
 | `value_json`                     | Canonical JSON whose typed payload model and codec belong to the consuming domain.                                                              |
 | `recorded_at`                    | When the record became authoritative.                                                                                                           |
-| `operation`                      | Which lifecycle operation established applied state; nullable only where the record is desired declaration rather than an applied fact.         |
+| `operation`                      | Which lifecycle operation established the snapshot or evidence; nullable only where the record is desired declaration.                          |
 
 The natural key is `(instance_kind, instance_name, record_type, record_key)`. Add an index
 supporting `(instance_kind, record_type)` batch reads. Do not add columns for integration or
@@ -443,7 +449,8 @@ R2 should not:
 - migrate all existing CRUD merely for naming consistency;
 - add an ORM, repository protocol, generic query language, unit-of-work hierarchy, or independent
   connection pool;
-- backfill applied state from current templates, row columns, or the legacy public-key column;
+- backfill lifecycle evidence from current templates, row columns, or the legacy public-key column;
+- infer provider-realized hardware from the recorded provisioning request;
 - create a universal instance parent table solely for relational purity;
 - solve key-agent selection or change SSH transport policy; or
 - claim workspace repair is full convergence.

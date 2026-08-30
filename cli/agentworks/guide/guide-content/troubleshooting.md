@@ -17,10 +17,11 @@ capability accepts.
 ## VM and SSH connectivity
 
 `agw vm describe NAME` shows the recorded power state, Tailscale address, recent events, current
-resolved declaration, applied facts, and structural drift. `agw doctor` reports SSH identity drift,
-orphaned instance records, malformed known records, and well-formed records from a newer release.
-`agw vm verify-connection NAME` tests the canonical admin connection without starting the VM. If
-that succeeds, `agw vm shell NAME` opens the Agentworks-managed SSH path.
+resolved declaration, lifecycle evidence, and structural drift. Its hardware evidence is the
+recorded provisioning request, not provider-observed realized hardware. `agw doctor` reports SSH
+identity drift, orphaned instance records, malformed known records, and well-formed records from a
+newer release. `agw vm verify-connection NAME` tests the canonical admin connection without starting
+the VM. If that succeeds, `agw vm shell NAME` opens the Agentworks-managed SSH path.
 
 For raw SSH, the default alias is `ssh awvm--NAME`. Run `agw config sync-ssh-config` if the
 generated entry is stale; installations may configure a different alias prefix.
