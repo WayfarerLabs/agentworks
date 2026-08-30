@@ -2,7 +2,7 @@
 
 <!-- cspell:ignore sdds -->
 
-- Status: Implementation review
+- Status: Ready for merge
 - Date: 2026-08-28
 - Requirements: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
@@ -267,17 +267,17 @@ assert structure, behavior, state, and value containment; they do not police aut
 
 ## Phase 5: Live Integration and Runtime Proof
 
-- [ ] Load `integration-testing` and `agw-test-env`; inventory exact authorized GitHub and Azure
+- [x] Load `integration-testing` and `agw-test-env`; inventory exact authorized GitHub and Azure
       identities, repositories, mutation budget, cleanup, and sensitive-output controls.
-- [ ] Prove a real `gh` identity supports HTTPS clone/fetch and a reversible write through the
+- [x] Prove a real `gh` identity supports HTTPS clone/fetch and a reversible write through the
       generated helper; exercise missing/unauthed state in a disposable user home.
-- [ ] Prove a real `az` service-principal identity obtains an Azure DevOps-audience token and
+- [x] Prove a real `az` service-principal identity obtains an Azure DevOps-audience token and
       supports HTTPS clone/fetch and a reversible write through the generated helper.
-- [ ] Verify Azure organization membership/permissions and wrong-identity failures are distinguished
+- [x] Verify Azure organization membership/permissions and wrong-identity failures are distinguished
       from helper/CLI failures without leaking provider output.
 - [x] Prove per-`get` reacquisition with fake CLIs returning different values on consecutive calls;
       do not manipulate live login or cache state owned by future authentication features.
-- [ ] Stop for design revision if Azure Git or host-scoped Git config behavior disproves the LLD; do
+- [x] Stop for design revision if Azure Git or host-scoped Git config behavior disproves the LLD; do
       not add a Git upgrade, GCM dependency, or alternate transport implicitly.
 
 ### Phase 5 Definition of Done
@@ -297,7 +297,7 @@ assert structure, behavior, state, and value containment; they do not police aut
       command reference, guide concepts, CLI README, upgrade guide, and plugin documentation; the
       upgrade guide must pin the paired CLI/full-resource-directory cutover, short validation
       outage, pre-reinitialization rollback, and post-reinitialization fix-forward boundary.
-- [ ] Make the implementation's release-visible feature commit a breaking Conventional Commit and
+- [x] Make the implementation's release-visible feature commit a breaking Conventional Commit and
       add one paragraph `BREAKING CHANGE:` footer describing required structured `source`; verify
       Release Please derives exactly one breaking release-note entry. Do not edit its generated
       changelog directly or duplicate the marker through the PR title.
@@ -334,13 +334,13 @@ assert structure, behavior, state, and value containment; they do not police aut
       `gh auth status --active`, sharpen missing/unhealthy CLI recovery guidance without blocking
       helper installation, and collapse overlapping readiness tests to the ten behavioral cases that
       cover provider outcomes, transport suppression, nonfatal retention, and policy skip.
-- [ ] Run focused and full Python, static, lint, locked-SDD, Rulesync, website, installed-wheel, and
+- [x] Run focused and full Python, static, lint, locked-SDD, Rulesync, website, installed-wheel, and
       live integration gates.
-- [ ] Obtain private `agentworks-reviewer`, Muntz, and generic correctness/security reviews; resolve
+- [x] Obtain private `agentworks-reviewer`, Muntz, and generic correctness/security reviews; resolve
       material findings and rerun affected gates.
-- [ ] Hand off a complete ready implementation PR with exact-head evidence and monitor published
+- [x] Hand off a complete ready implementation PR with exact-head evidence and monitor published
       review/testing under the authorized process.
-- [ ] Before the final implementation PR merges, create `locked.md` summarizing the final contract,
+- [x] Before the final implementation PR merges, create `locked.md` summarizing the final contract,
       promoted permanent homes, live evidence, and any deliberate deviations.
 
 ### Phase 6 Definition of Done
