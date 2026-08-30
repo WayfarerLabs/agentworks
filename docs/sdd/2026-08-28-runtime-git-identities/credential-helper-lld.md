@@ -340,21 +340,40 @@ generation without returning sensitive bytes to the workstation.
 
 After building complete bytes locally, the reconciler takes a 30-second bounded exclusive `flock` on
 the stable lock. Under it, the reconciler cleans the one abandoned-stage path, stages the private
-generation, compares it to active state, atomically replaces `launch` when its current
-implementation changed, and atomically replaces `current` with GNU `mv -T` when desired state
-changed. Staging inside the lock needs no PID, lease, or ownership protocol.
+generation, compares it to active state, installs or repairs `launch` from this implementation's
+fixed bytes, and atomically replaces `current` with GNU `mv -T` when desired state changed. Staging
+inside the lock needs no PID, lease, or ownership protocol.
+
+Opening or repairing that pathname uses one short bounded bootstrap handoff on the already-open
+`~/.agentworks` directory inode. Launcher and reconciler hold that handoff only while validating the
+credential-root inode, normalizing or opening `lock`, taking the normal shared/exclusive lock, and
+revalidating both path identities. They release it before selection, mutation, or garbage
+collection. The stable `lock` file remains the sole credential-state authority held across those
+operations; the handoff only prevents corrupt-path repair from splitting callers across two lock
+inode identities. A corrupt or concurrently replaced parent/root identity fails closed. The lock
+must be a single-link regular file. The launcher rejects any other shape; the reconciler unlinks the
+managed name and creates a fresh lock without changing an externally linked inode. For an existing
+single-link lock, the reconciler restores owner read/write access before opening it, then empties
+and sets mode `0600` only through the locked, revalidated descriptor.
 
 The launcher waits at most 10 seconds for a shared lock, using file descriptor 9 in this
 implementation, then executes `current/dispatch` with Git's operation arguments unchanged. The
-dispatcher loads the selected stored value or managed-helper path from one generation before closing
-descriptor 9. Its common runtime envelope then invokes that generation-owned provider helper. CLI
-descendants cannot retain the lock. Contention fails with fixed value-safe retry guidance.
+dispatcher reads a selected stored value while holding descriptor 9. For a managed helper it opens
+the generation-owned helper on descriptor 8, closes descriptor 9, and invokes the open helper
+through `/proc/self/fd/8`. Garbage collection may unlink the inactive generation after the shared
+lock closes, but the open inode remains available to that request. CLI descendants cannot retain the
+lock. Contention fails with fixed value-safe retry guidance.
 
-The observable invariant is that one helper request reads exactly one complete generation. The
-launcher and `current` are separate atomic replacements, so this implementation must support and
-test both adjacent launcher/dispatcher pairings plus a fault between replacements. File descriptor 9
-is the present mechanism, not a public or permanently versioned ABI. No future versioned root or
-compatibility regime is specified.
+The launcher removes inherited Bash startup/tracing variables at the dispatcher exec boundary.
+Managed-helper execution puts the fixed ten-second bound around both the producer and anonymous-pipe
+consumer, so an escaped descendant retaining stdout cannot keep command substitution open. A child
+writer contains `SIGPIPE` when a helper exits without reading its request. Neither bound uses a
+credential-bearing temporary file.
+
+The observable invariant is that one helper request reads exactly one complete generation. This
+breaking cut introduces `launch` and the generation layout together, so there is no previous valid
+launcher/dispatcher pairing to support. File descriptors 8 and 9 are present mechanisms, not public
+or permanently versioned ABIs. No future versioned root or compatibility regime is specified.
 
 An activation failure leaves the prior link in place. Startup removes abandoned stages and inactive
 generations while holding the exclusive lock. A crash may leave dormant owned files but never an
@@ -397,9 +416,10 @@ For `get`:
 3. ignore an embedded username for scope selection; provider `review_remote` remains the config-time
    home for forge-specific advisories;
 4. choose the longest matching path prefix, then the first declared host default;
-5. load the selected payload from the same generation;
-6. close the shared-lock descriptor after the required data is resident;
-7. return a stored response directly, or execute the selected managed helper in the common bounded
+5. load a stored response from the same generation, or open the selected managed helper there;
+6. close the shared-lock descriptor after the stored data is resident or the managed-helper
+   descriptor is open;
+7. return a stored response directly, or execute the open managed helper in the common bounded
    envelope and relay only a syntactically valid Git credential response.
 
 For `store`, do nothing. For `erase`, retain the fixed selected-credential diagnosis but do not
@@ -460,7 +480,9 @@ Every full reconcile removes only known legacy Agentworks artifacts and values:
 Cleanup never uses unqualified `--replace-all`. A generic `credential.helper=store` installed by old
 direct add is indistinguishable from operator configuration and remains, but the owned credential
 file it read is deleted without inspection. Legacy credential bytes are disabled before new
-activation or registration cleanup. Faults may leave authentication absent, never stale-active.
+activation or registration cleanup. Cleanup never reactivates a mechanism that it has already
+disabled. A failure before disablement may leave the complete preexisting mechanism unchanged; a
+later failure may leave authentication absent until retry.
 
 For nonempty state, reconciliation activates the complete generation and adds the include before
 garbage collection. For empty state it removes the include, launcher, symlink, and generations after
@@ -537,10 +559,12 @@ names. Scoped delivery enforces that `credential_material(ctx)` cannot read beyo
 - legacy/mixed-state cleanup with unrelated helpers/includes preserved;
 - staged-write and activation faults retain one complete prior state;
 - concurrent helper/swap/cleanup and empty transitions use the same shared/exclusive lock;
-- lock timeouts and proof that managed-helper descendants cannot retain the descriptor;
-- current launch with previous dispatch and previous launch with current dispatch, plus a fault
-  between their two atomic replacements;
-- mutation-boundary fault injection, concurrent reconcilers, and abandoned-stage cleanup.
+- bounded lock timeouts, open-generation helper lifetime during cleanup, and proof that
+  managed-helper descendants cannot retain the lock descriptor;
+- staging/activation failures expose no partial new state, and cleanup never reactivates an
+  already-disabled mechanism;
+- corrupt owned-path repair, concurrent reconcilers, empty reconciliation, and abandoned-stage
+  cleanup.
 
 ### Live integration
 

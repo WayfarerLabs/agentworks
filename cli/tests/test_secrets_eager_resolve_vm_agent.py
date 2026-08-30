@@ -61,15 +61,15 @@ def test_vm_create_does_not_eager_resolve_operator_env() -> None:
     """
     import inspect
 
+    from agentworks.git_credentials import nodes as credential_nodes
     from agentworks.secrets import resolver as secrets_resolver
-    from agentworks.vms import initializer as vm_initializer
     from agentworks.vms import manager as vm_manager
     from agentworks.vms import nodes as vm_nodes
 
     # Walk the call chain explicitly so the check survives refactors.
     sources = [
         inspect.getsource(vm_manager.create_vm),
-        inspect.getsource(vm_initializer.resolve_git_credential_providers),
+        inspect.getsource(credential_nodes.git_credential_node),
         inspect.getsource(vm_nodes.VMTemplateNode),
         inspect.getsource(secrets_resolver.Resolver),
     ]

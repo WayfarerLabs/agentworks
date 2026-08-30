@@ -78,7 +78,15 @@ class _RecordingTransport:
         self._primary_group = primary_group or LINUX_USER
         self._shell = shell
 
-    def run(self, cmd: str, *, sudo: bool = False, check: bool = True, timeout: int | None = None) -> _Result:
+    def run(
+        self,
+        cmd: str,
+        *,
+        sudo: bool = False,
+        check: bool = True,
+        timeout: int | None = None,
+        input_text: str | None = None,
+    ) -> _Result:
         self.runs.append((cmd, sudo))
         if cmd.startswith(f"id -gn {LINUX_USER}"):
             return _Result(stdout=self._primary_group)
@@ -131,7 +139,7 @@ def _run_create_on_vm(
         template,
         LINUX_USER,
         agent_name="dev",
-        git_tokens={},
+        credential_requests=(),
         logger=SSHLogger("box", "test-home-perms"),
         admin_git_force_safe_directory=True,
     )

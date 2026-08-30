@@ -1,47 +1,29 @@
-"""Base interface for git credential providers.
+"""Provider contract for declarative Git HTTPS credentials.
 
-A git credential provider is a capability (see ``capabilities/README.md``):
-it DECLARES the shape of its own config block as a model,
-including the secret its token comes from, checks that token against the
-host at the post-resolve ``runup`` stage, and produces the credential
-materials (``credential_lines`` / ``helper_entry``) as its op. Token
-resolution itself lives in the framework: each provider declares a
-``SecretReference`` for its token, the active source chain (env-var /
-1Password / prompt / ...) resolves it, and the token secret's health
-reports through the doctor Secrets group and ``agw secret describe
-git-token-<name>`` like any other secret.
+Providers own acquisition and forge-specific scope translation. Core gives a
+provider only its declared runtime inputs and receives final credential
+material: either a username/password pair to store or a provider-authored
+helper to invoke at Git runtime.
 """
 
 from __future__ import annotations
 
 from abc import abstractmethod
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
-
-from pydantic import Field
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, ClassVar
 
 from agentworks.capabilities.base import Capability
-from agentworks.schema import (
-    AgwModel,
-    NonEmptyStr,
-    ScalarShorthand,
-    SecretRef,
-    UnionScalarShorthand,
-)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+    from pydantic import BaseModel
 
     from agentworks.capabilities.base import RunContext
 
 
 def _http_probe(url: str, headers: dict[str, str], *, timeout: float = 5.0) -> tuple[int, bytes, dict[str, str]]:
-    """GET ``url``; returns (status, body, lowercased-headers).
-
-    HTTP error statuses are returned, not raised; network-level
-    failures raise ``OSError`` (URLError subclasses it) for the caller
-    to treat as indeterminate.
-    """
+    """GET ``url`` and return status, body, and lower-cased headers."""
     from urllib import error, request
 
     req = request.Request(url, headers=headers)
@@ -50,94 +32,69 @@ def _http_probe(url: str, headers: dict[str, str], *, timeout: float = 5.0) -> t
             return (
                 resp.status,
                 resp.read(),
-                {k.lower(): v for k, v in resp.headers.items()},
+                {key.lower(): value for key, value in resp.headers.items()},
             )
     except error.HTTPError as exc:
         body = exc.read() if hasattr(exc, "read") else b""
-        return (exc.code, body, {k.lower(): v for k, v in exc.headers.items()})
+        return (exc.code, body, {key.lower(): value for key, value in exc.headers.items()})
 
 
-def _require_line_safe_token(token: str, *, secret_name: str) -> str:
-    """Return one token safe for Git's header and line syntax."""
+def require_line_safe_credential_input(value: str, *, secret_name: str) -> str:
+    """Validate a secret before a provider uses it in line-oriented auth."""
     from agentworks.secrets.line_safety import (
         LineOrientedSecretUse,
         require_line_safe_secret,
     )
 
     return require_line_safe_secret(
-        token,
+        value,
         use=LineOrientedSecretUse.GIT_CREDENTIAL,
         secret_name=secret_name,
     )
 
 
-class SecretToken(AgwModel):
-    """Obtain this credential's token from a named secret."""
+@dataclass(frozen=True)
+class HttpsCredentialScope:
+    """One exact HTTPS host and optional segment-aware path prefix."""
 
-    scalar_shorthand: ClassVar = ScalarShorthand(annotation=str, field="secret")
-    """A bare ``token: <name>`` is this arm with ``secret`` filled."""
-
-    mode: Literal["secret"]
-
-    secret: Annotated[NonEmptyStr, SecretRef(usage="the auth token", default_template="git-token-{owner_name}")]
-    """The secret holding this credential's personal access token."""
-
-
-TokenAcquisition = Annotated[
-    SecretToken,
-    UnionScalarShorthand(discriminator="mode", arm=SecretToken),
-]
-"""How a git credential obtains its token, as a one-arm tagged union."""
-
-
-class TokenAcquiringConfig(AgwModel):
-    """The config every token-acquiring git credential provider shares."""
-
-    # Omission selects secret acquisition. Any other arm must be selected
-    # explicitly. Raw data is intentional: the owner
-    # boundary fills the secret arm's templated ``secret`` before pydantic
-    # validates it, which a constructed instance could not express.
-    token: TokenAcquisition = Field(default={"mode": "secret"})  # type: ignore[assignment]
-    """How this credential obtains its token. Defaults to the secret arm;
-    a bare secret name is that arm's shorthand."""
+    host: str
+    path_prefix: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
-class HelperEntry:
-    """What the credential helper needs to select this credential by
-    remote URL: the host it serves, the username on its store line
-    (the key back into the managed store file), and its scopes --
-    ``repos`` match the remote path exactly, ``owner`` matches its
-    first segment. No scopes = the host's default candidate.
-    """
+class StoredCredential:
+    """A final Git username/password response for private storage."""
 
-    host: str
-    username: str
-    repos: tuple[str, ...] = ()
-    owner: str | None = None
+    username: str = field(repr=False)
+    password: str = field(repr=False)
+
+
+@dataclass(frozen=True)
+class ManagedHelper:
+    """A provider-authored runtime helper and its value-safe failure hint."""
+
+    program: bytes = field(repr=False)
+    failure_hint: str
+
+
+CredentialPayload = StoredCredential | ManagedHelper
+
+
+@dataclass(frozen=True)
+class CredentialMaterial:
+    """Final provider output consumed by the generic core reconciler."""
+
+    scopes: tuple[HttpsCredentialScope, ...]
+    payload: CredentialPayload = field(repr=False)
 
 
 class GitCredentialProvider(Capability):
-    """Capability: configures git credentials for one host on VMs.
+    """Capability that produces final Git credential material.
 
-    A thin-wrapper capability (``git-credential`` over
-    ``git-credential-provider``): the ``git-credential`` consuming
-    resource names a provider in one tagged ``spec.provider`` table and
-    the rest of that table IS this config, so the instance does the real
-    work. It is constructed by the composition roots as
-    ``cls(credential_name, config, description=...)``, with the
-    capability's OWN keys and not the tag: bound to one declared
-    credential, never
-    resolved secret values (see the ``Capability`` lifecycle). The
-    declared token secret joins the operation's boundary union through
-    the holding node's ``secret_refs`` and its value arrives through
-    the context at ``runup`` / op time.
-
-    Subclasses (``GitHubCredentialProvider``, ``AzDOCredentialProvider``)
-    declare their ``config_model`` (the token secret and any scope
-    fields), implement ``_verify_token`` (the authenticated probe), and
-    implement the ops ``helper_entry`` / ``credential_lines``. Core
-    consumers validate tokens and returned material around those ops.
+    A provider validates its complete configuration, declares any secret
+    references through that model, performs provider-specific runup, and
+    translates forge concepts into generic HTTPS scopes. It never writes a
+    target user's files or Git configuration.
     """
 
     owner_kind: ClassVar[str] = "git-credential"
@@ -149,105 +106,44 @@ class GitCredentialProvider(Capability):
         *,
         description: str | None = None,
     ) -> None:
-        # An omitted config is an empty, unscoped provider config. The token
-        # secret still comes from the owner template.
         super().__init__(owner_name, config or {})
-        # Display sugar for the consuming resource's name; not part of
-        # the capability's config (which is the tagged table's other keys).
         self._description = description
 
     @property
-    def config(self) -> TokenAcquiringConfig:
-        """This credential's validated provider config."""
-        return self._config_as(TokenAcquiringConfig)
-
-    @property
-    def secret_name(self) -> str:
-        """The token secret this credential sources its PAT from
-        (default ``git-token-<name>``). Named by the helper's rejection
-        diagnosis and read from the context at ``runup``."""
-        return self.config.token.secret
-
-    @property
-    def store_username(self) -> str:
-        """The username on this credential's store line, the join key the
-        credential helper selects by. Default: the credential's own name;
-        subclasses override where the host dictates otherwise."""
-        return self.owner_name
-
-    def runup(self, ctx: RunContext) -> None:
-        """Authenticated readiness (the ``runup`` lifecycle stage):
-        confirm the resolved PAT authorizes against the host before it is
-        written to any VM.
-
-        Post-resolve and read-only: it reads the token from the context's
-        resolved secrets (``ctx.secret(name)``) and does a single
-        authenticated GET. A definitive rejection raises
-        ``TokenRejectedError`` (safe: runup runs before any VM/user
-        mutation); network indeterminacy or any other non-success warns
-        and continues unverified, so a transient outage never blocks work
-        a valid token would have done. Operators skip this whole stage via
-        the composition root (which gates the call on ``[defaults]``); it
-        is not this method's job to consult that flag. A context with no
-        resolved secrets at all (inspection only?) is the accessor's
-        typed ``ConfigError``.
-        """
-        token = _require_line_safe_token(
-            ctx.secret(self.secret_name),
-            secret_name=self.secret_name,
-        )
-        self._verify_token(token)
+    def config(self) -> BaseModel:
+        """This credential's validated provider-owned configuration."""
+        return self._config
 
     def review_remote(self, url: str) -> list[str]:
-        """Advisory review of a declared repo remote URL against THIS
-        credential's resolution semantics. Config-only: no token, no
-        network, no per-user wiring; it reads only this instance's own
-        config (its host and scope), which is exactly why the judgment
-        lives on the instance and not in core config, only the instance
-        knows its host (including a future enterprise host) and how it
-        selects credentials.
-
-        Return advisory strings when the URL is served by this
-        credential's host and something about it would defeat resolution;
-        return ``[]`` when the URL is not this credential's concern or is
-        fine. The default abstains; providers override with their own
-        host and username semantics.
-        """
+        """Return provider-owned advisories for a declared remote URL."""
         return []
 
-    def _probe_pat(
+    def _probe_static_credential(
         self,
         url: str,
         headers: dict[str, str],
         *,
+        secret_name: str,
         reject_statuses: tuple[int, ...],
         host_label: str,
     ) -> tuple[bytes, dict[str, str]] | None:
-        """Shared authenticated probe for a PAT-sourcing provider.
-
-        Returns ``(body, lowercased-headers)`` on HTTP 200. Raises
-        ``TokenRejectedError`` on a ``reject_statuses`` code (a
-        definitive rejection). Returns ``None`` after warning on network
-        indeterminacy or any other non-200 (the token is unconfirmed,
-        not known-bad).
-        """
+        """Run one provider-owned authenticated probe of static input."""
         from agentworks import output
         from agentworks.errors import TokenRejectedError
 
         try:
-            status, body, resp_headers = _http_probe(url, headers)
+            status, body, response_headers = _http_probe(url, headers)
         except OSError as exc:
             output.warn(f"could not verify git credential {self.owner_name!r} (network: {exc}); continuing unverified")
             return None
         if status in reject_statuses:
             raise TokenRejectedError(
-                f"{host_label} rejected the token for git credential {self.owner_name!r} (secret {self.secret_name!r})",
+                f"{host_label} rejected the credential for git credential {self.owner_name!r} (secret {secret_name!r})",
                 entity_kind="git-credential",
                 entity_name=self.owner_name,
                 hint=(
-                    "Check the secret's value: expired, revoked, or "
-                    "mistyped? Set [defaults] runup_git_credentials = false "
-                    "to skip verification."
+                    "Check the secret's value: expired, revoked, or mistyped? "
+                    "Set [defaults] runup_git_credentials = false to skip verification."
                 ),
             )
         if status != 200:
@@ -256,31 +152,8 @@ class GitCredentialProvider(Capability):
                 f"({host_label} answered {status}); continuing unverified"
             )
             return None
-        return (body, resp_headers)
+        return (body, response_headers)
 
     @abstractmethod
-    def _verify_token(self, token: str) -> None:
-        """Authenticated probe of the resolved ``token`` (via
-        :meth:`_probe_pat`). Raise ``TokenRejectedError`` on definitive
-        rejection; warn (never raise) on indeterminacy; announce success
-        with any enrichment (login, expiry)."""
-
-    @abstractmethod
-    def helper_entry(self) -> HelperEntry:
-        """This credential's selection entry for the generated helper.
-
-        The helper receives (host, path) per query (``useHttpPath``
-        is set globally in the managed include), and picks the most
-        specific credential: exact repo, then owner (first path
-        segment), then the host's default (an entry without scopes),
-        then the first store line for the host, which keeps entries added
-        through ``vm add-git-credential`` usable.
-        """
-
-    @abstractmethod
-    def credential_lines(self, token: str) -> list[str]:
-        """Return lines for ~/.git-credentials.
-
-        Each line is a URL in the format: https://user:token@host.
-        Core callers validate both ``token`` and every returned line.
-        """
+    def credential_material(self, ctx: RunContext) -> CredentialMaterial:
+        """Return this provider's final scopes and credential payload."""

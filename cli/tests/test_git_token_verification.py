@@ -1,309 +1,180 @@
-"""Authenticated token verification at the capability ``runup()`` stage.
-
-``runup()`` is the post-resolve readiness stage: the provider reads its
-resolved PAT from the context (``ctx.secret``) and probes it against
-the host (github ``GET /user``, azdo connectionData). Policy: a definitive
-rejection raises ``TokenRejectedError`` (safe: runup runs before any
-VM/user mutation); network indeterminacy warns and continues unverified.
-The suite-wide conftest guard makes any unmocked probe look like a
-network failure, so no test can reach the real network.
-
-Doctor no longer runs an authenticated token check (it is preflight-only,
-relying on the Secrets group for resolvability); on-demand authenticated
-checking is the deferred ``doctor --runup`` (issue #176).
-"""
+"""Provider-owned static runup and scoped materialization behavior."""
 
 from __future__ import annotations
 
-from pathlib import Path
-from textwrap import dedent
+from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, cast
+from unittest.mock import MagicMock
 
 import pytest
 
-from agentworks.bootstrap import build_registry
 from agentworks.capabilities.base import RunContext
+from agentworks.capabilities.git_credential.base import (
+    CredentialMaterial,
+    GitCredentialProvider,
+    HttpsCredentialScope,
+    ManagedHelper,
+    StoredCredential,
+)
 from agentworks.capabilities.git_credential.github import GitHubCredentialProvider
-from agentworks.config import load_config
-from agentworks.errors import TokenRejectedError, ValidationError
+from agentworks.errors import StateError, TokenRejectedError, ValidationError
+from agentworks.git_credentials import CredentialRequest, materialize_credential_state
+from agentworks.orchestration.secrets import ScopedSecrets
 from agentworks.plugins.azure.azdo import AzDOCredentialProvider
-from agentworks.secrets.policy import TtyInteractionPolicy
-from tests.conftest import ManifestDoc, write_manifests
+from agentworks.schema import AgwModel, NonEmptyStr, SecretRef
 
-_EXPIRY_HEADER = "github-authentication-token-expiration"
+if TYPE_CHECKING:
+    from agentworks.git_credentials.nodes import GitCredentialNode
 
 
 def _probe(status: int, body: bytes = b"{}", headers: dict[str, str] | None = None):  # noqa: ANN202
     calls: list[tuple[str, dict[str, str]]] = []
 
-    def fake(url: str, req_headers: dict[str, str], *, timeout: float = 5.0):  # noqa: ANN202, ARG001
-        calls.append((url, req_headers))
+    def fake(url: str, request_headers: dict[str, str], *, timeout: float = 5.0):  # noqa: ANN202, ARG001
+        calls.append((url, request_headers))
         return (status, body, headers or {})
 
     fake.calls = calls  # type: ignore[attr-defined]
     return fake
 
 
-class _StubReader:
-    """Minimal ``SecretReader`` stand-in: the resolved token values a
-    provider's ``runup()`` reads through the context."""
-
-    def __init__(self, tokens: dict[str, str]) -> None:
-        self._tokens = tokens
-
-    def get(self, name: str) -> str:
-        return self._tokens[name]
+def _ctx(values: dict[str, str], allowed: tuple[str, ...]) -> RunContext:
+    return RunContext(secrets=ScopedSecrets(values, allowed))
 
 
-# -- github ---------------------------------------------------------------
+def _config(*, runup: bool = True):  # noqa: ANN202
+    config = MagicMock()
+    config.defaults.runup_git_credentials = runup
+    return config
 
 
-def test_github_200_verifies_with_login_and_expiry(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    fake = _probe(
-        200,
-        b'{"login": "wfscot"}',
-        {_EXPIRY_HEADER: "2026-10-01 17:24:32 UTC"},
-    )
+def _request(provider: GitCredentialProvider, context: RunContext) -> CredentialRequest:
+    node = MagicMock()
+    node.name = "gh"
+    node.provider = provider
+    node.runup.side_effect = provider.runup
+    return CredentialRequest(cast("GitCredentialNode", node), context)
+
+
+def test_github_secret_runup_uses_declared_input_and_authenticated_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _probe(200, b'{"login": "operator"}')
     monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", fake)
-    p = GitHubCredentialProvider("gh", {})
-    p.runup(RunContext(secrets=_StubReader({"git-token-gh": "tok"})))
-    out = capsys.readouterr().out
-    assert "Verified git token for git-credential/gh" in out
-    assert "login wfscot" in out
-    assert "expires 2026-10-01" in out
+    provider = GitHubCredentialProvider("gh", {"source": {"mode": "secret", "secret": "github-input"}})
+    provider.runup(_ctx({"github-input": "credential-value"}, ("github-input",)))
     ((url, headers),) = fake.calls  # type: ignore[attr-defined]
     assert url == "https://api.github.com/user"
-    assert headers["Authorization"] == "Bearer tok"
+    assert headers["Authorization"] == "Bearer credential-value"
 
 
-def test_github_401_is_definitive_rejection(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _probe(401))
-    p = GitHubCredentialProvider("gh", {"token": "my-secret"})
-    with pytest.raises(TokenRejectedError, match="rejected the token") as exc:
-        p.runup(RunContext(secrets=_StubReader({"my-secret": "bogus"})))
-    assert "'gh'" in str(exc.value)
-    assert "'my-secret'" in str(exc.value)
-    assert "runup_git_credentials = false" in (exc.value.hint or "")
-
-
-def test_github_other_status_warns_and_continues(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _probe(503))
-    p = GitHubCredentialProvider("gh", {})
-    p.runup(RunContext(secrets=_StubReader({"git-token-gh": "tok"})))
-    assert "could not verify" in capsys.readouterr().err
-
-
-def test_network_failure_warns_and_continues(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """No probe monkeypatch here: the conftest guard IS the network
-    failure, proving both the guard and the indeterminacy path."""
-    p = GitHubCredentialProvider("gh", {})
-    p.runup(RunContext(secrets=_StubReader({"git-token-gh": "tok"})))
-    assert "could not verify" in capsys.readouterr().err
-
-
-def test_expiry_header_format_drift_tolerated(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    fake = _probe(200, b'{"login": "x"}', {_EXPIRY_HEADER: "soonish"})
-    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", fake)
-    p = GitHubCredentialProvider("gh", {})
-    p.runup(RunContext(secrets=_StubReader({"git-token-gh": "t"})))
-    out = capsys.readouterr().out
-    assert "Verified git token for git-credential/gh" in out
-    assert "login x" in out
-    assert "expires" not in out  # drift -> no expiry shown
-
-
-def test_github_runup_without_secrets_is_error() -> None:
-    """A runup with no resolved secrets in the context (inspection) is
-    a typed error, not a crash."""
-    from agentworks.errors import ConfigError
-
-    p = GitHubCredentialProvider("gh", {})
-    with pytest.raises(ConfigError, match="resolved secrets"):
-        p.runup(RunContext())
-
-
-@pytest.mark.parametrize("token", ["prefix\nsuffix", "prefix\rsuffix", "prefix\0suffix"])
-def test_github_runup_rejects_line_unsafe_token_before_authenticated_probe(
-    monkeypatch: pytest.MonkeyPatch,
-    token: str,
-) -> None:
-    def _no_probe(*_args: object, **_kwargs: object) -> object:
-        raise AssertionError("line-unsafe token reached the authenticated probe")
-
-    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _no_probe)
-    provider = GitHubCredentialProvider("gh", {})
-
-    with pytest.raises(ValidationError) as caught:
-        provider.runup(RunContext(secrets=_StubReader({"git-token-gh": token})))
-
-    assert token not in repr((caught.value.args, vars(caught.value)))
-    assert caught.value.__cause__ is None
-    assert caught.value.__context__ is None
-
-
-@pytest.mark.parametrize("token", ["prefix\nsuffix", "prefix\rsuffix", "prefix\0suffix"])
-def test_credential_materials_reject_line_unsafe_token_at_final_sink(token: str) -> None:
-    from agentworks.git_credentials import build_credential_materials
-
-    provider = GitHubCredentialProvider("gh", {})
-    with pytest.raises(ValidationError) as caught:
-        build_credential_materials({"gh": provider}, {"gh": token})
-
-    assert token not in repr((caught.value.args, vars(caught.value)))
-    assert caught.value.__cause__ is None
-    assert caught.value.__context__ is None
-
-
-# -- azdo -------------------------------------------------------------------
+@pytest.mark.parametrize("status", [401])
+def test_github_secret_runup_definitively_rejects_bad_input(monkeypatch: pytest.MonkeyPatch, status: int) -> None:
+    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _probe(status))
+    provider = GitHubCredentialProvider("gh", {"source": {"mode": "secret"}})
+    with pytest.raises(TokenRejectedError):
+        provider.runup(_ctx({"git-token-gh": "rejected"}, ("git-token-gh",)))
 
 
 @pytest.mark.parametrize("status", [401, 203])
-def test_azdo_rejection_statuses(monkeypatch: pytest.MonkeyPatch, status: int) -> None:
-    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _probe(status))
-    p = AzDOCredentialProvider("ado", {"org": "my-org"})
-    with pytest.raises(TokenRejectedError, match="Azure DevOps rejected"):
-        p.runup(RunContext(secrets=_StubReader({"git-token-ado": "bogus"})))
-
-
-def test_azdo_200_verifies(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    fake = _probe(200)
+def test_azdo_secret_runup_preserves_existing_org_probe(monkeypatch: pytest.MonkeyPatch, status: int) -> None:
+    fake = _probe(status)
     monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", fake)
-    p = AzDOCredentialProvider("ado", {"org": "my-org"})
-    p.runup(RunContext(secrets=_StubReader({"git-token-ado": "tok"})))
-    assert "Verified git token for git-credential/ado" in capsys.readouterr().out
+    provider = AzDOCredentialProvider("ado", {"org": "my-org", "source": {"mode": "secret"}})
+    with pytest.raises(TokenRejectedError):
+        provider.runup(_ctx({"git-token-ado": "rejected"}, ("git-token-ado",)))
     ((url, headers),) = fake.calls  # type: ignore[attr-defined]
     assert url == "https://dev.azure.com/my-org/_apis/connectionData"
     assert headers["Authorization"].startswith("Basic ")
 
 
-# -- collector wiring (agent-create token pass) -----------------------------
+def test_cli_arms_do_no_provisioning_time_command_or_network_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    def explode(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("CLI-backed runup must not probe")
+
+    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", explode)
+    GitHubCredentialProvider("gh", {"source": {"mode": "gh-cli"}}).runup(_ctx({}, ()))
+    AzDOCredentialProvider("ado", {"org": "my-org", "source": {"mode": "az-cli"}}).runup(_ctx({}, ()))
 
 
-def _config_with_github_cred(tmp_path: Path):  # noqa: ANN202
-    pub = tmp_path / "k.pub"
-    priv = tmp_path / "k"
-    pub.write_text("ssh-ed25519 AAAA test")
-    priv.write_text("key")
-    cfg = tmp_path / "config.toml"
-    cfg.write_text(
-        dedent(f"""\
-        [operator]
-        ssh_public_key = "{pub.as_posix()}"
-        ssh_private_key = "{priv.as_posix()}"
-        """)
-    )
-    write_manifests(tmp_path, ManifestDoc("git-credential", "gh", {"provider": {"name": "github"}}))
-    return load_config(cfg, warn_issues=False)
-
-
-def test_collect_git_tokens_does_not_probe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Collection only reads resolved values; the runup (the network
-    probe) is deferred to the write step (``runup_and_filter``), so
-    collecting tokens never touches the network."""
-    monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", "goodtok")
-
-    def _explode(*_a: object, **_k: object) -> object:
-        raise AssertionError("resolving git tokens must not probe")
-
-    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _explode)
-    config = _config_with_github_cred(tmp_path)
-    registry = build_registry(config)
-
-    from agentworks.git_credentials.nodes import git_credential_node
-    from agentworks.orchestration.secrets import ScopedSecrets, secret_union
-    from agentworks.secrets.resolver import Resolver
-
-    resolver = Resolver(config, registry, interaction=TtyInteractionPolicy.REFUSE)
-    node = git_credential_node(registry, "gh")
-    for secret_name in secret_union([node]):
-        resolver.register_name(secret_name)
-    resolver.resolve()
-    token = ScopedSecrets(resolver.values, node.secret_refs()).get(node.provider.secret_name)
-    assert token == "goodtok"
-
-
-# -- runup_and_filter (the deferred runup at the write step) ----------------
-
-
-def _runup_config(*, enabled: bool = True) -> object:
-    from unittest.mock import MagicMock
-
-    cfg = MagicMock()
-    cfg.defaults.runup_git_credentials = enabled
-    return cfg
-
-
-def test_runup_and_filter_keeps_verified(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    from agentworks.git_credentials import runup_and_filter
-
-    monkeypatch.setattr(
-        "agentworks.capabilities.git_credential.base._http_probe",
-        _probe(200, b'{"login": "wfscot"}', {_EXPIRY_HEADER: "2026-10-01 00:00:00 UTC"}),
-    )
-    providers = {"gh": GitHubCredentialProvider("gh", {})}
-    passed = runup_and_filter(providers, {"gh": "goodtok"}, _runup_config())  # type: ignore[arg-type]
-    assert set(passed) == {"gh"}
-    out = capsys.readouterr().out
-    assert "Verified git token for git-credential/gh" in out
-    assert "login wfscot" in out
-
-
-def test_runup_and_filter_skips_rejected(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    """A definitively rejected token is SKIPPED (dropped from the result)
-    with a warning; provisioning continues to a partial result rather
-    than aborting."""
-    from agentworks.git_credentials import runup_and_filter
-
-    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _probe(401))
-    providers = {"gh": GitHubCredentialProvider("gh", {})}
-    passed = runup_and_filter(providers, {"gh": "bogus"}, _runup_config())  # type: ignore[arg-type]
-    assert passed == {}
-    assert "skipping" in capsys.readouterr().err
-
-
-def test_runup_and_filter_logs_skip_for_partial(
+@pytest.mark.parametrize("value", ["line\nfeed", "carriage\rreturn", "nul\0byte"])
+def test_secret_input_is_line_safe_before_probe_or_materialization(
     monkeypatch: pytest.MonkeyPatch,
+    value: str,
 ) -> None:
-    """When a logger is passed (vm init), a skip is recorded as a warning
-    so the VM degrades to PARTIAL."""
-    from unittest.mock import MagicMock
+    def explode(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("unsafe value reached authenticated probe")
 
-    from agentworks.git_credentials import runup_and_filter
+    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", explode)
+    provider = GitHubCredentialProvider("gh", {"source": {"mode": "secret"}})
+    context = _ctx({"git-token-gh": value}, ("git-token-gh",))
+    with pytest.raises(ValidationError):
+        provider.runup(context)
+    with pytest.raises(ValidationError):
+        provider.credential_material(context)
 
-    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _probe(401))
-    logger = MagicMock()
-    passed = runup_and_filter(
-        {"gh": GitHubCredentialProvider("gh", {})},
-        {"gh": "bogus"},
-        _runup_config(),  # type: ignore[arg-type]
-        logger,
+
+def test_scoped_delivery_refuses_undeclared_provider_reads() -> None:
+    provider = GitHubCredentialProvider("gh", {"source": {"mode": "secret", "secret": "declared"}})
+    with pytest.raises(StateError):
+        provider.credential_material(_ctx({"declared": "value"}, ()))
+
+
+class _ExchangeConfig(AgwModel):
+    name: Literal["exchange"]
+    first: Annotated[NonEmptyStr, SecretRef(usage="the first exchange input")]
+    second: Annotated[NonEmptyStr, SecretRef(usage="the second exchange input")]
+    output: Literal["stored", "helper"]
+
+
+class _ExchangeProvider(GitCredentialProvider):
+    contract_version: ClassVar[int] = 3
+    name: ClassVar[str] = "exchange"
+    description: ClassVar[str] = "test exchange provider"
+    config_model: ClassVar[type[_ExchangeConfig]] = _ExchangeConfig
+
+    @property
+    def config(self) -> _ExchangeConfig:
+        return self._config_as(_ExchangeConfig)
+
+    def credential_material(self, ctx: RunContext) -> CredentialMaterial:
+        joined = f"{ctx.secret(self.config.first)}:{ctx.secret(self.config.second)}"
+        if self.config.output == "stored":
+            payload: StoredCredential | ManagedHelper = StoredCredential("derived", joined)
+        else:
+            payload = ManagedHelper(b"#!/bin/sh\nexit 1\n", "fixed failure")
+        return CredentialMaterial((HttpsCredentialScope("example.com"),), payload)
+
+
+@pytest.mark.parametrize("output", ["stored", "helper"])
+def test_multiple_declared_inputs_are_orthogonal_to_provider_output(output: str) -> None:
+    provider = _ExchangeProvider(
+        "exchange",
+        {"first": "first", "second": "second", "output": output},
     )
-    assert passed == {}
+    context = _ctx({"first": "one", "second": "two"}, ("first", "second"))
+    material = provider.credential_material(context)
+    if output == "stored":
+        assert material.payload == StoredCredential("derived", "one:two")
+    else:
+        assert isinstance(material.payload, ManagedHelper)
+
+
+def test_materialization_skip_policy_reconciles_zero_survivors(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _probe(401))
+    provider = GitHubCredentialProvider("gh", {"source": {"mode": "secret"}})
+    request = _request(provider, _ctx({"git-token-gh": "rejected"}, ("git-token-gh",)))
+    logger = MagicMock()
+    state, count = materialize_credential_state((request,), _config(), logger)
+    assert count == 0
+    assert not state.has_credentials
     logger.warning.assert_called_once()
 
 
-def test_runup_and_filter_disabled_keeps_all(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from agentworks.git_credentials import runup_and_filter
+def test_disabled_runup_still_materializes_final_stored_credential(monkeypatch: pytest.MonkeyPatch) -> None:
+    def explode(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("disabled runup must not probe")
 
-    def _explode(*_a: object, **_k: object) -> object:
-        raise AssertionError("must not probe when runup is disabled")
-
-    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _explode)
-    providers = {"gh": GitHubCredentialProvider("gh", {})}
-    passed = runup_and_filter(
-        providers,
-        {"gh": "x"},
-        _runup_config(enabled=False),  # type: ignore[arg-type]
-    )
-    assert set(passed) == {"gh"}
+    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", explode)
+    provider = GitHubCredentialProvider("gh", {"source": {"mode": "secret"}})
+    request = _request(provider, _ctx({"git-token-gh": "value"}, ("git-token-gh",)))
+    state, count = materialize_credential_state((request,), _config(runup=False))
+    assert count == 1
+    assert state.has_credentials

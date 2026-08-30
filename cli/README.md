@@ -224,6 +224,17 @@ reference for reading an old `config.toml` and for rewriting it as manifests.
 The four capability kinds (`vm-platform`, `harness-integration`, `git-credential-provider`,
 `secret-backend`) are read-only rows for registered code, never declared and never in TOML.
 
+Every `git-credential` provider requires its own structured `source`. The shipped GitHub provider
+accepts `secret` or `gh-cli`; the Azure DevOps provider accepts `secret` or `az-cli`. Secret sources
+declare the provider input that Agentworks resolves. CLI sources use the target user's active CLI
+identity at Git-operation time, so the CLI must be installed and authenticated for that admin or
+agent user. Put credential names on the relevant template and reinitialize the user to rebuild the
+complete managed Git credential state. See `agw resource explain git-credential-provider/NAME` for
+the installed schema.
+
+This is a breaking change from 0.16. [The 0.17 upgrade guide](../docs/guides/upgrading-to-0.17.md)
+covers the paired CLI/resource-directory cutover, per-user reinitialization, and rollback boundary.
+
 Env vars ride their owning resource, as an `env` map in the template's `spec` (the removed TOML
 shape used `[<scope>.env]` subsections), at vm / workspace / admin / agent / session scope. The
 `lima-local` and `wsl2` vm-sites ship built in and their names are reserved.
@@ -298,7 +309,7 @@ agw secret list
 # ----                 -----------                                                                -------                       ------
 # api-key              OpenAI key for the operator's service                                      OPENAI_API_KEY                candidate
 # force-prompt         Always prompted at command time                                            won't attempt                 candidate
-# git-token-github     (auto) the auth token for git_credentials:github                           AW_SECRET_GIT_TOKEN_GITHUB    candidate
+# git-token-github     (auto) the GitHub credential input for git-credential:github               AW_SECRET_GIT_TOKEN_GITHUB    candidate
 # tailscale-auth-key   (auto) the Tailscale auth key for vm-template:default (and 1 more)          AW_SECRET_TAILSCALE_AUTH_KEY  candidate
 ```
 
@@ -388,14 +399,14 @@ secret, operator-declared and auto-declared alike. Doctor keeps these health row
 Source-applicability detail (per-source soft-skip reasons, inactive mappings, per-secret references)
 lives in `agw secret list` and `agw secret describe`. `AGENTWORKS_*` identity overrides surface in
 the Configuration group (they're a config-load warning). Broken `{ secret: ... }` references are
-caught earlier as a hard config-load error before doctor runs. Git-credential tokens are just
-secrets: their _resolvability_ reports as ordinary `git-token-<name>` rows in the Secrets group,
-like any other secret. Doctor uses no-impact provider preview. It may read and discard a value when
-the backend classifies that work as no-impact, but it cannot ask for operator action and never
-returns the value. Use `agw secret verify NAME... --allow-interaction` when you want the strongest
-provider answer. Capability token authentication still occurs at the capability `runup()` stage
-inside provisioning operations. The Tailscale group checks only workstation connectivity; the auth
-key is the `tailscale-auth-key` secret row.
+caught earlier as a hard config-load error before doctor runs. A secret-backed git credential's
+declared inputs report as ordinary secret rows. CLI-backed credentials declare no secret and are
+checked only when Git invokes their runtime helper. Doctor uses no-impact provider preview. It may
+read and discard a value when the backend classifies that work as no-impact, but it cannot ask for
+operator action and never returns the value. Use `agw secret verify NAME... --allow-interaction`
+when you want the strongest provider answer. Secret-backed capability authentication still occurs at
+the capability `runup()` stage inside provisioning operations. The Tailscale group checks only
+workstation connectivity; the auth key is the `tailscale-auth-key` secret row.
 
 `--non-interactive` is not a general unattended fail-fast mode. It only disables TTY interaction;
 out-of-band application authentication may still raise an approval request and wait until the
@@ -614,9 +625,10 @@ and it does not race SQLite by deleting those coordination files.
 
 Secret values are read from the operator's shell via the `env-var` backend, which follows the
 convention `AW_SECRET_<UPPER_SNAKE_CASE>` derived from the secret's name. The Tailscale auth key
-(secret `tailscale-auth-key`) reads from `AW_SECRET_TAILSCALE_AUTH_KEY`; a git credential's PAT
-(secret `git-token-<name>`) reads from `AW_SECRET_GIT_TOKEN_<NAME>`; and so on. Override the
-convention per secret via the secret's `backend_mappings` (`env-var: CUSTOM_NAME`).
+(secret `tailscale-auth-key`) reads from `AW_SECRET_TAILSCALE_AUTH_KEY`; a secret-backed git
+credential using its default reference (`git-token-<name>`) reads from `AW_SECRET_GIT_TOKEN_<NAME>`;
+and so on. Override the convention per secret via the secret's `backend_mappings`
+(`env-var: CUSTOM_NAME`).
 
 Use `agw secret list` to see the exact env var name for each declared or auto-declared secret, and
 `agw secret describe <name>` for the full per-secret view (origin, usages, backend mappings,

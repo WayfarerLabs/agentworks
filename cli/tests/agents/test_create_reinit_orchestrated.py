@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from agentworks.db import Database
 
 AGENT_MANIFESTS = [
-    ManifestDoc("git-credential", "gh", {"provider": {"name": "github"}}),
+    ManifestDoc("git-credential", "gh", {"provider": {"name": "github", "source": {"mode": "secret"}}}),
     ManifestDoc("agent-template", "default", {"git_credentials": ["gh"]}),
     ManifestDoc("agent-template", "other", {"git_credentials": ["gh"]}),
 ]
@@ -66,7 +66,10 @@ def mutation(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     captured: dict[str, Any] = {}
 
     def _fake_mutation(*args: Any, **kwargs: Any) -> None:
-        captured["git_tokens"] = kwargs["git_tokens"]
+        requests = kwargs["credential_requests"]
+        captured["credential_passwords"] = {
+            request.name: request.provider.credential_material(request.context).payload.password for request in requests
+        }
         captured["agent_name"] = kwargs["agent_name"]
 
     monkeypatch.setattr(agent_initializer, "create_agent_on_vm", _fake_mutation)
@@ -162,7 +165,7 @@ def test_agent_mutation_refuses_ssh_identity_before_activation(
     assert mutation == {}
 
 
-def test_create_and_reinit_loggers_receive_all_git_tokens(
+def test_create_and_reinit_loggers_receive_all_git_credential_inputs(
     db: Database,
     make_config,
     mutation: dict[str, Any],
@@ -295,7 +298,7 @@ def test_create_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
 
     assert resolve_counter == [["proxmox-token"], ["git-token-gh"]]
     assert events == ["status", "start", "tailscale"]  # the gate ran
-    assert mutation["git_tokens"] == {"gh": "ghtok"}
+    assert mutation["credential_passwords"] == {"gh": "ghtok"}
     row = db.get_agent("dev")
     assert row is not None and row.linux_user == "agt-dev"
     # Banner parity: the orchestrator frames the same phases the
@@ -334,7 +337,7 @@ def test_reinit_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
 
     assert resolve_counter == [["proxmox-token"], ["git-token-gh"]]
     assert events == ["status", "start", "tailscale"]
-    assert mutation["git_tokens"] == {"gh": "ghtok"}
+    assert mutation["credential_passwords"] == {"gh": "ghtok"}
     assert mutation["agent_name"] == "dev"
     assert any("reinitialized" in m for m in captured_output.info)
     # The terminal outcome routes through result(): RESULT role at level 0.
@@ -370,7 +373,7 @@ def test_create_reachable_vm_fast_path_costs_no_gate_resolve(
     # first-encounter order (the union's only source since the
     # construct-time registration seam closed).
     assert resolve_counter == [["git-token-gh", "proxmox-token"]]
-    assert mutation["git_tokens"] == {"gh": "ghtok"}
+    assert mutation["credential_passwords"] == {"gh": "ghtok"}
 
 
 # -- failure parity -----------------------------------------------------------

@@ -37,7 +37,11 @@ def test_admin_to_git_credentials_to_secret_walk(tmp_path: Path) -> None:
     cfg = _write_cfg(
         tmp_path,
         manifests=[
-            ManifestDoc("git-credential", "github", {"provider": {"name": "github"}}),
+            ManifestDoc(
+                "git-credential",
+                "github",
+                {"provider": {"name": "github", "source": {"mode": "secret"}}},
+            ),
             ManifestDoc(
                 "admin-template",
                 "default",
@@ -72,7 +76,11 @@ def test_agent_template_to_git_credentials_to_secret_walk(tmp_path: Path) -> Non
         system = ["azure"]
         """,
         manifests=[
-            ManifestDoc("git-credential", "azdo", {"provider": {"name": "azdo", "org": "my-org"}}),
+            ManifestDoc(
+                "git-credential",
+                "azdo",
+                {"provider": {"name": "azdo", "org": "my-org", "source": {"mode": "secret"}}},
+            ),
             ManifestDoc("agent-template", "claude", {"git_credentials": ["azdo"]}),
         ],
     )
@@ -80,7 +88,7 @@ def test_agent_template_to_git_credentials_to_secret_walk(tmp_path: Path) -> Non
     registry = build_registry(config)
 
     cred = registry.lookup("git-credential", "azdo")
-    assert cred.provider.config == {"org": "my-org"}
+    assert cred.provider.config == {"org": "my-org", "source": {"mode": "secret"}}
 
     decl = registry.lookup("secret", "git-token-azdo")
     assert decl.origin is not None
@@ -104,8 +112,16 @@ def test_collect_secrets_for_walks_admin_subgraph(tmp_path: Path) -> None:
         system = ["azure"]
         """,
         manifests=[
-            ManifestDoc("git-credential", "github", {"provider": {"name": "github"}}),
-            ManifestDoc("git-credential", "azdo", {"provider": {"name": "azdo", "org": "my-org"}}),
+            ManifestDoc(
+                "git-credential",
+                "github",
+                {"provider": {"name": "github", "source": {"mode": "secret"}}},
+            ),
+            ManifestDoc(
+                "git-credential",
+                "azdo",
+                {"provider": {"name": "azdo", "org": "my-org", "source": {"mode": "secret"}}},
+            ),
             ManifestDoc(
                 "admin-template",
                 "default",

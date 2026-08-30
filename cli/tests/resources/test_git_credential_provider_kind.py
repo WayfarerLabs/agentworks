@@ -39,7 +39,7 @@ def test_known_providers_resolve(tmp_path: Path) -> None:
     cfg = load_config(
         _write_cfg(
             tmp_path / "config.toml",
-            ManifestDoc("git-credential", "gh", {"provider": {"name": "github"}}),
+            ManifestDoc("git-credential", "gh", {"provider": {"name": "github", "source": {"mode": "secret"}}}),
         ),
         warn_issues=False,
     )

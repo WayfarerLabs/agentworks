@@ -11,9 +11,7 @@ loader that constructs it.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
-
-from pydantic import model_validator
+from typing import TYPE_CHECKING
 
 from agentworks.declared_resource import DeclaredResource
 from agentworks.schema import CapabilityBlock, RefOwner
@@ -64,19 +62,6 @@ class GitCredentialConfig(DeclaredResource):
     """The provider for this credential. ``name`` selects it and the
     remaining keys configure it."""
 
-    @model_validator(mode="before")
-    @classmethod
-    def _steer_a_top_level_token(cls, data: Any) -> Any:
-        """``token`` is the mistake operators make coming from the flat
-        TOML shape. As a plain unknown key it would name the valid field
-        without saying where the token goes."""
-        if isinstance(data, dict) and "token" in data:
-            raise ValueError(
-                "'token' is provider config now: move it into the spec.provider table "
-                "(its 'name' key selects the provider)"
-            )
-        return data
-
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         from agentworks.resources.reference import (
             ResourceReference as _ResourceReq,
@@ -94,7 +79,7 @@ class GitCredentialConfig(DeclaredResource):
                 source=source,
             ),
         ]
-        # Everything the credential references (its token secret and any
+        # Everything the credential references (secret inputs and any
         # other resource the provider's config names) is read structurally
         # off the provider's DECLARED model, by the core: no provider code
         # runs here. Total and non-throwing, so a malformed blob

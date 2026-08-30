@@ -191,7 +191,9 @@ disables the exact old custom helper before removing its registration. A generic
 `credential.helper=store` possibly installed by old direct add is indistinguishable from operator
 configuration and remains, but has no old Agentworks store to serve. Nonempty reconciliation then
 activates the new generation/include; empty reconciliation removes the new include/generations.
-Fault injection may leave a safe no-credential gap, never a reactivated stale credential.
+Cleanup never reactivates a mechanism that it has already disabled. A failure before disablement may
+leave the complete preexisting mechanism unchanged; a later failure may leave a safe no-credential
+gap. Retrying initialization converges from either state.
 
 ## Git Config Transition
 
@@ -213,8 +215,9 @@ duplicates, missing files, and malformed Agentworks files. Every case preserves 
 - Reinit is the rollout and repair mechanism.
 - The reconciler holds the bounded exclusive lock across legacy cleanup, target staging, comparison,
   launcher/current activation, include mutation, and inactive-generation cleanup. Activation failure
-  leaves the previous generation active unless legacy cleanup already required the safe
-  no-credential state; existing logger semantics mark initialization partial.
+  never exposes a partial new generation. A failure before a preexisting mechanism is disabled may
+  leave that complete mechanism unchanged; a later failure leaves the Agentworks include absent
+  until retry. Existing logger semantics mark initialization partial.
 - If new helpers fail at runtime, the operator authenticates/fixes the CLI identity and retries Git;
   reinit is needed only for config/helper changes.
 - Downgrading Agentworks after new-format reconciliation is unsupported as an active-management or

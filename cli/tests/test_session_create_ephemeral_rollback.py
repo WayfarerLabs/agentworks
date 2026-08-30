@@ -205,8 +205,8 @@ def test_session_create_frames_phases_like_a_plan(
 def test_realize_bodies_take_domain_shaped_kwargs_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Pin the realization-body seam contract: the bodies are
     phase-free domain code and receive domain-shaped kwargs ONLY. Everything power-shaped arrives already
-    prepared by the orchestrator: the agent body's ``git_tokens`` are
-    pre-resolved (read through scoped delivery at the one boundary),
+    prepared by the orchestrator: the agent body's credential requests carry
+    scoped provider contexts prepared at the one boundary,
     and NO resolver, values mapping, or platform threads through, so a
     body structurally cannot re-run a resolve or re-frame phases. If
     someone widens this seam to "save" a resolve, this test trips."""
@@ -267,7 +267,8 @@ def test_realize_bodies_take_domain_shaped_kwargs_only(tmp_path: Path, monkeypat
         "vm",
         "template",
         "overlay",
-        "git_tokens",
+        "credential_requests",
+        "credential_redactions",
         "defer_overlay_report",
     }
     db.close()

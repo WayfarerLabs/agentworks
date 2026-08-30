@@ -4,10 +4,9 @@ each git-credential manifest's ``spec.provider.name`` value.
 Each provider implementation (``GitHubCredentialProvider`` in core,
 ``AzDOCredentialProvider`` in the opt-in ``azure`` system plugin) is a
 ``Capability`` (see ``capabilities/README.md``): it declares the shape of
-its own config block, authenticates its token at the ``runup`` stage, and
-produces the credential materials as its op. The consuming resource
-(``GitCredentialConfig``) and the materials assembly that writes them to
-a VM live in the ``git_credentials`` domain, not here; capabilities
+its own config block, optionally checks provider inputs at ``runup``, and
+produces final credential material. The consuming resource and the core
+reconciler live in the ``git_credentials`` domain, not here; capabilities
 depend only on the framework, never on their consuming domain.
 
 The ``azdo`` provider now ships in the ``azure`` system plugin
@@ -20,22 +19,28 @@ still finds it by registry name, while its ROW publishes with a
 from __future__ import annotations
 
 from agentworks.capabilities.git_credential.base import (
+    CredentialMaterial,
     GitCredentialProvider,
-    HelperEntry,
-    SecretToken,
-    TokenAcquiringConfig,
-    TokenAcquisition,
+    HttpsCredentialScope,
+    ManagedHelper,
+    StoredCredential,
 )
-from agentworks.capabilities.git_credential.github import GitHubCredentialProvider
+from agentworks.capabilities.git_credential.github import (
+    GitHubCliSource,
+    GitHubCredentialProvider,
+    GitHubSecretSource,
+)
 
 __all__ = [
     "GIT_CREDENTIAL_PROVIDER_REGISTRY",
+    "CredentialMaterial",
     "GitCredentialProvider",
+    "GitHubCliSource",
     "GitHubCredentialProvider",
-    "HelperEntry",
-    "SecretToken",
-    "TokenAcquiringConfig",
-    "TokenAcquisition",
+    "GitHubSecretSource",
+    "HttpsCredentialScope",
+    "ManagedHelper",
+    "StoredCredential",
 ]
 
 

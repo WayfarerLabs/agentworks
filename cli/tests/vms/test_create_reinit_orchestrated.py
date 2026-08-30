@@ -11,11 +11,12 @@ from __future__ import annotations
 
 import contextlib
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock
 
 import pytest
 
+from agentworks.capabilities.git_credential.base import StoredCredential
 from agentworks.capabilities.vm_platform import ProvisionResult
 from agentworks.config import load_config
 from agentworks.db import VersionedPayload, VMStatus
@@ -34,6 +35,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from agentworks.db import Database
+    from agentworks.git_credentials import CredentialRequest
 
 # Proxmox ships in the opt-in ``proxmox`` system plugin since Phase 10 (R11),
 # so a config that uses the proxmox site enables the plugin, exactly as a real
@@ -44,7 +46,7 @@ PLUGINS_ENABLED = """
 system = ["proxmox"]
 """
 
-GIT_CRED_GH = ManifestDoc("git-credential", "gh", {"provider": {"name": "github"}})
+GIT_CRED_GH = ManifestDoc("git-credential", "gh", {"provider": {"name": "github", "source": {"mode": "secret"}}})
 
 
 @pytest.fixture
@@ -199,10 +201,12 @@ def test_create_admin_spec_credential_joins_graph_and_logger_redactions(
     def _phase_b(*args: object, **kwargs: object) -> None:
         events.append("phase-b")
         assert args[10] is loggers[0]
-        providers = args[7]
-        assert isinstance(providers, dict)
-        assert list(providers) == ["gh"]
-        assert kwargs["git_tokens"] == {"gh": "ghtok"}
+        providers = cast("tuple[CredentialRequest, ...]", args[7])
+        assert [request.name for request in providers] == ["gh"]
+        request = providers[0]
+        payload = request.provider.credential_material(request.context).payload
+        assert isinstance(payload, StoredCredential)
+        assert payload.password == "ghtok"
 
     monkeypatch.setattr(vm_manager, "run_initialization", _phase_b)
 
@@ -769,7 +773,6 @@ def test_reinit_runs_initialization_through_the_gate(
     monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
 
     def _fake_init(*args: object, **kwargs: object) -> None:
-        captured["git_tokens"] = kwargs["git_tokens"]
         captured["providers"] = args[7]
         captured["held"] = list(holds)
 
@@ -780,9 +783,9 @@ def test_reinit_runs_initialization_through_the_gate(
 
     vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
 
-    assert captured["git_tokens"] == {"gh": "ghtok"}
     assert logger_redactions == [("ghtok",)]
-    assert list(captured["providers"]) == ["gh"]  # type: ignore[call-overload]
+    requests = cast("tuple[CredentialRequest, ...]", captured["providers"])
+    assert [request.name for request in requests] == ["gh"]
     assert captured["held"] == ["open"]  # init ran inside the span
     assert holds == ["open", "close"]  # span closed at the end
     assert any("reinitialized successfully" in m for m in captured_output.info)
@@ -871,7 +874,6 @@ def test_reinit_resolves_the_stored_admin_template(
     captured: dict[str, object] = {}
 
     def _fake_init(*args: object, **kwargs: object) -> None:
-        captured["git_tokens"] = kwargs["git_tokens"]
         captured["providers"] = args[7]
         captured["admin"] = args[4]
 
@@ -882,8 +884,8 @@ def test_reinit_resolves_the_stored_admin_template(
 
     vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
 
-    assert captured["git_tokens"] == {"gh": "ghtok"}
-    assert list(captured["providers"]) == ["gh"]  # type: ignore[call-overload]
+    requests = cast("tuple[CredentialRequest, ...]", captured["providers"])
+    assert [request.name for request in requests] == ["gh"]
     assert isinstance(captured["admin"], AdminConfig)
     assert captured["admin"].shell == "zsh"
 

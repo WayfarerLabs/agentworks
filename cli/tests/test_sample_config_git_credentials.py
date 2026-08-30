@@ -1,12 +1,9 @@
-"""Tests for the ``git-credential`` manifest decoder's token handling: the
-token secret auto-declares (or stays at its default ``git-token-<name>`` name
-when the operator doesn't override), and bad token shapes are rejected.
+"""Tests for the ``git-credential`` manifest decoder's secret source handling.
 
 config.toml is settings only now (ADR 0022): git-credentials are declared as
 ``resources/*.yaml`` manifests, and the decode + auto-declare that used to run
 at ``load_config`` now runs at ``build_registry`` (manifest decode + finalize).
-The token lives inside the manifest's ``provider`` table, not a flat ``token``
-key.
+The source lives inside the manifest's ``provider`` table.
 """
 
 from __future__ import annotations
@@ -29,16 +26,17 @@ def _write_cfg(tmp_path: Path, *docs: ManifestDoc | str) -> Path:
 
 
 def test_default_token_secret_auto_declares(tmp_path: Path) -> None:
-    """A bare ``git-credential/github`` manifest (no ``token`` in the provider
-    table) decodes with the default ``token = "git-token-github"``; the
+    """A secret source with no inner reference defaults to ``git-token-github``; the
     framework's finalize pass auto-declares that secret via
     ``GitCredentialConfig.dependencies``.
     """
-    cfg = _write_cfg(tmp_path, ManifestDoc("git-credential", "github", {"provider": {"name": "github"}}))
+    cfg = _write_cfg(
+        tmp_path,
+        ManifestDoc("git-credential", "github", {"provider": {"name": "github", "source": {"mode": "secret"}}}),
+    )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
-    # No token in provider_config -> the provider defaults the secret.
-    assert "token" not in registry.lookup("git-credential", "github").provider.config
+    assert registry.lookup("git-credential", "github").provider.config["source"] == {"mode": "secret"}
 
     decl = registry.lookup("secret", "git-token-github")
     assert decl.origin is not None
@@ -47,24 +45,28 @@ def test_default_token_secret_auto_declares(tmp_path: Path) -> None:
 
 
 def test_custom_token_secret_auto_declares(tmp_path: Path) -> None:
-    """An operator-typed ``token = "custom"`` in the provider table overrides
+    """An explicit inner secret reference overrides
     the default secret name; auto-declare uses the custom name.
     """
     cfg = _write_cfg(
         tmp_path,
-        ManifestDoc("git-credential", "github", {"provider": {"name": "github", "token": "custom-tok"}}),
+        ManifestDoc(
+            "git-credential",
+            "github",
+            {"provider": {"name": "github", "source": {"mode": "secret", "secret": "custom-tok"}}},
+        ),
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
-    assert registry.lookup("git-credential", "github").provider.config["token"] == "custom-tok"
+    assert registry.lookup("git-credential", "github").provider.config["source"]["secret"] == "custom-tok"
 
     decl = registry.lookup("secret", "custom-tok")
     assert decl.origin is not None
     assert decl.origin.variant == "auto-declared"
 
 
-def test_empty_token_string_rejected(tmp_path: Path) -> None:
-    """An empty-string ``token = ""`` is a usability footgun (would
+def test_empty_secret_name_rejected(tmp_path: Path) -> None:
+    """An empty secret name is a usability footgun (would
     derive ``AW_SECRET_`` env-var name and prompt for a secret called
     ``""``); the decoder rejects it explicitly at build.
     """
@@ -72,21 +74,25 @@ def test_empty_token_string_rejected(tmp_path: Path) -> None:
 
     cfg = _write_cfg(
         tmp_path,
-        ManifestDoc("git-credential", "github", {"provider": {"name": "github", "token": ""}}),
+        ManifestDoc(
+            "git-credential",
+            "github",
+            {"provider": {"name": "github", "source": {"mode": "secret", "secret": ""}}},
+        ),
     )
     config = load_config(cfg, warn_issues=False)
-    with pytest.raises(ConfigError, match="token.secret: must not be empty"):
+    with pytest.raises(ConfigError, match="source.secret: must not be empty"):
         build_registry(config)
 
 
-def test_a_token_table_requires_its_union_tag(tmp_path: Path) -> None:
-    """The long token spelling is a real tagged union, so an untagged
+def test_a_source_table_requires_its_union_tag(tmp_path: Path) -> None:
+    """The source is a real tagged union, so an untagged
     table is refused rather than inferred as the sole arm."""
     from agentworks.errors import ConfigError
 
     cfg = _write_cfg(
         tmp_path,
-        ManifestDoc("git-credential", "github", {"provider": {"name": "github", "token": {"secret": "x"}}}),
+        ManifestDoc("git-credential", "github", {"provider": {"name": "github", "source": {"secret": "x"}}}),
     )
     config = load_config(cfg, warn_issues=False)
     with pytest.raises(ConfigError):

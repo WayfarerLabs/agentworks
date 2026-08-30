@@ -13,9 +13,8 @@ synthesize. Operators must explicitly declare every
 agent-template. A typo'd reference errors at config load via the framework's
 miss-policy dispatch, with the reference source surfaced. The kind is
 intentionally minimal: validating "the name is published" is the whole job.
-Token resolution happens through the secret kind (each
-``GitCredentialConfig`` emits a ``SecretReference`` for its token at
-finalize time).
+Provider-declared resource references are derived structurally from each
+provider's configuration model.
 
 ``GitCredentialProviderKind`` gives the framework a name-keyed marker so
 ``spec.provider.name`` typos surface uniformly.
@@ -34,10 +33,11 @@ from agentworks.capabilities.descriptor import (
     ConfigContract,
     HostSurface,
 )
-from agentworks.capabilities.git_credential.base import GitCredentialProvider, TokenAcquiringConfig
+from agentworks.capabilities.git_credential.base import GitCredentialProvider
 from agentworks.git_credentials.credential import GitCredentialConfig
 from agentworks.resources.graph import Readiness
 from agentworks.resources.kind import KIND_REGISTRY, NoUnreferencedDefaultError
+from agentworks.schema import AgwModel
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
@@ -77,19 +77,13 @@ class _GitCredentialKind:
     prose: TopicProse = TopicProse(
         title="Git credentials",
         overview="""
-        A git-credential is how a VM obtains a git token. `spec.provider` selects the
-        provider capability and carries its config; admin and agent templates refer to
-        the credential by name through `git_credentials`.
+        A git-credential tells one provider how to produce HTTPS credentials and where
+        they apply. `spec.provider` selects the provider capability and carries its
+        complete config; admin and agent templates refer to the credential by name.
 
-        The provider's `token` field says how the token is obtained. Its `secret` arm
-        names a SECRET and defaults to `git-token-<this credential's name>`; a bare
-        secret name is shorthand for that arm. The secret resolves through the source
-        chain at VM-init time. Because the default name derives from this resource's
-        name, a name that breaks the standard naming rules still loads but warns.
-
-        Declare several: the managed credential helper picks the right one per remote,
-        which is what makes a fine-grained token scoped to one repository usable
-        alongside a broader one.
+        Providers may return a final stored username/password or a managed helper that
+        acquires one at Git runtime. Agentworks combines every declared credential into
+        one path-aware helper configuration and rebuilds that state on each user init.
         """,
     )
     miss_policy: Literal["auto-declare", "error"] = "error"
@@ -119,13 +113,13 @@ class _GitCredentialProviderKind:
     """Implementation of ``ResourceKind`` for ``"git-credential-provider"``."""
 
     kind: str = "git-credential-provider"
-    description: str = "Capability for obtaining git tokens from one forge"
+    description: str = "Capability for producing scoped Git HTTPS credential material"
     prose: TopicProse = TopicProse(
         title="Git credential providers",
         overview="""
-        A git-credential-provider knows how one forge's tokens work: what scoping a
-        credential may declare, and how to check that a token is live before a VM
-        depends on it.
+        A git-credential-provider owns credential acquisition, final Git username and
+        password construction, and translation of forge concepts into generic HTTPS
+        path scopes.
 
         Providers are code, and a git-credential document selects one by writing its
         name inside `spec.provider`. The keys allowed beside that name are the
@@ -173,17 +167,17 @@ def _readiness(name: str, impl: Any) -> Readiness:
 
 GIT_CREDENTIAL_PROVIDER_DESCRIPTOR = CapabilityKindDescriptor(
     kind="git-credential-provider",
-    contract_version=2,
+    contract_version=3,
     implementation_contract=GitCredentialProvider,
     registry=_registry,
-    required_operations=frozenset({"helper_entry", "credential_lines"}),
+    required_operations=frozenset({"credential_material"}),
     # Empty: GitCredentialProvider supplies every non-operation member a
     # subclass needs.
     required_attributes=frozenset(),
     entry_factory=_entry,
     readiness=_readiness,
     publisher_source="agentworks.capabilities.git_credential",
-    config_schema=ConfigContract(base=TokenAcquiringConfig, discriminator="name"),
+    config_schema=ConfigContract(base=AgwModel, discriminator="name"),
     manifest_section=HostSurface(
         host_kind="git-credential",
         naming_field="provider",

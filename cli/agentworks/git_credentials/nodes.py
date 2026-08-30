@@ -12,9 +12,9 @@ the git-credentials domain, not to any one consumer.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
-from agentworks.errors import NotFoundError
+from agentworks.errors import NotFoundError, StateError
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
@@ -48,9 +48,13 @@ class GitCredentialNode:
         return f"git-credential/{self._name}"
 
     @property
+    def name(self) -> str:
+        return self._name
+
+    @property
     def provider(self) -> GitCredentialProvider:
         """The held instance, for the orchestrator's domain ops
-        (``helper_entry`` / ``credential_lines``). Ops stay
+        (``credential_material``). Ops stay
         un-unified; holding is not hiding."""
         return self._provider
 
@@ -61,7 +65,7 @@ class GitCredentialNode:
         return tuple(ref.name for ref in self._secret_refs)
 
     def config_secret_refs(self) -> tuple[ResourceReference, ...]:
-        # The provider's token secret, as declared. The preflight sweep
+        # The provider's secret inputs, as declared. The preflight sweep
         # predicts resolvability over these; the credential itself does
         # not, because how a secret gets a value is the operation's
         # concern and not the credential's.
@@ -88,7 +92,6 @@ def git_credential_node(registry: Registry, name: str) -> GitCredentialNode:
     the node's ``secret_refs``.
     """
     from agentworks.resources.access import git_credential
-    from agentworks.vms.initializer import resolve_git_credential_providers
 
     decl = git_credential(registry, name)
     if decl is None:
@@ -97,7 +100,19 @@ def git_credential_node(registry: Registry, name: str) -> GitCredentialNode:
             entity_kind="git-credential",
             entity_name=name,
         )
-    provider = resolve_git_credential_providers(registry, [name])[name]
+    readiness = registry.graph.readiness_of("git-credential", name)
+    if not readiness.is_ready:
+        raise StateError(
+            f"git-credential '{name}' is not ready: {readiness.reason}",
+            entity_kind="git-credential",
+            entity_name=name,
+            hint="`agw doctor` lists each git-credential's state; enable the required plugin or use a ready one",
+        )
+    provider_class = cast(
+        "type[GitCredentialProvider]",
+        registry.graph.impl_of("git-credential-provider", decl.provider.name),
+    )
+    provider = provider_class(name, decl.provider.config, description=decl.description)
     # Read the credential's config-implied secret edges off the retained graph
     # (the single access path, R11) rather than re-walking the decl.
     secret_refs = tuple(ref for ref in registry.graph.edges_of("git-credential", name) if ref.kind == "secret")

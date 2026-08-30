@@ -108,7 +108,7 @@ Sources:
 - [Authenticate to Azure DevOps with Microsoft Entra ID](https://learn.microsoft.com/en-us/azure/devops/integrate/get-started/authentication/entra?view=azure-devops)
 - [Azure Repos credential managers](https://learn.microsoft.com/en-us/azure/devops/repos/git/set-up-credential-managers?view=azure-devops)
 - [Git Credential Manager Azure Repos token model](https://github.com/git-ecosystem/git-credential-manager/blob/00bac415e196099a881371e709574c104156ab8e/docs/azrepos-users-and-tokens.md)
-- [Git Credential Manager Azure Repos provider source](https://github.com/git-ecosystem/git-credential-manager/blob/00bac415e196099a881371e709574c104156ab8e/src/shared/Microsoft.AzureRepos/AzureReposHostProvider.cs#L87-L150)
+- [Git Credential Manager Azure Repos provider source](https://github.com/git-ecosystem/git-credential-manager/blob/00bac415e196099a881371e709574c104156ab8e/src/Microsoft.AzureRepos/AzureReposHostProvider.cs#L87-L150)
 
 ## Current Agentworks Prior Art
 

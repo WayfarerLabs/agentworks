@@ -306,7 +306,7 @@ def test_secret_used_by_v1_crosses_a_declared_runtime_subgraph(
     path, config = _registry(
         tmp_path,
         monkeypatch,
-        ManifestDoc("git-credential", "github", {"provider": {"name": "github"}}),
+        ManifestDoc("git-credential", "github", {"provider": {"name": "github", "source": {"mode": "secret"}}}),
         ManifestDoc("admin-template", "default", {"git_credentials": ["github"]}),
     )
     db = Database(path)

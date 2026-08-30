@@ -64,7 +64,11 @@ def _write_config(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Pat
         ("vm-template", "azure-prod", {"cpus": 4, "env": {"FOO": "bar"}}),
         ("admin-template", "default", {"shell": "zsh", "env": {"FOO": "bar"}}),
         ("named-console-template", "default", {"tmux_layout": "tiled"}),
-        ("git-credential", "github-prod", {"provider": {"name": "github"}}),
+        (
+            "git-credential",
+            "github-prod",
+            {"provider": {"name": "github", "source": {"mode": "secret"}}},
+        ),
         ("secret", "anthropic-api-key", {}),
         ("session-template", "dev", {"harness_integration": {"name": "shell", "command": "claude"}}),
         ("workspace-template", "gruntweave", {"repo": "https://example.com/org/repo.git"}),

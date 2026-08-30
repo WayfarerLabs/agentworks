@@ -1,16 +1,19 @@
 # Upgrading to 0.17
 
-The 0.17 boundary has two upgrade actions. Third-party `harness-integration` authors must move from
-contract version 1 to version 2, where merge behavior belongs to the config model the integration
-offers. Separately, every VM created before 0.17 needs one successful `agw vm reinit NAME` before
-ordinary Agentworks SSH operations will use it. Operators using the shipped `shell`, `claude-code`,
-`codex`, or `grok-build` integrations do not need to change integration configuration, but the VM
-reinitialization still applies.
+The 0.17 boundary has three upgrade actions. Third-party `harness-integration` authors must move
+from contract version 1 to version 2, where merge behavior belongs to the config model the
+integration offers. Every VM created before 0.17 needs one successful `agw vm reinit NAME` before
+ordinary Agentworks SSH operations will use it. Every declared `git-credential` must also move to
+the new provider-owned structured `source`, followed by reinitialization of each affected admin or
+agent user. Operators using the shipped `shell`, `claude-code`, `codex`, or `grok-build`
+integrations do not need to change integration configuration.
 
-**This guide is release-scoped.** It carries both existing VMs and third-party integrations across
-the 0.17 boundary. The permanent model and harness author contracts live in
-[`cli/agentworks/schema/README.md`](../../cli/agentworks/schema/README.md) and
-[`cli/agentworks/capabilities/harness_integration/README.md`](../../cli/agentworks/capabilities/harness_integration/README.md).
+**This guide is release-scoped.** It carries existing VMs, third-party harness integrations, and Git
+credential declarations across the 0.17 boundary. The permanent contracts live in
+[`cli/agentworks/schema/README.md`](../../cli/agentworks/schema/README.md),
+[`cli/agentworks/capabilities/harness_integration/README.md`](../../cli/agentworks/capabilities/harness_integration/README.md),
+and
+[`cli/agentworks/capabilities/git_credential/README.md`](../../cli/agentworks/capabilities/git_credential/README.md).
 
 ## Third-party harness integrations must declare contract version 2
 
@@ -121,3 +124,128 @@ platform supports a recovery transport. Restore the configured public key on the
 configured public and private paths identify the same key, and then rerun `agw vm reinit NAME`.
 Platform recovery can still depend on the configured key for some providers. If it cannot connect,
 use the provider's native recovery tooling or recreate the VM.
+
+## Rewrite every Git credential source
+
+The released `provider.token` field, its scalar shorthand, and omission default are gone. Each
+shipped provider now requires its own structured `provider.source`:
+
+```yaml
+# Before
+provider:
+  name: github
+  token: github-pat
+
+# After, same secret-backed behavior
+provider:
+  name: github
+  source:
+    mode: secret
+    secret: github-pat
+```
+
+If the old credential omitted `token`, use an explicit secret source and omit only its inner
+reference:
+
+```yaml
+provider:
+  name: github
+  source:
+    mode: secret
+```
+
+That inner omission retains the `git-token-<credential-name>` default. Azure DevOps uses the same
+secret shape beside its required `org`.
+
+The new runtime identity choices are:
+
+```yaml
+# GitHub
+provider:
+  name: github
+  source: { mode: gh-cli }
+
+# Azure DevOps
+provider:
+  name: azdo
+  org: example-org
+  source: { mode: az-cli }
+```
+
+CLI sources use the target admin or agent user's active CLI identity. Agentworks does not install or
+authenticate `gh` or `az`. GitHub invokes `gh auth token --hostname github.com`; Azure DevOps uses
+`az account get-access-token` with resource `499b84ac-1321-427f-aa17-267ca6975798`, query
+`accessToken`, and TSV output. The Azure identity must also have access to the configured
+organization and repository.
+
+## Cut over the CLI and resource directory together
+
+The 0.16 CLI does not understand `source`, and the 0.17 CLI does not accept the released `token`
+shape. Treat the CLI and the complete resource directory as one versioned unit:
+
+1. Stop concurrent Agentworks commands on the workstation.
+2. Back up `config.toml` and the complete resources directory at operator-selected locations.
+3. Prepare the rewritten resource directory without changing the active copy.
+4. Upgrade the CLI and atomically replace the complete active resource directory.
+5. Run `agw doctor` and `agw resource list --kind git-credential --include-disabled`.
+
+For the recommended `uv` installation and the default resource path, one concrete cutover is:
+
+```console
+$ cp -a ~/.config/agentworks ~/.config/agentworks.pre-0.17
+$ cp -a ~/.config/agentworks/resources ~/.config/agentworks-resources.0.17
+# Edit every git-credential in ~/.config/agentworks-resources.0.17, then stop other agw commands.
+$ uv tool install --upgrade 'agentworks-cli>=0.17,<0.18'
+$ mv ~/.config/agentworks/resources ~/.config/agentworks-resources.0.16
+$ mv ~/.config/agentworks-resources.0.17 ~/.config/agentworks/resources
+$ agw doctor
+$ agw resource list --kind git-credential --include-disabled
+```
+
+Choose unused backup and staging paths before starting. Operators with a non-default `resource_dir`
+should substitute that complete directory; do not move individual manifests into the active tree.
+
+A short validation outage between steps 4 and 5 is expected if those two replacements cannot be
+truly atomic. Do not run provisioning or reinitialization while the CLI and active resources are on
+opposite sides of the contract.
+
+Before the first successful 0.17 reinit, rollback means restoring both the prior CLI and the
+complete prior resource directory. After a successful 0.17 reinit, do not use a downgrade to manage
+or repair that user's Git credentials. Fix forward with the new CLI and reinitialize again.
+
+For the example above, pre-reinit rollback is the inverse paired cutover:
+
+```console
+# Stop other agw commands first.
+$ mv ~/.config/agentworks/resources ~/.config/agentworks-resources.failed-0.17
+$ mv ~/.config/agentworks-resources.0.16 ~/.config/agentworks/resources
+$ uv tool install --force 'agentworks-cli>=0.16,<0.17'
+$ agw doctor
+```
+
+The full `~/.config/agentworks.pre-0.17` copy is the recovery backup if more than the resource
+directory was changed. Keep it until the canary and affected-user reinitializations succeed.
+
+## Reinitialize every affected Git user
+
+Run `agw vm reinit VM` for affected VM administrators and `agw agent reinit AGENT` for affected
+managed agents. Initialization now rebuilds the complete Agentworks-owned Git credential state even
+when the desired list is empty. It removes the released Agentworks-owned helper, scope include, and
+credential file before installing the new private generation, or leaves a clean empty state.
+
+The removed `agw vm add-git-credential` command has no replacement. Declare credentials on the
+appropriate admin or agent template and reinitialize. A generic operator-managed
+`credential.helper=store` setting is preserved, but the old Agentworks-owned `~/.git-credentials`
+file is removed without reading it.
+
+If a CLI-backed helper fails later, authenticate or repair that target user's CLI identity and retry
+Git. Reinitialize only after changing a manifest or generated helper.
+
+## Update third-party Git credential providers
+
+Provider contract version 2 is removed without an adapter. A version-3 provider owns its complete
+configuration model and declared references, implements `credential_material(ctx)`, translates its
+scope to generic HTTPS host/path segments, and returns either final `StoredCredential` material or a
+first-party `ManagedHelper`. Provider inputs do not determine which output shape is allowed. See
+[`cli/agentworks/capabilities/git_credential/README.md`](../../cli/agentworks/capabilities/git_credential/README.md)
+for the permanent author contract.

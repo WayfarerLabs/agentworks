@@ -1,20 +1,16 @@
-"""Direct admin-user access commands: shell, exec, and git-credential add."""
+"""Direct admin-user access commands: shell and exec."""
 
 from __future__ import annotations
 
 import contextlib
 from typing import TYPE_CHECKING
 
-from agentworks import output
-from agentworks.capabilities.base import RunContext
-from agentworks.errors import StateError, ValidationError
+from agentworks.errors import StateError
 
 from ._helpers import (
-    _credential_line_key,
     _guard_failed_vm,
     _require_vm,
     _resolve_workspace_for_vm,
-    _vm_scope,
 )
 from .boundary import (
     gated_vm_boundary,
@@ -256,166 +252,3 @@ def exec_vm(
         if ws is not None:
             remote_cmd = f"cd {shlex.quote(ws.workspace_path)} && {remote_cmd}"
         return target.call_streaming(remote_cmd, env=env)
-
-
-def add_git_credential(
-    db: Database,
-    config: Config,
-    name: str,
-    credential_name: str,
-    *,
-    interaction: TtyInteractionPolicy,
-) -> None:
-    """Add or update a git credential on a VM.
-
-    This is the first ORCHESTRATED command: its graph is DERIVED from
-    the DB row and the declared references by the ``vms/nodes.py``
-    factories (zero hand-wired edges), the activation gate replaces
-    this command's ``keep_active`` use (opening BEFORE the preflight
-    sweep and seeding the boundary resolver with its just-in-time
-    values), secrets are delivered scoped to each node's declared
-    names, and a rejected token is FATAL (a plain uncaught raise: the
-    operator asked to add exactly this one credential, unlike vm/agent
-    provisioning's skip-and-degrade).
-
-    The tracer's three documented interim seams are CLOSED with the
-    resolver retirement: the walk union is the boundary's only source
-    (construct-time registration is gone), prediction is central at
-    the node preflights, and the platform's power ops read the
-    context (``ctx.secret``, with the gate's scoped reader as the
-    source for gate-driven ops).
-    """
-    import agentworks.vms.manager as _mgr
-    from agentworks.bootstrap import load_request_registry
-    from agentworks.git_credentials.nodes import git_credential_node
-    from agentworks.orchestration.activation import (
-        activation_gate,
-        gate_secret_resolver,
-    )
-    from agentworks.orchestration.readiness import preflight_all
-    from agentworks.orchestration.secrets import ScopedSecrets, secret_union
-    from agentworks.orchestration.walk import walk
-    from agentworks.transports import transport
-    from agentworks.vms.nodes import live_vm_node
-
-    # build_registry runs first so framework miss-policies (e.g.
-    # GitCredentialKind's error policy on a typo'd credential name)
-    # surface before any DB / VM / config-key business logic.
-    registry = load_request_registry(config, live_database=db)
-
-    vm = _require_vm(db, name)
-    _guard_failed_vm(vm)
-    if vm.tailscale_host is None:
-        raise StateError(
-            f"VM '{name}' has no Tailscale IP",
-            entity_kind="vm",
-            entity_name=name,
-            hint="VM init may not be complete. Check 'vm describe' for status.",
-        )
-
-    from agentworks.secrets.resolver import Resolver
-
-    resolver = Resolver(config, registry, interaction=interaction)
-
-    # BUILD: the command names its direct resources (this VM, this
-    # credential); everything else enters through the derived graph
-    # (the row's site field, the decl's references).
-    cred_node = git_credential_node(registry, credential_name)
-    provider = cred_node.provider
-
-    entry = provider.helper_entry()
-    if entry.repos or entry.owner:
-        # Scoped credentials need the helper's embedded selection map
-        # rebuilt: a single-line store merge can't provide that. The
-        # full-rebuild path (reinit) can. Guarded before the VM node is
-        # built and before the gate, preserving the imperative error
-        # precedence (at HEAD the site bound after this guard, so a bad
-        # site never preempted this error) and ensuring a scoped
-        # credential never costs a prompt or a VM start.
-        raise ValidationError(
-            f"git credential '{credential_name}' is scoped (fine-grained "
-            f"PAT); add it to the admin or agent template and run "
-            f"'agw vm reinit {name}' instead of add-git-credential"
-        )
-
-    vm_node = live_vm_node(db, config, registry, vm)
-    nodes = walk(vm_node, cred_node)
-    # The walk supplies the boundary union.
-    for secret_name in secret_union(nodes):
-        resolver.register_name(secret_name)
-
-    scope = _vm_scope(db, name)
-
-    _mgr.require_vm_ssh_boundary(db, config, vm)
-    with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
-        # PREFLIGHT-ALL against the one command-start context, then the
-        # boundary resolve: the walk-away point.
-        preflight_all(
-            nodes,
-            RunContext(config=config, operation_scope=scope),
-            registry=registry,
-            interaction=interaction,
-        )
-        resolver.resolve()
-
-        def scoped_ctx(node_secret_refs: tuple[str, ...]) -> RunContext:
-            return RunContext(
-                config=config,
-                operation_scope=scope,
-                secrets=ScopedSecrets(resolver.values, node_secret_refs),
-            )
-
-        # add-git-credential is a single explicit add, so a rejected
-        # token is fatal here (unlike vm/agent provisioning, which
-        # skips and continues to partial): the operator asked to add
-        # exactly this one credential.
-        if config.defaults.runup_git_credentials:
-            output.info(f"Performing runup test for git-credential/{credential_name}...")
-            cred_node.runup(scoped_ctx(cred_node.secret_refs()))
-        # The materials-write op reads its token through the node's
-        # SCOPED delivery: only the credential's declared secret names.
-        token = scoped_ctx(cred_node.secret_refs()).secret(provider.secret_name)
-        from agentworks.git_credentials import materialize_credential_lines
-
-        new_lines = materialize_credential_lines(provider, token)
-
-        target = transport(vm, config)
-
-        # Read existing credentials, filter out entries this credential
-        # replaces. The key is (username, host/path): scoped github
-        # lines are path-less and share the host, so a host-only key
-        # would evict every github line including the scoped ones.
-        result = target.run("cat ~/.git-credentials 2>/dev/null || true")
-        existing = result.stdout.strip().splitlines() if result.stdout.strip() else []
-
-        new_keys = {_credential_line_key(line) for line in new_lines} - {None}
-        filtered = [e for e in existing if _credential_line_key(e) not in new_keys]
-
-        # New (always unscoped, see the guard above) lines go FIRST:
-        # a username-less query takes the first matching store line, so
-        # the host-level fallback must precede username-tagged scoped
-        # lines that may already be on the VM.
-        all_lines = new_lines + filtered
-        cred_content = "\n".join(all_lines) + "\n"
-        target.write_file("~/.git-credentials", cred_content, mode="600")
-        # This single-line merge does NOT regenerate the credential helper
-        # script (it stays from the last full init/reinit). The scoped
-        # guard above forces scoped credentials through reinit, so the
-        # added line is always unscoped and selection needs no helper
-        # change; its only gap is that a rejection of a credential added
-        # post-init falls to the helper's generic (unnamed) diagnosis
-        # until the next reinit rebuilds the script. Acceptable.
-        # Never downgrade the helper slot: on a helper-provisioned VM
-        # the agentworks helper stays registered (reverting to store
-        # would reintroduce its erase-on-rejection self-destruct for
-        # EVERY credential); on an old VM without the helper script,
-        # keep store working until the next reinit installs the helper.
-        from agentworks.git_credentials import GIT_CRED_HELPER_PATH
-
-        target.run(
-            f"if [ -x {GIT_CRED_HELPER_PATH} ]; then "
-            f"git config --global --replace-all credential.helper '!{GIT_CRED_HELPER_PATH}'; "
-            f"else git config --global credential.helper store; fi"
-        )
-
-    output.result(f"Git credential '{credential_name}' configured on VM '{name}'")

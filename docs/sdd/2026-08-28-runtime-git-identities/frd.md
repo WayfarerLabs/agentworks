@@ -205,12 +205,17 @@ configuration MAY remain, but the Agentworks-owned store it formerly read MUST b
 
 Repeated initialization with the same desired inputs MUST be idempotent. Removing, adding, changing
 scope, or changing an acquisition mode MUST converge in one run without preserving stale material.
-Concurrent helper requests MUST use one complete generation while reconciliation and garbage
-collection wait for them rather than mixing selection and credential bytes.
+Concurrent helper requests MUST use one complete generation. The dispatcher MUST open the selected
+generation-owned record or helper while holding the shared lock. Reconciliation and garbage
+collection MAY then unlink an inactive generation after that lock is released; an open descriptor
+MUST keep the selected material available for the in-flight request without extending the lock into
+the provider CLI process.
 
 Migration ordering MUST disable legacy token material before removing its registrations or the new
-host reset. A failure at any cleanup/activation boundary MAY leave authentication absent until the
-next reinit but MUST NOT reactivate or serve a stale credential.
+host reset. Reconciliation MUST NOT expose a partial new generation or reactivate a credential
+mechanism that it has already disabled. A failure before a preexisting complete mechanism is
+disabled MAY leave that mechanism unchanged; a later failure MAY leave authentication absent until
+the next reinit. Retrying initialization MUST converge from either state.
 
 ### R8: Git configuration ownership
 
@@ -347,9 +352,11 @@ scope change, and mode transition converges; empty desired state removes all pro
 Agentworks-owned credential/routing state except the inert stable lock while preserving unrelated
 helpers and Git config. Any indistinguishable generic `store` helper left behind has no
 Agentworks-owned credential file to serve. Concurrent helper/swap/cleanup tests prove one invocation
-never mixes generations or loses files while using them. Mixed legacy/new fault injection proves
-every mutation boundary is stale-safe, and contention tests prove lock waits and child-descriptor
-lifetimes are bounded.
+never mixes generations and retains its selected material through an open generation-owned
+descriptor while cleanup proceeds. Staging and activation faults prove no partial new generation is
+exposed; cleanup tests prove already-disabled mechanisms are not reactivated and that retry
+converges. Corrupt-state, empty-reconciliation, lock-contention, and child-descriptor tests prove
+the remaining bounded failure behavior.
 
 ### AC7: Single write path
 

@@ -19,9 +19,10 @@ import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.capabilities.git_credential.base import (
+    CredentialMaterial,
     GitCredentialProvider,
-    HelperEntry,
-    TokenAcquiringConfig,
+    HttpsCredentialScope,
+    StoredCredential,
 )
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
@@ -31,6 +32,8 @@ from tests.conftest import ManifestDoc, write_manifests
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+    from agentworks.capabilities.base import RunContext
 
 
 def _config(tmp_path: Path, settings: str = "", *, enabled: bool = False) -> Any:
@@ -78,7 +81,10 @@ def test_azdo_org_required(tmp_path: Path) -> None:
     build_registry: capability validation runs in the finalize ``validate``
     pass (R3). The manifest file:line is re-attached from the resource
     origin, so the error frames the declaring document."""
-    _manifest(tmp_path, ManifestDoc("git-credential", "ado", {"provider": {"name": "azdo"}}))
+    _manifest(
+        tmp_path,
+        ManifestDoc("git-credential", "ado", {"provider": {"name": "azdo", "source": {"mode": "secret"}}}),
+    )
     config = _config(tmp_path, enabled=True)
     with pytest.raises(ConfigError, match="org: is required") as exc:
         build_registry(config)
@@ -101,11 +107,13 @@ def test_azdo_rejects_unknown_blob_fields_yaml(tmp_path: Path) -> None:
           provider:
             name: azdo
             org: my-org
+            source:
+              mode: secret
             bogus: 1
         """,
     )
     config = _config(tmp_path, enabled=True)
-    with pytest.raises(ConfigError, match="bogus: unknown field; expected one of: name, org, token") as exc:
+    with pytest.raises(ConfigError, match="bogus: unknown field; expected one of: name, org, source") as exc:
         build_registry(config)
     assert "res.yaml" in str(exc.value)
 
@@ -121,16 +129,14 @@ def test_a_capability_with_no_config_rejects_every_key() -> None:
     class _Bare(GitCredentialProvider):
         name = "bare"
         description = "declares no configuration"
-        contract_version = 1
+        contract_version = 3
         config_model = _BareConfig
 
-        def _verify_token(self, token: str) -> None: ...
-
-        def helper_entry(self) -> HelperEntry:
-            return HelperEntry(host="example.test", username="bare")
-
-        def credential_lines(self, token: str) -> list[str]:
-            return []
+        def credential_material(self, ctx: object) -> CredentialMaterial:
+            return CredentialMaterial(
+                (HttpsCredentialScope("example.test"),),
+                StoredCredential("bare", "unused"),
+            )
 
     _Bare("bare", {})
     with pytest.raises(ConfigError, match="anything: unknown field"):
@@ -150,11 +156,13 @@ def test_github_rejects_unknown_blob_fields(tmp_path: Path) -> None:
         spec:
           provider:
             name: github
+            source:
+              mode: secret
             org: nope
         """,
     )
     config = _config(tmp_path)
-    with pytest.raises(ConfigError, match="org: unknown field; expected one of: name, owner, repos, token"):
+    with pytest.raises(ConfigError, match="org: unknown field; expected one of: name, owner, repos, source"):
         build_registry(config)
 
 
@@ -266,15 +274,15 @@ def test_construct_time_validation_survives_the_flip(tmp_path: Path) -> None:
     from agentworks.plugins.azure.azdo import AzDOCredentialProvider
 
     with pytest.raises(ConfigError, match="org: is required"):
-        AzDOCredentialProvider("ado", {})
+        AzDOCredentialProvider("ado", {"source": {"mode": "secret"}})
 
-    assert AzDOCredentialProvider("ado", {"org": "my-org"}).config.org == "my-org"
+    assert AzDOCredentialProvider("ado", {"org": "my-org", "source": {"mode": "secret"}}).config.org == "my-org"
 
 
 # -- The dependencies half ---------------------------------------------------
 
 
-class _SigningConfig(TokenAcquiringConfig):
+class _SigningConfig(AgwModel):
     """A config that NAMES a secret, with a constant default. The whole
     of what used to be a hand-rolled ``dependencies`` plus its guard."""
 
@@ -288,16 +296,18 @@ class _SigningCredentialProvider(GitCredentialProvider):
 
     name = "test-signing"
     description = "signs with a declared secret"
-    contract_version = 2
+    contract_version = 3
     config_model = _SigningConfig
 
-    def _verify_token(self, token: str) -> None: ...
+    def credential_material(self, ctx: RunContext) -> CredentialMaterial:
+        return CredentialMaterial(
+            (HttpsCredentialScope("example.test"),),
+            StoredCredential("signer", ctx.secret(self.config.signing_key)),
+        )
 
-    def credential_lines(self, token: str) -> list[str]:
-        return [f"https://signer:{token}@example.test"]
-
-    def helper_entry(self) -> HelperEntry:
-        return HelperEntry(host="example.test", username="signer")
+    @property
+    def config(self) -> _SigningConfig:
+        return self._config_as(_SigningConfig)
 
 
 SIGNING_ENABLED = """

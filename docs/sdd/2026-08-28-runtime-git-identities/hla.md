@@ -124,25 +124,29 @@ The reconciler:
 2. takes a bounded exclusive lock;
 3. cleans an abandoned stage, disables legacy credential material/registration, stages a private
    generation, and compares it to active state;
-4. atomically replaces the stable launcher/current generation when changed and ensures the exact
-   include once for nonempty state, or removes the launcher/include for empty state;
+4. installs or repairs the stable launcher, atomically replaces the current generation when changed,
+   and ensures the exact include once for nonempty state, or removes the launcher/include for empty
+   state;
 5. deletes inactive generations and releases the lock.
 
 Each helper invocation enters through the stable launcher, takes a bounded shared lock on the
 current implementation's fixed inherited descriptor, and executes the dispatcher from the resolved
-immutable generation. The dispatcher loads everything it needs for one selected stored credential or
-managed helper before releasing that descriptor; managed-helper descendants cannot retain it.
-Replacement and garbage collection therefore cannot produce a mixed-generation read. The include
-owns the helper registration and `useHttpPath` behavior for only the hosts represented in the
-desired state. For each managed host it resets inherited helper values before registering the
+immutable generation. For stored material the dispatcher reads the selected record under that lock.
+For a managed helper it opens the generation-owned helper, then releases the shared lock and invokes
+the already-open file through its descriptor. Reconciliation may unlink the inactive generation, but
+the in-flight request retains the selected helper inode; provider CLI descendants cannot retain the
+lock. Replacement and garbage collection therefore cannot produce a mixed-generation read. The
+include owns the helper registration and `useHttpPath` behavior for only the hosts represented in
+the desired state. For each managed host it resets inherited helper values before registering the
 Agentworks launcher; unrelated hosts retain operator-managed helpers. Agentworks does not delete or
 rewrite any indistinguishable operator `credential.helper` value.
 
-The stable launcher and dispatcher replacement window exists in this implementation because their
-two atomic replacements cannot be one filesystem transaction. Both adjacent pairings MUST therefore
-work for this migration and be tested with a fault between replacements. The fixed descriptor is a
-current lock-handoff mechanism, not a public or permanently versioned ABI; a future incompatible
-change designs its migration when it exists.
+This breaking cut introduces the managed root, stable launcher, and dispatcher together; no prior
+valid Agentworks launcher exists to pair with the new dispatcher. The launcher is repaired from the
+same implementation bytes during reconciliation, while `current` alone selects an immutable
+generation atomically. The fixed descriptors are current lock-and-material handoff mechanisms, not
+public or permanently versioned ABIs; a future incompatible change designs its migration when it
+exists.
 
 ### Stable launcher and runtime dispatcher
 

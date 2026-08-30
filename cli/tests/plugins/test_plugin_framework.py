@@ -22,10 +22,13 @@ import pytest
 
 import agentworks
 import agentworks.plugins as plugins_pkg
+from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.conformance import conformance_error
 from agentworks.capabilities.descriptor import capability_descriptors, descriptor_for
+from agentworks.capabilities.git_credential.base import CredentialMaterial, HttpsCredentialScope, StoredCredential
 from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.errors import StateError
+from agentworks.orchestration.secrets import ScopedSecrets
 from agentworks.origin import Origin
 from agentworks.plugins import (
     SYSTEM_PLUGINS,
@@ -267,21 +270,25 @@ class _BackendWithNonBooleanTtySupport(ConformingSecretBackend):
     supports_tty_interaction = 1  # type: ignore[assignment]
 
 
-def test_git_contract_v2_retains_public_credential_lines_hook() -> None:
-    class _CompatibleV2Provider(ConformingGitCredentialProvider):
-        name = "compatible-v2-provider"
-        description = "uses the released contract-version-2 material hook"
+def test_git_contract_v3_requires_context_material_hook() -> None:
+    class _CompatibleV3Provider(ConformingGitCredentialProvider):
+        name = "compatible-v3-provider"
+        description = "uses the contract-version-3 material hook"
 
-        def credential_lines(self, token: str) -> list[str]:
-            return [f"https://compatible:{token}@example.test"]
+        def credential_material(self, ctx: RunContext) -> CredentialMaterial:
+            return CredentialMaterial(
+                (HttpsCredentialScope("example.test"),),
+                StoredCredential("compatible", "credential"),
+            )
 
     plugin = Plugin(
-        name="compatible-v2-plugin",
-        capabilities={"git-credential-provider": (_CompatibleV2Provider,)},
+        name="compatible-v3-plugin",
+        capabilities={"git-credential-provider": (_CompatibleV3Provider,)},
     )
     with seated_plugin(plugin):
-        instance = _CompatibleV2Provider("credential", {})
-        assert instance.credential_lines("token") == ["https://compatible:token@example.test"]
+        instance = _CompatibleV3Provider("credential", {})
+        material = instance.credential_material(RunContext(secrets=ScopedSecrets({}, ())))
+        assert material.payload == StoredCredential("compatible", "credential")
 
 
 class _NotAModel:
