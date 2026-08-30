@@ -184,12 +184,17 @@ def append_vm_site_database_checks(
                         hint=site_manifest_hint(vm.site),
                     )
                 else:
-                    _append_live_release_check(group, config, vm)
+                    _append_live_release_check(group, database, config, vm)
     except Exception as error:
         group.warn("VM sites", f"could not check the database: {error}", hint=getattr(error, "hint", None))
 
 
-def _append_live_release_check(group: HealthGroup, config: Config, vm: VMRow) -> None:
+def _append_live_release_check(
+    group: HealthGroup,
+    database: Database,
+    config: Config,
+    vm: VMRow,
+) -> None:
     """Compare a reachable guest to persisted release state without writing it."""
 
     if vm.tailscale_host is None:
@@ -198,7 +203,9 @@ def _append_live_release_check(group: HealthGroup, config: Config, vm: VMRow) ->
     try:
         from agentworks.debian import probe_debian_release
         from agentworks.transports import transport
+        from agentworks.vms.manager.boundary import require_vm_ssh_boundary
 
+        require_vm_ssh_boundary(database, config, vm)
         target = transport(vm, config, default_timeout=10)
         observed = probe_debian_release(target)
     except Exception as error:

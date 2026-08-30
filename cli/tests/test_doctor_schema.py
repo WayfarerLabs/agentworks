@@ -225,12 +225,41 @@ def test_doctor_compares_live_and_recorded_debian_release_without_writing(
         "agentworks.debian.probe_debian_release",
         lambda candidate: observed if candidate is sentinel else DebianRelease.BOOKWORM,
     )
+    monkeypatch.setattr("agentworks.vms.manager.boundary.require_vm_ssh_boundary", lambda *_args: None)
     group = HealthGroup("VM sites")
 
-    _append_live_release_check(group, cast("Config", object()), before)
+    _append_live_release_check(group, db, cast("Config", object()), before)
 
     assert group.checks[0].status is expected_status
     assert db.get_vm("box") == before
+
+
+def test_doctor_does_not_construct_transport_when_ssh_identity_is_refused(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db.insert_vm("box", site="lima-local", hostname="box")
+    db.update_vm_tailscale("box", "100.64.0.9")
+    vm = db.get_vm("box")
+    assert vm is not None
+
+    def refuse(*_args: object) -> None:
+        raise StateError(
+            "VM 'box' has no recorded SSH identity",
+            hint="Run 'agw vm reinit box' to establish SSH identity evidence.",
+        )
+
+    monkeypatch.setattr("agentworks.vms.manager.boundary.require_vm_ssh_boundary", refuse)
+    monkeypatch.setattr(
+        "agentworks.transports.transport",
+        lambda *_args, **_kwargs: pytest.fail("transport constructed after SSH identity refusal"),
+    )
+    group = HealthGroup("VM sites")
+
+    _append_live_release_check(group, db, cast("Config", object()), vm)
+
+    assert group.checks[0].status is Status.WARN
+    assert group.checks[0].hint is not None
 
 
 def test_doctor_reports_incomplete_upgrade_and_staging_residue(
