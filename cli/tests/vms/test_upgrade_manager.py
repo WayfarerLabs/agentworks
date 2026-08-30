@@ -16,7 +16,7 @@ from agentworks.debian import (
     DebianReleaseProfile,
     DebianUpgradePolicy,
 )
-from agentworks.errors import StateError, ValidationError
+from agentworks.errors import StateError, UserAbort, ValidationError
 from agentworks.ssh import SSHError
 from agentworks.vms.manager import upgrade as upgrade_manager
 from agentworks.vms.manager.inspect import _project_vm_event_name
@@ -455,6 +455,157 @@ def test_timer_restore_keeps_all_timers_stopped_until_configuration_succeeds() -
         )
 
     assert not any(command.startswith("systemctl start ") for command in commands)
+
+
+@pytest.mark.parametrize(
+    ("failure_stage", "restoration_proved"),
+    (("decline", False), ("prompt", True), ("plan", True)),
+)
+def test_source_safe_planning_exit_restores_timers_or_records_repair(
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: str,
+    restoration_proved: bool,
+) -> None:
+    transition = upgrade_manager._transitions(DEBIAN_RELEASES)[-1]
+    state = JournalState(
+        version=1,
+        attempt_id=None,
+        last_completed=JournalProgress.SOURCE_CURRENT,
+        active_action=None,
+        active_started_at=None,
+        boot_id_before=None,
+        outcome=AttemptOutcome.SUCCEEDED,
+        failure=None,
+    )
+    plan: dict[str, object] = {
+        "apt_timer_states": {
+            "apt-daily.timer": ["enabled", "active"],
+            "apt-daily-upgrade.timer": ["enabled", "active"],
+        },
+        "preliminary_material_plan": {},
+    }
+    target = object()
+    original_error: Exception | None = None
+    if failure_stage == "prompt":
+        original_error = UserAbort("interrupted")
+    elif failure_stage == "plan":
+        original_error = StateError("plan update failed")
+
+    class _Journal:
+        def __init__(self, candidate: object) -> None:
+            assert candidate is target
+
+        def install(self) -> None:
+            pass
+
+        def load(self, pair: UpgradePair) -> JournalState:
+            assert pair == transition.pair
+            return state
+
+        def load_plan(self, pair: UpgradePair) -> dict[str, object]:
+            assert pair == transition.pair
+            return plan
+
+        def update_plan(self, pair: UpgradePair, updated: dict[str, object]) -> None:
+            assert pair == transition.pair
+            assert updated is plan
+            assert original_error is not None
+            raise original_error
+
+    class _Execution:
+        def install_script(self) -> None:
+            pass
+
+    @contextlib.contextmanager
+    def _boundary(*args: object, **kwargs: object):
+        del args, kwargs
+        yield object(), object(), object()
+
+    db = _Database()
+    vm = SimpleNamespace(name="box")
+    final = SimpleNamespace(material_plan=lambda: {}, to_plan=lambda: {})
+    restore_attempts: list[object] = []
+
+    def _restore(*args: object) -> bool:
+        restore_attempts.append(args)
+        return restoration_proved
+
+    def _confirm(*args: object, **kwargs: object) -> bool:
+        del args, kwargs
+        if failure_stage == "prompt":
+            assert original_error is not None
+            raise original_error
+        return failure_stage == "plan"
+
+    monkeypatch.setattr(upgrade_manager, "gated_vm_boundary", _boundary)
+    monkeypatch.setattr(upgrade_manager, "RemoteJournal", _Journal)
+    monkeypatch.setattr(upgrade_manager, "_execution", lambda *args: _Execution())
+    monkeypatch.setattr(upgrade_manager, "_tailscale_auth_key_name", lambda *args: "tailscale-key")
+    monkeypatch.setattr(upgrade_manager, "_probe", lambda *args, **kwargs: final)
+    monkeypatch.setattr(upgrade_manager, "_require_safe_preflight", lambda *args: None)
+    monkeypatch.setattr(upgrade_manager, "_render_plan", lambda *args, **kwargs: None)
+    monkeypatch.setattr(upgrade_manager, "_restore_timers_after_source_safe_failure", _restore)
+    monkeypatch.setattr("agentworks.output.confirm", _confirm)
+    monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda *args, **kwargs: object())
+    monkeypatch.setattr("agentworks.transports.transport", lambda *args, **kwargs: target)
+
+    expected_error = UserAbort if failure_stage == "prompt" else StateError
+    with pytest.raises(expected_error) as raised:
+        upgrade_manager._resume_after_source_update(
+            db,
+            object(),
+            vm,
+            transition,
+            platform_name="lima",
+            tailscale_auth_key="ts-key",
+            interaction=object(),
+        )
+
+    assert len(restore_attempts) == 1
+    if restoration_proved:
+        assert raised.value is original_error
+        assert db.events == []
+    else:
+        assert len(db.events) == 1
+        assert db.events[0][1] == "debian_upgrade_repair_required"
+        assert json.loads(db.events[0][2] or "null")["stage"] == "source-safe-apt-timer-restore"
+
+
+def test_timer_plan_state_requires_exact_owned_units_and_valid_states() -> None:
+    valid: dict[str, object] = {
+        "apt_timer_states": {
+            "apt-daily.timer": ["enabled", "active"],
+            "apt-daily-upgrade.timer": ["disabled", "inactive"],
+        }
+    }
+    assert upgrade_manager._timer_states_from_plan(valid) == {
+        "apt-daily.timer": ("enabled", "active"),
+        "apt-daily-upgrade.timer": ("disabled", "inactive"),
+    }
+
+    invalid_values = (
+        {"apt-daily.timer": ["enabled", "active"]},
+        {
+            "apt-daily.timer": ["enabled", "active"],
+            "apt-daily-upgrade.timer": ["disabled", "inactive"],
+            "ssh.service": ["enabled", "active"],
+        },
+        {
+            "apt-daily.timer": ["unknown", "active"],
+            "apt-daily-upgrade.timer": ["disabled", "inactive"],
+        },
+        {
+            "apt-daily.timer": ["enabled", "activating"],
+            "apt-daily-upgrade.timer": ["disabled", "inactive"],
+        },
+        {
+            "apt-daily.timer": ["masked", "active"],
+            "apt-daily-upgrade.timer": ["disabled", "inactive"],
+        },
+    )
+    for states in invalid_values:
+        with pytest.raises(StateError):
+            upgrade_manager._timer_states_from_plan({"apt_timer_states": states})
 
 
 def test_wsl_target_health_uses_provider_kernel_instead_of_guest_kernel_package(

@@ -6,10 +6,11 @@ import re
 import shlex
 import uuid
 from typing import TYPE_CHECKING, NamedTuple
+from urllib.parse import urlsplit
 
 from agentworks.errors import StateError
 
-from .preflight import PreflightIssue, UpgradePreflight
+from .preflight import APT_TIMER_UNITS, PreflightIssue, UpgradePreflight
 from .scripts import render_debian_sources
 
 if TYPE_CHECKING:
@@ -22,7 +23,8 @@ _MINIMUM_BOOT_FREE = 512 * 1024 * 1024
 _MINIMUM_ROOT_FREE = 5 * 1024 * 1024 * 1024
 _MINIMUM_VAR_FREE = 2 * 1024 * 1024 * 1024
 _MINIMUM_CACHE_FREE = 2 * 1024 * 1024 * 1024
-_DEBIAN_HOSTS = ("deb.debian.org", "security.debian.org", "ftp.debian.org")
+_DEBIAN_HOSTS = frozenset({"deb.debian.org", "security.debian.org", "ftp.debian.org"})
+_DEBIAN_URI_SCHEMES = frozenset({"http", "https"})
 NATIVE_PACKAGE_LOCK_COMMAND = r"""
 if command -v fuser >/dev/null 2>&1; then
   fuser /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend /var/cache/apt/archives/lock /var/lib/apt/lists/lock 2>/dev/null
@@ -44,6 +46,7 @@ fi
 class _SourceEntry(NamedTuple):
     uris: tuple[str, ...]
     suites: tuple[str, ...]
+    has_binary: bool
 
 
 def probe_upgrade_preflight(
@@ -105,7 +108,7 @@ def probe_upgrade_preflight(
             _stdout(target, f"systemctl is-enabled {name}", check=False) or "unknown",
             _stdout(target, f"systemctl is-active {name}", check=False) or "unknown",
         )
-        for name in ("apt-daily.timer", "apt-daily-upgrade.timer")
+        for name in APT_TIMER_UNITS
     }
 
     return UpgradePreflight(
@@ -163,11 +166,12 @@ def target_source_hygiene_issues(
     issues: set[str] = set()
     for path, content in files.items():
         for entry in _enabled_source_entries(path, content):
-            debian_uris = tuple(uri for uri in entry.uris if any(host in uri for host in _DEBIAN_HOSTS))
+            debian_uris = tuple(uri for uri in entry.uris if _is_debian_uri(uri))
             if len(debian_uris) != len(entry.uris):
                 issues.add(path)
             if debian_uris:
-                covered.update(expected.intersection(entry.suites))
+                if entry.has_binary:
+                    covered.update(expected.intersection(entry.suites))
                 if set(entry.suites) - expected:
                     issues.add(path)
     issues.update(f"<missing-target-suite:{suite}>" for suite in sorted(expected - covered))
@@ -181,15 +185,20 @@ def _simulate_target_upgrade(
     """Simulate both target-release upgrade stages against isolated APT state."""
     scratch = f"/var/tmp/agentworks-apt-plan-{uuid.uuid4().hex}"
     sources = f"{scratch}/debian.sources"
+    apt_config = f"{scratch}/apt.conf"
+    apt_config_parts = f"{scratch}/apt.conf.d"
     q_scratch = shlex.quote(scratch)
     q_sources = shlex.quote(sources)
+    q_apt_config = shlex.quote(apt_config)
     source_document = render_debian_sources(target_suites)
+    config_document = f'Dir::Etc::main "/dev/null";\nDir::Etc::parts "{apt_config_parts}";\n'
     removals: set[str] = set()
     downloads: list[int] = []
     growth: list[int] = []
     try:
         target.run(
-            f"install -d -m 0700 {q_scratch} {q_scratch}/lists/partial {q_scratch}/archives/partial",
+            f"install -d -m 0700 {q_scratch} {q_scratch}/lists/partial "
+            f"{q_scratch}/archives/partial {q_scratch}/apt.conf.d",
             sudo=True,
         )
         target.run(
@@ -206,10 +215,14 @@ def _simulate_target_upgrade(
             input_text=source_document,
             tty=False,
         )
+        target.run(
+            f"python3 -c {shlex.quote(writer)} {q_apt_config}",
+            sudo=True,
+            input_text=config_document,
+            tty=False,
+        )
         options = " ".join(
             (
-                "-o Dir::Etc::main=/dev/null",
-                "-o Dir::Etc::parts=-",
                 f"-o Dir::Etc::sourcelist={q_sources}",
                 "-o Dir::Etc::sourceparts=-",
                 f"-o Dir::State::Lists={q_scratch}/lists",
@@ -221,28 +234,32 @@ def _simulate_target_upgrade(
                 "-o APT::Get::List-Cleanup=0",
             )
         )
-        update = target.run(f"APT_CONFIG=/dev/null LC_ALL=C apt-get {options} update", sudo=True, check=False)
+        update = target.run(
+            f"APT_CONFIG={q_apt_config} LC_ALL=C apt-get {options} update",
+            sudo=True,
+            check=False,
+        )
         results = (
             target.run(
-                f"APT_CONFIG=/dev/null LC_ALL=C apt-get {options} -s upgrade --without-new-pkgs",
+                f"APT_CONFIG={q_apt_config} LC_ALL=C apt-get {options} -s upgrade --without-new-pkgs",
                 sudo=True,
                 check=False,
             ),
             target.run(
-                f"APT_CONFIG=/dev/null LC_ALL=C apt-get {options} -s full-upgrade",
+                f"APT_CONFIG={q_apt_config} LC_ALL=C apt-get {options} -s full-upgrade",
                 sudo=True,
                 check=False,
             ),
         )
         estimates = (
             target.run(
-                f"APT_CONFIG=/dev/null LC_ALL=C apt-get {options} "
+                f"APT_CONFIG={q_apt_config} LC_ALL=C apt-get {options} "
                 "--print-uris --yes --download-only upgrade --without-new-pkgs",
                 sudo=True,
                 check=False,
             ),
             target.run(
-                f"APT_CONFIG=/dev/null LC_ALL=C apt-get {options} --print-uris --yes --download-only full-upgrade",
+                f"APT_CONFIG={q_apt_config} LC_ALL=C apt-get {options} --print-uris --yes --download-only full-upgrade",
                 sudo=True,
                 check=False,
             ),
@@ -349,6 +366,7 @@ def _package_origin_inventory(target: Transport) -> tuple[tuple[str, ...], tuple
     command = r"""
 dpkg-query -W -f='${binary:Package}\t${Version}\n' |
 while IFS="$(printf '\t')" read -r package version; do
+  debian_origin='(^|[[:space:]])https?://(deb\.debian\.org|security\.debian\.org|ftp\.debian\.org)(:|/|[[:space:]]|$)'
   matches=$(apt-cache madison "$package" | awk -F '|' -v wanted="$version" '
     {
       candidate=$2
@@ -358,7 +376,7 @@ while IFS="$(printf '\t')" read -r package version; do
   ') || exit 70
   if [ -z "$matches" ]; then
     printf 'OBSOLETE:%s\n' "$package"
-  elif ! printf '%s\n' "$matches" | grep -Eq 'deb\.debian\.org|security\.debian\.org|ftp\.debian\.org'; then
+  elif ! printf '%s\n' "$matches" | grep -Eiq "$debian_origin"; then
     printf 'NONDEBIAN:%s\n' "$package"
   fi
 done
@@ -378,19 +396,24 @@ done
 
 def _is_third_party(content: str) -> bool:
     path = "source.sources" if re.search(r"(?im)^\s*types\s*:", content) else "source.list"
-    return any(
-        any(not any(host in uri for host in _DEBIAN_HOSTS) for uri in entry.uris)
-        for entry in _enabled_source_entries(path, content)
-    )
+    return any(any(not _is_debian_uri(uri) for uri in entry.uris) for entry in _enabled_source_entries(path, content))
 
 
 def _mentions_other_debian_suite(content: str, source_suites: Sequence[str]) -> bool:
     allowed = set(source_suites)
     path = "source.sources" if re.search(r"(?im)^\s*types\s*:", content) else "source.list"
     return any(
-        any(host in uri for uri in entry.uris for host in _DEBIAN_HOSTS) and bool(set(entry.suites) - allowed)
+        any(_is_debian_uri(uri) for uri in entry.uris) and bool(set(entry.suites) - allowed)
         for entry in _enabled_source_entries(path, content)
     )
+
+
+def _is_debian_uri(uri: str) -> bool:
+    try:
+        parsed = urlsplit(uri)
+    except ValueError:
+        return False
+    return parsed.scheme.lower() in _DEBIAN_URI_SCHEMES and parsed.hostname in _DEBIAN_HOSTS
 
 
 def _enabled_source_entries(path: str, content: str) -> tuple[_SourceEntry, ...]:
@@ -402,16 +425,16 @@ def _enabled_source_entries(path: str, content: str) -> tuple[_SourceEntry, ...]
         if not active or active.startswith("#"):
             continue
         match = re.match(
-            r"deb\s+(?:\[([^]]+)\]\s+)?(\S+)\s+(\S+)",
+            r"(deb|deb-src)\s+(?:\[([^]]+)\]\s+)?(\S+)\s+(\S+)",
             active,
             flags=re.IGNORECASE,
         )
         if match is None:
             continue
-        options, uri, suite = match.groups()
+        source_type, options, uri, suite = match.groups()
         if options is not None and re.search(r"(?:^|\s)enabled\s*=\s*(?:no|false|0)(?:\s|$)", options, re.I):
             continue
-        entries.append(_SourceEntry((uri,), (suite,)))
+        entries.append(_SourceEntry((uri,), (suite,), source_type.lower() == "deb"))
     return tuple(entries)
 
 
@@ -434,12 +457,13 @@ def _enabled_deb822_entries(content: str) -> tuple[_SourceEntry, ...]:
             fields[current] = value.strip()
         if fields.get("enabled", "yes").lower() in {"no", "false", "0"}:
             continue
-        if "deb" not in fields.get("types", "").split():
+        source_types = {value.lower() for value in fields.get("types", "").split()}
+        if not source_types.intersection({"deb", "deb-src"}):
             continue
         uris = tuple(fields.get("uris", "").split())
         suites = tuple(fields.get("suites", "").split())
         if uris and suites:
-            entries.append(_SourceEntry(uris, suites))
+            entries.append(_SourceEntry(uris, suites, "deb" in source_types))
     return tuple(entries)
 
 

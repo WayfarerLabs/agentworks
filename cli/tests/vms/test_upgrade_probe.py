@@ -62,21 +62,27 @@ def test_target_plan_uses_isolated_sources_and_both_upgrade_stages() -> None:
     assert any(command.endswith(" -s full-upgrade") for command in apt_commands)
     assert sum("--print-uris" in command for command in apt_commands) == 2
     assert all("Dir::Etc::sourcelist=/var/tmp/agentworks-apt-plan-" in command for command in apt_commands)
-    assert all("APT_CONFIG=/dev/null" in command for command in apt_commands)
-    assert all("Dir::Etc::main=/dev/null" in command for command in apt_commands)
-    assert all("Dir::Etc::parts=-" in command for command in apt_commands)
+    assert all("APT_CONFIG=/var/tmp/agentworks-apt-plan-" in command for command in apt_commands)
+    assert all("/apt.conf LC_ALL=C apt-get" in command for command in apt_commands)
+    assert all("Dir::Etc::main=" not in command for command in apt_commands)
+    assert all("Dir::Etc::parts=" not in command for command in apt_commands)
     assert all("Dir::State::status=/var/tmp/agentworks-apt-plan-" in command for command in apt_commands)
     assert all("Dir::State::status=/var/lib/dpkg/status" not in command for command in apt_commands)
     assert any("install -m 0600 /var/lib/dpkg/status" in command for command in commands)
     assert commands[-1].startswith("rm -rf /var/tmp/agentworks-apt-plan-")
 
-    source_writes = [kwargs["input_text"] for _command, kwargs in target.calls if "input_text" in kwargs]
-    assert len(source_writes) == 1
-    source_write = source_writes[0]
+    writes = {command: kwargs["input_text"] for command, kwargs in target.calls if "input_text" in kwargs}
+    assert len(writes) == 2
+    source_write = next(value for command, value in writes.items() if command.endswith("/debian.sources"))
     assert isinstance(source_write, str)
     assert "Suites: trixie trixie-updates" in source_write
     assert "Suites: trixie-security" in source_write
     assert "bookworm" not in source_write
+    config_write = next(value for command, value in writes.items() if command.endswith("/apt.conf"))
+    assert isinstance(config_write, str)
+    assert 'Dir::Etc::main "/dev/null";' in config_write
+    assert 'Dir::Etc::parts "/var/tmp/agentworks-apt-plan-' in config_write
+    assert config_write.endswith('/apt.conf.d";\n')
 
 
 def test_target_plan_fails_closed_and_cleans_up_when_indexes_fail() -> None:

@@ -260,24 +260,17 @@ a provider unable to construct or honor the required request.
       before mutation plus `last_completed_action`, active action, attempt identity, and attempt
       outcome, with no duplicate pair fields. Database/init state remains authoritative for product
       health. Every journal writer takes the same lock, and the package service holds it for each
-      remote action. Reject unsafe links, ownership, or modes at the fixed root, pair directory,
-      lock, plan, and state boundaries; fence completion, failure, retry, and repeated
-      reboot-dispatch writes with the active attempt identity.
+      remote action.
 - [x] Detect native dpkg/APT locks and automatic update services. Fail closed on another package
       owner; durably record and inhibit known automatic timers. Restore their prior state only after
       a source-safe abort or verified healthy target completion; retain inhibition on a
-      mixed/unhealthy state until forward repair or external restore. Keep every timer stopped until
-      the complete recorded configuration is restored, and persist a repair-required event when
-      restoration cannot be proved.
+      mixed/unhealthy state until forward repair or external restore.
 - [x] Bring the source release current under the detached systemd service, rerun every health check,
       and reopen the planning boundary. Recompute the full package/source/removal plan from current
       state, display drift from the preliminary plan, and require a second explicit confirmation
-      before changing suites. Isolate target simulation from guest APT configuration and hooks, and
-      aggregate conservative requirements for shared or separate `/`, `/var`, cache, and `/boot`
-      filesystems.
+      before changing suites.
 - [x] Classify, archive, and disable third-party sources; generate canonical target deb822 sources
-      from the selected adjacent policy, then run its minimal and full package actions. Treat only
-      enabled `.list`/deb822 stanzas as active and require every policy target suite at convergence.
+      from the selected adjacent policy, then run its minimal and full package actions.
 - [x] Implement inspection/resume after interruption inside every remote action, SSH loss, and
       package failure. A resume inspects native locks, unit state, active attempt, logs, and
       postcondition checks before deciding whether to continue, retry, or request repair.
@@ -290,6 +283,20 @@ a provider unable to construct or honor the required request.
       owner, distinguish safe timer restoration from retained mixed-state inhibition, prove lock
       exclusion for journal writes and reboot dispatch, and resume without replaying a completed
       action.
+
+### Private-review corrections
+
+- [x] Reject unsafe links, ownership, or modes at the fixed journal root, pair directory, lock,
+      plan, and state boundaries; fence completion, failure, retry, and repeated reboot-dispatch
+      writes with the active attempt identity.
+- [x] Keep every automatic APT timer stopped until the complete recorded configuration is restored,
+      validate the exact owned timer inventory before root mutation, and persist a repair-required
+      event whenever restoration cannot be proved, including operator cancellation.
+- [x] Isolate target simulation from guest APT configuration and hooks through a primary scratch APT
+      config, and aggregate conservative requirements for shared or separate `/`, `/var`, cache, and
+      `/boot` filesystems.
+- [x] Parse enabled binary and source-only `.list`/deb822 stanzas, require exact official Debian URI
+      hosts, and require every policy target suite at convergence.
 
 ### Slice 3: reboot, reconnect, and convergence
 

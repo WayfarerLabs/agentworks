@@ -5,6 +5,24 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+APT_TIMER_UNITS = ("apt-daily.timer", "apt-daily-upgrade.timer")
+APT_TIMER_ENABLE_STATES = frozenset(
+    {
+        "enabled",
+        "enabled-runtime",
+        "disabled",
+        "static",
+        "indirect",
+        "generated",
+        "alias",
+        "linked",
+        "linked-runtime",
+        "masked",
+        "masked-runtime",
+    }
+)
+APT_TIMER_ACTIVE_STATES = frozenset({"active", "inactive"})
+
 
 class PreflightIssue(StrEnum):
     """Machine-checkable reasons an upgrade may not begin."""
@@ -83,21 +101,8 @@ class UpgradePreflight:
             found.append(PreflightIssue.PACKAGE_DATABASE_BROKEN)
         if self.package_manager_owner is not None:
             found.append(PreflightIssue.PACKAGE_MANAGER_BUSY)
-        timer_enable_states = {
-            "enabled",
-            "enabled-runtime",
-            "disabled",
-            "static",
-            "indirect",
-            "generated",
-            "alias",
-            "linked",
-            "linked-runtime",
-            "masked",
-            "masked-runtime",
-        }
         if any(
-            enabled not in timer_enable_states or active not in {"active", "inactive"}
+            enabled not in APT_TIMER_ENABLE_STATES or active not in APT_TIMER_ACTIVE_STATES
             for enabled, active in self.apt_timer_states.values()
         ) or any(
             enabled in {"masked", "masked-runtime"} and active == "active"

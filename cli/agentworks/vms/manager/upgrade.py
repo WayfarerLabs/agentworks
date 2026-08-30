@@ -39,6 +39,11 @@ from agentworks.vms.upgrade.network import (
     snapshot_provider_interface_names,
     verify_interface_names,
 )
+from agentworks.vms.upgrade.preflight import (
+    APT_TIMER_ACTIVE_STATES,
+    APT_TIMER_ENABLE_STATES,
+    APT_TIMER_UNITS,
+)
 from agentworks.vms.upgrade.probe import (
     NATIVE_PACKAGE_LOCK_COMMAND,
     probe_upgrade_preflight,
@@ -478,37 +483,29 @@ def _resume_after_source_update(
                     platform_name=platform_name,
                 )
                 _require_safe_preflight(final, transition)
-            except Exception:
-                _restore_timers_or_record(
-                    db,
-                    vm,
-                    target,
-                    timer_states,
-                    transition,
-                )
-                raise
-            _render_plan(final, transition, heading="Final Debian suite-switch plan")
-            if plan.get("preliminary_material_plan") != final.material_plan():
-                output.warn("The final package, source, conffile, blocker, or space plan changed after source update.")
-            output.warn("VM connectivity will be interrupted during service restarts and reboot.")
-            if not output.confirm(
-                f"Switch Debian suites from {transition.pair.source} to {transition.pair.target}?",
-                default=False,
-            ):
-                _restore_apt_timers(target, timer_states)
-                raise UserAbort("VM upgrade paused before suite switching; rerun vm upgrade to continue")
-            plan["final_plan"] = final.to_plan()
-            journal.update_plan(transition.pair, plan)
-            try:
+                _render_plan(final, transition, heading="Final Debian suite-switch plan")
+                if plan.get("preliminary_material_plan") != final.material_plan():
+                    output.warn(
+                        "The final package, source, conffile, blocker, or space plan changed after source update."
+                    )
+                output.warn("VM connectivity will be interrupted during service restarts and reboot.")
+                if not output.confirm(
+                    f"Switch Debian suites from {transition.pair.source} to {transition.pair.target}?",
+                    default=False,
+                ):
+                    raise UserAbort("VM upgrade paused before suite switching; rerun vm upgrade to continue")
+                plan["final_plan"] = final.to_plan()
+                journal.update_plan(transition.pair, plan)
                 _inhibit_apt_timers(target)
-            except Exception:
-                _restore_timers_or_record(
-                    db,
-                    vm,
-                    target,
-                    timer_states,
-                    transition,
-                )
+            except Exception as error:
+                restored = _restore_timers_or_record(db, vm, target, timer_states, transition)
+                if not restored:
+                    raise StateError(
+                        "Automatic APT timer state needs repair before the Debian upgrade can pause",
+                        entity_kind="vm",
+                        entity_name=vm.name,
+                        hint="Restore apt-daily.timer and apt-daily-upgrade.timer to their recorded states.",
+                    ) from error
                 raise
 
         for action in (
@@ -1087,14 +1084,21 @@ def _target_health_failures(
 
 def _timer_states_from_plan(plan: dict[str, object]) -> dict[str, tuple[str, str]]:
     value = plan.get("apt_timer_states")
-    if not isinstance(value, dict):
+    if not isinstance(value, dict) or set(value) != set(APT_TIMER_UNITS):
         raise StateError("upgrade plan is missing automatic APT timer state")
     result: dict[str, tuple[str, str]] = {}
-    for name, state in value.items():
-        if not isinstance(name, str) or not isinstance(state, list) or len(state) != 2:
+    for name in APT_TIMER_UNITS:
+        state = value[name]
+        if not isinstance(state, list) or len(state) != 2:
             raise StateError("upgrade plan has invalid automatic APT timer state")
         enabled, active = state
-        if not isinstance(enabled, str) or not isinstance(active, str):
+        if (
+            not isinstance(enabled, str)
+            or enabled not in APT_TIMER_ENABLE_STATES
+            or not isinstance(active, str)
+            or active not in APT_TIMER_ACTIVE_STATES
+            or (enabled in {"masked", "masked-runtime"} and active == "active")
+        ):
             raise StateError("upgrade plan has invalid automatic APT timer state")
         result[name] = (enabled, active)
     return result

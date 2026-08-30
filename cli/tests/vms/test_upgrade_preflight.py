@@ -193,6 +193,60 @@ Components: main
     )
 
 
+@pytest.mark.parametrize(
+    ("path", "content"),
+    (
+        (
+            "/etc/apt/sources.list",
+            "deb https://deb.debian.org.evil.example/debian trixie main\n",
+        ),
+        (
+            "/etc/apt/sources.list.d/debian.sources",
+            "Types: deb\nURIs: https://deb.debian.org.evil.example/debian\nSuites: trixie\n",
+        ),
+    ),
+)
+def test_spoofed_debian_hostname_is_third_party_and_cannot_cover_target_suite(
+    path: str,
+    content: str,
+) -> None:
+    class _Target:
+        def run(self, command: str, **kwargs: object) -> object:
+            del command, kwargs
+            return SimpleNamespace(ok=True, stdout=f"AGW-SOURCE:{path}\n{content}")
+
+    assert _is_third_party(content) is True
+    assert _mentions_other_debian_suite(content, ("bookworm",)) is False
+    issues = target_source_hygiene_issues(
+        _Target(),  # type: ignore[arg-type]
+        ("trixie",),
+    )
+    assert path in issues
+    assert "<missing-target-suite:trixie>" in issues
+
+
+@pytest.mark.parametrize(
+    "content",
+    (
+        "deb-src https://evil.example/debian trixie main\n",
+        "Types: deb-src\nURIs: https://evil.example/debian\nSuites: trixie\n",
+    ),
+)
+def test_source_only_stanzas_participate_in_third_party_classification(content: str) -> None:
+    assert _is_third_party(content) is True
+
+
+@pytest.mark.parametrize(
+    "content",
+    (
+        "deb-src https://deb.debian.org/debian bookworm main\n",
+        "Types: deb-src\nURIs: https://deb.debian.org/debian\nSuites: bookworm\n",
+    ),
+)
+def test_source_only_stanzas_participate_in_foreign_suite_classification(content: str) -> None:
+    assert _mentions_other_debian_suite(content, ("trixie",)) is True
+
+
 def test_failed_empty_safety_probe_cannot_become_a_safe_empty_fact() -> None:
     class _Target:
         def run(self, command: str, **kwargs: object) -> object:

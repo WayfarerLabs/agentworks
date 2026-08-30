@@ -422,8 +422,9 @@ second mutation confirmation before changing sources.
 
 The target-release simulation is isolated from guest-owned APT policy. It uses generated canonical
 target sources, scratch package indexes, scratch dpkg status and extended-state copies, no
-preferences, and `APT_CONFIG=/dev/null` with the main configuration and configuration-parts paths
-disabled. Guest APT hooks or other fragments therefore cannot execute during this read-only plan.
+preferences, and a primary scratch `APT_CONFIG` that redirects the main configuration to `/dev/null`
+and configuration parts to an empty scratch directory before APT traverses either. Guest APT hooks
+or other fragments therefore cannot execute during this read-only plan.
 
 ### Backup and recovery gate
 
