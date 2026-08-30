@@ -301,10 +301,15 @@ def test_add_sessions_live_preflight_refusal_preserves_membership(
         "agentworks.sessions.multi_console._live_target",
         _refuse_live_target,
     )
+    monkeypatch.setattr("agentworks.sessions.multi_console._pane_secret_target", lambda *args, **kwargs: object())
+    monkeypatch.setattr(
+        "agentworks.secrets.resolve_for_command",
+        lambda *args, **kwargs: pytest.fail("live preflight refusal must precede secret resolution"),
+    )
 
     with pytest.raises(ConnectivityError):
         add_sessions(
-            db, _StubConfig(), console_name="con", session_specs=["b"], interaction=TtyInteractionPolicy.REFUSE
+            db, _StubConfig(), console_name="con", session_specs=["b+1"], interaction=TtyInteractionPolicy.REFUSE
         )
 
     assert [member.session_name for member in db.list_console_sessions("con")] == ["a"]
@@ -351,6 +356,11 @@ def test_add_shell_live_preflight_refusal_preserves_shells(db: Database, monkeyp
     monkeypatch.setattr(
         "agentworks.sessions.multi_console._live_target",
         _refuse_live_target,
+    )
+    monkeypatch.setattr("agentworks.sessions.multi_console._pane_secret_target", lambda *args, **kwargs: object())
+    monkeypatch.setattr(
+        "agentworks.secrets.resolve_for_command",
+        lambda *args, **kwargs: pytest.fail("live preflight refusal must precede secret resolution"),
     )
 
     with pytest.raises(ConnectivityError):

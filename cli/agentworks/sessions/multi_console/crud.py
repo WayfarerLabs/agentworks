@@ -162,6 +162,7 @@ def add_sessions(
                 entity_name=spec.name,
             )
 
+    live = _mc._live_target(db, config, console.vm_name)
     registry = load_request_registry(config, live_database=db)
 
     # Eager-prompting orchestration: when
@@ -220,7 +221,6 @@ def add_sessions(
                 interaction=interaction,
             )
 
-    live = _mc._live_target(db, config, console.vm_name)
     with db.transaction():
         current_order = [member.session_name for member in db.list_console_sessions(console_name)]
         current_names = set(current_order)
@@ -472,7 +472,6 @@ def add_shell(
 
     _validate_cwd(cwd)
     console = _require_console(db, console_name)
-    registry = load_request_registry(config, live_database=db)
     cs = db.get_console_session(console_name, session_name)
     if cs is None:
         raise NotFoundError(
@@ -480,6 +479,9 @@ def add_shell(
             entity_kind="console-member",
             entity_name=session_name,
         )
+
+    live = _mc._live_target(db, config, console.vm_name)
+    registry = load_request_registry(config, live_database=db)
 
     # Eager-prompting orchestration: resolve any
     # secrets referenced by this pane's env chain BEFORE the DB write +
@@ -519,7 +521,6 @@ def add_shell(
                 interaction=interaction,
             )
 
-    live = _mc._live_target(db, config, console.vm_name)
     new_shell: ShellEntry = {"cwd": cwd, "admin": admin}
     new_shells = [*cs.shells, new_shell]
     db.update_console_shells(console_name, session_name, new_shells)

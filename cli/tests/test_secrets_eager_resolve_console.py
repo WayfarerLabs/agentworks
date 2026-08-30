@@ -56,6 +56,7 @@ def test_console_add_shell_eager_resolve_fires_before_db_update(
 
     # Stub the secret-target builder so we don't need a real Config.
     monkeypatch.setattr(multi_console, "_pane_secret_target", lambda *a, **k: object())
+    monkeypatch.setattr(multi_console, "_live_target", lambda *args, **kwargs: (object(), object()))
 
     def _explode(*args: object, **kwargs: object) -> None:
         raise SecretUnavailableError(
@@ -459,6 +460,7 @@ def test_console_add_sessions_with_shells_eager_resolves(
         "_pane_secret_target",
         lambda *a, **k: object(),
     )
+    monkeypatch.setattr(multi_console, "_live_target", lambda *args, **kwargs: (object(), object()))
 
     def _explode(*args: object, **kwargs: object) -> None:
         raise SecretUnavailableError(
