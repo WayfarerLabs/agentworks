@@ -94,9 +94,9 @@ a stored credential or a managed helper.
 ### GitHub CLI
 
 When runup is enabled, `source.mode: gh-cli` checks whether `gh` exists and whether
-`gh auth status --hostname github.com` succeeds in the current target-user environment. The check is
-read-only and advisory: arbitrary CLI output is suppressed and the managed helper is installed even
-when the check warns. On each matching Git `get`, that helper runs exactly:
+`gh auth status --active --hostname github.com` succeeds for the identity the runtime token command
+will use. The check is read-only and advisory: arbitrary CLI output is suppressed and the managed
+helper is installed even when the check warns. On each matching Git `get`, that helper runs exactly:
 
 ```text
 GH_PROMPT_DISABLED=1 gh auth token --hostname github.com

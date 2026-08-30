@@ -148,9 +148,15 @@ class AzDOCredentialProvider(GitCredentialProvider):
         if result.returncode == 0:
             output.detail(f"Verified Azure CLI readiness for git-credential/{self.owner_name}")
         elif result.returncode == 20:
-            output.warn(f"Azure CLI is not installed for git-credential/{self.owner_name}")
+            output.warn(
+                f"Azure CLI credentials are currently unavailable for git-credential/{self.owner_name}; "
+                "the target user must install 'az' on PATH and authenticate it as the intended identity"
+            )
         else:
-            output.warn(f"Azure CLI is not authenticated or healthy for git-credential/{self.owner_name}")
+            output.warn(
+                f"Azure CLI credentials are currently unavailable for git-credential/{self.owner_name}; "
+                "the target user must authenticate 'az' as the intended identity"
+            )
 
     def _verify_token(self, token: str, *, secret_name: str) -> None:
         import base64

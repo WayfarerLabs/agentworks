@@ -174,9 +174,9 @@ provider:
 
 CLI sources use the target admin or agent user's active CLI identity. Agentworks does not install or
 authenticate `gh` or `az`. During enabled credential runup, GitHub checks
-`gh auth status --hostname github.com` and Azure checks `az account show`; either check may warn
-without blocking helper installation. GitHub invokes `gh auth token --hostname github.com` at Git
-runtime; Azure DevOps uses `az account get-access-token` with resource
+`gh auth status --active --hostname github.com` and Azure checks `az account show`; either check may
+warn without blocking helper installation. GitHub invokes `gh auth token --hostname github.com` at
+Git runtime; Azure DevOps uses `az account get-access-token` with resource
 `499b84ac-1321-427f-aa17-267ca6975798`, query `accessToken`, and TSV output. The Azure identity must
 also have access to the configured organization and repository. The target user owns and may change
 the active CLI identity; verify it after authentication changes.

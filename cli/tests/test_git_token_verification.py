@@ -122,7 +122,7 @@ def _stub_cli(bin_dir: Path, name: str) -> None:
         (
             GitHubCredentialProvider("gh", {"source": {"mode": "gh-cli"}}),
             "gh",
-            ("auth", "status", "--hostname", "github.com"),
+            ("auth", "status", "--active", "--hostname", "github.com"),
         ),
         (
             AzDOCredentialProvider("ado", {"org": "my-org", "source": {"mode": "az-cli"}}),
@@ -168,34 +168,6 @@ def test_cli_runup_checks_current_target_without_forwarding_process_output(
 
 
 @pytest.mark.parametrize(
-    ("provider", "command_name"),
-    [
-        (GitHubCredentialProvider("gh", {"source": {"mode": "gh-cli"}}), "gh"),
-        (AzDOCredentialProvider("ado", {"org": "my-org", "source": {"mode": "az-cli"}}), "az"),
-    ],
-)
-def test_cli_runup_distinguishes_missing_command_from_unhealthy_identity(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    provider: GitCredentialProvider,
-    command_name: str,
-) -> None:
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    args_path = tmp_path / "args"
-    warnings: list[str] = []
-    monkeypatch.setattr("agentworks.output.warn", warnings.append)
-    missing_target = _ShellTarget(bin_dir, args_path, 1)
-    provider.runup(RunContext(admin_target=cast("Transport", missing_target), secrets=ScopedSecrets({}, ())))
-    _stub_cli(bin_dir, command_name)
-    unhealthy_target = _ShellTarget(bin_dir, args_path, 1)
-    provider.runup(RunContext(admin_target=cast("Transport", unhealthy_target), secrets=ScopedSecrets({}, ())))
-
-    assert len(warnings) == 2
-    assert warnings[0] != warnings[1]
-
-
-@pytest.mark.parametrize(
     "provider",
     [
         GitHubCredentialProvider("gh", {"source": {"mode": "gh-cli"}}),
@@ -215,24 +187,10 @@ def test_cli_runup_suppresses_transport_diagnostics(
     assert "untrusted transport detail" not in warnings[0]
 
 
-@pytest.mark.parametrize(
-    ("provider", "command_name"),
-    [
-        (GitHubCredentialProvider("gh", {"source": {"mode": "gh-cli"}}), "gh"),
-        (AzDOCredentialProvider("ado", {"org": "my-org", "source": {"mode": "az-cli"}}), "az"),
-    ],
-)
-@pytest.mark.parametrize("installed", [False, True])
-def test_cli_runup_warning_keeps_managed_helper(
-    tmp_path: Path,
-    provider: GitCredentialProvider,
-    command_name: str,
-    installed: bool,
-) -> None:
+def test_cli_runup_warning_keeps_managed_helper(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    if installed:
-        _stub_cli(bin_dir, command_name)
+    provider = GitHubCredentialProvider("gh", {"source": {"mode": "gh-cli"}})
     request = _request(provider, {}, ())
     state = materialize_credential_state(
         (request,),
@@ -243,16 +201,8 @@ def test_cli_runup_warning_keeps_managed_helper(
     assert state.has_credentials
 
 
-@pytest.mark.parametrize(
-    "provider",
-    [
-        GitHubCredentialProvider("gh", {"source": {"mode": "gh-cli"}}),
-        AzDOCredentialProvider("ado", {"org": "my-org", "source": {"mode": "az-cli"}}),
-    ],
-)
-def test_disabled_runup_skips_cli_readiness_but_keeps_managed_helper(
-    provider: GitCredentialProvider,
-) -> None:
+def test_disabled_runup_skips_cli_readiness_but_keeps_managed_helper() -> None:
+    provider = GitHubCredentialProvider("gh", {"source": {"mode": "gh-cli"}})
     target = MagicMock()
     state = materialize_credential_state(
         (_request(provider, {}, ()),),

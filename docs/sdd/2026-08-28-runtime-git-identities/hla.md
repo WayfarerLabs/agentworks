@@ -204,9 +204,9 @@ optional validation work. The current provider-specific HTTP probes and caller p
 - current CLI-backed arms check target-user command presence and read-only authentication health,
   suppress all CLI output, and warn without preventing helper installation.
 
-GitHub uses `gh auth status --hostname github.com`; Azure uses `az account show` and does not
-request an Azure DevOps token. Disabling runup skips both secret and CLI checks. Preflight remains
-dependency-blind and unchanged.
+GitHub uses `gh auth status --active --hostname github.com`, which checks only the account used by
+the runtime token command. Azure uses `az account show` and does not request an Azure DevOps token.
+Disabling runup skips both secret and CLI checks. Preflight remains dependency-blind and unchanged.
 
 ### Materialization
 

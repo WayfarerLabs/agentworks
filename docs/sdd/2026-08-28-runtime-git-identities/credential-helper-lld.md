@@ -218,8 +218,9 @@ current CLI arm    -> provider checks command presence and read-only authenticat
 
 A definitive secret rejection retains current skip/warn/partial semantics. Network indeterminacy
 warns and continues. CLI readiness failure also warns and continues to helper materialization.
-GitHub checks `gh auth status --hostname github.com`; Azure checks `az account show` without minting
-an Azure DevOps token. Both suppress arbitrary process output. Disabling runup skips optional
+GitHub checks `gh auth status --active --hostname github.com`, restricting status and its exit code
+to the account used by the runtime token command. Azure checks `az account show` without minting an
+Azure DevOps token. Both suppress arbitrary process output. Disabling runup skips optional
 validation only; it never skips materialization.
 
 ## Built-in Provider Output

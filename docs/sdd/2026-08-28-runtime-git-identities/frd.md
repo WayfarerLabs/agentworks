@@ -152,10 +152,10 @@ acquisition.
 
 For `gh-cli` and `az-cli`, provider runup MUST perform a read-only check in the current target-user
 environment when runup is enabled. GitHub MUST distinguish a missing `gh` from an unsuccessful
-`gh auth status --hostname github.com`; Azure MUST distinguish a missing `az` from an unsuccessful
-`az account show`. The checks MUST suppress arbitrary CLI output, MUST NOT authenticate or mutate
-identity state, and MUST be advisory: core still installs the returned helper on every readiness
-outcome. Azure runup MUST NOT request an Azure DevOps access token.
+`gh auth status --active --hostname github.com`; Azure MUST distinguish a missing `az` from an
+unsuccessful `az account show`. The checks MUST suppress arbitrary CLI output, MUST NOT authenticate
+or mutate identity state, and MUST be advisory: core still installs the returned helper on every
+readiness outcome. Azure runup MUST NOT request an Azure DevOps access token.
 
 The managed-helper definition MUST contain the provider-owned helper program and a fixed,
 actionable, value-safe failure hint. Core installs and invokes that program but does not model or

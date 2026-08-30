@@ -59,6 +59,11 @@ host explicit. GitHub CLI also documents `GH_TOKEN`/`GITHUB_TOKEN` precedence an
 `GH_PROMPT_DISABLED`, so an automation-safe helper can delegate identity selection to the CLI
 without parsing its config files.
 
+`gh auth status` tests every known account on the selected host and exits nonzero if any has an
+authentication issue. Its `--active` flag limits both display and status to the active account, the
+same account `gh auth token --hostname github.com` uses. Runup therefore includes `--active`; a
+stale inactive account must not make the current runtime identity appear unhealthy.
+
 `gh auth login --with-token` accepts a supplied token, but that is an authentication operation and
 belongs to the future user-feature layer, not a Git helper. A fine-grained token in environment is
 also explicitly recommended over storing it through `gh auth login` for headless use.
@@ -67,13 +72,14 @@ also explicitly recommended over storing it through `gh auth login` for headless
 
 - `gh-cli` invokes `gh auth token --hostname github.com` at Git runtime;
 - the helper disables prompting and treats the active CLI account as operator-selected state;
-- enabled runup checks `gh auth status --hostname github.com` read-only in the target-user
+- enabled runup checks `gh auth status --active --hostname github.com` read-only in the target-user
   environment, warns without blocking helper installation, and never authenticates `gh`;
 - enterprise hosts are deferred rather than inferred.
 
 Sources:
 
 - [`gh auth token`](https://cli.github.com/manual/gh_auth_token)
+- [`gh auth status`](https://cli.github.com/manual/gh_auth_status)
 - [`gh` environment variables](https://cli.github.com/manual/gh_help_environment)
 - [`gh auth login`](https://cli.github.com/manual/gh_auth_login)
 

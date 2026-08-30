@@ -89,7 +89,7 @@ _GH_FAILURE_HINT = (
 
 _GH_READINESS = """
 command -v gh >/dev/null 2>&1 || exit 20
-GH_PROMPT_DISABLED=1 gh auth status --hostname github.com >/dev/null 2>&1 || exit 21
+GH_PROMPT_DISABLED=1 gh auth status --active --hostname github.com >/dev/null 2>&1 || exit 21
 """
 
 
@@ -163,9 +163,15 @@ class GitHubCredentialProvider(GitCredentialProvider):
         if result.returncode == 0:
             output.detail(f"Verified GitHub CLI readiness for git-credential/{self.owner_name}")
         elif result.returncode == 20:
-            output.warn(f"GitHub CLI is not installed for git-credential/{self.owner_name}")
+            output.warn(
+                f"GitHub CLI credentials are currently unavailable for git-credential/{self.owner_name}; "
+                "the target user must install 'gh' on PATH and run 'gh auth login'"
+            )
         else:
-            output.warn(f"GitHub CLI is not authenticated or healthy for git-credential/{self.owner_name}")
+            output.warn(
+                f"GitHub CLI credentials are currently unavailable for git-credential/{self.owner_name}; "
+                "the target user must run 'gh auth login' for the intended active github.com identity"
+            )
 
     def _verify_token(self, token: str, *, secret_name: str) -> None:
         import json

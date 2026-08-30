@@ -330,6 +330,10 @@ assert structure, behavior, state, and value containment; they do not police aut
       Phase 1/2 current-CLI-no-runup ruling. Focused tests cover the three distinct contexts, both
       target roles, missing/unhealthy/ready CLIs, output suppression, nonfatal helper retention, and
       disabled runup. Live acceptance and final delivery remain open below.)
+- [x] Apply the bounded round-4 review fix: limit GitHub readiness to the active account with
+      `gh auth status --active`, sharpen missing/unhealthy CLI recovery guidance without blocking
+      helper installation, and collapse overlapping readiness tests to the ten behavioral cases that
+      cover provider outcomes, transport suppression, nonfatal retention, and policy skip.
 - [ ] Run focused and full Python, static, lint, locked-SDD, Rulesync, website, installed-wheel, and
       live integration gates.
 - [ ] Obtain private `agentworks-reviewer`, Muntz, and generic correctness/security reviews; resolve
