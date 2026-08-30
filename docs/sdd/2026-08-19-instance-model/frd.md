@@ -70,6 +70,11 @@
   recorded request versus current declaration. The private store discriminator and key remain
   `applied-state` and `hardware-provenance` without a migration. SSH identity remains independently
   evidenced by the successful authorized-key write.
+- **Human configuration documents use YAML (authenticated operator channel to the instance-model
+  effort lead, 2026-08-30):** live-instance human descriptions render instance specs, current
+  resolved specs, and lifecycle-evidence value objects as YAML, consistent with resource files and
+  `resource show`. Machine output remains JSON, and single-line comparison values remain compact
+  JSON.
 
 ## Why now
 

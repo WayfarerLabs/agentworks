@@ -362,6 +362,14 @@ between current declarations and recorded lifecycle evidence, including visible 
 supported CLI surfaces. Hardware evidence describes the successful provisioning request, not
 provider-realized hardware.
 
+### R5 correction: YAML human configuration documents
+
+- [ ] Render structured instance specs, current resolved specs, and lifecycle-evidence values as
+      safe block YAML in human live-instance descriptions; retain compact JSON for inline comparison
+      values and preserve the complete JSON v1 machine contract.
+- [ ] Prove YAML round-trip and terminal safety, update permanent CLI collateral, run focused and
+      full validation, and complete the independent project and complexity reviews.
+
 ## Phase 6: complete verification and closeout
 
 - [x] Run focused tests after every phase and the full gate on the complete exact head.
