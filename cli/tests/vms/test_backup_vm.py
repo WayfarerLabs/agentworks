@@ -192,7 +192,7 @@ def test_backup_refuses_an_unsupported_selected_applied_payload_version(
             interaction=TtyInteractionPolicy.REFUSE,
         )
 
-    assert type(caught.value) is StateError
+    assert isinstance(caught.value, StateError)
     assert caught.value.entity_kind == "vm"
     assert caught.value.entity_name == "bvm"
     assert caught.value.hint is not None

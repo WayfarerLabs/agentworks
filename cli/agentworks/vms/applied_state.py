@@ -58,6 +58,10 @@ class UnverifiableSSHAppliedState:
 type SSHAppliedState = VerifiedSSHAppliedState | UnverifiableSSHAppliedState
 
 
+class UnsupportedAppliedStateVersionError(StateError):
+    """Applied evidence was written by a codec version this release cannot read."""
+
+
 @dataclass(frozen=True, slots=True)
 class PreparedConfiguredSSHIdentity:
     """Validated public content and its configured private identity."""
@@ -228,10 +232,19 @@ def compare_vm_ssh_identity(
         ),
         None,
     )
-    if record is None:
+    applied = None if record is None else decode_ssh_identity(record)
+    return compare_vm_ssh_identity_evidence(vm_name, current, applied)
+
+
+def compare_vm_ssh_identity_evidence(
+    vm_name: str,
+    current: SSHIdentity,
+    applied: SSHAppliedState | None,
+) -> VMSSHIdentityComparison:
+    """Compare one preloaded current identity with preloaded applied evidence."""
+    if applied is None:
         return VMSSHIdentityComparison(VMSSHIdentityState.NOT_RECORDED, vm_name)
 
-    applied = decode_ssh_identity(record)
     if isinstance(applied, UnverifiableSSHAppliedState) or isinstance(current, UnverifiableSSHIdentity):
         return VMSSHIdentityComparison(VMSSHIdentityState.UNVERIFIABLE, vm_name)
     state = VMSSHIdentityState.MATCH if applied.fingerprint == current.fingerprint else VMSSHIdentityState.DRIFT
@@ -340,7 +353,7 @@ def _validated_fingerprint(value: object) -> str:
     return value
 
 
-def _unsupported_payload_version_error(record: AppliedStateSlice) -> StateError:
+def _unsupported_payload_version_error(record: AppliedStateSlice) -> UnsupportedAppliedStateVersionError:
     version = record.payload.payload_version
     if _is_safe_diagnostic_name(record.instance_name):
         message = (
@@ -351,7 +364,7 @@ def _unsupported_payload_version_error(record: AppliedStateSlice) -> StateError:
     else:
         message = f"stored VM {record.key.value} applied state uses unsupported payload version {version}"
         entity_name = None
-    return StateError(
+    return UnsupportedAppliedStateVersionError(
         message,
         entity_kind="vm",
         entity_name=entity_name,

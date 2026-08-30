@@ -343,6 +343,7 @@ def _resolve_walk_with_provenance(
         resolution_layers,
         run_layer_fold,
     )
+    from agentworks.resources.resolved_spec import resolved_spec_default_paths
 
     layers = [
         DeclarationLayer(
@@ -362,7 +363,7 @@ def _resolve_walk_with_provenance(
         _SessionAccumulator(ResolvedSessionTemplate(name=name), MergedHarness()),
         layers,
         _merge_session_layer,
-        default_paths=(("description",), ("harness_integration",)),
+        default_paths=resolved_spec_default_paths(ResolvedSessionTemplate),
         default_resource_kind="session-template",
         default_name=name,
     )

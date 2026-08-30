@@ -23,6 +23,7 @@ from agentworks.resources import KIND_REGISTRY, Registry
 from agentworks.resources.access import ResourceIdentity
 from agentworks.resources.graph import DisabledMark, Readiness
 from agentworks.resources.inspect import list_resources, resource_listing_data
+from agentworks.resources.kind import ResolvedSpecKind
 from agentworks.resources.show import project_declaration, resource_show_data, show_resource
 from agentworks.schema import AgwModel
 from agentworks.topics import TopicProse
@@ -206,8 +207,36 @@ def test_service_projects_declarable_and_capability_rows(tmp_path: Path) -> None
     assert declarable.readiness.is_ready
     assert capability.category == "capability"
     assert capability.declaration is None
+    assert declarable.resolution is None
+    assert capability.resolution is None
     assert capability.readiness is not None
     assert not capability.readiness.is_available
+
+
+def test_exactly_the_selectable_template_kinds_project_resolution(tmp_path: Path) -> None:
+    config, registry = _request_context(tmp_path)
+    expected = {
+        "vm-template",
+        "admin-template",
+        "workspace-template",
+        "agent-template",
+        "session-template",
+    }
+
+    assert {kind for kind, handler in KIND_REGISTRY.items() if isinstance(handler, ResolvedSpecKind)} == expected
+    for kind in expected:
+        shown = _show(config, registry, ResourceIdentity(kind, "default"), tmp_path)
+        assert shown.resolution is not None
+        resource = resource_show_data(shown)["resource"]
+        assert isinstance(resource, dict)
+        resolution = resource["resolution"]
+        assert isinstance(resolution, dict)
+        assert resolution["status"] == "resolved"
+        assert isinstance(resolution["spec"], dict)
+
+    secret = resource_show_data(_show(config, registry, ResourceIdentity("secret", "npm-token"), tmp_path))["resource"]
+    assert isinstance(secret, dict)
+    assert "resolution" not in secret
 
 
 def test_show_summary_is_the_exact_matching_list_row(tmp_path: Path) -> None:
@@ -257,6 +286,9 @@ def test_service_does_not_resolve_secrets_or_create_a_vm_platform(
 
     assert _show(config, registry, ResourceIdentity("secret", "npm-token"), tmp_path).declaration is not None
     assert _show(config, registry, ResourceIdentity("vm-platform", "lima"), tmp_path).declaration is None
+    vm_template = _show(config, registry, ResourceIdentity("vm-template", "default"), tmp_path)
+    assert vm_template.resolution is not None
+    assert vm_template.resolution.spec["tailscale_auth_key"] == "tailscale-auth-key"
 
 
 @pytest.mark.parametrize(

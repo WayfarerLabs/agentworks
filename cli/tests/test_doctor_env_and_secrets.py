@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
+from pathlib import Path
 from textwrap import dedent
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import Mock
 
 import pytest
+from typer.testing import CliRunner
 
 from agentworks.bootstrap import build_registry
 from agentworks.capabilities.secret_backend import BlockReason, TtyInteractionAccess
+from agentworks.cli import app
 from agentworks.config import load_config
 from agentworks.db import LATEST_VERSION, Database, VersionedPayload
 from agentworks.doctor import (
@@ -31,7 +35,6 @@ from tests.conftest import ManifestDoc, write_manifests
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from pathlib import Path
 
 
 def _write_config(
@@ -727,6 +730,50 @@ def test_invalid_live_overlay_keeps_declared_doctor_registry(
     assert registry.graph.is_live("agent", "dev") is False
     assert live_failure is not None
     assert live_failure.status is Status.FAIL
+
+
+def test_doctor_cli_keeps_database_inspection_value_free_after_live_publication_failure(
+    tmp_path: Path,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks import config as config_module
+    from agentworks import db as db_module
+
+    unsafe_key = "future\n\u202ePRIVATE_KEY_SENTINEL"
+    unsafe_value = "PRIVATE_PAYLOAD_SENTINEL"
+    cfg = _write_config(tmp_path, manifests=[ManifestDoc("agent-template", "default")])
+    db.insert_vm("box", "lima-local", "box", template="default")
+    db.insert_agent("dev", "box", "dev", template="default")
+    db.instance_state.put_desired_overlay(
+        "agent",
+        "dev",
+        VersionedPayload(1, {unsafe_key: unsafe_value}),
+    )
+    database_path = Path(db._conn.execute("PRAGMA database_list").fetchone()[2])
+    monkeypatch.setattr(config_module, "CONFIG_PATH", cfg)
+    monkeypatch.setattr(db_module, "DB_PATH", database_path)
+
+    result = CliRunner().invoke(app, ["doctor", "--output", "json"])
+
+    combined = result.stdout + result.stderr
+    assert unsafe_key not in combined
+    assert "PRIVATE_KEY_SENTINEL" not in combined
+    assert unsafe_value not in combined
+    document = cast("dict[str, object]", json.loads(result.stdout))
+    data = cast("dict[str, object]", document["data"])
+    groups = cast("list[dict[str, object]]", data["groups"])
+    database = next(group for group in groups if group["name"] == "Database")
+    checks = cast("list[dict[str, object]]", database["checks"])
+    state_facts = [
+        cast("dict[str, object]", check["instance_state"])
+        for check in checks
+        if check.get("instance_state") is not None
+    ]
+    assert any(
+        fact["fact_type"] == "unconsumed-record" and fact["instance_kind"] == "agent" and fact["instance_name"] == "dev"
+        for fact in state_facts
+    )
 
 
 def test_malformed_current_schema_keeps_declared_doctor_registry(

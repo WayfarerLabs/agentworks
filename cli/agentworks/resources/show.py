@@ -9,16 +9,16 @@ represented by their loaded Pydantic model.
 
 from __future__ import annotations
 
-import math
+import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, assert_never
+from typing import TYPE_CHECKING, Literal, assert_never
 
 import yaml
 
 from agentworks import output
 from agentworks.declared_resource import FRAMEWORK_FIELDS, METADATA_FIELDS, DeclaredResource, EnvelopeMetadata
 from agentworks.doctor import HealthCheck, checks_for_resource, health_check_data
-from agentworks.machine_output import JsonObject, JsonValue, project_origin
+from agentworks.machine_output import JsonObject, project_json_value, project_origin
 from agentworks.manifests.envelope import API_VERSION
 from agentworks.resources.access import ResourceIdentity, resolve_resource
 from agentworks.resources.graph import Enablement, Readiness
@@ -30,7 +30,9 @@ from agentworks.resources.graph_query import (
     instance_ref_data,
 )
 from agentworks.resources.inspect import ResourceSummary, summarize_resource
+from agentworks.resources.kind import ResolvedSpecKind
 from agentworks.resources.render import format_origin_line, sanitize_fact_line
+from agentworks.resources.resolved_spec import ResolvedSpec, resolved_spec_data
 
 if TYPE_CHECKING:
     from agentworks.capabilities.secret_backend import TtyInteractionAccess
@@ -59,36 +61,14 @@ class ResourceShow:
     used_by: tuple[InstanceRef, ...] | None
     diagnostics: tuple[HealthCheck, ...]
     declaration: JsonObject | None
-
-
-def _json_value(value: Any) -> JsonValue:
-    """Validate declared-row output at the closed JSON v1 carrier boundary.
-
-    Declarable kinds and their model classes are core-owned, but plugins may
-    contribute manifest row data. Pydantic JSON mode is dynamically typed, so
-    this runtime guard proves that only a closed, finite ``JsonValue`` crosses
-    the machine contract; unexpected output is rejected rather than coerced.
-    """
-    if value is None or isinstance(value, str | bool | int):
-        return value
-    if isinstance(value, float):
-        if not math.isfinite(value):
-            raise AssertionError("declaration JSON values must be finite")
-        return value
-    if isinstance(value, list):
-        return [_json_value(item) for item in value]
-    if isinstance(value, dict):
-        if not all(isinstance(key, str) for key in value):
-            raise AssertionError("declaration JSON object keys must be strings")
-        return {key: _json_value(item) for key, item in value.items()}
-    raise AssertionError(f"Pydantic JSON mode produced a non-JSON value: {type(value).__name__}")
+    resolution: ResolvedSpec | None = None
 
 
 def project_declaration(kind: str, resource: DeclaredResource) -> JsonObject:
     """Reconstruct one normalized manifest from a loaded declarable row."""
     declared_fields = set(type(resource).model_fields) - FRAMEWORK_FIELDS
     dumped = resource.model_dump(mode="json", include=declared_fields, exclude_none=True)
-    json_dumped = _json_value(dumped)
+    json_dumped = project_json_value(dumped)
     if not isinstance(json_dumped, dict):
         raise AssertionError("a declared resource must project to a JSON object")
 
@@ -142,6 +122,7 @@ def show_resource(
     focused: FocusedGraphFacts = focused_graph_facts(registry, identity)
     summary = summarize_resource(registry, identity, focused.used_by)
     diagnostics = checks_for_resource(config, registry, identity, tty_access=tty_access)
+    resolution = handler.resolve_for_show(registry, identity.name) if isinstance(handler, ResolvedSpecKind) else None
 
     return ResourceShow(
         summary=summary,
@@ -152,6 +133,7 @@ def show_resource(
         used_by=focused.used_by,
         diagnostics=diagnostics,
         declaration=declaration,
+        resolution=resolution,
     )
 
 
@@ -164,28 +146,29 @@ def resource_show_data(shown: ResourceShow) -> JsonObject:
             "is_available": shown.readiness.is_available,
             "reason": shown.readiness.reason,
         }
-    return {
-        "resource": {
-            "kind": shown.summary.kind,
-            "name": shown.summary.name,
-            "origin": project_origin(shown.summary.origin),
-            "reference_count": shown.summary.reference_count,
-            "used_by_count": shown.summary.used_by_count,
-            "description": shown.summary.description,
-            "not_ready_reason": shown.summary.not_ready_reason,
-            "disabled": shown.summary.disabled,
-            "category": shown.category,
-            "enablement": shown.enablement.value,
-            "readiness": readiness,
-            "relationships": {
-                "dependencies": [graph_edge_data(edge) for edge in shown.relationships.dependencies],
-                "dependents": [graph_edge_data(edge) for edge in shown.relationships.dependents],
-            },
-            "used_by": None if shown.used_by is None else [instance_ref_data(ref) for ref in shown.used_by],
-            "diagnostics": [health_check_data(check) for check in shown.diagnostics],
-            "declaration": shown.declaration,
-        }
+    resource: JsonObject = {
+        "kind": shown.summary.kind,
+        "name": shown.summary.name,
+        "origin": project_origin(shown.summary.origin),
+        "reference_count": shown.summary.reference_count,
+        "used_by_count": shown.summary.used_by_count,
+        "description": shown.summary.description,
+        "not_ready_reason": shown.summary.not_ready_reason,
+        "disabled": shown.summary.disabled,
+        "category": shown.category,
+        "enablement": shown.enablement.value,
+        "readiness": readiness,
+        "relationships": {
+            "dependencies": [graph_edge_data(edge) for edge in shown.relationships.dependencies],
+            "dependents": [graph_edge_data(edge) for edge in shown.relationships.dependents],
+        },
+        "used_by": None if shown.used_by is None else [instance_ref_data(ref) for ref in shown.used_by],
+        "diagnostics": [health_check_data(check) for check in shown.diagnostics],
+        "declaration": shown.declaration,
     }
+    if shown.resolution is not None:
+        resource["resolution"] = resolved_spec_data(shown.resolution)
+    return {"resource": resource}
 
 
 def _human_scalar(value: str | bool | None) -> str:
@@ -261,6 +244,26 @@ def render_resource_show(shown: ResourceShow) -> None:
             with output.section():
                 output.info(f"message: {_human_scalar(check.message)}")
                 output.info(f"hint: {_human_scalar(check.hint)}")
+
+    if shown.resolution is not None:
+        output.info("Resolved spec:")
+        document = yaml.safe_dump(
+            shown.resolution.spec,
+            allow_unicode=False,
+            default_flow_style=False,
+            sort_keys=False,
+        )
+        with output.section():
+            for line in document.rstrip("\n").split("\n"):
+                output.info(line)
+        output.info("Resolved spec provenance:")
+        with output.section():
+            for item in shown.resolution.provenance:
+                path = json.dumps(item.path, ensure_ascii=True, separators=(",", ":"))
+                sources = ", ".join(
+                    f"{source.role}:{source.resource_kind}/{source.resource_name}" for source in item.sources
+                )
+                output.info(f"{sanitize_fact_line(path)}: {sanitize_fact_line(sources)}")
 
     if shown.declaration is None:
         output.info("Declaration: null")

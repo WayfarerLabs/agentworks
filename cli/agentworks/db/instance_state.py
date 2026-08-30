@@ -26,8 +26,12 @@ _DESIRED_OVERLAY = "desired-overlay"
 _APPLIED_STATE = "applied-state"
 _DESIRED_KEY = "spec"
 _MAX_APPLIED_KEY_LENGTH = 64
+_MAX_RECORD_DISCRIMINATOR_LENGTH = 64
 _MAX_OWNER_DISPLAY_LENGTH = 256
 _APPLIED_KEY_PATTERN = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*")
+_SAFE_METADATA_PATTERN = re.compile(r"[a-z][a-z0-9]*(?:[-./][a-z0-9]+)*")
+_SAFE_OWNER_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]*")
+_UTC_TIMESTAMP_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 
 
 class AppliedStateKey(StrEnum):
@@ -35,6 +39,24 @@ class AppliedStateKey(StrEnum):
 
     HARDWARE_PROVENANCE = "hardware-provenance"
     SSH_IDENTITY = "ssh-identity"
+
+
+class InstanceRecordDiagnostic(StrEnum):
+    """Closed, value-free reasons that a persisted record is malformed."""
+
+    INVALID_INSTANCE_KIND = "invalid-instance-kind"
+    INVALID_INSTANCE_NAME = "invalid-instance-name"
+    INVALID_PAYLOAD_VERSION = "invalid-payload-version"
+    INVALID_PAYLOAD = "invalid-payload"
+    NONCANONICAL_PAYLOAD = "noncanonical-payload"
+    INVALID_RECORDED_AT = "invalid-recorded-at"
+    INVALID_FUTURE_DISCRIMINATOR = "invalid-future-discriminator"
+    INVALID_DESIRED_DISCRIMINATOR = "invalid-desired-discriminator"
+    INVALID_DESIRED_OPERATION = "invalid-desired-operation"
+    INVALID_APPLIED_DISCRIMINATOR = "invalid-applied-discriminator"
+    INVALID_APPLIED_KEY = "invalid-applied-key"
+    INVALID_APPLIED_OPERATION = "invalid-applied-operation"
+    APPLIED_KEY_OWNER_MISMATCH = "applied-key-owner-mismatch"
 
 
 _APPLIED_KEYS_BY_KIND: dict[InstanceKind, frozenset[AppliedStateKey]] = {
@@ -88,6 +110,75 @@ class AppliedStateSlice:
     recorded_at: str
 
 
+@dataclass(frozen=True, slots=True)
+class InstanceRecordMetadata:
+    """Value-free identity and version facts safe to expose during inspection."""
+
+    instance_kind: InstanceKind | None
+    instance_name: str | None
+    record_type: str | None
+    record_key: str | None
+    payload_version: int | None
+    recorded_at: str | None
+    owner_exists: bool
+
+    def __post_init__(self) -> None:
+        if self.instance_kind is not None and self.instance_kind not in _INSTANCE_KINDS:
+            raise ValueError("instance_kind metadata is invalid")
+        if self.instance_name is not None and not _is_safe_display_name(self.instance_name):
+            raise ValueError("instance_name metadata is unsafe")
+        for label, value in (("record_type", self.record_type), ("record_key", self.record_key)):
+            if value is not None and not _is_safe_record_metadata_text(value):
+                raise ValueError(f"{label} metadata is unsafe")
+        if self.payload_version is not None and (type(self.payload_version) is not int or self.payload_version <= 0):
+            raise ValueError("payload_version metadata is invalid")
+        if self.recorded_at is not None and not _is_safe_recorded_at(self.recorded_at):
+            raise ValueError("recorded_at metadata is unsafe")
+        if type(self.owner_exists) is not bool:
+            raise TypeError("owner_exists metadata must be bool")
+
+
+@dataclass(frozen=True, slots=True)
+class InspectedDesiredOverlay:
+    """One structurally valid desired record plus sanitized metadata."""
+
+    record: DesiredOverlayRecord
+    metadata: InstanceRecordMetadata
+
+
+@dataclass(frozen=True, slots=True)
+class InspectedAppliedStateSlice:
+    """One recognized applied slice plus sanitized metadata."""
+
+    record: AppliedStateSlice
+    metadata: InstanceRecordMetadata
+
+
+@dataclass(frozen=True, slots=True)
+class UnconsumedInstanceRecord:
+    """Safe metadata for a valid record this release does not understand."""
+
+    metadata: InstanceRecordMetadata
+
+
+@dataclass(frozen=True, slots=True)
+class MalformedInstanceRecord:
+    """Safe metadata and a value-free diagnostic for one damaged record."""
+
+    metadata: InstanceRecordMetadata
+    diagnostic: InstanceRecordDiagnostic
+
+
+@dataclass(frozen=True, slots=True)
+class InstanceStateInspection:
+    """Closed singular or fleet inspection result with row failures isolated."""
+
+    desired_overlays: tuple[InspectedDesiredOverlay, ...]
+    applied_slices: tuple[InspectedAppliedStateSlice, ...]
+    unconsumed_records: tuple[UnconsumedInstanceRecord, ...]
+    malformed_records: tuple[MalformedInstanceRecord, ...]
+
+
 def _utc_now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -132,6 +223,7 @@ def _is_safe_display_name(instance_name: object) -> TypeGuard[str]:
         isinstance(instance_name, str)
         and bool(instance_name)
         and instance_name.isprintable()
+        and _SAFE_OWNER_PATTERN.fullmatch(instance_name) is not None
         and len(repr(instance_name)) <= _MAX_OWNER_DISPLAY_LENGTH
     )
 
@@ -144,26 +236,109 @@ def _is_well_formed_applied_key(raw_key: object) -> TypeGuard[str]:
     )
 
 
-def _state_error(detail: str, row: sqlite3.Row) -> StateError:
+def _is_well_formed_operation(operation: object) -> TypeGuard[str]:
+    return _is_well_formed_applied_key(operation)
+
+
+def _is_safe_record_metadata_text(value: object) -> TypeGuard[str]:
+    return (
+        isinstance(value, str)
+        and 0 < len(value) <= _MAX_RECORD_DISCRIMINATOR_LENGTH
+        and _SAFE_METADATA_PATTERN.fullmatch(value) is not None
+    )
+
+
+def _is_safe_recorded_at(value: object) -> TypeGuard[str]:
+    return isinstance(value, str) and _UTC_TIMESTAMP_PATTERN.fullmatch(value) is not None
+
+
+def _safe_record_metadata(row: sqlite3.Row) -> InstanceRecordMetadata:
+    """Project database-sourced metadata without exposing unsafe text."""
+    raw_kind = row["instance_kind"]
+    instance_kind: InstanceKind | None = raw_kind if isinstance(raw_kind, str) and raw_kind in _INSTANCE_KINDS else None
+    raw_name = row["instance_name"]
+    instance_name = raw_name if _is_safe_display_name(raw_name) else None
+    raw_version = row["payload_version"]
+    payload_version = raw_version if type(raw_version) is int and raw_version > 0 else None
+    raw_recorded_at = row["recorded_at"]
+    recorded_at = raw_recorded_at if _is_safe_recorded_at(raw_recorded_at) else None
+    raw_type = row["record_type"]
+    raw_key = row["record_key"]
+    return InstanceRecordMetadata(
+        instance_kind=instance_kind,
+        instance_name=instance_name,
+        record_type=raw_type if _is_safe_record_metadata_text(raw_type) else None,
+        record_key=raw_key if _is_safe_record_metadata_text(raw_key) else None,
+        payload_version=payload_version,
+        recorded_at=recorded_at,
+        owner_exists=bool(row["owner_exists"]),
+    )
+
+
+_DIAGNOSTIC_DETAILS: dict[InstanceRecordDiagnostic, str] = {
+    InstanceRecordDiagnostic.INVALID_INSTANCE_KIND: "invalid instance kind",
+    InstanceRecordDiagnostic.INVALID_INSTANCE_NAME: "invalid instance name",
+    InstanceRecordDiagnostic.INVALID_PAYLOAD_VERSION: "invalid payload version",
+    InstanceRecordDiagnostic.INVALID_PAYLOAD: "invalid payload",
+    InstanceRecordDiagnostic.NONCANONICAL_PAYLOAD: "payload is not canonically encoded",
+    InstanceRecordDiagnostic.INVALID_RECORDED_AT: "invalid recorded timestamp",
+    InstanceRecordDiagnostic.INVALID_FUTURE_DISCRIMINATOR: "invalid future record discriminator",
+    InstanceRecordDiagnostic.INVALID_DESIRED_DISCRIMINATOR: "invalid desired-overlay discriminator",
+    InstanceRecordDiagnostic.INVALID_DESIRED_OPERATION: "desired overlay has lifecycle provenance",
+    InstanceRecordDiagnostic.INVALID_APPLIED_DISCRIMINATOR: "invalid applied-state discriminator",
+    InstanceRecordDiagnostic.INVALID_APPLIED_KEY: "invalid applied-state slice key",
+    InstanceRecordDiagnostic.INVALID_APPLIED_OPERATION: "invalid applied-state lifecycle provenance",
+    InstanceRecordDiagnostic.APPLIED_KEY_OWNER_MISMATCH: "applied-state slice key is invalid for its owner kind",
+}
+
+
+class _MalformedPersistedRecord(StateError):
+    """Internal typed failure carrying only a closed inspection diagnostic."""
+
+    def __init__(
+        self,
+        message: str,
+        diagnostic: InstanceRecordDiagnostic,
+        *,
+        entity_kind: str,
+        entity_name: str | None,
+        hint: str,
+    ) -> None:
+        super().__init__(
+            message,
+            entity_kind=entity_kind,
+            entity_name=entity_name,
+            hint=hint,
+        )
+        self.diagnostic = diagnostic
+
+
+def _state_error(diagnostic: InstanceRecordDiagnostic, row: sqlite3.Row) -> _MalformedPersistedRecord:
     instance_kind = row["instance_kind"]
     instance_name = row["instance_name"]
+    detail = _DIAGNOSTIC_DETAILS[diagnostic]
     hint = "Back up the state database before repairing it, or restore a known-good backup."
     if isinstance(instance_kind, str) and instance_kind in _INSTANCE_KINDS:
         if _is_safe_display_name(instance_name):
-            return StateError(
+            return _MalformedPersistedRecord(
                 f"stored {instance_kind} {instance_name!r} instance state is malformed: {detail}",
+                diagnostic,
                 entity_kind=instance_kind,
                 entity_name=instance_name,
                 hint=hint,
             )
-        return StateError(
+        return _MalformedPersistedRecord(
             f"stored {instance_kind} instance state is malformed: {detail}",
+            diagnostic,
             entity_kind=instance_kind,
+            entity_name=None,
             hint=hint,
         )
-    return StateError(
+    return _MalformedPersistedRecord(
         f"instance state record is malformed: {detail}",
+        diagnostic,
         entity_kind="database",
+        entity_name=None,
         hint=hint,
     )
 
@@ -176,8 +351,8 @@ def _validate_instance_kind(instance_kind: str) -> InstanceKind:
 
 def _validate_identity(instance_kind: str, instance_name: str) -> InstanceKind:
     validated_kind = _validate_instance_kind(instance_kind)
-    if not isinstance(instance_name, str) or not instance_name:
-        raise ValueError("instance_name must be a nonempty string")
+    if not _is_safe_display_name(instance_name):
+        raise ValueError("instance_name must be a bounded safe identifier")
     return validated_kind
 
 
@@ -198,37 +373,37 @@ def _decode_common(row: sqlite3.Row) -> tuple[InstanceKind, str, VersionedPayloa
     recorded_at = row["recorded_at"]
 
     if not isinstance(instance_kind, str) or instance_kind not in _INSTANCE_KINDS:
-        raise _state_error("invalid instance kind", row)
-    if not isinstance(instance_name, str) or not instance_name:
-        raise _state_error("invalid instance name", row)
+        raise _state_error(InstanceRecordDiagnostic.INVALID_INSTANCE_KIND, row)
+    if not _is_safe_display_name(instance_name):
+        raise _state_error(InstanceRecordDiagnostic.INVALID_INSTANCE_NAME, row)
     if type(payload_version) is not int or payload_version <= 0:
-        raise _state_error("invalid payload version", row)
+        raise _state_error(InstanceRecordDiagnostic.INVALID_PAYLOAD_VERSION, row)
     if not isinstance(value_json, str):
-        raise _state_error("payload is not text", row)
+        raise _state_error(InstanceRecordDiagnostic.INVALID_PAYLOAD, row)
     try:
         value = json.loads(value_json)
     except (json.JSONDecodeError, RecursionError, UnicodeDecodeError) as error:
-        raise _state_error("payload is not valid JSON", row) from error
+        raise _state_error(InstanceRecordDiagnostic.INVALID_PAYLOAD, row) from error
     if not isinstance(value, dict):
-        raise _state_error("payload is not a JSON object", row)
+        raise _state_error(InstanceRecordDiagnostic.INVALID_PAYLOAD, row)
     try:
         payload = VersionedPayload(payload_version, cast("JsonObject", value))
     except (RecursionError, TypeError, ValueError) as error:
-        raise _state_error("payload contains invalid JSON values", row) from error
+        raise _state_error(InstanceRecordDiagnostic.INVALID_PAYLOAD, row) from error
     try:
         canonical_value = _encode_payload(payload)
     except (TypeError, ValueError) as error:
-        raise _state_error("payload contains invalid JSON values", row) from error
+        raise _state_error(InstanceRecordDiagnostic.INVALID_PAYLOAD, row) from error
     if canonical_value != value_json:
-        raise _state_error("payload is not canonically encoded", row)
+        raise _state_error(InstanceRecordDiagnostic.NONCANONICAL_PAYLOAD, row)
     if not isinstance(recorded_at, str):
-        raise _state_error("recorded timestamp is not text", row)
+        raise _state_error(InstanceRecordDiagnostic.INVALID_RECORDED_AT, row)
     try:
         parsed_recorded_at = datetime.strptime(recorded_at, "%Y-%m-%dT%H:%M:%SZ")
     except ValueError as error:
-        raise _state_error("recorded timestamp is invalid", row) from error
+        raise _state_error(InstanceRecordDiagnostic.INVALID_RECORDED_AT, row) from error
     if parsed_recorded_at.strftime("%Y-%m-%dT%H:%M:%SZ") != recorded_at:
-        raise _state_error("recorded timestamp is not canonical UTC", row)
+        raise _state_error(InstanceRecordDiagnostic.INVALID_RECORDED_AT, row)
     return instance_kind, instance_name, payload, recorded_at
 
 
@@ -369,8 +544,8 @@ class InstanceStateRepository:
     ) -> tuple[AppliedStateSlice, ...]:
         """Upsert supplied slices atomically while preserving every unlisted slice."""
         validated_kind = _validate_identity(instance_kind, instance_name)
-        if not isinstance(operation, str) or not operation:
-            raise ValueError("operation must be a nonempty string")
+        if not _is_well_formed_operation(operation):
+            raise ValueError("operation must be 1 to 64 lower-kebab ASCII characters")
         encoded: list[tuple[AppliedStateKey, VersionedPayload, str]] = []
         for key, payload in slices.items():
             _validate_applied_key(validated_kind, key)
@@ -433,6 +608,85 @@ class InstanceStateRepository:
         ).fetchall()
         return tuple(record for row in rows if (record := self._to_applied(row)) is not None)
 
+    def inspect_owner_state(
+        self,
+        instance_kind: InstanceKind,
+        instance_name: str,
+    ) -> InstanceStateInspection:
+        """Inspect records after the caller established this owner in its snapshot."""
+        _validate_identity(instance_kind, instance_name)
+        return self._inspect(instance_kind=instance_kind, instance_name=instance_name, known_owner=True)
+
+    def inspect_all_instance_state(self) -> InstanceStateInspection:
+        """Inspect the complete store in one deterministic fleet query."""
+        return self._inspect()
+
+    def _inspect(
+        self,
+        *,
+        instance_kind: InstanceKind | None = None,
+        instance_name: str | None = None,
+        known_owner: bool = False,
+    ) -> InstanceStateInspection:
+        if known_owner and instance_kind is None:
+            raise AssertionError("known-owner inspection requires one exact owner")
+        where = ""
+        parameters: tuple[object, ...] = ()
+        if instance_kind is not None:
+            assert instance_name is not None
+            where = "WHERE state.instance_kind = ? AND state.instance_name = ? "
+            parameters = (instance_kind, instance_name)
+        owner_exists_sql = (
+            "1"
+            if known_owner
+            else "CASE state.instance_kind "
+            "WHEN 'vm' THEN EXISTS(SELECT 1 FROM vms WHERE name = state.instance_name) "
+            "WHEN 'workspace' THEN EXISTS(SELECT 1 FROM workspaces WHERE name = state.instance_name) "
+            "WHEN 'agent' THEN EXISTS(SELECT 1 FROM agents WHERE name = state.instance_name) "
+            "WHEN 'session' THEN EXISTS(SELECT 1 FROM sessions WHERE name = state.instance_name) "
+            "ELSE 0 END"
+        )
+        rows = self._connection.execute(
+            f"SELECT state.*, {owner_exists_sql} AS owner_exists FROM instance_records AS state "
+            + where
+            + "ORDER BY state.instance_kind, state.instance_name, state.record_type, state.record_key",
+            parameters,
+        ).fetchall()
+
+        desired: list[InspectedDesiredOverlay] = []
+        applied: list[InspectedAppliedStateSlice] = []
+        unconsumed: list[UnconsumedInstanceRecord] = []
+        malformed: list[MalformedInstanceRecord] = []
+        for row in rows:
+            metadata = _safe_record_metadata(row)
+            try:
+                record_type = row["record_type"]
+                if record_type == _DESIRED_OVERLAY:
+                    desired.append(InspectedDesiredOverlay(self._to_desired(row), metadata))
+                    continue
+                if record_type == _APPLIED_STATE:
+                    record = self._to_applied(row)
+                    if record is not None:
+                        applied.append(InspectedAppliedStateSlice(record, metadata))
+                    else:
+                        unconsumed.append(UnconsumedInstanceRecord(metadata))
+                    continue
+                if not isinstance(record_type, str) or not record_type:
+                    raise _state_error(InstanceRecordDiagnostic.INVALID_FUTURE_DISCRIMINATOR, row)
+                raw_key = row["record_key"]
+                if not isinstance(raw_key, str) or not raw_key:
+                    raise _state_error(InstanceRecordDiagnostic.INVALID_FUTURE_DISCRIMINATOR, row)
+                _decode_common(row)
+                unconsumed.append(UnconsumedInstanceRecord(metadata))
+            except _MalformedPersistedRecord as error:
+                malformed.append(MalformedInstanceRecord(metadata, error.diagnostic))
+        return InstanceStateInspection(
+            desired_overlays=tuple(desired),
+            applied_slices=tuple(applied),
+            unconsumed_records=tuple(unconsumed),
+            malformed_records=tuple(malformed),
+        )
+
     def _delete_instance_records_for_names(
         self,
         instance_kind: InstanceKind,
@@ -450,23 +704,23 @@ class InstanceStateRepository:
     @staticmethod
     def _to_desired(row: sqlite3.Row) -> DesiredOverlayRecord:
         if row["record_type"] != _DESIRED_OVERLAY or row["record_key"] != _DESIRED_KEY:
-            raise _state_error("invalid desired-overlay discriminator", row)
+            raise _state_error(InstanceRecordDiagnostic.INVALID_DESIRED_DISCRIMINATOR, row)
         if row["operation"] is not None:
-            raise _state_error("desired overlay has lifecycle provenance", row)
+            raise _state_error(InstanceRecordDiagnostic.INVALID_DESIRED_OPERATION, row)
         instance_kind, instance_name, payload, recorded_at = _decode_common(row)
         return DesiredOverlayRecord(instance_kind, instance_name, payload, recorded_at)
 
     @staticmethod
     def _to_applied(row: sqlite3.Row) -> AppliedStateSlice | None:
         if row["record_type"] != _APPLIED_STATE:
-            raise _state_error("invalid applied-state discriminator", row)
+            raise _state_error(InstanceRecordDiagnostic.INVALID_APPLIED_DISCRIMINATOR, row)
         instance_kind, instance_name, payload, recorded_at = _decode_common(row)
         raw_key = row["record_key"]
         operation = row["operation"]
         if not _is_well_formed_applied_key(raw_key):
-            raise _state_error("invalid applied-state slice key", row)
-        if not isinstance(operation, str) or not operation:
-            raise _state_error("applied state has no lifecycle provenance", row)
+            raise _state_error(InstanceRecordDiagnostic.INVALID_APPLIED_KEY, row)
+        if not _is_well_formed_operation(operation):
+            raise _state_error(InstanceRecordDiagnostic.INVALID_APPLIED_OPERATION, row)
         try:
             key = AppliedStateKey(raw_key)
         except ValueError:
@@ -475,5 +729,5 @@ class InstanceStateRepository:
             # from this release's typed result is forward-compatible and lossless.
             return None
         if key not in _APPLIED_KEYS_BY_KIND[instance_kind]:
-            raise _state_error("applied-state slice key is invalid for its owner kind", row)
+            raise _state_error(InstanceRecordDiagnostic.APPLIED_KEY_OWNER_MISMATCH, row)
         return AppliedStateSlice(instance_kind, instance_name, key, payload, operation, recorded_at)

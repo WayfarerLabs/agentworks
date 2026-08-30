@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import shlex
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import agentworks.sessions.manager as _mgr
 from agentworks import output
@@ -14,6 +14,7 @@ from agentworks.errors import (
     AgentworksError,
     BrokenStateError,
     ExternalError,
+    NotFoundError,
     StateError,
     UserAbort,
 )
@@ -22,9 +23,12 @@ from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.db import Database, SessionRow, VMRow
+    from agentworks.db import Database, InstanceStateInspection, SessionRow, VMRow
+    from agentworks.instance_description import InstanceStateDescription
     from agentworks.machine_output import JsonObject
+    from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.sessions.template import SessionTemplate
     from agentworks.sessions.tmux import RunCommand
 
 
@@ -65,6 +69,7 @@ class SessionDescription:
     created_at: str
     updated_at: str
     consoles: tuple[SessionConsole, ...]
+    instance_state: InstanceStateDescription
 
 
 def session_listing_data(listing: SessionListing) -> JsonObject:
@@ -88,7 +93,7 @@ def session_listing_data(listing: SessionListing) -> JsonObject:
 
 def session_description_data(description: SessionDescription) -> JsonObject:
     """Project session detail facts into the closed JSON v1 shape."""
-    return {
+    data: JsonObject = {
         "session": {
             "name": description.name,
             "workspace_name": description.workspace_name,
@@ -106,6 +111,11 @@ def session_description_data(description: SessionDescription) -> JsonObject:
             ],
         },
     }
+    from agentworks.instance_description import instance_state_data
+
+    session_data = cast("JsonObject", data["session"])
+    session_data["instance_state"] = instance_state_data(description.instance_state)
+    return data
 
 
 def delete_session(
@@ -441,43 +451,65 @@ def session_description(
     status probes against the idle timer.
     """
     session = _mgr._require_session(db, name)
-    # Resolve the harness_integration for the display block (config-only, no
-    # vm/target dependency) before entering the boundary span.
-    # ``_display_registry`` guards the build for consistency with
-    # ``list_sessions``, but note ``_prepare_vm`` below ALSO builds the
-    # registry (for the VM gate) and is not guarded: describe genuinely
-    # needs a valid registry to probe live status, so a truly broken
-    # registry aborts describe there regardless. The "-" fallback here
-    # is thus defensive, not a graceful-degrade path describe can reach.
-    harness_integration = _mgr._display_live_harness_integration(
-        db,
-        _mgr._display_registry(config),
-        session.name,
-        session.template,
-    )
-    with _mgr._prepare_vm(
-        db,
-        config,
-        session,
-        operation=None,
-        interaction=interaction,
-    ) as (
-        _ws,
-        vm,
-        _run_command,
-        _run_as_root,
-        target,
-    ):
-        session = _mgr._ensure_pid(session, target=target, db=db)
+    probe_started = False
+    try:
+        with _mgr._prepare_vm(
+            db,
+            config,
+            session,
+            operation=None,
+            interaction=interaction,
+        ) as (
+            _ws,
+            _vm,
+            _run_command,
+            _run_as_root,
+            target,
+        ):
+            probe_started = True
+            session = _mgr._ensure_pid(session, target=target, db=db)
+            status = _mgr.check_session_status(session, target=target)
+            return _session_structural_description(db, config, name, status)
+    except (NotFoundError, StateError) as error:
+        if probe_started:
+            raise
+        selected_template_missing = (
+            isinstance(error, NotFoundError)
+            and error.entity_kind == "session-template"
+            and error.entity_name == session.template
+        )
+        focused_spec_unavailable = (
+            isinstance(error, StateError) and error.entity_kind == "session" and error.entity_name == session.name
+        )
+        if not selected_template_missing and not focused_spec_unavailable:
+            raise
+        # Current declaration failure makes a live probe meaningless, but it
+        # must not hide the stored declaration and applied siblings.
+        return _session_structural_description(db, config, name, SessionStatus.UNKNOWN)
 
-        status = _mgr.check_session_status(session, target=target)
 
+def _session_structural_description(
+    db: Database,
+    config: Config,
+    name: str,
+    status: SessionStatus,
+) -> SessionDescription:
+    """Take the authoritative post-observation structural snapshot."""
+    with db.snapshot():
+        session = _mgr._require_session(db, name)
+        workspace = _mgr._require_workspace(db, session.workspace_name)
+        from agentworks.instance_description import load_instance_description_registry
+
+        registry = load_instance_description_registry(db, config, "session", name)
+        inspection = db.instance_state.inspect_owner_state("session", name)
+        instance_state = _session_instance_state(registry, session, inspection)
+        harness_integration = _session_harness_integration(instance_state)
         return SessionDescription(
             name=session.name,
             workspace_name=session.workspace_name,
-            vm_name=vm.name,
+            vm_name=workspace.vm_name,
             template=session.template,
-            harness_integration=None if harness_integration == "-" else harness_integration,
+            harness_integration=harness_integration,
             mode=project_session_mode(session.mode),
             agent_name=session.agent_name,
             status={
@@ -493,7 +525,44 @@ def session_description(
                 SessionConsole(console_name=console_name, position=position)
                 for console_name, position in db.list_console_memberships_for_session(session.name)
             ),
+            instance_state=instance_state,
         )
+
+
+def _session_instance_state(
+    registry: Registry,
+    session: SessionRow,
+    inspection: InstanceStateInspection,
+) -> InstanceStateDescription:
+    from agentworks.instance_description import single_declaration_instance_state
+    from agentworks.resources.access import ResourceIdentity
+    from agentworks.sessions.templates import resolve_template_with_provenance
+
+    selection = ResourceIdentity("session-template", session.template)
+    return single_declaration_instance_state(
+        instance_kind="session",
+        selection=selection,
+        inspection=inspection,
+        resolve=lambda overlay: resolve_template_with_provenance(
+            registry,
+            session.template,
+            overlay=cast("SessionTemplate | None", overlay),
+            instance_name=session.name,
+        ),
+    )
+
+
+def _session_harness_integration(state: InstanceStateDescription) -> str | None:
+    """Read the harness integration from the same strict current declaration."""
+    from agentworks.resources.resolved_spec import ResolvedSpec
+
+    declaration = state.declarations[0].current
+    if not isinstance(declaration, ResolvedSpec):
+        return None
+    value = declaration.spec["harness_integration"]
+    if not isinstance(value, str):
+        raise AssertionError("resolved session harness integration must be text")
+    return value
 
 
 def render_session_description(description: SessionDescription) -> None:
@@ -517,6 +586,9 @@ def render_session_description(description: SessionDescription) -> None:
     output.info(f"Status:     {status_label}")
     output.info(f"Created:    {description.created_at}")
     output.info(f"Updated:    {description.updated_at}")
+    from agentworks.instance_description import render_instance_state
+
+    render_instance_state(description.instance_state)
     output.info(f"\nConsoles ({len(description.consoles)}):")
     if description.consoles:
         for console in description.consoles:

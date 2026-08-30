@@ -1,20 +1,20 @@
 # Instance Model and State: Functional Requirements
 
-- Status: Active (R1, R2, and R4 merged; merge-strategy correction implemented and verified; R3 and
-  R5 pending)
+- Status: Active (R1-R4 and merge strategy merged; R5 implemented, final verification pending)
 - Date: 2026-08-19
-- Last revised: 2026-08-28
+- Last revised: 2026-08-30
 - Parent: the `2026-08-04-next-steps` saga (destination 2 and the wave-4 enabling track)
 
 ## Rulings this seed rests on
 
 - **Operator direction (2026-08-19):** four workstreams combine into one push: the database
-  evaluation with a light repository layer, instance state (the fully resolved and applied config
-  recorded per instance), instance-level spec overlays via the CLI, and CLI surfaces showing fully
-  resolved specs for templates and live instances. One SDD carrying all four, phased, is the
-  sanctioned shape. The effort lead may propose a split if the R1 assessment or the design work
-  itself surfaces a reason the operator accepts; R4 is the likeliest candidate, since its near-term
-  consumer is the thinnest, and the R1 database assessment cannot by itself speak to that.
+  evaluation with a light repository layer, instance state (fully resolved configuration-snapshot
+  slices recorded per successful lifecycle operation, including outcome evidence where required),
+  instance-level spec overlays via the CLI, and CLI surfaces showing fully resolved specs for
+  templates and live instances. One SDD carrying all four, phased, is the sanctioned shape. The
+  effort lead may propose a split if the R1 assessment or the design work itself surfaces a reason
+  the operator accepts; R4 is the likeliest candidate, since its near-term consumer is the thinnest,
+  and the R1 database assessment cannot by itself speak to that.
 - **Operator lean (2026-08-08, reaffirmed 2026-08-19): assessment first, and "something in that
   direction, not full ORM."** The database work begins by describing what exists and what hurts, and
   the repository layer is judged by the queries the other three workstreams actually need, never by
@@ -31,11 +31,13 @@
   independent of runtime liveness. The database publishes them during the ordinary Registry
   collection phase before finalization; creating commands temporarily publish pending resources
   through the same boundary.
-- **Existing applied state remains unknown (authenticated operator channel to the instance-model
-  effort lead, 2026-08-21; reaffirmed 2026-08-23):** no migration reconstructs applied state from
-  current declarations. A real lifecycle operation establishes only the slices it can prove it
-  applied. Workspace repair is not full idempotent convergence, so it cannot manufacture a complete
-  workspace applied record. Unknown is visible and distinct from both match and drift.
+- **Existing lifecycle evidence remains unknown (authenticated operator channel to the
+  instance-model effort lead, 2026-08-21; reaffirmed 2026-08-23):** no migration reconstructs it
+  from current declarations. A real lifecycle operation establishes only the configuration-snapshot
+  slices warranted by its successful outcome; a slice can require additional evidence that the
+  relevant work succeeded. Workspace repair is not full idempotent convergence, so it cannot
+  manufacture a complete workspace lifecycle record. Unknown is visible and distinct from both match
+  and drift.
 - **Password-protected SSH keys must not regress (authenticated operator channel to the
   instance-model effort lead, 2026-08-21; clarified 2026-08-23):** password protection is neither a
   mismatch nor an unsupported condition. Derive a fingerprint without unlocking when the private key
@@ -59,6 +61,15 @@
   select an alternative strategy; `replace` discards the complete previous subtree, so none of its
   child strategies participate in that layer. Lists retain stable append-deduplication by default
   and can select replacement. Scalars replace by default.
+- **Lifecycle evidence records the configuration associated with success (authenticated operator
+  channel to the instance-model effort lead, 2026-08-30):** a persisted lifecycle record is the
+  configuration snapshot used by a successful lifecycle operation. It describes what Agentworks
+  expected that operation to create or configure. It does not claim that Agentworks independently
+  observed the provider's realized state or detect provider-side normalization or inconsistency. For
+  VM hardware, the public fact is `hardware-request`: the successful create request, compared as
+  recorded request versus current declaration. The private store discriminator and key remain
+  `applied-state` and `hardware-provenance` without a migration. SSH identity remains independently
+  evidenced by the successful authorized-key write.
 
 ## Why now
 
@@ -99,27 +110,31 @@ simplification sweep's re-scope, operator direction 2026-08-19, recorded in that
 `message-2026-08-19-sweep-rescope.md`): a rewrite here leaves its area's tests trimmed to the
 sweep's standard, and the plan carries that as definition-of-done, not follow-up.
 
-### R3: Instance state, the applied record
+### R3: Instance state and lifecycle evidence
 
 For each provisioned instance (VM first, as the vertical slice; the store's contract must serve
-sessions, workspaces, and agents without redesign), the system records the fully resolved
-configuration that was actually applied: the effective spec after the whole inheritance stack and
-platform defaults, as of the provisioning or reinit that applied it, with enough provenance to say
-when and by what operation. The record is the store the wave-2 ruling named, designed once for its
-three consumers (instance specs, integration applied-state, artifact ownership). This effort ships
-the first consumer and documents the contract wave 4's integration applied-state builds on, in a
-permanent home beside the store's implementation rather than inside this effort's SDD, since a later
-wave must read a live doc and not spelunk a locked one. Artifact ownership (wave 6) has no stated
-requirements anywhere yet, so the obligation there is only that the design must not preclude it: a
-checkable constraint, never a deliverable, and the effort lead must not invent schema for it.
-Applied state is readable through R5's surfaces and comparable against the currently declared spec;
-drift is a reportable fact (doctor is the natural reporter). Remediation of drift (rotation,
-re-apply) is out of scope; making it visible is in scope.
+sessions, workspaces, and agents without redesign), the system records slices of the fully resolved
+configuration used by successful lifecycle operations: the effective spec after the whole
+inheritance stack and model defaults, as of the operation that used it, with enough provenance to
+say when and by what operation. This lifecycle evidence describes the configuration Agentworks
+expected to create or apply successfully. A slice may require independent evidence that its
+corresponding work succeeded, as SSH identity does. It does not claim that Agentworks observed
+provider-realized hardware or detect provider-side normalization or inconsistency. The record is the
+store the wave-2 ruling named, designed once for its three consumers (instance specs, integration
+applied-state, artifact ownership). This effort ships the first consumer and documents the contract
+wave 4's integration applied-state builds on, in a permanent home beside the store's implementation
+rather than inside this effort's SDD, since a later wave must read a live doc and not spelunk a
+locked one. Artifact ownership (wave 6) has no stated requirements anywhere yet, so the obligation
+there is only that the design must not preclude it: a checkable constraint, never a deliverable, and
+the effort lead must not invent schema for it. Lifecycle evidence is readable through R5's surfaces
+and comparable against the currently declared spec; drift is a reportable fact (doctor is the
+natural reporter). Remediation of drift (rotation, re-apply) is out of scope; making it visible is
+in scope.
 
-Under the existing-state ruling above, existing applied state stays unknown until a real lifecycle
-operation, such as reinit or resume, establishes what it actually applied. A missing record is a
-first-class outcome for comparisons and diagnostics, rendered as not recorded rather than omitted.
-It is not drift, a match, or an implicit pass.
+Under the existing-state ruling above, existing lifecycle evidence stays unknown until a real
+lifecycle operation, such as reinit or resume, records the applicable successful configuration
+snapshot. A missing record is a first-class outcome for comparisons and diagnostics, rendered as not
+recorded rather than omitted. It is not drift, a match, or an implicit pass.
 
 **The proving slice (operator direction, 2026-08-21):** record the operator SSH identity an instance
 was actually provisioned with, so preflight can check it and fail cleanly when it is missing,
@@ -190,12 +205,13 @@ That is an intentional hard cutover of the harness-integration capability contra
 version 2: shipped integrations move to annotations, version-1 third-party integrations fail clearly
 at registration, and no compatibility bridge or second merge authority remains.
 
-The resolved result is what R3 records on apply and R5 shows on demand. Validation matches template
-validation: an overlay that would produce an invalid effective spec fails at declaration time with
-the same error quality templates get. One adjacent idea, recorded here so it is inheritable rather
-than remembered: a template field could be marked as one an instance must set, so the template
-declares the requirement and the overlay satisfies it. That is input to price during design, not a
-requirement; it ships only if it falls out naturally.
+The resolved result feeds the configuration-snapshot slices that successful lifecycle operations
+record and R5 shows on demand. Validation matches template validation: an overlay that would produce
+an invalid effective spec fails at declaration time with the same error quality templates get. One
+adjacent idea, recorded here so it is inheritable rather than remembered: a template field could be
+marked as one an instance must set, so the template declares the requirement and the overlay
+satisfies it. That is input to price during design, not a requirement; it ships only if it falls out
+naturally.
 
 Database-backed VMs, workspaces, agents, sessions, and consoles are live resources whether or not
 they are currently running. The state database is another resource publisher: ordinary registry
@@ -220,28 +236,28 @@ must exist before mutation.
 
 ### R5: Resolved-spec surfaces
 
-The CLI can show the fully resolved spec for a template (what an instance created from it would get
-after the inheritance chain resolves, with each value's source marked: declared, inherited,
-defaulted, overlaid). Note for the effort lead, verified at HEAD: there is no separate
-platform-defaults layer. Hardware defaults live once, on the resolved template
+The CLI can show the fully resolved spec for a template: what Agentworks would request for an
+instance created from it after the inheritance chain resolves, with each value's source marked as
+declared, inherited, defaulted, or overlaid. Note for the effort lead, verified at HEAD: there is no
+separate platform-defaults layer. Hardware defaults live once, on the resolved template
 (`cli/agentworks/vms/templates.py`), and `cli/agentworks/capabilities/vm_platform/base.py` records
 why a platform-side default was deliberately eliminated (a second declaration of the same value is
 free to drift from the first). Do not reintroduce one; "defaulted" means the resolved template's own
-default and for a live instance (both its current declared resolution and its applied record per R3,
-with drift highlighted). The natural home is `resource show` per the focused-superset ruling on that
-command; the effort lead proposes the exact surface in design. Machine output follows the JSON v1
-discipline: existing fields preserved, additions optional and tagged.
+default. For a live instance, the CLI shows both its current declared resolution and its lifecycle
+evidence per R3, with drift highlighted. The natural home is `resource show` per the
+focused-superset ruling on that command; the effort lead proposes the exact surface in design.
+Machine output follows the JSON v1 discipline: existing fields preserved, additions tagged.
 
 ## Acceptance
 
 - Wave 4's applied-state slice can build on the store contract without reopening it (the contract
   document is reviewed by the saga lead before implementation of R3 lands).
 - The onboarding field finding is discharged: an agent can state, before `vm create` mutates
-  anything, the effective CPUs, memory, disk, and swap the instance will get, via a CLI surface.
+  anything, the effective CPUs, memory, disk, and swap Agentworks will request, via a CLI surface.
   Today no command shows them: `agw resource show vm-template/NAME` renders the declared row only,
   so the resolved values first appear in provisioning output.
 - The key-change hazard is visible: after an operator edits the configured identity, a doctor run or
-  an R5 surface names the drift against each affected instance's applied record.
+  an R5 surface names the drift against each affected instance's recorded lifecycle evidence.
 - At every supported template-setting lifecycle boundary, an operator can supply the final inline
   instance layer and can tell from the command result whether that layer was set, retained,
   replaced, cleared, or explicitly absent, without the CLI echoing its values.
@@ -266,5 +282,7 @@ discipline: existing fields preserved, additions optional and tagged.
 - Incremental mutation of a finalized registry or graph, and provider-observed runtime liveness.
   Registry construction remains collect-then-finalize and derives live resources from durable
   database state.
+- Provider-observed or realized VM hardware, including detection of provider-side normalization or
+  inconsistency with the successful provisioning request.
 
 -- Seeded by the saga lead; the effort lead owns everything downstream of this FRD.

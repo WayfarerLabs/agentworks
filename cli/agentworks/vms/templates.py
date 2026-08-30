@@ -135,6 +135,7 @@ def _resolve_with_provenance(
         resolution_layers,
         run_layer_fold,
     )
+    from agentworks.resources.resolved_spec import resolved_spec_default_paths
     from agentworks.template_layers import merge_resolved_template_layer
 
     layers = [
@@ -155,7 +156,7 @@ def _resolve_with_provenance(
         ResolvedVMTemplate(name=name),
         layers,
         merge_resolved_template_layer,
-        default_paths=((field,) for field in ("cpus", "memory", "disk", "swap", "tailscale_auth_key")),
+        default_paths=resolved_spec_default_paths(ResolvedVMTemplate),
         default_resource_kind="vm-template",
         default_name=name,
     )
