@@ -1,6 +1,6 @@
 # Plan: Debian Release Transition
 
-- Status: Implementation complete and statically green; live certification and final review pending
+- Status: Implementation and private review complete; live certification and merge handoff pending
 - Date: 2026-08-28
 - Governing artifacts: `frd.md`, `hla.md`, `prior-art-research.md`, and `migration-strategy.md`
 
@@ -368,7 +368,9 @@ the product cannot ship consistently within the agreed scope.
       without a second current authority, codename-specific database migration, new create field,
       CLI target selector, or arbitrary upgrade graph. Treat this as a structural no-hardcoding
       proof, not a compatibility claim or a promise of unchanged workflow internals.
-- [ ] Run full unit/static/docs/generated gates and the final independent review lanes.
+- [x] Run full unit/static/docs/generated gates and the final independent review lanes.
+- [ ] Create `locked.md` after live certification or an authenticated operator disposition, then
+      publish the exact green head with merge intent and complete PR-level review.
 
 ### Exit criteria
 
