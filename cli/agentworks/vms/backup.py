@@ -292,7 +292,7 @@ def _archive_workspaces(
 
         # Admin can't write to root-owned temp dir, so stage via a securely
         # created temp file (mktemp creates with mode 0600), then move as root.
-        staging_paths = target.run("mktemp /tmp/_aw_paths_XXXXXX.txt").stdout.strip()
+        staging_paths = target.run("mktemp /var/tmp/_aw_paths_XXXXXX.txt").stdout.strip()
         q_staging = shlex.quote(staging_paths)
         target.write_file(staging_paths, path_content)
         target.run(f"mv {q_staging} {q_paths_file}", sudo=True)
@@ -305,7 +305,7 @@ def _archive_workspaces(
         # for run_detached's files. Can't use the root-owned tmp_dir because
         # run_detached writes its wrapper script via scp (as admin). Using
         # mktemp -d (not -u) avoids the race/symlink risks of mktemp -u.
-        detached_dir = target.run("mktemp -d /tmp/_aw_detached_XXXXXX").stdout.strip()
+        detached_dir = target.run("mktemp -d /var/tmp/_aw_detached_XXXXXX").stdout.strip()
         detached_base = f"{detached_dir}/run"
 
         import threading

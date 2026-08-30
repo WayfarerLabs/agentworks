@@ -220,10 +220,13 @@ omit static non-candidates. The default preview permits no backend-classified op
 
 ```text
 {vms: [{name, site, template, provisioning_status, initialization_status,
-        workspace_count, agent_count, session_count, tailscale_host, created_at}]}
+        workspace_count, agent_count, session_count, tailscale_host, created_at,
+        debian_release, debian_release_observed_at}]}
 ```
 
-`template` and `tailscale_host` are nullable. VMs retain name order. Provisioning is `pending`,
+`template`, `tailscale_host`, `debian_release`, and `debian_release_observed_at` are nullable. A
+non-null release is a codename recognized by this Agentworks build, and its timestamp records the
+last matching live observation. VMs retain name order. Provisioning is `pending`,
 `in_progress`, `complete`, `failed`, or `unknown`; initialization additionally permits `partial`.
 These frozen JSON v1 vocabularies do not expand when domain enums gain members. In this VM list JSON
 projection, `unknown` is the stable sentinel for an invalid persisted value and never echoes that
@@ -236,11 +239,14 @@ this ordered shape:
 {name, created_at, site, platform, backend, observed_status, status_disposition,
  operator_stopped, hostname, system_slug, system_slug_state, template, admin_template,
  admin_username, provisioning_status, initialization_status, tailscale_host, last_seen_at,
- provisioned_resources, live_resources, agents, workspaces, events}
+ debian_release, debian_release_observed_at, provisioned_resources, live_resources, agents,
+ workspaces, events}
 ```
 
 `platform`, `backend`, `observed_status`, `status_disposition`, `system_slug`, `template`,
-`admin_template`, `tailscale_host`, `last_seen_at`, and `live_resources` are nullable.
+`admin_template`, `tailscale_host`, `last_seen_at`, `debian_release`,
+`debian_release_observed_at`, and `live_resources` are nullable. Non-null release observations have
+the same recognized-codename and timestamp semantics as VM list.
 `observed_status` is `running`, `stopped`, `deallocated`, or `unknown`; `status_disposition` is
 `manual` or `idle` only for stopped or deallocated VMs; and `system_slug_state` is `set`,
 `declined`, or `unset`. `provisioned_resources` is `{cpus, memory_gib, disk_gib, swap_gib}` with
