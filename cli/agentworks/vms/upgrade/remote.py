@@ -131,11 +131,11 @@ class RemoteJournal:
     def retry(self, pair: UpgradePair, attempt_id: str) -> JournalState:
         return self._state("retry", pair.source, pair.target, attempt_id)
 
-    def dispatch_reboot(self, pair: UpgradePair, boot_id: str) -> JournalState:
-        return self._state("dispatch-reboot", pair.source, pair.target, boot_id)
+    def dispatch_reboot(self, pair: UpgradePair, boot_id: str) -> None:
+        self._dispatch("dispatch-reboot", pair.source, pair.target, boot_id)
 
-    def redispatch_reboot(self, pair: UpgradePair, boot_id: str, attempt_id: str) -> JournalState:
-        return self._state("redispatch-reboot", pair.source, pair.target, boot_id, attempt_id)
+    def redispatch_reboot(self, pair: UpgradePair, boot_id: str, attempt_id: str) -> None:
+        self._dispatch("redispatch-reboot", pair.source, pair.target, boot_id, attempt_id)
 
     def update_plan(self, pair: UpgradePair, plan: Mapping[str, object]) -> JournalState:
         encoded = base64.urlsafe_b64encode(json.dumps(plan, sort_keys=True).encode()).decode("ascii")
@@ -146,6 +146,11 @@ class RemoteJournal:
         if not isinstance(value, dict):
             raise JournalError("remote journal returned an invalid state result")
         return JournalState.from_mapping(value)
+
+    def _dispatch(self, *args: str) -> None:
+        """Dispatch a reboot without requiring an SSH acknowledgement."""
+        command = shlex.join(["python3", _REMOTE_HELPER, "--root", REMOTE_ROOT, *args])
+        self._target.run(command, sudo=True, check=False)
 
     def _run(self, *args: str) -> object:
         command = shlex.join(["python3", _REMOTE_HELPER, "--root", REMOTE_ROOT, *args])

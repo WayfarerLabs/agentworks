@@ -9,34 +9,29 @@ set -euo pipefail
 #   3. Creates a least-privilege user, API token, custom roles, and ACLs
 #
 # Run on the Proxmox host as root:
-#   bash proxmox-setup.sh [VMID] [STORAGE] [BRIDGE] [RELEASE]
+#   bash proxmox-setup.sh [VMID] [STORAGE] [BRIDGE]
 #
 # Arguments (all optional with defaults):
 #   VMID    - Template VM ID (default: 9000)
 #   STORAGE - Storage volume for VM disks (default: local-lvm)
 #   BRIDGE  - Network bridge (default: vmbr0)
-#   RELEASE - Supported Debian release (default: trixie)
 #
 # Idempotent: safe to re-run. Skips resources that already exist.
 # To recreate the API token, answer 'y' when prompted.
 
+if [ "$#" -gt 3 ]; then
+    echo "Usage: bash proxmox-setup.sh [VMID] [STORAGE] [BRIDGE]" >&2
+    exit 2
+fi
+
 VMID="${1:-9000}"
 STORAGE="${2:-local-lvm}"
 BRIDGE="${3:-vmbr0}"
-RELEASE="${4:-trixie}"
+RELEASE="trixie"
+DEBIAN_VERSION="13"
 POOL="agentworks"
 USER="agentworks@pam"
 TOKEN_NAME="agentworks"
-
-case "$RELEASE" in
-    trixie)
-        DEBIAN_VERSION="13"
-        ;;
-    *)
-        echo "Unsupported Debian release: $RELEASE (supported: trixie)" >&2
-        exit 2
-        ;;
-esac
 
 IMAGE_URL="https://cloud.debian.org/images/cloud/${RELEASE}/latest/debian-${DEBIAN_VERSION}-generic-amd64.qcow2"
 TEMPLATE_NAME="debian-${DEBIAN_VERSION}-template"

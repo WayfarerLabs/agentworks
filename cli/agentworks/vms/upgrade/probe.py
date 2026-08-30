@@ -346,20 +346,17 @@ def _source_files(target: Transport) -> dict[str, str]:
 set -e
 for path in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
   [ -f "$path" ] || continue
-  printf 'AGW-SOURCE:%s\n' "$path"
+  printf '%s\0' "$path"
   cat "$path"
+  printf '\0'
 done
 """.strip()
     output = _stdout(target, command, sudo=True)
-    files: dict[str, list[str]] = {}
-    current: str | None = None
-    for line in output.splitlines():
-        if line.startswith("AGW-SOURCE:"):
-            current = line.removeprefix("AGW-SOURCE:")
-            files[current] = []
-        elif current is not None:
-            files[current].append(line)
-    return {path: "\n".join(lines) for path, lines in files.items()}
+    framed = output.split("\0")
+    if framed[-1] != "" or len(framed) % 2 != 1:
+        raise StateError("APT source inventory returned invalid framing")
+    payload = framed[:-1]
+    return dict(zip(payload[::2], payload[1::2], strict=True))
 
 
 def _package_origin_inventory(target: Transport) -> tuple[tuple[str, ...], tuple[str, ...]]:

@@ -622,7 +622,9 @@ brings the source suite current, shows a recomputed final plan, and asks again b
 suites. Package actions and reboot intent are durably recorded under
 `/var/lib/agentworks/debian-upgrades`, so rerunning the same command resumes or diagnoses the
 recorded transition instead of replaying work. On resume, omit `--checkpoint` or pass the originally
-attested reference; a different value cannot replace the pre-upgrade recovery evidence. See
+attested reference; a different value cannot replace the pre-upgrade recovery evidence. A fresh
+upgrade and a resume paused before suite switching require an interactive terminal; a later resume
+may run non-interactively after its required authorization is durable. See
 [Upgrading a Debian VM](../docs/guides/debian-vm-upgrades.md) for preflight, recovery, and
 platform-route details.
 

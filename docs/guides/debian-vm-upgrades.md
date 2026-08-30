@@ -55,6 +55,10 @@ The workflow has three authorization points:
 3. It reopens the VM operation boundary, repeats the complete preflight, highlights material drift,
    shows the final plan, and asks permission to switch Debian suites.
 
+The checkpoint option supplies recovery evidence, not authorization. A fresh upgrade and a resume
+paused before suite switching therefore require an interactive terminal. A non-interactive
+invocation may continue a later stage whose required authorization is already durable.
+
 After the second confirmation, Agentworks preserves and disables the existing APT source files,
 writes the target release's canonical Debian sources, runs the documented minimal and full upgrades,
 and verifies the target kernel is installed on guest-kernel platforms. It uses the installed target

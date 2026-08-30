@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from .engine import ActionDisposition, ActionResult
 from .journal import JournalState, UpgradeAction, UpgradePair
 from .probe import NATIVE_PACKAGE_LOCK_COMMAND
-from .remote import REMOTE_ROOT, RemoteJournal
+from .remote import REMOTE_ROOT
 from .scripts import render_upgrade_script
 
 if TYPE_CHECKING:
@@ -34,14 +34,12 @@ class RemoteUpgradeExecution:
     def __init__(
         self,
         target: Transport,
-        journal: RemoteJournal,
         pair: UpgradePair,
         *,
         target_version_id: str,
         target_suites: Sequence[str],
     ) -> None:
         self._target = target
-        self._journal = journal
         self._pair = pair
         self._target_version_id = target_version_id
         self._target_suites = tuple(target_suites)
@@ -63,9 +61,7 @@ class RemoteUpgradeExecution:
 
     def start(self, action: UpgradeAction, attempt_id: str) -> ActionResult:
         if action is UpgradeAction.REBOOT:
-            boot_id = self.current_boot_id()
-            self._journal.dispatch_reboot(self._pair, boot_id)
-            return ExecutionResult(ActionDisposition.RUNNING)
+            raise ValueError("reboot dispatch is owned by the upgrade manager")
 
         unit = _unit_name(attempt_id)
         command = shlex.join([self._script, action.value])

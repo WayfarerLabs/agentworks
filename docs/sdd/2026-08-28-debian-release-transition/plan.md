@@ -1,6 +1,6 @@
 # Plan: Debian Release Transition
 
-- Status: Ready-triggered feedback round 1 in progress
+- Status: Ready-triggered feedback round 1 corrections complete; ready handoff pending
 - Date: 2026-08-28
 - Governing artifacts: `frd.md`, `hla.md`, `prior-art-research.md`, and `migration-strategy.md`
 
@@ -380,10 +380,10 @@ the product cannot ship consistently within the agreed scope.
 
 ### Ready-triggered feedback round 1
 
-- [ ] Resolve the full integration report's source-permission and false action-failure blockers,
+- [x] Resolve the full integration report's source-permission and false action-failure blockers,
       batch its accepted resume, repair, reboot, secret-resolution, and collateral findings, and
       retain the approved interactive and legacy-site boundaries.
-- [ ] Replace the duplicate remote journal scanner with one temporarily staged execution of the
+- [x] Replace the duplicate remote journal scanner with one temporarily staged execution of the
       canonical guest journal implementation.
 - [ ] Reconcile current `main`, run the complete gate and independent review lanes on the corrected
       exact head, then publish the signed round 1 of 4 ready handoff for external revalidation.

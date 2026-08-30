@@ -118,10 +118,11 @@ def _upgrade_vm(
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
 
-    entry = _inspect_entry(db, config, vm, interaction=interaction)
     checkpoint_ref = _validate_checkpoint(checkpoint) if checkpoint is not None else None
+    entry = _inspect_entry(db, config, vm, interaction=interaction)
     vm = _require_vm(db, name)
     if entry.adoption:
+        _require_interactive_upgrade_authorization()
         _adopt_external_upgrade(
             db,
             config,
@@ -137,6 +138,7 @@ def _upgrade_vm(
         return
 
     if entry.journal_pair is None:
+        _require_interactive_upgrade_authorization()
         assert entry.preflight is not None
         _require_safe_preflight(entry.preflight, entry.transition)
         _render_plan(
@@ -172,7 +174,7 @@ def _upgrade_vm(
             default=False,
         ):
             raise UserAbort("VM upgrade cancelled before package mutation")
-        tailscale_auth_key = _initialize_and_update_source(
+        _initialize_and_update_source(
             db,
             config,
             vm,
@@ -182,11 +184,8 @@ def _upgrade_vm(
             ordinary_backup,
             recovery_bundle,
             platform_name=entry.platform_name,
-            tailscale_auth_key=entry.tailscale_auth_key,
             interaction=interaction,
         )
-    else:
-        tailscale_auth_key = entry.tailscale_auth_key
 
     _resume_after_source_update(
         db,
@@ -195,7 +194,7 @@ def _upgrade_vm(
         entry.transition,
         platform_name=entry.platform_name,
         checkpoint_ref=checkpoint_ref,
-        tailscale_auth_key=tailscale_auth_key,
+        tailscale_auth_key=entry.tailscale_auth_key,
         interaction=interaction,
     )
     target_release = entry.transition.pair.target
@@ -347,9 +346,8 @@ def _initialize_and_update_source(
     recovery_bundle: Path,
     *,
     platform_name: str,
-    tailscale_auth_key: str,
     interaction: TtyInteractionPolicy,
-) -> str:
+) -> None:
     from agentworks.bootstrap import load_request_registry
     from agentworks.transports import transport
 
@@ -397,7 +395,7 @@ def _initialize_and_update_source(
                 "debian_upgrade_started",
                 json.dumps({"checkpoint": checkpoint, "target": transition.pair.target}, sort_keys=True),
             )
-            execution = _execution(target, journal, transition)
+            execution = _execution(target, transition)
             execution.install_script()
         except (Exception, KeyboardInterrupt) as error:
             _restore_timers_or_raise_repair(
@@ -418,7 +416,6 @@ def _initialize_and_update_source(
             target,
             fresh.apt_timer_states,
         )
-    return tailscale_auth_key
 
 
 def _resume_after_source_update(
@@ -449,7 +446,7 @@ def _resume_after_source_update(
         state = journal.load(transition.pair)
         plan = journal.load_plan(transition.pair)
         _require_matching_checkpoint(checkpoint_ref, plan)
-        execution = _execution(target, journal, transition)
+        execution = _execution(target, transition)
         execution.install_script()
         if state.last_completed is JournalProgress.PREPARED or state.active_action is UpgradeAction.SOURCE_UPDATE:
             timers = _timer_states_from_plan(plan)
@@ -464,6 +461,7 @@ def _resume_after_source_update(
         if state.last_completed is JournalProgress.SOURCE_CURRENT and state.active_action is None:
             timer_states = _timer_states_from_plan(plan)
             try:
+                _require_interactive_upgrade_authorization()
                 final = _probe(
                     db,
                     vm,
@@ -571,15 +569,9 @@ def _finish_after_reboot(
                 tailscale_auth_key=tailscale_auth_key,
             )
             if reconnected is None and _observed_boot_id(target) == prior_boot_id:
-                output.warn("The guest is still on the pre-reboot boot ID; safely redispatching reboot once.")
+                output.warn("The guest is still on the pre-reboot boot ID; safely dispatching reboot once more.")
                 reboot_state = journal.load(transition.pair)
-                if reboot_state.attempt_id is None:
-                    raise StateError("reboot journal is missing its active attempt identity")
-                journal.redispatch_reboot(
-                    transition.pair,
-                    prior_boot_id,
-                    reboot_state.attempt_id,
-                )
+                _dispatch_reboot_once(journal, transition.pair, reboot_state, prior_boot_id)
                 reconnected = _reconnect_after_reboot(
                     db,
                     config,
@@ -604,7 +596,7 @@ def _finish_after_reboot(
                 )
             target = reconnected
             journal = RemoteJournal(target)
-            execution = _execution(target, journal, transition)
+            execution = _execution(target, transition)
             reboot_state = journal.load(transition.pair)
             result = execution.inspect(UpgradeAction.REBOOT, reboot_state)
             if result.disposition.value != "succeeded":
@@ -701,6 +693,23 @@ def _advance_reboot(journal: RemoteJournal, execution: RemoteUpgradeExecution, p
     return boot_id
 
 
+def _dispatch_reboot_once(
+    journal: RemoteJournal,
+    pair: UpgradePair,
+    state: JournalState,
+    boot_id: str,
+) -> None:
+    if state.active_action is UpgradeAction.REBOOT:
+        if state.attempt_id is None:
+            raise StateError("reboot journal is missing its active attempt identity")
+        journal.redispatch_reboot(pair, boot_id, state.attempt_id)
+        return
+    if state.next_action is UpgradeAction.REBOOT:
+        journal.dispatch_reboot(pair, boot_id)
+        return
+    raise StateError("upgrade journal is not ready to retry reboot dispatch")
+
+
 def _probe(
     db: Database,
     vm: VMRow,
@@ -776,8 +785,6 @@ def _render_plan(preflight: UpgradePreflight, transition: _Transition, *, headin
 
 def _resolve_checkpoint(value: str | None) -> str:
     if value is None:
-        if not output.is_interactive():
-            raise ValidationError("--checkpoint is required when vm upgrade cannot prompt")
         output.warn("Create a bootable provider snapshot, WSL export, Proxmox backup, or equivalent before continuing.")
         value = output.prompt("External recovery artifact reference").strip()
     return _validate_checkpoint(value)
@@ -787,6 +794,11 @@ def _validate_checkpoint(value: str) -> str:
     if value != value.strip() or not value or len(value) > 512 or "\n" in value or "\r" in value:
         raise ValidationError("checkpoint reference must be a non-blank, bounded single line")
     return value
+
+
+def _require_interactive_upgrade_authorization() -> None:
+    if not output.is_interactive():
+        raise ValidationError("vm upgrade requires an interactive terminal at each pending authorization boundary")
 
 
 def _require_matching_checkpoint(value: str | None, plan: dict[str, object]) -> None:
@@ -1380,12 +1392,10 @@ def _tailscale_auth_key(resolver: Resolver, name: str) -> str:
 
 def _execution(
     target: Transport,
-    journal: RemoteJournal,
     transition: _Transition,
 ) -> RemoteUpgradeExecution:
     return RemoteUpgradeExecution(
         target,
-        journal,
         transition.pair,
         target_version_id=transition.target_profile.version_id,
         target_suites=transition.policy.target_suites,

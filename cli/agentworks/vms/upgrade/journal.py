@@ -343,10 +343,6 @@ class JournalStore:
         _atomic_json(directory / "state.json", state.to_mapping())
         return state
 
-    def scan_incomplete(self, retained_pairs: Sequence[UpgradePair]) -> list[UpgradePair]:
-        states = self.read_states(retained_pairs)
-        return [pair for pair, state in states.items() if not state.is_complete]
-
     def read_states(self, retained_pairs: Sequence[UpgradePair]) -> dict[UpgradePair, JournalState]:
         """Read and validate the retained journal inventory without mutation."""
         _reject_symlink_ancestors(self.root)
@@ -609,7 +605,10 @@ def _cli(argv: Sequence[str] | None = None) -> int:
         return 0
     elif args.command == "dispatch-reboot":
         with store.locked(pair):
-            state = store.load(pair).claim(UpgradeAction.REBOOT, boot_id_before=args.boot_id)
+            state = store.load(pair)
+            if not _package_locks_quiescent():
+                raise JournalError("reboot cannot be dispatched while package-manager ownership is uncertain")
+            state = state.claim(UpgradeAction.REBOOT, boot_id_before=args.boot_id)
             store.write_state(pair, state)
             subprocess.Popen(
                 ["systemctl", "reboot"],

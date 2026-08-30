@@ -56,15 +56,15 @@ scp scripts/proxmox-teardown.sh root@<proxmox-host>:/tmp/
 ssh -t root@<proxmox-host> bash /tmp/proxmox-teardown.sh <vmid>
 ```
 
-| Argument  | Description                       | Default     |
-| --------- | --------------------------------- | ----------- |
-| `vmid`    | VMID for the template             | `9000`      |
-| `storage` | Storage volume for disks          | `local-lvm` |
-| `bridge`  | Network bridge                    | `vmbr0`     |
-| `release` | Supported Debian release to build | `trixie`    |
+| Argument  | Description              | Default     |
+| --------- | ------------------------ | ----------- |
+| `vmid`    | VMID for the template    | `9000`      |
+| `storage` | Storage volume for disks | `local-lvm` |
+| `bridge`  | Network bridge           | `vmbr0`     |
 
-The script is idempotent -- it skips resources that already exist. At the end it prints the config
-block and token secret for your agentworks config.
+The script builds Agentworks' current Debian release; it does not expose an operating-system or
+release selector. It is idempotent -- it skips resources that already exist. At the end it prints
+the config block and token secret for your agentworks config.
 
 ### Security model
 

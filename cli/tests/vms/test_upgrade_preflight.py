@@ -153,7 +153,7 @@ Enabled: no
             del command, kwargs
             return SimpleNamespace(
                 ok=True,
-                stdout="AGW-SOURCE:/etc/apt/sources.list.d/debian.sources\n" + content,
+                stdout=f"/etc/apt/sources.list.d/debian.sources\0{content}\0",
             )
 
     issues = target_source_hygiene_issues(
@@ -182,7 +182,7 @@ Components: main
             del command, kwargs
             return SimpleNamespace(
                 ok=True,
-                stdout="AGW-SOURCE:/etc/apt/sources.list.d/debian.sources\n" + content,
+                stdout=f"/etc/apt/sources.list.d/debian.sources\0{content}\0",
             )
 
     assert (
@@ -203,13 +203,34 @@ def test_source_inventory_reads_root_only_deb822_files_with_sudo() -> None:
             calls.append(kwargs)
             return SimpleNamespace(
                 ok=True,
-                stdout="AGW-SOURCE:/etc/apt/sources.list.d/debian.sources\nSuites: trixie\n",
+                stdout="/etc/apt/sources.list.d/debian.sources\0Suites: trixie\n\0",
             )
 
     assert _source_files(_Target()) == {  # type: ignore[arg-type]
-        "/etc/apt/sources.list.d/debian.sources": "Suites: trixie"
+        "/etc/apt/sources.list.d/debian.sources": "Suites: trixie\n"
     }
     assert calls == [{"sudo": True, "check": True}]
+
+
+def test_source_inventory_does_not_treat_deb822_fields_as_record_boundaries() -> None:
+    path = "/etc/apt/sources.list.d/debian.sources"
+    content = """\
+Types: deb
+URIs: https://deb.debian.org/debian
+AGW-SOURCE: valid-extension-field
+Suites: bookworm trixie
+Components: main
+"""
+
+    class _Target:
+        def run(self, command: str, **kwargs: object) -> object:
+            del command, kwargs
+            return SimpleNamespace(ok=True, stdout=f"{path}\0{content}\0")
+
+    files = _source_files(_Target())  # type: ignore[arg-type]
+
+    assert files == {path: content}
+    assert _mentions_other_debian_suite(files[path], ("trixie",)) is True
 
 
 @pytest.mark.parametrize(
@@ -232,7 +253,7 @@ def test_spoofed_debian_hostname_is_third_party_and_cannot_cover_target_suite(
     class _Target:
         def run(self, command: str, **kwargs: object) -> object:
             del command, kwargs
-            return SimpleNamespace(ok=True, stdout=f"AGW-SOURCE:{path}\n{content}")
+            return SimpleNamespace(ok=True, stdout=f"{path}\0{content}\0")
 
     assert _is_third_party(content) is True
     assert _mentions_other_debian_suite(content, ("bookworm",)) is False

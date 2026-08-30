@@ -343,6 +343,7 @@ def test_reboot_closes_pre_upgrade_gate_before_fresh_post_reboot_gate(
     monkeypatch.setattr(upgrade_manager, "require_stable_interface_names", lambda predictions: None)
     monkeypatch.setattr(upgrade_manager, "verify_interface_names", lambda *args: None)
     monkeypatch.setattr(upgrade_manager, "_verify_target_health", lambda *args, **kwargs: None)
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: False)
     _install_release_probe(monkeypatch, DebianRelease.TRIXIE)
     monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda *args, **kwargs: object())
     monkeypatch.setattr("agentworks.transports.transport", lambda *args, **kwargs: target)
@@ -482,6 +483,7 @@ def test_timer_restore_keeps_all_timers_stopped_until_configuration_succeeds() -
         ("plan", True),
         ("keyboard", True),
         ("keyboard-unproved", False),
+        ("non-interactive", True),
     ),
 )
 def test_source_safe_planning_exit_restores_timers_or_records_repair(
@@ -578,11 +580,14 @@ def test_source_safe_planning_exit_restores_timers_or_records_repair(
     monkeypatch.setattr(upgrade_manager, "_render_plan", lambda *args, **kwargs: None)
     monkeypatch.setattr(upgrade_manager, "_restore_timers_after_source_safe_failure", _restore)
     monkeypatch.setattr("agentworks.output.confirm", _confirm)
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: failure_stage != "non-interactive")
     monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda *args, **kwargs: object())
     monkeypatch.setattr("agentworks.transports.transport", lambda *args, **kwargs: target)
 
     expected_error: type[BaseException]
-    if failure_stage == "prompt":
+    if failure_stage == "non-interactive":
+        expected_error = ValidationError
+    elif failure_stage == "prompt":
         expected_error = UserAbort
     elif failure_stage == "keyboard" and restoration_proved:
         expected_error = KeyboardInterrupt
@@ -601,8 +606,9 @@ def test_source_safe_planning_exit_restores_timers_or_records_repair(
         )
 
     assert len(restore_attempts) == 1
-    if restoration_proved:
+    if restoration_proved and original_error is not None:
         assert raised.value is original_error
+    if restoration_proved:
         assert db.events == []
     else:
         assert len(db.events) == 1
@@ -958,6 +964,79 @@ def test_resume_checkpoint_must_match_the_attested_plan_reference() -> None:
         upgrade_manager._require_matching_checkpoint("snapshot-after-mutation", plan)
 
 
+def test_invalid_checkpoint_is_rejected_before_vm_inspection(monkeypatch: pytest.MonkeyPatch) -> None:
+    vm = SimpleNamespace(name="box")
+    inspections: list[object] = []
+    monkeypatch.setattr(upgrade_manager, "_require_vm", lambda *args: vm)
+    monkeypatch.setattr(upgrade_manager, "_guard_failed_vm", lambda candidate: None)
+    monkeypatch.setattr(upgrade_manager, "_inspect_entry", lambda *args, **kwargs: inspections.append(args))
+
+    with pytest.raises(ValidationError):
+        upgrade_manager._upgrade_vm(
+            object(),
+            object(),
+            "box",
+            checkpoint="invalid\ncheckpoint",
+            interaction=object(),
+        )
+
+    assert inspections == []
+
+
+def test_fresh_upgrade_requires_interactive_authorization_before_preflight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vm = SimpleNamespace(name="box")
+    transition = upgrade_manager._transitions(DEBIAN_RELEASES)[-1]
+    entry = SimpleNamespace(
+        adoption=False,
+        journal_pair=None,
+        preflight=object(),
+        transition=transition,
+        platform_name="lima",
+        tailscale_auth_key="ts-key",
+    )
+    monkeypatch.setattr(upgrade_manager, "_require_vm", lambda *args: vm)
+    monkeypatch.setattr(upgrade_manager, "_guard_failed_vm", lambda candidate: None)
+    monkeypatch.setattr(upgrade_manager, "_inspect_entry", lambda *args, **kwargs: entry)
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: False)
+    monkeypatch.setattr(
+        upgrade_manager,
+        "_require_safe_preflight",
+        lambda *args: pytest.fail("fresh non-interactive upgrade reached preflight authorization"),
+    )
+
+    with pytest.raises(ValidationError):
+        upgrade_manager._upgrade_vm(object(), object(), "box", interaction=object())
+
+
+def test_external_adoption_requires_interactive_authorization_before_confirmation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vm = SimpleNamespace(name="box")
+    transition = upgrade_manager._transitions(DEBIAN_RELEASES)[-1]
+    entry = SimpleNamespace(
+        adoption=True,
+        journal_pair=None,
+        preflight=None,
+        transition=transition,
+        platform_name="lima",
+        tailscale_auth_key="ts-key",
+    )
+    monkeypatch.setattr(upgrade_manager, "_require_vm", lambda *args: vm)
+    monkeypatch.setattr(upgrade_manager, "_guard_failed_vm", lambda candidate: None)
+    monkeypatch.setattr(upgrade_manager, "_inspect_entry", lambda *args, **kwargs: entry)
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: False)
+    monkeypatch.setattr(
+        upgrade_manager,
+        "_adopt_external_upgrade",
+        lambda *args, **kwargs: pytest.fail("non-interactive upgrade reached adoption confirmation"),
+    )
+
+    with pytest.raises(ValidationError):
+        upgrade_manager._upgrade_vm(object(), object(), "box", interaction=object())
+
+
 def test_reboot_dispatch_has_no_guest_read_after_dispatch() -> None:
     pair = UpgradePair("bookworm", "trixie")
     state = JournalState(
@@ -992,6 +1071,39 @@ def test_reboot_dispatch_has_no_guest_read_after_dispatch() -> None:
 
     assert result == "boot-before"
     assert calls == ["load", "boot-id", "dispatch"]
+
+
+def test_reboot_retry_dispatches_unrecorded_intent_or_redispatches_active_attempt() -> None:
+    pair = UpgradePair("bookworm", "trixie")
+    state = JournalState(
+        version=1,
+        attempt_id=None,
+        last_completed=JournalProgress.FULL_UPGRADE_COMPLETE,
+        active_action=None,
+        active_started_at=None,
+        boot_id_before=None,
+        outcome=AttemptOutcome.SUCCEEDED,
+        failure=None,
+    )
+    calls: list[tuple[object, ...]] = []
+
+    class _Journal:
+        def dispatch_reboot(self, requested: UpgradePair, boot_id: str) -> None:
+            calls.append(("dispatch", requested, boot_id))
+
+        def redispatch_reboot(self, requested: UpgradePair, boot_id: str, attempt_id: str) -> None:
+            calls.append(("redispatch", requested, boot_id, attempt_id))
+
+    journal = _Journal()
+    upgrade_manager._dispatch_reboot_once(journal, pair, state, "boot-a")  # type: ignore[arg-type]
+    active = state.claim(UpgradeAction.REBOOT, boot_id_before="boot-a")
+    assert active.attempt_id is not None
+    upgrade_manager._dispatch_reboot_once(journal, pair, active, "boot-a")  # type: ignore[arg-type]
+
+    assert calls == [
+        ("dispatch", pair, "boot-a"),
+        ("redispatch", pair, "boot-a", active.attempt_id),
+    ]
 
 
 @pytest.mark.parametrize(

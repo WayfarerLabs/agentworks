@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -156,7 +157,7 @@ def test_multiple_incomplete_remote_journals_fail_before_selection() -> None:
         RemoteJournal(_Target()).select_incomplete((first, second))  # type: ignore[arg-type]
 
 
-def test_completed_historic_journal_does_not_block_new_pair(tmp_path) -> None:
+def test_completed_historic_journal_and_new_pair_share_inventory(tmp_path) -> None:
     first = UpgradePair("bookworm", "trixie")
     second = UpgradePair("trixie", "forky")
     store = JournalStore(tmp_path)
@@ -170,7 +171,6 @@ def test_completed_historic_journal_does_not_block_new_pair(tmp_path) -> None:
     store.write_state(first, state)
     store.initialize(second, {})
 
-    assert store.scan_incomplete((first, second)) == [second]
     assert set(store.read_states((first, second))) == {first, second}
 
 
@@ -391,6 +391,56 @@ def test_absent_remote_journal_scan_is_read_only(pair: UpgradePair) -> None:
     assert " install " not in target.commands[0]
     assert " scan " in target.commands[0]
     assert target.commands[-1].startswith("rm -f /var/tmp/agentworks-journal-scan-")
+
+
+def test_remote_reboot_dispatch_does_not_require_an_ssh_acknowledgement(pair: UpgradePair) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class _Target:
+        def run(self, command: str, **kwargs: object) -> object:
+            calls.append((command, kwargs))
+            return type("Result", (), {"ok": False, "stdout": "", "stderr": "connection closed"})()
+
+    remote = RemoteJournal(_Target())  # type: ignore[arg-type]
+    remote.dispatch_reboot(pair, "boot-a")
+    remote.redispatch_reboot(pair, "boot-a", "attempt-a")
+
+    assert [command.split()[4] for command, _kwargs in calls] == ["dispatch-reboot", "redispatch-reboot"]
+    assert [kwargs for _command, kwargs in calls] == [
+        {"sudo": True, "check": False},
+        {"sudo": True, "check": False},
+    ]
+
+
+def test_initial_reboot_dispatch_refuses_uncertain_package_ownership(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    pair: UpgradePair,
+) -> None:
+    store = JournalStore(tmp_path)
+    store.initialize(pair, {})
+    state = store.load(pair)
+    for action in (
+        UpgradeAction.SOURCE_UPDATE,
+        UpgradeAction.SWITCH_SOURCES,
+        UpgradeAction.MINIMAL_UPGRADE,
+        UpgradeAction.FULL_UPGRADE,
+    ):
+        state = state.claim(action)
+        assert state.attempt_id is not None
+        state = state.complete_active(state.attempt_id)
+    store.write_state(pair, state)
+    monkeypatch.setattr(journal_module, "_package_locks_quiescent", lambda: False)
+    monkeypatch.setattr(
+        subprocess,
+        "Popen",
+        lambda *args, **kwargs: pytest.fail("reboot started despite package lock uncertainty"),
+    )
+
+    with pytest.raises(JournalError):
+        journal_module._cli(["--root", str(tmp_path), "dispatch-reboot", pair.source, pair.target, "boot-a"])
+
+    assert store.load(pair) == state
 
 
 def test_reboot_lock_proof_falls_back_to_lslocks_when_fuser_is_absent(
