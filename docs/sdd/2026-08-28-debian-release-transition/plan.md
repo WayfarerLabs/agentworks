@@ -1,6 +1,6 @@
 # Plan: Debian Release Transition
 
-- Status: Implementation and private review complete; live certification and merge handoff pending
+- Status: Implementation and private review complete; ready-triggered external validation pending
 - Date: 2026-08-28
 - Governing artifacts: `frd.md`, `hla.md`, `prior-art-research.md`, and `migration-strategy.md`
 
@@ -42,6 +42,11 @@ The final cutover additionally runs the live integration matrix under the `integ
 `agw-test-env` protocols. Cloud or Proxmox resources use the operator-provided environment
 inventory, names, cost budgets, recovery prerequisites, and cleanup rules. A platform does not
 become certified from mocks alone.
+
+The exact green merge-intent handoff triggers the external integration-test and PR review lanes. Any
+resulting correction returns the PR to draft before the head changes, then publishes a new green
+ready handoff. Live evidence and its authenticated disposition remain merge gates even though the
+ready transition starts those lanes.
 
 Every PR gets an independent `agentworks-reviewer` lane and a `muntz` complexity pass before the
 first operator handoff. Capability-spanning implementation PRs also get a fresh-eyes correctness
@@ -369,8 +374,11 @@ the product cannot ship consistently within the agreed scope.
       CLI target selector, or arbitrary upgrade graph. Treat this as a structural no-hardcoding
       proof, not a compatibility claim or a promise of unchanged workflow internals.
 - [x] Run full unit/static/docs/generated gates and the final independent review lanes.
-- [ ] Create `locked.md` after live certification or an authenticated operator disposition, then
-      publish the exact green head with merge intent and complete PR-level review.
+- [x] Record authenticated operator direction that an exact green ready handoff triggers external
+      integration testing and complete PR-level review, with up to four feedback/fix rounds using
+      the draft/ready handoff protocol.
+- [ ] After live certification or an authenticated disposition, create `locked.md`, record the final
+      evidence, and leave the exact green reviewed head ready to merge.
 
 ### Exit criteria
 
