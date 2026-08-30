@@ -123,6 +123,7 @@ def test_configure_apt_sources_resolves_all_mappings_before_guest_mutation() -> 
         name="test-source",
         key_url="https://example.com/key.gpg",
         key_path="/etc/apt/keyrings/test.gpg",
+        source=None,
         sources={DebianRelease.TRIXIE: "deb https://example.com trixie main"},
         source_file="test.list",
     )
@@ -149,6 +150,7 @@ def test_phase_b_resolves_all_release_maps_before_any_guest_call(monkeypatch: py
         name="test-source",
         key_url="https://example.com/key.gpg",
         key_path="/etc/apt/keyrings/test.gpg",
+        source=None,
         sources={DebianRelease.TRIXIE: "deb https://example.com trixie main"},
         source_file="test.list",
     )

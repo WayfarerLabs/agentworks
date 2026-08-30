@@ -1,6 +1,6 @@
 # Plan: Debian Release Transition
 
-- Status: Draft
+- Status: Implementation complete and statically green; live certification and final review pending
 - Date: 2026-08-28
 - Governing artifacts: `frd.md`, `hla.md`, `prior-art-research.md`, and `migration-strategy.md`
 
@@ -90,56 +90,60 @@ without requiring a post-review documentation-only bookkeeping commit.
 
 ## Phase 1: Core release observation, persistence, and APT values
 
+Implementation note (2026-08-30): the implementation branch is the atomic cutover candidate, so
+Trixie is active in its registry. It is not ready to ship until the Phase 5 live matrix and final
+reviews pass; the unchecked certification items below are deliberate.
+
 ### Implementation
 
-- [ ] Add the typed ordered Debian release/profile/parser module and relative support classifier.
-      Derive current only from the final active profile; keep Bookworm as that final profile until
-      Phase 5 and use explicit candidate-profile fixtures for Trixie work.
-- [ ] Add nullable release and observation-time columns through the ordinary forward migration,
+- [x] Add the typed ordered Debian release/profile/parser module and relative support classifier.
+      Derive current only from the final active profile and use explicit candidate-profile fixtures
+      to prove future promotion without introducing another current authority.
+- [x] Add nullable release and observation-time columns through the ordinary forward migration,
       enforcing pair-null state without enumerating codenames in SQL.
-- [ ] Update the exact historical schema inventory used by safe database restore.
-- [ ] Extend `VMRow`, converters, repository accessors, and backup serialization.
-- [ ] Add the shared live observation service and typed mismatch/unsupported errors.
-- [ ] Add release facts to VM list/describe and additive JSON v1 projections after the names-only
+- [x] Update the exact historical schema inventory used by safe database restore.
+- [x] Extend `VMRow`, converters, repository accessors, and backup serialization.
+- [x] Add the shared live observation service and typed mismatch/unsupported errors.
+- [x] Add release facts to VM list/describe and additive JSON v1 projections after the names-only
       short circuit.
-- [ ] Add doctor findings for unknown, recorded/live disagreement, previous-release upgrade
+- [x] Add doctor findings for unknown, recorded/live disagreement, previous-release upgrade
       availability, and legacy best-effort status.
-- [ ] Emit one warning from the named-VM operation boundary before accessing a recognized legacy
+- [x] Emit one warning from the named-VM operation boundary before accessing a recognized legacy
       release without blocking an ordinary operation merely because of release position.
-- [ ] Extend `apt-source` with mutually exclusive scalar `source` and release map `sources` forms.
-- [ ] Reject codename-bearing scalars and missing selected mappings before mutation.
-- [ ] Convert shipped HashiCorp, tofuutils, and ngrok resources to reviewed maps; keep invariant
+- [x] Extend `apt-source` with mutually exclusive scalar `source` and release map `sources` forms.
+- [x] Reject codename-bearing scalars and missing selected mappings before mutation.
+- [x] Convert shipped HashiCorp, tofuutils, and ngrok resources to reviewed maps; keep invariant
       vendor sources scalar.
-- [ ] Thread verified release into initializer APT resolution and preserve graph/provenance
+- [x] Thread verified release into initializer APT resolution and preserve graph/provenance
       behavior.
-- [ ] Update resource schemas, generated samples, plugin manifests, parity oracles, permanent
+- [x] Update resource schemas, generated samples, plugin manifests, parity oracles, permanent
       teaching, machine-output contracts, command references, and user manifest errors.
 
 ### Focused verification
 
-- [ ] Cover migration from every supported historical schema shape.
-- [ ] Prove there is no guessed legacy backfill.
-- [ ] Cover the parser matrix for Debian, contradictions, missing fields, and non-Debian guests.
-- [ ] Cover observation insert/refresh/mismatch semantics.
-- [ ] Prove unknown rows remain usable for release-insensitive operations.
-- [ ] Prove list names-only remains probe-free.
-- [ ] Prove JSON values are recognized codenames or null and a future registry value needs no SQL
+- [x] Cover migration from every supported historical schema shape.
+- [x] Prove there is no guessed legacy backfill.
+- [x] Cover the parser matrix for Debian, contradictions, missing fields, and non-Debian guests.
+- [x] Cover observation insert/refresh/mismatch semantics.
+- [x] Prove unknown rows remain usable for release-insensitive operations.
+- [x] Prove list names-only remains probe-free.
+- [x] Prove JSON values are recognized codenames or null and a future registry value needs no SQL
       shape change.
-- [ ] Cover scalar/map schema, Bookworm/Trixie selection, and vendor-specific ngrok behavior.
-- [ ] Prove resolution uses observed VM release rather than current creation release.
-- [ ] Prove a missing mapping fails before key/source writes.
-- [ ] Prove current, previous, and legacy classifications derive from positions in the one profile
+- [x] Cover scalar/map schema, Bookworm/Trixie selection, and vendor-specific ngrok behavior.
+- [x] Prove resolution uses observed VM release rather than current creation release.
+- [x] Prove a missing mapping fails before key/source writes.
+- [x] Prove current, previous, and legacy classifications derive from positions in the one profile
       registry; appending a profile changes tiers without persisted rewrites or calendar input.
-- [ ] Prove a release absent from the active registry refuses release-sensitive mutation with a
+- [x] Prove a release absent from the active registry refuses release-sensitive mutation with a
       supporting-build diagnostic rather than creating an ahead-of-current tier.
-- [ ] Prove legacy ordinary operations warn and continue to their concrete checks, while
+- [x] Prove legacy ordinary operations warn and continue to their concrete checks, while
       `vm upgrade` refuses without attempting a multi-hop path.
-- [ ] Cover built-in/plugin parity and generated sample/explain surfaces.
-- [ ] Prove through config/schema/CLI searches that there is no public release selector.
+- [x] Cover built-in/plugin parity and generated sample/explain surfaces.
+- [x] Prove through config/schema/CLI searches that there is no public release selector.
 
 ### Exit criteria
 
-- [ ] The database faithfully represents unknown and every registry-recognized observation, and
+- [x] The database faithfully represents unknown and every registry-recognized observation, and
       Phase B selects the observed release independent of current creation policy. No later phase
       hides release state in platform metadata, persists support position, or lands against a
       release-unaware APT consumer.
@@ -148,47 +152,47 @@ without requiring a post-review documentation-only bookkeeping commit.
 
 ### Implementation
 
-- [ ] Move VM backup and workspace-copy size-unbounded staging out of `/tmp` into secure disk-backed
+- [x] Move VM backup and workspace-copy size-unbounded staging out of `/tmp` into secure disk-backed
       directories, preserving cleanup on success, failure, and interrupt.
-- [ ] Inventory remaining active guest `/tmp` uses and record why each is bounded or move it.
+- [x] Inventory remaining active guest `/tmp` uses and record why each is bounded or move it.
 
 ### Focused verification
 
-- [ ] Exercise backup and workspace copy with payload larger than a constrained `/tmp` tmpfs.
-- [ ] Prove interrupt cleanup and no world-readable staging.
+- [x] Exercise backup and workspace copy with payload larger than a constrained `/tmp` tmpfs.
+- [x] Prove interrupt cleanup and no world-readable staging.
 
 ### Exit criteria
 
-- [ ] Trixie tmpfs behavior cannot break large Agentworks transfers.
+- [x] Trixie tmpfs behavior cannot break large Agentworks transfers.
 
 ## Phase 3: Platform current-release creation
 
 ### Shared contract
 
-- [ ] Bump the vm-platform kind and every implementation from contract version 2 to 3; add required
+- [x] Bump the vm-platform kind and every implementation from contract version 2 to 3; add required
       `debian_release` to `ProvisionRequest` and verified release to `ProvisionResult`.
-- [ ] Add the create-time shared release probe helper.
-- [ ] Keep core as the only owner of current and pass its concrete value in every manager-built
+- [x] Add the create-time shared release probe helper.
+- [x] Keep core as the only owner of current and pass its concrete value in every manager-built
       request; platforms have no local current default.
-- [ ] Add the shared release-map resolver and focused errors: code-owned misses name the outdated
+- [x] Add the shared release-map resolver and focused errors: code-owned misses name the outdated
       platform/plugin, while operator-owned misses name the exact vm-site release key. Resolve
       before backend mutation and never fall back.
-- [ ] Preserve both typed release-map failures and their remediation hints through the manager's
+- [x] Preserve both typed release-map failures and their remediation hints through the manager's
       provisioning wrapper after provisional-row unwind.
-- [ ] Require every platform to verify the guest before leaving its backend rollback window.
-- [ ] Update `cli/agentworks/capabilities/README.md`,
+- [x] Require every platform to verify the guest before leaving its backend rollback window.
+- [x] Update `cli/agentworks/capabilities/README.md`,
       `cli/agentworks/capabilities/vm_platform/README.md`, `cli/agentworks/plugins/README.md`, the
       kind's topic prose, and the request, result, and `create` docstrings in the same merge unit as
       contract version 3.
 
 After the shared contract is reviewed, provider work splits by ownership on stacked review branches:
 
-- [ ] **Lima/WSL:** implement the release-keyed Debian cloud image block, derived OCI
+- [x] **Lima/WSL:** implement the release-keyed Debian cloud image block, derived OCI
       tag/cache/diagnostics, and local create tests.
-- [ ] **AWS/Azure:** implement the SSM release mapping, Azure full image record/disk floor, and
+- [x] **AWS/Azure:** implement the SSM release mapping, Azure full image record/disk floor, and
       cloud create tests.
-- [ ] **GCP:** implement the release and architecture image-family map and GCE create tests.
-- [ ] **Proxmox:** implement release-keyed template config, the legacy Bookworm adapter, setup
+- [x] **GCP:** implement the release and architecture image-family map and GCE create tests.
+- [x] **Proxmox:** implement release-keyed template config, the legacy Bookworm adapter, setup
       script, and guest validation.
 
 Workers do not edit the shared request/result contract after it is handed off. Any required contract
@@ -198,104 +202,106 @@ a provider unable to construct or honor the required request.
 
 ### Focused verification
 
-- [ ] Prove every exposed architecture has an official Trixie selector.
-- [ ] Prove contract version 2 platforms fail registration with an incompatibility error.
-- [ ] Prove a contract-current missing code-owned mapping fails before backend mutation with the
+- [x] Prove every exposed architecture has an official Trixie selector.
+- [x] Prove contract version 2 platforms fail registration with an incompatibility error.
+- [x] Prove a contract-current missing code-owned mapping fails before backend mutation with the
       platform-update hint and no fallback.
-- [ ] Prove a mismatch raised by the shared in-window verifier triggers backend cleanup and no
+- [x] Prove a mismatch raised by the shared in-window verifier triggers backend cleanup and no
       success row.
-- [ ] Prove a nonconforming returned mismatch persists backend identifiers, retains one failed and
+- [x] Prove a nonconforming returned mismatch persists backend identifiers, retains one failed and
       uninitialized row that `vm delete` can address, and returns the typed delete/retry diagnostic.
-- [ ] Prove the manager supplies current and persists only the matching returned verified value
+- [x] Prove the manager supplies current and persists only the matching returned verified value
       before Phase B.
-- [ ] Prove existing platform metadata and existing VM operations stay compatible.
-- [ ] Prove the Proxmox legacy scalar cannot satisfy a current-release create and a missing current
+- [x] Prove existing platform metadata and existing VM operations stay compatible.
+- [x] Prove the Proxmox legacy scalar cannot satisfy a current-release create and a missing current
       template names `template_vmids.<release>`.
-- [ ] Prove no arbitrary provider image field appears in configuration.
-- [ ] Review both capability READMEs and the plugin-author README for the
+- [x] Prove no arbitrary provider image field appears in configuration.
+- [x] Review both capability READMEs and the plugin-author README for the
       request/map/failure/verification/plugin contract without adding tests that pin authored
       wording.
 
 ### Exit criteria
 
-- [ ] All providers honor one version 3 current-release contract and are code-complete for Trixie,
+- [x] All providers honor one version 3 current-release contract and are code-complete for Trixie,
       while the product cutover remains held until live certification in Phase 5.
 
 ## Phase 4: Durable `vm upgrade`
 
 ### Slice 1: plan and recovery gate
 
-- [ ] Add the thin `vm upgrade NAME [--checkpoint REF]` CLI and VM-name completion.
-- [ ] Build the manager boundary that resolves site credentials, canonical/native routes, SSH
+- [x] Add the thin `vm upgrade NAME [--checkpoint REF]` CLI and VM-name completion.
+- [x] Build the manager boundary that resolves site credentials, canonical/native routes, SSH
       identity, and Tailscale rejoin secret before mutation.
-- [ ] After activation, scan the fixed journal root before new-upgrade eligibility. Resume or
+- [x] After activation, scan the fixed journal root before new-upgrade eligibility. Resume or
       diagnose exactly one incomplete validated adjacent pair through its retained target policy,
       even after a later profile append; refuse multiple journals and never start a second beside
       one.
-- [ ] With no incomplete journal, derive source and target from the final two registry profiles.
+- [x] With no incomplete journal, derive source and target from the final two registry profiles.
       Return already-current for current, select only previous-to-current, and refuse legacy with
       fresh-VM/data-copy guidance and no multi-hop attempt.
-- [ ] Implement live release/database reconciliation and the externally completed adjacent adoption
+- [x] Implement live release/database reconciliation and the externally completed adjacent adoption
       path, with Bookworm-to-Trixie as the first instance.
-- [ ] Implement session quiescence and Debian preflight checks from the transition policy.
-- [ ] Produce a preliminary simulated removal/source plan without mutation.
-- [ ] Create the ordinary VM backup and focused Debian recovery bundle with owner-only local
+- [x] Implement session quiescence and Debian preflight checks from the transition policy.
+- [x] Produce a preliminary simulated removal/source plan without mutation.
+- [x] Create the ordinary VM backup and focused Debian recovery bundle with owner-only local
       storage.
-- [ ] Require an external checkpoint reference that identifies an actual recoverable artifact, audit
-      it, and obtain explicit operator consent to bring the source release current within its suite.
+- [x] Require an external checkpoint reference that identifies an actual recoverable artifact, audit
+      it, obtain explicit checkpoint/console attestation, and separately obtain operator consent to
+      bring the source release current within its suite.
 
-- [ ] Focused tests prove every unsafe condition fails before source mutation and neither local
+- [x] Focused tests prove every unsafe condition fails before source mutation and neither local
       backup is misrepresented as a bootable checkpoint.
 
 ### Slice 2: package state machine
 
-- [ ] Implement the root-owned `{source}-to-{target}` persistent directory, atomic action journal,
+- [x] Implement the root-owned `{source}-to-{target}` persistent directory, atomic action journal,
       private orchestrator lock, script, and log. The validated directory alone owns the
       source/target pair. `plan.json` stores the computed plan and `state.json` records intent
       before mutation plus `last_completed_action`, active action, attempt identity, and attempt
       outcome, with no duplicate pair fields. Database/init state remains authoritative for product
       health. Every journal writer takes the same lock, and the package service holds it for each
       remote action.
-- [ ] Detect native dpkg/APT locks and automatic update services. Fail closed on another package
+- [x] Detect native dpkg/APT locks and automatic update services. Fail closed on another package
       owner; durably record and inhibit known automatic timers. Restore their prior state only after
       a source-safe abort or verified healthy target completion; retain inhibition on a
       mixed/unhealthy state until forward repair or external restore.
-- [ ] Bring the source release current under the detached systemd service, rerun every health check,
+- [x] Bring the source release current under the detached systemd service, rerun every health check,
       and reopen the planning boundary. Recompute the full package/source/removal plan from current
       state, display drift from the preliminary plan, and require a second explicit confirmation
       before changing suites.
-- [ ] Classify, archive, and disable third-party sources; generate canonical target deb822 sources
+- [x] Classify, archive, and disable third-party sources; generate canonical target deb822 sources
       from the selected adjacent policy, then run its minimal and full package actions.
-- [ ] Implement inspection/resume after interruption inside every remote action, SSH loss, and
+- [x] Implement inspection/resume after interruption inside every remote action, SSH loss, and
       package failure. A resume inspects native locks, unit state, active attempt, logs, and
       postcondition checks before deciding whether to continue, retry, or request repair.
-- [ ] Preserve sources/logs and fail with forward-repair or external-restore guidance; do not
+- [x] Preserve sources/logs and fail with forward-repair or external-restore guidance; do not
       restore source-release entries onto a mixed package state.
 
-- [ ] Focused tests use a fake transport/systemd boundary and real temporary filesystem state. They
+- [x] Focused tests use a fake transport/systemd boundary and real temporary filesystem state. They
       kill the client inside every action, assert durable intent precedes mutation, exercise plan
-      drift and both confirmations, prove one native package owner, distinguish safe timer
-      restoration from retained mixed-state inhibition, prove lock exclusion for journal writes and
-      reboot dispatch, and resume without replaying a completed action.
+      drift, checkpoint attestation, and both mutation confirmations, prove one native package
+      owner, distinguish safe timer restoration from retained mixed-state inhibition, prove lock
+      exclusion for journal writes and reboot dispatch, and resume without replaying a completed
+      action.
 
 ### Slice 3: reboot, reconnect, and convergence
 
-- [ ] After the package unit installs the target release's udev rules, predict interface names and
+- [x] After the package unit installs the target release's udev rules, predict interface names and
       block reboot with pinning guidance if connectivity would be unsafe.
-- [ ] Take the same journal lock, record intent, dispatch reboot inside its critical section, and
+- [x] Take the same journal lock, record intent, dispatch reboot inside its critical section, and
       open a fresh post-reboot operation span.
-- [ ] Add strict provider/SSH reconnect rather than warning-and-continue behavior.
-- [ ] Use native transport and explicit Tailscale rejoin where current platform capability permits.
-- [ ] Record a local `repair-required` outcome with checkpoint/console guidance when no path
+- [x] Add strict provider/SSH reconnect rather than warning-and-continue behavior.
+- [x] Use native transport and explicit Tailscale rejoin where current platform capability permits.
+- [x] Record a local `repair-required` outcome with checkpoint/console guidance when no path
       returns; the unreachable guest cannot authoritatively record its own outcome.
-- [ ] Persist the target immediately after proof, then run health checks and release-aware Phase B.
-- [ ] Use existing init state plus a `repair-required` event for later convergence failures without
+- [x] Persist the target immediately after proof, then run health checks and release-aware Phase B.
+- [x] Use existing init state plus a `repair-required` event for later convergence failures without
       database rollback; do not duplicate Trixie observation or Phase B completion in remote state.
-- [ ] Add permanent operator recovery and resume documentation for every stage.
+- [x] Add permanent operator recovery and resume documentation for every stage.
 
 ### Exit criteria
 
-- [ ] The orchestrated command is safe to interrupt inside every remote action, uses one lock for
+- [x] The orchestrated command is safe to interrupt inside every remote action, uses one lock for
       every journal writer and reboot dispatch, never runs two package managers, restores automatic
       updates only from a provably safe package state, never claims automatic rollback, and
       distinguishes OS transition success from later initialization health.
@@ -335,15 +341,15 @@ the product cannot ship consistently within the agreed scope.
 
 - [ ] Atomically append the certified Trixie profile, making it current by registry position, and
       delete the Bookworm platform image selectors.
-- [ ] Enable the relative support classifier and named-VM legacy warning; prove Bookworm is previous
+- [x] Enable the relative support classifier and named-VM legacy warning; prove Bookworm is previous
       at this cutover and that no wall-clock value changes its tier.
-- [ ] Add the superseding Debian-release ADR and mark ADR 0002 superseded without rewriting history.
-- [ ] Update README, CLI reference, platform/resource guides, config samples, schemas, completions,
+- [x] Add the superseding Debian-release ADR and mark ADR 0002 superseded without rewriting history.
+- [x] Update README, CLI reference, platform/resource guides, config samples, schemas, completions,
       release notes, and release-specific support/recovery teaching. Contract-author teaching
       remains owned by the Phase 3 version-cutover merge unit.
-- [ ] Search current code/docs for unaccounted release literals, platform-local current defaults,
+- [x] Search current code/docs for unaccounted release literals, platform-local current defaults,
       Bookworm-create claims, unbounded archive staging in `/tmp`, and VM-backup rollback claims.
-- [ ] Prove a synthetic release-promotion fixture can add mapping values and append one successor
+- [x] Prove a synthetic release-promotion fixture can add mapping values and append one successor
       profile with its upgrade-from-previous policy, changing current and adjacent policy selection
       without a second current authority, codename-specific database migration, new create field,
       CLI target selector, or arbitrary upgrade graph. Treat this as a structural no-hardcoding

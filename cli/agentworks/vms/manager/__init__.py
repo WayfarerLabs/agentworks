@@ -66,7 +66,7 @@ from .tailscale import (
     _warned_tailscale_missing,
     port_forward_vm,
 )
-from .upgrade import UpgradeResult, upgrade_vm
+from .upgrade import upgrade_vm
 from .verification import VMConnectionVerification, verify_vm_connection
 
 __all__ = [
@@ -114,7 +114,6 @@ __all__ = [
     "verify_tailscale_available",
     "verified_vm_release",
     "VMConnectionVerification",
-    "UpgradeResult",
     "upgrade_vm",
     "vm_description",
     "vm_listing",

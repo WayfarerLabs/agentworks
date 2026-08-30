@@ -8,6 +8,7 @@ from agentworks.errors import StateError
 from agentworks.vms.upgrade.network import (
     predict_interface_names,
     require_stable_interface_names,
+    snapshot_provider_interface_names,
     verify_interface_names,
 )
 
@@ -41,6 +42,13 @@ def test_prediction_parses_stable_installed_udev_result() -> None:
 def test_predicted_rename_blocks_reboot() -> None:
     with pytest.raises(StateError):
         require_stable_interface_names({"eth0": "enp1s0"})
+
+
+def test_provider_managed_interface_snapshot_keeps_observed_names() -> None:
+    assert snapshot_provider_interface_names(_Target(_Result("eth0\ntailscale0\n"))) == {
+        "eth0": "eth0",
+        "tailscale0": "tailscale0",
+    }
 
 
 def test_post_reboot_interface_verification_requires_predicted_names() -> None:

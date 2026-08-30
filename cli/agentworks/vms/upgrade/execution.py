@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from .engine import ActionDisposition, ActionResult
 from .journal import JournalState, UpgradeAction, UpgradePair
+from .probe import NATIVE_PACKAGE_LOCK_COMMAND
 from .remote import REMOTE_ROOT, RemoteJournal
 from .scripts import render_upgrade_script
 
@@ -77,8 +78,8 @@ class RemoteUpgradeExecution:
         )
         result = self._target.run(systemd_run, sudo=True, check=False)
         if not result.ok:
-            detail = (result.stderr or result.stdout or "systemd-run failed").strip()
-            return ExecutionResult(ActionDisposition.REPAIR_REQUIRED, detail[-2000:])
+            detail = result.stderr or result.stdout or "systemd-run failed"
+            return ExecutionResult(ActionDisposition.REPAIR_REQUIRED, _single_line_detail(detail))
         return ExecutionResult(ActionDisposition.RUNNING)
 
     def wait(self, action: UpgradeAction, state: JournalState) -> ActionResult:
@@ -111,13 +112,7 @@ class RemoteUpgradeExecution:
         postcondition = self._postcondition(action)
         if postcondition:
             return ExecutionResult(ActionDisposition.SUCCEEDED)
-        locks = self._target.run(
-            "command -v fuser >/dev/null 2>&1 && "
-            "fuser /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend "
-            "/var/cache/apt/archives/lock /var/lib/apt/lists/lock 2>/dev/null",
-            sudo=True,
-            check=False,
-        )
+        locks = self._target.run(NATIVE_PACKAGE_LOCK_COMMAND, sudo=True, check=False)
         lock_owners = " ".join((locks.stdout or "").split())
         if locks.returncode not in {0, 1}:
             return ExecutionResult(
@@ -131,8 +126,8 @@ class RemoteUpgradeExecution:
             )
         status = values[-1] if values else "unknown"
         tail = self._target.run(f"tail -n 30 {shlex.quote(self._log)}", sudo=True, check=False)
-        detail = (tail.stdout or tail.stderr or f"systemd action exited with status {status}").strip()
-        return ExecutionResult(ActionDisposition.RETRYABLE, detail[-2000:])
+        detail = tail.stdout or tail.stderr or f"systemd action exited with status {status}"
+        return ExecutionResult(ActionDisposition.RETRYABLE, _single_line_detail(detail))
 
     def current_boot_id(self) -> str:
         return self._target.run("cat /proc/sys/kernel/random/boot_id").stdout.strip()
@@ -172,3 +167,8 @@ class RemoteUpgradeExecution:
 def _unit_name(attempt_id: str) -> str:
     safe = attempt_id.replace("-", "")
     return f"agentworks-debian-upgrade-{safe}"
+
+
+def _single_line_detail(value: str) -> str:
+    normalized = " | ".join(line.strip() for line in value.splitlines() if line.strip())
+    return (normalized or "upgrade action failed")[-2000:]

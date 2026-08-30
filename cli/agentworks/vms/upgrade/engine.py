@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
 
-from .journal import AttemptOutcome, JournalState, JournalStore, UpgradeAction, UpgradePair
+from .journal import AttemptOutcome, JournalState, UpgradeAction, UpgradePair
 
 
 class ActionDisposition(StrEnum):
@@ -67,59 +66,6 @@ class UpgradeActionError(Exception):
         self.repair_required = repair_required
 
 
-@dataclass(frozen=True, slots=True)
-class EngineResult:
-    state: JournalState
-    disposition: ActionDisposition
-
-
-class FilesystemJournal:
-    """Locking adapter that makes the local store match the remote API."""
-
-    def __init__(self, store: JournalStore) -> None:
-        self._store = store
-
-    def load(self, pair: UpgradePair) -> JournalState:
-        return self._store.load(pair)
-
-    def claim(self, pair: UpgradePair, action: UpgradeAction) -> JournalState:
-        with self._store.locked(pair):
-            state = self._store.load(pair).claim(action)
-            self._store.write_state(pair, state)
-            return state
-
-    def complete(self, pair: UpgradePair, action: UpgradeAction) -> JournalState:
-        with self._store.locked(pair):
-            state = self._store.load(pair)
-            if state.active_action is not action:
-                raise UpgradeActionError(action, "completion does not match active action", repair_required=True)
-            state = state.complete_active()
-            self._store.write_state(pair, state)
-            return state
-
-    def fail(
-        self,
-        pair: UpgradePair,
-        action: UpgradeAction,
-        detail: str,
-        *,
-        repair_required: bool,
-    ) -> JournalState:
-        with self._store.locked(pair):
-            state = self._store.load(pair)
-            if state.active_action is not action:
-                raise UpgradeActionError(action, "failure does not match active action", repair_required=True)
-            state = state.fail_active(detail, repair_required=repair_required)
-            self._store.write_state(pair, state)
-            return state
-
-    def retry(self, pair: UpgradePair) -> JournalState:
-        with self._store.locked(pair):
-            state = self._store.load(pair).retry_active()
-            self._store.write_state(pair, state)
-            return state
-
-
 class UpgradeEngine:
     """Advance one named action without replaying a proved postcondition."""
 
@@ -127,7 +73,7 @@ class UpgradeEngine:
         self._journal = journal
         self._execution = execution
 
-    def advance_action(self, pair: UpgradePair, action: UpgradeAction) -> EngineResult:
+    def advance_action(self, pair: UpgradePair, action: UpgradeAction) -> JournalState:
         state = self._journal.load(pair)
         if state.active_action is not None:
             if state.active_action is not action:
@@ -135,7 +81,7 @@ class UpgradeEngine:
             inspected = self._execution.inspect(action, state)
             if inspected.disposition is ActionDisposition.SUCCEEDED:
                 state = self._journal.complete(pair, action)
-                return EngineResult(state, ActionDisposition.SUCCEEDED)
+                return state
             if inspected.disposition is ActionDisposition.RUNNING:
                 return self._finish_running(pair, action, state)
             if inspected.disposition is ActionDisposition.REPAIR_REQUIRED:
@@ -160,13 +106,13 @@ class UpgradeEngine:
             return self._finish_running(pair, action, state)
         return self._finish_result(pair, action, started)
 
-    def _finish_running(self, pair: UpgradePair, action: UpgradeAction, state: JournalState) -> EngineResult:
+    def _finish_running(self, pair: UpgradePair, action: UpgradeAction, state: JournalState) -> JournalState:
         return self._finish_result(pair, action, self._execution.wait(action, state))
 
-    def _finish_result(self, pair: UpgradePair, action: UpgradeAction, result: ActionResult) -> EngineResult:
+    def _finish_result(self, pair: UpgradePair, action: UpgradeAction, result: ActionResult) -> JournalState:
         if result.disposition is ActionDisposition.SUCCEEDED:
             state = self._journal.complete(pair, action)
-            return EngineResult(state, result.disposition)
+            return state
         detail = result.detail or "action did not satisfy its postcondition"
         repair_required = result.disposition is ActionDisposition.REPAIR_REQUIRED
         self._journal.fail(pair, action, detail, repair_required=repair_required)

@@ -65,6 +65,7 @@ def test_apt_source_resolves_a_release_map() -> None:
         name="mapped",
         key_url="https://example.com/key.gpg",
         key_path="/etc/apt/keyrings/example.gpg",
+        source=None,
         sources={
             DebianRelease.BOOKWORM: "deb https://example.com bookworm main",
             DebianRelease.TRIXIE: "deb https://example.com trixie main",

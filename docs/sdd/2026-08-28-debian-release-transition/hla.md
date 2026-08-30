@@ -346,13 +346,14 @@ export path, or another identifier for the actual recovery artifact. A ticket nu
 unless the referenced ticket itself identifies that artifact. The command has no `--target`,
 `--release`, `--force`, or `--yes` option. The target is always the core current release.
 
-The command makes two interactive decisions. The preliminary decision follows backup/checkpoint and
-authorizes bringing the source release current within its existing suite. The final decision follows
-a reopened operation boundary and a complete recomputation of the target plan, and authorizes
-switching suites. It shows removals, disabled repositories, backup paths, checkpoint limitations,
-platform recovery guidance, material plan drift, and expected downtime. Once an irreversible action
-exists, rerunning the command may inspect or resume it without asking the operator to recreate
-completed work.
+The command has three interactive authorization points. The first attests that the named external
+checkpoint exists and that console or rescue access was tested. Two mutation decisions follow: the
+preliminary decision authorizes bringing the source release current within its existing suite, and
+the final decision follows a reopened operation boundary plus a complete recomputation of the target
+plan and authorizes switching suites. It shows removals, disabled repositories, backup paths,
+checkpoint limitations, platform recovery guidance, material plan drift, and expected downtime. Once
+an irreversible action exists, rerunning the command may inspect or resume it without asking the
+operator to recreate completed work.
 
 The manager owns validation and typed errors. The Typer command only maps argv to the service call.
 The workflow opens the ordinary VM operation boundary to resolve the site credentials, canonical
@@ -382,7 +383,8 @@ The read-only preflight records a plan containing:
 - architecture and current kernel;
 - dpkg audit result and held packages;
 - source-release point state and OpenSSH package version;
-- installed kernel metapackage;
+- installed kernel metapackage on guest-kernel platforms, or the explicit WSL2 provider-kernel
+  classification;
 - separate `/boot` size/free space when present;
 - free space for `/`, `/var`, and the apt archive estimate;
 - APT preferences, backports, proposed-updates, mixed suites, and third-party sources;
@@ -406,13 +408,13 @@ application-specific intervention fail with exact manual guidance; the first imp
 invent a general prompt-answer engine. Package removals are shown for operator review rather than
 silently accepted. No concurrent Agentworks session may be live or unverifiable.
 
-The preliminary preflight is not the suite-switch authorization. After backup, external checkpoint,
-and the first confirmation, the manager brings the source release fully current. Because that update
-and checkpoint activity can change dependencies or machine state, it closes and reopens the ordinary
-VM operation boundary, then recomputes the complete preflight: sessions, package health, holds,
-conffiles, blockers, sources, space, and simulated removals. It shows the final plan, highlights any
-material difference from the preliminary plan, and requires the second confirmation before changing
-sources.
+The preliminary preflight is not the suite-switch authorization. After backup, external checkpoint
+attestation, and the first mutation confirmation, the manager brings the source release fully
+current. Because that update and checkpoint activity can change dependencies or machine state, it
+closes and reopens the ordinary VM operation boundary, then recomputes the complete preflight:
+sessions, package health, holds, conffiles, blockers, sources, space, and simulated removals. It
+shows the final plan, highlights any material difference from the preliminary plan, and requires the
+second mutation confirmation before changing sources.
 
 ### Backup and recovery gate
 
@@ -518,7 +520,8 @@ The post-reboot order is:
    `repair-required` event with the external checkpoint reference plus provider console
    instructions;
 5. observe and persist the target release as soon as `/etc/os-release` proves it;
-6. verify dpkg/apt, the running target kernel, systemd, sshd, Tailscale, and Agentworks identities;
+6. verify dpkg/apt convergence and target source hygiene, the running target guest kernel or WSL2
+   provider kernel, systemd, sshd, Tailscale, and Agentworks identities;
 7. run Phase B with the target release and restore only selected mapped APT sources; and
 8. record complete, or target observed with repair required when later verification/reinit fails.
 
@@ -555,6 +558,15 @@ prediction of Trixie behavior. After `full-upgrade-complete` and before reboot, 
 unsafe predicted rename blocks reboot with Debian's pinning guidance; a permitted reboot compares
 the predicted and actual post-reboot names and connectivity.
 
+WSL2 is the deliberate kernel and interface exception. A WSL distribution is a container inside
+Microsoft's managed WSL2 VM and has no Debian `linux-image` metapackage of its own. Its preflight
+records the running Microsoft kernel, native lock inspection falls back from `fuser` to `lslocks`,
+and target health verifies the Microsoft kernel marker. The installed distribution's systemd owns
+clean shutdown; after the pre-reboot activation span closes, the ordinary WSL activation gate starts
+the distribution again and the changed boot ID proves restart. WSL networking is provider-managed,
+so the workflow records the live interface names before shutdown and verifies those names after
+restart instead of applying Debian udev naming rules to them.
+
 ## CLI, diagnostics, and machine output
 
 `vm list` gains release and relative support columns after its names-only short circuit.
@@ -581,18 +593,18 @@ allowing the operation to continue. It does not turn release age into a readines
 
 ## Failure and integrity behavior
 
-| Failure point                 | Durable truth                                                  | Next action                                 |
-| ----------------------------- | -------------------------------------------------------------- | ------------------------------------------- |
-| Before first confirmation     | no remote mutation; DB observation unchanged                   | correct preflight and rerun                 |
-| Backup failure                | partial local artifact is not accepted                         | fix space/transport and rerun               |
-| Source update failure         | last-completed/active actions and apt log                      | repair source release, then rerun           |
-| Final plan differs            | recomputed plan; suites still on source release                | review and confirm or stop                  |
-| Source switch or apt failure  | progress, active attempt, sources backup, log, checkpoint ref  | repair forward or restore externally        |
-| Local CLI/SSH interruption    | systemd unit plus progress/attempt state                       | rerun `vm upgrade` to inspect/resume        |
-| Reboot never returns          | last known progress plus checkpoint and repair-required events | use platform console/checkpoint             |
-| Target observed, health fails | DB says target; repair-required event                          | repair target release and rerun             |
-| Phase B warning/failure       | DB says target; init status partial/failed                     | fix mapped source or initializer and reinit |
-| Manual adjacent upgrade found | DB/live disagreement, no active journal                        | use `vm upgrade` adoption path              |
+| Failure point                      | Durable truth                                                  | Next action                                 |
+| ---------------------------------- | -------------------------------------------------------------- | ------------------------------------------- |
+| Before first mutation confirmation | no remote mutation; DB observation unchanged                   | correct preflight and rerun                 |
+| Backup failure                     | partial local artifact is not accepted                         | fix space/transport and rerun               |
+| Source update failure              | last-completed/active actions and apt log                      | repair source release, then rerun           |
+| Final plan differs                 | recomputed plan; suites still on source release                | review and confirm or stop                  |
+| Source switch or apt failure       | progress, active attempt, sources backup, log, checkpoint ref  | repair forward or restore externally        |
+| Local CLI/SSH interruption         | systemd unit plus progress/attempt state                       | rerun `vm upgrade` to inspect/resume        |
+| Reboot never returns               | last known progress plus checkpoint and repair-required events | use platform console/checkpoint             |
+| Target observed, health fails      | DB says target; repair-required event                          | repair target release and rerun             |
+| Phase B warning/failure            | DB says target; init status partial/failed                     | fix mapped source or initializer and reinit |
+| Manual adjacent upgrade found      | DB/live disagreement, no active journal                        | use `vm upgrade` adoption path              |
 
 No failure path rewrites the database to the source release after the target has been observed. No
 path calls the existing data-only VM backup a boot restore point.
@@ -652,7 +664,8 @@ semantics.
   inhibition on mixed/unhealthy states;
 - atomic progress/attempt transitions, interruption inside every action, the same lock around every
   journal write/reboot dispatch, and no duplicate apt work;
-- external checkpoint and both local backup gates before source mutation;
+- external checkpoint attestation, both local backup gates, and the first mutation confirmation
+  before source mutation;
 - strict reconnect, native-route rejoin, Proxmox no-route failure, Trixie observation timing, and
   repair-required outcomes; and
 - disk-backed large staging with a small `/tmp` tmpfs;

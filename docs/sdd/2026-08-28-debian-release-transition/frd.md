@@ -189,9 +189,9 @@ Before changing Debian sources, the command must:
    rejoin;
 2. observe `current-1` and reconcile that observation with the database;
 3. refuse active, broken, or unverifiable Agentworks sessions;
-4. verify package database health, package holds, architecture, kernel metapackage, APT pins,
-   third-party and backports sources, modified package conffiles, minimum `/boot` space, and
-   sufficient package-cache/root-disk space;
+4. verify package database health, package holds, architecture, kernel metapackage on platforms
+   where the guest owns its kernel, APT pins, third-party and backports sources, modified package
+   conffiles, minimum `/boot` space, and sufficient package-cache/root-disk space;
 5. enforce the source release's OpenSSH minimum needed for a reconnectable remote upgrade and run
    the pair-specific blocker checks captured from the target release's Debian release notes;
 6. show the preliminary packages apt plans to remove and every source Agentworks will disable or
@@ -206,20 +206,21 @@ before confirmation and in its result. The external reference can name a provide
 export, Proxmox backup, or equivalent artifact. Agentworks records the reference with the upgrade
 event but does not claim it created, validated, owns, or can restore that external artifact.
 
-The first confirmation authorizes bringing the source release current at its existing suite, not
-switching Debian suites. After that update, the command reopens the operation boundary and
-recomputes every package, source, conffile, blocker, and space fact. It shows the final plan and
-requires a second confirmation before switching suites; any material drift from the preliminary plan
-is explicit. For the first transition it then follows Debian's supported direct Bookworm-to-Trixie
-procedure:
+The first mutation confirmation authorizes bringing the source release current at its existing
+suite, not switching Debian suites. After that update, the command reopens the operation boundary
+and recomputes every package, source, conffile, blocker, and space fact. It shows the final plan and
+requires a second mutation confirmation before switching suites; any material drift from the
+preliminary plan is explicit. For the first transition it then follows Debian's supported direct
+Bookworm-to-Trixie procedure:
 
 - bring Bookworm fully current before changing suites;
 - disable non-Debian APT sources and preserve their original files;
 - write canonical codename-pinned Trixie Debian sources;
 - run the scripted `apt-get` equivalent of the documented minimal upgrade and full upgrade;
-- ensure the Trixie kernel is installed;
+- ensure the Trixie kernel is installed on guest-kernel platforms; WSL2 instead verifies the
+  Microsoft-managed provider kernel because a WSL distribution does not own a Debian kernel;
 - predict interface names with the installed Trixie udev rules and block reboot when an unsafe
-  rename still needs operator pinning;
+  rename still needs operator pinning; WSL2 records the provider-managed names instead;
 - reboot;
 - reconnect strictly, using an existing platform-native route and explicit Tailscale rejoin where
   available when the canonical path does not return;

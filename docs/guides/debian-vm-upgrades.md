@@ -12,9 +12,11 @@ cannot enter this workflow. Create a current VM and copy its workspaces and data
 
 Stop every Agentworks session on the VM and resolve any package-manager work already in progress.
 The command checks the recorded and observed Debian releases, package-database health, package
-holds, kernel meta-package, OpenSSH version, APT pins and mixed suites, modified package
-configuration files, disk space, package removals, third-party repositories, and transition-specific
-Debian release-note blockers.
+holds, kernel meta-package where the guest owns its kernel, OpenSSH version, APT pins and mixed
+suites, modified package configuration files, partition-aware disk estimates, package removals,
+third-party repositories, and transition-specific Debian release-note blockers. WSL2 uses the
+Microsoft-managed WSL kernel, so Agentworks verifies that provider kernel instead of requiring a
+Debian `linux-image` package inside the distribution.
 
 Create a recovery artifact that can boot outside Agentworks before authorizing package changes.
 Depending on the platform, that can be a provider snapshot, WSL export, Proxmox backup, or
@@ -26,24 +28,28 @@ restore the artifact.
 agw vm upgrade build-1 --checkpoint snapshot-2026-08-29
 ```
 
-When a terminal is available, omitting `--checkpoint` prompts for the reference. Non-interactive use
-must provide it. The existing `vm backup` and the Debian recovery bundle created by the command are
-data-recovery artifacts, not checkpoints that can boot a VM.
+Omitting `--checkpoint` prompts for the reference. The command separately asks you to attest that
+the named artifact exists and that console or rescue access was tested. Supplying the option does
+not skip that attestation. The existing `vm backup` and the Debian recovery bundle created by the
+command are data-recovery artifacts, not checkpoints that can boot a VM.
 
 ## What the command does
 
-The workflow has two authorization points:
+The workflow has three authorization points:
 
-1. It shows a preliminary plan, completes the ordinary VM backup and Debian recovery bundle, records
-   the external checkpoint reference, and asks permission to bring the source release fully current
-   without changing suites.
-2. It reopens the VM operation boundary, repeats the complete preflight, highlights material drift,
+1. It records the external checkpoint reference and asks you to attest that the artifact and
+   independent recovery access exist.
+2. It completes the ordinary VM backup and Debian recovery bundle, then asks permission to bring the
+   source release fully current without changing suites.
+3. It reopens the VM operation boundary, repeats the complete preflight, highlights material drift,
    shows the final plan, and asks permission to switch Debian suites.
 
 After the second confirmation, Agentworks preserves and disables the existing APT source files,
 writes the target release's canonical Debian sources, runs the documented minimal and full upgrades,
-and verifies the target kernel is installed. It uses the installed target udev rules to predict
-post-reboot interface names and refuses to reboot when a rename could strand the VM.
+and verifies the target kernel is installed on guest-kernel platforms. It uses the installed target
+udev rules to predict post-reboot interface names and refuses to reboot when a rename could strand
+the VM. WSL2 instead records and verifies its provider-managed interface names across the clean
+systemd shutdown and distribution restart.
 
 The reboot is a separate durably recorded action. Agentworks requires a changed boot ID, verifies
 the predicted interface names, and first tries the canonical Tailscale SSH route. If that route does
@@ -52,9 +58,10 @@ the key resolved before mutation. Proxmox has no post-create native transport, s
 uses the Proxmox console and the recorded backup.
 
 As soon as `/etc/os-release` proves the target release, Agentworks records it in the database. It
-then verifies the package database, running kernel, systemd, sshd, Tailscale, and Agentworks
-identities before rerunning release-aware VM initialization. Automatic APT timers are restored to
-their prior states only after the healthy target and initialization complete.
+then verifies the package database, target APT convergence and sources, running guest or WSL
+provider kernel, systemd, sshd, Tailscale, and Agentworks identities before rerunning release-aware
+VM initialization. Automatic APT timers are restored to their prior states only after the healthy
+target and initialization complete.
 
 ## Resume and recovery
 

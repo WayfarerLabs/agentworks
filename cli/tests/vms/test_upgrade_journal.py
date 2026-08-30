@@ -5,17 +5,19 @@ from dataclasses import dataclass, replace
 
 import pytest
 
-from agentworks.vms.upgrade import (
+from agentworks.vms.upgrade import journal as journal_module
+from agentworks.vms.upgrade.engine import (
     ActionDisposition,
+    UpgradeActionError,
+    UpgradeEngine,
+)
+from agentworks.vms.upgrade.journal import (
     AttemptOutcome,
-    FilesystemJournal,
     JournalError,
     JournalProgress,
     JournalState,
     JournalStore,
     UpgradeAction,
-    UpgradeActionError,
-    UpgradeEngine,
     UpgradePair,
 )
 from agentworks.vms.upgrade.remote import RemoteJournal
@@ -49,6 +51,53 @@ class _Execution:
 
     def wait(self, action: UpgradeAction, state: JournalState) -> _Result:
         return _Result(self.started)
+
+
+class _StoreJournal:
+    """Test-owned adapter for exercising the coordinator against a local store."""
+
+    def __init__(self, store: JournalStore) -> None:
+        self.store = store
+
+    def load(self, pair: UpgradePair) -> JournalState:
+        return self.store.load(pair)
+
+    def claim(self, pair: UpgradePair, action: UpgradeAction) -> JournalState:
+        with self.store.locked(pair):
+            state = self.store.load(pair).claim(action)
+            self.store.write_state(pair, state)
+            return state
+
+    def complete(self, pair: UpgradePair, action: UpgradeAction) -> JournalState:
+        with self.store.locked(pair):
+            state = self.store.load(pair)
+            if state.active_action is not action:
+                raise UpgradeActionError(action, "completion mismatch", repair_required=True)
+            state = state.complete_active()
+            self.store.write_state(pair, state)
+            return state
+
+    def fail(
+        self,
+        pair: UpgradePair,
+        action: UpgradeAction,
+        detail: str,
+        *,
+        repair_required: bool,
+    ) -> JournalState:
+        with self.store.locked(pair):
+            state = self.store.load(pair)
+            if state.active_action is not action:
+                raise UpgradeActionError(action, "failure mismatch", repair_required=True)
+            state = state.fail_active(detail, repair_required=repair_required)
+            self.store.write_state(pair, state)
+            return state
+
+    def retry(self, pair: UpgradePair) -> JournalState:
+        with self.store.locked(pair):
+            state = self.store.load(pair).retry_active()
+            self.store.write_state(pair, state)
+            return state
 
 
 @pytest.fixture
@@ -131,9 +180,7 @@ def test_engine_records_intent_before_dispatch(tmp_path, pair: UpgradePair) -> N
             raise KeyboardInterrupt
 
     with pytest.raises(KeyboardInterrupt):
-        UpgradeEngine(FilesystemJournal(store), _InterruptingExecution()).advance_action(
-            pair, UpgradeAction.SOURCE_UPDATE
-        )
+        UpgradeEngine(_StoreJournal(store), _InterruptingExecution()).advance_action(pair, UpgradeAction.SOURCE_UPDATE)
 
     state = store.load(pair)
     assert state.active_action is UpgradeAction.SOURCE_UPDATE
@@ -146,10 +193,10 @@ def test_resume_proves_completed_active_action_without_replay(tmp_path, pair: Up
     store.write_state(pair, store.load(pair).claim(UpgradeAction.SOURCE_UPDATE))
     execution = _Execution(inspected=ActionDisposition.SUCCEEDED, started=ActionDisposition.RUNNING)
 
-    result = UpgradeEngine(FilesystemJournal(store), execution).advance_action(pair, UpgradeAction.SOURCE_UPDATE)
+    result = UpgradeEngine(_StoreJournal(store), execution).advance_action(pair, UpgradeAction.SOURCE_UPDATE)
 
-    assert result.state.last_completed is JournalProgress.SOURCE_CURRENT
-    assert result.state.active_action is None
+    assert result.last_completed is JournalProgress.SOURCE_CURRENT
+    assert result.active_action is None
     assert execution.inspections == [UpgradeAction.SOURCE_UPDATE]
     assert execution.starts == []
 
@@ -163,7 +210,7 @@ def test_repair_required_attempt_is_not_retried(tmp_path, pair: UpgradePair) -> 
     execution = _Execution(inspected=ActionDisposition.REPAIR_REQUIRED)
 
     with pytest.raises(UpgradeActionError) as raised:
-        UpgradeEngine(FilesystemJournal(store), execution).advance_action(pair, UpgradeAction.SOURCE_UPDATE)
+        UpgradeEngine(_StoreJournal(store), execution).advance_action(pair, UpgradeAction.SOURCE_UPDATE)
 
     assert raised.value.repair_required is True
     assert execution.starts == []
@@ -226,3 +273,18 @@ def test_absent_remote_journal_scan_is_read_only(pair: UpgradePair) -> None:
             raise AssertionError("read-only scan attempted to install a helper")
 
     assert RemoteJournal(_Target()).read_states((pair,)) == {}
+
+
+def test_reboot_lock_proof_falls_back_to_lslocks_when_fuser_is_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "agentworks.vms.upgrade.journal.shutil.which",
+        lambda command: None if command == "fuser" else "/usr/bin/lslocks",
+    )
+    monkeypatch.setattr(
+        "agentworks.vms.upgrade.journal.subprocess.run",
+        lambda *args, **kwargs: type("Result", (), {"returncode": 0, "stdout": ""})(),
+    )
+
+    assert journal_module._package_locks_quiescent() is True

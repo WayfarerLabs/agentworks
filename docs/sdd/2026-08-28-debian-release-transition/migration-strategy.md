@@ -180,13 +180,14 @@ eligibility is considered; multiple journals fail with repair guidance. Only wit
 the command prove that the observed release is current-1 and select the final target profile's
 upgrade-from-previous policy. It performs the HLA preflight, updates no Debian suites, and shows a
 preliminary plan. It then creates the Agentworks backup and Debian recovery bundle, records the
-operator's external checkpoint reference identifying the actual artifact, and receives confirmation
-to bring the source release current within its existing suite.
+operator's external checkpoint reference identifying the actual artifact, receives explicit
+attestation that the artifact exists and console or rescue access was tested, and separately
+receives confirmation to bring the source release current within its existing suite.
 
 After that update it closes and reopens the VM operation boundary, reruns the complete preflight and
-simulation, shows every material difference, and receives a second confirmation before switching
-sources. A preliminary confirmation never authorizes a changed removal, source, conffile, blocker,
-or space plan.
+simulation, shows every material difference, and receives a second mutation confirmation before
+switching sources. A preliminary mutation confirmation never authorizes a changed removal, source,
+conffile, blocker, or space plan.
 
 If the command exits before confirmation, no transition state needs cleanup. A failed or incomplete
 local backup is not accepted as a gate.

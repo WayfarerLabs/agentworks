@@ -124,6 +124,19 @@ Design consequences:
 Sources: [Bookworm release lifecycle](https://www.debian.org/releases/bookworm/),
 [Trixie release lifecycle](https://www.debian.org/releases/trixie/)
 
+### WSL2 kernel and restart ownership
+
+WSL2 runs distributions as isolated containers inside a Microsoft-managed lightweight VM with a
+shared Linux kernel. Systemd is supported inside the distribution and participates in its clean
+shutdown, while `wsl --terminate`/activation owns the distribution lifecycle. Therefore a WSL2
+distribution upgrade must not require a Debian kernel metapackage or apply guest udev predictions to
+provider-managed interfaces; it verifies the Microsoft kernel and a changed distribution boot ID.
+
+Sources:
+[Microsoft WSL version comparison](https://learn.microsoft.com/en-us/windows/wsl/compare-versions),
+[Microsoft WSL systemd architecture](https://learn.microsoft.com/en-us/windows/wsl/systemd), and
+[Microsoft WSL lifecycle commands](https://learn.microsoft.com/en-us/windows/wsl/basic-commands)
+
 ## Official Trixie image selectors
 
 | Platform | Official current selector                                                     | Design consequence                                                                               |

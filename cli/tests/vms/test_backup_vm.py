@@ -13,7 +13,7 @@ from contextlib import nullcontext
 from json import loads
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -25,7 +25,7 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import backup as vm_backup
 
 if TYPE_CHECKING:
-    from agentworks.db import Database
+    from agentworks.db import Database, WorkspaceRow
 
 
 def test_missing_tailscale_fails_before_the_boundary(
@@ -79,7 +79,7 @@ def test_workspace_path_staging_is_cleaned_when_upload_fails(tmp_path: Path) -> 
     with pytest.raises(OSError):
         vm_backup._archive_workspaces(  # noqa: SLF001
             target,
-            [SimpleNamespace(workspace_path="/srv/workspace")],
+            [cast("WorkspaceRow", SimpleNamespace(workspace_path="/srv/workspace"))],
             tmp_path / "workspaces.tar.zst",
             "operator",
         )

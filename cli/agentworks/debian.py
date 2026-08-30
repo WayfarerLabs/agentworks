@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 from agentworks.errors import StateError
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from agentworks.transports import Transport
 
@@ -36,17 +36,19 @@ class DebianSupport(StrEnum):
     LEGACY = "legacy"
 
 
+def _no_release_blockers(_target: Transport) -> tuple[str, ...]:
+    return ()
+
+
 @dataclass(frozen=True)
 class DebianUpgradePolicy:
     """The transition facts owned by one target release profile."""
 
-    source: DebianRelease
-    target: DebianRelease
     source_suites: tuple[str, ...]
     target_suites: tuple[str, ...]
     minimum_openssh_version: str
     documentation_urls: tuple[str, ...]
-    blockers: tuple[str, ...] = ()
+    blocker_probe: Callable[[Transport], tuple[str, ...]] = _no_release_blockers
 
 
 @dataclass(frozen=True)
@@ -58,9 +60,33 @@ class DebianReleaseProfile:
     upgrade_from_previous: DebianUpgradePolicy | None = None
 
 
+def _bookworm_to_trixie_blockers(target: Transport) -> tuple[str, ...]:
+    """Return release-note blockers for the Bookworm-to-Trixie edge."""
+    blockers: list[str] = []
+    if _package_installed(target, "rabbitmq-server"):
+        blockers.append("rabbitmq-server-installed")
+    if _package_installed(target, "mariadb-server"):
+        inactive = not target.run("systemctl is-active --quiet mariadb", sudo=True, check=False).ok
+        clean_log = target.run(
+            "journalctl -u mariadb -n 300 --no-pager -o cat 2>/dev/null | "
+            "grep -E 'Shutdown complete|Starting MariaDB|Started MariaDB' | "
+            "tail -1 | grep -Fq 'Shutdown complete'",
+            sudo=True,
+            check=False,
+        ).ok
+        if not inactive or not clean_log:
+            blockers.append("mariadb-unsafe-shutdown")
+    return tuple(blockers)
+
+
+def _package_installed(target: Transport, package: str) -> bool:
+    return target.run(
+        f"dpkg-query -W -f='${{db:Status-Status}}' {shlex.quote(package)} 2>/dev/null | grep -qx installed",
+        check=False,
+    ).ok
+
+
 BOOKWORM_TO_TRIXIE = DebianUpgradePolicy(
-    source=DebianRelease.BOOKWORM,
-    target=DebianRelease.TRIXIE,
     source_suites=("bookworm", "bookworm-updates", "bookworm-security"),
     target_suites=("trixie", "trixie-updates", "trixie-security"),
     minimum_openssh_version="1:9.2p1-2+deb12u7",
@@ -68,7 +94,7 @@ BOOKWORM_TO_TRIXIE = DebianUpgradePolicy(
         "https://www.debian.org/releases/trixie/amd64/release-notes/ch-upgrading.en.html",
         "https://www.debian.org/releases/trixie/amd64/release-notes/ch-information.en.html",
     ),
-    blockers=("mariadb-unsafe-shutdown", "rabbitmq-server-installed"),
+    blocker_probe=_bookworm_to_trixie_blockers,
 )
 
 
@@ -90,14 +116,10 @@ def validate_release_profiles(
 
     if frozen[0].upgrade_from_previous is not None:
         raise ValueError("the first Debian release profile cannot have an upgrade policy")
-    for previous, profile in zip(frozen, frozen[1:], strict=False):
+    for profile in frozen[1:]:
         policy = profile.upgrade_from_previous
         if policy is None:
             raise ValueError(f"Debian release {profile.release} requires an adjacent upgrade policy")
-        if policy.source is not previous.release or policy.target is not profile.release:
-            raise ValueError(
-                f"Debian release {profile.release} upgrade policy must describe {previous.release} to {profile.release}"
-            )
     return frozen
 
 

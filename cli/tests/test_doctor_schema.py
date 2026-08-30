@@ -8,7 +8,8 @@ import sqlite3
 import subprocess
 import sys
 from pathlib import Path
-from typing import cast
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -18,6 +19,7 @@ from agentworks.debian import DebianRelease
 from agentworks.doctor import HealthGroup, Status
 from agentworks.doctor_state import (
     _append_live_release_check,
+    _append_live_upgrade_hazards,
     _live_resource_counts,
     _report_contents,
     append_vm_site_database_checks,
@@ -26,6 +28,9 @@ from agentworks.doctor_state import (
 )
 from agentworks.errors import StateError
 from agentworks.resources.live import LIVE_RESOURCE_KINDS
+
+if TYPE_CHECKING:
+    from agentworks.transports import Transport
 
 
 def _installed_agw() -> Path:
@@ -226,6 +231,40 @@ def test_doctor_compares_live_and_recorded_debian_release_without_writing(
 
     assert group.checks[0].status is expected_status
     assert db.get_vm("box") == before
+
+
+def test_doctor_reports_incomplete_upgrade_and_staging_residue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Target:
+        def __init__(self) -> None:
+            self.commands: list[str] = []
+
+        def run(self, command: str, **kwargs: object) -> object:
+            del kwargs
+            self.commands.append(command)
+            if "*.agentworks-disabled" in command:
+                return SimpleNamespace(stdout="/etc/apt/sources.list.d/vendor.agentworks-disabled\n")
+            if "find /tmp" in command:
+                return SimpleNamespace(stdout="/tmp/agentworks-backup-old\n")
+            raise AssertionError(command)
+
+    class _Journal:
+        def __init__(self, target: object) -> None:
+            assert isinstance(target, _Target)
+
+        def read_states(self, pairs: tuple[object, ...]) -> dict[object, object]:
+            return {pairs[0]: SimpleNamespace(is_complete=False)}
+
+    monkeypatch.setattr("agentworks.vms.upgrade.remote.RemoteJournal", _Journal)
+    group = HealthGroup("VM sites")
+    target = _Target()
+
+    _append_live_upgrade_hazards(group, SimpleNamespace(name="box"), cast("Transport", target))
+
+    assert len(group.checks) == 3
+    assert all(check.status is Status.WARN for check in group.checks)
+    assert len(target.commands) == 2
 
 
 def test_installed_doctor_reports_malformed_schema_in_human_and_json(tmp_path: Path) -> None:

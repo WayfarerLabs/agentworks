@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.doctor import HealthGroup
+    from agentworks.transports import Transport
     from agentworks.vms.sites import VMSiteDecl
 
 
@@ -198,7 +199,8 @@ def _append_live_release_check(group: HealthGroup, config: Config, vm: VMRow) ->
         from agentworks.debian import probe_debian_release
         from agentworks.transports import transport
 
-        observed = probe_debian_release(transport(vm, config, default_timeout=10))
+        target = transport(vm, config, default_timeout=10)
+        observed = probe_debian_release(target)
     except Exception as error:
         group.warn(
             f"VM '{vm.name}' Debian live",
@@ -220,3 +222,57 @@ def _append_live_release_check(group: HealthGroup, config: Config, vm: VMRow) ->
         )
     else:
         group.ok(f"VM '{vm.name}' Debian live", observed.value)
+    _append_live_upgrade_hazards(group, vm, target)
+
+
+def _append_live_upgrade_hazards(group: HealthGroup, vm: VMRow, target: Transport) -> None:
+    """Report durable upgrade and pre-Trixie staging residue without mutation."""
+    from agentworks.debian import DEBIAN_RELEASES
+    from agentworks.vms.upgrade.journal import UpgradePair
+    from agentworks.vms.upgrade.remote import RemoteJournal
+
+    pairs = tuple(
+        UpgradePair(source.release.value, destination.release.value)
+        for source, destination in zip(DEBIAN_RELEASES, DEBIAN_RELEASES[1:], strict=False)
+    )
+    try:
+        states = RemoteJournal(target).read_states(pairs)
+        incomplete = [pair.dirname for pair, state in states.items() if not state.is_complete]
+        if incomplete:
+            group.warn(
+                f"VM '{vm.name}' Debian upgrade",
+                "incomplete durable journal: " + ", ".join(incomplete),
+                hint=f"Run 'agw vm upgrade {vm.name}' to inspect or resume it.",
+            )
+
+        disabled = target.run(
+            "find /etc/apt -maxdepth 3 -type f -name '*.agentworks-disabled' -print 2>/dev/null",
+            sudo=True,
+            check=False,
+        )
+        disabled_paths = [line.strip() for line in disabled.stdout.splitlines() if line.strip()]
+        if disabled_paths:
+            group.warn(
+                f"VM '{vm.name}' disabled APT sources",
+                f"{len(disabled_paths)} unmanaged source file(s) remain disabled after upgrade",
+            )
+
+        old_tmp = target.run(
+            "find /tmp -mindepth 1 -maxdepth 1 "
+            "\\( -name 'agentworks-backup-*' -o -name '_aw_paths_*' -o -name '_aw_detached_*' "
+            "-o -name '*-copy.tgz' -o -name 'agentworks-copy-*' -o -name 'agentworks-source-ref' \\) "
+            "-print 2>/dev/null",
+            check=False,
+        )
+        old_paths = [line.strip() for line in old_tmp.stdout.splitlines() if line.strip()]
+        if old_paths:
+            group.warn(
+                f"VM '{vm.name}' legacy staging",
+                f"{len(old_paths)} pre-Trixie size-bearing /tmp path(s) remain",
+            )
+    except Exception as error:
+        group.warn(
+            f"VM '{vm.name}' Debian upgrade diagnostics",
+            f"could not inspect live upgrade state: {error}",
+            hint=getattr(error, "hint", None),
+        )

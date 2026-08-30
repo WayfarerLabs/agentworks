@@ -13,6 +13,7 @@ import contextlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -30,6 +31,12 @@ if TYPE_CHECKING:
 JOURNAL_VERSION = 1
 DEFAULT_ROOT = Path("/var/lib/agentworks/debian-upgrades")
 _PAIR_PART = re.compile(r"[a-z][a-z0-9-]*")
+_PACKAGE_LOCK_PATHS = (
+    "/var/lib/dpkg/lock",
+    "/var/lib/dpkg/lock-frontend",
+    "/var/cache/apt/archives/lock",
+    "/var/lib/apt/lists/lock",
+)
 
 
 class JournalError(Exception):
@@ -523,21 +530,7 @@ def _cli(argv: Sequence[str] | None = None) -> int:
     elif args.command == "redispatch-reboot":
         with store.locked(pair):
             state = store.load(pair).redispatch_reboot(args.boot_id)
-            try:
-                locks = subprocess.run(
-                    [
-                        "fuser",
-                        "/var/lib/dpkg/lock",
-                        "/var/lib/dpkg/lock-frontend",
-                        "/var/cache/apt/archives/lock",
-                        "/var/lib/apt/lists/lock",
-                    ],
-                    capture_output=True,
-                    check=False,
-                )
-            except OSError as error:
-                raise JournalError("reboot cannot prove package-manager quiescence") from error
-            if locks.returncode != 1:
+            if not _package_locks_quiescent():
                 raise JournalError("reboot cannot be redispatched while package-manager ownership is uncertain")
             store.write_state(pair, state)
             subprocess.Popen(
@@ -578,6 +571,27 @@ def _cli(argv: Sequence[str] | None = None) -> int:
             store.write_state(pair, state)
     _write_result(state.to_mapping())
     return 0
+
+
+def _package_locks_quiescent() -> bool:
+    fuser = shutil.which("fuser")
+    if fuser is not None:
+        fuser_result = subprocess.run([fuser, *_PACKAGE_LOCK_PATHS], capture_output=True, check=False)
+        return fuser_result.returncode == 1
+    lslocks = shutil.which("lslocks")
+    if lslocks is None:
+        return False
+    lslocks_result = subprocess.run(
+        [lslocks, "--noheadings", "--output", "PATH,PID"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if lslocks_result.returncode != 0:
+        return False
+    return all(
+        not line.split() or line.split()[0] not in _PACKAGE_LOCK_PATHS for line in lslocks_result.stdout.splitlines()
+    )
 
 
 def main() -> int:

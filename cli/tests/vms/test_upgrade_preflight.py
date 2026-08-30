@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from agentworks.errors import StateError
-from agentworks.vms.upgrade import PreflightIssue, UpgradePreflight
+from agentworks.vms.upgrade.preflight import PreflightIssue, UpgradePreflight
 from agentworks.vms.upgrade.probe import _is_third_party, _lines, _mentions_other_debian_suite
 
 
@@ -54,17 +54,41 @@ def test_each_persisted_safety_class_blocks_before_mutation() -> None:
         (replace(_safe(), release_blockers=("rabbitmq",)), PreflightIssue.RELEASE_BLOCKER),
         (replace(_safe(), boot_free_bytes=99), PreflightIssue.BOOT_SPACE_LOW),
         (replace(_safe(), root_free_bytes=99), PreflightIssue.ROOT_SPACE_LOW),
+        (replace(_safe(), var_free_bytes=99, var_required_bytes=100), PreflightIssue.VAR_SPACE_LOW),
         (replace(_safe(), cache_free_bytes=99), PreflightIssue.CACHE_SPACE_LOW),
     )
     for plan, expected in cases:
         assert expected in _issues(plan)
 
 
+def test_provider_managed_kernel_does_not_require_a_guest_metapackage() -> None:
+    plan = replace(_safe(), kernel_metapackage=None, guest_kernel_required=False)
+
+    assert PreflightIssue.KERNEL_METAPACKAGE_MISSING not in _issues(plan)
+
+
+def test_shared_filesystem_space_reports_one_aggregate_blocker() -> None:
+    plan = replace(
+        _safe(),
+        root_filesystem="shared",
+        root_free_bytes=99,
+        root_required_bytes=100,
+        var_filesystem="shared",
+        var_free_bytes=99,
+        var_required_bytes=100,
+        cache_filesystem="shared",
+        cache_free_bytes=99,
+        cache_required_bytes=100,
+    )
+
+    assert _issues(plan) == (PreflightIssue.ROOT_SPACE_LOW,)
+
+
 def test_material_plan_fingerprint_changes_on_second_pass_drift() -> None:
     preliminary = _safe()
     final = replace(preliminary, removals=("obsolete-package",))
 
-    assert preliminary.material_fingerprint() != final.material_fingerprint()
+    assert preliminary.material_plan() != final.material_plan()
 
 
 def test_plan_serialization_keeps_timer_restore_state() -> None:

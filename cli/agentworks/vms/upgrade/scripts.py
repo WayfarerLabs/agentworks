@@ -23,13 +23,7 @@ def render_upgrade_script(
 ) -> str:
     """Render a deterministic script whose action is selected by argv."""
     directory = f"{REMOTE_ROOT}/{pair.dirname}"
-    security_suites = " ".join(suite for suite in target_suites if "security" in suite)
-    ordinary_suites = " ".join(suite for suite in target_suites if "security" not in suite)
-    if not ordinary_suites:
-        raise ValueError("target policy must include at least one ordinary Debian suite")
-    source_document = _deb822_stanza(_DEBIAN_MIRROR, ordinary_suites)
-    if security_suites:
-        source_document += "\n" + _deb822_stanza(_SECURITY_MIRROR, security_suites)
+    source_document = render_debian_sources(target_suites)
 
     q_directory = shlex.quote(directory)
     q_source_document = shlex.quote(source_document)
@@ -97,6 +91,18 @@ case "$action" in
     ;;
 esac
 """
+
+
+def render_debian_sources(suites: Sequence[str]) -> str:
+    """Render the canonical Debian sources document for one release policy."""
+    security_suites = " ".join(suite for suite in suites if "security" in suite)
+    ordinary_suites = " ".join(suite for suite in suites if "security" not in suite)
+    if not ordinary_suites:
+        raise ValueError("target policy must include at least one ordinary Debian suite")
+    document = _deb822_stanza(_DEBIAN_MIRROR, ordinary_suites)
+    if security_suites:
+        document += "\n" + _deb822_stanza(_SECURITY_MIRROR, security_suites)
+    return document
 
 
 def _deb822_stanza(uri: str, suites: str) -> str:

@@ -45,6 +45,18 @@ done
     return predictions
 
 
+def snapshot_provider_interface_names(target: Transport) -> dict[str, str]:
+    """Record provider-managed names when guest udev does not own the interface."""
+    result = target.run(
+        "find /sys/class/net -mindepth 1 -maxdepth 1 -printf '%f\\n' | grep -vx lo | sort",
+        check=False,
+    )
+    names = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if not result.ok or not names:
+        raise StateError("Debian upgrade could not inventory provider-managed network interfaces")
+    return {name: name for name in names}
+
+
 def require_stable_interface_names(predictions: dict[str, str]) -> None:
     """Refuse reboot when the installed rules predict a rename."""
     renames = {current: predicted for current, predicted in predictions.items() if current != predicted}

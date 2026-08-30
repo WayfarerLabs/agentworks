@@ -61,8 +61,6 @@ def test_appending_a_candidate_profile_reclassifies_older_releases() -> None:
 
     forky = cast("DebianRelease", CandidateRelease.FORKY)
     candidate_policy = DebianUpgradePolicy(
-        source=DebianRelease.TRIXIE,
-        target=forky,
         source_suites=("trixie",),
         target_suites=("forky",),
         minimum_openssh_version="candidate",
@@ -89,8 +87,8 @@ def test_release_registry_requires_the_adjacent_policy() -> None:
             )
         )
 
-    assert BOOKWORM_TO_TRIXIE.source is DebianRelease.BOOKWORM
-    assert BOOKWORM_TO_TRIXIE.target is DebianRelease.TRIXIE
+    assert BOOKWORM_TO_TRIXIE.source_suites[0] == "bookworm"
+    assert BOOKWORM_TO_TRIXIE.target_suites[0] == "trixie"
 
 
 def test_probe_validates_the_expected_release() -> None:

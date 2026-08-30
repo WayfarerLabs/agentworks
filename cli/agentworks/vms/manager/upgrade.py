@@ -3,17 +3,24 @@
 from __future__ import annotations
 
 import contextlib
-import importlib
 import json
 import shlex
 import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.db import PID_STOPPED, SessionStatus
+from agentworks.debian import (
+    CURRENT_DEBIAN_RELEASE,
+    DEBIAN_RELEASES,
+    DebianRelease,
+    DebianReleaseProfile,
+    DebianUpgradePolicy,
+    probe_debian_release,
+)
 from agentworks.errors import StateError, UserAbort, ValidationError
 from agentworks.path_rendering import format_host_path
 from agentworks.vms.upgrade.engine import UpgradeActionError, UpgradeEngine
@@ -29,9 +36,15 @@ from agentworks.vms.upgrade.journal import (
 from agentworks.vms.upgrade.network import (
     predict_interface_names,
     require_stable_interface_names,
+    snapshot_provider_interface_names,
     verify_interface_names,
 )
-from agentworks.vms.upgrade.probe import probe_upgrade_preflight, supported_architectures
+from agentworks.vms.upgrade.probe import (
+    NATIVE_PACKAGE_LOCK_COMMAND,
+    probe_upgrade_preflight,
+    supported_architectures,
+    target_source_hygiene_issues,
+)
 from agentworks.vms.upgrade.remote import RemoteJournal
 
 from ._helpers import _guard_failed_vm, _require_vm
@@ -52,53 +65,11 @@ if TYPE_CHECKING:
     from agentworks.vms.upgrade.preflight import UpgradePreflight
 
 
-class _UpgradePolicy(Protocol):
-    source: str
-    target: str
-    source_suites: tuple[str, ...]
-    target_suites: tuple[str, ...]
-    minimum_openssh_version: str
-    documentation_urls: tuple[str, ...]
-    blockers: tuple[str, ...]
-
-
-class _ReleaseProfile(Protocol):
-    release: str
-    version_id: str
-    upgrade_from_previous: _UpgradePolicy | None
-
-
-class _DebianModule(Protocol):
-    DEBIAN_RELEASES: tuple[_ReleaseProfile, ...]
-    CURRENT_DEBIAN_RELEASE: str
-
-    def probe_debian_release(self, target: Transport, *, expected: str | None = None) -> str: ...
-
-
-class _ReleaseDatabase(Protocol):
-    def update_vm_debian_release(
-        self,
-        name: str,
-        release: object,
-        *,
-        observed_at: str | None = None,
-    ) -> None: ...
-
-
-@dataclass(frozen=True, slots=True)
-class UpgradeResult:
-    name: str
-    source: str
-    target: str
-    status: str
-
-
 @dataclass(frozen=True, slots=True)
 class _Transition:
     pair: UpgradePair
-    source_profile: _ReleaseProfile
-    target_profile: _ReleaseProfile
-    policy: _UpgradePolicy
+    target_profile: DebianReleaseProfile
+    policy: DebianUpgradePolicy
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,7 +88,7 @@ def upgrade_vm(
     *,
     checkpoint: str | None = None,
     interaction: TtyInteractionPolicy,
-) -> UpgradeResult:
+) -> None:
     """Upgrade one verified previous-release VM to core's current release."""
     try:
         return _upgrade_vm(db, config, name, checkpoint=checkpoint, interaction=interaction)
@@ -137,35 +108,45 @@ def _upgrade_vm(
     *,
     checkpoint: str | None = None,
     interaction: TtyInteractionPolicy,
-) -> UpgradeResult:
+) -> None:
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
-    if vm.tailscale_host is None:
-        raise StateError(
-            f"VM '{name}' has no canonical Tailscale route",
-            entity_kind="vm",
-            entity_name=name,
-            hint="Repair VM connectivity before starting or resuming the Debian upgrade.",
-        )
 
     entry = _inspect_entry(db, config, vm, interaction=interaction)
     vm = _require_vm(db, name)
     if entry.adoption:
-        return _adopt_external_upgrade(db, config, vm, entry.transition, interaction=interaction)
+        _adopt_external_upgrade(
+            db,
+            config,
+            vm,
+            entry.transition,
+            platform_name=entry.platform_name,
+            interaction=interaction,
+        )
+        return
     if entry.journal_pair is None and entry.preflight is None:
         current = entry.transition.pair.target
         output.result(f"VM '{name}' already runs Debian {current}; no upgrade is needed.")
-        return UpgradeResult(name, current, current, "already-current")
+        return
 
     if entry.journal_pair is None:
         assert entry.preflight is not None
         _require_safe_preflight(entry.preflight, entry.transition)
-        _render_plan(entry.preflight, heading="Preliminary Debian upgrade plan")
+        _render_plan(
+            entry.preflight,
+            entry.transition,
+            heading="Preliminary Debian upgrade plan",
+        )
 
         from agentworks.vms.backup import backup_vm
 
         _render_checkpoint_guidance(entry.platform_name)
         checkpoint_ref = _resolve_checkpoint(checkpoint)
+        if not output.confirm(
+            "Confirm that the named external recovery artifact exists and console or rescue access was tested?",
+            default=False,
+        ):
+            raise UserAbort("VM upgrade cancelled before local backup because checkpoint creation was not attested")
         ordinary_backup = backup_vm(db, config, name, interaction=interaction)
         recovery_bundle = _create_recovery_bundle(
             db,
@@ -193,54 +174,58 @@ def _upgrade_vm(
             checkpoint_ref,
             ordinary_backup,
             recovery_bundle,
+            platform_name=entry.platform_name,
             interaction=interaction,
         )
     else:
         tailscale_auth_key = None
 
-    result = _resume_after_source_update(
+    _resume_after_source_update(
         db,
         config,
         vm,
         entry.transition,
+        platform_name=entry.platform_name,
         tailscale_auth_key=tailscale_auth_key,
         interaction=interaction,
     )
-    if result.status == "complete":
-        import agentworks.vms.manager as manager
+    target_release = entry.transition.pair.target
+    import agentworks.vms.manager as manager
 
-        try:
-            manager.reinit_vm(db, config, name, interaction=interaction)
-            _require_complete_initialization(db, name)
-        except Exception as error:
-            db.insert_vm_event(
-                name,
-                "debian_upgrade_repair_required",
-                json.dumps({"stage": "release-aware-initialization", "target": result.target}, sort_keys=True),
-            )
-            raise StateError(
-                f"VM '{name}' runs Debian {result.target}, but release-aware initialization needs repair",
-                entity_kind="vm",
-                entity_name=name,
-                hint="Repair the initialization failure and run vm reinit. Automatic APT timers remain inhibited.",
-            ) from error
-        try:
-            _restore_completed_timer_state(db, config, vm, entry.transition, interaction=interaction)
-        except Exception as error:
-            db.insert_vm_event(
-                name,
-                "debian_upgrade_repair_required",
-                json.dumps({"stage": "apt-timer-restore", "target": result.target}, sort_keys=True),
-            )
-            raise StateError(
-                f"VM '{name}' is healthy on Debian {result.target}, but automatic APT timers need repair",
-                entity_kind="vm",
-                entity_name=name,
-                hint="Restore apt-daily.timer and apt-daily-upgrade.timer to their recorded states.",
-            ) from error
-        db.insert_vm_event(name, "debian_upgrade_complete", json.dumps({"target": result.target}, sort_keys=True))
-        output.result(f"VM '{name}' upgraded to Debian {result.target}.")
-    return result
+    try:
+        manager.reinit_vm(db, config, name, interaction=interaction)
+        _require_complete_initialization(db, name)
+    except Exception as error:
+        db.insert_vm_event(
+            name,
+            "debian_upgrade_repair_required",
+            json.dumps({"stage": "release-aware-initialization", "target": target_release}, sort_keys=True),
+        )
+        raise StateError(
+            f"VM '{name}' runs Debian {target_release}, but release-aware initialization needs repair",
+            entity_kind="vm",
+            entity_name=name,
+            hint=(
+                "Repair the initialization failure, run vm reinit, then rerun vm upgrade to finalize. "
+                "Automatic APT timers remain inhibited."
+            ),
+        ) from error
+    try:
+        _restore_completed_timer_state(db, config, vm, entry.transition, interaction=interaction)
+    except Exception as error:
+        db.insert_vm_event(
+            name,
+            "debian_upgrade_repair_required",
+            json.dumps({"stage": "apt-timer-restore", "target": target_release}, sort_keys=True),
+        )
+        raise StateError(
+            f"VM '{name}' is healthy on Debian {target_release}, but automatic APT timers need repair",
+            entity_kind="vm",
+            entity_name=name,
+            hint="Restore apt-daily.timer and apt-daily-upgrade.timer to their recorded states.",
+        ) from error
+    db.insert_vm_event(name, "debian_upgrade_complete", json.dumps({"target": target_release}, sort_keys=True))
+    output.result(f"VM '{name}' upgraded to Debian {target_release}.")
 
 
 def _inspect_entry(
@@ -250,12 +235,11 @@ def _inspect_entry(
     *,
     interaction: TtyInteractionPolicy,
 ) -> _EntryInspection:
-    debian = _debian()
-    transitions = _transitions(debian.DEBIAN_RELEASES)
+    transitions = _transitions(DEBIAN_RELEASES)
     retained_pairs = tuple(transition.pair for transition in transitions)
     by_pair = {transition.pair: transition for transition in transitions}
     current_transition = transitions[-1]
-    if current_transition.pair.target != _release_text(debian.CURRENT_DEBIAN_RELEASE):
+    if current_transition.pair.target != CURRENT_DEBIAN_RELEASE.value:
         raise StateError("Debian release registry does not end at the declared current release")
 
     from agentworks.bootstrap import load_request_registry
@@ -301,28 +285,28 @@ def _inspect_entry(
             pair = pending_completion[0]
             return _EntryInspection(by_pair[pair], pair, None, False, platform_name)
 
-        live_release = debian.probe_debian_release(target)
+        live_release = probe_debian_release(target)
         recorded = _recorded_release(vm)
         if recorded is None:
             _persist_release(db, vm.name, live_release)
-            recorded = live_release
-        elif recorded == live_release:
+            recorded = live_release.value
+        elif recorded == live_release.value:
             _persist_release(db, vm.name, live_release)
-        elif recorded == current_transition.pair.source and live_release == current_transition.pair.target:
+        elif recorded == current_transition.pair.source and live_release.value == current_transition.pair.target:
             return _EntryInspection(current_transition, None, None, True, platform_name)
         else:
             raise StateError(
-                f"VM '{vm.name}' release disagreement: database={recorded}, guest={live_release}",
+                f"VM '{vm.name}' release disagreement: database={recorded}, guest={live_release.value}",
                 entity_kind="vm",
                 entity_name=vm.name,
                 hint="Repair the disagreement before a release-sensitive operation.",
             )
 
-        if live_release == current_transition.pair.target:
+        if live_release.value == current_transition.pair.target:
             return _EntryInspection(current_transition, None, None, False, platform_name)
-        if live_release != current_transition.pair.source:
+        if live_release.value != current_transition.pair.source:
             raise StateError(
-                f"VM '{vm.name}' runs Debian {live_release}; only "
+                f"VM '{vm.name}' runs Debian {live_release.value}; only "
                 f"{current_transition.pair.source} to {current_transition.pair.target} is supported",
                 entity_kind="vm",
                 entity_name=vm.name,
@@ -331,7 +315,14 @@ def _inspect_entry(
                     "Multi-hop upgrade is not supported."
                 ),
             )
-        preflight = _probe(db, vm, target, current_transition, recorded)
+        preflight = _probe(
+            db,
+            vm,
+            target,
+            current_transition,
+            recorded,
+            platform_name=platform_name,
+        )
         return _EntryInspection(current_transition, None, preflight, False, platform_name)
 
 
@@ -345,6 +336,7 @@ def _initialize_and_update_source(
     ordinary_backup: Path,
     recovery_bundle: Path,
     *,
+    platform_name: str,
     interaction: TtyInteractionPolicy,
 ) -> str:
     from agentworks.bootstrap import load_request_registry
@@ -364,14 +356,21 @@ def _initialize_and_update_source(
         target = transport(vm, config)
         journal = RemoteJournal(target)
         journal.install()
-        if journal.select_incomplete(tuple(item.pair for item in _transitions(_debian().DEBIAN_RELEASES))) is not None:
+        if journal.select_incomplete(tuple(item.pair for item in _transitions(DEBIAN_RELEASES))) is not None:
             raise StateError(
                 f"VM '{vm.name}' acquired an upgrade journal while backups were being prepared",
                 entity_kind="vm",
                 entity_name=vm.name,
                 hint="Rerun vm upgrade to inspect the existing journal.",
             )
-        fresh = _probe(db, vm, target, transition, transition.pair.source)
+        fresh = _probe(
+            db,
+            vm,
+            target,
+            transition,
+            transition.pair.source,
+            platform_name=platform_name,
+        )
         _require_safe_preflight(fresh, transition)
         plan = fresh.to_plan()
         plan.update(
@@ -379,19 +378,41 @@ def _initialize_and_update_source(
                 "checkpoint": checkpoint,
                 "ordinary_backup": str(ordinary_backup),
                 "recovery_bundle": str(recovery_bundle),
-                "preliminary_material_fingerprint": json.loads(json.dumps(preflight.material_fingerprint())),
+                "preliminary_material_plan": preflight.material_plan(),
             }
         )
         journal.initialize(transition.pair, plan)
-        _inhibit_apt_timers(target)
-        db.insert_vm_event(
-            vm.name,
-            "debian_upgrade_started",
-            json.dumps({"checkpoint": checkpoint, "target": transition.pair.target}, sort_keys=True),
+        try:
+            _inhibit_apt_timers(target)
+        except Exception:
+            _restore_timers_after_source_safe_failure(
+                target,
+                fresh.apt_timer_states,
+                transition,
+            )
+            raise
+        try:
+            db.insert_vm_event(
+                vm.name,
+                "debian_upgrade_started",
+                json.dumps({"checkpoint": checkpoint, "target": transition.pair.target}, sort_keys=True),
+            )
+            execution = _execution(target, journal, transition)
+            execution.install_script()
+        except Exception:
+            _restore_timers_after_source_safe_failure(
+                target,
+                fresh.apt_timer_states,
+                transition,
+            )
+            raise
+        _advance_source_action(
+            journal,
+            execution,
+            transition,
+            target,
+            fresh.apt_timer_states,
         )
-        execution = _execution(target, journal, transition)
-        execution.install_script()
-        _advance_source_action(journal, execution, transition.pair, target, fresh.apt_timer_states)
     return tailscale_auth_key
 
 
@@ -401,9 +422,10 @@ def _resume_after_source_update(
     vm: VMRow,
     transition: _Transition,
     *,
+    platform_name: str,
     tailscale_auth_key: str | None,
     interaction: TtyInteractionPolicy,
-) -> UpgradeResult:
+) -> None:
     from agentworks.bootstrap import load_request_registry
     from agentworks.transports import transport
 
@@ -417,7 +439,7 @@ def _resume_after_source_update(
         vm,
         secret_names=required_names,
         interaction=interaction,
-    ) as (vm_node, resolver, ops_ctx):
+    ) as (_vm_node, resolver, _ops_ctx):
         if tailscale_auth_key is None:
             tailscale_auth_key = _tailscale_auth_key(resolver, auth_key_name)
         target = transport(vm, config)
@@ -429,34 +451,55 @@ def _resume_after_source_update(
         if state.last_completed is JournalProgress.PREPARED or state.active_action is UpgradeAction.SOURCE_UPDATE:
             plan = journal.load_plan(transition.pair)
             timers = _timer_states_from_plan(plan)
-            _inhibit_apt_timers(target)
-            _advance_source_action(journal, execution, transition.pair, target, timers)
+            try:
+                _inhibit_apt_timers(target)
+            except Exception:
+                _restore_timers_after_source_safe_failure(target, timers, transition)
+                raise
+            _advance_source_action(journal, execution, transition, target, timers)
             state = journal.load(transition.pair)
 
         if state.last_completed is JournalProgress.SOURCE_CURRENT and state.active_action is None:
-            final = _probe(db, vm, target, transition, transition.pair.source)
+            plan = journal.load_plan(transition.pair)
+            timer_states = _timer_states_from_plan(plan)
             try:
+                final = _probe(
+                    db,
+                    vm,
+                    target,
+                    transition,
+                    transition.pair.source,
+                    platform_name=platform_name,
+                )
                 _require_safe_preflight(final, transition)
             except Exception:
-                plan = journal.load_plan(transition.pair)
-                _restore_apt_timers(target, _timer_states_from_plan(plan))
+                _restore_timers_after_source_safe_failure(
+                    target,
+                    timer_states,
+                    transition,
+                )
                 raise
-            _render_plan(final, heading="Final Debian suite-switch plan")
-            plan = journal.load_plan(transition.pair)
-            final_fingerprint = json.loads(json.dumps(final.material_fingerprint()))
-            if plan.get("preliminary_material_fingerprint") != final_fingerprint:
+            _render_plan(final, transition, heading="Final Debian suite-switch plan")
+            if plan.get("preliminary_material_plan") != final.material_plan():
                 output.warn("The final package, source, conffile, blocker, or space plan changed after source update.")
             output.warn("VM connectivity will be interrupted during service restarts and reboot.")
             if not output.confirm(
                 f"Switch Debian suites from {transition.pair.source} to {transition.pair.target}?",
                 default=False,
             ):
-                plan = journal.load_plan(transition.pair)
-                _restore_apt_timers(target, _timer_states_from_plan(plan))
+                _restore_apt_timers(target, timer_states)
                 raise UserAbort("VM upgrade paused before suite switching; rerun vm upgrade to continue")
             plan["final_plan"] = final.to_plan()
             journal.update_plan(transition.pair, plan)
-            _inhibit_apt_timers(target)
+            try:
+                _inhibit_apt_timers(target)
+            except Exception:
+                _restore_timers_after_source_safe_failure(
+                    target,
+                    timer_states,
+                    transition,
+                )
+                raise
 
         for action in (
             UpgradeAction.SWITCH_SOURCES,
@@ -469,7 +512,11 @@ def _resume_after_source_update(
 
         state = journal.load(transition.pair)
         if state.last_completed is JournalProgress.FULL_UPGRADE_COMPLETE and state.active_action is None:
-            predictions = predict_interface_names(target)
+            predictions = (
+                snapshot_provider_interface_names(target)
+                if platform_name == "wsl2"
+                else predict_interface_names(target)
+            )
             require_stable_interface_names(predictions)
             plan = journal.load_plan(transition.pair)
             plan["interface_predictions"] = predictions
@@ -479,43 +526,83 @@ def _resume_after_source_update(
             reboot_state = journal.load(transition.pair)
             if reboot_state.boot_id_before is None:
                 raise StateError("reboot journal is missing the pre-reboot boot ID")
+            prior_boot_id: str | None = reboot_state.boot_id_before
+        elif state.last_completed is JournalProgress.REBOOT_COMPLETE:
+            prior_boot_id = None
+        else:
+            raise StateError("upgrade journal did not reach reboot dispatch")
+        checkpoint_value = journal.load_plan(transition.pair).get("checkpoint")
+        checkpoint = checkpoint_value if isinstance(checkpoint_value, str) else None
+
+    assert tailscale_auth_key is not None
+    _finish_after_reboot(
+        db,
+        config,
+        vm,
+        transition,
+        platform_name=platform_name,
+        prior_boot_id=prior_boot_id,
+        checkpoint=checkpoint,
+        tailscale_auth_key=tailscale_auth_key,
+        interaction=interaction,
+    )
+
+
+def _finish_after_reboot(
+    db: Database,
+    config: Config,
+    vm: VMRow,
+    transition: _Transition,
+    *,
+    platform_name: str,
+    prior_boot_id: str | None,
+    checkpoint: str | None,
+    tailscale_auth_key: str,
+    interaction: TtyInteractionPolicy,
+) -> None:
+    """Reconnect and verify inside a fresh post-reboot orchestration span."""
+    from agentworks.bootstrap import load_request_registry
+    from agentworks.transports import transport
+
+    registry = load_request_registry(config, live_database=db)
+    with gated_vm_boundary(
+        db,
+        config,
+        registry,
+        vm,
+        interaction=interaction,
+    ) as (vm_node, _resolver, ops_ctx):
+        target = transport(vm, config)
+        if prior_boot_id is not None:
+            journal = RemoteJournal(target)
             reconnected = _reconnect_after_reboot(
                 db,
                 config,
                 vm,
                 target,
-                prior_boot_id=reboot_state.boot_id_before,
+                prior_boot_id=prior_boot_id,
                 vm_node=vm_node,
                 ops_ctx=ops_ctx,
                 tailscale_auth_key=tailscale_auth_key,
             )
-            if reconnected is None and _observed_boot_id(target) == reboot_state.boot_id_before:
+            if reconnected is None and _observed_boot_id(target) == prior_boot_id:
                 output.warn("The guest is still on the pre-reboot boot ID; safely redispatching reboot once.")
-                journal.redispatch_reboot(transition.pair, reboot_state.boot_id_before)
+                journal.redispatch_reboot(transition.pair, prior_boot_id)
                 reconnected = _reconnect_after_reboot(
                     db,
                     config,
                     vm,
                     target,
-                    prior_boot_id=reboot_state.boot_id_before,
+                    prior_boot_id=prior_boot_id,
                     vm_node=vm_node,
                     ops_ctx=ops_ctx,
                     tailscale_auth_key=tailscale_auth_key,
                 )
             if reconnected is None:
-                state = journal.load(transition.pair)
-                if state.active_action is UpgradeAction.REBOOT:
-                    journal.fail(
-                        transition.pair,
-                        UpgradeAction.REBOOT,
-                        "canonical transport did not return after reboot",
-                        repair_required=True,
-                    )
-                plan = journal.load_plan(transition.pair)
                 db.insert_vm_event(
                     vm.name,
                     "debian_upgrade_repair_required",
-                    json.dumps({"checkpoint": plan.get("checkpoint"), "stage": "reconnect"}, sort_keys=True),
+                    json.dumps({"checkpoint": checkpoint, "stage": "reconnect"}, sort_keys=True),
                 )
                 raise StateError(
                     f"VM '{vm.name}' did not reconnect after reboot",
@@ -542,8 +629,10 @@ def _resume_after_source_update(
                     entity_name=vm.name,
                 )
             journal.complete(transition.pair, UpgradeAction.REBOOT)
+        else:
+            journal = RemoteJournal(target)
 
-        live = _debian().probe_debian_release(target, expected=transition.target_profile.release)
+        live = probe_debian_release(target, expected=transition.target_profile.release)
         _persist_release(db, vm.name, live)
         try:
             verify_interface_names(target, _interface_predictions(journal.load_plan(transition.pair)))
@@ -555,8 +644,7 @@ def _resume_after_source_update(
                 json.dumps({"checkpoint": plan.get("checkpoint"), "stage": "interface-names"}, sort_keys=True),
             )
             raise
-        _verify_target_health(db, vm, target, transition)
-        return UpgradeResult(vm.name, transition.pair.source, transition.pair.target, "complete")
+        _verify_target_health(db, vm, target, transition, platform_name=platform_name)
 
 
 def _advance_action(
@@ -577,19 +665,24 @@ def _advance_action(
 def _advance_source_action(
     journal: RemoteJournal,
     execution: RemoteUpgradeExecution,
-    pair: UpgradePair,
+    transition: _Transition,
     target: Transport,
     timer_states: dict[str, tuple[str, str]],
 ) -> None:
+    pair = transition.pair
     try:
         _advance_action(journal, execution, pair, UpgradeAction.SOURCE_UPDATE)
     except StateError:
-        state = journal.load(pair)
-        if state.last_completed is JournalProgress.PREPARED and state.outcome in {
-            AttemptOutcome.FAILED,
-            AttemptOutcome.REPAIR_REQUIRED,
-        }:
-            _restore_apt_timers(target, timer_states)
+        try:
+            state = journal.load(pair)
+        except Exception:
+            output.warn("Automatic APT timers remain inhibited because upgrade state could not be inspected.")
+        else:
+            if state.last_completed is JournalProgress.PREPARED and state.outcome in {
+                AttemptOutcome.FAILED,
+                AttemptOutcome.REPAIR_REQUIRED,
+            }:
+                _restore_timers_after_source_safe_failure(target, timer_states, transition)
         raise
 
 
@@ -620,6 +713,8 @@ def _probe(
     target: Transport,
     transition: _Transition,
     recorded: str,
+    *,
+    platform_name: str,
 ) -> UpgradePreflight:
     from agentworks.sessions.manager import batch_check_status
 
@@ -632,14 +727,16 @@ def _probe(
         status = statuses.get(session.name, SessionStatus.UNKNOWN)
         if status is not SessionStatus.STOPPED:
             unsafe.append(f"{session.name}:{status.value}")
-    live = _release_text(_debian().probe_debian_release(target))
+    live = probe_debian_release(target).value
     return probe_upgrade_preflight(
         target,
         database_release=recorded,
         live_release=live,
         source_suites=transition.policy.source_suites,
+        target_suites=transition.policy.target_suites,
+        guest_kernel_required=platform_name != "wsl2",
         minimum_openssh_version=transition.policy.minimum_openssh_version,
-        blocker_hooks=transition.policy.blockers,
+        blocker_probe=transition.policy.blocker_probe,
         non_quiescent_sessions=unsafe,
     )
 
@@ -656,7 +753,7 @@ def _require_safe_preflight(preflight: UpgradePreflight, transition: _Transition
         )
 
 
-def _render_plan(preflight: UpgradePreflight, *, heading: str) -> None:
+def _render_plan(preflight: UpgradePreflight, transition: _Transition, *, heading: str) -> None:
     with output.section(heading):
         output.detail(f"Architecture: {preflight.architecture}; kernel: {preflight.kernel}")
         output.detail(f"Packages apt would remove: {', '.join(preflight.removals) or 'none'}")
@@ -664,6 +761,23 @@ def _render_plan(preflight: UpgradePreflight, *, heading: str) -> None:
         output.detail(f"Installed non-Debian packages: {', '.join(preflight.non_debian_packages) or 'none'}")
         output.detail(f"Obsolete packages: {', '.join(preflight.obsolete_packages) or 'none'}")
         output.detail(f"Modified conffiles: {', '.join(preflight.modified_conffiles) or 'none'}")
+        output.detail(
+            f"Estimated download: {preflight.apt_download_bytes} bytes; "
+            f"installed growth: {preflight.apt_installed_growth_bytes} bytes"
+        )
+        output.detail(
+            f"Free space: / ({preflight.root_filesystem})={preflight.root_free_bytes}, "
+            f"/var ({preflight.var_filesystem})={preflight.var_free_bytes}, "
+            f"apt-cache ({preflight.cache_filesystem})={preflight.cache_free_bytes}, "
+            f"/boot ({preflight.boot_filesystem})={preflight.boot_free_bytes} bytes"
+        )
+        output.detail(
+            f"Required free space: /={preflight.root_required_bytes}, "
+            f"/var={preflight.var_required_bytes}, apt-cache={preflight.cache_required_bytes}, "
+            f"/boot={preflight.boot_required_bytes} bytes; shared filesystems are aggregated"
+        )
+        for url in transition.policy.documentation_urls:
+            output.detail(f"Debian release note: {url}")
 
 
 def _resolve_checkpoint(value: str | None) -> str:
@@ -742,7 +856,7 @@ def _create_recovery_bundle(
                 sudo=True,
             )
             target.run(
-                f"chown {shlex.quote(vm.admin_username)} {shlex.quote(archive)}",
+                f"chown {shlex.quote(vm.admin_username)} {q_remote} {shlex.quote(archive)}",
                 sudo=True,
             )
             target.copy_from(archive, local_archive)
@@ -761,6 +875,39 @@ def _inhibit_apt_timers(target: Transport) -> None:
         "systemctl mask apt-daily.timer apt-daily-upgrade.timer",
         sudo=True,
     )
+
+
+def _restore_timers_after_source_safe_failure(
+    target: Transport,
+    states: dict[str, tuple[str, str]],
+    transition: _Transition,
+) -> bool:
+    """Restore timers only when the source release is provably package-safe."""
+    if not _source_state_is_safe_for_timer_restore(target, transition):
+        output.warn("Automatic APT timers remain inhibited because package state is not provably safe.")
+        return False
+    try:
+        _restore_apt_timers(target, states)
+    except Exception as error:
+        output.warn(
+            "Automatic APT timer restoration failed after a source-safe abort "
+            f"({type(error).__name__}); repair the recorded timer states manually."
+        )
+        return False
+    return True
+
+
+def _source_state_is_safe_for_timer_restore(
+    target: Transport,
+    transition: _Transition,
+) -> bool:
+    try:
+        probe_debian_release(target, expected=DebianRelease(transition.pair.source))
+        audit = target.run("dpkg --audit", sudo=True, check=False)
+        locks = target.run(NATIVE_PACKAGE_LOCK_COMMAND, sudo=True, check=False)
+    except Exception:
+        return False
+    return audit.ok and not (audit.stdout or "").strip() and locks.returncode == 1
 
 
 def _restore_apt_timers(target: Transport, states: dict[str, tuple[str, str]]) -> None:
@@ -812,8 +959,16 @@ def _verify_target_health(
     vm: VMRow,
     target: Transport,
     transition: _Transition,
+    *,
+    platform_name: str,
 ) -> None:
-    failed = _target_health_failures(db, vm, target)
+    failed = _target_health_failures(
+        db,
+        vm,
+        target,
+        platform_name=platform_name,
+        target_suites=transition.policy.target_suites,
+    )
     if not failed:
         return
     plan = RemoteJournal(target).load_plan(transition.pair)
@@ -833,11 +988,18 @@ def _verify_target_health(
     )
 
 
-def _target_health_failures(db: Database, vm: VMRow, target: Transport) -> list[str]:
+def _target_health_failures(
+    db: Database,
+    vm: VMRow,
+    target: Transport,
+    *,
+    platform_name: str,
+    target_suites: Sequence[str],
+) -> list[str]:
     checks = {
         "package database": 'test -z "$(dpkg --audit)"',
-        "running kernel package": (
-            "dpkg-query -W -f='${db:Status-Status}' \"linux-image-$(uname -r)\" 2>/dev/null | grep -qx installed"
+        "target package convergence": (
+            "simulation=\"$(LC_ALL=C apt-get -s full-upgrade)\" && ! printf '%s\\n' \"$simulation\" | grep -q '^Inst '"
         ),
         "systemd": 'test "$(cat /proc/1/comm)" = systemd',
         "sshd": "systemctl is-active --quiet ssh",
@@ -845,6 +1007,17 @@ def _target_health_failures(db: Database, vm: VMRow, target: Transport) -> list[
         "admin identity": f"id {shlex.quote(vm.admin_username)} >/dev/null",
         "Agentworks state": "test -d /var/lib/agentworks",
     }
+    if platform_name == "wsl2":
+        checks["WSL2 provider kernel"] = "uname -r | grep -qi microsoft"
+    else:
+        checks["running target kernel"] = (
+            "meta=; for candidate in linux-image-amd64 linux-image-cloud-amd64 "
+            "linux-image-arm64 linux-image-cloud-arm64; do "
+            "dpkg-query -W -f='${db:Status-Status}' \"$candidate\" 2>/dev/null | grep -qx installed "
+            "&& meta=$candidate && break; done; "
+            'test -n "$meta" && '
+            'dpkg-query -W -f=\'${Depends}\' "$meta" | grep -Fq "linux-image-$(uname -r)"'
+        )
     checks.update(
         {
             f"agent identity {agent.name}": f"id {shlex.quote(agent.linux_user)} >/dev/null"
@@ -857,7 +1030,10 @@ def _target_health_failures(db: Database, vm: VMRow, target: Transport) -> list[
             for workspace in db.list_workspaces(vm_name=vm.name)
         }
     )
-    return [name for name, command in checks.items() if not target.run(command, sudo=True, check=False).ok]
+    failed = [name for name, command in checks.items() if not target.run(command, sudo=True, check=False).ok]
+    if target_source_hygiene_issues(target, target_suites):
+        failed.append("target APT sources")
+    return failed
 
 
 def _timer_states_from_plan(plan: dict[str, object]) -> dict[str, tuple[str, str]]:
@@ -893,8 +1069,9 @@ def _adopt_external_upgrade(
     vm: VMRow,
     transition: _Transition,
     *,
+    platform_name: str,
     interaction: TtyInteractionPolicy,
-) -> UpgradeResult:
+) -> None:
     output.warn(
         f"VM '{vm.name}' already runs Debian {transition.pair.target}, "
         f"while the database records {transition.pair.source}."
@@ -907,8 +1084,14 @@ def _adopt_external_upgrade(
     registry = load_request_registry(config, live_database=db)
     with gated_vm_boundary(db, config, registry, vm, interaction=interaction):
         target = transport(vm, config)
-        live = _debian().probe_debian_release(target, expected=transition.target_profile.release)
-        failed = _target_health_failures(db, vm, target)
+        live = probe_debian_release(target, expected=transition.target_profile.release)
+        failed = _target_health_failures(
+            db,
+            vm,
+            target,
+            platform_name=platform_name,
+            target_suites=transition.policy.target_suites,
+        )
         if failed:
             raise StateError(
                 f"VM '{vm.name}' is not healthy enough to adopt as Debian {transition.pair.target}",
@@ -942,7 +1125,6 @@ def _adopt_external_upgrade(
         "debian_upgrade_adopted",
         json.dumps({"target": transition.pair.target}, sort_keys=True),
     )
-    return UpgradeResult(vm.name, transition.pair.source, transition.pair.target, "adopted")
 
 
 def _wait_for_strict_reconnect(
@@ -1040,10 +1222,10 @@ def _read_entry_states_with_repair(
     from agentworks.ssh import SSHError
     from agentworks.transports import native_transport, transport
 
-    canonical = transport(vm, config)
     try:
+        canonical = transport(vm, config)
         return canonical, RemoteJournal(canonical).read_states(retained_pairs)
-    except SSHError:
+    except (SSHError, StateError):
         output.warn("The canonical route is unavailable; reading upgrade recovery state over the native route.")
 
     with contextlib.ExitStack() as stack:
@@ -1140,22 +1322,21 @@ def _execution(
     )
 
 
-def _transitions(profiles: Sequence[_ReleaseProfile]) -> tuple[_Transition, ...]:
+def _transitions(profiles: Sequence[DebianReleaseProfile]) -> tuple[_Transition, ...]:
     transitions: list[_Transition] = []
     for source, target in zip(profiles, profiles[1:], strict=False):
         policy = target.upgrade_from_previous
         if policy is None:
-            raise StateError(f"Debian profile {_release_text(target.release)} has no adjacent upgrade policy")
-        pair = UpgradePair(_release_text(source.release), _release_text(target.release))
-        transitions.append(_Transition(pair, source, target, policy))
+            raise StateError(f"Debian profile {target.release.value} has no adjacent upgrade policy")
+        pair = UpgradePair(source.release.value, target.release.value)
+        transitions.append(_Transition(pair, target, policy))
     if not transitions:
         raise StateError("Debian release registry has no adjacent upgrade transition")
     return tuple(transitions)
 
 
 def _recorded_release(vm: VMRow) -> str | None:
-    value = getattr(vm, "debian_release", None)
-    return None if value is None else _release_text(value)
+    return None if vm.debian_release is None else vm.debian_release.value
 
 
 def _has_completed_upgrade_event(db: Database, name: str, target: str) -> bool:
@@ -1171,15 +1352,5 @@ def _has_completed_upgrade_event(db: Database, name: str, target: str) -> bool:
     return False
 
 
-def _persist_release(db: Database, name: str, release: object) -> None:
-    cast("_ReleaseDatabase", db).update_vm_debian_release(name, release)
-
-
-def _release_text(value: object) -> str:
-    if not isinstance(value, str) or not value:
-        raise StateError("Debian release registry returned an invalid release value")
-    return value
-
-
-def _debian() -> _DebianModule:
-    return cast("_DebianModule", importlib.import_module("agentworks.debian"))
+def _persist_release(db: Database, name: str, release: DebianRelease) -> None:
+    db.update_vm_debian_release(name, release)
