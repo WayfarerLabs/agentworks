@@ -7,10 +7,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal, cast
 
-import yaml
-
 from agentworks import output
-from agentworks.resources.render import sanitize_fact_line
+from agentworks.resources.render import sanitize_fact_line, yaml_document_lines
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -466,12 +464,6 @@ def render_instance_state(state: InstanceStateDescription) -> None:
 
 
 def _render_yaml_object(value: JsonObject) -> None:
-    document = yaml.safe_dump(
-        value,
-        allow_unicode=False,
-        default_flow_style=False,
-        sort_keys=False,
-    )
     with output.section():
-        for line in document.rstrip("\n").split("\n"):
+        for line in yaml_document_lines(value):
             output.detail(line)
