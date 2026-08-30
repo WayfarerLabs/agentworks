@@ -2,8 +2,7 @@
 
 <!-- cspell:ignore sdds -->
 
-- Status: R1, R2, and R4 merged; merge-strategy correction merged; R3 implemented and under review;
-  R5 pending
+- Status: R1 through R4 and the merge-strategy correction merged; R5 in design
 - Date: 2026-08-23
 - Last revised: 2026-08-29
 - Requirements: [frd.md](./frd.md)
@@ -11,11 +10,12 @@
 - R2 contract: [store-contract.md](./store-contract.md)
 - Instance-spec CLI: [instance-spec-cli.md](./instance-spec-cli.md)
 - Merge strategy: [merge-strategy-lld.md](./merge-strategy-lld.md)
-- Code basis: `8c9057ce` on `main`
+- R5 design: [resolved-drift-surfaces-lld.md](./resolved-drift-surfaces-lld.md)
+- Code basis: `79e555a6` on `main`
 - Delivery vehicle: merged R1 artifact PR #632, merged R2 store and R4 design PR #636, merged R4
-  implementation PR #670; merged merge-strategy SDD checkpoint and implementation PR #686; R3 SDD
-  checkpoint and implementation on draft PR #700 from `main`; remaining phases as independently
-  green PRs, stacked only for actual dependencies
+  implementation PR #670; merged merge-strategy SDD checkpoint and implementation PR #686; merged R3
+  SDD checkpoint and implementation PR #700; R5 SDD checkpoint and implementation on one draft PR
+  from `main`
 
 ## Delivery posture
 
@@ -341,8 +341,9 @@ current transport will present, and no password-protected-key path regresses.
 - [ ] Extend the focused `resource show` service with fully resolved template values and path, map
       key, or list-item provenance sufficient to distinguish declared, inherited, defaulted, and
       overlaid contributors truthfully.
-- [ ] Extend live-instance show with current declared resolution, applied slices, and explicit not
-      recorded, match, drift, or unverifiable comparison state in the existing read snapshot.
+- [ ] Extend existing VM, workspace, agent, and session `describe` with current declared resolution,
+      applied slices, and explicit not recorded, match, drift, or unverifiable comparison state in
+      one structural read snapshot.
 - [ ] Add doctor batch reads, owner-existence validation for orphaned records, visibility for
       unconsumed newer-release records, and structural SSH drift checks without opening a sidecar or
       repeating one query per instance.

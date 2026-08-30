@@ -1,12 +1,12 @@
 # HLA: Instance Model and State
 
-- Status: R1, R2, and R4 merged; merge-strategy correction merged; R3 implemented and under review;
-  R5 pending
+- Status: R1 through R4 and the merge-strategy correction merged; R5 in design
 - Date: 2026-08-23
 - Last revised: 2026-08-29
 - FRD: [frd.md](./frd.md)
 - Assessment: [database-assessment.md](./database-assessment.md)
 - Store contract: [store-contract.md](./store-contract.md)
+- R5 low-level design: [resolved-drift-surfaces-lld.md](./resolved-drift-surfaces-lld.md)
 - Saga: `docs/sdd/2026-08-04-next-steps/`
 
 ## Architectural summary
@@ -399,10 +399,11 @@ or recreation rather than implying native shell changes persisted evidence.
 
 ## R5: resolved and applied projections
 
-Template `resource show` gains an optional typed resolution hook on the four inheriting kinds. The
-generic show service projects resolved values and provenance without importing domain reducers.
+Template `resource show` gains an optional typed resolution hook on the four inheriting kinds and
+the independently selectable `admin-template` kind. The generic show service projects resolved
+values and provenance without importing domain reducers.
 
-Live VM, workspace, agent, and session describe services are the natural instance surfaces. They
+Existing live VM, workspace, agent, and session `describe` services are the instance surfaces. They
 combine:
 
 - current template plus overlay resolution;
@@ -410,10 +411,13 @@ combine:
 - row-backed applied hardware values plus applied slices from the same database snapshot; and
 - structural comparison states: not recorded, unverifiable, match, or drift.
 
-Registry assembly already publishes structural live facts from one read-only database transaction.
-Inspection reads those facts only from the retained graph rather than opening a second structural
-snapshot. Any overlay or applied-state projection added to `resource show` must use one explicit
-request snapshot. Doctor reads applied SSH slices in one batch, derives the current configured
+Each describe collector reads the registry publication, owner rows, overlay, current resolution, and
+applied records in one explicit database snapshot. Describe uses its existing writable command
+database, so the registry publisher's nested snapshot composes without a second SQLite `BEGIN`. The
+retained live graph owns relationships, not resolved values, so current declaration is resolved from
+the same registry and typed overlay inside that snapshot. Cheap offline host-readiness checks may
+run during registry finalization; remote, provider, secret, prompt, and runtime observations run
+only after it closes. Doctor reads applied SSH slices in one batch, derives the current configured
 private identity once per run, and reports per-VM state without an N+1 query.
 
 JSON v1 retains every existing field and adds optional tagged objects. Human and JSON forms project

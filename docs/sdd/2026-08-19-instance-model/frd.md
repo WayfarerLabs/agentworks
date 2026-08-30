@@ -1,9 +1,8 @@
 # Instance Model and State: Functional Requirements
 
-- Status: Active (R1, R2, and R4 merged; merge-strategy correction implemented and verified; R3 and
-  R5 pending)
+- Status: Active (R1 through R4 and the merge-strategy correction merged; R5 in design)
 - Date: 2026-08-19
-- Last revised: 2026-08-28
+- Last revised: 2026-08-29
 - Parent: the `2026-08-04-next-steps` saga (destination 2 and the wave-4 enabling track)
 
 ## Rulings this seed rests on

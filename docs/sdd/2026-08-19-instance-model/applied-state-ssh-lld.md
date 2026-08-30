@@ -1,6 +1,6 @@
 # R3 Applied State and SSH Identity: Low-Level Design
 
-- Status: Implemented and under review
+- Status: Implemented and merged
 - Date: 2026-08-28
 - Requirements: R3 in `frd.md`
 - Architecture: `hla.md`, R3 applied state and SSH identity
