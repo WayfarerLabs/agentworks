@@ -129,7 +129,7 @@ def _managed_helper(program: bytes, failure_hint: str) -> tuple[bytes, str]:
 def build_user_credential_state(
     materials: Iterable[tuple[str, tuple[HttpsCredentialScope, ...], CredentialPayload]],
 ) -> UserCredentialState:
-    """Validate provider output and compile one generic Git credential state."""
+    """Compile already-validated scopes and validate payloads into Git credential state."""
     from agentworks.capabilities.git_credential.base import (
         ManagedHelper,
         StoredCredential,

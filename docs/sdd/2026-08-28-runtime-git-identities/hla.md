@@ -101,9 +101,10 @@ Core builds one complete `UserCredentialState` for a target user:
 - an Agentworks-owned Git include;
 - legacy cleanup targets.
 
-The builder rejects every duplicate exact claim, including host defaults, orders longest path
-prefixes before shorter prefixes and host defaults, and emits no generation files when the desired
-material set is empty. The reconciler owns the fixed stable launcher and lock.
+During preparation, core rejects every duplicate exact claim, including host defaults. The builder
+receives those validated scopes, orders longest path prefixes before shorter prefixes and host
+defaults, and emits no generation files when the desired material set is empty. The reconciler owns
+the fixed stable launcher and lock.
 
 ### Per-user reconciler
 

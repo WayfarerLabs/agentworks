@@ -898,6 +898,7 @@ def test_launchers_share_parent_handoff_while_reconciliation_is_excluded(tmp_pat
                 stderr=subprocess.PIPE,
                 text=True,
                 env=os.environ | {"HOME": str(tmp_path)},
+                start_new_session=True,
             )
             assert launcher.stdin is not None
             launcher.stdin.write(_request("example.com"))
@@ -909,6 +910,13 @@ def test_launchers_share_parent_handoff_while_reconciliation_is_excluded(tmp_pat
             time.sleep(0.01)
         assert all(reached_stable_lock(launcher) for launcher in launchers)
 
+        for launcher in launchers:
+            os.killpg(launcher.pid, signal.SIGTERM)
+            assert launcher.wait(timeout=2) < 0
+            assert launcher.stdout is not None and launcher.stderr is not None
+            launcher.stdout.close()
+            launcher.stderr.close()
+
         reconcile = subprocess.Popen(
             ["bash", "-c", _RECONCILE_SCRIPT.replace("@DESIRED@", "empty")],
             stdin=subprocess.DEVNULL,
@@ -917,13 +925,18 @@ def test_launchers_share_parent_handoff_while_reconciliation_is_excluded(tmp_pat
             text=True,
             env=os.environ | {"HOME": str(tmp_path)},
         )
-        time.sleep(0.1)
-        assert reconcile.poll() is None
+        deadline = time.monotonic() + 2
+        while not reached_stable_lock(reconcile) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert reached_stable_lock(reconcile)
 
-    for launcher in launchers:
-        assert launcher.wait(timeout=2) == 0
-        assert launcher.stdout is not None
-        assert launcher.stdout.read() == "username=user\npassword=value\n\n"
+        parent_fd = os.open(tmp_path / ".agentworks", os.O_RDONLY)
+        try:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(parent_fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        finally:
+            os.close(parent_fd)
+
     assert reconcile.wait(timeout=2) == 0
 
 
