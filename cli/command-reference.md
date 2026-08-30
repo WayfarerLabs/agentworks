@@ -269,10 +269,11 @@ succeeded. Comparisons are `{key, state, differences?}`; differences are
 metadata. An issue contains a closed `code` plus optional `slot` or `record_key`; malformed future
 record types use `record-malformed` rather than an applied-state issue code. These explicit
 inspection commands can show authored plaintext declaration values, but never resolved secret
-values; handle their human and JSON output as sensitive. Human describe renders the complete current
-spec without the exhaustive per-leaf Value sources. JSON describe and both human and JSON template
-`resource show` retain full provenance. Human describe calls the recorded-fact section
-`Lifecycle evidence`.
+values; handle their human and JSON output as sensitive. Human describe renders instance specs,
+complete current specs, and lifecycle-evidence value objects as block YAML without the exhaustive
+per-leaf Value sources. Single-line comparison values remain compact JSON. JSON describe and both
+human and JSON template `resource show` retain full provenance. Human describe calls the
+recorded-fact section `Lifecycle evidence`.
 
 `agw vm describe NAME --output json` uses command `vm.describe` and data `{vm, issues}`. `vm` has
 this ordered shape:
