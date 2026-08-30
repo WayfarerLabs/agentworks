@@ -366,6 +366,9 @@ provider-realized hardware.
 ## Phase 6: complete verification and closeout
 
 - [x] Run focused tests after every phase and the full gate on the complete exact head.
+- [x] Remove the unused by-kind desired-overlay and applied-slice list reads and the value-less
+      hardware marker carrier identified by final complexity review; update their tests and the
+      closed store contract while retaining every exact-owner, owner-tree, and fleet consumer.
 - [ ] Run equal-capability project review, independent fresh-eyes review, and the saga review
       campaign scaled to the final blast radius; resolve every material finding.
 - [x] Run isolated-home CLI acceptance for overlay declaration, resolved template and instance show,

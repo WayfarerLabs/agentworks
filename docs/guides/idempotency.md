@@ -141,8 +141,8 @@ access was restored.
 
 `workspace repair` reconciles the on-VM workspace's access mechanics with its database grants and
 its repo-local git identity with the current template. It is not full template convergence, does not
-establish complete lifecycle evidence, never re-clones the repo (the checkout is preserved), and
-never removes on-VM state.
+establish complete lifecycle evidence, and never re-clones the repo or deletes workspace contents.
+Repair does revoke stale agent group memberships when database grants are removed.
 
 ### Fully idempotent
 
