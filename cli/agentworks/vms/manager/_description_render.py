@@ -47,7 +47,7 @@ def render_vm_description(description: VMDescription) -> None:
 
     live = description.live_resources
     if vm.cpus is not None or live is not None:
-        output.info(f"\n{'Resources':<16}{'Provisioned':<14}{'Current':<14}{'Used'}")
+        output.info(f"\n{'Resources':<16}{'Requested':<14}{'Current':<14}{'Used'}")
         output.detail(
             f"{'CPU':<16}"
             f"{str(vm.cpus) if vm.cpus else '-':<14}"

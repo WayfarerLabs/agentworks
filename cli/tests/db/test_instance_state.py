@@ -709,8 +709,14 @@ def test_owner_inspection_keeps_recognized_and_future_records_closed(db: Databas
     )
     db._conn.commit()  # noqa: SLF001
 
-    inspection = db.instance_state.inspect_owner_state("vm", "alpha")
+    statements: list[str] = []
+    db._conn.set_trace_callback(statements.append)  # noqa: SLF001
+    try:
+        inspection = db.instance_state.inspect_owner_state("vm", "alpha")
+    finally:
+        db._conn.set_trace_callback(None)  # noqa: SLF001
 
+    assert not any("EXISTS(" in statement.upper() for statement in statements)
     assert inspection.desired_overlays == (
         InspectedDesiredOverlay(
             desired,

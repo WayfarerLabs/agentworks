@@ -168,13 +168,34 @@ def test_doctor_compares_fleet_ssh_evidence_with_one_configured_key_read(
         check
         for check in group.checks
         if check.instance_state is not None
-        and check.instance_state.fact_type is InstanceStateHealthFactType.APPLIED_COMPARISON
+        and check.instance_state.fact_type is InstanceStateHealthFactType.LIFECYCLE_COMPARISON
     ]
     assert reads == 1
     assert [(check.instance_state.instance_name, check.status) for check in comparisons if check.instance_state] == [
         ("alpha", Status.FAIL),
         ("beta", Status.FAIL),
     ]
+
+
+def test_doctor_missing_ssh_evidence_includes_an_action_hint(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = Path(db._conn.execute("PRAGMA database_list").fetchone()[2])
+    monkeypatch.setattr("agentworks.db.DB_PATH", database_path)
+    db.insert_vm("box", site="local", hostname="box")
+
+    group = check_database(None)
+
+    comparison = next(
+        check
+        for check in group.checks
+        if check.instance_state is not None
+        and check.instance_state.fact_type is InstanceStateHealthFactType.LIFECYCLE_COMPARISON
+        and check.instance_state.comparison == "not-recorded"
+    )
+    assert comparison.status is Status.WARN
+    assert comparison.hint is not None
 
 
 def test_doctor_keeps_independent_instance_state_facts_when_one_row_is_malformed(
@@ -227,7 +248,7 @@ def test_doctor_keeps_independent_instance_state_facts_when_one_row_is_malformed
 
     facts = [check.instance_state for check in group.checks if check.instance_state is not None]
     assert {fact.fact_type for fact in facts} >= {
-        InstanceStateHealthFactType.APPLIED_COMPARISON,
+        InstanceStateHealthFactType.LIFECYCLE_COMPARISON,
         InstanceStateHealthFactType.MALFORMED_RECORD,
         InstanceStateHealthFactType.ORPHAN_RECORD,
         InstanceStateHealthFactType.UNCONSUMED_RECORD,
@@ -370,7 +391,7 @@ def test_doctor_reports_legacy_unverifiable_evidence_without_parsing_current_key
         check
         for check in group.checks
         if check.instance_state is not None
-        and check.instance_state.fact_type is InstanceStateHealthFactType.APPLIED_COMPARISON
+        and check.instance_state.fact_type is InstanceStateHealthFactType.LIFECYCLE_COMPARISON
     ]
     assert [(check.status, check.instance_state.comparison) for check in comparisons if check.instance_state] == [
         (Status.INFO, "unverifiable")

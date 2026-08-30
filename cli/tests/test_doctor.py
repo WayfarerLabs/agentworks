@@ -125,7 +125,7 @@ def test_machine_output_serializes_value_free_instance_state_fact() -> None:
                         Status.FAIL,
                         "does not match recorded identity",
                         instance_state=InstanceStateHealthFact(
-                            fact_type=InstanceStateHealthFactType.APPLIED_COMPARISON,
+                            fact_type=InstanceStateHealthFactType.LIFECYCLE_COMPARISON,
                             instance_kind="vm",
                             instance_name="box",
                             record_type="applied-state",
@@ -144,7 +144,7 @@ def test_machine_output_serializes_value_free_instance_state_fact() -> None:
     fact = cast("dict[str, object]", _first_projected_check(report)["instance_state"])
 
     assert fact == {
-        "fact_type": "applied-comparison",
+        "fact_type": "lifecycle-comparison",
         "instance_kind": "vm",
         "instance_name": "box",
         "record_type": "applied-state",

@@ -69,6 +69,7 @@ class VMInspectionIssueSource(StrEnum):
 # by the issue's source could not report. Every issue this module raises is that
 # outcome, so the JSON code is a constant rather than a per-issue fact.
 _VM_ISSUE_CODE_UNAVAILABLE = "unavailable"
+_HARDWARE_REQUEST_EVIDENCE_KEY = "hardware-request"
 
 
 @dataclass(frozen=True)
@@ -610,11 +611,10 @@ def _vm_instance_state(
     vm: VMRow,
     inspection: InstanceStateInspection,
 ) -> tuple[InstanceStateDescription, SSHAppliedState | None]:
-    """Collect same-snapshot VM declaration and applied-state facts."""
+    """Collect same-snapshot VM declaration and lifecycle evidence."""
     from agentworks.db import AppliedStateKey
     from agentworks.errors import NotFoundError, StateError
     from agentworks.instance_description import (
-        AppliedFact,
         ComparisonDifference,
         DeclarationSlot,
         InstanceComparison,
@@ -622,6 +622,7 @@ def _vm_instance_state(
         InstanceStateDescription,
         InstanceStateIssue,
         InstanceStateIssueCode,
+        LifecycleEvidence,
         UnconsumedRecord,
         inspected_desired_record,
         inspection_metadata_facts,
@@ -732,7 +733,7 @@ def _vm_instance_state(
 
     applied_by_key = {item.record.key: item.record for item in inspection.applied_slices}
     malformed_keys = {item.metadata.record_key for item in inspection.malformed_records}
-    applied_facts: list[AppliedFact] = []
+    lifecycle_evidence: list[LifecycleEvidence] = []
     comparisons: list[InstanceComparison] = []
 
     hardware = applied_by_key.get(AppliedStateKey.HARDWARE_PROVENANCE)
@@ -740,12 +741,14 @@ def _vm_instance_state(
         status: Literal["not-recorded", "unavailable"] = (
             "unavailable" if AppliedStateKey.HARDWARE_PROVENANCE.value in malformed_keys else "not-recorded"
         )
-        applied_facts.append(AppliedFact(AppliedStateKey.HARDWARE_PROVENANCE.value, status))
+        lifecycle_evidence.append(LifecycleEvidence(_HARDWARE_REQUEST_EVIDENCE_KEY, status))
+        if status == "not-recorded":
+            comparisons.append(InstanceComparison(_HARDWARE_REQUEST_EVIDENCE_KEY, "not-recorded"))
     else:
         try:
             decode_hardware_provenance(hardware)
         except UnsupportedAppliedStateVersionError:
-            applied_facts.append(AppliedFact(AppliedStateKey.HARDWARE_PROVENANCE.value, "unavailable"))
+            lifecycle_evidence.append(LifecycleEvidence(_HARDWARE_REQUEST_EVIDENCE_KEY, "unavailable"))
             unconsumed_facts.append(
                 UnconsumedRecord(
                     "applied-state",
@@ -761,7 +764,7 @@ def _vm_instance_state(
                 )
             )
         except StateError:
-            applied_facts.append(AppliedFact(AppliedStateKey.HARDWARE_PROVENANCE.value, "unavailable"))
+            lifecycle_evidence.append(LifecycleEvidence(_HARDWARE_REQUEST_EVIDENCE_KEY, "unavailable"))
             issues.append(
                 InstanceStateIssue(
                     InstanceStateIssueCode.APPLIED_RECORD_MALFORMED,
@@ -776,33 +779,33 @@ def _vm_instance_state(
                 "swap": vm.swap_gib,
             }
             if not all(type(value) is int for value in values.values()):
-                applied_facts.append(AppliedFact(AppliedStateKey.HARDWARE_PROVENANCE.value, "unavailable"))
+                lifecycle_evidence.append(LifecycleEvidence(_HARDWARE_REQUEST_EVIDENCE_KEY, "unavailable"))
                 issues.append(
                     InstanceStateIssue(
-                        InstanceStateIssueCode.APPLIED_FACT_UNAVAILABLE,
+                        InstanceStateIssueCode.LIFECYCLE_EVIDENCE_UNAVAILABLE,
                         record_key=hardware.key.value,
                     )
                 )
             else:
-                applied_values = cast("JsonObject", values)
-                applied_facts.append(
-                    AppliedFact(
-                        hardware.key.value,
+                recorded_values = cast("JsonObject", values)
+                lifecycle_evidence.append(
+                    LifecycleEvidence(
+                        _HARDWARE_REQUEST_EVIDENCE_KEY,
                         "recorded",
                         recorded_at=hardware.recorded_at,
                         operation=hardware.operation,
-                        value=applied_values,
+                        value=recorded_values,
                     )
                 )
                 if isinstance(current_vm, ResolvedSpec):
                     differences = tuple(
-                        ComparisonDifference(field, cast("int", applied), current_vm.spec[field])
-                        for field, applied in values.items()
-                        if applied != current_vm.spec[field]
+                        ComparisonDifference(field, cast("int", recorded), current_vm.spec[field])
+                        for field, recorded in values.items()
+                        if recorded != current_vm.spec[field]
                     )
                     comparisons.append(
                         InstanceComparison(
-                            hardware.key.value,
+                            _HARDWARE_REQUEST_EVIDENCE_KEY,
                             "drift" if differences else "match",
                             differences,
                         )
@@ -820,14 +823,14 @@ def _vm_instance_state(
     ssh_record = applied_by_key.get(AppliedStateKey.SSH_IDENTITY)
     if ssh_record is None:
         status = "unavailable" if AppliedStateKey.SSH_IDENTITY.value in malformed_keys else "not-recorded"
-        applied_facts.append(AppliedFact(AppliedStateKey.SSH_IDENTITY.value, status))
+        lifecycle_evidence.append(LifecycleEvidence(AppliedStateKey.SSH_IDENTITY.value, status))
         if status == "not-recorded":
             comparisons.append(InstanceComparison(AppliedStateKey.SSH_IDENTITY.value, "not-recorded"))
     else:
         try:
             ssh_applied = decode_ssh_identity(ssh_record)
         except UnsupportedAppliedStateVersionError:
-            applied_facts.append(AppliedFact(AppliedStateKey.SSH_IDENTITY.value, "unavailable"))
+            lifecycle_evidence.append(LifecycleEvidence(AppliedStateKey.SSH_IDENTITY.value, "unavailable"))
             unconsumed_facts.append(
                 UnconsumedRecord(
                     "applied-state",
@@ -843,7 +846,7 @@ def _vm_instance_state(
                 )
             )
         except StateError:
-            applied_facts.append(AppliedFact(AppliedStateKey.SSH_IDENTITY.value, "unavailable"))
+            lifecycle_evidence.append(LifecycleEvidence(AppliedStateKey.SSH_IDENTITY.value, "unavailable"))
             issues.append(
                 InstanceStateIssue(
                     InstanceStateIssueCode.APPLIED_RECORD_MALFORMED,
@@ -864,8 +867,8 @@ def _vm_instance_state(
                 }
             else:
                 raise AssertionError("unexpected SSH applied-state carrier")
-            applied_facts.append(
-                AppliedFact(
+            lifecycle_evidence.append(
+                LifecycleEvidence(
                     ssh_record.key.value,
                     "recorded",
                     recorded_at=ssh_record.recorded_at,
@@ -879,7 +882,7 @@ def _vm_instance_state(
             DeclarationSlot("vm", vm_selection, vm_spec, current_vm),
             DeclarationSlot("admin", admin_selection, admin_spec, current_admin),
         ),
-        applied_facts=tuple(applied_facts),
+        lifecycle_evidence=tuple(lifecycle_evidence),
         comparisons=tuple(comparisons),
         unconsumed_records=tuple(unconsumed_facts),
         issues=tuple(issues),

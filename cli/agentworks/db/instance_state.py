@@ -613,9 +613,9 @@ class InstanceStateRepository:
         instance_kind: InstanceKind,
         instance_name: str,
     ) -> InstanceStateInspection:
-        """Inspect every stored record for one exact typed owner."""
+        """Inspect records after the caller established this owner in its snapshot."""
         _validate_identity(instance_kind, instance_name)
-        return self._inspect(instance_kind=instance_kind, instance_name=instance_name)
+        return self._inspect(instance_kind=instance_kind, instance_name=instance_name, known_owner=True)
 
     def inspect_all_instance_state(self) -> InstanceStateInspection:
         """Inspect the complete store in one deterministic fleet query."""
@@ -626,20 +626,28 @@ class InstanceStateRepository:
         *,
         instance_kind: InstanceKind | None = None,
         instance_name: str | None = None,
+        known_owner: bool = False,
     ) -> InstanceStateInspection:
+        if known_owner and instance_kind is None:
+            raise AssertionError("known-owner inspection requires one exact owner")
         where = ""
         parameters: tuple[object, ...] = ()
         if instance_kind is not None:
             assert instance_name is not None
             where = "WHERE state.instance_kind = ? AND state.instance_name = ? "
             parameters = (instance_kind, instance_name)
-        rows = self._connection.execute(
-            "SELECT state.*, CASE state.instance_kind "
+        owner_exists_sql = (
+            "1"
+            if known_owner
+            else "CASE state.instance_kind "
             "WHEN 'vm' THEN EXISTS(SELECT 1 FROM vms WHERE name = state.instance_name) "
             "WHEN 'workspace' THEN EXISTS(SELECT 1 FROM workspaces WHERE name = state.instance_name) "
             "WHEN 'agent' THEN EXISTS(SELECT 1 FROM agents WHERE name = state.instance_name) "
             "WHEN 'session' THEN EXISTS(SELECT 1 FROM sessions WHERE name = state.instance_name) "
-            "ELSE 0 END AS owner_exists FROM instance_records AS state "
+            "ELSE 0 END"
+        )
+        rows = self._connection.execute(
+            f"SELECT state.*, {owner_exists_sql} AS owner_exists FROM instance_records AS state "
             + where
             + "ORDER BY state.instance_kind, state.instance_name, state.record_type, state.record_key",
             parameters,

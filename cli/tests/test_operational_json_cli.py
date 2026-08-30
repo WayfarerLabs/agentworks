@@ -650,7 +650,7 @@ def test_session_describe_json_positive_and_stopped_pid_with_degraded_template(
         "selection": {"kind": "session-template", "name": "missing-template"},
         "reason": "missing-selection",
     }
-    assert session_state["applied"] == {"facts": []}
+    assert session_state["lifecycle_evidence"] == []
     assert live_record["consoles"] == [
         {"console_name": "alpha", "position": 0},
         {"console_name": "zeta", "position": 1},

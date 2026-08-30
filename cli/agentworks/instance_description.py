@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
 
 type InstanceSpecStatus = Literal["absent", "present", "unavailable"]
-type AppliedFactStatus = Literal["recorded", "not-recorded", "unavailable"]
+type LifecycleEvidenceStatus = Literal["recorded", "not-recorded", "unavailable"]
 type InstanceComparisonState = Literal["not-recorded", "unverifiable", "match", "drift"]
 
 
@@ -62,11 +62,11 @@ class DeclarationSlot:
 
 
 @dataclass(frozen=True, slots=True)
-class AppliedFact:
-    """One independently evidenced applied-state fact."""
+class LifecycleEvidence:
+    """One configuration fact evidenced by a successful lifecycle operation."""
 
     key: str
-    status: AppliedFactStatus
+    status: LifecycleEvidenceStatus
     recorded_at: str | None = None
     operation: str | None = None
     value: JsonObject | None = None
@@ -74,18 +74,18 @@ class AppliedFact:
     def __post_init__(self) -> None:
         if self.status == "recorded":
             if self.recorded_at is None or self.operation is None or self.value is None:
-                raise ValueError("a recorded applied fact requires evidence")
+                raise ValueError("recorded lifecycle evidence requires operation, timestamp, and value")
             return
         if self.recorded_at is not None or self.operation is not None or self.value is not None:
-            raise ValueError("an unrecorded or unavailable applied fact carries no evidence")
+            raise ValueError("unrecorded or unavailable lifecycle evidence carries no value")
 
 
 @dataclass(frozen=True, slots=True)
 class ComparisonDifference:
-    """One scalar field whose current and applied values differ."""
+    """One scalar field whose current and recorded values differ."""
 
     field: str
-    applied: JsonValue
+    recorded: JsonValue
     current: JsonValue
 
 
@@ -116,7 +116,7 @@ class InstanceStateIssueCode(StrEnum):
     CURRENT_DECLARATION_UNRESOLVED = "current-declaration-unresolved"
     APPLIED_RECORD_MALFORMED = "applied-record-malformed"
     APPLIED_RECORD_UNSUPPORTED = "applied-record-unsupported"
-    APPLIED_FACT_UNAVAILABLE = "applied-fact-unavailable"
+    LIFECYCLE_EVIDENCE_UNAVAILABLE = "lifecycle-evidence-unavailable"
     CURRENT_IDENTITY_UNAVAILABLE = "current-identity-unavailable"
 
 
@@ -131,10 +131,10 @@ class InstanceStateIssue:
 
 @dataclass(frozen=True, slots=True)
 class InstanceStateDescription:
-    """Current declarations and independently recorded applied evidence."""
+    """Current declarations and independently recorded lifecycle evidence."""
 
     declarations: tuple[DeclarationSlot, ...]
-    applied_facts: tuple[AppliedFact, ...] = ()
+    lifecycle_evidence: tuple[LifecycleEvidence, ...] = ()
     comparisons: tuple[InstanceComparison, ...] = ()
     unconsumed_records: tuple[UnconsumedRecord, ...] = ()
     issues: tuple[InstanceStateIssue, ...] = ()
@@ -310,8 +310,8 @@ def instance_state_data(state: InstanceStateDescription) -> JsonObject:
             "current": resolved_spec_data(declaration.current),
         }
 
-    facts: list[JsonValue] = []
-    for fact in state.applied_facts:
+    evidence: list[JsonValue] = []
+    for fact in state.lifecycle_evidence:
         fact_data: JsonObject = {"key": fact.key, "status": fact.status}
         if fact.status == "recorded":
             assert fact.recorded_at is not None
@@ -324,7 +324,7 @@ def instance_state_data(state: InstanceStateDescription) -> JsonObject:
                     "value": fact.value,
                 }
             )
-        facts.append(fact_data)
+        evidence.append(fact_data)
 
     comparisons: list[JsonValue] = []
     for comparison in state.comparisons:
@@ -333,7 +333,7 @@ def instance_state_data(state: InstanceStateDescription) -> JsonObject:
             comparison_data["differences"] = [
                 {
                     "field": difference.field,
-                    "applied": difference.applied,
+                    "recorded": difference.recorded,
                     "current": difference.current,
                 }
                 for difference in comparison.differences
@@ -342,7 +342,7 @@ def instance_state_data(state: InstanceStateDescription) -> JsonObject:
 
     return {
         "declarations": declarations,
-        "applied": {"facts": facts},
+        "lifecycle_evidence": evidence,
         "comparisons": comparisons,
         "unconsumed_records": [
             {
@@ -390,20 +390,12 @@ def render_instance_state(state: InstanceStateDescription) -> None:
             else:
                 output.detail("Current spec:")
                 _render_json_object(current.spec)
-                output.detail("Value sources:")
-                with output.section():
-                    for item in current.provenance:
-                        path = json.dumps(item.path, ensure_ascii=True, separators=(",", ":"))
-                        sources = ", ".join(
-                            f"{source.role}:{source.resource_kind}/{source.resource_name}" for source in item.sources
-                        )
-                        output.detail(sanitize_fact_line(f"{path}: {sources}"))
 
-    output.info("\nApplied state:")
-    if not state.applied_facts:
+    output.info("\nLifecycle evidence:")
+    if not state.lifecycle_evidence:
         output.detail("not recorded")
     else:
-        for fact in state.applied_facts:
+        for fact in state.lifecycle_evidence:
             suffix = ""
             if fact.status == "recorded":
                 suffix = f" by {fact.operation} at {fact.recorded_at}"
@@ -421,10 +413,10 @@ def render_instance_state(state: InstanceStateDescription) -> None:
             if comparison.differences:
                 with output.section():
                     for difference in comparison.differences:
-                        applied = json.dumps(difference.applied, ensure_ascii=True, separators=(",", ":"))
+                        recorded = json.dumps(difference.recorded, ensure_ascii=True, separators=(",", ":"))
                         current_value = json.dumps(difference.current, ensure_ascii=True, separators=(",", ":"))
                         output.detail(
-                            sanitize_fact_line(f"{difference.field}: applied={applied}, current={current_value}")
+                            sanitize_fact_line(f"{difference.field}: recorded={recorded}, current={current_value}")
                         )
 
     if state.unconsumed_records:

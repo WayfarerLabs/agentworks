@@ -379,9 +379,10 @@ def _report_instance_state(
                 Status.WARN,
                 f"VM '{vm_name}' SSH identity",
                 "not recorded",
-                InstanceStateHealthFactType.APPLIED_COMPARISON,
+                InstanceStateHealthFactType.LIFECYCLE_COMPARISON,
                 missing_metadata,
                 comparison=VMSSHIdentityState.NOT_RECORDED.value,
+                hint=f"Run 'agw vm reinit {vm_name}' to establish SSH identity evidence.",
             )
             continue
         applied, metadata = evidence
@@ -390,7 +391,7 @@ def _report_instance_state(
                 Status.INFO,
                 f"VM '{vm_name}' SSH identity",
                 "recorded identity is unverifiable",
-                InstanceStateHealthFactType.APPLIED_COMPARISON,
+                InstanceStateHealthFactType.LIFECYCLE_COMPARISON,
                 metadata,
                 comparison=VMSSHIdentityState.UNVERIFIABLE.value,
             )
@@ -408,7 +409,7 @@ def _report_instance_state(
             disposition[0],
             f"VM '{vm_name}' SSH identity",
             disposition[1],
-            InstanceStateHealthFactType.APPLIED_COMPARISON,
+            InstanceStateHealthFactType.LIFECYCLE_COMPARISON,
             metadata,
             comparison=comparison.state.value,
         )

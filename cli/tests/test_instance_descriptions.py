@@ -1,4 +1,4 @@
-"""Resolved declaration and applied evidence on live describe DTOs."""
+"""Resolved declarations and lifecycle evidence on live describe DTOs."""
 
 from __future__ import annotations
 
@@ -14,12 +14,13 @@ from agentworks.db import AppliedStateKey, VersionedPayload
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
-    from agentworks.instance_description import AppliedFact, InstanceComparison, InstanceStateDescription
+    from agentworks.instance_description import InstanceComparison, InstanceStateDescription, LifecycleEvidence
     from agentworks.vms.applied_state import SSHAppliedState
 
 
 _FINGERPRINT = f"SHA256:{'A' * 43}"
 _OTHER_FINGERPRINT = f"SHA256:{'E' * 43}"
+_HARDWARE_REQUEST = "hardware-request"
 
 
 def _seed_vm(
@@ -57,12 +58,16 @@ def _vm_state(db: Database, config: Config) -> tuple[InstanceStateDescription, S
         return _vm_instance_state(registry, vm, inspection)
 
 
-def _fact(state: InstanceStateDescription, key: AppliedStateKey) -> AppliedFact:
-    return next(fact for fact in state.applied_facts if fact.key == key.value)
+def _evidence_key(key: AppliedStateKey) -> str:
+    return _HARDWARE_REQUEST if key is AppliedStateKey.HARDWARE_PROVENANCE else key.value
+
+
+def _fact(state: InstanceStateDescription, key: AppliedStateKey) -> LifecycleEvidence:
+    return next(fact for fact in state.lifecycle_evidence if fact.key == _evidence_key(key))
 
 
 def _comparison(state: InstanceStateDescription, key: AppliedStateKey) -> InstanceComparison | None:
-    return next((item for item in state.comparisons if item.key == key.value), None)
+    return next((item for item in state.comparisons if item.key == _evidence_key(key)), None)
 
 
 def _insert_raw_record(
@@ -123,13 +128,13 @@ def test_workspace_and_agent_descriptions_include_current_final_layers(
     assert workspace_slot.instance_spec.status == "present"
     assert workspace_slot.current.status == "resolved"
     assert workspace_slot.current.spec["tmuxinator"] is False
-    assert workspace.instance_state.applied_facts == ()
+    assert workspace.instance_state.lifecycle_evidence == ()
 
     agent_slot = agent.instance_state.declarations[0]
     assert agent_slot.instance_spec.status == "present"
     assert agent_slot.current.status == "resolved"
     assert agent_slot.current.spec["shell"] == "/bin/fish"
-    assert agent.instance_state.applied_facts == ()
+    assert agent.instance_state.lifecycle_evidence == ()
 
 
 def test_workspace_description_retains_unavailable_stored_spec(
@@ -149,7 +154,7 @@ def test_workspace_description_retains_unavailable_stored_spec(
     assert slot.instance_spec.reason == "unsupported-version"
     assert slot.current.status == "unresolved"
     assert slot.current.reason == "instance-spec-unavailable"
-    assert description.instance_state.applied_facts == ()
+    assert description.instance_state.lifecycle_evidence == ()
 
 
 def test_vm_and_admin_instance_specs_resolve_independently(
@@ -175,7 +180,7 @@ def test_vm_and_admin_instance_specs_resolve_independently(
     assert admin_slot.current.spec["shell"] == "zsh"
 
 
-def test_missing_selected_vm_template_leaves_admin_and_applied_facts_visible(
+def test_missing_selected_vm_template_leaves_admin_and_lifecycle_evidence_visible(
     db: Database,
     make_config,  # noqa: ANN001
 ) -> None:
@@ -309,7 +314,7 @@ def test_damaged_desired_sibling_does_not_hide_valid_canonical_record(
 @pytest.mark.parametrize(
     ("row_values", "marker", "expected_status", "expected_comparison", "difference_fields"),
     [
-        ((4, 8, 50, 4), False, "not-recorded", None, ()),
+        ((4, 8, 50, 4), False, "not-recorded", "not-recorded", ()),
         ((4, 8, 50, 4), True, "recorded", "match", ()),
         ((6, 16, 50, 4), True, "recorded", "drift", ("cpus", "memory")),
         ((None, 8, 50, 4), True, "unavailable", None, ()),
@@ -343,6 +348,94 @@ def test_hardware_fact_matrix(
     assert (() if comparison is None else tuple(item.field for item in comparison.differences)) == difference_fields
 
 
+def test_hardware_request_match_does_not_claim_observed_provider_hardware_matches(
+    db: Database,
+    make_config,  # noqa: ANN001
+) -> None:
+    from agentworks.instance_specs import parse_vm_instance_specs
+    from agentworks.vms.applied_state import encode_hardware_provenance
+    from agentworks.vms.manager.inspect import (
+        VMDescription,
+        VMDetailFacts,
+        VMLiveResources,
+        vm_description_data,
+    )
+
+    _seed_vm(db, cpus=6, memory=16)
+    overlays = parse_vm_instance_specs('{"cpus":6,"memory":16}', None)
+    assert overlays is not None
+    db.instance_state.put_desired_overlay("vm", "box", overlays.payload)
+    db.instance_state.replace_applied_slices(
+        "vm",
+        "box",
+        "vm-create",
+        {AppliedStateKey.HARDWARE_PROVENANCE: encode_hardware_provenance()},
+    )
+    state, _ = _vm_state(db, make_config())
+    vm = db.get_vm("box")
+    assert vm is not None
+    description = VMDescription(
+        VMDetailFacts.from_row(vm),
+        None,
+        None,
+        None,
+        None,
+        None,
+        "unset",
+        VMLiveResources(
+            "8",
+            "0.1",
+            "32 GiB",
+            "1 GiB",
+            "3%",
+            "4 GiB",
+            "0 B",
+            "0%",
+            "50 GiB",
+            "5 GiB",
+            "10%",
+        ),
+        (),
+        (),
+        (),
+        (),
+        (),
+        state,
+    )
+
+    projected = vm_description_data(description)["vm"]
+    assert isinstance(projected, dict)
+    assert projected["provisioned_resources"] == {
+        "cpus": 6,
+        "memory_gib": 16,
+        "disk_gib": 50,
+        "swap_gib": 4,
+    }
+    assert projected["live_resources"] == {
+        "cpus": "8",
+        "load_average": "0.1",
+        "memory_total": "32 GiB",
+        "memory_used": "1 GiB",
+        "memory_percent": "3%",
+        "swap_total": "4 GiB",
+        "swap_used": "0 B",
+        "swap_percent": "0%",
+        "disk_total": "50 GiB",
+        "disk_used": "5 GiB",
+        "disk_percent": "10%",
+    }
+    instance_state = projected["instance_state"]
+    assert isinstance(instance_state, dict)
+    evidence = instance_state["lifecycle_evidence"]
+    assert isinstance(evidence, list)
+    hardware = evidence[0]
+    assert isinstance(hardware, dict)
+    assert hardware["key"] == "hardware-request"
+    comparisons = instance_state["comparisons"]
+    assert isinstance(comparisons, list)
+    assert comparisons[0] == {"key": "hardware-request", "state": "match"}
+
+
 def test_hardware_marker_rejects_non_integer_database_value(
     db: Database,
     make_config,  # noqa: ANN001
@@ -363,7 +456,7 @@ def test_hardware_marker_rejects_non_integer_database_value(
 
     assert _fact(state, AppliedStateKey.HARDWARE_PROVENANCE).status == "unavailable"
     assert _comparison(state, AppliedStateKey.HARDWARE_PROVENANCE) is None
-    assert any(issue.code.value == "applied-fact-unavailable" for issue in state.issues)
+    assert any(issue.code.value == "lifecycle-evidence-unavailable" for issue in state.issues)
 
 
 @pytest.mark.parametrize(
@@ -431,7 +524,7 @@ def test_future_record_type_and_applied_key_are_value_free_unconsumed_facts(
         ("applied-state", "future-fact"),
         ("future-state", "future-key"),
     }
-    assert [fact.status for fact in state.applied_facts] == ["not-recorded", "not-recorded"]
+    assert [fact.status for fact in state.lifecycle_evidence] == ["not-recorded", "not-recorded"]
 
 
 def test_ssh_not_recorded_is_an_explicit_comparison(
@@ -548,11 +641,83 @@ def test_unavailable_current_ssh_identity_omits_comparison(
     assert any(issue.code.value == "current-identity-unavailable" for issue in compared.issues)
 
 
+def test_instance_state_json_projects_literal_lifecycle_evidence_contract() -> None:
+    from agentworks.instance_description import (
+        ComparisonDifference,
+        DeclarationSlot,
+        InstanceComparison,
+        InstanceSpec,
+        InstanceStateDescription,
+        LifecycleEvidence,
+        instance_state_data,
+    )
+    from agentworks.resources.access import ResourceIdentity
+    from agentworks.resources.resolved_spec import ResolvedSpec
+
+    state = InstanceStateDescription(
+        declarations=(
+            DeclarationSlot(
+                "vm",
+                ResourceIdentity("vm-template", "default"),
+                InstanceSpec("absent"),
+                ResolvedSpec({"cpus": 8}, ()),
+            ),
+        ),
+        lifecycle_evidence=(
+            LifecycleEvidence(
+                "hardware-request",
+                "recorded",
+                recorded_at="2026-08-30T12:00:00Z",
+                operation="vm-create",
+                value={"cpus": 6},
+            ),
+        ),
+        comparisons=(
+            InstanceComparison(
+                "hardware-request",
+                "drift",
+                (ComparisonDifference("cpus", 6, 8),),
+            ),
+        ),
+    )
+
+    assert instance_state_data(state) == {
+        "declarations": {
+            "vm": {
+                "selection": {"kind": "vm-template", "name": "default"},
+                "instance_spec": {"status": "absent"},
+                "current": {
+                    "status": "resolved",
+                    "spec": {"cpus": 8},
+                    "provenance": [],
+                },
+            },
+        },
+        "lifecycle_evidence": [
+            {
+                "key": "hardware-request",
+                "status": "recorded",
+                "recorded_at": "2026-08-30T12:00:00Z",
+                "operation": "vm-create",
+                "value": {"cpus": 6},
+            },
+        ],
+        "comparisons": [
+            {
+                "key": "hardware-request",
+                "state": "drift",
+                "differences": [{"field": "cpus", "recorded": 6, "current": 8}],
+            },
+        ],
+        "unconsumed_records": [],
+        "issues": [],
+    }
+
+
 def test_live_instance_human_facts_are_terminal_safe(
     captured_output,  # noqa: ANN001
 ) -> None:
     from agentworks.instance_description import (
-        AppliedFact,
         ComparisonDifference,
         DeclarationSlot,
         InstanceComparison,
@@ -560,6 +725,7 @@ def test_live_instance_human_facts_are_terminal_safe(
         InstanceStateDescription,
         InstanceStateIssue,
         InstanceStateIssueCode,
+        LifecycleEvidence,
         UnconsumedRecord,
         render_instance_state,
     )
@@ -598,8 +764,8 @@ def test_live_instance_human_facts_are_terminal_safe(
                 declaration.current,
             ),
         ),
-        applied_facts=(
-            AppliedFact(
+        lifecycle_evidence=(
+            LifecycleEvidence(
                 f"fact-{unsafe}",
                 "recorded",
                 recorded_at=f"recorded-{unsafe}",
@@ -611,7 +777,7 @@ def test_live_instance_human_facts_are_terminal_safe(
             InstanceComparison(
                 f"comparison-{unsafe}",
                 "drift",
-                (ComparisonDifference(f"field-{unsafe}", f"applied-{unsafe}", f"current-{unsafe}"),),
+                (ComparisonDifference(f"field-{unsafe}", f"recorded-{unsafe}", f"current-{unsafe}"),),
             ),
         ),
         unconsumed_records=(UnconsumedRecord(f"type-{unsafe}", f"record-{unsafe}", 9, f"future-time-{unsafe}"),),
