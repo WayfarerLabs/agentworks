@@ -93,8 +93,10 @@ a stored credential or a managed helper.
 
 ### GitHub CLI
 
-`source.mode: gh-cli` performs no provision-time command or authentication check. On each matching
-Git `get`, its managed helper runs exactly:
+When runup is enabled, `source.mode: gh-cli` checks whether `gh` exists and whether
+`gh auth status --hostname github.com` succeeds in the current target-user environment. The check is
+read-only and advisory: arbitrary CLI output is suppressed and the managed helper is installed even
+when the check warns. On each matching Git `get`, that helper runs exactly:
 
 ```text
 GH_PROMPT_DISABLED=1 gh auth token --hostname github.com
@@ -107,8 +109,10 @@ and the freshly acquired token as the password.
 
 ### Azure CLI
 
-`source.mode: az-cli` also defers command and authentication checks until Git requests a matching
-credential. Its managed helper runs exactly:
+When runup is enabled, `source.mode: az-cli` checks whether `az` exists and whether
+`az account show` succeeds in the current target-user environment. It does not request an Azure
+DevOps token during runup, and a warning does not prevent helper installation. Its managed helper
+runs exactly:
 
 ```text
 az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --query accessToken --output tsv
@@ -121,10 +125,12 @@ after authentication changes. The provider returns the configured organization a
 fresh access token as password. The helper neither selects nor mutates Azure tenant or subscription
 state.
 
-If a CLI is absent, unauthenticated, times out, or returns malformed output, the wrapper suppresses
-its stdout and stderr and prints only the provider's fixed recovery hint. Authenticate or repair the
-target user's CLI identity and retry Git; reinitialization is needed only when the manifest or
-generated helper changes.
+If a CLI is absent or unauthenticated during enabled runup, initialization warns but still installs
+the helper. If it is absent, unauthenticated, times out, or returns malformed output at Git runtime,
+the wrapper suppresses its stdout and stderr and prints only the provider's fixed recovery hint.
+Authenticate or repair the target user's CLI identity and retry Git; reinitialization is needed only
+when the manifest or generated helper changes. Setting `defaults.runup_git_credentials = false`
+skips both secret-source verification and these CLI readiness checks, not helper installation.
 
 ## Scope and selection
 
@@ -157,8 +163,11 @@ def credential_material(self, ctx: RunContext) -> CredentialPayload: ...
 ```
 
 Static scopes come only from provider configuration. Before VM or agent creation mutation, core
-validates all declarations together and calls `validate_inputs` with the provider's scoped resolved
-inputs. The later payload is either `StoredCredential(username, password)` or
+validates all declarations together and calls `validate_inputs` with a fresh context without a
+target containing the provider's scoped resolved inputs. At user initialization it constructs
+another fresh context with the same scoped inputs and exactly the current admin or agent target for
+runup, then a third fresh context without a target for materialization. The later payload is either
+`StoredCredential(username, password)` or
 `ManagedHelper(provider_authored_program, fixed_failure_hint)`.
 
 The result carries no echoed credential name. Provider inputs and outputs are orthogonal: secret

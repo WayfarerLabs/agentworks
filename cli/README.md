@@ -227,10 +227,11 @@ The four capability kinds (`vm-platform`, `harness-integration`, `git-credential
 Every `git-credential` provider requires its own structured `source`. The shipped GitHub provider
 accepts `secret` or `gh-cli`; the Azure DevOps provider accepts `secret` or `az-cli`. Secret sources
 declare the provider input that Agentworks resolves. CLI sources use the target user's active CLI
-identity at Git-operation time, so the CLI must be installed and authenticated for that admin or
-agent user. Put credential names on the relevant template and reinitialize the user to rebuild the
-complete managed Git credential state. See `agw resource explain git-credential-provider/NAME` for
-the installed schema.
+identity at Git-operation time. Enabled credential runup checks that the CLI is installed and its
+identity is healthy for that admin or agent user, but a warning does not block helper installation.
+Put credential names on the relevant template and reinitialize the user to rebuild the complete
+managed Git credential state. See `agw resource explain git-credential-provider/NAME` for the
+installed schema.
 
 This is a breaking change from 0.16. [The 0.17 upgrade guide](../docs/guides/upgrading-to-0.17.md)
 covers the paired CLI/resource-directory cutover, per-user reinitialization, and rollback boundary.
@@ -400,13 +401,14 @@ Source-applicability detail (per-source soft-skip reasons, inactive mappings, pe
 lives in `agw secret list` and `agw secret describe`. `AGENTWORKS_*` identity overrides surface in
 the Configuration group (they're a config-load warning). Broken `{ secret: ... }` references are
 caught earlier as a hard config-load error before doctor runs. A secret-backed git credential's
-declared inputs report as ordinary secret rows. CLI-backed credentials declare no secret and are
-checked only when Git invokes their runtime helper. Doctor uses no-impact provider preview. It may
-read and discard a value when the backend classifies that work as no-impact, but it cannot ask for
-operator action and never returns the value. Use `agw secret verify NAME... --allow-interaction`
-when you want the strongest provider answer. Secret-backed capability authentication still occurs at
-the capability `runup()` stage inside provisioning operations. The Tailscale group checks only
-workstation connectivity; the auth key is the `tailscale-auth-key` secret row.
+declared inputs report as ordinary secret rows. CLI-backed credentials declare no secret. Their
+optional target-user readiness check occurs during initialization, and final token acquisition
+remains at Git runtime. Doctor uses no-impact provider preview. It may read and discard a value when
+the backend classifies that work as no-impact, but it cannot ask for operator action and never
+returns the value. Use `agw secret verify NAME... --allow-interaction` when you want the strongest
+provider answer. Secret-backed capability authentication still occurs at the capability `runup()`
+stage inside provisioning operations. The Tailscale group checks only workstation connectivity; the
+auth key is the `tailscale-auth-key` secret row.
 
 `--non-interactive` is not a general unattended fail-fast mode. It only disables TTY interaction;
 out-of-band application authentication may still raise an approval request and wait until the

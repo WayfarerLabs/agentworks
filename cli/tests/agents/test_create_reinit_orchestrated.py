@@ -69,7 +69,7 @@ def mutation(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
     def _fake_mutation(*args: Any, **kwargs: Any) -> None:
         requests = kwargs["credential_requests"]
-        materials = {request.name: request.provider.credential_material(request.context) for request in requests}
+        materials = {request.name: request.provider.credential_material(request.context()) for request in requests}
         assert all(isinstance(material, StoredCredential) for material in materials.values())
         captured["credential_passwords"] = {
             name: material.password for name, material in materials.items() if isinstance(material, StoredCredential)

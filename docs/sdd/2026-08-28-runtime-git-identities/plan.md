@@ -321,6 +321,15 @@ assert structure, behavior, state, and value containment; they do not police aut
       credential-material wrapper, one required provider operation, and retained multiple-default
       tie-breaking while preserving that history. Live acceptance and final delivery remain open
       below.)
+- [x] Incorporate correction round 4 without rewriting completed history: retain a scoped context
+      assembler instead of a preparation-time context; give validation a fresh context with no
+      target and give runup a fresh op-start context containing exactly the current admin or agent
+      target while materialization gets a separate fresh context with no target; add provider-owned,
+      read-only `gh`/`az` readiness checks that warn without blocking helper installation; and make
+      the runup policy skip both secret and CLI checks. (2026-08-30: this supersedes the completed
+      Phase 1/2 current-CLI-no-runup ruling. Focused tests cover the three distinct contexts, both
+      target roles, missing/unhealthy/ready CLIs, output suppression, nonfatal helper retention, and
+      disabled runup. Live acceptance and final delivery remain open below.)
 - [ ] Run focused and full Python, static, lint, locked-SDD, Rulesync, website, installed-wheel, and
       live integration gates.
 - [ ] Obtain private `agentworks-reviewer`, Muntz, and generic correctness/security reviews; resolve

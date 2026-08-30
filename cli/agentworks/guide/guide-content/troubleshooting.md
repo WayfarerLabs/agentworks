@@ -38,9 +38,11 @@ connection path.
 
 First inspect the selected `git-credential` and its provider with `agw resource show` and
 `agw resource explain`. A secret source reports failures during resolution or optional runup. A
-`gh-cli` or `az-cli` source is checked later, by the target user's Git operation: confirm that the
-matching CLI is on that user's `PATH` and authenticated as the intended identity. Azure DevOps also
-requires that identity to have access to the configured organization and repository.
+`gh-cli` or `az-cli` source receives a read-only readiness check during enabled runup, but a warning
+does not block helper installation. Confirm that the matching CLI is on that user's `PATH` and
+authenticated as the intended identity. Azure DevOps also requires that identity to have access to
+the configured organization and repository. Final credential acquisition still happens only when the
+target user's Git operation invokes the helper.
 
 Fixing CLI authentication takes effect on the next Git operation because the helper reacquires each
 time. After changing a manifest or a template's `git_credentials`, reinitialize the VM admin or

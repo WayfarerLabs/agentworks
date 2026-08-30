@@ -173,11 +173,13 @@ provider:
 ```
 
 CLI sources use the target admin or agent user's active CLI identity. Agentworks does not install or
-authenticate `gh` or `az`. GitHub invokes `gh auth token --hostname github.com`; Azure DevOps uses
-`az account get-access-token` with resource `499b84ac-1321-427f-aa17-267ca6975798`, query
-`accessToken`, and TSV output. The Azure identity must also have access to the configured
-organization and repository. The target user owns and may change the active CLI identity; verify it
-after authentication changes.
+authenticate `gh` or `az`. During enabled credential runup, GitHub checks
+`gh auth status --hostname github.com` and Azure checks `az account show`; either check may warn
+without blocking helper installation. GitHub invokes `gh auth token --hostname github.com` at Git
+runtime; Azure DevOps uses `az account get-access-token` with resource
+`499b84ac-1321-427f-aa17-267ca6975798`, query `accessToken`, and TSV output. The Azure identity must
+also have access to the configured organization and repository. The target user owns and may change
+the active CLI identity; verify it after authentication changes.
 
 ## Cut over the CLI and resource directory together
 
@@ -241,8 +243,9 @@ appropriate admin or agent template and reinitialize. A generic operator-managed
 reading it only when `!~/.agentworks-git-cred-helper.sh` was registered at the start of that
 reconciliation; otherwise a file or directory at that generic path is left untouched.
 
-If a CLI-backed helper fails later, authenticate or repair that target user's CLI identity and retry
-Git. Reinitialize only after changing a manifest or generated helper.
+If initialization warns about CLI readiness or a CLI-backed helper fails later, authenticate or
+repair that target user's CLI identity and retry Git. Reinitialize only after changing a manifest or
+generated helper.
 
 ## Update third-party Git credential providers
 

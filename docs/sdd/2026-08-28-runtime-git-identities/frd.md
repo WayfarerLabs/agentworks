@@ -24,10 +24,10 @@ validates the static scopes and asks each provider to validate its resolved inpu
 effects. It later validates the returned payload shape and reconciles every Agentworks-owned helper
 and Git configuration artifact, including the transition to no configured credentials.
 
-Secret-backed tokens retain their current runup validation. CLI-backed credentials deliberately do
-not check tool installation or authentication during provisioning; their helpers acquire a fresh
-credential at Git-operation time and return a clear, value-safe failure if the CLI is unavailable or
-unauthenticated.
+Secret-backed tokens retain their current runup validation. CLI-backed providers use the same
+optional runup stage for a read-only check of the target user's current CLI readiness while always
+installing their helper. The helper still acquires the final credential only at Git-operation time
+and returns a clear, value-safe failure if readiness later changes.
 
 ## Goals
 
@@ -99,10 +99,11 @@ reference. No stale Agentworks credential remains available.
 A git credential provider MUST validate its provider-specific configuration, declare every secret it
 needs, and expose the generic HTTPS scopes translated from its configuration. Before creation, core
 MUST validate all scopes together and invoke the provider's side-effect-free input validation with a
-`RunContext` that exposes only those resolved secrets. At credential-materialization time, core MUST
-invoke it with that same scoped context. The provider MUST own every authentication-specific step,
-including validation, exchange, and derivation, and return either a final stored credential or a
-declarative managed helper.
+`RunContext` that exposes only those resolved secrets. At runup, core MUST assemble a fresh context
+with the same provider-scoped secret view and exactly the current admin or agent target. At
+credential-materialization time it MUST assemble another fresh scoped context with no target. The
+provider MUST own every authentication-specific step, including validation, exchange, and
+derivation, and return either a final stored credential or a declarative managed helper.
 
 The provider MUST NOT write target-user files, alter Git configuration, install or authenticate a
 CLI, or read an undeclared secret. Core MUST NOT interpret a provider's secret names, assume a
@@ -143,21 +144,25 @@ on that returned boundary. A definitive rejection keeps the current multi-creden
 user-initialization semantics: skip that credential, warn, and record partial initialization.
 Network indeterminacy warns and continues unverified.
 
-`defaults.runup_git_credentials = false` continues to disable only this static-token verification.
-It has no effect on runtime CLI acquisition.
+`defaults.runup_git_credentials = false` disables optional provider runup, including static-token
+verification and CLI readiness checks. It has no effect on materialization or runtime CLI
+acquisition.
 
 ### R4: Runtime CLI acquisition
 
-For `gh-cli` and `az-cli`, the provider MUST return a managed helper without testing whether the
-corresponding executable is installed, whether it is authenticated, or whether it can reach the
-forge. Core installs the returned helper as opaque provider-owned behavior. This avoids coupling
-helper installation to tool-install and login ordering.
+For `gh-cli` and `az-cli`, provider runup MUST perform a read-only check in the current target-user
+environment when runup is enabled. GitHub MUST distinguish a missing `gh` from an unsuccessful
+`gh auth status --hostname github.com`; Azure MUST distinguish a missing `az` from an unsuccessful
+`az account show`. The checks MUST suppress arbitrary CLI output, MUST NOT authenticate or mutate
+identity state, and MUST be advisory: core still installs the returned helper on every readiness
+outcome. Azure runup MUST NOT request an Azure DevOps access token.
 
 The managed-helper definition MUST contain the provider-owned helper program and a fixed,
 actionable, value-safe failure hint. Core installs and invokes that program but does not model or
-probe its command dependencies. At Git runtime the provider program MUST check and invoke its own
-dependencies, handle command absence and execution failure, suppress unsafe upstream output, and
-fail through its fixed hint. No dependency check occurs during provisioning.
+probe its command dependencies itself. At Git runtime the provider program MUST independently check
+and invoke its own dependencies, handle command absence and execution failure, suppress unsafe
+upstream output, and fail through its fixed hint. A successful runup is not a durable readiness
+guarantee.
 
 At each matching Git `get` request:
 
@@ -322,7 +327,8 @@ inputs before VM/agent creation mutations, perform their later validation/acquis
 final stored credentials under the existing enabled/disabled and skip/partial policies. Synthetic
 providers prove that several declared secrets may produce a stored credential or a managed helper
 without core understanding the exchange or correlating inputs with output shape. CLI-backed modes
-receive no secrets and perform no CLI check during provisioning.
+receive no secrets; their enabled runup distinguishes missing, unhealthy, and ready target-user CLI
+states without blocking helper installation, while disabled runup performs no check.
 
 ### AC3: Runtime GitHub identity
 

@@ -73,11 +73,13 @@ validate_inputs(scoped_context) -> no side effects
 credential_material(scoped_context) -> StoredCredential | ManagedHelper
 ```
 
-Core first resolves the operation-wide secret union, then constructs one `RunContext` per credential
-node whose `ScopedSecrets` view contains exactly that node's provider-declared names. The provider's
-static scopes and input validation are prepared together before VM or agent creation mutation. Its
-later materialization operation receives the same context, owns any validation/exchange/derivation,
-and returns the final payload. A stored password/token is sensitive final material, never an inert
+Core first resolves the operation-wide secret union. Before mutation it constructs a fresh,
+`RunContext` with no target per credential node whose `ScopedSecrets` view contains exactly that
+node's provider-declared names. The provider's static scopes and input validation are prepared
+together there. At user initialization core constructs another fresh context with the same scoped
+secret view and exactly the current admin or agent target for runup. Materialization receives a
+third fresh, scoped context with no target. The provider owns any validation/exchange/derivation and
+returns the final payload. A stored password/token is sensitive final material, never an inert
 secret reference for core to interpret. A managed helper is declarative provider output: provider
 code owns its behavior while core owns installation, registration, replacement, and removal.
 Operator configuration cannot supply commands or executable bodies. A provider's declared inputs do
@@ -180,11 +182,12 @@ no secret refs and can pass preflight without a secret source.
 
 ### Boundary resolution
 
-Composition roots resolve the plan's complete secret union once and deliver each provider a
-`RunContext` backed by `ScopedSecrets(node.secret_refs())`. Core neither builds a token mapping nor
-assumes what the values mean. A provider cannot read an undeclared secret, and a provider with no
-declared secrets receives an empty scoped view. The context deliberately contains no admin or agent
-transport, so the materialization operation has no target-mutation power.
+Composition roots resolve the plan's complete secret union once and retain an assembler that gives
+each provider a fresh `RunContext` backed by `ScopedSecrets(node.secret_refs())`. Core neither
+builds a token mapping nor assumes what the values mean. A provider cannot read an undeclared
+secret, and a provider with no declared secrets receives an empty scoped view. The early validation
+context deliberately has no target. Runup names exactly the target user being initialized, while
+later materialization again has no target.
 
 ### Runup
 
@@ -193,22 +196,26 @@ validate its resolved inputs without side effects. Current secret arms enforce l
 current CLI arms have no static input to validate.
 
 When `defaults.runup_git_credentials` is enabled, the git-credential node later calls provider runup
-with the same scoped context later used for materialization. Each provider decides whether its
-configured arm has optional validation work. The current provider-specific HTTP probes and caller
-policies remain:
+with the freshly assembled op-start context. Each provider decides whether its configured arm has
+optional validation work. The current provider-specific HTTP probes and caller policies remain:
 
 - multi-credential initialization skips a definitively rejected static token and records partial;
 - network indeterminacy warns and continues;
-- current CLI-backed arms do no runup work.
+- current CLI-backed arms check target-user command presence and read-only authentication health,
+  suppress all CLI output, and warn without preventing helper installation.
+
+GitHub uses `gh auth status --hostname github.com`; Azure uses `az account show` and does not
+request an Azure DevOps token. Disabling runup skips both secret and CLI checks. Preflight remains
+dependency-blind and unchanged.
 
 ### Materialization
 
-Core calls each surviving provider's materialization operation with its scoped context. The provider
-returns a final payload; core then validates line/control safety for stored protocol fields and the
-bounded managed-helper shape. Static scopes and their collisions were already validated before
-creation. Core does not correlate declared inputs with payload shape. It renders the deterministic
-state and reconciles even if the surviving set is empty. Core never performs authentication-specific
-mapping or exchange.
+Core calls each surviving provider's materialization operation with a fresh scoped context without a
+target context. The provider returns a final payload; core then validates line/control safety for
+stored protocol fields and the bounded managed-helper shape. Static scopes and their collisions were
+already validated before creation. Core does not correlate declared inputs with payload shape. It
+renders the deterministic state and reconciles even if the surviving set is empty. Core never
+performs authentication-specific mapping or exchange.
 
 ### Git operation
 
@@ -253,7 +260,7 @@ reversible write. The exact command and prior-art evidence live in the LLD and r
 ## Security Boundaries
 
 - Provider configuration can choose only closed acquisition arms; it cannot inject commands.
-- Current CLI runtime helpers execute no login and require no Agentworks secret.
+- Current CLI runup and runtime helpers execute no login and require no Agentworks secret.
 - Provider-owned side-effect-free input validation follows scoped secret resolution and precedes VM
   or agent creation mutation; optional authenticated runup remains later under its existing policy.
 - Provider materialization can read only declared secrets; core never interprets their values.
@@ -276,6 +283,7 @@ reversible write. The exact command and prior-art evidence live in the LLD and r
 | Missing declared secret                    | resolution   | existing secret-resolution failure                          |
 | Provider rejects or cannot materialize     | runup/op     | existing skip/partial or initialization failure semantics   |
 | Static probe network indeterminate         | runup        | warning; helper is installed                                |
+| CLI absent or unauthenticated at runup     | runup        | value-safe warning; managed helper is still installed       |
 | required command absent/helper fails       | Git runtime  | nonzero helper with fixed value-safe diagnostic             |
 | Shared/exclusive lock contention           | runtime/init | bounded failure with fixed value-safe retry guidance        |
 | CLI token empty, malformed, or timed out   | Git runtime  | nonzero helper with fixed value-safe diagnostic             |

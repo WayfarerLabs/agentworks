@@ -268,7 +268,7 @@ def test_create_admin_spec_credential_joins_graph_and_logger_redactions(
         providers = cast("tuple[CredentialRequest, ...]", args[7])
         assert [request.name for request in providers] == ["gh"]
         request = providers[0]
-        payload = request.provider.credential_material(request.context)
+        payload = request.provider.credential_material(request.context())
         assert isinstance(payload, StoredCredential)
         assert payload.password == "ghtok"
 

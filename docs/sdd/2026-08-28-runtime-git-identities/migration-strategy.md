@@ -136,11 +136,12 @@ production remains on the old path only within the working branch.
 Convert GitHub and Azure DevOps to `credential_scopes()`, `validate_inputs(ctx)`, and
 `credential_material(ctx)`. Each provider translates its own scope fields, reads only its scoped
 declared secrets, performs side-effect-free input validation before creation, retains authenticated
-validation for the secret arm, and returns either a final stored credential or its fixed CLI managed
-helper. Input dependencies and output variants remain independent; synthetic coverage proves a
-secret-bearing provider may return either shape without core interpreting the relationship. Update
-the descriptor contract version and required operations in the same commit or tightly adjacent
-commits that never form a mergeable partial.
+validation for the secret arm, performs advisory read-only target-user readiness for the CLI arm,
+and returns either a final stored credential or its fixed CLI managed helper. Input dependencies and
+output variants remain independent; synthetic coverage proves a secret-bearing provider may return
+either shape without core interpreting the relationship. Update the descriptor contract version and
+required operations in the same commit or tightly adjacent commits that never form a mergeable
+partial.
 
 ### 3. Convert graph and boundary assumptions
 
@@ -218,8 +219,9 @@ duplicates, missing files, and malformed Agentworks files. Every case preserves 
   never exposes a partial new generation. A failure before a preexisting mechanism is disabled may
   leave that complete mechanism unchanged; a later failure leaves the Agentworks include absent
   until retry. Existing logger semantics mark initialization partial.
-- If new helpers fail at runtime, the operator authenticates/fixes the CLI identity and retries Git;
-  reinit is needed only for config/helper changes.
+- CLI readiness warnings do not block helper installation. If a helper later fails at runtime, the
+  operator authenticates/fixes the CLI identity and retries Git; reinit is needed only for
+  config/helper changes.
 - Downgrading Agentworks after new-format reconciliation is unsupported as an active-management or
   recovery workflow. Paired binary/config rollback is available only before the first successful
   new-format reinit; afterward recovery fixes forward with the new CLI.

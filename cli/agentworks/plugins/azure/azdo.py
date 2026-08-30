@@ -64,6 +64,11 @@ _AZ_FAILURE_HINT = (
     "for this user, then authenticate an identity with access to the configured Azure DevOps organization"
 )
 
+_AZ_READINESS = """
+command -v az >/dev/null 2>&1 || exit 20
+az account show --output none >/dev/null 2>&1 || exit 21
+"""
+
 
 def _azure_cli_helper(org: str) -> bytes:
     return f"""#!/bin/sh
@@ -92,7 +97,8 @@ class AzDOCredentialProvider(GitCredentialProvider):
         overview="""
         Authenticates HTTPS git operations against one Azure DevOps organization. An
         explicit `source` selects either a declared secret or the active target-user
-        Azure CLI identity.
+        Azure CLI identity. Enabled runup checks that CLI identity read-only and warns
+        without blocking helper installation.
 
         The configured organization is both the credential's scope and the username
         returned to Git. The Azure CLI identity must already belong to that organization
@@ -120,10 +126,31 @@ class AzDOCredentialProvider(GitCredentialProvider):
 
     def runup(self, ctx: RunContext) -> None:
         source = self.config.source
-        if not isinstance(source, AzDOSecretSource):
+        if isinstance(source, AzureCliSource):
+            self._check_cli_readiness(ctx)
             return
         token = self._secret_input(ctx, source)
         self._verify_token(token, secret_name=source.secret)
+
+    def _check_cli_readiness(self, ctx: RunContext) -> None:
+        from agentworks import output
+        from agentworks.errors import StateError
+        from agentworks.ssh import SSHError
+
+        target = ctx.admin_target() or ctx.agent_target()
+        if target is None:
+            raise StateError("Azure CLI runup requires a current user target")
+        try:
+            result = target.run(_AZ_READINESS, check=False, timeout=10)
+        except SSHError:
+            output.warn(f"Could not check Azure CLI readiness for git-credential/{self.owner_name}")
+            return
+        if result.returncode == 0:
+            output.detail(f"Verified Azure CLI readiness for git-credential/{self.owner_name}")
+        elif result.returncode == 20:
+            output.warn(f"Azure CLI is not installed for git-credential/{self.owner_name}")
+        else:
+            output.warn(f"Azure CLI is not authenticated or healthy for git-credential/{self.owner_name}")
 
     def _verify_token(self, token: str, *, secret_name: str) -> None:
         import base64

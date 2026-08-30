@@ -233,9 +233,11 @@ spec:
 ```
 
 CLI sources use the target user's already-authenticated CLI identity and acquire a fresh credential
-when Git asks for it. They do not install or authenticate `gh` or `az`. The target user owns and may
-change that active identity, so verify it after authentication changes. Secret sources retain their
-provider-owned optional runup validation and install the final username/password privately.
+when Git asks for it. They do not install or authenticate `gh` or `az`. Enabled runup checks command
+presence and read-only authentication health, but warns without blocking helper installation. The
+target user owns and may change that active identity, so verify it after authentication changes.
+Secret sources retain their provider-owned optional runup validation and install the final
+username/password privately.
 
 GitHub `repos` scopes an exact `owner/repo`, while `owner` covers its repositories. A GitHub
 credential with neither is the host default. Azure DevOps always scopes to its configured

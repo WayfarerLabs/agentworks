@@ -67,7 +67,8 @@ also explicitly recommended over storing it through `gh auth login` for headless
 
 - `gh-cli` invokes `gh auth token --hostname github.com` at Git runtime;
 - the helper disables prompting and treats the active CLI account as operator-selected state;
-- initialization neither checks nor authenticates `gh`;
+- enabled runup checks `gh auth status --hostname github.com` read-only in the target-user
+  environment, warns without blocking helper installation, and never authenticates `gh`;
 - enterprise hosts are deferred rather than inferred.
 
 Sources:
@@ -97,6 +98,8 @@ Git, though GCM owns more authentication and storage behavior than this effort n
 - the helper returns configured organization as username and token as password, with live Git proof
   required before merge;
 - it does not choose or mutate tenant/subscription state;
+- enabled runup uses read-only `az account show`, never token acquisition, to warn about current
+  target-user readiness without blocking helper installation;
 - Agentworks documents that forge-side organization membership/permissions are prerequisites;
 - real clone/fetch/push proves the exact credential-helper response before merge.
 
@@ -155,12 +158,14 @@ Rejected. Azure tokens are short-lived, authentication may happen after tool ins
 copied tokens become stale durable secrets. Runtime acquisition is the point of delegating to the
 CLI identity.
 
-### Provision-time CLI availability/auth checks
+### Read-only CLI readiness at runup
 
-Rejected. Tool installation and manual/future-feature authentication can occur later in the same
-user lifecycle. A check during provisioning races that ordering and still cannot guarantee future
-runtime success. The provider-owned runtime helper checks and invokes its own command and returns
-fixed, value-safe failure guidance; core adds no duplicate dependency field or `PATH` probe.
+Accepted as advisory provider behavior. Tool installation and manual/future-feature authentication
+can still occur later, so readiness failure cannot block helper installation and success cannot be
+treated as a durable guarantee. The provider checks command presence and its CLI's read-only account
+status in the current target-user environment, suppresses arbitrary output, and never authenticates
+or acquires the final Git token. The runtime helper independently checks again at actual use; core
+adds no dependency model or forge-specific probe.
 
 ### Remove static token validation for symmetry
 

@@ -242,7 +242,13 @@ def create_agent_on_vm(
     # removes any Agentworks-owned state left by an older template.
     from agentworks.git_credentials import configure_user_git_credentials
 
-    configure_user_git_credentials(agent_target, credential_requests, config, logger)
+    configure_user_git_credentials(
+        agent_target,
+        credential_requests,
+        config,
+        logger,
+        target_role="agent",
+    )
 
     # User install commands + login-shell PATH profile fragment.
     _run_agent_install_commands(

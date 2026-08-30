@@ -55,10 +55,17 @@ def _realize_ephemerals(
     from agentworks.capabilities.base import RunContext
     from agentworks.orchestration.secrets import ScopedSecrets
 
-    def scoped_ctx(secret_names: tuple[str, ...]) -> RunContext:
+    def scoped_ctx(
+        secret_names: tuple[str, ...],
+        *,
+        admin_target: Transport | None = None,
+        agent_target: Transport | None = None,
+    ) -> RunContext:
         return RunContext(
             config=config,
             operation_scope=graph.scope,
+            admin_target=admin_target,
+            agent_target=agent_target,
             secrets=ScopedSecrets(secret_values, secret_names),
         )
 

@@ -258,7 +258,7 @@ def run_initialization(
     This is called both from ``create_vm`` (after ``bootstrap_vm``) and
     from ``reinit_vm`` for repeatable re-initialization. The closed
     ``operation`` value also drives create-only setup behavior.
-    Each credential request carries the provider's scoped operation context.
+    Each credential request carries the provider's scoped context assembler.
     """
     db.insert_vm_event(vm_name, "init_started")
 
@@ -635,7 +635,13 @@ def _phase_b_setup(
                 output.warn(msg)
 
         # Non-fatal: git credentials (before dotfiles and mise lockfile for private repos)
-        configure_user_git_credentials(ts_target, credential_requests, config, logger)
+        configure_user_git_credentials(
+            ts_target,
+            credential_requests,
+            config,
+            logger,
+            target_role="admin",
+        )
 
         # Non-fatal: dotfiles (can override mise config, can provide lockfile)
         if admin.dotfiles_source:

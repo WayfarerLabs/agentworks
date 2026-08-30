@@ -87,6 +87,11 @@ _GH_FAILURE_HINT = (
     "for this user, then authenticate the intended github.com identity"
 )
 
+_GH_READINESS = """
+command -v gh >/dev/null 2>&1 || exit 20
+GH_PROMPT_DISABLED=1 gh auth status --hostname github.com >/dev/null 2>&1 || exit 21
+"""
+
 
 class GitHubCredentialProvider(GitCredentialProvider):
     """Produces stored or GitHub-CLI-backed credentials for github.com."""
@@ -100,6 +105,8 @@ class GitHubCredentialProvider(GitCredentialProvider):
         overview="""
         Authenticates HTTPS git operations against GitHub. An explicit `source`
         selects either a declared secret or the active target-user GitHub CLI identity.
+        Enabled runup checks that CLI identity read-only and warns without blocking
+        helper installation.
 
         `repos` pins the credential to specific repositories, while `owner` covers every
         repository under one user or organization. An unscoped credential is the
@@ -134,10 +141,31 @@ class GitHubCredentialProvider(GitCredentialProvider):
 
     def runup(self, ctx: RunContext) -> None:
         source = self.config.source
-        if not isinstance(source, GitHubSecretSource):
+        if isinstance(source, GitHubCliSource):
+            self._check_cli_readiness(ctx)
             return
         token = self._secret_input(ctx, source)
         self._verify_token(token, secret_name=source.secret)
+
+    def _check_cli_readiness(self, ctx: RunContext) -> None:
+        from agentworks import output
+        from agentworks.errors import StateError
+        from agentworks.ssh import SSHError
+
+        target = ctx.admin_target() or ctx.agent_target()
+        if target is None:
+            raise StateError("GitHub CLI runup requires a current user target")
+        try:
+            result = target.run(_GH_READINESS, check=False, timeout=10)
+        except SSHError:
+            output.warn(f"Could not check GitHub CLI readiness for git-credential/{self.owner_name}")
+            return
+        if result.returncode == 0:
+            output.detail(f"Verified GitHub CLI readiness for git-credential/{self.owner_name}")
+        elif result.returncode == 20:
+            output.warn(f"GitHub CLI is not installed for git-credential/{self.owner_name}")
+        else:
+            output.warn(f"GitHub CLI is not authenticated or healthy for git-credential/{self.owner_name}")
 
     def _verify_token(self, token: str, *, secret_name: str) -> None:
         import json

@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
     from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.transports import Transport
     from agentworks.vms.nodes import LiveVMNode
 
 # ``_mgr`` binds this module's own package object (safe: by the time
@@ -204,10 +205,17 @@ def create_agent(
         with output.section("Resolving Secrets"):
             resolver.resolve()
 
-        def scoped_ctx(secret_names: tuple[str, ...]) -> RunContext:
+        def scoped_ctx(
+            secret_names: tuple[str, ...],
+            *,
+            admin_target: Transport | None = None,
+            agent_target: Transport | None = None,
+        ) -> RunContext:
             return RunContext(
                 config=config,
                 operation_scope=scope,
+                admin_target=admin_target,
+                agent_target=agent_target,
                 secrets=ScopedSecrets(resolver.values, secret_names),
             )
 
@@ -624,10 +632,17 @@ def reinit_agent(
         with output.section("Resolving Secrets"):
             resolver.resolve()
 
-        def scoped_ctx(secret_names: tuple[str, ...]) -> RunContext:
+        def scoped_ctx(
+            secret_names: tuple[str, ...],
+            *,
+            admin_target: Transport | None = None,
+            agent_target: Transport | None = None,
+        ) -> RunContext:
             return RunContext(
                 config=config,
                 operation_scope=scope,
+                admin_target=admin_target,
+                agent_target=agent_target,
                 secrets=ScopedSecrets(resolver.values, secret_names),
             )
 

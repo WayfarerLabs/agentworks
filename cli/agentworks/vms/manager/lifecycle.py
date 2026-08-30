@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
     from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.transports import Transport
 
 # NOTE on the initializer imports (``verify_tailscale_available``,
 # ``bootstrap_vm``, ``run_initialization``):
@@ -281,10 +282,17 @@ def create_vm(
 
     scope = OperationScope(level=ScopeLevel.VM, system_slug=slug, vm=vm_name)
 
-    def scoped_ctx(secret_names: tuple[str, ...]) -> RunContext:
+    def scoped_ctx(
+        secret_names: tuple[str, ...],
+        *,
+        admin_target: Transport | None = None,
+        agent_target: Transport | None = None,
+    ) -> RunContext:
         return RunContext(
             config=config,
             operation_scope=scope,
+            admin_target=admin_target,
+            agent_target=agent_target,
             secrets=ScopedSecrets(resolver.values, secret_names),
         )
 
@@ -760,10 +768,17 @@ def reinit_vm(
         vm=name,
     )
 
-    def scoped_ctx(secret_names: tuple[str, ...]) -> RunContext:
+    def scoped_ctx(
+        secret_names: tuple[str, ...],
+        *,
+        admin_target: Transport | None = None,
+        agent_target: Transport | None = None,
+    ) -> RunContext:
         return RunContext(
             config=config,
             operation_scope=scope,
+            admin_target=admin_target,
+            agent_target=agent_target,
             secrets=ScopedSecrets(resolver.values, secret_names),
         )
 

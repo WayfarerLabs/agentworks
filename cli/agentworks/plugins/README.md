@@ -247,8 +247,10 @@ including any acquisition discriminator and every `SecretRef`, and implements `c
 to declare generic HTTPS routing plus `credential_material(ctx)` to return either a stored
 credential or a provider-authored runtime helper. It may override the default no-op
 `validate_inputs(ctx)` for side-effect-free checks at the pre-creation boundary. Do not derive a
-plugin provider from a shared source model or ask core to interpret its secrets. The full author
-contract is in [`capabilities/git_credential/README.md`](../capabilities/git_credential/README.md).
+plugin provider from a shared source model or ask core to interpret its secrets. Provider runup may
+use its fresh current-user target for read-only readiness; materialization receives a separate
+context without a target. The full author contract is in
+[`capabilities/git_credential/README.md`](../capabilities/git_credential/README.md).
 
 The capability model as a whole, including how a config is offered per facet and what the framework
 does with the declaration at each lifecycle stage, is

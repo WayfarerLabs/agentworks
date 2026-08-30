@@ -505,9 +505,10 @@ lifecycle has to be safe to re-run, and the five stages divide cleanly on how th
   provisioning ops carry it because `reinit` exists.
 
 Many ops satisfy this because they are pure functions or full reconciliation. Git credential
-materialization, for example, produces one complete desired state; the core then atomically
-activates that state and removes Agentworks-owned files and registrations that are no longer
-desired.
+materialization, for example, produces one complete desired state from a scoped context with no
+target; its preceding read-only runup receives a separate fresh context with exactly the current
+user target. The core then atomically activates that state and removes Agentworks-owned files and
+registrations that are no longer desired.
 
 ### Host Readiness and the Fold
 

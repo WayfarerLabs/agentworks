@@ -14,7 +14,8 @@ from agentworks.git_credentials.state import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping
+    from collections.abc import Iterable, Mapping
+    from typing import Literal
 
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.git_credential.base import (
@@ -34,13 +35,25 @@ class _WarnLogger(Protocol):
     def warning(self, msg: str) -> None: ...
 
 
+class ScopedContextFactory(Protocol):
+    """Assemble one provider-scoped context for the requested stage."""
+
+    def __call__(
+        self,
+        secret_names: tuple[str, ...],
+        *,
+        admin_target: Transport | None = None,
+        agent_target: Transport | None = None,
+    ) -> RunContext: ...
+
+
 @dataclass(frozen=True)
 class CredentialRequest:
-    """One holding credential node and its scoped operation context."""
+    """One credential node, its frozen scopes, and scoped context assembler."""
 
     node: GitCredentialNode
-    context: RunContext
     scopes: tuple[HttpsCredentialScope, ...]
+    scoped_context: ScopedContextFactory
 
     @property
     def name(self) -> str:
@@ -50,18 +63,29 @@ class CredentialRequest:
     def provider(self) -> GitCredentialProvider:
         return self.node.provider
 
+    def context(
+        self,
+        *,
+        admin_target: Transport | None = None,
+        agent_target: Transport | None = None,
+    ) -> RunContext:
+        """Assemble a fresh provider-scoped context for one lifecycle stage."""
+        return self.scoped_context(
+            self.node.secret_refs(),
+            admin_target=admin_target,
+            agent_target=agent_target,
+        )
+
 
 def credential_requests(
     nodes: Iterable[GitCredentialNode],
-    scoped_ctx: Callable[[tuple[str, ...]], RunContext],
+    scoped_ctx: ScopedContextFactory,
 ) -> tuple[CredentialRequest, ...]:
     """Prepare static scopes and resolved inputs before target mutation."""
-    requests = tuple(
-        CredentialRequest(node, scoped_ctx(node.secret_refs()), node.provider.credential_scopes()) for node in nodes
-    )
+    requests = tuple(CredentialRequest(node, node.provider.credential_scopes(), scoped_ctx) for node in nodes)
     validate_credential_scope_claims((request.name, request.scopes) for request in requests)
     for request in requests:
-        request.provider.validate_inputs(request.context)
+        request.provider.validate_inputs(request.context())
     return requests
 
 
@@ -82,6 +106,8 @@ def announce_git_credentials(nodes: Iterable[GitCredentialNode]) -> None:
 
 def materialize_credential_state(
     requests: Iterable[CredentialRequest],
+    target: Transport,
+    target_role: Literal["admin", "agent"],
     config: Config,
     logger: _WarnLogger | None = None,
 ) -> UserCredentialState:
@@ -91,9 +117,12 @@ def materialize_credential_state(
     materials: list[tuple[str, tuple[HttpsCredentialScope, ...], CredentialPayload]] = []
     for request in requests:
         if config.defaults.runup_git_credentials:
+            runup_context = (
+                request.context(admin_target=target) if target_role == "admin" else request.context(agent_target=target)
+            )
             output.detail(f"Performing runup test for git-credential/{request.name}...")
             try:
-                request.node.runup(request.context)
+                request.node.runup(runup_context)
             except TokenRejectedError as exc:
                 msg = (
                     f"git credential {request.name!r} rejected; skipping it "
@@ -107,7 +136,7 @@ def materialize_credential_state(
             (
                 request.name,
                 request.scopes,
-                request.provider.credential_material(request.context),
+                request.provider.credential_material(request.context()),
             )
         )
     return build_user_credential_state(materials)
@@ -118,13 +147,15 @@ def configure_user_git_credentials(
     requests: Iterable[CredentialRequest],
     config: Config,
     logger: _WarnLogger,
+    *,
+    target_role: Literal["admin", "agent"],
 ) -> None:
     """Materialize and unconditionally reconcile one target user's full state."""
     from agentworks.ssh import SSHError
 
     logger.step("Git credentials")
     output.info("Reconciling git credentials...")
-    state = materialize_credential_state(requests, config, logger)
+    state = materialize_credential_state(requests, target, target_role, config, logger)
     try:
         reconcile_user_git_credentials(target, state)
     except SSHError as exc:

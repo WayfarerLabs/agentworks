@@ -189,14 +189,16 @@ default no-op input-validation hook. The composition root constructs `ctx` with
 `ScopedSecrets(resolved_values, node.secret_refs())` and no admin or agent transport. Before
 creation mutation, core validates every provider's static scopes together and calls
 `validate_inputs(ctx)`. The hook is side-effect-free; shipped secret arms use it for line safety and
-CLI arms inherit the no-op. Later materialization owns any required validation, API exchange,
-derivation, and final response construction.
+CLI arms inherit the no-op. Later runup receives a newly assembled context with the same scoped
+secrets plus exactly the current admin or agent target. Materialization receives another fresh,
+scoped context without a target and owns any required validation, API exchange, derivation, and
+final response construction.
 
 The operation performs no target-user filesystem or Git configuration mutation. Its declared input
 set and returned output variant are orthogonal: the provider may return either payload after using
 any subset of the capabilities granted through its scoped operation context. The current secret arms
-return stored credentials, and the current CLI arms return managed helpers without executing the CLI
-at provisioning time, but those are provider choices rather than core rules.
+return stored credentials, and the current CLI arms return managed helpers after a read-only
+target-user readiness check, but those are provider choices rather than core rules.
 
 The descriptor deletes version-2 `helper_entry`, `credential_lines`, `store_username`, and the
 universal `secret_name` assumption atomically. Core no longer receives a token map or calls a
@@ -205,17 +207,20 @@ provider method with a naked token.
 ### Runup
 
 When `defaults.runup_git_credentials` is enabled, the credential node calls provider `runup(ctx)`
-before materialization. The same scoped context is used. Providers decide whether their configured
-arm has optional readiness work:
+before materialization. This op-start context is fresh, retains the provider's scoped resolved
+inputs, and exposes exactly the current admin or agent target. Providers decide whether their
+configured arm has optional readiness work:
 
 ```text
 current secret arm -> provider performs its existing authenticated probe
-current CLI arm    -> provider does nothing
+current CLI arm    -> provider checks command presence and read-only authentication health
 ```
 
-A definitive rejection retains current skip/warn/partial semantics. Network indeterminacy warns and
-continues. Disabling runup skips optional validation only; it never skips materialization a provider
-requires to produce its final stored credential.
+A definitive secret rejection retains current skip/warn/partial semantics. Network indeterminacy
+warns and continues. CLI readiness failure also warns and continues to helper materialization.
+GitHub checks `gh auth status --hostname github.com`; Azure checks `az account show` without minting
+an Azure DevOps token. Both suppress arbitrary process output. Disabling runup skips optional
+validation only; it never skips materialization.
 
 ## Built-in Provider Output
 
@@ -452,18 +457,23 @@ nodes = resolve declared git-credential nodes and held providers
 resolved = resolve union(nodes.secret_refs())
 
 for each node/provider:
-    ctx = RunContext(secrets=ScopedSecrets(resolved, node.secret_refs()))
+    validation_ctx = RunContext(secrets=ScopedSecrets(resolved, node.secret_refs()))
     scopes = provider.credential_scopes()
 validate all static scope claims together
 for each node/provider:
-    provider.validate_inputs(ctx)  # side-effect-free, before creation mutation
+    provider.validate_inputs(validation_ctx)  # side-effect-free, before creation mutation
 
 creation may now mutate VM/agent state
 
 for each node/provider:
+    op_ctx = RunContext(
+        secrets=ScopedSecrets(resolved, node.secret_refs()),
+        admin_target=target_user,  # or exactly agent_target=target_user
+    )
     if runup policy enabled:
-        provider.runup(ctx)
-    payload = provider.credential_material(ctx)
+        provider.runup(op_ctx)
+    material_ctx = RunContext(secrets=ScopedSecrets(resolved, node.secret_refs()))
+    payload = provider.credential_material(material_ctx)
     validate payload at core boundary
     collect (node.name, scopes, payload)
 
@@ -517,7 +527,8 @@ Both composition roots:
 2. resolve the operation-wide union of provider-declared secrets;
 3. prepare and validate static scopes, then invoke side-effect-free provider input validation before
    creation mutation;
-4. give each provider its own scoped context for later runup and materialization;
+4. assemble a fresh provider-scoped context with exactly the current user target for runup, then a
+   separate fresh context without a target for materialization;
 5. collect final payloads with their already-validated scopes without building a token map;
 6. invoke the same builder/reconciler unconditionally before private Git-backed user setup.
 

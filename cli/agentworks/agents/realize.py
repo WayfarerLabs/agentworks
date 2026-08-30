@@ -4,7 +4,7 @@
 the bespoke mutation an orchestrator runs in its roll-forward, between
 the boundary resolve and ``log.mark_realized``. Domain code with
 deliberately narrow duties: it frames no phases, resolves no secrets
-(credential requests arrive with their scoped contexts already prepared),
+(credential requests arrive with their scoped context assemblers prepared),
 opens no gate, and re-checks nothing its caller
 already validated (name shape, existence, the VM row). The body owns
 the mutation, the git-credential materials ops it carries (whose
