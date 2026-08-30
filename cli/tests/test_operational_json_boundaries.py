@@ -19,6 +19,7 @@ from agentworks.resources.graph import Readiness
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolve import ActiveSource, ResolutionBatch
 from tests.conftest import stub_vm_ssh_identity
+from tests.instance_state_support import stub_instance_state
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -390,6 +391,7 @@ def test_vm_event_detail_cannot_expose_secret_command_text(monkeypatch: pytest.M
         (VMDetailEvent("2026-01-02", raw_event, marker),),
         (),
         (),
+        stub_instance_state("vm", "admin"),
     )
     monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
     monkeypatch.setattr(vm, "get_db", lambda: object())
@@ -487,7 +489,22 @@ def test_machine_presentation_suppression_keeps_prompts_interactive_on_stderr(
         None,
         False,
     )
-    description = VMDescription(facts, None, None, None, None, None, "unset", None, (), (), (), (), ())
+    description = VMDescription(
+        facts,
+        None,
+        None,
+        None,
+        None,
+        None,
+        "unset",
+        None,
+        (),
+        (),
+        (),
+        (),
+        (),
+        stub_instance_state("vm", "admin"),
+    )
     answers: list[str] = []
 
     def presentation_op() -> None:

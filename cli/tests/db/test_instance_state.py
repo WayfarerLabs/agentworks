@@ -13,6 +13,10 @@ from agentworks.db import (
     AppliedStateSlice,
     Database,
     DesiredOverlayRecord,
+    InspectedAppliedStateSlice,
+    InspectedDesiredOverlay,
+    InstanceRecordDiagnostic,
+    InstanceRecordMetadata,
     MigrationContext,
     SessionMode,
     VersionedPayload,
@@ -194,7 +198,7 @@ def test_desired_overlay_round_trip_upsert_clear_and_canonical_storage(tmp_path:
         database.close()
 
 
-def test_persistence_accepts_nonempty_historic_owner_names(db: Database) -> None:
+def test_persistence_accepts_safe_historic_owner_names(db: Database) -> None:
     assert len(_HISTORIC_SESSION_NAME) > 64
 
     expected = db.instance_state.put_desired_overlay("session", _HISTORIC_SESSION_NAME, _payload("intent"))
@@ -202,7 +206,7 @@ def test_persistence_accepts_nonempty_historic_owner_names(db: Database) -> None
     assert db.instance_state.get_desired_overlay("session", _HISTORIC_SESSION_NAME) == expected
 
 
-@pytest.mark.parametrize("instance_name", ["", 1, True])
+@pytest.mark.parametrize("instance_name", ["", 1, True, "bad\nname", "victim' forged-owner"])
 def test_desired_mutation_rejects_invalid_owner_name_before_writing(
     db: Database,
     instance_name: object,
@@ -686,6 +690,236 @@ def test_persisted_valid_unknown_key_with_malformed_envelope_raises(
         assert raised.value.hint is not None
     finally:
         database.close()
+
+
+def test_owner_inspection_keeps_recognized_and_future_records_closed(db: Database) -> None:
+    db.insert_vm("alpha", site="local", hostname="alpha")
+    desired = db.instance_state.put_desired_overlay("vm", "alpha", _payload("intent"))
+    [applied] = db.instance_state.replace_applied_slices(
+        "vm",
+        "alpha",
+        "vm-create",
+        {AppliedStateKey.SSH_IDENTITY: _payload("identity")},
+    )
+    db._conn.execute(  # noqa: SLF001
+        "INSERT INTO instance_records "
+        "(instance_kind, instance_name, record_type, record_key, payload_version, "
+        "value_json, recorded_at, operation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ("vm", "alpha", "future-record", "opaque", 7, '{"secret":"hidden"}', "2026-08-23T12:00:00Z", None),
+    )
+    db._conn.commit()  # noqa: SLF001
+
+    statements: list[str] = []
+    db._conn.set_trace_callback(statements.append)  # noqa: SLF001
+    try:
+        inspection = db.instance_state.inspect_owner_state("vm", "alpha")
+    finally:
+        db._conn.set_trace_callback(None)  # noqa: SLF001
+
+    assert not any("EXISTS(" in statement.upper() for statement in statements)
+    assert inspection.desired_overlays == (
+        InspectedDesiredOverlay(
+            desired,
+            InstanceRecordMetadata(
+                "vm",
+                "alpha",
+                "desired-overlay",
+                "spec",
+                1,
+                desired.recorded_at,
+                True,
+            ),
+        ),
+    )
+    assert inspection.applied_slices == (
+        InspectedAppliedStateSlice(
+            applied,
+            InstanceRecordMetadata(
+                "vm",
+                "alpha",
+                "applied-state",
+                "ssh-identity",
+                1,
+                applied.recorded_at,
+                True,
+            ),
+        ),
+    )
+    assert len(inspection.unconsumed_records) == 1
+    metadata = inspection.unconsumed_records[0].metadata
+    assert (metadata.record_type, metadata.record_key, metadata.payload_version) == (
+        "future-record",
+        "opaque",
+        7,
+    )
+    assert "hidden" not in repr(inspection)
+    assert inspection.malformed_records == ()
+
+
+def test_fleet_inspection_isolates_malformed_rows_and_reports_orphans(db: Database) -> None:
+    db.insert_vm("live", site="local", hostname="live")
+    db.instance_state.put_desired_overlay("vm", "live", _payload("intent"))
+    db.instance_state.put_desired_overlay("agent", "orphan", _payload("intent"))
+    db.instance_state.replace_applied_slices(
+        "vm",
+        "broken",
+        "vm-create",
+        {AppliedStateKey.HARDWARE_PROVENANCE: VersionedPayload(1, {})},
+    )
+    db._conn.execute(  # noqa: SLF001
+        "UPDATE instance_records SET value_json = ? WHERE instance_kind = 'vm' AND instance_name = 'broken'",
+        ("not-json-private-payload",),
+    )
+    db._conn.commit()  # noqa: SLF001
+
+    inspection = db.instance_state.inspect_all_instance_state()
+
+    assert [(item.record.instance_name, item.metadata.owner_exists) for item in inspection.desired_overlays] == [
+        ("orphan", False),
+        ("live", True),
+    ]
+    assert inspection.applied_slices == ()
+    assert len(inspection.malformed_records) == 1
+    malformed = inspection.malformed_records[0]
+    assert malformed.metadata.instance_name == "broken"
+    assert malformed.metadata.owner_exists is False
+    assert "not-json-private-payload" not in repr(malformed)
+
+
+def test_fleet_inspection_classifies_unknown_applied_key_without_payload(db: Database) -> None:
+    db.insert_vm("alpha", site="local", hostname="alpha")
+    db._conn.execute(  # noqa: SLF001
+        "INSERT INTO instance_records "
+        "(instance_kind, instance_name, record_type, record_key, payload_version, "
+        "value_json, recorded_at, operation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "vm",
+            "alpha",
+            "applied-state",
+            "future-fact",
+            2,
+            '{"private":"hidden"}',
+            "2026-08-23T12:00:00Z",
+            "vm-create",
+        ),
+    )
+    db._conn.commit()  # noqa: SLF001
+
+    [unconsumed] = db.instance_state.inspect_all_instance_state().unconsumed_records
+
+    assert unconsumed.metadata.owner_exists is True
+    assert unconsumed.metadata.record_key == "future-fact"
+    assert "hidden" not in repr(unconsumed)
+
+
+def test_malformed_inspection_drops_exception_and_raw_payload(db: Database) -> None:
+    db._conn.execute("PRAGMA ignore_check_constraints = ON")  # noqa: SLF001
+    db._conn.execute(  # noqa: SLF001
+        "INSERT INTO instance_records "
+        "(instance_kind, instance_name, record_type, record_key, payload_version, "
+        "value_json, recorded_at, operation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "vm",
+            "broken",
+            "applied-state",
+            "ssh-identity",
+            1,
+            "private-raw-payload",
+            "2026-08-23T12:00:00Z",
+            "vm-create",
+        ),
+    )
+    db._conn.commit()  # noqa: SLF001
+
+    [malformed] = db.instance_state.inspect_all_instance_state().malformed_records
+
+    assert malformed.diagnostic is InstanceRecordDiagnostic.INVALID_PAYLOAD
+    assert not hasattr(malformed, "error")
+    assert "private-raw-payload" not in repr(malformed)
+
+
+def test_future_inspection_omits_unsafe_optional_metadata(db: Database) -> None:
+    db._conn.execute(  # noqa: SLF001
+        "INSERT INTO instance_records "
+        "(instance_kind, instance_name, record_type, record_key, payload_version, "
+        "value_json, recorded_at, operation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "vm",
+            "alpha",
+            "future/type",
+            "PRIVATE KEY MATERIAL",
+            4,
+            "{}",
+            "2026-08-23T12:00:00Z",
+            None,
+        ),
+    )
+    db._conn.commit()  # noqa: SLF001
+
+    [unconsumed] = db.instance_state.inspect_all_instance_state().unconsumed_records
+
+    assert unconsumed.metadata.record_type == "future/type"
+    assert unconsumed.metadata.record_key is None
+    assert "PRIVATE KEY MATERIAL" not in repr(unconsumed)
+
+
+@pytest.mark.parametrize("unsafe_name", ["bad\nname", "victim' forged-row"])
+def test_fleet_inspection_never_retains_unsafe_owner_text(db: Database, unsafe_name: str) -> None:
+    db._conn.execute(  # noqa: SLF001
+        "INSERT INTO instance_records "
+        "(instance_kind, instance_name, record_type, record_key, payload_version, "
+        "value_json, recorded_at, operation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "vm",
+            unsafe_name,
+            "future-record",
+            "opaque",
+            1,
+            "{}",
+            "2026-08-23T12:00:00Z",
+            None,
+        ),
+    )
+    db._conn.commit()  # noqa: SLF001
+
+    [malformed] = db.instance_state.inspect_all_instance_state().malformed_records
+
+    assert malformed.diagnostic is InstanceRecordDiagnostic.INVALID_INSTANCE_NAME
+    assert malformed.metadata.instance_name is None
+    assert unsafe_name not in repr(malformed)
+
+
+def test_applied_operation_is_safe_on_write_and_inspection(db: Database) -> None:
+    with pytest.raises(ValueError):
+        db.instance_state.replace_applied_slices(
+            "vm",
+            "alpha",
+            "vm-create\nforged",
+            {AppliedStateKey.SSH_IDENTITY: _payload("identity")},
+        )
+
+    db._conn.execute("PRAGMA ignore_check_constraints = ON")  # noqa: SLF001
+    db._conn.execute(  # noqa: SLF001
+        "INSERT INTO instance_records "
+        "(instance_kind, instance_name, record_type, record_key, payload_version, "
+        "value_json, recorded_at, operation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "vm",
+            "alpha",
+            "applied-state",
+            "ssh-identity",
+            1,
+            "{}",
+            "2026-08-23T12:00:00Z",
+            "vm-create\nforged",
+        ),
+    )
+    db._conn.commit()  # noqa: SLF001
+
+    [malformed] = db.instance_state.inspect_all_instance_state().malformed_records
+
+    assert malformed.diagnostic is InstanceRecordDiagnostic.INVALID_APPLIED_OPERATION
+    assert "vm-create\nforged" not in repr(malformed)
 
 
 @pytest.mark.parametrize("unsafe_name", ["bad\nname", "x" * 1_000])

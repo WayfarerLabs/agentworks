@@ -197,7 +197,8 @@ Settings sections (`config.toml`, permanent):
 
 Resources are declared as YAML manifests. `agw resource kinds` lists every kind with its category
 and purpose, `agw resource show KIND/NAME` shows one complete focused card with list facts, direct
-relationships, current users, attributable health checks, and the normalized declaration,
+relationships, current users, attributable health checks, and the normalized declaration, selectable
+instance templates also show their fully resolved spec and value provenance,
 `agw resource explain KIND` documents what one accepts field by field, and
 `agw graph show KIND/NAME` traverses beyond that row through declared and current live
 relationships.
@@ -536,7 +537,12 @@ recovery or recreate the VM when that path cannot connect.
 
 Non-fatal initialization failures (packages, dotfiles) produce a `partial` status rather than
 aborting. Fatal failures prompt for deletion or reinit. Use `vm describe` to view the full event
-log.
+log, current VM and admin declarations, recorded lifecycle evidence, and structural drift. The
+hardware evidence is the provisioning request associated with successful creation, not a provider
+observation of realized hardware. Workspace, agent, and session `describe` commands show the same
+current-declaration and stored-instance-layer facts without inventing lifecycle evidence those
+operations do not record. Human describe keeps the complete current spec compact by omitting
+per-leaf Value sources; JSON describe and template `resource show` retain full provenance.
 
 ## Shell Completion
 
@@ -569,8 +575,9 @@ default, completes an online snapshot. An interactive terminal asks
 `Back up the state database before migrating?` with yes as the default. Automation uses
 `[database] auto_backup_before_migration = true`; set it to `false` only when deliberately accepting
 migration without that recovery point. `agw doctor` uses a WAL-aware read-only inspection and never
-runs migrations. See the [doctor JSON contract](command-reference.md#doctor-json-schema) for the
-machine-readable result.
+runs migrations. It reports malformed, orphaned, or newer-release instance records and compares
+recorded VM SSH identities in one batch when current configuration is available. See the
+[doctor JSON contract](command-reference.md#doctor-json-schema) for the machine-readable result.
 
 Create a consistent on-demand snapshot, including committed WAL content, with:
 

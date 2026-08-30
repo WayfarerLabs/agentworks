@@ -8,10 +8,11 @@ building their own safe fact records and for selecting collection order.
 from __future__ import annotations
 
 import json
+import math
 import unicodedata
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, BinaryIO, assert_never
+from typing import TYPE_CHECKING, Any, BinaryIO, assert_never, cast
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -28,6 +29,23 @@ type JsonObject = dict[str, JsonValue]
 # here does, so it stays a named constant rather than a fact any record holds.
 _SCHEMA_VERSION = 1
 _TERMINAL_UNSAFE_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
+
+
+def project_json_value(value: Any) -> JsonValue:
+    """Validate dynamically projected data at the finite JSON boundary."""
+    if value is None or isinstance(value, str | bool | int):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise AssertionError("projected JSON numbers must be finite")
+        return value
+    if isinstance(value, list):
+        return [project_json_value(item) for item in value]
+    if isinstance(value, dict):
+        if not all(isinstance(key, str) for key in value):
+            raise AssertionError("projected JSON object keys must be strings")
+        return {cast("str", key): project_json_value(item) for key, item in value.items()}
+    raise AssertionError(f"projection produced a non-JSON value: {type(value).__name__}")
 
 
 class OutputFormat(StrEnum):

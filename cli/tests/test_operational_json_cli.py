@@ -12,8 +12,10 @@ from typer.testing import CliRunner
 
 from agentworks.cli import app
 from agentworks.db import PID_STOPPED, SessionMode, SessionStatus, VMRow, WorkspaceRow
+from agentworks.instance_description import instance_state_data
 from agentworks.secrets.policy import TtyInteractionPolicy
 from tests.conftest import stub_vm_ssh_identity
+from tests.instance_state_support import stub_instance_state
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -235,8 +237,8 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
         provisioning_status="complete",
         init_status="partial",
         tailscale_host="100.64.0.9",
-        cpus=8,
-        memory_gib=32,
+        cpus=6,
+        memory_gib=16,
         disk_gib=256,
         swap_gib=None,
         admin_username="operator",
@@ -247,6 +249,10 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
         operator_stopped=False,
     )
     workspace_row = WorkspaceRow("workspace-a", "box", None, "/srv/workspace-a", "2026-01-03", "ws-a")
+    vm_state = stub_instance_state("vm", "admin")
+    workspace_state = stub_instance_state("workspace")
+    agent_state = stub_instance_state("agent")
+    session_state = stub_instance_state("session")
     vm_description = VMDescription(
         vm=VMDetailFacts.from_row(vm_row),
         platform="proxmox",
@@ -285,6 +291,7 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
         ),
         issues=tuple(VMIssue(VMInspectionIssueSource(source)) for source in VMInspectionIssueSource),
         diagnostics=(),
+        instance_state=vm_state,
     )
     workspace_description = WorkspaceDescription(
         WorkspaceDetailFacts.from_row(workspace_row),
@@ -293,6 +300,7 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
             WorkspaceSession("worker", "codex", "agent", "agent-a"),
         ),
         (WorkspaceAgent("agent-b", "aw-b"), WorkspaceAgent("agent-a", "aw-a")),
+        workspace_state,
     )
     agent_description = AgentDescription(
         "agent-a",
@@ -303,6 +311,7 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
         "2026-01-06",
         ("workspace-b", "workspace-a"),
         (AgentSession("worker-b", "codex", "workspace-b"), AgentSession("worker-a", "shell", "workspace-a")),
+        agent_state,
     )
     session_description = SessionDescription(
         "worker",
@@ -317,6 +326,7 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
         "2026-01-07",
         "2026-01-08",
         (SessionConsole("console-z", 5), SessionConsole("console-a", 2)),
+        session_state,
     )
     console_description = ConsoleDescription(
         "console-a",
@@ -339,7 +349,7 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
     monkeypatch.setattr(sessions, "session_description", lambda *_args, **_kwargs: session_description)
     monkeypatch.setattr(multi_console, "console_description", lambda *_args, **_kwargs: console_description)
 
-    expected_vm = {
+    expected_vm: dict[str, object] = {
         "vm": {
             "name": "box",
             "created_at": "2026-01-01",
@@ -359,7 +369,7 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
             "initialization_status": "partial",
             "tailscale_host": "100.64.0.9",
             "last_seen_at": "2026-01-02",
-            "provisioned_resources": {"cpus": 8, "memory_gib": 32, "disk_gib": 256, "swap_gib": None},
+            "provisioned_resources": {"cpus": 6, "memory_gib": 16, "disk_gib": 256, "swap_gib": None},
             "live_resources": {
                 "cpus": "8",
                 "load_average": "0.1 0.2 0.3",
@@ -373,45 +383,56 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
                 "disk_used": "64 GiB",
                 "disk_percent": "25%",
             },
-            "agents": [
-                {"name": "agent-b", "linux_user": "aw-b", "grant_all": True, "grant_count": 2},
-                {"name": "agent-a", "linux_user": "aw-a", "grant_all": False, "grant_count": 1},
-            ],
-            "workspaces": [
-                {
-                    "name": "workspace-b",
-                    "path": "/srv/b",
-                    "sessions": [
-                        {"name": "admin", "template": "shell", "mode": "admin", "agent_name": None},
-                        {"name": "worker", "template": "codex", "mode": "agent", "agent_name": "agent-a"},
-                    ],
-                }
-            ],
+            "agents": cast(
+                "object",
+                [
+                    {"name": "agent-b", "linux_user": "aw-b", "grant_all": True, "grant_count": 2},
+                    {"name": "agent-a", "linux_user": "aw-a", "grant_all": False, "grant_count": 1},
+                ],
+            ),
+            "workspaces": cast(
+                "object",
+                [
+                    {
+                        "name": "workspace-b",
+                        "path": "/srv/b",
+                        "sessions": [
+                            {"name": "admin", "template": "shell", "mode": "admin", "agent_name": None},
+                            {"name": "worker", "template": "codex", "mode": "agent", "agent_name": "agent-a"},
+                        ],
+                    }
+                ],
+            ),
             "events": [
                 {"created_at": "2026-01-04", "event": "provisioning_started", "detail": None},
                 {"created_at": "2026-01-05", "event": "init_complete", "detail": None},
             ],
+            "instance_state": instance_state_data(vm_state),
         },
         "issues": [
             {"source": source, "code": "unavailable"}
             for source in ("site_lookup", "preflight", "secret_resolution", "platform_status")
         ],
     }
-    expected_workspace = {
+    expected_workspace: dict[str, object] = {
         "workspace": {
             "name": "workspace-a",
             "vm_name": "box",
             "template": None,
             "path": "/srv/workspace-a",
             "created_at": "2026-01-03",
-            "sessions": [
-                {"name": "admin", "template": "shell", "mode": "admin", "agent_name": None},
-                {"name": "worker", "template": "codex", "mode": "agent", "agent_name": "agent-a"},
-            ],
+            "sessions": cast(
+                "object",
+                [
+                    {"name": "admin", "template": "shell", "mode": "admin", "agent_name": None},
+                    {"name": "worker", "template": "codex", "mode": "agent", "agent_name": "agent-a"},
+                ],
+            ),
             "agents": [{"name": "agent-b", "linux_user": "aw-b"}, {"name": "agent-a", "linux_user": "aw-a"}],
+            "instance_state": instance_state_data(workspace_state),
         }
     }
-    expected_agent = {
+    expected_agent: dict[str, object] = {
         "agent": {
             "name": "agent-a",
             "vm_name": "box",
@@ -424,9 +445,10 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
                 {"name": "worker-b", "template": "codex", "workspace_name": "workspace-b"},
                 {"name": "worker-a", "template": "shell", "workspace_name": "workspace-a"},
             ],
+            "instance_state": instance_state_data(agent_state),
         }
     }
-    expected_session = {
+    expected_session: dict[str, object] = {
         "session": {
             "name": "worker",
             "workspace_name": "workspace-a",
@@ -443,9 +465,10 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
                 {"console_name": "console-z", "position": 5},
                 {"console_name": "console-a", "position": 2},
             ],
+            "instance_state": instance_state_data(session_state),
         }
     }
-    expected_console = {
+    expected_console: dict[str, object] = {
         "console": {
             "name": "console-a",
             "vm_name": "box",
@@ -562,6 +585,7 @@ def test_session_json_status_repairs_and_no_status_are_preserved(
 
 def test_session_describe_json_positive_and_stopped_pid_with_degraded_template(
     db: Database,
+    make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Describe repairs a positive PID, maps PID_STOPPED to null, and leaks no fallback error."""
@@ -574,7 +598,9 @@ def test_session_describe_json_positive_and_stopped_pid_with_degraded_template(
     db.add_console_session("zeta", "stopped", [])
     db.add_console_session("zeta", "live", [])
     db.add_console_session("alpha", "live", [])
-    config = object()
+    db._conn.execute("UPDATE sessions SET template = 'missing-template'")
+    db._conn.commit()
+    config = make_config()
     marker = "unresolvable-template-sensitive-error"
     monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: config)
     monkeypatch.setattr(command, "get_db", lambda: db)
@@ -618,6 +644,13 @@ def test_session_describe_json_positive_and_stopped_pid_with_degraded_template(
     )
     assert marker.encode() not in live.stdout_bytes
     assert b"secret-boot-describe" not in live.stdout_bytes
+    session_state = live_record["instance_state"]
+    assert session_state["declarations"]["session"]["current"] == {
+        "status": "unresolved",
+        "selection": {"kind": "session-template", "name": "missing-template"},
+        "reason": "missing-selection",
+    }
+    assert session_state["lifecycle_evidence"] == []
     assert live_record["consoles"] == [
         {"console_name": "alpha", "position": 0},
         {"console_name": "zeta", "position": 1},
@@ -637,27 +670,24 @@ def test_session_describe_json_positive_and_stopped_pid_with_degraded_template(
 @pytest.mark.parametrize("failure", ["broken-registry", "unresolvable-template"])
 def test_session_list_and_describe_degrade_harness_integration_without_error_text(
     db: Database,
+    make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
     failure: str,
 ) -> None:
     """Both actual Typer projections use null for display-only config failures."""
     from agentworks.cli.commands import session as command
-    from agentworks.errors import ConfigError
     from agentworks.sessions import manager
 
     _seed_session_rows(db)
     marker = f"{failure}-sensitive-detail"
-    monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
+    config = make_config()
+    monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: config)
     monkeypatch.setattr(command, "get_db", lambda: db)
     if failure == "broken-registry":
         monkeypatch.setattr(manager, "_display_registry", lambda _config: None)
     else:
-        monkeypatch.setattr(manager, "_display_registry", lambda _config: object())
-
-        def cannot_resolve(*_args: object, **_kwargs: object) -> object:
-            raise ConfigError(marker)
-
-        monkeypatch.setattr("agentworks.sessions.templates.resolve_template", cannot_resolve)
+        db._conn.execute("UPDATE sessions SET template = 'missing-template'")
+        db._conn.commit()
 
     @contextlib.contextmanager
     def batch_boundary(*_args: object, **_kwargs: object) -> Iterator[None]:
@@ -734,7 +764,20 @@ def test_vm_describe_closed_status_and_slug_enums_reach_typer_json(
         None,
     )
     description = VMDescription(
-        VMDetailFacts.from_row(row), None, None, observed, disposition, slug, slug_state, None, (), (), (), (), ()
+        VMDetailFacts.from_row(row),
+        None,
+        None,
+        observed,
+        disposition,
+        slug,
+        slug_state,
+        None,
+        (),
+        (),
+        (),
+        (),
+        (),
+        stub_instance_state("vm", "admin"),
     )
     monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
     monkeypatch.setattr(vm, "get_db", lambda: object())
@@ -800,13 +843,28 @@ def test_vm_and_workspace_descriptions_snapshot_only_frozen_safe_scalars() -> No
     }
     vm_facts = VMDetailFacts.from_row(vm_row)
     live_facts = VMLiveResources.from_mapping(live_mapping)
-    vm_description = VMDescription(vm_facts, None, None, None, None, None, "unset", live_facts, (), (), (), (), ())
+    vm_description = VMDescription(
+        vm_facts,
+        None,
+        None,
+        None,
+        None,
+        None,
+        "unset",
+        live_facts,
+        (),
+        (),
+        (),
+        (),
+        (),
+        stub_instance_state("vm", "admin"),
+    )
     vm_before = vm_description_data(vm_description)
 
     workspace_row = WorkspaceRow("ws", "box", None, "/srv/ws", "2026-01-02", "ws-ws")
     workspace_facts = WorkspaceDetailFacts.from_row(workspace_row)
     workspace_list_row = WorkspaceListRow.from_row(workspace_row)
-    detail = WorkspaceDescription(workspace_facts, (), ())
+    detail = WorkspaceDescription(workspace_facts, (), (), stub_instance_state("workspace"))
     listing = WorkspaceListing((workspace_list_row,))
     workspace_before = (workspace_description_data(detail), workspace_listing_data(listing))
 

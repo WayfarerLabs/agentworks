@@ -50,6 +50,7 @@ def resolve_from_dict_with_provenance(
         LayerSourceKind,
         run_layer_fold,
     )
+    from agentworks.resources.resolved_spec import resolved_spec_default_paths
     from agentworks.vms.admin import AdminConfig
 
     selected = "default" if template_name is None else template_name
@@ -81,19 +82,7 @@ def resolve_from_dict_with_provenance(
         AdminConfig(name=selected),
         layers,
         _merge_template,
-        default_paths=(
-            ("username",),
-            ("shell",),
-            ("dotfiles_source",),
-            ("dotfiles_destination",),
-            ("dotfiles_install_cmd",),
-            ("mise_activate",),
-            ("mise_lockfile",),
-            ("mise_allow_unlocked",),
-            ("mise_install_before",),
-            ("mise_prune_on_reinit",),
-            ("git_force_safe_directory",),
-        ),
+        default_paths=resolved_spec_default_paths(AdminConfig),
         default_resource_kind="admin-template",
         default_name=selected,
     )

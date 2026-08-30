@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, assert_never
 
@@ -36,6 +36,31 @@ class Status(Enum):
     FAIL = "fail"
 
 
+class InstanceStateHealthFactType(StrEnum):
+    """Closed tags for instance-state facts attached to doctor checks."""
+
+    LIFECYCLE_COMPARISON = "lifecycle-comparison"
+    COVERAGE = "coverage"
+    MALFORMED_RECORD = "malformed-record"
+    ORPHAN_RECORD = "orphan-record"
+    UNCONSUMED_RECORD = "unconsumed-record"
+
+
+@dataclass(frozen=True, slots=True)
+class InstanceStateHealthFact:
+    """Value-free machine facts for one instance-state doctor outcome."""
+
+    fact_type: InstanceStateHealthFactType
+    instance_kind: str | None = None
+    instance_name: str | None = None
+    record_type: str | None = None
+    record_key: str | None = None
+    payload_version: int | None = None
+    recorded_at: str | None = None
+    comparison: str | None = None
+    owner_exists: bool | None = None
+
+
 @dataclass
 class HealthCheck:
     name: str
@@ -46,6 +71,7 @@ class HealthCheck:
     CLI surface so the operator sees actionable next steps without
     cramming everything into one parenthetical."""
     secret_preview: ResolutionPreview | None = None
+    instance_state: InstanceStateHealthFact | None = None
 
 
 @dataclass
@@ -183,6 +209,19 @@ def health_check_data(check: HealthCheck) -> JsonObject:
         from agentworks.secrets.preview import preview_data
 
         data["secret_preview"] = preview_data(check.secret_preview)
+    if check.instance_state is not None:
+        fact = check.instance_state
+        data["instance_state"] = {
+            "fact_type": fact.fact_type.value,
+            "instance_kind": fact.instance_kind,
+            "instance_name": fact.instance_name,
+            "record_type": fact.record_type,
+            "record_key": fact.record_key,
+            "payload_version": fact.payload_version,
+            "recorded_at": fact.recorded_at,
+            "comparison": fact.comparison,
+            "owner_exists": fact.owner_exists,
+        }
     return data
 
 
@@ -427,7 +466,7 @@ def run_checks(
         report.groups.append(_check_secrets(config, registry, tty_access=tty_access))
     else:
         report.groups.append(_skipped_group("Secrets", "Declared secrets"))
-    report.groups.append(_check_database())
+    report.groups.append(_check_database(config))
 
     if completion_version is not None:
         report.groups.append(_check_completions(completion_version))
@@ -814,8 +853,8 @@ def _build_doctor_registry(
     caught_errors = (ConfigError, StateError, ValidationError)
     try:
         return build_registry(config, manifests=manifests), None
-    except caught_errors as error:
-        live_failure = error
+    except caught_errors:
+        pass
 
     try:
         declared_registry = build_registry(
@@ -844,8 +883,7 @@ def _build_doctor_registry(
     return declared_registry, HealthCheck(
         "Live resource coverage",
         Status.FAIL,
-        str(live_failure),
-        hint=live_failure.hint,
+        "not checked (database publication failed; see the Database group)",
     )
 
 
@@ -982,10 +1020,10 @@ def _check_secrets(
     return g
 
 
-def _check_database() -> HealthGroup:
+def _check_database(config: Config | None) -> HealthGroup:
     from agentworks.doctor_state import check_database
 
-    return check_database()
+    return check_database(config)
 
 
 def _check_completions(current_version: str) -> HealthGroup:

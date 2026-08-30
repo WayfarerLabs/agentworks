@@ -21,12 +21,14 @@ KIND_REGISTRY`` populates the registry.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from agentworks.resources.reference import ResourceReference
+    from agentworks.resources.registry import Registry
+    from agentworks.resources.resolved_spec import ResolvedSpec
     from agentworks.topics import TopicProse
 
 
@@ -187,6 +189,18 @@ class ResourceKind(Protocol):
     # chain's names and reachability) are the owning subsystem's job,
     # run from ``bootstrap.build_registry`` after finalize -- config is
     # a setting, not a resource, and the Registry never sees it.
+
+
+@runtime_checkable
+class ResolvedSpecKind(Protocol):
+    """Optional kind hook for concrete template inspection.
+
+    Domain handlers own their imports and resolution. Framework inspection
+    detects this separate protocol at runtime, so unrelated declarable and
+    capability kinds carry no meaningless hook.
+    """
+
+    def resolve_for_show(self, registry: Registry, name: str) -> ResolvedSpec: ...
 
 
 class NoUnreferencedDefaultError(Exception):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, cast
 
 from agentworks import output
 from agentworks.db import SYSTEM_SLUG_KEY, VMStatus
@@ -24,9 +24,12 @@ from .boundary import _platform_ops_ctx
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.db import Database, VMRow
+    from agentworks.db import Database, DesiredOverlayRecord, InstanceStateInspection, VMRow
+    from agentworks.instance_description import InstanceStateDescription
     from agentworks.machine_output import JsonObject
+    from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.vms.applied_state import SSHAppliedState
 
 # NAME-column truncation cap for ``vm list``, derived from the VM-name cap so
 # the two cannot drift: a valid name (<= MAX_VM_NAME_LENGTH) never truncates,
@@ -66,6 +69,7 @@ class VMInspectionIssueSource(StrEnum):
 # by the issue's source could not report. Every issue this module raises is that
 # outcome, so the JSON code is a constant rather than a per-issue fact.
 _VM_ISSUE_CODE_UNAVAILABLE = "unavailable"
+_HARDWARE_REQUEST_EVIDENCE_KEY = "hardware-request"
 
 
 @dataclass(frozen=True)
@@ -226,6 +230,7 @@ class VMDescription:
     events: tuple[VMDetailEvent, ...]
     issues: tuple[VMIssue, ...]
     diagnostics: tuple[VMDiagnostic, ...]
+    instance_state: InstanceStateDescription
 
 
 def vm_listing_data(listing: VMListing) -> JsonObject:
@@ -253,7 +258,7 @@ def vm_description_data(description: VMDescription) -> JsonObject:
     """Project VM detail facts into the closed JSON v1 shape."""
     vm = description.vm
     live_resources = description.live_resources
-    return {
+    data: JsonObject = {
         "vm": {
             "name": vm.name,
             "created_at": vm.created_at,
@@ -334,6 +339,11 @@ def vm_description_data(description: VMDescription) -> JsonObject:
         },
         "issues": [_project_vm_issue(issue) for issue in description.issues],
     }
+    from agentworks.instance_description import instance_state_data
+
+    vm_data = cast("JsonObject", data["vm"])
+    vm_data["instance_state"] = instance_state_data(description.instance_state)
+    return data
 
 
 def _project_vm_issue(issue: VMIssue) -> JsonObject:
@@ -436,7 +446,6 @@ def vm_description(
 ) -> VMDescription:
     """Collect safe VM detail facts, degrading bounded live reads to issues."""
     import agentworks.vms.manager as _mgr
-    from agentworks.bootstrap import load_request_registry
     from agentworks.capabilities.base import RunContext
     from agentworks.orchestration.readiness import preflight_all
     from agentworks.orchestration.secrets import secret_union
@@ -445,7 +454,6 @@ def vm_description(
     from agentworks.vms.nodes import live_vm_node
     from agentworks.vms.sites import lookup_site
 
-    vm = _require_vm(db, name)
     issues: list[VMIssue] = []
     diagnostics: list[VMDiagnostic] = []
     platform_name: str | None = None
@@ -454,7 +462,62 @@ def vm_description(
     status_disposition: str | None = None
     live_resources: VMLiveResources | None = None
 
-    registry = load_request_registry(config, live_database=db)
+    with db.snapshot():
+        vm = _require_vm(db, name)
+        from agentworks.instance_description import load_instance_description_registry
+
+        registry = load_instance_description_registry(db, config, "vm", name)
+        inspection = db.instance_state.inspect_owner_state("vm", name)
+        instance_state, applied_ssh = _vm_instance_state(registry, vm, inspection)
+
+        stored_slug = db.get_setting(SYSTEM_SLUG_KEY)
+        if stored_slug is None:
+            system_slug = None
+            system_slug_state = "unset"
+        elif stored_slug == "":
+            system_slug = None
+            system_slug_state = "declined"
+        else:
+            system_slug = stored_slug
+            system_slug_state = "set"
+
+        agents = tuple(
+            VMDetailAgent(
+                name=agent.name,
+                linux_user=agent.linux_user,
+                grant_all=agent.grant_all,
+                grant_count=db.count_agent_grants(agent.name),
+            )
+            for agent in db.list_agents(vm_name=name)
+        )
+        workspaces = tuple(
+            VMDetailWorkspace(
+                name=workspace.name,
+                path=workspace.workspace_path,
+                sessions=tuple(
+                    VMDetailSession(
+                        name=session.name,
+                        template=session.template,
+                        mode=project_session_mode(session.mode),
+                        agent_name=session.agent_name,
+                    )
+                    for session in db.list_sessions(workspace_name=workspace.name)
+                ),
+            )
+            for workspace in db.list_workspaces(vm_name=name)
+        )
+        events = tuple(
+            VMDetailEvent(created_at=event.created_at, event=event.event, detail=event.detail)
+            for event in db.list_vm_events(name)
+        )
+        vm_facts = VMDetailFacts.from_row(vm)
+
+    instance_state = _add_current_ssh_comparison(
+        instance_state,
+        vm.name,
+        config,
+        applied_ssh,
+    )
     try:
         site_decl = lookup_site(vm.site, registry)
         platform_name = site_decl.platform.name
@@ -525,48 +588,8 @@ def vm_description(
         if raw_live_resources is not None:
             live_resources = VMLiveResources.from_mapping(raw_live_resources)
 
-    stored_slug = db.get_setting(SYSTEM_SLUG_KEY)
-    if stored_slug is None:
-        system_slug = None
-        system_slug_state = "unset"
-    elif stored_slug == "":
-        system_slug = None
-        system_slug_state = "declined"
-    else:
-        system_slug = stored_slug
-        system_slug_state = "set"
-
-    agents = tuple(
-        VMDetailAgent(
-            name=agent.name,
-            linux_user=agent.linux_user,
-            grant_all=agent.grant_all,
-            grant_count=db.count_agent_grants(agent.name),
-        )
-        for agent in db.list_agents(vm_name=name)
-    )
-    workspaces = tuple(
-        VMDetailWorkspace(
-            name=workspace.name,
-            path=workspace.workspace_path,
-            sessions=tuple(
-                VMDetailSession(
-                    name=session.name,
-                    template=session.template,
-                    mode=project_session_mode(session.mode),
-                    agent_name=session.agent_name,
-                )
-                for session in db.list_sessions(workspace_name=workspace.name)
-            ),
-        )
-        for workspace in db.list_workspaces(vm_name=name)
-    )
-    events = tuple(
-        VMDetailEvent(created_at=event.created_at, event=event.event, detail=event.detail)
-        for event in db.list_vm_events(name)
-    )
     return VMDescription(
-        vm=VMDetailFacts.from_row(vm),
+        vm=vm_facts,
         platform=platform_name,
         backend=backend,
         observed_status=observed_status,
@@ -579,122 +602,357 @@ def vm_description(
         events=events,
         issues=tuple(issues),
         diagnostics=tuple(diagnostics),
+        instance_state=instance_state,
+    )
+
+
+def _vm_instance_state(
+    registry: Registry,
+    vm: VMRow,
+    inspection: InstanceStateInspection,
+) -> tuple[InstanceStateDescription, SSHAppliedState | None]:
+    """Collect same-snapshot VM declaration and lifecycle evidence."""
+    from agentworks.db import AppliedStateKey
+    from agentworks.errors import NotFoundError, StateError
+    from agentworks.instance_description import (
+        ComparisonDifference,
+        DeclarationSlot,
+        InstanceComparison,
+        InstanceSpec,
+        InstanceStateDescription,
+        InstanceStateIssue,
+        InstanceStateIssueCode,
+        LifecycleEvidence,
+        UnconsumedRecord,
+        inspected_desired_record,
+        inspection_metadata_facts,
+        malformed_desired_record_present,
+    )
+    from agentworks.instance_specs import (
+        UnsupportedStoredOverlayError,
+        VMInstanceOverlays,
+        decode_stored_vm_overlays,
+    )
+    from agentworks.resources.access import ResourceIdentity
+    from agentworks.resources.resolved_spec import (
+        ResolvedSpec,
+        SpecResolution,
+        UnresolvedSpec,
+        project_resolved_spec,
+    )
+    from agentworks.vms import instance_overlay as vm_codec
+    from agentworks.vms.admin_templates import resolve_template_with_provenance as resolve_admin
+    from agentworks.vms.applied_state import (
+        UnsupportedAppliedStateVersionError,
+        UnverifiableSSHAppliedState,
+        VerifiedSSHAppliedState,
+        decode_hardware_provenance,
+        decode_ssh_identity,
+    )
+    from agentworks.vms.templates import resolve_template_with_provenance as resolve_vm
+
+    unconsumed, metadata_issues = inspection_metadata_facts(inspection)
+    unconsumed_facts = list(unconsumed)
+    issues = list(metadata_issues)
+    record = inspected_desired_record(inspection)
+    overlays: VMInstanceOverlays | None = None
+    desired_unavailable: Literal["malformed", "unsupported-version"] | None = None
+    if malformed_desired_record_present(inspection):
+        desired_unavailable = "malformed"
+    elif record is not None:
+        try:
+            overlays = decode_stored_vm_overlays(record)
+        except UnsupportedStoredOverlayError:
+            desired_unavailable = "unsupported-version"
+            issues.append(InstanceStateIssue(InstanceStateIssueCode.INSTANCE_SPEC_UNSUPPORTED))
+        except StateError:
+            desired_unavailable = "malformed"
+            issues.append(InstanceStateIssue(InstanceStateIssueCode.INSTANCE_SPEC_MALFORMED))
+
+    vm_selection = ResourceIdentity("vm-template", "default" if vm.template is None else vm.template)
+    admin_selection = ResourceIdentity(
+        "admin-template",
+        "default" if vm.admin_template is None else vm.admin_template,
+    )
+
+    current_vm: SpecResolution
+    current_admin: SpecResolution
+    if desired_unavailable is not None:
+        vm_spec = admin_spec = InstanceSpec("unavailable", reason=desired_unavailable)
+        current_vm = UnresolvedSpec(vm_selection, "instance-spec-unavailable")
+        current_admin = UnresolvedSpec(admin_selection, "instance-spec-unavailable")
+    else:
+        vm_overlay = None if overlays is None else overlays.vm
+        admin_overlay = None if overlays is None else overlays.admin
+        if vm_overlay is not None or admin_overlay is not None:
+            assert record is not None
+        vm_spec = (
+            InstanceSpec("absent")
+            if vm_overlay is None
+            else InstanceSpec(
+                "present",
+                recorded_at=cast("DesiredOverlayRecord", record).recorded_at,
+                spec=vm_overlay.payload.value,
+            )
+        )
+        admin_spec = (
+            InstanceSpec("absent")
+            if admin_overlay is None
+            else InstanceSpec(
+                "present",
+                recorded_at=cast("DesiredOverlayRecord", record).recorded_at,
+                spec=vm_codec.encode_admin_overlay(admin_overlay),
+            )
+        )
+        try:
+            current_vm = project_resolved_spec(
+                resolve_vm(
+                    registry,
+                    vm.template,
+                    overlay=None if vm_overlay is None else vm_overlay.declaration,
+                    instance_name=vm.name,
+                ),
+                vm_selection,
+            )
+        except NotFoundError:
+            current_vm = UnresolvedSpec(vm_selection, "missing-selection")
+            issues.append(InstanceStateIssue(InstanceStateIssueCode.CURRENT_DECLARATION_UNRESOLVED, slot="vm"))
+        try:
+            current_admin = project_resolved_spec(
+                resolve_admin(
+                    registry,
+                    vm.admin_template,
+                    overlay=admin_overlay,
+                    instance_name=vm.name,
+                ),
+                admin_selection,
+            )
+        except NotFoundError:
+            current_admin = UnresolvedSpec(admin_selection, "missing-selection")
+            issues.append(InstanceStateIssue(InstanceStateIssueCode.CURRENT_DECLARATION_UNRESOLVED, slot="admin"))
+
+    applied_by_key = {item.record.key: item.record for item in inspection.applied_slices}
+    malformed_applied_keys = {
+        item.metadata.record_key
+        for item in inspection.malformed_records
+        if item.metadata.record_type == "applied-state"
+    }
+    lifecycle_evidence: list[LifecycleEvidence] = []
+    comparisons: list[InstanceComparison] = []
+
+    hardware = applied_by_key.get(AppliedStateKey.HARDWARE_PROVENANCE)
+    if hardware is None:
+        status: Literal["not-recorded", "unavailable"] = (
+            "unavailable" if AppliedStateKey.HARDWARE_PROVENANCE.value in malformed_applied_keys else "not-recorded"
+        )
+        lifecycle_evidence.append(LifecycleEvidence(_HARDWARE_REQUEST_EVIDENCE_KEY, status))
+        if status == "not-recorded":
+            comparisons.append(InstanceComparison(_HARDWARE_REQUEST_EVIDENCE_KEY, "not-recorded"))
+    else:
+        try:
+            decode_hardware_provenance(hardware)
+        except UnsupportedAppliedStateVersionError:
+            lifecycle_evidence.append(LifecycleEvidence(_HARDWARE_REQUEST_EVIDENCE_KEY, "unavailable"))
+            unconsumed_facts.append(
+                UnconsumedRecord(
+                    "applied-state",
+                    hardware.key.value,
+                    hardware.payload.payload_version,
+                    hardware.recorded_at,
+                )
+            )
+            issues.append(
+                InstanceStateIssue(
+                    InstanceStateIssueCode.APPLIED_RECORD_UNSUPPORTED,
+                    record_key=hardware.key.value,
+                )
+            )
+        except StateError:
+            lifecycle_evidence.append(LifecycleEvidence(_HARDWARE_REQUEST_EVIDENCE_KEY, "unavailable"))
+            issues.append(
+                InstanceStateIssue(
+                    InstanceStateIssueCode.APPLIED_RECORD_MALFORMED,
+                    record_key=hardware.key.value,
+                )
+            )
+        else:
+            values = {
+                "cpus": vm.cpus,
+                "memory": vm.memory_gib,
+                "disk": vm.disk_gib,
+                "swap": vm.swap_gib,
+            }
+            if not all(type(value) is int for value in values.values()):
+                lifecycle_evidence.append(LifecycleEvidence(_HARDWARE_REQUEST_EVIDENCE_KEY, "unavailable"))
+                issues.append(
+                    InstanceStateIssue(
+                        InstanceStateIssueCode.LIFECYCLE_EVIDENCE_UNAVAILABLE,
+                        record_key=hardware.key.value,
+                    )
+                )
+            else:
+                recorded_values = cast("JsonObject", values)
+                lifecycle_evidence.append(
+                    LifecycleEvidence(
+                        _HARDWARE_REQUEST_EVIDENCE_KEY,
+                        "recorded",
+                        recorded_at=hardware.recorded_at,
+                        operation=hardware.operation,
+                        value=recorded_values,
+                    )
+                )
+                if isinstance(current_vm, ResolvedSpec):
+                    differences = tuple(
+                        ComparisonDifference(field, cast("int", recorded), current_vm.spec[field])
+                        for field, recorded in values.items()
+                        if recorded != current_vm.spec[field]
+                    )
+                    comparisons.append(
+                        InstanceComparison(
+                            _HARDWARE_REQUEST_EVIDENCE_KEY,
+                            "drift" if differences else "match",
+                            differences,
+                        )
+                    )
+                else:
+                    issues.append(
+                        InstanceStateIssue(
+                            InstanceStateIssueCode.CURRENT_DECLARATION_UNRESOLVED,
+                            slot="vm",
+                            record_key=hardware.key.value,
+                        )
+                    )
+
+    ssh_applied: SSHAppliedState | None = None
+    ssh_record = applied_by_key.get(AppliedStateKey.SSH_IDENTITY)
+    if ssh_record is None:
+        status = "unavailable" if AppliedStateKey.SSH_IDENTITY.value in malformed_applied_keys else "not-recorded"
+        lifecycle_evidence.append(LifecycleEvidence(AppliedStateKey.SSH_IDENTITY.value, status))
+        if status == "not-recorded":
+            comparisons.append(InstanceComparison(AppliedStateKey.SSH_IDENTITY.value, "not-recorded"))
+    else:
+        try:
+            ssh_applied = decode_ssh_identity(ssh_record)
+        except UnsupportedAppliedStateVersionError:
+            lifecycle_evidence.append(LifecycleEvidence(AppliedStateKey.SSH_IDENTITY.value, "unavailable"))
+            unconsumed_facts.append(
+                UnconsumedRecord(
+                    "applied-state",
+                    ssh_record.key.value,
+                    ssh_record.payload.payload_version,
+                    ssh_record.recorded_at,
+                )
+            )
+            issues.append(
+                InstanceStateIssue(
+                    InstanceStateIssueCode.APPLIED_RECORD_UNSUPPORTED,
+                    record_key=ssh_record.key.value,
+                )
+            )
+        except StateError:
+            lifecycle_evidence.append(LifecycleEvidence(AppliedStateKey.SSH_IDENTITY.value, "unavailable"))
+            issues.append(
+                InstanceStateIssue(
+                    InstanceStateIssueCode.APPLIED_RECORD_MALFORMED,
+                    record_key=ssh_record.key.value,
+                )
+            )
+        else:
+            if isinstance(ssh_applied, VerifiedSSHAppliedState):
+                ssh_value: JsonObject = {
+                    "status": "verified",
+                    "private_key_ref": ssh_applied.private_key_ref,
+                    "fingerprint": ssh_applied.fingerprint,
+                }
+            elif isinstance(ssh_applied, UnverifiableSSHAppliedState):
+                ssh_value = {
+                    "status": "unverifiable",
+                    "private_key_ref": ssh_applied.private_key_ref,
+                }
+            else:
+                raise AssertionError("unexpected SSH applied-state carrier")
+            lifecycle_evidence.append(
+                LifecycleEvidence(
+                    ssh_record.key.value,
+                    "recorded",
+                    recorded_at=ssh_record.recorded_at,
+                    operation=ssh_record.operation,
+                    value=ssh_value,
+                )
+            )
+
+    state = InstanceStateDescription(
+        declarations=(
+            DeclarationSlot("vm", vm_selection, vm_spec, current_vm),
+            DeclarationSlot("admin", admin_selection, admin_spec, current_admin),
+        ),
+        lifecycle_evidence=tuple(lifecycle_evidence),
+        comparisons=tuple(comparisons),
+        unconsumed_records=tuple(unconsumed_facts),
+        issues=tuple(issues),
+    )
+    return state, ssh_applied
+
+
+def _add_current_ssh_comparison(
+    state: InstanceStateDescription,
+    vm_name: str,
+    config: Config,
+    applied: SSHAppliedState | None,
+) -> InstanceStateDescription:
+    """Add the host-read SSH comparison after the database snapshot closes."""
+    if applied is None:
+        return state
+    from dataclasses import replace
+
+    from agentworks.instance_description import (
+        InstanceComparison,
+        InstanceStateIssue,
+        InstanceStateIssueCode,
+    )
+    from agentworks.ssh_identity import SSHIdentityReadError, read_private_ssh_identity
+    from agentworks.vms.applied_state import (
+        UnverifiableSSHAppliedState,
+        compare_vm_ssh_identity_evidence,
+    )
+
+    if isinstance(applied, UnverifiableSSHAppliedState):
+        return replace(
+            state,
+            comparisons=(
+                *state.comparisons,
+                InstanceComparison("ssh-identity", "unverifiable"),
+            ),
+        )
+
+    try:
+        current = read_private_ssh_identity(config.operator.ssh_private_key)
+    except SSHIdentityReadError:
+        return replace(
+            state,
+            issues=(
+                *state.issues,
+                InstanceStateIssue(
+                    InstanceStateIssueCode.CURRENT_IDENTITY_UNAVAILABLE,
+                    record_key="ssh-identity",
+                ),
+            ),
+        )
+    comparison = compare_vm_ssh_identity_evidence(vm_name, current, applied)
+    return replace(
+        state,
+        comparisons=(
+            *state.comparisons,
+            InstanceComparison("ssh-identity", comparison.state.value),
+        ),
     )
 
 
 def render_vm_description(description: VMDescription) -> None:
     """Render VM detail facts with the legacy human layout."""
-    vm = description.vm
-    for diagnostic in description.diagnostics:
-        error = diagnostic.error
-        output.warn(f"{error}" + (f"\n{error.hint}" if error.hint else ""))
+    from ._description_render import render_vm_description as render
 
-    site_platform = description.platform or "-"
-    backend_label = description.backend or "-"
-    status_label = description.observed_status or "-"
-    if description.status_disposition is not None:
-        status_label += f" ({description.status_disposition})"
-
-    output.info(f"Name:           {vm.name}")
-    output.info(f"Created:        {vm.created_at}")
-    output.info(f"Site:           {vm.site}")
-    output.info(f"Platform:       {site_platform}")
-    output.info(f"Backend:        {backend_label}")
-    output.info(f"Status:         {status_label}")
-    output.info(f"Hostname:       {vm.hostname}")
-    # The slug never shows in normal CLI output (vm list stays
-    # name-only); describe and doctor are its surfaces. The slug is
-    # install-level, so a VM created before it was set gets a marker:
-    # its hostname and backend names carry no prefix. A blank answer is
-    # a VALID one: declined ("(none)") renders distinctly from
-    # never-asked ("-").
-    slug = description.system_slug
-    slug_label = slug or ("(none)" if description.system_slug_state == "declined" else "-")
-    # Exact hostname comparison (the slug is immutable and the hostname is
-    # recorded as {slug}-{name}); a prefix test could false-negative on
-    # a pre-slug VM whose name happens to start with the slug.
-    if slug and vm.hostname != f"{slug}-{vm.name}":
-        slug_label += " (not applied to this VM)"
-    output.info(f"System Slug:    {slug_label}")
-    output.info(f"Template:       {vm.template or '-'}")
-    output.info(f"Admin User:     {vm.admin_username}")
-    output.info(f"Provisioning:   {vm.provisioning_status}")
-    output.info(f"Initialization: {vm.initialization_status}")
-    output.info(f"Tailscale IP:   {vm.tailscale_host or '-'}")
-
-    live = description.live_resources
-
-    if vm.cpus is not None or live is not None:
-        output.info(f"\n{'Resources':<16}{'Provisioned':<14}{'Current':<14}{'Used'}")
-        output.detail(
-            f"{'CPU':<16}"
-            f"{str(vm.cpus) if vm.cpus else '-':<14}"
-            f"{live.cpus if live else '-':<14}"
-            f"{'load ' + live.load_average if live else '-'}"
-        )
-        output.detail(
-            f"{'Memory':<16}"
-            f"{str(vm.memory_gib) + 'G' if vm.memory_gib else '-':<14}"
-            f"{live.memory_total if live else '-':<14}"
-            f"{live.memory_used + ' (' + live.memory_percent + ')' if live else '-'}"
-        )
-        output.detail(
-            f"{'Swap':<16}"
-            f"{str(vm.swap_gib) + 'G' if vm.swap_gib else '-':<14}"
-            f"{live.swap_total if live else '-':<14}"
-            f"{live.swap_used + ' (' + live.swap_percent + ')' if live else '-'}"
-        )
-        output.detail(
-            f"{'Disk':<16}"
-            f"{str(vm.disk_gib) + 'G' if vm.disk_gib else '-':<14}"
-            f"{live.disk_total if live else '-':<14}"
-            f"{live.disk_used + ' (' + live.disk_percent + ')' if live else '-'}"
-        )
-
-    if vm.last_seen_at:
-        output.info(f"Last Seen:      {vm.last_seen_at}")
-
-    # Agents on this VM
-    output.info(f"\nAgents ({len(description.agents)}):")
-    if description.agents:
-        for agent in description.agents:
-            grant_count = agent.grant_count
-            grant_label = "all" if agent.grant_all else str(grant_count)
-            output.detail(f"{agent.name}  (user: {agent.linux_user}, grants: {grant_label})")
-    else:
-        output.detail("(none)")
-
-    # Workspaces with sessions
-    output.info(f"\nWorkspaces ({len(description.workspaces)}):")
-    if description.workspaces:
-        for ws in description.workspaces:
-            output.detail(f"{ws.name}  ({ws.path})")
-            # Headerless sections carry the per-workspace session listing's
-            # indentation (was detail(indent=2)/detail(indent=3)): the
-            # "Sessions" line sits one level under the workspace, each
-            # session one level under that.
-            with output.section():
-                if ws.sessions:
-                    output.detail(f"Sessions ({len(ws.sessions)}):")
-                    with output.section():
-                        for s in ws.sessions:
-                            mode_label = (
-                                s.mode if s.mode == "unknown" else f"agent:{s.agent_name}" if s.agent_name else "admin"
-                            )
-                            output.detail(f"{s.name}  [{s.template}]  {mode_label}")
-                else:
-                    output.detail("(no sessions)")
-    else:
-        output.detail("(none)")
-
-    # Events
-    output.info(f"\nEvents ({len(description.events)}):")
-    if description.events:
-        for event in description.events:
-            evt_detail = f"  {event.detail}" if event.detail else ""
-            output.detail(f"{event.created_at}  {event.event}{evt_detail}")
-    else:
-        output.detail("(none)")
+    render(description)
 
 
 def describe_vm(

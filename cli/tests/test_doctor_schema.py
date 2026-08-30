@@ -8,12 +8,14 @@ import sqlite3
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
 
-from agentworks.db import LATEST_VERSION, Database, SessionMode
-from agentworks.doctor import HealthGroup, Status
+from agentworks.config import Config
+from agentworks.db import LATEST_VERSION, AppliedStateKey, Database, SessionMode, VersionedPayload
+from agentworks.doctor import HealthGroup, InstanceStateHealthFactType, Status
 from agentworks.doctor_state import (
     _live_resource_counts,
     _report_contents,
@@ -23,6 +25,11 @@ from agentworks.doctor_state import (
 )
 from agentworks.errors import StateError
 from agentworks.resources.live import LIVE_RESOURCE_KINDS
+from agentworks.ssh_identity import UnverifiableSSHIdentity, VerifiedSSHIdentity
+from agentworks.vms.applied_state import encode_ssh_identity
+
+_FINGERPRINT = f"SHA256:{'A' * 43}"
+_OTHER_FINGERPRINT = f"SHA256:{'E' * 43}"
 
 
 def _installed_agw() -> Path:
@@ -131,6 +138,266 @@ def test_doctor_warns_without_echoing_an_unexpected_vm_initialization_state(
     assert warning.message == "unexpected initialization state"
 
 
+def test_doctor_compares_fleet_ssh_evidence_with_one_configured_key_read(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = Path(db._conn.execute("PRAGMA database_list").fetchone()[2])
+    monkeypatch.setattr("agentworks.db.DB_PATH", database_path)
+    for name in ("alpha", "beta"):
+        db.insert_vm(name, site="local", hostname=name)
+        db.instance_state.replace_applied_slices(
+            "vm",
+            name,
+            "vm-create",
+            {AppliedStateKey.SSH_IDENTITY: encode_ssh_identity("/old/key", VerifiedSSHIdentity(_FINGERPRINT))},
+        )
+    reads = 0
+
+    def read_identity(path: Path) -> VerifiedSSHIdentity:
+        nonlocal reads
+        reads += 1
+        return VerifiedSSHIdentity(_OTHER_FINGERPRINT)
+
+    monkeypatch.setattr("agentworks.ssh_identity.read_private_ssh_identity", read_identity)
+    config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key=Path("/configured/key")))
+
+    group = check_database(cast("Config", config))
+
+    comparisons = [
+        check
+        for check in group.checks
+        if check.instance_state is not None
+        and check.instance_state.fact_type is InstanceStateHealthFactType.LIFECYCLE_COMPARISON
+    ]
+    assert reads == 1
+    assert [(check.instance_state.instance_name, check.status) for check in comparisons if check.instance_state] == [
+        ("alpha", Status.FAIL),
+        ("beta", Status.FAIL),
+    ]
+
+
+def test_doctor_missing_ssh_evidence_includes_an_action_hint(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = Path(db._conn.execute("PRAGMA database_list").fetchone()[2])
+    monkeypatch.setattr("agentworks.db.DB_PATH", database_path)
+    db.insert_vm("box", site="local", hostname="box")
+
+    group = check_database(None)
+
+    comparison = next(
+        check
+        for check in group.checks
+        if check.instance_state is not None
+        and check.instance_state.fact_type is InstanceStateHealthFactType.LIFECYCLE_COMPARISON
+        and check.instance_state.comparison == "not-recorded"
+    )
+    assert comparison.status is Status.WARN
+    assert comparison.hint is not None
+
+
+def test_doctor_keeps_independent_instance_state_facts_when_one_row_is_malformed(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = Path(db._conn.execute("PRAGMA database_list").fetchone()[2])
+    monkeypatch.setattr("agentworks.db.DB_PATH", database_path)
+    db.insert_vm("healthy", site="local", hostname="healthy")
+    db.insert_vm("broken", site="local", hostname="broken")
+    db.instance_state.replace_applied_slices(
+        "vm",
+        "healthy",
+        "vm-create",
+        {AppliedStateKey.SSH_IDENTITY: encode_ssh_identity("/old/key", VerifiedSSHIdentity(_FINGERPRINT))},
+    )
+    db.instance_state.replace_applied_slices(
+        "vm",
+        "broken",
+        "vm-create",
+        {AppliedStateKey.SSH_IDENTITY: encode_ssh_identity("/old/key", VerifiedSSHIdentity(_FINGERPRINT))},
+    )
+    db._conn.execute(  # noqa: SLF001
+        "UPDATE instance_records SET value_json = ? WHERE instance_name = 'broken'",
+        ("private-malformed-payload",),
+    )
+    db._conn.execute(  # noqa: SLF001
+        "INSERT INTO instance_records "
+        "(instance_kind, instance_name, record_type, record_key, payload_version, "
+        "value_json, recorded_at, operation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "agent",
+            "orphan",
+            "future/type",
+            "PRIVATE KEY",
+            9,
+            '{"private":"hidden-future-payload"}',
+            "2026-08-29T12:00:00Z",
+            None,
+        ),
+    )
+    db._conn.commit()  # noqa: SLF001
+    monkeypatch.setattr(
+        "agentworks.ssh_identity.read_private_ssh_identity",
+        lambda path: VerifiedSSHIdentity(_FINGERPRINT),
+    )
+    config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key=Path("/configured/key")))
+
+    group = check_database(cast("Config", config))
+
+    facts = [check.instance_state for check in group.checks if check.instance_state is not None]
+    assert {fact.fact_type for fact in facts} >= {
+        InstanceStateHealthFactType.LIFECYCLE_COMPARISON,
+        InstanceStateHealthFactType.MALFORMED_RECORD,
+        InstanceStateHealthFactType.ORPHAN_RECORD,
+        InstanceStateHealthFactType.UNCONSUMED_RECORD,
+    }
+    assert any(fact.instance_name == "healthy" and fact.comparison == "match" for fact in facts)
+    assert not any(fact.instance_name == "broken" and fact.comparison == "not-recorded" for fact in facts)
+    assert "private-malformed-payload" not in repr(group)
+    assert "hidden-future-payload" not in repr(group)
+
+
+def test_doctor_never_projects_unsafe_persisted_diagnostics(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = Path(db._conn.execute("PRAGMA database_list").fetchone()[2])
+    monkeypatch.setattr("agentworks.db.DB_PATH", database_path)
+    db.insert_vm("box", site="local", hostname="box")
+    db.instance_state.put_desired_overlay(
+        "vm",
+        "box",
+        VersionedPayload(2, {"vm": {"PRIVATE-RAW-KEY": "private-raw-value"}}),
+    )
+    db._conn.execute("PRAGMA ignore_check_constraints = ON")  # noqa: SLF001
+    db._conn.executemany(  # noqa: SLF001
+        "INSERT INTO instance_records "
+        "(instance_kind, instance_name, record_type, record_key, payload_version, "
+        "value_json, recorded_at, operation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            (
+                "vm",
+                "box",
+                "applied-state",
+                "ssh-identity",
+                1,
+                "{}",
+                "2026-08-29T12:00:00Z",
+                "vm-create\nforged-operation",
+            ),
+            (
+                "agent",
+                "orphan",
+                "future/type",
+                "PRIVATE KEY MATERIAL",
+                9,
+                "{}",
+                "2026-08-29T12:00:00Z",
+                None,
+            ),
+            (
+                "agent",
+                "victim' forged-owner",
+                "future/type",
+                "opaque",
+                9,
+                "{}",
+                "2026-08-29T12:00:00Z",
+                None,
+            ),
+        ],
+    )
+    db._conn.commit()  # noqa: SLF001
+
+    rendered = json.dumps(
+        [
+            {
+                "name": check.name,
+                "message": check.message,
+                "hint": check.hint,
+                "instance_state": None
+                if check.instance_state is None
+                else {
+                    "instance_name": check.instance_state.instance_name,
+                    "record_key": check.instance_state.record_key,
+                },
+            }
+            for check in check_database(None).checks
+        ]
+    )
+
+    for unsafe in (
+        "PRIVATE-RAW-KEY",
+        "private-raw-value",
+        "vm-create\nforged-operation",
+        "PRIVATE KEY MATERIAL",
+        "victim' forged-owner",
+    ):
+        assert unsafe not in rendered
+
+
+def test_doctor_inspects_records_without_config_and_reports_one_coverage_gap(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = Path(db._conn.execute("PRAGMA database_list").fetchone()[2])
+    monkeypatch.setattr("agentworks.db.DB_PATH", database_path)
+    db.insert_vm("box", site="local", hostname="box")
+    db.instance_state.replace_applied_slices(
+        "vm",
+        "box",
+        "vm-create",
+        {AppliedStateKey.SSH_IDENTITY: encode_ssh_identity("/old/key", VerifiedSSHIdentity(_FINGERPRINT))},
+    )
+    monkeypatch.setattr(
+        "agentworks.ssh_identity.read_private_ssh_identity",
+        lambda path: pytest.fail(f"unexpected key read: {path}"),
+    )
+
+    group = check_database(None)
+
+    coverage = [
+        check
+        for check in group.checks
+        if check.instance_state is not None and check.instance_state.fact_type is InstanceStateHealthFactType.COVERAGE
+    ]
+    assert len(coverage) == 1
+    assert coverage[0].status is Status.WARN
+
+
+def test_doctor_reports_legacy_unverifiable_evidence_without_parsing_current_key(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = Path(db._conn.execute("PRAGMA database_list").fetchone()[2])
+    monkeypatch.setattr("agentworks.db.DB_PATH", database_path)
+    db.insert_vm("box", site="local", hostname="box")
+    db.instance_state.replace_applied_slices(
+        "vm",
+        "box",
+        "vm-create",
+        {AppliedStateKey.SSH_IDENTITY: encode_ssh_identity("/old/key", UnverifiableSSHIdentity())},
+    )
+    monkeypatch.setattr(
+        "agentworks.ssh_identity.read_private_ssh_identity",
+        lambda path: pytest.fail(f"unexpected key read: {path}"),
+    )
+
+    group = check_database(None)
+
+    comparisons = [
+        check
+        for check in group.checks
+        if check.instance_state is not None
+        and check.instance_state.fact_type is InstanceStateHealthFactType.LIFECYCLE_COMPARISON
+    ]
+    assert [(check.status, check.instance_state.comparison) for check in comparisons if check.instance_state] == [
+        (Status.INFO, "unverifiable")
+    ]
+
+
 def test_doctor_reports_each_database_backed_live_resource_count(
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
@@ -150,7 +417,8 @@ def test_doctor_reports_each_database_backed_live_resource_count(
     for index in range(5):
         db.insert_console(f"console-{index}", "box")
 
-    counts = _live_resource_counts(db, db.list_vms())
+    vms = db.list_vms()
+    counts = _live_resource_counts(db, vms)
     assert set(counts) == LIVE_RESOURCE_KINDS
     assert counts == {
         "vm": 1,
@@ -163,7 +431,7 @@ def test_doctor_reports_each_database_backed_live_resource_count(
     warnings: list[str] = []
     monkeypatch.setattr("agentworks.output.warn", warnings.append)
     group = HealthGroup("Database")
-    _report_contents(group, db)
+    _report_contents(group, vms=vms, counts=counts)
 
     assert warnings == []
 

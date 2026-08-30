@@ -16,8 +16,10 @@ from agentworks.workspaces.manager._common import _guard_vm_status, _resolve_vm,
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.db import Database, WorkspaceRow
+    from agentworks.db import Database, InstanceStateInspection, WorkspaceRow
+    from agentworks.instance_description import InstanceStateDescription
     from agentworks.machine_output import JsonObject
+    from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.workspaces.template import WorkspaceTemplate
 
@@ -84,6 +86,7 @@ class WorkspaceDescription:
     workspace: WorkspaceDetailFacts
     sessions: tuple[WorkspaceSession, ...]
     agents: tuple[WorkspaceAgent, ...]
+    instance_state: InstanceStateDescription
 
 
 def workspace_listing_data(listing: WorkspaceListing) -> JsonObject:
@@ -104,7 +107,7 @@ def workspace_listing_data(listing: WorkspaceListing) -> JsonObject:
 def workspace_description_data(description: WorkspaceDescription) -> JsonObject:
     """Project workspace detail facts into the closed JSON v1 shape."""
     workspace = description.workspace
-    return {
+    data: JsonObject = {
         "workspace": {
             "name": workspace.name,
             "vm_name": workspace.vm_name,
@@ -123,6 +126,11 @@ def workspace_description_data(description: WorkspaceDescription) -> JsonObject:
             "agents": [{"name": agent.name, "linux_user": agent.linux_user} for agent in description.agents],
         },
     }
+    from agentworks.instance_description import instance_state_data
+
+    workspace_data = cast("JsonObject", data["workspace"])
+    workspace_data["instance_state"] = instance_state_data(description.instance_state)
+    return data
 
 
 def create_workspace(
@@ -295,31 +303,72 @@ def create_workspace(
             subprocess.run(["code", str(vscode_path)], check=False)
 
 
-def workspace_description(db: Database, name: str) -> WorkspaceDescription:
+def workspace_description(db: Database, config: Config, name: str) -> WorkspaceDescription:
     """Collect the ordered workspace detail facts without presentation."""
-    ws = db.get_workspace(name)
-    if ws is None:
-        raise NotFoundError(
-            f"workspace '{name}' not found",
-            entity_kind="workspace",
-            entity_name=name,
+    with db.snapshot():
+        ws = db.get_workspace(name)
+        if ws is None:
+            raise NotFoundError(
+                f"workspace '{name}' not found",
+                entity_kind="workspace",
+                entity_name=name,
+            )
+        from agentworks.instance_description import load_tolerant_instance_description_registry
+
+        registry = load_tolerant_instance_description_registry(db, config, "workspace", name)
+        inspection = db.instance_state.inspect_owner_state("workspace", name)
+        instance_state = _workspace_instance_state(registry, ws, inspection)
+
+        sessions = tuple(
+            WorkspaceSession(
+                name=session.name,
+                template=session.template,
+                mode=project_session_mode(session.mode),
+                agent_name=session.agent_name,
+            )
+            for session in db.list_sessions(workspace_name=name)
+        )
+        agents = tuple(
+            WorkspaceAgent(name=agent.name, linux_user=agent.linux_user)
+            for agent in db.list_agents(vm_name=ws.vm_name)
+            if db.has_any_grant(agent.name, name)
+        )
+        return WorkspaceDescription(
+            workspace=WorkspaceDetailFacts.from_row(ws),
+            sessions=sessions,
+            agents=agents,
+            instance_state=instance_state,
         )
 
-    sessions = tuple(
-        WorkspaceSession(
-            name=session.name,
-            template=session.template,
-            mode=project_session_mode(session.mode),
-            agent_name=session.agent_name,
-        )
-        for session in db.list_sessions(workspace_name=name)
+
+def _workspace_instance_state(
+    registry: Registry | None,
+    workspace: WorkspaceRow,
+    inspection: InstanceStateInspection,
+) -> InstanceStateDescription:
+    from agentworks.instance_description import single_declaration_instance_state
+    from agentworks.resources.access import ResourceIdentity
+    from agentworks.workspaces.templates import resolve_template_with_provenance
+
+    selection = ResourceIdentity(
+        "workspace-template",
+        "default" if workspace.template is None else workspace.template,
     )
-    agents = tuple(
-        WorkspaceAgent(name=agent.name, linux_user=agent.linux_user)
-        for agent in db.list_agents(vm_name=ws.vm_name)
-        if db.has_any_grant(agent.name, name)
+    return single_declaration_instance_state(
+        instance_kind="workspace",
+        selection=selection,
+        inspection=inspection,
+        resolve=(
+            None
+            if registry is None
+            else lambda overlay: resolve_template_with_provenance(
+                registry,
+                workspace.template,
+                overlay=cast("WorkspaceTemplate | None", overlay),
+                instance_name=workspace.name,
+            )
+        ),
     )
-    return WorkspaceDescription(workspace=WorkspaceDetailFacts.from_row(ws), sessions=sessions, agents=agents)
 
 
 def render_workspace_description(description: WorkspaceDescription) -> None:
@@ -331,6 +380,10 @@ def render_workspace_description(description: WorkspaceDescription) -> None:
     output.info(f"Template:   {template_name}")
     output.info(f"Path:       {ws.path}")
     output.info(f"Created:    {ws.created_at}")
+
+    from agentworks.instance_description import render_instance_state
+
+    render_instance_state(description.instance_state)
 
     # Sessions
     sessions = description.sessions
@@ -352,9 +405,9 @@ def render_workspace_description(description: WorkspaceDescription) -> None:
         output.detail("(none)")
 
 
-def describe_workspace(db: Database, name: str) -> None:
+def describe_workspace(db: Database, config: Config, name: str) -> None:
     """Show workspace details."""
-    render_workspace_description(workspace_description(db, name))
+    render_workspace_description(workspace_description(db, config, name))
 
 
 def workspace_listing(

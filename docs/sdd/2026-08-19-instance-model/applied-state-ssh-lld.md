@@ -1,7 +1,8 @@
 # R3 Applied State and SSH Identity: Low-Level Design
 
-- Status: Implemented and under review
+- Status: Implemented and merged
 - Date: 2026-08-28
+- Last revised: 2026-08-30
 - Requirements: R3 in `frd.md`
 - Architecture: `hla.md`, R3 applied state and SSH identity
 - Storage contract: `store-contract.md`
@@ -11,9 +12,10 @@
 ## Decision summary
 
 R3 adds two VM-owned, version-1 applied-state codecs outside `agentworks.db`: an empty marker
-proving that a successful create established the hardware values already stored on the VM row, and
-an SSH identity payload recording the configured private-key reference plus either its authoritative
-OpenSSH SHA-256 fingerprint or an explicit unverifiable marker.
+associating the hardware request already stored on the VM row with a successful create, and an SSH
+identity payload recording the configured private-key reference plus either its authoritative
+OpenSSH SHA-256 fingerprint or an explicit unverifiable marker. The hardware request is what
+Agentworks expected the platform to create. It is not a provider observation of realized hardware.
 
 A standard-library leaf parser extracts the one public blob from a native `openssh-key-v1` private
 envelope without decrypting its private section. The same fingerprint function parses the configured
@@ -24,9 +26,10 @@ evidence. A malformed claimed-native envelope or unavailable file is a typed err
 evidence.
 
 VM initialization returns explicit authorized-key proof. Its terminal checkpoint writes final init
-status, the terminal event, and only proven applied slices inside one SQLite transaction. Create
-records hardware plus SSH proof; reinit records only SSH proof. Failed lifecycle operations record
-no new slices.
+status, the terminal event, and only successful configuration-snapshot slices whose required
+evidence is satisfied, inside one SQLite transaction. Create records the hardware request plus the
+successfully written SSH identity; reinit records only the successfully written SSH identity. Failed
+lifecycle operations record no new slices.
 
 Operational SSH comparison is a separate VM-domain service invoked at canonical SSH composition
 roots before transport construction. It returns structural not-recorded, unverifiable, match, or
@@ -177,7 +180,7 @@ The private parser never reads the public path or a sibling path. Runtime code n
 
 ## Applied payload codecs
 
-### Hardware provenance, version 1
+### Hardware-provenance storage marker, version 1
 
 The typed carrier has no fields and encodes as an empty object:
 
@@ -186,7 +189,11 @@ The typed carrier has no fields and encodes as an empty object:
 ```
 
 The record envelope already carries operation and timestamp. CPU, memory, disk, and swap remain on
-the VM row and are not copied into this marker. The decoder accepts version 1 with exactly an empty
+the VM row and are not copied into this marker. Together, the marker and row values record the
+provisioning request used by a successful create. They do not claim provider-realized hardware or
+detect normalization or inconsistency after the request leaves Agentworks. R5 projects this private
+`hardware-provenance` storage key as public `hardware-request` lifecycle evidence and compares the
+recorded request with the current declaration. The decoder accepts version 1 with exactly an empty
 object and rejects every other version or field.
 
 ### SSH identity, version 1
@@ -313,7 +320,7 @@ stable proof into slices and then performs one terminal transaction.
 On a successful `vm-create`:
 
 - always include `hardware-provenance` because platform create and Phase B reached a successful
-  terminal create checkpoint;
+  terminal create checkpoint with the request stored on the VM row;
 - include `ssh-identity` only when authorized-key reconciliation and the stability check prove it;
 - set final status to `complete` or `partial` from the complete warning set;
 - insert the matching `init_complete` or `init_partial` event; and
@@ -366,7 +373,7 @@ passphrases, source fragments, or captured upstream output.
 
 Comparison rules are:
 
-| Applied state         | Current private identity | Fact         |
+| Recorded state        | Current private identity | Fact         |
 | --------------------- | ------------------------ | ------------ |
 | no slice              | any readable state       | not-recorded |
 | verified fingerprint  | same fingerprint         | match        |
@@ -507,7 +514,8 @@ archive restore consumer to update.
 
 ### Lifecycle and transaction tests
 
-- successful create writes hardware and verified SSH slices with one operation and timestamp;
+- successful create writes the `hardware-provenance` marker and verified SSH slice with one
+  operation and timestamp;
 - password-protected native OpenSSH create and reinit capture verified identity;
 - partial init after unrelated warnings still records proven slices;
 - successful reinit replaces SSH only and preserves hardware;

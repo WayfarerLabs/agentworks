@@ -12,6 +12,7 @@ from agentworks.ssh_identity import UnverifiableSSHIdentity, VerifiedSSHIdentity
 from agentworks.vms import applied_state
 from agentworks.vms.applied_state import (
     HardwareProvenance,
+    UnsupportedAppliedStateVersionError,
     UnverifiableSSHAppliedState,
     VerifiedSSHAppliedState,
     VMSSHIdentityComparison,
@@ -46,7 +47,7 @@ def test_hardware_marker_codec_refuses_an_unsupported_version_as_version_skew() 
     with pytest.raises(StateError) as caught:
         applied_state.decode_hardware_provenance(record)
 
-    assert type(caught.value) is StateError
+    assert isinstance(caught.value, UnsupportedAppliedStateVersionError)
     assert caught.value.entity_kind == "vm"
     assert caught.value.entity_name == "alpha"
     assert caught.value.hint is not None
@@ -105,7 +106,7 @@ def test_ssh_payload_codec_refuses_an_unsupported_version_before_decoding_value(
     with pytest.raises(StateError) as caught:
         applied_state.decode_ssh_identity(record)
 
-    assert type(caught.value) is StateError
+    assert isinstance(caught.value, UnsupportedAppliedStateVersionError)
     assert caught.value.entity_kind == "vm"
     assert caught.value.entity_name == "alpha"
     assert caught.value.hint is not None
@@ -200,6 +201,24 @@ def test_compare_vm_ssh_identity_returns_structural_fact(
     comparison = applied_state.compare_vm_ssh_identity(db, "alpha", Path("/new"))
 
     assert comparison.state is expected
+
+
+def test_pure_ssh_identity_comparison_needs_no_database_or_key_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        applied_state,
+        "read_private_ssh_identity",
+        lambda path: pytest.fail(f"unexpected key read: {path}"),
+    )
+
+    comparison = applied_state.compare_vm_ssh_identity_evidence(
+        "alpha",
+        VerifiedSSHIdentity(_FINGERPRINT),
+        VerifiedSSHAppliedState("/old", _OTHER_FINGERPRINT),
+    )
+
+    assert comparison == VMSSHIdentityComparison(VMSSHIdentityState.DRIFT, "alpha")
 
 
 def test_require_vm_ssh_identity_distinguishes_ordinary_and_establishment_policy() -> None:

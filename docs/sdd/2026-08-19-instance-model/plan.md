@@ -2,20 +2,20 @@
 
 <!-- cspell:ignore sdds -->
 
-- Status: R1, R2, and R4 merged; merge-strategy correction merged; R3 implemented and under review;
-  R5 pending
+- Status: R1-R4 and merge strategy merged; R5 implemented, final verification pending
 - Date: 2026-08-23
-- Last revised: 2026-08-29
+- Last revised: 2026-08-30
 - Requirements: [frd.md](./frd.md)
 - R1 assessment: [database-assessment.md](./database-assessment.md)
 - R2 contract: [store-contract.md](./store-contract.md)
 - Instance-spec CLI: [instance-spec-cli.md](./instance-spec-cli.md)
 - Merge strategy: [merge-strategy-lld.md](./merge-strategy-lld.md)
-- Code basis: `8c9057ce` on `main`
+- R5 design: [resolved-drift-surfaces-lld.md](./resolved-drift-surfaces-lld.md)
+- Code basis: `79e555a6` on `main`
 - Delivery vehicle: merged R1 artifact PR #632, merged R2 store and R4 design PR #636, merged R4
-  implementation PR #670; merged merge-strategy SDD checkpoint and implementation PR #686; R3 SDD
-  checkpoint and implementation on draft PR #700 from `main`; remaining phases as independently
-  green PRs, stacked only for actual dependencies
+  implementation PR #670; merged merge-strategy SDD checkpoint and implementation PR #686; merged R3
+  SDD checkpoint and implementation PR #700; R5 SDD checkpoint and implementation on one draft PR
+  from `main`
 
 ## Delivery posture
 
@@ -286,7 +286,7 @@ policy at arbitrary depth; object replacement is an honest subtree boundary; cap
 their config models rather than executable merge hooks; current shipped fields retain their
 behavior; and no database migration, payload-version change, or new operator syntax is introduced.
 
-## Phase 4: R3 applied instance state and SSH proving slice
+## Phase 4: R3 lifecycle evidence and SSH proving slice
 
 - [x] Complete the authoritative OpenSSH research and low-level design in `prior-art-research.md`
       and `applied-state-ssh-lld.md`, including the password-protected-key, transaction,
@@ -333,36 +333,42 @@ guidance. Reinit now refuses an invalid configured identity before activation or
 release guide plus permanent CLI documentation explain the one successful reinit historic VMs need
 and the recovery choices when their installed key no longer works.
 
-Definition of done: the identity used at apply time is recorded and compared with the identity the
-current transport will present, and no password-protected-key path regresses.
+Definition of done: the identity established by the successful authorized-key write is recorded and
+compared with the identity the current transport will present, the successful VM provisioning
+request is recorded without claiming provider-observed hardware, and no password-protected-key path
+regresses.
 
 ## Phase 5: R5 resolved-spec and drift surfaces
 
-- [ ] Extend the focused `resource show` service with fully resolved template values and path, map
+- [x] Extend the focused `resource show` service with fully resolved template values and path, map
       key, or list-item provenance sufficient to distinguish declared, inherited, defaulted, and
       overlaid contributors truthfully.
-- [ ] Extend live-instance show with current declared resolution, applied slices, and explicit not
-      recorded, match, drift, or unverifiable comparison state in the existing read snapshot.
-- [ ] Add doctor batch reads, owner-existence validation for orphaned records, visibility for
+- [x] Extend existing VM, workspace, agent, and session `describe` with current declared resolution,
+      lifecycle evidence, and explicit not recorded, match, drift, or unverifiable comparison state
+      in one structural read snapshot.
+- [x] Add doctor batch reads, owner-existence validation for orphaned records, visibility for
       unconsumed newer-release records, and structural SSH drift checks without opening a sidecar or
       repeating one query per instance.
-- [ ] Preserve JSON v1 fields and add only optional tagged data; keep human and JSON facts
-      reconciled without prose-policing tests.
-- [ ] Prove effective CPU, memory, disk, and swap are available before `vm create`; template and
-      instance provenance; applied/current comparison; batch query behavior; and no overlay ceremony
-      in the simple case.
-- [ ] Update permanent resource, machine-output, doctor, command-reference, and guide collateral.
+- [x] Preserve JSON v1 fields, add tagged `instance_state` to every current live-description
+      producer under additive compatibility, and keep human and JSON facts reconciled without
+      prose-policing tests.
+- [x] Prove effective CPU, memory, disk, and swap requests are available before `vm create`;
+      template and instance provenance; recorded/current comparison; batch query behavior; and no
+      overlay ceremony in the simple case.
+- [x] Update permanent resource, machine-output, doctor, command-reference, and guide collateral.
 
-Definition of done: an operator or agent can inspect effective pre-mutation specs and honest
-post-apply drift, including visible ignorance, from the supported CLI surfaces.
+Definition of done: an operator or agent can inspect effective pre-mutation specs and honest drift
+between current declarations and recorded lifecycle evidence, including visible ignorance, from the
+supported CLI surfaces. Hardware evidence describes the successful provisioning request, not
+provider-realized hardware.
 
 ## Phase 6: complete verification and closeout
 
-- [ ] Run focused tests after every phase and the full gate on the complete exact head.
+- [x] Run focused tests after every phase and the full gate on the complete exact head.
 - [ ] Run equal-capability project review, independent fresh-eyes review, and the saga review
       campaign scaled to the final blast radius; resolve every material finding.
-- [ ] Run isolated-home CLI acceptance for overlay declaration, resolved template and instance show,
-      doctor tri-state output, malformed state, and JSON v1 compatibility.
+- [x] Run isolated-home CLI acceptance for overlay declaration, resolved template and instance show,
+      doctor comparison output, malformed state, and JSON v1 compatibility.
 - [ ] Run live VM validation for create-time capture, matching preflight, deliberate identity drift,
       password-protected OpenSSH keys, safe cleanup, and independent residue verification.
 - [ ] Promote all load-bearing contract and operator teaching into permanent docs, confirm no
