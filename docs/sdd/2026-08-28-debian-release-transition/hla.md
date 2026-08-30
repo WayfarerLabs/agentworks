@@ -72,9 +72,11 @@ classifications, not persisted values or calendar windows.
 The target profile's `upgrade_from_previous` policy owns transition-specific checks, source suites,
 minimum OpenSSH version, and documentation links. There is no pair-keyed upgrade graph. With no
 incomplete journal, `vm upgrade` can select only the final profile's policy and the source profile
-immediately before it. Supporting the next Debian release means certifying its local mappings and
-atomically appending one profile whose policy upgrades from the old final profile. It does not
-change the database shape, create request, CLI, or state-machine topology.
+immediately before it. Supporting the next Debian release requires implementing and certifying its
+local mappings and transition policy, then atomically appending one profile whose policy upgrades
+from the old final profile. The database representation, concrete create request, CLI command,
+relative support classifier, and adjacent state-machine framework are designed for reuse. Release
+notes and certification evidence may still require separately scoped changes inside that framework.
 
 Before that atomic append, a candidate codename is not in the active registry and therefore cannot
 be classified or persisted by the shipping build. If a live guest reports that candidate early, the
@@ -620,8 +622,9 @@ semantics.
 - release parser accepts matching Debian codename/version pairs and rejects contradictions;
 - database migration, exact schema inventory, converter, insert/update, backup serialization, and
   null legacy behavior, including pair-null enforcement without a codename-enumerating SQL check;
-- relative support classification for current, previous, and legacy positions, including a profile
-  append without a schema or public-interface change;
+- relative support classification for current, previous, and legacy positions, including a synthetic
+  profile append that changes positions without adding a codename-specific schema or
+  public-interface field;
 - no operator-facing schema or CLI accepts a release/image selection;
 - vm-platform contract version 2 implementations fail exact registration conformance after the
   version 3 cutover;

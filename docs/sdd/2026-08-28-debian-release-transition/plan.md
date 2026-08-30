@@ -343,9 +343,11 @@ the product cannot ship consistently within the agreed scope.
       remains owned by the Phase 3 version-cutover merge unit.
 - [ ] Search current code/docs for unaccounted release literals, platform-local current defaults,
       Bookworm-create claims, unbounded archive staging in `/tmp`, and VM-backup rollback claims.
-- [ ] Prove a release-promotion fixture can add mapping values and append one successor profile with
-      its upgrade-from-previous policy, changing current without another authority or any database,
-      create API, CLI, or state-machine change.
+- [ ] Prove a synthetic release-promotion fixture can add mapping values and append one successor
+      profile with its upgrade-from-previous policy, changing current and adjacent policy selection
+      without a second current authority, codename-specific database migration, new create field,
+      CLI target selector, or arbitrary upgrade graph. Treat this as a structural no-hardcoding
+      proof, not a compatibility claim or a promise of unchanged workflow internals.
 - [ ] Run full unit/static/docs/generated gates and the final independent review lanes.
 
 ### Exit criteria

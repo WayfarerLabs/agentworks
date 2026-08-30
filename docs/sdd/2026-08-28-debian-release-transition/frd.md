@@ -11,8 +11,10 @@
   mode. This preserves the consistency decision in ADR 0002 while superseding its fixed Bookworm
   release.
 - **Agentworks has exactly one current Debian release.** New VMs always target that core-selected
-  release. This effort advances it from Bookworm to Trixie; a future release promotion changes the
-  release registry and mappings, not the operator interface or lifecycle architecture.
+  release. This effort advances it from Bookworm to Trixie. A future release promotion is expected
+  to reuse the same registry, create contract, CLI, support policy, and adjacent-upgrade workflow,
+  but it still requires a release-specific profile, mappings, upgrade policy, and certification.
+  Evidence from that release may require separately scoped internal workflow changes.
 - **The supported upgrade edge is release-relative.** Agentworks supports `current-1` to `current`
   through `agw vm upgrade NAME`. It never supports a direct or chained `current-2` upgrade.
 - **Old VMs remain operable.** A recognized `current-2` or older VM remains available on a
@@ -55,11 +57,14 @@ pointer that can disagree with the order. Trixie becomes the final profile in th
 immediate predecessor is `current-1`; every earlier recognized release is `current-2` or older.
 These positions are derived from the one registry, never persisted as VM state.
 
-Promoting a future stable Debian release certifies its release-specific mappings and appends one
-profile to the registry. Every non-first profile owns the reviewed policy for upgrading from the
-profile immediately before it; non-adjacent policy edges are not representable. The append makes the
-new profile current without changing a separate setting. It does not require a new database shape,
-VM create API, CLI command, or support-policy mechanism. The concrete release is internal product
+Promoting a future stable Debian release implements and certifies its release-specific mappings and
+adjacent upgrade policy, then appends one profile to the registry. Every non-first profile owns the
+reviewed policy for upgrading from the profile immediately before it; non-adjacent policy edges are
+not representable. The append makes the new profile current without changing a separate setting. The
+stable product contract is that promotion does not add a second current setting, an
+operator-selectable target, a codename-specific database migration, a new CLI command, or an
+arbitrary upgrade graph; the existing concrete-release create field is reused. This is not a promise
+that release-specific workflow internals remain unchanged. The concrete release is internal product
 policy, not an operator-selectable VM field.
 
 The following surfaces remain absent:
@@ -353,7 +358,9 @@ release through a controlled, recorded product lifecycle.
 - Letting an operator choose Bookworm for a new VM is out of scope.
 - Skipping Debian releases, downgrading, and direct or chained upgrade from `current-2` are out of
   scope. This effort implements and certifies only Bookworm-to-Trixie while giving the next adjacent
-  release the same registry, mapping, request, and workflow shape. It is not an arbitrary release
+  release the same registry, mapping, request, and workflow shape. Synthetic successor fixtures
+  prove that those seams are not pair-hardcoded; they do not claim compatibility with an
+  unimplemented release or promise unchanged workflow internals. This is not an arbitrary release
   graph or unbounded generic upgrader.
 - Automatic provider snapshot creation, snapshot deletion, or rollback is out of scope for this
   first transition. Agentworks does not own resources it cannot clean up consistently.
