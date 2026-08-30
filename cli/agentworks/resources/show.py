@@ -10,16 +10,15 @@ represented by their loaded Pydantic model.
 from __future__ import annotations
 
 import json
-import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, assert_never
+from typing import TYPE_CHECKING, Literal, assert_never
 
 import yaml
 
 from agentworks import output
 from agentworks.declared_resource import FRAMEWORK_FIELDS, METADATA_FIELDS, DeclaredResource, EnvelopeMetadata
 from agentworks.doctor import HealthCheck, checks_for_resource, health_check_data
-from agentworks.machine_output import JsonObject, JsonValue, project_origin
+from agentworks.machine_output import JsonObject, project_json_value, project_origin
 from agentworks.manifests.envelope import API_VERSION
 from agentworks.resources.access import ResourceIdentity, resolve_resource
 from agentworks.resources.graph import Enablement, Readiness
@@ -65,34 +64,11 @@ class ResourceShow:
     resolution: ResolvedSpec | None = None
 
 
-def _json_value(value: Any) -> JsonValue:
-    """Validate declared-row output at the closed JSON v1 carrier boundary.
-
-    Declarable kinds and their model classes are core-owned, but plugins may
-    contribute manifest row data. Pydantic JSON mode is dynamically typed, so
-    this runtime guard proves that only a closed, finite ``JsonValue`` crosses
-    the machine contract; unexpected output is rejected rather than coerced.
-    """
-    if value is None or isinstance(value, str | bool | int):
-        return value
-    if isinstance(value, float):
-        if not math.isfinite(value):
-            raise AssertionError("declaration JSON values must be finite")
-        return value
-    if isinstance(value, list):
-        return [_json_value(item) for item in value]
-    if isinstance(value, dict):
-        if not all(isinstance(key, str) for key in value):
-            raise AssertionError("declaration JSON object keys must be strings")
-        return {key: _json_value(item) for key, item in value.items()}
-    raise AssertionError(f"Pydantic JSON mode produced a non-JSON value: {type(value).__name__}")
-
-
 def project_declaration(kind: str, resource: DeclaredResource) -> JsonObject:
     """Reconstruct one normalized manifest from a loaded declarable row."""
     declared_fields = set(type(resource).model_fields) - FRAMEWORK_FIELDS
     dumped = resource.model_dump(mode="json", include=declared_fields, exclude_none=True)
-    json_dumped = _json_value(dumped)
+    json_dumped = project_json_value(dumped)
     if not isinstance(json_dumped, dict):
         raise AssertionError("a declared resource must project to a JSON object")
 

@@ -13,8 +13,6 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import (
         Database,
-        InspectedAppliedStateSlice,
-        InspectedDesiredOverlay,
         InstanceRecordMetadata,
         InstanceStateInspection,
         VMRow,
@@ -209,12 +207,6 @@ def _report_instance_state(
             )
         )
 
-    def desired_metadata(item: InspectedDesiredOverlay) -> InstanceRecordMetadata:
-        return item.metadata
-
-    def applied_metadata(item: InspectedAppliedStateSlice) -> InstanceRecordMetadata:
-        return item.metadata
-
     def label(metadata: InstanceRecordMetadata) -> str:
         owner = (
             f"{metadata.instance_kind} {metadata.instance_name!r}"
@@ -225,8 +217,8 @@ def _report_instance_state(
         return f"{owner} {record}"
 
     metadata_rows = [
-        *(desired_metadata(item) for item in inspection.desired_overlays),
-        *(applied_metadata(item) for item in inspection.applied_slices),
+        *(item.metadata for item in inspection.desired_overlays),
+        *(item.metadata for item in inspection.applied_slices),
         *(item.metadata for item in inspection.unconsumed_records),
         *(item.metadata for item in inspection.malformed_records),
     ]
@@ -262,7 +254,7 @@ def _report_instance_state(
         )
 
     for desired_record in inspection.desired_overlays:
-        metadata = desired_metadata(desired_record)
+        metadata = desired_record.metadata
         try:
             decode_stored_overlay(desired_record.record)
         except UnsupportedStoredOverlayError:
@@ -287,7 +279,7 @@ def _report_instance_state(
     ssh_record_names = {
         item.record.instance_name
         for item in inspection.applied_slices
-        if item.record.key is AppliedStateKey.SSH_IDENTITY and item.owner_exists
+        if item.record.key is AppliedStateKey.SSH_IDENTITY and item.metadata.owner_exists
     }
     ssh_record_names.update(
         item.metadata.instance_name
@@ -300,13 +292,13 @@ def _report_instance_state(
     )
     ssh_evidence: dict[str, tuple[SSHAppliedState, InstanceRecordMetadata]] = {}
     for applied_record in inspection.applied_slices:
-        metadata = applied_metadata(applied_record)
+        metadata = applied_record.metadata
         try:
             if applied_record.record.key is AppliedStateKey.HARDWARE_PROVENANCE:
                 decode_hardware_provenance(applied_record.record)
             elif applied_record.record.key is AppliedStateKey.SSH_IDENTITY:
                 decoded = decode_ssh_identity(applied_record.record)
-                if applied_record.owner_exists:
+                if applied_record.metadata.owner_exists:
                     ssh_evidence[applied_record.record.instance_name] = (decoded, metadata)
         except UnsupportedAppliedStateVersionError:
             add(

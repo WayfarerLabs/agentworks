@@ -120,14 +120,14 @@ def test_workspace_and_agent_descriptions_include_current_final_layers(
     agent = agent_description(db, config, name="dev")
 
     assert workspace.instance_state is not None
-    workspace_slot = workspace.instance_state.declarations[0].declaration
+    workspace_slot = workspace.instance_state.declarations[0]
     assert workspace_slot.instance_spec.status == "present"
     assert workspace_slot.current.status == "resolved"
     assert workspace_slot.current.spec["tmuxinator"] is False
     assert workspace.instance_state.applied_facts == ()
 
     assert agent.instance_state is not None
-    agent_slot = agent.instance_state.declarations[0].declaration
+    agent_slot = agent.instance_state.declarations[0]
     assert agent_slot.instance_spec.status == "present"
     assert agent_slot.current.status == "resolved"
     assert agent_slot.current.spec["shell"] == "/bin/fish"
@@ -147,7 +147,7 @@ def test_workspace_description_retains_unavailable_stored_spec(
     description = workspace_description(db, make_config(), "work")
 
     assert description.instance_state is not None
-    slot = description.instance_state.declarations[0].declaration
+    slot = description.instance_state.declarations[0]
     assert slot.instance_spec.status == "unavailable"
     assert slot.instance_spec.reason == "unsupported-version"
     assert slot.current.status == "unresolved"
@@ -169,7 +169,7 @@ def test_vm_and_admin_instance_specs_resolve_independently(
     state, _ = _vm_state(db, make_config())
 
     assert [slot.name for slot in state.declarations] == ["vm", "admin"]
-    vm_slot, admin_slot = (slot.declaration for slot in state.declarations)
+    vm_slot, admin_slot = state.declarations
     assert vm_slot.instance_spec.status == "present"
     assert vm_slot.current.status == "resolved"
     assert vm_slot.current.spec["cpus"] == 6
@@ -194,7 +194,7 @@ def test_missing_selected_vm_template_leaves_admin_and_applied_facts_visible(
 
     state, _ = _vm_state(db, make_config())
 
-    vm_slot, admin_slot = (slot.declaration for slot in state.declarations)
+    vm_slot, admin_slot = state.declarations
     assert vm_slot.current.status == "unresolved"
     assert vm_slot.current.reason == "missing-selection"
     assert admin_slot.current.status == "resolved"
@@ -228,8 +228,8 @@ def test_unavailable_vm_desired_state_retains_applied_siblings(
 
     state, _ = _vm_state(db, make_config())
 
-    assert [slot.declaration.instance_spec.reason for slot in state.declarations] == [reason, reason]
-    assert [slot.declaration.current.status for slot in state.declarations] == ["unresolved", "unresolved"]
+    assert [slot.instance_spec.reason for slot in state.declarations] == [reason, reason]
+    assert [slot.current.status for slot in state.declarations] == ["unresolved", "unresolved"]
     assert _fact(state, AppliedStateKey.HARDWARE_PROVENANCE).status == "recorded"
     assert _fact(state, AppliedStateKey.SSH_IDENTITY).status == "not-recorded"
 
@@ -256,7 +256,7 @@ def test_malformed_desired_envelope_retains_applied_siblings(
 
     state, _ = _vm_state(db, make_config())
 
-    assert [slot.declaration.instance_spec.reason for slot in state.declarations] == ["malformed", "malformed"]
+    assert [slot.instance_spec.reason for slot in state.declarations] == ["malformed", "malformed"]
     assert _fact(state, AppliedStateKey.HARDWARE_PROVENANCE).status == "recorded"
     assert any(issue.code.value == "instance-spec-malformed" for issue in state.issues)
 
@@ -275,7 +275,7 @@ def test_damaged_desired_record_key_is_unavailable_not_absent(
 
     state, _ = _vm_state(db, make_config())
 
-    for declaration in (slot.declaration for slot in state.declarations):
+    for declaration in state.declarations:
         assert declaration.instance_spec.status == "unavailable"
         assert declaration.instance_spec.reason == "malformed"
         assert declaration.current.status == "unresolved"
@@ -302,7 +302,7 @@ def test_damaged_desired_sibling_does_not_hide_valid_canonical_record(
 
     state, _ = _vm_state(db, make_config())
 
-    vm_slot = state.declarations[0].declaration
+    vm_slot = state.declarations[0]
     assert vm_slot.instance_spec.status == "present"
     assert vm_slot.current.status == "resolved"
     assert vm_slot.current.spec["cpus"] == 6
@@ -563,7 +563,6 @@ def test_live_instance_human_facts_are_terminal_safe(
         InstanceStateDescription,
         InstanceStateIssue,
         InstanceStateIssueCode,
-        NamedDeclarationSlot,
         UnconsumedRecord,
         render_instance_state,
     )
@@ -576,6 +575,7 @@ def test_live_instance_human_facts_are_terminal_safe(
 
     unsafe = "line\ncontrol\x1b\u202e"
     declaration = DeclarationSlot(
+        name="slot",
         selection=ResourceIdentity(f"kind-{unsafe}", f"name-{unsafe}"),
         instance_spec=InstanceSpec(
             "present",
@@ -593,7 +593,14 @@ def test_live_instance_human_facts_are_terminal_safe(
         ),
     )
     state = InstanceStateDescription(
-        declarations=(NamedDeclarationSlot(f"slot-{unsafe}", declaration),),
+        declarations=(
+            DeclarationSlot(
+                f"slot-{unsafe}",
+                declaration.selection,
+                declaration.instance_spec,
+                declaration.current,
+            ),
+        ),
         applied_facts=(
             AppliedFact(
                 f"fact-{unsafe}",

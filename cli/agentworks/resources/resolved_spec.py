@@ -9,13 +9,13 @@ surviving path. It never resolves secrets or invokes domain behavior.
 from __future__ import annotations
 
 import dataclasses
-import math
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, TypeAdapter
 
 from agentworks.declared_resource import DeclaredResource
+from agentworks.machine_output import project_json_value
 from agentworks.resources.inheritance import LayerSource, LayerSourceKind
 from agentworks.value_provenance import longest_prefix_value
 
@@ -87,7 +87,7 @@ def project_resolved_spec[T](
 ) -> ResolvedSpec:
     """Project one typed layered resolution through the closed JSON boundary."""
     dumped = _JSON_ADAPTER.dump_python(layered.value, mode="json")
-    json_dumped = _json_value(dumped)
+    json_dumped = project_json_value(dumped)
     if not isinstance(json_dumped, dict):
         raise AssertionError("a resolved spec must project to a JSON object")
 
@@ -196,23 +196,6 @@ def _provenance_paths(
             if isinstance(child, dict | list):
                 paths.extend(_provenance_paths(child, recorded_paths, item_path, include_self=False))
     return tuple(paths)
-
-
-def _json_value(value: Any) -> JsonValue:
-    """Validate Pydantic JSON mode at the closed finite carrier boundary."""
-    if value is None or isinstance(value, str | bool | int):
-        return value
-    if isinstance(value, float):
-        if not math.isfinite(value):
-            raise AssertionError("resolved spec JSON values must be finite")
-        return value
-    if isinstance(value, list):
-        return [_json_value(item) for item in value]
-    if isinstance(value, dict):
-        if not all(isinstance(key, str) for key in value):
-            raise AssertionError("resolved spec JSON object keys must be strings")
-        return {cast("str", key): _json_value(item) for key, item in value.items()}
-    raise AssertionError(f"Pydantic JSON mode produced a non-JSON value: {type(value).__name__}")
 
 
 __all__ = [

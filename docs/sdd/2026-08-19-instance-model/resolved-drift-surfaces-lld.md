@@ -232,6 +232,7 @@ One declaration slot is:
 
 ```text
 DeclarationSlot
+  name: str
   selection: ResourceIdentity
   instance_spec: AbsentInstanceSpec | PresentInstanceSpec | UnavailableInstanceSpec
   current: ResolvedSpec | UnresolvedSpec

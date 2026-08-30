@@ -768,7 +768,7 @@ def test_fleet_inspection_isolates_malformed_rows_and_reports_orphans(db: Databa
 
     inspection = db.instance_state.inspect_all_instance_state()
 
-    assert [(item.record.instance_name, item.owner_exists) for item in inspection.desired_overlays] == [
+    assert [(item.record.instance_name, item.metadata.owner_exists) for item in inspection.desired_overlays] == [
         ("orphan", False),
         ("live", True),
     ]

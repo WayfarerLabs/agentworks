@@ -623,7 +623,6 @@ def _vm_instance_state(
         InstanceStateDescription,
         InstanceStateIssue,
         InstanceStateIssueCode,
-        NamedDeclarationSlot,
         UnconsumedRecord,
         inspected_desired_record,
         inspection_metadata_facts,
@@ -878,8 +877,8 @@ def _vm_instance_state(
 
     state = InstanceStateDescription(
         declarations=(
-            NamedDeclarationSlot("vm", DeclarationSlot(vm_selection, vm_spec, current_vm)),
-            NamedDeclarationSlot("admin", DeclarationSlot(admin_selection, admin_spec, current_admin)),
+            DeclarationSlot("vm", vm_selection, vm_spec, current_vm),
+            DeclarationSlot("admin", admin_selection, admin_spec, current_admin),
         ),
         applied_facts=tuple(applied_facts),
         comparisons=tuple(comparisons),

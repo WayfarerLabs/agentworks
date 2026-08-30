@@ -557,7 +557,7 @@ def _session_harness_integration(state: InstanceStateDescription) -> str | None:
     """Read the harness integration from the same strict current declaration."""
     from agentworks.resources.resolved_spec import ResolvedSpec
 
-    declaration = state.declarations[0].declaration.current
+    declaration = state.declarations[0].current
     if not isinstance(declaration, ResolvedSpec):
         return None
     value = declaration.spec["harness_integration"]

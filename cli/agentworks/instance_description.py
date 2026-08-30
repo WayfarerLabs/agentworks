@@ -55,17 +55,10 @@ class InstanceSpec:
 class DeclarationSlot:
     """Selected base, stored final layer, and current effective declaration."""
 
+    name: str
     selection: ResourceIdentity
     instance_spec: InstanceSpec
     current: SpecResolution
-
-
-@dataclass(frozen=True, slots=True)
-class NamedDeclarationSlot:
-    """One domain-named declaration slot in an instance description."""
-
-    name: str
-    declaration: DeclarationSlot
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,7 +133,7 @@ class InstanceStateIssue:
 class InstanceStateDescription:
     """Current declarations and independently recorded applied evidence."""
 
-    declarations: tuple[NamedDeclarationSlot, ...]
+    declarations: tuple[DeclarationSlot, ...]
     applied_facts: tuple[AppliedFact, ...] = ()
     comparisons: tuple[InstanceComparison, ...] = ()
     unconsumed_records: tuple[UnconsumedRecord, ...] = ()
@@ -281,9 +274,11 @@ def single_declaration_instance_state[T: BaseModel, R](
 
     return InstanceStateDescription(
         declarations=(
-            NamedDeclarationSlot(
+            DeclarationSlot(
                 instance_kind,
-                DeclarationSlot(selection, instance_spec, current),
+                selection,
+                instance_spec,
+                current,
             ),
         ),
         unconsumed_records=unconsumed,
@@ -296,8 +291,7 @@ def instance_state_data(state: InstanceStateDescription) -> JsonObject:
     from agentworks.resources.resolved_spec import resolved_spec_data
 
     declarations: JsonObject = {}
-    for named in state.declarations:
-        declaration = named.declaration
+    for declaration in state.declarations:
         instance_spec: JsonObject = {"status": declaration.instance_spec.status}
         if declaration.instance_spec.status == "present":
             assert declaration.instance_spec.recorded_at is not None
@@ -307,7 +301,7 @@ def instance_state_data(state: InstanceStateDescription) -> JsonObject:
         elif declaration.instance_spec.status == "unavailable":
             assert declaration.instance_spec.reason is not None
             instance_spec["reason"] = declaration.instance_spec.reason
-        declarations[named.name] = {
+        declarations[declaration.name] = {
             "selection": {
                 "kind": declaration.selection.kind,
                 "name": declaration.selection.name,
@@ -375,9 +369,10 @@ def render_instance_state(state: InstanceStateDescription) -> None:
     from agentworks.resources.resolved_spec import ResolvedSpec
 
     output.info("\nCurrent declarations:")
-    for named in state.declarations:
-        declaration = named.declaration
-        output.detail(sanitize_fact_line(f"{named.name}: {declaration.selection.kind}/{declaration.selection.name}"))
+    for declaration in state.declarations:
+        output.detail(
+            sanitize_fact_line(f"{declaration.name}: {declaration.selection.kind}/{declaration.selection.name}")
+        )
         with output.section():
             spec = declaration.instance_spec
             if spec.status == "present":

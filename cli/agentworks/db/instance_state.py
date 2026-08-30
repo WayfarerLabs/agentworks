@@ -145,11 +145,6 @@ class InspectedDesiredOverlay:
     record: DesiredOverlayRecord
     metadata: InstanceRecordMetadata
 
-    @property
-    def owner_exists(self) -> bool:
-        """Whether the record's database owner exists."""
-        return self.metadata.owner_exists
-
 
 @dataclass(frozen=True, slots=True)
 class InspectedAppliedStateSlice:
@@ -157,11 +152,6 @@ class InspectedAppliedStateSlice:
 
     record: AppliedStateSlice
     metadata: InstanceRecordMetadata
-
-    @property
-    def owner_exists(self) -> bool:
-        """Whether the record's database owner exists."""
-        return self.metadata.owner_exists
 
 
 @dataclass(frozen=True, slots=True)
