@@ -51,54 +51,24 @@ class RemoteJournal:
         return pairs[0] if pairs else None
 
     def read_states(self, retained_pairs: Sequence[UpgradePair]) -> dict[UpgradePair, JournalState]:
-        """Read and locally validate the fixed journal root without mutating it."""
-        script = """
-import json
-import os
-import stat
-import sys
-
-root = sys.argv[1]
-if not os.path.lexists(root):
-    print("{}")
-    raise SystemExit(0)
-root_stat = os.lstat(root)
-if (
-    os.path.realpath(root) != root
-    or not stat.S_ISDIR(root_stat.st_mode)
-    or root_stat.st_uid != 0
-    or stat.S_IMODE(root_stat.st_mode) != 0o700
-):
-    print("upgrade journal root has unsafe ownership or mode", file=sys.stderr)
-    raise SystemExit(2)
-inventory = {}
-for name in sorted(os.listdir(root)):
-    directory = os.path.join(root, name)
-    directory_stat = os.lstat(directory)
-    if stat.S_ISLNK(directory_stat.st_mode):
-        print("upgrade journal root contains a symlink", file=sys.stderr)
-        raise SystemExit(2)
-    if not stat.S_ISDIR(directory_stat.st_mode):
-        continue
-    if directory_stat.st_uid != 0 or stat.S_IMODE(directory_stat.st_mode) != 0o700:
-        print("upgrade journal directory has unsafe ownership or mode", file=sys.stderr)
-        raise SystemExit(2)
-    state_path = os.path.join(directory, "state.json")
-    state_stat = os.lstat(state_path)
-    if (
-        stat.S_ISLNK(state_stat.st_mode)
-        or not stat.S_ISREG(state_stat.st_mode)
-        or state_stat.st_uid != 0
-        or stat.S_IMODE(state_stat.st_mode) != 0o600
-    ):
-        print("upgrade journal state has unsafe ownership or mode", file=sys.stderr)
-        raise SystemExit(2)
-    with open(state_path, encoding="utf-8") as stream:
-        inventory[name] = json.load(stream)
-print(json.dumps(inventory, separators=(",", ":"), sort_keys=True))
-""".strip()
-        command = shlex.join(["python3", "-c", script, REMOTE_ROOT])
-        result = self._target.run(command, sudo=True, check=False)
+        """Stage the canonical implementation for one read-only inventory scan."""
+        source = Path(__file__).with_name("journal.py")
+        staging = f"/var/tmp/agentworks-journal-scan-{uuid.uuid4().hex}.py"
+        try:
+            self._target.copy_to(source, staging)
+            command = shlex.join(
+                [
+                    "python3",
+                    staging,
+                    "--root",
+                    REMOTE_ROOT,
+                    "scan",
+                    *(pair.dirname for pair in retained_pairs),
+                ]
+            )
+            result = self._target.run(command, sudo=True, check=False)
+        finally:
+            self._target.run(f"rm -f {shlex.quote(staging)}", check=False)
         if not result.ok:
             detail = (result.stderr or result.stdout or "cannot read remote upgrade journal root").strip()
             raise JournalError(detail[-2000:])

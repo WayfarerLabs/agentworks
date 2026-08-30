@@ -49,15 +49,11 @@ def test_roundtrip_vm(db: Database) -> None:
     assert vm is not None
     assert vm.platform_metadata == {"instance_name": "dev-vm"}
 
-    db.update_vm_debian_release(
-        "dev-vm",
-        DebianRelease.TRIXIE,
-        observed_at="2026-08-30T00:00:00Z",
-    )
+    db.update_vm_debian_release("dev-vm", DebianRelease.TRIXIE)
     vm = db.get_vm("dev-vm")
     assert vm is not None
     assert vm.debian_release is DebianRelease.TRIXIE
-    assert vm.debian_release_observed_at == "2026-08-30T00:00:00Z"
+    assert vm.debian_release_observed_at is not None
 
     db.set_operator_stopped("dev-vm", True)
     vm = db.get_vm("dev-vm")

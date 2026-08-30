@@ -1,6 +1,6 @@
 # Plan: Debian Release Transition
 
-- Status: Implementation and private review complete; ready-triggered external validation pending
+- Status: Ready-triggered feedback round 1 in progress
 - Date: 2026-08-28
 - Governing artifacts: `frd.md`, `hla.md`, `prior-art-research.md`, and `migration-strategy.md`
 
@@ -377,6 +377,17 @@ the product cannot ship consistently within the agreed scope.
 - [x] Record authenticated operator direction that an exact green ready handoff triggers external
       integration testing and complete PR-level review, with up to four feedback/fix rounds using
       the draft/ready handoff protocol.
+
+### Ready-triggered feedback round 1
+
+- [ ] Resolve the full integration report's source-permission and false action-failure blockers,
+      batch its accepted resume, repair, reboot, secret-resolution, and collateral findings, and
+      retain the approved interactive and legacy-site boundaries.
+- [ ] Replace the duplicate remote journal scanner with one temporarily staged execution of the
+      canonical guest journal implementation.
+- [ ] Reconcile current `main`, run the complete gate and independent review lanes on the corrected
+      exact head, then publish the signed round 1 of 4 ready handoff for external revalidation.
+
 - [ ] After live certification or an authenticated disposition, create `locked.md`, record the final
       evidence, and leave the exact green reviewed head ready to merge.
 

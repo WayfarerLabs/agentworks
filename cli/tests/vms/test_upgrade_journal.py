@@ -137,6 +137,9 @@ def test_multiple_incomplete_remote_journals_fail_before_selection() -> None:
     second = UpgradePair("trixie", "forky")
 
     class _Target:
+        def copy_to(self, source: Path, destination: str) -> None:
+            del source, destination
+
         def run(self, command: str, **kwargs: object) -> object:
             del command, kwargs
             inventory = {
@@ -168,6 +171,22 @@ def test_completed_historic_journal_does_not_block_new_pair(tmp_path) -> None:
     store.initialize(second, {})
 
     assert store.scan_incomplete((first, second)) == [second]
+    assert set(store.read_states((first, second))) == {first, second}
+
+
+def test_absent_local_journal_inventory_does_not_create_the_root(tmp_path, pair: UpgradePair) -> None:
+    root = tmp_path / "absent"
+
+    assert JournalStore(root).read_states((pair,)) == {}
+    assert not root.exists()
+
+
+def test_inventory_rejects_a_dangling_symlink_root(tmp_path, pair: UpgradePair) -> None:
+    root = tmp_path / "linked-root"
+    root.symlink_to(tmp_path / "missing", target_is_directory=True)
+
+    with pytest.raises(JournalError):
+        JournalStore(root).read_states((pair,))
 
 
 def test_one_nonblocking_lock_excludes_every_other_writer(tmp_path, pair: UpgradePair) -> None:
@@ -341,14 +360,27 @@ def test_reboot_redispatch_requires_the_unchanged_recorded_boot() -> None:
 
 def test_absent_remote_journal_scan_is_read_only(pair: UpgradePair) -> None:
     class _Target:
+        def __init__(self) -> None:
+            self.copy_destinations: list[str] = []
+            self.commands: list[str] = []
+
         def run(self, command: str, **kwargs: object) -> object:
-            del command, kwargs
+            del kwargs
+            self.commands.append(command)
             return type("Result", (), {"ok": True, "stdout": "{}", "stderr": ""})()
 
-        def copy_to(self, *args: object, **kwargs: object) -> None:
-            raise AssertionError("read-only scan attempted to install a helper")
+        def copy_to(self, source: Path, destination: str) -> None:
+            assert source.name == "journal.py"
+            self.copy_destinations.append(destination)
 
-    assert RemoteJournal(_Target()).read_states((pair,)) == {}  # type: ignore[arg-type]
+    target = _Target()
+
+    assert RemoteJournal(target).read_states((pair,)) == {}  # type: ignore[arg-type]
+    assert len(target.copy_destinations) == 1
+    assert " ensure-root" not in target.commands[0]
+    assert " install " not in target.commands[0]
+    assert " scan " in target.commands[0]
+    assert target.commands[-1].startswith("rm -f /var/tmp/agentworks-journal-scan-")
 
 
 def test_reboot_lock_proof_falls_back_to_lslocks_when_fuser_is_absent(

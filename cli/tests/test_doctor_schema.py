@@ -481,7 +481,7 @@ def test_doctor_compares_live_and_recorded_debian_release_without_writing(
 ) -> None:
     db.insert_vm("box", site="lima-local", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
-    db.update_vm_debian_release("box", recorded, observed_at="2026-08-29T00:00:00Z")
+    db.update_vm_debian_release("box", recorded)
     before = db.get_vm("box")
     assert before is not None
 

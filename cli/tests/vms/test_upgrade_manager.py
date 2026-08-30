@@ -45,8 +45,7 @@ class _Database:
         self.updates: list[tuple[str, object]] = []
         self.events: list[tuple[str, str, str | None]] = []
 
-    def update_vm_debian_release(self, name: str, release: object, *, observed_at: str | None = None) -> None:
-        del observed_at
+    def update_vm_debian_release(self, name: str, release: object) -> None:
         self.updates.append((name, release))
 
     def list_vm_events(self, name: str) -> list[object]:
@@ -150,6 +149,23 @@ def test_completed_journal_without_completion_event_resumes_post_reboot_work(
     assert entry.adoption is False
 
 
+def test_entry_inspection_resolves_the_tailscale_key_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_entry_fakes(monkeypatch, journal_pair=None)
+    _install_release_probe(monkeypatch, DebianRelease.TRIXIE)
+    resolutions: list[object] = []
+
+    def _resolve(resolver: object, name: str) -> str:
+        resolutions.append((resolver, name))
+        return "resolved-key"
+
+    monkeypatch.setattr(upgrade_manager, "_tailscale_auth_key", _resolve)
+
+    entry = upgrade_manager._inspect_entry(_Database(), object(), _vm(DebianRelease.TRIXIE), interaction=object())
+
+    assert entry.tailscale_auth_key == "resolved-key"
+    assert len(resolutions) == 1
+
+
 def test_proved_target_is_persisted_before_release_aware_reinit(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
 
@@ -158,10 +174,8 @@ def test_proved_target_is_persisted_before_release_aware_reinit(monkeypatch: pyt
             self,
             name: str,
             release: object,
-            *,
-            observed_at: str | None = None,
         ) -> None:
-            super().update_vm_debian_release(name, release, observed_at=observed_at)
+            super().update_vm_debian_release(name, release)
             calls.append("persist")
 
         def insert_vm_event(self, name: str, event: str, detail: str | None = None) -> None:
@@ -175,6 +189,7 @@ def test_proved_target_is_persisted_before_release_aware_reinit(monkeypatch: pyt
         preflight=None,
         transition=transition,
         platform_name="lima",
+        tailscale_auth_key="ts-key",
     )
     vm = SimpleNamespace(name="box", tailscale_host="100.64.0.9")
     db = _UpgradeDatabase()
@@ -306,9 +321,10 @@ def test_reboot_closes_pre_upgrade_gate_before_fresh_post_reboot_gate(
         yield SimpleNamespace(site=SimpleNamespace(platform=object())), object(), object()
         events.append(f"exit{number}")
 
-    def _dispatch(_journal: object, _execution: object, requested: UpgradePair) -> None:
+    def _dispatch(_journal: object, _execution: object, requested: UpgradePair) -> str:
         assert requested == pair
         state_holder[0] = state_holder[0].claim(UpgradeAction.REBOOT, boot_id_before="old-boot")
+        return "old-boot"
 
     def _reconnect(*args: object, **kwargs: object) -> object:
         del args, kwargs
@@ -337,6 +353,7 @@ def test_reboot_closes_pre_upgrade_gate_before_fresh_post_reboot_gate(
         vm,
         transition,
         platform_name="lima",
+        checkpoint_ref=None,
         tailscale_auth_key="ts-key",
         interaction=object(),
     )
@@ -578,6 +595,7 @@ def test_source_safe_planning_exit_restores_timers_or_records_repair(
             vm,
             transition,
             platform_name="lima",
+            checkpoint_ref=None,
             tailscale_auth_key="ts-key",
             interaction=object(),
         )
@@ -929,6 +947,51 @@ def test_adoption_keeps_persisted_target_and_records_repair_when_reinit_fails(
 def test_checkpoint_boundary_rejects_invalid_values(value: str) -> None:
     with pytest.raises(ValidationError):
         upgrade_manager._resolve_checkpoint(value)
+
+
+def test_resume_checkpoint_must_match_the_attested_plan_reference() -> None:
+    plan: dict[str, object] = {"checkpoint": "snapshot-before-upgrade"}
+
+    upgrade_manager._require_matching_checkpoint(None, plan)
+    upgrade_manager._require_matching_checkpoint("snapshot-before-upgrade", plan)
+    with pytest.raises(ValidationError):
+        upgrade_manager._require_matching_checkpoint("snapshot-after-mutation", plan)
+
+
+def test_reboot_dispatch_has_no_guest_read_after_dispatch() -> None:
+    pair = UpgradePair("bookworm", "trixie")
+    state = JournalState(
+        version=1,
+        attempt_id=None,
+        last_completed=JournalProgress.FULL_UPGRADE_COMPLETE,
+        active_action=None,
+        active_started_at=None,
+        boot_id_before=None,
+        outcome=AttemptOutcome.SUCCEEDED,
+        failure=None,
+    )
+    calls: list[str] = []
+
+    class _Journal:
+        def load(self, requested: UpgradePair) -> JournalState:
+            assert requested == pair
+            calls.append("load")
+            return state
+
+        def dispatch_reboot(self, requested: UpgradePair, boot_id: str) -> None:
+            assert requested == pair
+            assert boot_id == "boot-before"
+            calls.append("dispatch")
+
+    class _Execution:
+        def current_boot_id(self) -> str:
+            calls.append("boot-id")
+            return "boot-before"
+
+    result = upgrade_manager._advance_reboot(_Journal(), _Execution(), pair)  # type: ignore[arg-type]
+
+    assert result == "boot-before"
+    assert calls == ["load", "boot-id", "dispatch"]
 
 
 @pytest.mark.parametrize(

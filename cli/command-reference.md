@@ -621,7 +621,8 @@ data and Debian-state backups, requires a reference to an operator-created check
 brings the source suite current, shows a recomputed final plan, and asks again before switching
 suites. Package actions and reboot intent are durably recorded under
 `/var/lib/agentworks/debian-upgrades`, so rerunning the same command resumes or diagnoses the
-recorded transition instead of replaying work. See
+recorded transition instead of replaying work. On resume, omit `--checkpoint` or pass the originally
+attested reference; a different value cannot replace the pre-upgrade recovery evidence. See
 [Upgrading a Debian VM](../docs/guides/debian-vm-upgrades.md) for preflight, recovery, and
 platform-route details.
 

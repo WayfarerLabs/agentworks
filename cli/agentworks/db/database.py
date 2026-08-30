@@ -395,22 +395,14 @@ class Database:
         self,
         name: str,
         release: DebianRelease,
-        *,
-        observed_at: str | None = None,
     ) -> None:
         """Atomically replace one VM's proved Debian release observation."""
-        if observed_at is None:
-            self._conn.execute(
-                "UPDATE vms SET debian_release = ?, "
-                "debian_release_observed_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
-                "WHERE name = ?",
-                (release.value, name),
-            )
-        else:
-            self._conn.execute(
-                "UPDATE vms SET debian_release = ?, debian_release_observed_at = ? WHERE name = ?",
-                (release.value, observed_at, name),
-            )
+        self._conn.execute(
+            "UPDATE vms SET debian_release = ?, "
+            "debian_release_observed_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
+            "WHERE name = ?",
+            (release.value, name),
+        )
         self._commit_unless_in_tx()
 
     def set_operator_stopped(self, name: str, stopped: bool) -> None:

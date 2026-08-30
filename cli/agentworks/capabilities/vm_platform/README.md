@@ -45,9 +45,8 @@ load one), and `agw resource explain vm-platform/<name>` is the definitive confi
 - **`gcp-gce`** (via the `gcp` system plugin) runs VMs on Google Compute Engine in an
   operator-selected project, zone, and optional subnet.
 
-Per the Agentworks model, the choice of platform largely disappears once a VM is up and running. All
-New VMs run core's concrete current release (Debian Trixie) and are accessible via SSH over
-Tailscale.
+Per the Agentworks model, the choice of platform largely disappears once a VM is up and running. New
+VMs run core's concrete current release (Debian Trixie) and are accessible via SSH over Tailscale.
 
 ## Security Posture
 

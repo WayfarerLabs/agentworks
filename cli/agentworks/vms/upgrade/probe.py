@@ -350,7 +350,7 @@ for path in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/source
   cat "$path"
 done
 """.strip()
-    output = _stdout(target, command)
+    output = _stdout(target, command, sudo=True)
     files: dict[str, list[str]] = {}
     current: str | None = None
     for line in output.splitlines():

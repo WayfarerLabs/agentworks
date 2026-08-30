@@ -344,10 +344,19 @@ class JournalStore:
         return state
 
     def scan_incomplete(self, retained_pairs: Sequence[UpgradePair]) -> list[UpgradePair]:
-        if not self.root.exists():
-            return []
+        states = self.read_states(retained_pairs)
+        return [pair for pair, state in states.items() if not state.is_complete]
+
+    def read_states(self, retained_pairs: Sequence[UpgradePair]) -> dict[UpgradePair, JournalState]:
+        """Read and validate the retained journal inventory without mutation."""
+        try:
+            self.root.lstat()
+        except FileNotFoundError:
+            return {}
+        except OSError as error:
+            raise JournalError(f"cannot inspect upgrade journal directory: {self.root}") from error
         _validate_directory(self.root, expected_mode=0o700)
-        incomplete: list[UpgradePair] = []
+        states: dict[UpgradePair, JournalState] = {}
         for entry in sorted(self.root.iterdir(), key=lambda item: item.name):
             entry_stat = entry.lstat()
             if stat.S_ISLNK(entry_stat.st_mode):
@@ -355,9 +364,8 @@ class JournalStore:
             if not stat.S_ISDIR(entry_stat.st_mode):
                 continue
             pair = UpgradePair.parse(entry.name, retained_pairs=retained_pairs)
-            if not self.load(pair).is_complete:
-                incomplete.append(pair)
-        return incomplete
+            states[pair] = self.load(pair)
+        return states
 
     def load(self, pair: UpgradePair) -> JournalState:
         path = self._journal_directory(pair) / "state.json"
@@ -587,7 +595,7 @@ def _cli(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "scan":
         retained = tuple(UpgradePair.parse(name) for name in args.pairs)
-        _write_result([pair.dirname for pair in store.scan_incomplete(retained)])
+        _write_result({pair.dirname: state.to_mapping() for pair, state in store.read_states(retained).items()})
         return 0
 
     pair = UpgradePair(args.source, args.target)

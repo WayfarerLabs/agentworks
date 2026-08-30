@@ -11,6 +11,7 @@ from agentworks.vms.upgrade.probe import (
     _is_third_party,
     _lines,
     _mentions_other_debian_suite,
+    _source_files,
     target_source_hygiene_issues,
 )
 
@@ -191,6 +192,24 @@ Components: main
         )
         == ()
     )
+
+
+def test_source_inventory_reads_root_only_deb822_files_with_sudo() -> None:
+    calls: list[dict[str, object]] = []
+
+    class _Target:
+        def run(self, command: str, **kwargs: object) -> object:
+            del command
+            calls.append(kwargs)
+            return SimpleNamespace(
+                ok=True,
+                stdout="AGW-SOURCE:/etc/apt/sources.list.d/debian.sources\nSuites: trixie\n",
+            )
+
+    assert _source_files(_Target()) == {  # type: ignore[arg-type]
+        "/etc/apt/sources.list.d/debian.sources": "Suites: trixie"
+    }
+    assert calls == [{"sudo": True, "check": True}]
 
 
 @pytest.mark.parametrize(

@@ -84,6 +84,7 @@ class _EntryInspection:
     preflight: UpgradePreflight | None
     adoption: bool
     platform_name: str
+    tailscale_auth_key: str
 
 
 def upgrade_vm(
@@ -118,6 +119,7 @@ def _upgrade_vm(
     _guard_failed_vm(vm)
 
     entry = _inspect_entry(db, config, vm, interaction=interaction)
+    checkpoint_ref = _validate_checkpoint(checkpoint) if checkpoint is not None else None
     vm = _require_vm(db, name)
     if entry.adoption:
         _adopt_external_upgrade(
@@ -146,7 +148,7 @@ def _upgrade_vm(
         from agentworks.vms.backup import backup_vm
 
         _render_checkpoint_guidance(entry.platform_name)
-        checkpoint_ref = _resolve_checkpoint(checkpoint)
+        checkpoint_ref = _resolve_checkpoint(checkpoint_ref)
         if not output.confirm(
             "Confirm that the named external recovery artifact exists and console or rescue access was tested?",
             default=False,
@@ -180,10 +182,11 @@ def _upgrade_vm(
             ordinary_backup,
             recovery_bundle,
             platform_name=entry.platform_name,
+            tailscale_auth_key=entry.tailscale_auth_key,
             interaction=interaction,
         )
     else:
-        tailscale_auth_key = None
+        tailscale_auth_key = entry.tailscale_auth_key
 
     _resume_after_source_update(
         db,
@@ -191,6 +194,7 @@ def _upgrade_vm(
         vm,
         entry.transition,
         platform_name=entry.platform_name,
+        checkpoint_ref=checkpoint_ref,
         tailscale_auth_key=tailscale_auth_key,
         interaction=interaction,
     )
@@ -260,6 +264,7 @@ def _inspect_entry(
         interaction=interaction,
     ) as (vm_node, resolver, ops_ctx):
         platform_name = vm_node.site.platform.name
+        tailscale_auth_key = _tailscale_auth_key(resolver, auth_key_name)
         target, states = _read_entry_states_with_repair(
             db,
             config,
@@ -267,7 +272,7 @@ def _inspect_entry(
             retained_pairs,
             vm_node=vm_node,
             ops_ctx=ops_ctx,
-            tailscale_auth_key=_tailscale_auth_key(resolver, auth_key_name),
+            tailscale_auth_key=tailscale_auth_key,
         )
         incomplete = [pair for pair, state in states.items() if not state.is_complete]
         if len(incomplete) > 1:
@@ -276,7 +281,7 @@ def _inspect_entry(
         pair = incomplete[0] if incomplete else None
         if pair is not None:
             transition = by_pair[pair]
-            return _EntryInspection(transition, pair, None, False, platform_name)
+            return _EntryInspection(transition, pair, None, False, platform_name, tailscale_auth_key)
 
         pending_completion = [
             pair
@@ -288,7 +293,7 @@ def _inspect_entry(
             raise JournalError(f"multiple completed Debian upgrades need finalization: {names}")
         if pending_completion:
             pair = pending_completion[0]
-            return _EntryInspection(by_pair[pair], pair, None, False, platform_name)
+            return _EntryInspection(by_pair[pair], pair, None, False, platform_name, tailscale_auth_key)
 
         live_release = probe_debian_release(target)
         recorded = _recorded_release(vm)
@@ -298,7 +303,7 @@ def _inspect_entry(
         elif recorded == live_release.value:
             _persist_release(db, vm.name, live_release)
         elif recorded == current_transition.pair.source and live_release.value == current_transition.pair.target:
-            return _EntryInspection(current_transition, None, None, True, platform_name)
+            return _EntryInspection(current_transition, None, None, True, platform_name, tailscale_auth_key)
         else:
             raise StateError(
                 f"VM '{vm.name}' release disagreement: database={recorded}, guest={live_release.value}",
@@ -308,7 +313,7 @@ def _inspect_entry(
             )
 
         if live_release.value == current_transition.pair.target:
-            return _EntryInspection(current_transition, None, None, False, platform_name)
+            return _EntryInspection(current_transition, None, None, False, platform_name, tailscale_auth_key)
         if live_release.value != current_transition.pair.source:
             raise StateError(
                 f"VM '{vm.name}' runs Debian {live_release.value}; only "
@@ -328,7 +333,7 @@ def _inspect_entry(
             recorded,
             platform_name=platform_name,
         )
-        return _EntryInspection(current_transition, None, preflight, False, platform_name)
+        return _EntryInspection(current_transition, None, preflight, False, platform_name, tailscale_auth_key)
 
 
 def _initialize_and_update_source(
@@ -342,22 +347,20 @@ def _initialize_and_update_source(
     recovery_bundle: Path,
     *,
     platform_name: str,
+    tailscale_auth_key: str,
     interaction: TtyInteractionPolicy,
 ) -> str:
     from agentworks.bootstrap import load_request_registry
     from agentworks.transports import transport
 
     registry = load_request_registry(config, live_database=db)
-    auth_key_name = _tailscale_auth_key_name(db, registry, vm)
     with gated_vm_boundary(
         db,
         config,
         registry,
         vm,
-        secret_names=(auth_key_name,),
         interaction=interaction,
-    ) as (_vm_node, resolver, _ops_ctx):
-        tailscale_auth_key = _tailscale_auth_key(resolver, auth_key_name)
+    ):
         target = transport(vm, config)
         journal = RemoteJournal(target)
         journal.install()
@@ -425,33 +428,30 @@ def _resume_after_source_update(
     transition: _Transition,
     *,
     platform_name: str,
-    tailscale_auth_key: str | None,
+    checkpoint_ref: str | None,
+    tailscale_auth_key: str,
     interaction: TtyInteractionPolicy,
 ) -> None:
     from agentworks.bootstrap import load_request_registry
     from agentworks.transports import transport
 
     registry = load_request_registry(config, live_database=db)
-    auth_key_name = _tailscale_auth_key_name(db, registry, vm)
-    required_names = () if tailscale_auth_key is not None else (auth_key_name,)
     with gated_vm_boundary(
         db,
         config,
         registry,
         vm,
-        secret_names=required_names,
         interaction=interaction,
-    ) as (_vm_node, resolver, _ops_ctx):
-        if tailscale_auth_key is None:
-            tailscale_auth_key = _tailscale_auth_key(resolver, auth_key_name)
+    ):
         target = transport(vm, config)
         journal = RemoteJournal(target)
         journal.install()
+        state = journal.load(transition.pair)
+        plan = journal.load_plan(transition.pair)
+        _require_matching_checkpoint(checkpoint_ref, plan)
         execution = _execution(target, journal, transition)
         execution.install_script()
-        state = journal.load(transition.pair)
         if state.last_completed is JournalProgress.PREPARED or state.active_action is UpgradeAction.SOURCE_UPDATE:
-            plan = journal.load_plan(transition.pair)
             timers = _timer_states_from_plan(plan)
             try:
                 _inhibit_apt_timers(target)
@@ -462,7 +462,6 @@ def _resume_after_source_update(
             state = journal.load(transition.pair)
 
         if state.last_completed is JournalProgress.SOURCE_CURRENT and state.active_action is None:
-            plan = journal.load_plan(transition.pair)
             timer_states = _timer_states_from_plan(plan)
             try:
                 final = _probe(
@@ -512,20 +511,15 @@ def _resume_after_source_update(
             plan = journal.load_plan(transition.pair)
             plan["interface_predictions"] = predictions
             journal.update_plan(transition.pair, plan)
+        checkpoint_value = plan.get("checkpoint")
+        checkpoint = checkpoint_value if isinstance(checkpoint_value, str) else None
         if state.active_action is UpgradeAction.REBOOT or state.next_action is UpgradeAction.REBOOT:
-            _advance_reboot(journal, execution, transition.pair)
-            reboot_state = journal.load(transition.pair)
-            if reboot_state.boot_id_before is None:
-                raise StateError("reboot journal is missing the pre-reboot boot ID")
-            prior_boot_id: str | None = reboot_state.boot_id_before
+            prior_boot_id: str | None = _advance_reboot(journal, execution, transition.pair)
         elif state.last_completed is JournalProgress.REBOOT_COMPLETE:
             prior_boot_id = None
         else:
             raise StateError("upgrade journal did not reach reboot dispatch")
-        checkpoint_value = journal.load_plan(transition.pair).get("checkpoint")
-        checkpoint = checkpoint_value if isinstance(checkpoint_value, str) else None
 
-    assert tailscale_auth_key is not None
     _finish_after_reboot(
         db,
         config,
@@ -694,13 +688,17 @@ def _advance_source_action(
         raise
 
 
-def _advance_reboot(journal: RemoteJournal, execution: RemoteUpgradeExecution, pair: UpgradePair) -> None:
+def _advance_reboot(journal: RemoteJournal, execution: RemoteUpgradeExecution, pair: UpgradePair) -> str:
     state = journal.load(pair)
     if state.active_action is UpgradeAction.REBOOT:
-        return
+        if state.boot_id_before is None:
+            raise StateError("reboot journal is missing the pre-reboot boot ID")
+        return state.boot_id_before
     if state.next_action is not UpgradeAction.REBOOT:
         raise StateError("upgrade journal is not ready to reboot")
-    execution.start(UpgradeAction.REBOOT, "reboot-dispatch")
+    boot_id = execution.current_boot_id()
+    journal.dispatch_reboot(pair, boot_id)
+    return boot_id
 
 
 def _probe(
@@ -782,9 +780,26 @@ def _resolve_checkpoint(value: str | None) -> str:
             raise ValidationError("--checkpoint is required when vm upgrade cannot prompt")
         output.warn("Create a bootable provider snapshot, WSL export, Proxmox backup, or equivalent before continuing.")
         value = output.prompt("External recovery artifact reference").strip()
+    return _validate_checkpoint(value)
+
+
+def _validate_checkpoint(value: str) -> str:
     if value != value.strip() or not value or len(value) > 512 or "\n" in value or "\r" in value:
         raise ValidationError("checkpoint reference must be a non-blank, bounded single line")
     return value
+
+
+def _require_matching_checkpoint(value: str | None, plan: dict[str, object]) -> None:
+    if value is None:
+        return
+    recorded = plan.get("checkpoint")
+    if not isinstance(recorded, str):
+        raise StateError("Debian upgrade plan has no valid external checkpoint reference")
+    if value != recorded:
+        raise ValidationError(
+            "--checkpoint cannot replace the attested pre-upgrade recovery artifact on resume; "
+            "omit it or pass the originally recorded reference"
+        )
 
 
 def _render_checkpoint_guidance(platform_name: str) -> None:

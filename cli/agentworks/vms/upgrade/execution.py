@@ -101,12 +101,13 @@ class RemoteUpgradeExecution:
             return ExecutionResult(ActionDisposition.REPAIR_REQUIRED, "active action has no attempt identity")
         unit = _unit_name(state.attempt_id)
         show = self._target.run(
-            f"systemctl show {shlex.quote(unit)} --property=ActiveState --property=ExecMainStatus --value",
+            f"systemctl show {shlex.quote(unit)} --property=ActiveState --property=ExecMainStatus",
             sudo=True,
             check=False,
         )
-        values = [line.strip() for line in (show.stdout or "").splitlines() if line.strip()]
-        if values and values[0] in {"active", "activating", "deactivating"}:
+        properties = _systemd_properties(show.stdout or "")
+        active_state = properties.get("ActiveState")
+        if active_state in {"active", "activating", "deactivating"}:
             return ExecutionResult(ActionDisposition.RUNNING)
 
         postcondition = self._postcondition(action)
@@ -124,7 +125,18 @@ class RemoteUpgradeExecution:
                 ActionDisposition.REPAIR_REQUIRED,
                 f"native apt/dpkg locks remain owned by process(es): {lock_owners}",
             )
-        status = values[-1] if values else "unknown"
+        audit = self._target.run("dpkg --audit", sudo=True, check=False)
+        if not audit.ok:
+            return ExecutionResult(
+                ActionDisposition.REPAIR_REQUIRED,
+                "cannot inspect dpkg state after an interrupted action",
+            )
+        if (audit.stdout or "").strip():
+            return ExecutionResult(
+                ActionDisposition.REPAIR_REQUIRED,
+                "dpkg reports an interrupted package transaction; repair forward with sudo dpkg --configure -a",
+            )
+        status = properties.get("ExecMainStatus", "unknown")
         tail = self._target.run(f"tail -n 30 {shlex.quote(self._log)}", sudo=True, check=False)
         detail = tail.stdout or tail.stderr or f"systemd action exited with status {status}"
         return ExecutionResult(ActionDisposition.RETRYABLE, _single_line_detail(detail))
@@ -167,6 +179,16 @@ class RemoteUpgradeExecution:
 def _unit_name(attempt_id: str) -> str:
     safe = attempt_id.replace("-", "")
     return f"agentworks-debian-upgrade-{safe}"
+
+
+def _systemd_properties(value: str) -> dict[str, str]:
+    """Parse named systemd properties without relying on output order."""
+    properties: dict[str, str] = {}
+    for line in value.splitlines():
+        key, separator, property_value = line.partition("=")
+        if separator and key in {"ActiveState", "ExecMainStatus"}:
+            properties[key] = property_value.strip()
+    return properties
 
 
 def _single_line_detail(value: str) -> str:
