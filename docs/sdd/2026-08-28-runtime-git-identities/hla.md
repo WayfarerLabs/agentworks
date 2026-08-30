@@ -19,7 +19,10 @@ provider instances validate config and declare secret references
 core resolves the operation-wide secret union and gives each provider a scoped RunContext
         |
         v
-provider materialization -> StoredCredential | ManagedHelper
+provider static scopes + side-effect-free input validation
+        |
+        v
+creation may proceed; later provider materialization -> StoredCredential | ManagedHelper
         |
         v
 core builds one UserCredentialState
@@ -62,32 +65,23 @@ same change, and registration refuses an old implementation.
 
 ### Provider material
 
-The provider operation surface becomes one context-taking materialization operation rather than the
-current `helper_entry` plus `credential_lines` pair:
+The provider operation surface separates static routing declarations from later acquisition:
 
 ```text
-CredentialMaterial
-  scopes: HttpsCredentialScope[]
-    protocol = https
-    host
-    path_prefix_segments[]
-  payload:
-    StoredCredential
-      username
-      password/token
-    ManagedHelper
-      bounded provider-owned helper program
-      fixed value-safe failure hint
+credential_scopes() -> HttpsCredentialScope[]
+validate_inputs(scoped_context) -> no side effects
+credential_material(scoped_context) -> StoredCredential | ManagedHelper
 ```
 
 Core first resolves the operation-wide secret union, then constructs one `RunContext` per credential
 node whose `ScopedSecrets` view contains exactly that node's provider-declared names. The provider's
-materialization operation receives that context, owns any validation/exchange/derivation, and
-returns the final shape. A stored password/token is sensitive final material, never an inert secret
-reference for core to interpret. A managed helper is declarative provider output: provider code owns
-its behavior while core owns installation, registration, replacement, and removal. Operator
-configuration cannot supply commands or executable bodies. A provider's declared inputs do not
-constrain which payload variant it may return. Core treats both variants as sensitive provider
+static scopes and input validation are prepared together before VM or agent creation mutation. Its
+later materialization operation receives the same context, owns any validation/exchange/derivation,
+and returns the final payload. A stored password/token is sensitive final material, never an inert
+secret reference for core to interpret. A managed helper is declarative provider output: provider
+code owns its behavior while core owns installation, registration, replacement, and removal.
+Operator configuration cannot supply commands or executable bodies. A provider's declared inputs do
+not constrain which payload variant it may return. Core treats both variants as sensitive provider
 output and does not infer, scan, or attest their provenance.
 
 Scopes contain only Git's HTTPS credential context. GitHub translates `repos` and `owner` to path
@@ -107,10 +101,9 @@ Core builds one complete `UserCredentialState` for a target user:
 - an Agentworks-owned Git include;
 - legacy cleanup targets.
 
-The builder rejects duplicate nonempty path claims, retains released first-declared behavior for
-multiple host defaults, orders longest path prefixes before shorter prefixes and host defaults, and
-emits no generation files when the desired material set is empty. The reconciler owns the fixed
-stable launcher and lock.
+The builder rejects every duplicate exact claim, including host defaults, orders longest path
+prefixes before shorter prefixes and host defaults, and emits no generation files when the desired
+material set is empty. The reconciler owns the fixed stable launcher and lock.
 
 ### Per-user reconciler
 
@@ -129,17 +122,18 @@ The reconciler:
    state;
 5. deletes inactive generations and releases the lock.
 
-Each helper invocation enters through the stable launcher, takes a bounded shared lock on the
-current implementation's fixed inherited descriptor, and executes the dispatcher from the resolved
-immutable generation. For stored material the dispatcher reads the selected record under that lock.
-For a managed helper it opens the generation-owned helper, then releases the shared lock and invokes
-the already-open file through its descriptor. Reconciliation may unlink the inactive generation, but
-the in-flight request retains the selected helper inode; provider CLI descendants cannot retain the
-lock. Replacement and garbage collection therefore cannot produce a mixed-generation read. The
-include owns the helper registration and `useHttpPath` behavior for only the hosts represented in
-the desired state. For each managed host it resets inherited helper values before registering the
-Agentworks launcher; unrelated hosts retain operator-managed helpers. Agentworks does not delete or
-rewrite any indistinguishable operator `credential.helper` value.
+Each helper invocation enters through the stable launcher, takes a bounded shared parent-directory
+handoff lock and then a bounded shared lock on the current implementation's fixed inherited
+descriptor, and executes the dispatcher from the resolved immutable generation. For stored material
+the dispatcher reads the selected record under that lock. For a managed helper it opens the
+generation-owned helper, then releases the shared lock and invokes the already-open file through its
+descriptor. Reconciliation may unlink the inactive generation, but the in-flight request retains the
+selected helper inode; provider CLI descendants cannot retain the lock. Replacement and garbage
+collection therefore cannot produce a mixed-generation read. The include owns the helper
+registration and `useHttpPath` behavior for only the hosts represented in the desired state. For
+each managed host it resets inherited helper values before registering the Agentworks launcher;
+unrelated hosts retain operator-managed helpers. Agentworks does not delete or rewrite any
+indistinguishable operator `credential.helper` value.
 
 This breaking cut introduces the managed root, stable launcher, and dispatcher together; no prior
 valid Agentworks launcher exists to pair with the new dispatcher. The launcher is repaired from the
@@ -193,10 +187,14 @@ transport, so the materialization operation has no target-mutation power.
 
 ### Runup
 
-When `defaults.runup_git_credentials` is enabled, the git-credential node calls provider runup with
-the same scoped context later used for materialization. Each provider decides whether its configured
-arm has optional validation work. The current provider-specific HTTP probes and caller policies
-remain:
+Before any creation mutation, core validates all static scopes together and asks each provider to
+validate its resolved inputs without side effects. Current secret arms enforce line safety there;
+current CLI arms have no static input to validate.
+
+When `defaults.runup_git_credentials` is enabled, the git-credential node later calls provider runup
+with the same scoped context later used for materialization. Each provider decides whether its
+configured arm has optional validation work. The current provider-specific HTTP probes and caller
+policies remain:
 
 - multi-credential initialization skips a definitively rejected static token and records partial;
 - network indeterminacy warns and continues;
@@ -205,10 +203,11 @@ remain:
 ### Materialization
 
 Core calls each surviving provider's materialization operation with its scoped context. The provider
-returns final `CredentialMaterial`; core then validates generic scopes, line/control safety for
-stored protocol fields, bounded managed-helper shape, and collisions. It does not correlate declared
-inputs with payload shape. It renders the deterministic state and reconciles even if the surviving
-set is empty. Core never performs authentication-specific mapping or exchange.
+returns a final payload; core then validates line/control safety for stored protocol fields and the
+bounded managed-helper shape. Static scopes and their collisions were already validated before
+creation. Core does not correlate declared inputs with payload shape. It renders the deterministic
+state and reconciles even if the surviving set is empty. Core never performs authentication-specific
+mapping or exchange.
 
 ### Git operation
 
@@ -254,7 +253,8 @@ reversible write. The exact command and prior-art evidence live in the LLD and r
 
 - Provider configuration can choose only closed acquisition arms; it cannot inject commands.
 - Current CLI runtime helpers execute no login and require no Agentworks secret.
-- Provider-owned static validation remains after scoped secret resolution and before target writes.
+- Provider-owned side-effect-free input validation follows scoped secret resolution and precedes VM
+  or agent creation mutation; optional authenticated runup remains later under its existing policy.
 - Provider materialization can read only declared secrets; core never interprets their values.
 - Stored credentials and managed-helper bodies are sensitive provider output and are never logged or
   represented verbatim.
@@ -262,7 +262,8 @@ reversible write. The exact command and prior-art evidence live in the LLD and r
   emitted only through the Git protocol.
 - Upstream stderr is summarized, not copied blindly.
 - The managed directory and staged replacement are private to the target user.
-- A stable shared/exclusive `flock` prevents cross-generation reads and cleanup races.
+- A shared launcher/exclusive reconciler parent handoff preserves one lock identity; the stable
+  shared/exclusive `flock` prevents cross-generation reads and cleanup races.
 - Reconciliation deletes only exact Agentworks-owned paths and exact Git config values.
 - Integration fixtures use disposable identities/repos and clean up reversible writes.
 
@@ -291,9 +292,10 @@ because the internal operation surface changes.
 Existing VMs migrate on their next admin or agent initialization after their manifests are updated.
 The changelog/release notes and upgrade guide prominently label the config break, give exact
 `token`-to-`source` rewrites, and direct operators to declarative configuration and reinit.
-Reconciliation removes the legacy direct `credential.helper` value, old include, old helper script,
-and Agentworks-owned `~/.git-credentials`, then installs the new layout. An empty declared list also
-runs this cleanup.
+Reconciliation removes the legacy direct `credential.helper` value, old include, and old helper
+script. It removes `~/.git-credentials` only when the exact legacy Agentworks helper registration is
+present before cleanup; otherwise that path is operator-owned and untouched. An empty declared list
+also runs this cleanup.
 
 No background fleet mutation, database migration, or implicit CLI authentication occurs.
 

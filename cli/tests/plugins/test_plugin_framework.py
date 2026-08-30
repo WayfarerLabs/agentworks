@@ -25,7 +25,7 @@ import agentworks.plugins as plugins_pkg
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.conformance import conformance_error
 from agentworks.capabilities.descriptor import capability_descriptors, descriptor_for
-from agentworks.capabilities.git_credential.base import CredentialMaterial, HttpsCredentialScope, StoredCredential
+from agentworks.capabilities.git_credential.base import HttpsCredentialScope, StoredCredential
 from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.errors import StateError
 from agentworks.orchestration.secrets import ScopedSecrets
@@ -275,11 +275,8 @@ def test_git_contract_v3_requires_context_material_hook() -> None:
         name = "compatible-v3-provider"
         description = "uses the contract-version-3 material hook"
 
-        def credential_material(self, ctx: RunContext) -> CredentialMaterial:
-            return CredentialMaterial(
-                (HttpsCredentialScope("example.test"),),
-                StoredCredential("compatible", "credential"),
-            )
+        def credential_material(self, ctx: RunContext) -> StoredCredential:
+            return StoredCredential("compatible", "credential")
 
     plugin = Plugin(
         name="compatible-v3-plugin",
@@ -287,8 +284,9 @@ def test_git_contract_v3_requires_context_material_hook() -> None:
     )
     with seated_plugin(plugin):
         instance = _CompatibleV3Provider("credential", {})
+        assert instance.credential_scopes() == (HttpsCredentialScope("example.test"),)
         material = instance.credential_material(RunContext(secrets=ScopedSecrets({}, ())))
-        assert material.payload == StoredCredential("compatible", "credential")
+        assert material == StoredCredential("compatible", "credential")
 
 
 class _NotAModel:

@@ -8,10 +8,11 @@ Git credential providers produce HTTPS credentials for one declared `git-credent
 - translation of provider-specific scope into generic HTTPS host and path prefixes; and
 - a fixed, value-safe failure hint when they return a runtime helper.
 
-Core owns the other half. It validates final provider material, combines every credential selected
-for one user, routes Git requests by generic HTTPS scope, and fully reconciles the Agentworks-owned
-credential state during every admin or agent initialization. Providers never write user files or Git
-configuration.
+Core owns the other half. Before creation, it validates every provider's static scopes together and
+asks providers to validate resolved inputs without side effects. Later it validates final provider
+payloads, combines every credential selected for one user, routes Git requests by generic HTTPS
+scope, and fully reconciles the Agentworks-owned credential state during every admin or agent
+initialization. Providers never write user files or Git configuration.
 
 ## Declaring credentials
 
@@ -100,8 +101,9 @@ GH_PROMPT_DISABLED=1 gh auth token --hostname github.com
 ```
 
 The target user must have `gh` installed on `PATH` and must already be authenticated to the intended
-`github.com` identity. The provider returns username `x-access-token` and the freshly acquired token
-as the password.
+`github.com` identity. That user owns and can change the active identity independently of
+Agentworks; verify it after authentication changes. The provider returns username `x-access-token`
+and the freshly acquired token as the password.
 
 ### Azure CLI
 
@@ -114,8 +116,10 @@ az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --qu
 
 The target user must have `az` installed on `PATH`, must already be authenticated as the intended
 identity, and that identity must have access to the configured Azure DevOps organization and
-repository. The provider returns the configured organization as username and the fresh access token
-as password. The helper neither selects nor mutates Azure tenant or subscription state.
+repository. That user owns and can change the active identity independently of Agentworks; verify it
+after authentication changes. The provider returns the configured organization as username and the
+fresh access token as password. The helper neither selects nor mutates Azure tenant or subscription
+state.
 
 If a CLI is absent, unauthenticated, times out, or returns malformed output, the wrapper suppresses
 its stdout and stderr and prints only the provider's fixed recovery hint. Authenticate or repair the
@@ -124,17 +128,17 @@ generated helper changes.
 
 ## Scope and selection
 
-Providers return one or more `HttpsCredentialScope` values. A scope contains a normalized HTTPS host
-and an optional tuple of normalized path segments. Core knows no forge vocabulary.
+Providers declare one or more static `HttpsCredentialScope` values. A scope contains a normalized
+HTTPS host and an optional tuple of normalized path segments. Core knows no forge vocabulary.
 
 - GitHub `repos: [owner/repo]` becomes `github.com` plus the two-segment path.
 - GitHub `owner: owner` becomes the one-segment parent path.
 - GitHub with neither becomes the `github.com` host default.
 - Azure DevOps `org` becomes `dev.azure.com` plus the organization as one segment.
 
-The generic dispatcher chooses the longest matching segment prefix. Duplicate nonempty scopes are a
-configuration error. For released compatibility, multiple host defaults are allowed and the first
-declared default wins. Git-provided usernames do not override path selection.
+The generic dispatcher chooses the longest matching segment prefix. Every exact duplicate scope is a
+configuration error, including duplicate host defaults. Git-provided usernames do not override path
+selection.
 
 The generated include resets earlier helpers only for hosts Agentworks manages, installs one stable
 Agentworks launcher, and enables `credential.useHttpPath`. Unrelated hosts and operator Git settings
@@ -143,32 +147,34 @@ remain untouched.
 ## Provider contract version 3
 
 A provider subclasses `GitCredentialProvider`, declares `contract_version = 3`, and supplies a
-closed provider-local `AgwModel` with its literal `name` tag. It implements one required operation:
+closed provider-local `AgwModel` with its literal `name` tag. It implements two required operations
+and may override one side-effect-free hook:
 
 ```python
-def credential_material(self, ctx: RunContext) -> CredentialMaterial: ...
+def credential_scopes(self) -> tuple[HttpsCredentialScope, ...]: ...
+def validate_inputs(self, ctx: RunContext) -> None: ...  # default no-op
+def credential_material(self, ctx: RunContext) -> CredentialPayload: ...
 ```
 
-`CredentialMaterial` contains:
-
-- a nonempty tuple of `HttpsCredentialScope`; and
-- either `StoredCredential(username, password)` or
-  `ManagedHelper(provider_authored_program, fixed_failure_hint)`.
+Static scopes come only from provider configuration. Before VM or agent creation mutation, core
+validates all declarations together and calls `validate_inputs` with the provider's scoped resolved
+inputs. The later payload is either `StoredCredential(username, password)` or
+`ManagedHelper(provider_authored_program, fixed_failure_hint)`.
 
 The result carries no echoed credential name. Provider inputs and outputs are orthogonal: secret
 references are derived from the provider's model, while the operation may return either payload
 shape. A managed helper program is first-party provider code, never operator-authored config.
 
-Core validates hosts, segment tuples, protocol fields, helper size, and failure hints before
-installation. Stored username/password values are line-safe bounded UTF-8 fields and are stored as
-exact Git credential-protocol records, not credential URLs. Delimiters such as `:`, `@`, `/`, `%`,
-`?`, `#`, `=`, and backslash therefore remain literal.
+Core validates hosts, segment tuples, and collisions before creation; it validates protocol fields,
+helper size, and failure hints before installation. Stored username/password values are line-safe
+bounded UTF-8 fields and are stored as exact Git credential-protocol records, not credential URLs.
+Delimiters such as `:`, `@`, `/`, `%`, `?`, `#`, `=`, and backslash therefore remain literal.
 
 ## Reconciliation and managed state
 
-Every admin and agent initialization materializes the selected providers and invokes the same
-reconciler, including when the desired set is empty. The reconciler uses one bounded
-shared/exclusive lock and a private generation under:
+Every admin and agent initialization prepares selected providers, later materializes them, and
+invokes the same reconciler, including when the desired set is empty. The reconciler uses one
+bounded shared/exclusive lock and a private generation under:
 
 ```text
 ~/.agentworks/git-credentials/
@@ -177,17 +183,19 @@ shared/exclusive lock and a private generation under:
   current -> generations/generation.*
 ```
 
-Each generation contains its Git include, dispatcher, immutable stored protocol records, and
-provider helper programs. Reconciliation stages a complete generation, atomically activates
-`current`, registers exactly one include, and then removes inactive generations. A runtime request
-holds the shared lock only while selecting material and opening its generation-owned file; that
-descriptor keeps the selected material complete after the lock closes, and an external CLI process
-cannot retain the lock.
+Launchers share the short parent-directory handoff; reconciliation takes it exclusively. Each
+generation contains its Git include, dispatcher, immutable stored protocol records, and provider
+helper programs. Reconciliation stages a complete generation, atomically activates `current`,
+registers exactly one include, and then removes inactive generations. A runtime request holds the
+shared lock only while selecting material and opening its generation-owned file; that descriptor
+keeps the selected material complete after the lock closes, and an external CLI process cannot
+retain the lock.
 
 Empty reconciliation removes the include, launcher, current generation, and all Agentworks-owned
 credential material. Migration also removes the released Agentworks-owned legacy paths and only
-their exact Git config registrations. A generic operator `credential.helper=store` remains, but the
-old Agentworks-owned `~/.git-credentials` file it could read is removed without inspection.
+their exact Git config registrations. A generic operator `credential.helper=store` remains.
+`~/.git-credentials` is removed without inspection only when the exact old Agentworks helper
+registration was witnessed before cleanup; an unwitnessed file or directory is preserved.
 
 The runtime envelope accepts bounded Git credential protocol only, serves `get`, emits a diagnostic
 on matching `erase`, and performs no mutation for unsupported operations. Stored values and runtime

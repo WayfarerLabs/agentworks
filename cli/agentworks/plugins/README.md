@@ -243,11 +243,12 @@ mapping may be a bare string. Conformance checks both backend models against the
 contracts.
 
 Git credential providers use contract version 3. Each provider owns its entire config model,
-including any acquisition discriminator and every `SecretRef`, and implements
-`credential_material(ctx)` to return final generic HTTPS scopes plus either a stored credential or a
-provider-authored runtime helper. Do not derive a plugin provider from a shared source model or ask
-core to interpret its secrets. The full author contract is in
-[`capabilities/git_credential/README.md`](../capabilities/git_credential/README.md).
+including any acquisition discriminator and every `SecretRef`, and implements `credential_scopes()`
+to declare generic HTTPS routing plus `credential_material(ctx)` to return either a stored
+credential or a provider-authored runtime helper. It may override the default no-op
+`validate_inputs(ctx)` for side-effect-free checks at the pre-creation boundary. Do not derive a
+plugin provider from a shared source model or ask core to interpret its secrets. The full author
+contract is in [`capabilities/git_credential/README.md`](../capabilities/git_credential/README.md).
 
 The capability model as a whole, including how a config is offered per facet and what the framework
 does with the declaration at each lifecycle stage, is

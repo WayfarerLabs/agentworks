@@ -19,7 +19,7 @@ still finds it by registry name, while its ROW publishes with a
 from __future__ import annotations
 
 from agentworks.capabilities.git_credential.base import (
-    CredentialMaterial,
+    CredentialPayload,
     GitCredentialProvider,
     HttpsCredentialScope,
     ManagedHelper,
@@ -33,7 +33,7 @@ from agentworks.capabilities.git_credential.github import (
 
 __all__ = [
     "GIT_CREDENTIAL_PROVIDER_REGISTRY",
-    "CredentialMaterial",
+    "CredentialPayload",
     "GitCredentialProvider",
     "GitHubCliSource",
     "GitHubCredentialProvider",

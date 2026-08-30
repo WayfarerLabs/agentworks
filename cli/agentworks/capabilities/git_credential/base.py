@@ -80,16 +80,8 @@ class ManagedHelper:
 CredentialPayload = StoredCredential | ManagedHelper
 
 
-@dataclass(frozen=True)
-class CredentialMaterial:
-    """Final provider output consumed by the generic core reconciler."""
-
-    scopes: tuple[HttpsCredentialScope, ...]
-    payload: CredentialPayload = field(repr=False)
-
-
 class GitCredentialProvider(Capability):
-    """Capability that produces final Git credential material.
+    """Capability that declares scopes and produces final credential material.
 
     A provider validates its complete configuration, declares any secret
     references through that model, performs provider-specific runup, and
@@ -117,6 +109,13 @@ class GitCredentialProvider(Capability):
     def review_remote(self, url: str) -> list[str]:
         """Return provider-owned advisories for a declared remote URL."""
         return []
+
+    @abstractmethod
+    def credential_scopes(self) -> tuple[HttpsCredentialScope, ...]:
+        """Return the static HTTPS scopes derived from provider config."""
+
+    def validate_inputs(self, ctx: RunContext) -> None:
+        """Validate resolved provider inputs at the pre-mutation boundary."""
 
     def _probe_static_credential(
         self,
@@ -155,5 +154,5 @@ class GitCredentialProvider(Capability):
         return (body, response_headers)
 
     @abstractmethod
-    def credential_material(self, ctx: RunContext) -> CredentialMaterial:
-        """Return this provider's final scopes and credential payload."""
+    def credential_material(self, ctx: RunContext) -> CredentialPayload:
+        """Acquire this provider's final stored credential or helper."""

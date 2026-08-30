@@ -10,6 +10,7 @@ from agentworks.git_credentials.reconcile import reconcile_user_git_credentials
 from agentworks.git_credentials.state import (
     UserCredentialState,
     build_user_credential_state,
+    validate_credential_scope_claims,
 )
 
 if TYPE_CHECKING:
@@ -17,8 +18,9 @@ if TYPE_CHECKING:
 
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.git_credential.base import (
-        CredentialMaterial,
+        CredentialPayload,
         GitCredentialProvider,
+        HttpsCredentialScope,
     )
     from agentworks.config import Config
     from agentworks.git_credentials.nodes import GitCredentialNode
@@ -38,6 +40,7 @@ class CredentialRequest:
 
     node: GitCredentialNode
     context: RunContext
+    scopes: tuple[HttpsCredentialScope, ...]
 
     @property
     def name(self) -> str:
@@ -52,8 +55,14 @@ def credential_requests(
     nodes: Iterable[GitCredentialNode],
     scoped_ctx: Callable[[tuple[str, ...]], RunContext],
 ) -> tuple[CredentialRequest, ...]:
-    """Bind each held provider to only its declared resolved-secret view."""
-    return tuple(CredentialRequest(node, scoped_ctx(node.secret_refs())) for node in nodes)
+    """Prepare static scopes and resolved inputs before target mutation."""
+    requests = tuple(
+        CredentialRequest(node, scoped_ctx(node.secret_refs()), node.provider.credential_scopes()) for node in nodes
+    )
+    validate_credential_scope_claims((request.name, request.scopes) for request in requests)
+    for request in requests:
+        request.provider.validate_inputs(request.context)
+    return requests
 
 
 def credential_redactions(
@@ -75,11 +84,11 @@ def materialize_credential_state(
     requests: Iterable[CredentialRequest],
     config: Config,
     logger: _WarnLogger | None = None,
-) -> tuple[UserCredentialState, int]:
+) -> UserCredentialState:
     """Run provider-owned runup/materialization and compile surviving output."""
     from agentworks.errors import TokenRejectedError
 
-    materials: list[tuple[str, CredentialMaterial]] = []
+    materials: list[tuple[str, tuple[HttpsCredentialScope, ...], CredentialPayload]] = []
     for request in requests:
         if config.defaults.runup_git_credentials:
             output.detail(f"Performing runup test for git-credential/{request.name}...")
@@ -94,8 +103,14 @@ def materialize_credential_state(
                 if logger is not None:
                     logger.warning(msg)
                 continue
-        materials.append((request.name, request.provider.credential_material(request.context)))
-    return build_user_credential_state(materials), len(materials)
+        materials.append(
+            (
+                request.name,
+                request.scopes,
+                request.provider.credential_material(request.context),
+            )
+        )
+    return build_user_credential_state(materials)
 
 
 def configure_user_git_credentials(
@@ -109,7 +124,7 @@ def configure_user_git_credentials(
 
     logger.step("Git credentials")
     output.info("Reconciling git credentials...")
-    state, count = materialize_credential_state(requests, config, logger)
+    state = materialize_credential_state(requests, config, logger)
     try:
         reconcile_user_git_credentials(target, state)
     except SSHError as exc:
@@ -117,7 +132,7 @@ def configure_user_git_credentials(
         logger.warning(msg)
         output.warn(msg)
         return
-    output.detail(f"Git credentials reconciled for {output.count(count, 'provider')}")
+    output.detail("Git credentials reconciled")
 
 
 def remote_advisories(registry: Registry, url: str) -> list[str]:

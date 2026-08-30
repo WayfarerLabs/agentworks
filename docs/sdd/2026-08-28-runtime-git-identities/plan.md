@@ -311,6 +311,13 @@ assert structure, behavior, state, and value containment; they do not police aut
       constants, VM-owned provider resolver, and provider dictionaries. (2026-08-29: focused
       adversarial and affected-flow suites passed with the new Git-domain construction and
       announcement paths.)
+- [x] Incorporate correction round 3 without rewriting completed history: separate static scopes and
+      side-effect-free input validation from later payload acquisition; reject all exact scope
+      collisions before creation; share launcher parent handoffs while excluding reconciliation;
+      require the exact legacy helper-registration witness before removing `~/.git-credentials`;
+      sanitize reconcile diagnostics; remove provider/route counts; and document target-user CLI
+      identity mutability. (2026-08-30: structural and orchestration regressions cover every
+      corrected boundary; live acceptance and final delivery remain open below.)
 - [ ] Run focused and full Python, static, lint, locked-SDD, Rulesync, website, installed-wheel, and
       live integration gates.
 - [ ] Obtain private `agentworks-reviewer`, Muntz, and generic correctness/security reviews; resolve

@@ -176,7 +176,8 @@ CLI sources use the target admin or agent user's active CLI identity. Agentworks
 authenticate `gh` or `az`. GitHub invokes `gh auth token --hostname github.com`; Azure DevOps uses
 `az account get-access-token` with resource `499b84ac-1321-427f-aa17-267ca6975798`, query
 `accessToken`, and TSV output. The Azure identity must also have access to the configured
-organization and repository.
+organization and repository. The target user owns and may change the active CLI identity; verify it
+after authentication changes.
 
 ## Cut over the CLI and resource directory together
 
@@ -231,12 +232,14 @@ directory was changed. Keep it until the canary and affected-user reinitializati
 Run `agw vm reinit VM` for affected VM administrators and `agw agent reinit AGENT` for affected
 managed agents. Initialization now rebuilds the complete Agentworks-owned Git credential state even
 when the desired list is empty. It removes the released Agentworks-owned helper, scope include, and
-credential file before installing the new private generation, or leaves a clean empty state.
+credential file, when its exact legacy Agentworks helper registration proves ownership, before
+installing the new private generation, or leaves a clean empty state.
 
 The removed `agw vm add-git-credential` command has no replacement. Declare credentials on the
 appropriate admin or agent template and reinitialize. A generic operator-managed
-`credential.helper=store` setting is preserved, but the old Agentworks-owned `~/.git-credentials`
-file is removed without reading it.
+`credential.helper=store` setting is preserved. Agentworks removes `~/.git-credentials` without
+reading it only when `!~/.agentworks-git-cred-helper.sh` was registered at the start of that
+reconciliation; otherwise a file or directory at that generic path is left untouched.
 
 If a CLI-backed helper fails later, authenticate or repair that target user's CLI identity and retry
 Git. Reinitialize only after changing a manifest or generated helper.
@@ -244,8 +247,10 @@ Git. Reinitialize only after changing a manifest or generated helper.
 ## Update third-party Git credential providers
 
 Provider contract version 2 is removed without an adapter. A version-3 provider owns its complete
-configuration model and declared references, implements `credential_material(ctx)`, translates its
-scope to generic HTTPS host/path segments, and returns either final `StoredCredential` material or a
-first-party `ManagedHelper`. Provider inputs do not determine which output shape is allowed. See
+configuration model and declared references, implements `credential_scopes()` and
+`credential_material(ctx)`, and may override the side-effect-free `validate_inputs(ctx)` hook.
+Static scopes are generic HTTPS host/path segments; the later operation returns either final
+`StoredCredential` material or a first-party `ManagedHelper`. Provider inputs do not determine which
+output shape is allowed. See
 [`cli/agentworks/capabilities/git_credential/README.md`](../../cli/agentworks/capabilities/git_credential/README.md)
 for the permanent author contract.

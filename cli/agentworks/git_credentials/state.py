@@ -12,7 +12,10 @@ from agentworks.errors import ConfigError
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from agentworks.capabilities.git_credential.base import CredentialMaterial
+    from agentworks.capabilities.git_credential.base import (
+        CredentialPayload,
+        HttpsCredentialScope,
+    )
 
 
 _HOST_RE = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$")
@@ -77,6 +80,36 @@ def _validate_scope(host: str, path_prefix: tuple[str, ...]) -> None:
             raise ConfigError(f"git credential HTTPS path segment {segment!r} is not normalized")
 
 
+def validate_credential_scope_claims(
+    claims: Iterable[tuple[str, tuple[HttpsCredentialScope, ...]]],
+) -> tuple[tuple[str, tuple[HttpsCredentialScope, ...]], ...]:
+    """Validate static provider scopes and reject every exact collision."""
+    from agentworks.capabilities.git_credential.base import HttpsCredentialScope
+
+    validated = tuple(claims)
+    claimed: dict[tuple[str, tuple[str, ...]], str] = {}
+    for credential_name, scopes in validated:
+        _require_line_value(credential_name, label="name", max_bytes=255)
+        if not isinstance(scopes, tuple):
+            raise ConfigError(f"git credential {credential_name!r} scopes must be a tuple")
+        if not scopes:
+            raise ConfigError(f"git credential {credential_name!r} returned no HTTPS scope")
+        for scope in scopes:
+            if not isinstance(scope, HttpsCredentialScope):
+                raise ConfigError(f"git credential {credential_name!r} returned an unsupported HTTPS scope")
+            _validate_scope(scope.host, scope.path_prefix)
+            key = (scope.host, scope.path_prefix)
+            previous = claimed.get(key)
+            if previous is not None:
+                suffix = f"/{'/'.join(scope.path_prefix)}" if scope.path_prefix else ""
+                raise ConfigError(
+                    f"git credentials {previous!r} and {credential_name!r} both claim "
+                    f"scope {scope.host}{suffix}; scopes must be unambiguous"
+                )
+            claimed[key] = credential_name
+    return validated
+
+
 def _stored_record(username: str, password: str) -> bytes:
     username = _require_line_value(username, label="username", max_bytes=_MAX_PROTOCOL_FIELD_BYTES)
     password = _require_line_value(password, label="password", max_bytes=_MAX_PROTOCOL_FIELD_BYTES)
@@ -96,12 +129,10 @@ def _managed_helper(program: bytes, failure_hint: str) -> tuple[bytes, str]:
 
 
 def build_user_credential_state(
-    materials: Iterable[tuple[str, CredentialMaterial]],
+    materials: Iterable[tuple[str, tuple[HttpsCredentialScope, ...], CredentialPayload]],
 ) -> UserCredentialState:
     """Validate provider output and compile one generic Git credential state."""
     from agentworks.capabilities.git_credential.base import (
-        CredentialMaterial,
-        HttpsCredentialScope,
         ManagedHelper,
         StoredCredential,
     )
@@ -109,53 +140,28 @@ def build_user_credential_state(
     bindings = tuple(materials)
     if not bindings:
         return UserCredentialState("", "", (), ())
+    validated_scopes = validate_credential_scope_claims((name, scopes) for name, scopes, _payload in bindings)
 
     routes: list[_Route] = []
     payloads: dict[str, bytes] = {}
-    claimed_nonempty: dict[tuple[str, tuple[str, ...]], str] = {}
-    first_defaults: set[str] = set()
 
-    for declaration_order, (credential_name, material) in enumerate(bindings):
-        _require_line_value(credential_name, label="name", max_bytes=255)
-        if not isinstance(material, CredentialMaterial):
-            raise ConfigError(f"git credential {credential_name!r} returned unsupported material")
-        if not isinstance(material.scopes, tuple):
-            raise ConfigError(f"git credential {credential_name!r} scopes must be a tuple")
-        if not material.scopes:
-            raise ConfigError(f"git credential {credential_name!r} returned no HTTPS scope")
+    for declaration_order, (credential_name, _scopes, payload) in enumerate(bindings):
+        scopes = validated_scopes[declaration_order][1]
         credential_id = f"credential-{declaration_order:04d}"
-        if isinstance(material.payload, StoredCredential):
+        if isinstance(payload, StoredCredential):
             payload_kind: Literal["stored", "helper"] = "stored"
-            payloads[credential_id] = _stored_record(material.payload.username, material.payload.password)
+            payloads[credential_id] = _stored_record(payload.username, payload.password)
             failure_hint = ""
-        elif isinstance(material.payload, ManagedHelper):
+        elif isinstance(payload, ManagedHelper):
             payload_kind = "helper"
             payloads[credential_id], failure_hint = _managed_helper(
-                material.payload.program,
-                material.payload.failure_hint,
+                payload.program,
+                payload.failure_hint,
             )
         else:
             raise ConfigError(f"git credential {credential_name!r} returned an unsupported payload")
 
-        material_has_route = False
-        for scope in material.scopes:
-            if not isinstance(scope, HttpsCredentialScope):
-                raise ConfigError(f"git credential {credential_name!r} returned an unsupported HTTPS scope")
-            _validate_scope(scope.host, scope.path_prefix)
-            if scope.path_prefix:
-                key = (scope.host, scope.path_prefix)
-                previous = claimed_nonempty.get(key)
-                if previous is not None:
-                    joined = "/".join(scope.path_prefix)
-                    raise ConfigError(
-                        f"git credentials {previous!r} and {credential_name!r} both claim "
-                        f"scope {scope.host}/{joined}; nonempty scopes must be unambiguous"
-                    )
-                claimed_nonempty[key] = credential_name
-            elif scope.host in first_defaults:
-                continue
-            else:
-                first_defaults.add(scope.host)
+        for scope in scopes:
             routes.append(
                 _Route(
                     scope.host,
@@ -167,9 +173,6 @@ def build_user_credential_state(
                     declaration_order,
                 )
             )
-            material_has_route = True
-        if not material_has_route:
-            payloads.pop(credential_id, None)
 
     routes.sort(key=lambda route: (route.host, -len(route.path_prefix), route.path_prefix, route.declaration_order))
     used_ids = {route.credential_id for route in routes}

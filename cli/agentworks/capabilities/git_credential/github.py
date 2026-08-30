@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 from pydantic import Field
 
 from agentworks.capabilities.git_credential.base import (
-    CredentialMaterial,
+    CredentialPayload,
     GitCredentialProvider,
     HttpsCredentialScope,
     ManagedHelper,
@@ -111,7 +111,7 @@ class GitHubCredentialProvider(GitCredentialProvider):
     def config(self) -> GitHubConfig:
         return self._config_as(GitHubConfig)
 
-    def _scopes(self) -> tuple[HttpsCredentialScope, ...]:
+    def credential_scopes(self) -> tuple[HttpsCredentialScope, ...]:
         paths = [tuple(repo.split("/", 1)) for repo in self.config.repos]
         if self.config.owner is not None:
             paths.append((self.config.owner,))
@@ -123,11 +123,20 @@ class GitHubCredentialProvider(GitCredentialProvider):
     def _username(self) -> str:
         return self.owner_name if self.config.repos or self.config.owner else "x-access-token"
 
+    def validate_inputs(self, ctx: RunContext) -> None:
+        source = self.config.source
+        if isinstance(source, GitHubSecretSource):
+            self._secret_input(ctx, source)
+
+    @staticmethod
+    def _secret_input(ctx: RunContext, source: GitHubSecretSource) -> str:
+        return require_line_safe_credential_input(ctx.secret(source.secret), secret_name=source.secret)
+
     def runup(self, ctx: RunContext) -> None:
         source = self.config.source
         if not isinstance(source, GitHubSecretSource):
             return
-        token = require_line_safe_credential_input(ctx.secret(source.secret), secret_name=source.secret)
+        token = self._secret_input(ctx, source)
         self._verify_token(token, secret_name=source.secret)
 
     def _verify_token(self, token: str, *, secret_name: str) -> None:
@@ -165,14 +174,14 @@ class GitHubCredentialProvider(GitCredentialProvider):
         suffix = f" ({', '.join(extras)})" if extras else ""
         output.detail(f"Verified git token for git-credential/{self.owner_name}{suffix}")
 
-    def credential_material(self, ctx: RunContext) -> CredentialMaterial:
+    def credential_material(self, ctx: RunContext) -> CredentialPayload:
         source = self.config.source
         if isinstance(source, GitHubSecretSource):
-            password = require_line_safe_credential_input(ctx.secret(source.secret), secret_name=source.secret)
+            password = self._secret_input(ctx, source)
             payload: StoredCredential | ManagedHelper = StoredCredential(self._username, password)
         else:
             payload = ManagedHelper(_GH_HELPER, _GH_FAILURE_HINT)
-        return CredentialMaterial(self._scopes(), payload)
+        return payload
 
     def review_remote(self, url: str) -> list[str]:
         from urllib.parse import urlsplit

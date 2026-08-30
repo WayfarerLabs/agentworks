@@ -233,14 +233,14 @@ spec:
 ```
 
 CLI sources use the target user's already-authenticated CLI identity and acquire a fresh credential
-when Git asks for it. They do not install or authenticate `gh` or `az`. Secret sources retain their
+when Git asks for it. They do not install or authenticate `gh` or `az`. The target user owns and may
+change that active identity, so verify it after authentication changes. Secret sources retain their
 provider-owned optional runup validation and install the final username/password privately.
 
 GitHub `repos` scopes an exact `owner/repo`, while `owner` covers its repositories. A GitHub
 credential with neither is the host default. Azure DevOps always scopes to its configured
 organization under `dev.azure.com`. The generic helper selects the longest segment-aware path
-prefix; duplicate nonempty scopes fail initialization, while the first of multiple host defaults
-wins for released compatibility.
+prefix; every exact duplicate scope fails initialization, including duplicate host defaults.
 
 Admin and agent initialization rebuilds the complete Agentworks-owned credential state every time,
 including removing it when no credentials remain. Add credential names to the appropriate

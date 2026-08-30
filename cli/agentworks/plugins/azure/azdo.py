@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 from pydantic import Field
 
 from agentworks.capabilities.git_credential.base import (
-    CredentialMaterial,
+    CredentialPayload,
     GitCredentialProvider,
     HttpsCredentialScope,
     ManagedHelper,
@@ -104,16 +104,25 @@ class AzDOCredentialProvider(GitCredentialProvider):
     def config(self) -> AzDOConfig:
         return self._config_as(AzDOConfig)
 
-    def _scope(self) -> HttpsCredentialScope:
+    def credential_scopes(self) -> tuple[HttpsCredentialScope, ...]:
         # Preserve the released AzDO translation exactly: dev.azure.com
         # plus the configured organization as one path-prefix segment.
-        return HttpsCredentialScope("dev.azure.com", (self.config.org,))
+        return (HttpsCredentialScope("dev.azure.com", (self.config.org,)),)
+
+    def validate_inputs(self, ctx: RunContext) -> None:
+        source = self.config.source
+        if isinstance(source, AzDOSecretSource):
+            self._secret_input(ctx, source)
+
+    @staticmethod
+    def _secret_input(ctx: RunContext, source: AzDOSecretSource) -> str:
+        return require_line_safe_credential_input(ctx.secret(source.secret), secret_name=source.secret)
 
     def runup(self, ctx: RunContext) -> None:
         source = self.config.source
         if not isinstance(source, AzDOSecretSource):
             return
-        token = require_line_safe_credential_input(ctx.secret(source.secret), secret_name=source.secret)
+        token = self._secret_input(ctx, source)
         self._verify_token(token, secret_name=source.secret)
 
     def _verify_token(self, token: str, *, secret_name: str) -> None:
@@ -136,14 +145,14 @@ class AzDOCredentialProvider(GitCredentialProvider):
         if result is not None:
             output.detail(f"Verified git token for git-credential/{self.owner_name}")
 
-    def credential_material(self, ctx: RunContext) -> CredentialMaterial:
+    def credential_material(self, ctx: RunContext) -> CredentialPayload:
         source = self.config.source
         if isinstance(source, AzDOSecretSource):
-            password = require_line_safe_credential_input(ctx.secret(source.secret), secret_name=source.secret)
+            password = self._secret_input(ctx, source)
             payload: StoredCredential | ManagedHelper = StoredCredential(self.config.org, password)
         else:
             payload = ManagedHelper(_azure_cli_helper(self.config.org), _AZ_FAILURE_HINT)
-        return CredentialMaterial((self._scope(),), payload)
+        return payload
 
     def review_remote(self, url: str) -> list[str]:
         from urllib.parse import urlsplit

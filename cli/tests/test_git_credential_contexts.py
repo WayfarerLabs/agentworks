@@ -8,6 +8,7 @@ import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.capabilities.base import RunContext
+from agentworks.capabilities.git_credential.base import StoredCredential
 from agentworks.config import load_config
 from agentworks.errors import StateError
 from agentworks.git_credentials import credential_requests
@@ -69,12 +70,24 @@ def test_request_context_is_scoped_to_each_provider_declaration(tmp_path: Path) 
         ManifestDoc(
             "git-credential",
             "first",
-            {"provider": {"name": "github", "source": {"mode": "secret", "secret": "first-input"}}},
+            {
+                "provider": {
+                    "name": "github",
+                    "owner": "first",
+                    "source": {"mode": "secret", "secret": "first-input"},
+                }
+            },
         ),
         ManifestDoc(
             "git-credential",
             "second",
-            {"provider": {"name": "github", "source": {"mode": "secret", "secret": "second-input"}}},
+            {
+                "provider": {
+                    "name": "github",
+                    "owner": "second",
+                    "source": {"mode": "secret", "secret": "second-input"},
+                }
+            },
         ),
     )
     registry = build_registry(config)
@@ -85,7 +98,11 @@ def test_request_context_is_scoped_to_each_provider_declaration(tmp_path: Path) 
         return RunContext(secrets=ScopedSecrets(values, names))
 
     first, second = credential_requests(nodes, scoped)
-    assert first.provider.credential_material(first.context).payload.password == "one"  # type: ignore[union-attr]
-    assert second.provider.credential_material(second.context).payload.password == "two"  # type: ignore[union-attr]
+    first_material = first.provider.credential_material(first.context)
+    second_material = second.provider.credential_material(second.context)
+    assert isinstance(first_material, StoredCredential)
+    assert isinstance(second_material, StoredCredential)
+    assert first_material.password == "one"
+    assert second_material.password == "two"
     with pytest.raises(StateError):
         first.context.secret("second-input")

@@ -9,7 +9,7 @@ import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.git_credential.base import (
-    CredentialMaterial,
+    CredentialPayload,
     GitCredentialProvider,
     HttpsCredentialScope,
     ManagedHelper,
@@ -52,7 +52,11 @@ def _request(provider: GitCredentialProvider, context: RunContext) -> Credential
     node.name = "gh"
     node.provider = provider
     node.runup.side_effect = provider.runup
-    return CredentialRequest(cast("GitCredentialNode", node), context)
+    return CredentialRequest(
+        cast("GitCredentialNode", node),
+        context,
+        provider.credential_scopes(),
+    )
 
 
 def test_github_secret_runup_uses_declared_input_and_authenticated_probe(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -134,13 +138,16 @@ class _ExchangeProvider(GitCredentialProvider):
     def config(self) -> _ExchangeConfig:
         return self._config_as(_ExchangeConfig)
 
-    def credential_material(self, ctx: RunContext) -> CredentialMaterial:
+    def credential_scopes(self) -> tuple[HttpsCredentialScope, ...]:
+        return (HttpsCredentialScope("example.com"),)
+
+    def credential_material(self, ctx: RunContext) -> CredentialPayload:
         joined = f"{ctx.secret(self.config.first)}:{ctx.secret(self.config.second)}"
         if self.config.output == "stored":
             payload: StoredCredential | ManagedHelper = StoredCredential("derived", joined)
         else:
             payload = ManagedHelper(b"#!/bin/sh\nexit 1\n", "fixed failure")
-        return CredentialMaterial((HttpsCredentialScope("example.com"),), payload)
+        return payload
 
 
 @pytest.mark.parametrize("output", ["stored", "helper"])
@@ -152,9 +159,9 @@ def test_multiple_declared_inputs_are_orthogonal_to_provider_output(output: str)
     context = _ctx({"first": "one", "second": "two"}, ("first", "second"))
     material = provider.credential_material(context)
     if output == "stored":
-        assert material.payload == StoredCredential("derived", "one:two")
+        assert material == StoredCredential("derived", "one:two")
     else:
-        assert isinstance(material.payload, ManagedHelper)
+        assert isinstance(material, ManagedHelper)
 
 
 def test_materialization_skip_policy_reconciles_zero_survivors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -162,8 +169,7 @@ def test_materialization_skip_policy_reconciles_zero_survivors(monkeypatch: pyte
     provider = GitHubCredentialProvider("gh", {"source": {"mode": "secret"}})
     request = _request(provider, _ctx({"git-token-gh": "rejected"}, ("git-token-gh",)))
     logger = MagicMock()
-    state, count = materialize_credential_state((request,), _config(), logger)
-    assert count == 0
+    state = materialize_credential_state((request,), _config(), logger)
     assert not state.has_credentials
     logger.warning.assert_called_once()
 
@@ -175,6 +181,5 @@ def test_disabled_runup_still_materializes_final_stored_credential(monkeypatch: 
     monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", explode)
     provider = GitHubCredentialProvider("gh", {"source": {"mode": "secret"}})
     request = _request(provider, _ctx({"git-token-gh": "value"}, ("git-token-gh",)))
-    state, count = materialize_credential_state((request,), _config(runup=False))
-    assert count == 1
+    state = materialize_credential_state((request,), _config(runup=False))
     assert state.has_credentials

@@ -85,12 +85,14 @@ before that lifecycle; operation-scoped clients own bounded provider work instea
 
 The `git-credential-provider` capability turns provider-owned inputs into final HTTPS credential
 material. `github` and `azdo` (Azure DevOps) ship today. Each owns its complete source schema,
-declared secret inputs, optional validation, final Git username/password construction, and
-translation of forge scope into generic HTTPS path prefixes. A provider may return a stored
-credential or a first-party runtime helper. Core remains acquisition-agnostic: it validates and
-routes those final materials and fully reconciles each admin or agent user's Agentworks-owned Git
-state during initialization. See [`git_credential/README.md`](git_credential/README.md) for what a
-provider must provide and the shipped providers.
+declared secret inputs, side-effect-free input validation, optional authenticated runup, final Git
+username/password construction, and translation of forge scope into generic HTTPS path prefixes. A
+provider declares static scopes and may later return a stored credential or a first-party runtime
+helper. Core remains acquisition-agnostic: before creation it validates scopes and invokes input
+validation; later it validates and routes payloads and fully reconciles each admin or agent user's
+Agentworks-owned Git state during initialization. See
+[`git_credential/README.md`](git_credential/README.md) for what a provider must provide and the
+shipped providers.
 
 ## Technical Overview
 
@@ -726,11 +728,11 @@ VM domain explicitly delivers the one operation input every platform must consum
 complete-or-raise creation.
 
 The shipped capabilities illustrate both shapes. A secret-backed `git-credential-provider` reads its
-declared inputs through `ctx.secret(name)` during runup and final materialization, while a CLI
-source may declare none. `vm-platform/proxmox` reads its API token through the same accessor in
-runup and in its ops (the op client is built on first need from the delivered value and reused for
-the operation). A provider gets the accessor's typed error if it asks for an undeclared or
-undelivered name. A new capability should never hold a value source of its own.
+declared inputs through `ctx.secret(name)` during pre-creation input validation, runup, and final
+materialization, while a CLI source may declare none. `vm-platform/proxmox` reads its API token
+through the same accessor in runup and in its ops (the op client is built on first need from the
+delivered value and reused for the operation). A provider gets the accessor's typed error if it asks
+for an undeclared or undelivered name. A new capability should never hold a value source of its own.
 
 ### Where Capabilities Live
 

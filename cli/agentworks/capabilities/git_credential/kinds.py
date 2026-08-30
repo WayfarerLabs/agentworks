@@ -170,7 +170,7 @@ GIT_CREDENTIAL_PROVIDER_DESCRIPTOR = CapabilityKindDescriptor(
     contract_version=3,
     implementation_contract=GitCredentialProvider,
     registry=_registry,
-    required_operations=frozenset({"credential_material"}),
+    required_operations=frozenset({"credential_material", "credential_scopes"}),
     # Empty: GitCredentialProvider supplies every non-operation member a
     # subclass needs.
     required_attributes=frozenset(),

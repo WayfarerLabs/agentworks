@@ -19,7 +19,6 @@ import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.capabilities.git_credential.base import (
-    CredentialMaterial,
     GitCredentialProvider,
     HttpsCredentialScope,
     StoredCredential,
@@ -132,11 +131,11 @@ def test_a_capability_with_no_config_rejects_every_key() -> None:
         contract_version = 3
         config_model = _BareConfig
 
-        def credential_material(self, ctx: object) -> CredentialMaterial:
-            return CredentialMaterial(
-                (HttpsCredentialScope("example.test"),),
-                StoredCredential("bare", "unused"),
-            )
+        def credential_scopes(self) -> tuple[HttpsCredentialScope, ...]:
+            return (HttpsCredentialScope("example.test"),)
+
+        def credential_material(self, ctx: object) -> StoredCredential:
+            return StoredCredential("bare", "unused")
 
     _Bare("bare", {})
     with pytest.raises(ConfigError, match="anything: unknown field"):
@@ -299,11 +298,11 @@ class _SigningCredentialProvider(GitCredentialProvider):
     contract_version = 3
     config_model = _SigningConfig
 
-    def credential_material(self, ctx: RunContext) -> CredentialMaterial:
-        return CredentialMaterial(
-            (HttpsCredentialScope("example.test"),),
-            StoredCredential("signer", ctx.secret(self.config.signing_key)),
-        )
+    def credential_scopes(self) -> tuple[HttpsCredentialScope, ...]:
+        return (HttpsCredentialScope("example.test"),)
+
+    def credential_material(self, ctx: RunContext) -> StoredCredential:
+        return StoredCredential("signer", ctx.secret(self.config.signing_key))
 
     @property
     def config(self) -> _SigningConfig:

@@ -26,8 +26,9 @@ from pydantic import BaseModel, create_model
 
 from agentworks.capabilities.descriptor import descriptor_for
 from agentworks.capabilities.git_credential.base import (
-    CredentialMaterial,
+    CredentialPayload,
     GitCredentialProvider,
+    HttpsCredentialScope,
 )
 from agentworks.capabilities.harness_integration.base import HarnessIntegration
 from agentworks.capabilities.secret_backend import (
@@ -147,7 +148,10 @@ class ConformingGitCredentialProvider(GitCredentialProvider):
         super().__init_subclass__(**kwargs)
         _declare_fixture_config(cls, "git-credential-provider")
 
-    def credential_material(self, ctx: RunContext) -> CredentialMaterial:
+    def credential_scopes(self) -> tuple[HttpsCredentialScope, ...]:
+        return (HttpsCredentialScope("example.test"),)
+
+    def credential_material(self, ctx: RunContext) -> CredentialPayload:
         raise NotImplementedError
 
 

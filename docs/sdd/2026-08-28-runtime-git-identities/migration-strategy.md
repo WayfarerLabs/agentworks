@@ -127,19 +127,20 @@ credential list, scoped secret delivery, transport, logger, and initialization s
 
 ### 1. Introduce final types and builders in one implementation branch
 
-Add provider-owned acquisition unions, generic HTTPS scopes, the two version-3 material shapes, the
+Add provider-owned acquisition unions, generic HTTPS scopes, the two version-3 payload shapes, the
 state builder, the reconciler, and migration cleanup. Tests use the new types directly while
 production remains on the old path only within the working branch.
 
 ### 2. Convert both providers
 
-Convert GitHub and Azure DevOps to `credential_material(ctx)`. Each provider translates its own
-scope fields, reads only its scoped declared secrets, retains provider-owned validation for the
-secret arm, and returns either a final stored credential or its fixed CLI managed helper. Input
-dependencies and output variants remain independent; synthetic coverage proves a secret-bearing
-provider may return either shape without core interpreting the relationship. Update the descriptor
-contract version and required operation in the same commit or tightly adjacent commits that never
-form a mergeable partial.
+Convert GitHub and Azure DevOps to `credential_scopes()`, `validate_inputs(ctx)`, and
+`credential_material(ctx)`. Each provider translates its own scope fields, reads only its scoped
+declared secrets, performs side-effect-free input validation before creation, retains authenticated
+validation for the secret arm, and returns either a final stored credential or its fixed CLI managed
+helper. Input dependencies and output variants remain independent; synthetic coverage proves a
+secret-bearing provider may return either shape without core interpreting the relationship. Update
+the descriptor contract version and required operations in the same commit or tightly adjacent
+commits that never form a mergeable partial.
 
 ### 3. Convert graph and boundary assumptions
 
@@ -172,28 +173,27 @@ GitHub and Azure live acceptance before merge intent.
 
 ## Legacy File Ownership
 
-The released implementation overwrites all of these files wholesale and documents them as
-Agentworks-owned:
+The released implementation owns these exact helper paths:
 
 - `~/.agentworks-git-cred-helper.sh`;
 - `~/.agentworks-git-scopes.gitconfig`;
-- `~/.git-credentials` while configured through Agentworks;
 - the earlier warn-only `~/.agentworks-git-cred-warn.sh` helper.
 
-Migration removes all four exact paths. The released admin and agent initializers overwrite the
-entire `~/.git-credentials` file, and the generated helper labels it Agentworks-owned; parsing its
-secret lines adds risk while retaining them can keep stale credentials active. The upgrade guide
-calls out that manual values placed in this Agentworks-owned file are removed, matching released
-reinit ownership. Tests prove cleanup never reads or logs file content.
+Migration removes those exact paths. It removes `~/.git-credentials` only when the exact legacy
+Agentworks helper registration `!~/.agentworks-git-cred-helper.sh` exists at the start of
+reconciliation. That pre-cleanup witness establishes ownership without inspecting secret content.
+Without it, a file or directory at the generic store path remains untouched, including its bytes,
+mode, and inode.
 
-Under the exclusive stable lock, migration first deletes the Agentworks-owned credential file and
-disables the exact old custom helper before removing its registration. A generic
-`credential.helper=store` possibly installed by old direct add is indistinguishable from operator
-configuration and remains, but has no old Agentworks store to serve. Nonempty reconciliation then
-activates the new generation/include; empty reconciliation removes the new include/generations.
-Cleanup never reactivates a mechanism that it has already disabled. A failure before disablement may
-leave the complete preexisting mechanism unchanged; a later failure may leave a safe no-credential
-gap. Retrying initialization converges from either state.
+Under the exclusive stable lock, migration records the witness, conditionally deletes the legacy
+credential path, and disables the exact old custom helper before removing its registration. A
+generic `credential.helper=store` possibly installed by old direct add is indistinguishable from
+operator configuration and remains. When the ownership witness exists it has no old Agentworks store
+to serve. Nonempty reconciliation then activates the new generation/include; empty reconciliation
+removes the new include/generations. Cleanup never reactivates a mechanism that it has already
+disabled. A failure before disablement may leave the complete preexisting mechanism unchanged; a
+later failure may leave a safe no-credential gap. Retrying initialization converges from either
+state.
 
 ## Git Config Transition
 
@@ -245,8 +245,8 @@ The following transitions are explicit acceptance cases:
 - Provider contract v2 has no live implementation or adapter.
 - Admin and agent zero-credential init removes all provably Agentworks-owned credential/routing
   state; only the inert stable lock may remain. An indistinguishable generic
-  `credential.helper=store` may also remain, but the Agentworks-owned credential file it formerly
-  read is absent.
+  `credential.helper=store` may also remain. The legacy store path is absent only when its exact
+  Agentworks helper-registration witness existed; an unwitnessed path is preserved.
 - Operator-managed Git configuration outside exact Agentworks-owned paths survives.
 - The imperative direct-add command and all of its state-writing code are absent.
 - Same-input initialization is byte-stable after the first migration.

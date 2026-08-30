@@ -152,12 +152,6 @@ class ManagedHelper:
 
 
 CredentialPayload = StoredCredential | ManagedHelper
-
-
-@dataclass(frozen=True)
-class CredentialMaterial:
-    scopes: tuple[HttpsCredentialScope, ...]
-    payload: CredentialPayload = field(repr=False)
 ```
 
 `HttpsCredentialScope` represents Git credential context, not provider vocabulary. Protocol is fixed
@@ -182,17 +176,21 @@ whether its configuration declares zero, one, or several secrets. Core treats th
 sensitive output but does not inspect it for input values or require the provider to attest how it
 was derived.
 
-### Required operation
+### Provider operations
 
 ```python
-GitCredentialProvider.credential_material(ctx: RunContext) -> CredentialMaterial
+GitCredentialProvider.credential_scopes() -> tuple[HttpsCredentialScope, ...]
+GitCredentialProvider.validate_inputs(ctx: RunContext) -> None
+GitCredentialProvider.credential_material(ctx: RunContext) -> CredentialPayload
 ```
 
-This is the only credential-material operation required by the version-3 descriptor. The composition
-root constructs `ctx` with `ScopedSecrets(resolved_values, node.secret_refs())` and no admin or
-agent transport. The provider may read only names its configuration declared and has no
-target-mutation power. It owns any required validation, API exchange, derivation, and final response
-construction.
+The version-3 descriptor requires static scopes and payload materialization. It also exposes a
+default no-op input-validation hook. The composition root constructs `ctx` with
+`ScopedSecrets(resolved_values, node.secret_refs())` and no admin or agent transport. Before
+creation mutation, core validates every provider's static scopes together and calls
+`validate_inputs(ctx)`. The hook is side-effect-free; shipped secret arms use it for line safety and
+CLI arms inherit the no-op. Later materialization owns any required validation, API exchange,
+derivation, and final response construction.
 
 The operation performs no target-user filesystem or Git configuration mutation. Its declared input
 set and returned output variant are orthogonal: the provider may return either payload after using
@@ -270,16 +268,17 @@ core's generic two-shape contract.
 
 ## Core Material Boundary
 
-Core validates provider output once:
+Core validates provider boundaries in two stages:
 
-1. at least one scope exists;
+1. before creation, at least one static scope exists;
 2. host and path segments are normalized, bounded, and free of separators, dot segments, controls,
    and unsafe generated-config characters;
-3. duplicate nonempty scopes are rejected across materials; released first-declared behavior is
-   retained for multiple host defaults;
-4. stored username/password fields satisfy Git's newline/NUL restrictions and are never represented;
-5. managed-helper program and required hint are bounded, and the hint is line/control safe;
-6. output ordering is deterministic by host, descending path length, path, then declaration order.
+3. every duplicate exact scope is rejected, including duplicate host defaults;
+4. before creation, each provider validates its resolved inputs without side effects;
+5. later, stored username/password fields satisfy Git's newline/NUL restrictions and are never
+   represented;
+6. later, managed-helper program and required hint are bounded, and the hint is line/control safe;
+7. output ordering is deterministic by host, descending path length, path, then declaration order.
 
 Core does not validate whether a secret is a PAT, exchange one secret for another token, construct a
 forge authorization header, infer provider scope, correlate secret presence with payload type, or
@@ -294,10 +293,10 @@ class UserCredentialState:
     managed_helper_files: tuple[tuple[str, bytes], ...] = field(repr=False)
 ```
 
-Core collects `(known_node_name, material)` pairs; the provider does not echo the name core already
-knows. `build_user_credential_state(materials)` renders the private per-credential records,
-generation-owned dispatcher, helper file set, and include. Each tuple uses a safe generated relative
-name unrelated to the credential name. Stored values never enter the dispatcher or Git
+Core collects `(known_node_name, static_scopes, payload)` tuples; the provider does not echo the
+name core already knows. `build_user_credential_state(materials)` renders the private per-credential
+records, generation-owned dispatcher, helper file set, and include. Each tuple uses a safe generated
+relative name unrelated to the credential name. Stored values never enter the dispatcher or Git
 configuration. The reconciler writes stored records mode 0600 and provider-returned helpers
 mode 0700.
 
@@ -345,7 +344,8 @@ fixed bytes, and atomically replaces `current` with GNU `mv -T` when desired sta
 inside the lock needs no PID, lease, or ownership protocol.
 
 Opening or repairing that pathname uses one short bounded bootstrap handoff on the already-open
-`~/.agentworks` directory inode. Launcher and reconciler hold that handoff only while validating the
+`~/.agentworks` directory inode. Launchers take the handoff shared, so concurrent Git requests may
+overlap; reconciliation takes it exclusive. Both hold that handoff only while validating the
 credential-root inode, normalizing or opening `lock`, taking the normal shared/exclusive lock, and
 revalidating both path identities. They release it before selection, mutation, or garbage
 collection. The stable `lock` file remains the sole credential-state authority held across those
@@ -451,11 +451,19 @@ resolved = resolve union(nodes.secret_refs())
 
 for each node/provider:
     ctx = RunContext(secrets=ScopedSecrets(resolved, node.secret_refs()))
+    scopes = provider.credential_scopes()
+validate all static scope claims together
+for each node/provider:
+    provider.validate_inputs(ctx)  # side-effect-free, before creation mutation
+
+creation may now mutate VM/agent state
+
+for each node/provider:
     if runup policy enabled:
         provider.runup(ctx)
-    material = provider.credential_material(ctx)
-    validate material at core boundary
-    collect (node.name, material)
+    payload = provider.credential_material(ctx)
+    validate payload at core boundary
+    collect (node.name, scopes, payload)
 
 state = build_user_credential_state(surviving materials)
 reconcile_user_git_credentials(target_user, state)
@@ -474,19 +482,28 @@ Every full reconcile removes only known legacy Agentworks artifacts and values:
 - global `include.path` exactly equal to `~/.agentworks-git-scopes.gitconfig`;
 - `~/.agentworks-git-cred-helper.sh`;
 - `~/.agentworks-git-scopes.gitconfig`;
-- the Agentworks-owned `~/.git-credentials` generated by the released implementation;
+- `~/.git-credentials` only when the exact legacy Agentworks helper registration was witnessed
+  before cleanup;
 - the older warn-only `~/.agentworks-git-cred-warn.sh`, if present.
 
 Cleanup never uses unqualified `--replace-all`. A generic `credential.helper=store` installed by old
-direct add is indistinguishable from operator configuration and remains, but the owned credential
-file it read is deleted without inspection. Legacy credential bytes are disabled before new
-activation or registration cleanup. Cleanup never reactivates a mechanism that it has already
-disabled. A failure before disablement may leave the complete preexisting mechanism unchanged; a
-later failure may leave authentication absent until retry.
+direct add is indistinguishable from operator configuration and remains. Without the exact legacy
+helper-registration witness, an existing file or directory at `~/.git-credentials` is operator-owned
+and preserved byte-for-byte. With that witness, the path is removed without inspection. Legacy
+credential bytes are disabled before new activation or registration cleanup. Cleanup never
+reactivates a mechanism that it has already disabled. A failure before disablement may leave the
+complete preexisting mechanism unchanged; a later failure may leave authentication absent until
+retry.
 
 For nonempty state, reconciliation activates the complete generation and adds the include before
 garbage collection. For empty state it removes the include, launcher, symlink, and generations after
 legacy material is disabled. Only the empty lock may remain for concurrent callers.
+
+The transport call carries the archive only through sensitive stdin and uses `check=False`. The
+target script reports known classes through a small fixed exit-code set; core maps those codes to
+local, value-safe guidance. Unknown nonzero exits and transport exceptions receive sanitized local
+diagnostics. Core never includes the target script, payload, stdout, or stderr in an exception or
+warning.
 
 ## Call-site Changes
 
@@ -496,9 +513,11 @@ Both composition roots:
 
 1. resolve providers, including an empty set;
 2. resolve the operation-wide union of provider-declared secrets;
-3. give each provider its own scoped context for runup and materialization;
-4. collect final materials without building a token map;
-5. invoke the same builder/reconciler unconditionally before private Git-backed user setup.
+3. prepare and validate static scopes, then invoke side-effect-free provider input validation before
+   creation mutation;
+4. give each provider its own scoped context for later runup and materialization;
+5. collect final payloads with their already-validated scopes without building a token map;
+6. invoke the same builder/reconciler unconditionally before private Git-backed user setup.
 
 The agent's duplicated material writer and global Git commands are deleted. Transport and home path
 are the only admin/agent differences.
@@ -532,7 +551,7 @@ names. Scoped delivery enforces that `credential_material(ctx)` cannot read beyo
 - GitHub repository/owner and Azure organization translate to generic path tuples;
 - longest segment-aware prefix, host default, `.git` normalization, no match, and deterministic
   ordering;
-- duplicate nonempty scope refusal and released multiple-default behavior;
+- refusal of every duplicate exact scope, including multiple host defaults;
 - mixed stored/helper output on one host;
 - no credential in dispatcher/include/representations/errors for built-in outputs;
 - stored-record round trips for every URL/protocol delimiter, with exact rejection of malformed
@@ -556,15 +575,19 @@ names. Scoped delivery enforces that `credential_material(ctx)` cannot read beyo
 
 - fresh, same-input, add, remove, scope change, payload-shape switch, last removal;
 - admin/agent parity, empty desired state, and zero survivors;
-- legacy/mixed-state cleanup with unrelated helpers/includes preserved;
+- legacy/mixed-state cleanup with unrelated helpers/includes and unwitnessed `~/.git-credentials`
+  paths preserved;
 - staged-write and activation faults retain one complete prior state;
-- concurrent helper/swap/cleanup and empty transitions use the same shared/exclusive lock;
+- concurrent launchers overlap their shared parent handoff while reconciliation remains excluded;
+- concurrent helper/swap/cleanup and empty transitions use the same stable shared/exclusive lock;
 - bounded lock timeouts, open-generation helper lifetime during cleanup, and proof that
   managed-helper descendants cannot retain the lock descriptor;
 - staging/activation failures expose no partial new state, and cleanup never reactivates an
   already-disabled mechanism;
 - corrupt owned-path repair, concurrent reconcilers, empty reconciliation, and abandoned-stage
   cleanup.
+- fixed reconcile failure-code mapping and sanitized unknown/transport failures, with sensitive
+  stdin and remote streams absent from every diagnostic.
 
 ### Live integration
 

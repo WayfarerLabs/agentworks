@@ -20,7 +20,7 @@ from agentworks.capabilities.git_credential.base import StoredCredential
 from agentworks.capabilities.vm_platform import ProvisionResult
 from agentworks.config import load_config
 from agentworks.db import VersionedPayload, VMStatus
-from agentworks.errors import ConfigError, StateError
+from agentworks.errors import ConfigError, StateError, ValidationError
 from agentworks.output import Role
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
@@ -95,6 +95,70 @@ def test_create_unknown_template_precedes_unrelated_unsupported_live_overlay(
         )
 
     assert (caught.value.entity_kind, caught.value.entity_name) == ("vm-template", "missing")
+
+
+def test_create_refuses_invalid_provider_input_before_db_or_platform_mutation(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    config = make_config(
+        manifests=[
+            GIT_CRED_GH,
+            ManifestDoc("admin-template", "default", {"git_credentials": ["gh"]}),
+        ]
+    )
+    monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", "invalid\nvalue")
+    create = MagicMock()
+    initialize = MagicMock()
+    monkeypatch.setattr(LimaPlatform, "create", create)
+    monkeypatch.setattr(vm_manager, "run_initialization", initialize)
+
+    with pytest.raises(ValidationError):
+        vm_manager.create_vm(db, config, name="invalid-git", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_vm("invalid-git") is None
+    create.assert_not_called()
+    initialize.assert_not_called()
+
+
+def test_create_refuses_duplicate_static_scopes_before_db_or_platform_mutation(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    credentials = [
+        ManifestDoc(
+            "git-credential",
+            name,
+            {"provider": {"name": "github", "source": {"mode": "secret"}}},
+        )
+        for name in ("first", "second")
+    ]
+    config = make_config(
+        manifests=[
+            *credentials,
+            ManifestDoc(
+                "admin-template",
+                "default",
+                {"git_credentials": ["first", "second"]},
+            ),
+        ]
+    )
+    monkeypatch.setenv("AW_SECRET_GIT_TOKEN_FIRST", "first-token")
+    monkeypatch.setenv("AW_SECRET_GIT_TOKEN_SECOND", "second-token")
+    create = MagicMock()
+    monkeypatch.setattr(LimaPlatform, "create", create)
+
+    with pytest.raises(ConfigError):
+        vm_manager.create_vm(db, config, name="duplicate-git", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_vm("duplicate-git") is None
+    create.assert_not_called()
 
 
 def test_create_graph_derives_from_declared_resources(make_config, db: Database) -> None:
@@ -204,7 +268,7 @@ def test_create_admin_spec_credential_joins_graph_and_logger_redactions(
         providers = cast("tuple[CredentialRequest, ...]", args[7])
         assert [request.name for request in providers] == ["gh"]
         request = providers[0]
-        payload = request.provider.credential_material(request.context).payload
+        payload = request.provider.credential_material(request.context)
         assert isinstance(payload, StoredCredential)
         assert payload.password == "ghtok"
 

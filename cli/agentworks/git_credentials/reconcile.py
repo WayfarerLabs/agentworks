@@ -25,7 +25,7 @@ exec 7<"$parent" || {
     echo "agentworks: Git credential state is unavailable; reinitialize this user" >&2
     exit 1
 }
-if ! flock -x -w 10 7; then
+if ! flock -s -w 10 7; then
     echo "agentworks: Git credential state is busy; retry the Git operation" >&2
     exit 1
 fi
@@ -116,7 +116,8 @@ def _state_archive(state: UserCredentialState) -> str:
     return base64.b64encode(raw.getvalue()).decode("ascii")
 
 
-_RECONCILE_SCRIPT = r"""set -eu
+_RECONCILE_SCRIPT = r"""set -Eeu
+trap 'exit 29' ERR
 parent="$HOME/.agentworks"
 root="$HOME/.agentworks/git-credentials"
 stage="$root/.stage"
@@ -124,19 +125,16 @@ current_tmp="$root/.current.new"
 desired='@DESIRED@'
 umask 077
 if [ -L "$parent" ] || { [ -e "$parent" ] && [ ! -d "$parent" ]; }; then
-    echo "agentworks: cannot safely establish Git credential state under ~/.agentworks" >&2
-    exit 1
+    exit 20
 fi
 mkdir -p "$parent"
 exec 7<"$parent"
 if ! flock -x -w 30 7; then
-    echo "agentworks: timed out establishing the Git credential lock; retry user initialization" >&2
-    exit 1
+    exit 21
 fi
 if [ -L "$parent" ] || [ ! "$parent" -ef /proc/self/fd/7 ]; then
     exec 7<&-
-    echo "agentworks: cannot safely establish Git credential state under ~/.agentworks" >&2
-    exit 1
+    exit 20
 fi
 if [ -L "$root" ] || { [ -e "$root" ] && [ ! -d "$root" ]; }; then
     rm -f "$root"
@@ -158,16 +156,14 @@ chmod u+rw "$root/lock"
 exec 9<>"$root/lock"
 if ! flock -x -w 30 9; then
     exec 6<&- 7<&-
-    echo "agentworks: timed out reconciling Git credential state; retry user initialization" >&2
-    exit 1
+    exit 22
 fi
 if [ -L "$parent" ] || [ ! "$parent" -ef /proc/self/fd/7 ] || \
         [ -L "$root" ] || [ ! "$root" -ef /proc/self/fd/6 ] || \
         [ -L "$root/lock" ] || [ ! "$root/lock" -ef /proc/self/fd/9 ] || \
         [ "$(stat -Lc %h -- /proc/self/fd/9 2>/dev/null)" != 1 ]; then
     exec 9>&- 6<&- 7<&-
-    echo "agentworks: Git credential lock identity changed; retry user initialization" >&2
-    exit 1
+    exit 23
 fi
 : > /proc/self/fd/9
 chmod 600 /proc/self/fd/9
@@ -180,7 +176,7 @@ remove_config_value() {
         return 0
     else
         rc=$?
-        [ "$rc" -eq 5 ] || return "$rc"
+        [ "$rc" -eq 5 ] || exit 25
     fi
 }
 
@@ -193,11 +189,25 @@ remove_owned_path() {
     fi
 }
 
+# The released store is owned only when its exact Agentworks helper
+# registration is present at the start of this reconciliation. Record that
+# witness before cleanup because removing an absent config value succeeds.
+legacy_store_owned=0
+if git config --global --fixed-value --get-all credential.helper \
+        '!~/.agentworks-git-cred-helper.sh' >/dev/null 2>&1; then
+    legacy_store_owned=1
+else
+    rc=$?
+    [ "$rc" -eq 1 ] || exit 25
+fi
+
 # Clean abandoned staging and disable every known Agentworks registration
 # before changing material. A failure after this point leaves authentication
 # absent, never an older credential newly reachable.
 rm -rf "$stage" "$current_tmp"
-remove_owned_path "$HOME/.git-credentials"
+if [ "$legacy_store_owned" -eq 1 ]; then
+    remove_owned_path "$HOME/.git-credentials"
+fi
 remove_owned_path "$HOME/.agentworks-git-cred-helper.sh"
 remove_owned_path "$HOME/.agentworks-git-scopes.gitconfig"
 remove_owned_path "$HOME/.agentworks-git-cred-warn.sh"
@@ -242,7 +252,7 @@ mkdir -p "$stage" "$root/generations"
 chmod 700 "$stage" "$root/generations"
 if ! base64 -d | tar -xzf - -C "$stage"; then
     rm -rf "$stage"
-    exit 1
+    exit 24
 fi
 
 if [ ! -f "$root/launch" ] || ! cmp -s "$stage/launch" "$root/launch"; then
@@ -268,7 +278,7 @@ else
 fi
 rm -rf "$stage"
 
-git config --global --add include.path '~/.agentworks/git-credentials/current/config.gitconfig'
+git config --global --add include.path '~/.agentworks/git-credentials/current/config.gitconfig' || exit 25
 
 active=$(readlink -f "$root/current")
 for candidate in "$root/generations"/*; do
@@ -278,12 +288,38 @@ done
 """
 
 
+_RECONCILE_FAILURES = {
+    20: "Git credential state could not be established safely; reinitialize this user after repairing ~/.agentworks",
+    21: "timed out establishing Git credential state; retry user initialization",
+    22: "timed out reconciling Git credential state; retry user initialization",
+    23: "Git credential lock identity changed; retry user initialization",
+    24: "the staged Git credential state was rejected; retry user initialization",
+    25: (
+        "Git credential configuration could not be updated; "
+        "inspect this user's global Git config and retry initialization"
+    ),
+    29: "Git credential state could not be reconciled; retry user initialization",
+}
+
+
 def reconcile_user_git_credentials(target: Transport, state: UserCredentialState) -> None:
     """Converge all Agentworks-owned Git credential state for one user."""
+    from agentworks.ssh import SSHError
+
     desired = "present" if state.has_credentials else "empty"
     payload = _state_archive(state) if state.has_credentials else ""
-    target.run(
-        _RECONCILE_SCRIPT.replace("@DESIRED@", desired),
-        input_text=payload,
-        timeout=90,
-    )
+    try:
+        result = target.run(
+            _RECONCILE_SCRIPT.replace("@DESIRED@", desired),
+            input_text=payload,
+            timeout=90,
+            check=False,
+        )
+    except SSHError:
+        raise SSHError("Git credential reconciliation transport failed; retry user initialization") from None
+    if not result.ok:
+        message = _RECONCILE_FAILURES.get(
+            result.returncode,
+            "Git credential reconciliation failed unexpectedly; retry user initialization",
+        )
+        raise SSHError(message) from None
