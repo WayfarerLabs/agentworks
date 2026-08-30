@@ -71,5 +71,6 @@ def test_multiline_failed_unit_detail_is_safe_for_the_durable_journal() -> None:
 
     assert result.disposition is ActionDisposition.RETRYABLE
     assert result.detail is not None
-    failed = state.fail_active(result.detail, repair_required=False)
+    assert state.attempt_id is not None
+    failed = state.fail_active(state.attempt_id, result.detail, repair_required=False)
     assert failed.failure == "first failure | second failure"

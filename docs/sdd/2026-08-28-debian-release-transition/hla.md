@@ -385,8 +385,10 @@ The read-only preflight records a plan containing:
 - source-release point state and OpenSSH package version;
 - installed kernel metapackage on guest-kernel platforms, or the explicit WSL2 provider-kernel
   classification;
-- separate `/boot` size/free space when present;
-- free space for `/`, `/var`, and the apt archive estimate;
+- `/boot` size/free space on its actual filesystem, whether separate or shared;
+- free space and aggregate required space for each distinct filesystem backing `/`, `/var`, the apt
+  archive, and `/boot`; the installed-growth estimate is charged conservatively to each distinct
+  root or `/var` filesystem;
 - APT preferences, backports, proposed-updates, mixed suites, and third-party sources;
 - installed non-Debian and obsolete packages;
 - package-owned conffiles whose current hash differs from dpkg's recorded hash;
@@ -401,7 +403,9 @@ target completion restore that exact prior state. Once source-switch intent is d
 unhealthy package state keeps the timers inhibited and records that fact until forward repair proves
 a healthy target or the operator restores the external checkpoint. The private Agentworks journal
 lock prevents a second Agentworks runner; native locks and the timer lifecycle cover external
-owners.
+owners. Restoration first stops every known timer, reconfigures every recorded enablement state,
+then restores activation and verifies the complete set. Failure before that proof records a durable
+repair-required VM event rather than existing only as terminal output.
 
 Deterministic unsafe conditions fail. Modified conffiles and packages whose release notes require
 application-specific intervention fail with exact manual guidance; the first implementation does not
@@ -415,6 +419,11 @@ closes and reopens the ordinary VM operation boundary, then recomputes the compl
 sessions, package health, holds, conffiles, blockers, sources, space, and simulated removals. It
 shows the final plan, highlights any material difference from the preliminary plan, and requires the
 second mutation confirmation before changing sources.
+
+The target-release simulation is isolated from guest-owned APT policy. It uses generated canonical
+target sources, scratch package indexes, scratch dpkg status and extended-state copies, no
+preferences, and `APT_CONFIG=/dev/null` with the main configuration and configuration-parts paths
+disabled. Guest APT hooks or other fragments therefore cannot execute during this read-only plan.
 
 ### Backup and recovery gate
 
@@ -452,10 +461,12 @@ The upgrade owns a fixed root directory:
   upgrade.log
 ```
 
-Root owns the directory at mode 0700. The validated directory name is the only stored source/target
-identity. `plan.json` holds the computed package, source, blocker, and space plan without another
-pair field. `state.json` separates monotonic progress from the current attempt and its outcome,
-again without source or target fields. Its conceptual shape is:
+Root owns the fixed root and pair directory at mode 0700; the lock and JSON files use mode 0600.
+Every read and write rejects symlinked roots, pair directories, locks, plans, or states, wrong
+effective-user ownership, and non-private modes. The validated directory name is the only stored
+source/target identity. `plan.json` holds the computed package, source, blocker, and space plan
+without another pair field. `state.json` separates monotonic progress from the current attempt and
+its outcome, again without source or target fields. Its conceptual shape is:
 
 ```json
 {
@@ -480,12 +491,16 @@ Before every mutation, the actor takes the one fixed non-blocking journal `flock
 current state, and atomically writes a new attempt identity, active action, start time, and, for
 reboot, the current boot ID. The package service holds that same lock for its remote action; the
 manager takes it around any journal claim/write and reboot dispatch. After an actor proves the
-action's postcondition, it atomically advances `last_completed` and clears the active fields before
-releasing the lock. An interruption inside an action therefore leaves intent visible. A retry takes
-the same lock and checks the systemd unit, native apt/dpkg locks, logs, and that action's
-postcondition before it either advances, safely reruns, or requires manual repair. It never equates
-a missing success write with failure or success, and no second coordinator exists beside the lock
-and journal.
+action's postcondition, its completion or failure write compares the attempt identity it observed
+with the identity still active under the lock. Retry and repeated reboot dispatch use the same
+compare-and-set rule and issue a fresh attempt identity. A stale coordinator therefore cannot
+complete, fail, retry, or dispatch reboot again for a newer attempt. Successful completion
+atomically advances `last_completed` and clears the active fields before releasing the lock. An
+interruption inside an action therefore leaves intent visible. A retry takes the same lock and
+checks the systemd unit, native apt/dpkg locks, logs, and that action's postcondition before it
+either advances, safely reruns, or requires manual repair. It never equates a missing success write
+with failure or success; the package script's lock still prevents duplicate package execution while
+invocation-level writes are fenced by attempt identity.
 
 The script verifies native package-manager ownership and owns the recorded inhibit/restore lifecycle
 for automatic APT timers. Package work runs in a root systemd service whose script, output, exit
@@ -521,7 +536,9 @@ The post-reboot order is:
    instructions;
 5. observe and persist the target release as soon as `/etc/os-release` proves it;
 6. verify dpkg/apt convergence and target source hygiene, the running target guest kernel or WSL2
-   provider kernel, systemd, sshd, Tailscale, and Agentworks identities;
+   provider kernel, systemd, sshd, Tailscale, and Agentworks identities; source hygiene considers
+   only enabled `.list` and deb822 stanzas, requires coverage of every policy target suite, and
+   rejects enabled foreign suites or third-party URIs;
 7. run Phase B with the target release and restore only selected mapped APT sources; and
 8. record complete, or target observed with repair required when later verification/reinit fails.
 
@@ -660,10 +677,14 @@ semantics.
   its recorded pair, and blocks a second journal;
 - full plan recomputation after source-release update and renewed confirmation on every material
   change;
+- APT simulation isolated from guest configuration/hooks plus enabled-stanza target-source coverage
+  and distinct-filesystem space aggregation;
 - native apt/dpkg ownership refusal plus automatic timer inhibit, safe restoration, and retained
-  inhibition on mixed/unhealthy states;
+  inhibition on mixed/unhealthy states, with all-timers-stopped reconfiguration and durable repair
+  state when restoration fails;
 - atomic progress/attempt transitions, interruption inside every action, the same lock around every
-  journal write/reboot dispatch, and no duplicate apt work;
+  journal write/reboot dispatch, attempt-identity fencing of stale coordinators, private non-symlink
+  journal ownership, and no duplicate apt work;
 - external checkpoint attestation, both local backup gates, and the first mutation confirmation
   before source mutation;
 - strict reconnect, native-route rejoin, Proxmox no-route failure, Trixie observation timing, and

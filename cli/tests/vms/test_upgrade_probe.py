@@ -62,6 +62,9 @@ def test_target_plan_uses_isolated_sources_and_both_upgrade_stages() -> None:
     assert any(command.endswith(" -s full-upgrade") for command in apt_commands)
     assert sum("--print-uris" in command for command in apt_commands) == 2
     assert all("Dir::Etc::sourcelist=/var/tmp/agentworks-apt-plan-" in command for command in apt_commands)
+    assert all("APT_CONFIG=/dev/null" in command for command in apt_commands)
+    assert all("Dir::Etc::main=/dev/null" in command for command in apt_commands)
+    assert all("Dir::Etc::parts=-" in command for command in apt_commands)
     assert all("Dir::State::status=/var/tmp/agentworks-apt-plan-" in command for command in apt_commands)
     assert all("Dir::State::status=/var/lib/dpkg/status" not in command for command in apt_commands)
     assert any("install -m 0600 /var/lib/dpkg/status" in command for command in commands)
@@ -80,7 +83,7 @@ def test_target_plan_fails_closed_and_cleans_up_when_indexes_fail() -> None:
     target = _Target(update_returncode=100)
 
     _removals, _download, _growth, ok = _simulate_target_upgrade(  # type: ignore[arg-type]
-        target,
+        target,  # type: ignore[arg-type]
         ("trixie",),
     )
 
@@ -88,20 +91,71 @@ def test_target_plan_fails_closed_and_cleans_up_when_indexes_fail() -> None:
     assert target.calls[-1][0].startswith("rm -rf /var/tmp/agentworks-apt-plan-")
 
 
-def test_shared_filesystem_requirement_aggregates_each_space_component() -> None:
-    separate = _filesystem_requirements(
+def test_installed_growth_is_charged_to_each_distinct_root_or_var_filesystem() -> None:
+    without_growth = _filesystem_requirements(
         "root",
         "var",
         "cache",
+        boot_filesystem=None,
+        apt_download_bytes=3_000_000_000,
+        installed_growth_bytes=0,
+    )
+    with_growth = _filesystem_requirements(
+        "root",
+        "var",
+        "cache",
+        boot_filesystem=None,
         apt_download_bytes=3_000_000_000,
         installed_growth_bytes=400_000_000,
     )
-    shared = _filesystem_requirements(
+    shared_without_growth = _filesystem_requirements(
         "shared",
         "shared",
         "shared",
+        boot_filesystem=None,
+        apt_download_bytes=3_000_000_000,
+        installed_growth_bytes=0,
+    )
+    shared_with_growth = _filesystem_requirements(
+        "shared",
+        "shared",
+        "shared",
+        boot_filesystem=None,
         apt_download_bytes=3_000_000_000,
         installed_growth_bytes=400_000_000,
     )
 
-    assert shared == {"shared": sum(separate.values())}
+    assert with_growth["root"] - without_growth["root"] == 400_000_000
+    assert with_growth["var"] - without_growth["var"] == 400_000_000
+    assert shared_with_growth["shared"] - shared_without_growth["shared"] == 400_000_000
+
+
+def test_boot_floor_is_aggregated_when_boot_shares_root() -> None:
+    without_boot = _filesystem_requirements(
+        "root",
+        "var",
+        "cache",
+        boot_filesystem=None,
+        apt_download_bytes=0,
+        installed_growth_bytes=0,
+    )
+    shared_boot = _filesystem_requirements(
+        "root",
+        "var",
+        "cache",
+        boot_filesystem="root",
+        apt_download_bytes=0,
+        installed_growth_bytes=0,
+    )
+    separate_boot = _filesystem_requirements(
+        "root",
+        "var",
+        "cache",
+        boot_filesystem="boot",
+        apt_download_bytes=0,
+        installed_growth_bytes=0,
+    )
+
+    assert shared_boot["root"] > without_boot["root"]
+    assert separate_boot["root"] == without_boot["root"]
+    assert separate_boot["boot"] == shared_boot["root"] - without_boot["root"]

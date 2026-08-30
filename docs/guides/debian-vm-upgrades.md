@@ -18,6 +18,12 @@ third-party repositories, and transition-specific Debian release-note blockers. 
 Microsoft-managed WSL kernel, so Agentworks verifies that provider kernel instead of requiring a
 Debian `linux-image` package inside the distribution.
 
+The target package plan uses isolated scratch APT state and canonical target sources; it does not
+load the guest's APT configuration fragments, hooks, preferences, or source files. Space estimates
+are aggregated by the actual filesystems backing `/`, `/var`, the package cache, and `/boot`, so
+shared mounts are counted together and separate root/`/var` filesystems each carry a conservative
+installed-growth allowance.
+
 Create a recovery artifact that can boot outside Agentworks before authorizing package changes.
 Depending on the platform, that can be a provider snapshot, WSL export, Proxmox backup, or
 equivalent. Know how to reach the provider console or rescue environment and how to restore the
@@ -61,7 +67,9 @@ As soon as `/etc/os-release` proves the target release, Agentworks records it in
 then verifies the package database, target APT convergence and sources, running guest or WSL
 provider kernel, systemd, sshd, Tailscale, and Agentworks identities before rerunning release-aware
 VM initialization. Automatic APT timers are restored to their prior states only after the healthy
-target and initialization complete.
+target and initialization complete. A source-safe early failure also attempts restoration. If that
+restoration cannot be verified, all known timers remain stopped during reconfiguration and the VM
+gets a durable repair-required event.
 
 ## Resume and recovery
 
@@ -72,8 +80,10 @@ Durable state lives on the guest at:
 ```
 
 The directory is root-owned and contains the plan, atomic state, original source files, upgrade
-script, log, and one non-blocking lock. Package actions run in a detached systemd unit. Losing the
-local process or SSH connection does not erase intent or start a second package manager.
+script, log, and one non-blocking lock. Unsafe symlinks, ownership, or permissions on journal-owned
+paths stop the workflow for repair. Package actions run in a detached systemd unit. Losing the local
+process or SSH connection does not erase intent or start a second package manager; attempt
+identities also fence an older invocation from overwriting a newer retry.
 
 Run the same command after an interruption:
 

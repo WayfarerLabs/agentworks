@@ -260,17 +260,24 @@ a provider unable to construct or honor the required request.
       before mutation plus `last_completed_action`, active action, attempt identity, and attempt
       outcome, with no duplicate pair fields. Database/init state remains authoritative for product
       health. Every journal writer takes the same lock, and the package service holds it for each
-      remote action.
+      remote action. Reject unsafe links, ownership, or modes at the fixed root, pair directory,
+      lock, plan, and state boundaries; fence completion, failure, retry, and repeated
+      reboot-dispatch writes with the active attempt identity.
 - [x] Detect native dpkg/APT locks and automatic update services. Fail closed on another package
       owner; durably record and inhibit known automatic timers. Restore their prior state only after
       a source-safe abort or verified healthy target completion; retain inhibition on a
-      mixed/unhealthy state until forward repair or external restore.
+      mixed/unhealthy state until forward repair or external restore. Keep every timer stopped until
+      the complete recorded configuration is restored, and persist a repair-required event when
+      restoration cannot be proved.
 - [x] Bring the source release current under the detached systemd service, rerun every health check,
       and reopen the planning boundary. Recompute the full package/source/removal plan from current
       state, display drift from the preliminary plan, and require a second explicit confirmation
-      before changing suites.
+      before changing suites. Isolate target simulation from guest APT configuration and hooks, and
+      aggregate conservative requirements for shared or separate `/`, `/var`, cache, and `/boot`
+      filesystems.
 - [x] Classify, archive, and disable third-party sources; generate canonical target deb822 sources
-      from the selected adjacent policy, then run its minimal and full package actions.
+      from the selected adjacent policy, then run its minimal and full package actions. Treat only
+      enabled `.list`/deb822 stanzas as active and require every policy target suite at convergence.
 - [x] Implement inspection/resume after interruption inside every remote action, SSH loss, and
       package failure. A resume inspects native locks, unit state, active attempt, logs, and
       postcondition checks before deciding whether to continue, retry, or request repair.

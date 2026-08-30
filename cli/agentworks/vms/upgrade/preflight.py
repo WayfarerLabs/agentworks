@@ -118,10 +118,8 @@ class UpgradePreflight:
             found.append(PreflightIssue.MIXED_SUITES)
         if self.release_blockers:
             found.append(PreflightIssue.RELEASE_BLOCKER)
-        if self.boot_free_bytes is not None and self.boot_free_bytes < self.boot_required_bytes:
-            found.append(PreflightIssue.BOOT_SPACE_LOW)
         checked_filesystems: set[str] = set()
-        for issue, filesystem, free, required in (
+        filesystem_checks = [
             (
                 PreflightIssue.ROOT_SPACE_LOW,
                 self.root_filesystem,
@@ -140,7 +138,17 @@ class UpgradePreflight:
                 self.cache_free_bytes,
                 self.cache_required_bytes,
             ),
-        ):
+        ]
+        if self.boot_filesystem is not None and self.boot_free_bytes is not None:
+            filesystem_checks.append(
+                (
+                    PreflightIssue.BOOT_SPACE_LOW,
+                    self.boot_filesystem,
+                    self.boot_free_bytes,
+                    self.boot_required_bytes,
+                )
+            )
+        for issue, filesystem, free, required in filesystem_checks:
             if filesystem in checked_filesystems:
                 continue
             checked_filesystems.add(filesystem)

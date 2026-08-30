@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import shlex
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from agentworks.errors import StateError
 
@@ -39,6 +39,11 @@ else
   exit 69
 fi
 """.strip()
+
+
+class _SourceEntry(NamedTuple):
+    uris: tuple[str, ...]
+    suites: tuple[str, ...]
 
 
 def probe_upgrade_preflight(
@@ -82,18 +87,12 @@ def probe_upgrade_preflight(
     root_filesystem, _root_total, root_free = _filesystem_stats(target, "/")
     var_filesystem, _var_total, var_free = _filesystem_stats(target, "/var")
     cache_filesystem, _cache_total, cache_free = _filesystem_stats(target, "/var/cache/apt/archives")
-    boot_source, boot_total_value, boot_free_value = _filesystem_stats(target, "/boot")
-    boot_filesystem: str | None = boot_source
-    boot_total: int | None = boot_total_value
-    boot_free: int | None = boot_free_value
-    if boot_filesystem == root_filesystem:
-        boot_filesystem = None
-        boot_total = None
-        boot_free = None
+    boot_filesystem, boot_total, boot_free = _filesystem_stats(target, "/boot")
     space_requirements = _filesystem_requirements(
         root_filesystem,
         var_filesystem,
         cache_filesystem,
+        boot_filesystem=boot_filesystem,
         apt_download_bytes=apt_download,
         installed_growth_bytes=installed_growth,
     )
@@ -134,7 +133,7 @@ def probe_upgrade_preflight(
         boot_filesystem=boot_filesystem,
         boot_total_bytes=boot_total,
         boot_free_bytes=boot_free,
-        boot_required_bytes=_MINIMUM_BOOT_FREE,
+        boot_required_bytes=space_requirements[boot_filesystem],
         root_filesystem=root_filesystem,
         root_free_bytes=root_free,
         root_required_bytes=space_requirements[root_filesystem],
@@ -159,17 +158,19 @@ def target_source_hygiene_issues(
 ) -> tuple[str, ...]:
     """Return enabled source files that are not clean target-release Debian sources."""
     files = _source_files(target)
-    issues = {
-        path
-        for path, content in files.items()
-        if _is_third_party(content) or _mentions_other_debian_suite(content, target_suites)
-    }
-    if not any(
-        any(re.search(rf"\b{re.escape(suite)}\b", content) for suite in target_suites)
-        and any(host in content for host in _DEBIAN_HOSTS)
-        for content in files.values()
-    ):
-        issues.add("<missing-target-debian-source>")
+    expected = set(target_suites)
+    covered: set[str] = set()
+    issues: set[str] = set()
+    for path, content in files.items():
+        for entry in _enabled_source_entries(path, content):
+            debian_uris = tuple(uri for uri in entry.uris if any(host in uri for host in _DEBIAN_HOSTS))
+            if len(debian_uris) != len(entry.uris):
+                issues.add(path)
+            if debian_uris:
+                covered.update(expected.intersection(entry.suites))
+                if set(entry.suites) - expected:
+                    issues.add(path)
+    issues.update(f"<missing-target-suite:{suite}>" for suite in sorted(expected - covered))
     return tuple(sorted(issues))
 
 
@@ -207,6 +208,8 @@ def _simulate_target_upgrade(
         )
         options = " ".join(
             (
+                "-o Dir::Etc::main=/dev/null",
+                "-o Dir::Etc::parts=-",
                 f"-o Dir::Etc::sourcelist={q_sources}",
                 "-o Dir::Etc::sourceparts=-",
                 f"-o Dir::State::Lists={q_scratch}/lists",
@@ -218,23 +221,28 @@ def _simulate_target_upgrade(
                 "-o APT::Get::List-Cleanup=0",
             )
         )
-        update = target.run(f"LC_ALL=C apt-get {options} update", sudo=True, check=False)
+        update = target.run(f"APT_CONFIG=/dev/null LC_ALL=C apt-get {options} update", sudo=True, check=False)
         results = (
             target.run(
-                f"LC_ALL=C apt-get {options} -s upgrade --without-new-pkgs",
+                f"APT_CONFIG=/dev/null LC_ALL=C apt-get {options} -s upgrade --without-new-pkgs",
                 sudo=True,
                 check=False,
             ),
-            target.run(f"LC_ALL=C apt-get {options} -s full-upgrade", sudo=True, check=False),
+            target.run(
+                f"APT_CONFIG=/dev/null LC_ALL=C apt-get {options} -s full-upgrade",
+                sudo=True,
+                check=False,
+            ),
         )
         estimates = (
             target.run(
-                f"LC_ALL=C apt-get {options} --print-uris --yes --download-only upgrade --without-new-pkgs",
+                f"APT_CONFIG=/dev/null LC_ALL=C apt-get {options} "
+                "--print-uris --yes --download-only upgrade --without-new-pkgs",
                 sudo=True,
                 check=False,
             ),
             target.run(
-                f"LC_ALL=C apt-get {options} --print-uris --yes --download-only full-upgrade",
+                f"APT_CONFIG=/dev/null LC_ALL=C apt-get {options} --print-uris --yes --download-only full-upgrade",
                 sudo=True,
                 check=False,
             ),
@@ -369,35 +377,70 @@ done
 
 
 def _is_third_party(content: str) -> bool:
-    for line in content.splitlines():
-        active = line.strip()
-        if not active or active.startswith("#"):
-            continue
-        if re.match(r"deb(?:-src)?\s", active, flags=re.IGNORECASE):
-            if not any(host in active for host in _DEBIAN_HOSTS):
-                return True
-        elif active.lower().startswith("uris:"):
-            uris = active.partition(":")[2].split()
-            if any(not any(host in uri for host in _DEBIAN_HOSTS) for uri in uris):
-                return True
-    return False
+    path = "source.sources" if re.search(r"(?im)^\s*types\s*:", content) else "source.list"
+    return any(
+        any(not any(host in uri for host in _DEBIAN_HOSTS) for uri in entry.uris)
+        for entry in _enabled_source_entries(path, content)
+    )
 
 
 def _mentions_other_debian_suite(content: str, source_suites: Sequence[str]) -> bool:
-    if not any(host in content for host in _DEBIAN_HOSTS):
-        return False
     allowed = set(source_suites)
-    found: set[str] = set()
+    path = "source.sources" if re.search(r"(?im)^\s*types\s*:", content) else "source.list"
+    return any(
+        any(host in uri for uri in entry.uris for host in _DEBIAN_HOSTS) and bool(set(entry.suites) - allowed)
+        for entry in _enabled_source_entries(path, content)
+    )
+
+
+def _enabled_source_entries(path: str, content: str) -> tuple[_SourceEntry, ...]:
+    if path.endswith(".sources"):
+        return _enabled_deb822_entries(content)
+    entries: list[_SourceEntry] = []
     for line in content.splitlines():
         active = line.strip()
         if not active or active.startswith("#"):
             continue
-        legacy = re.match(r"deb(?:-src)?\s+(?:\[[^]]+\]\s+)?\S+\s+(\S+)", active, flags=re.IGNORECASE)
-        if legacy is not None:
-            found.add(legacy.group(1))
-        elif active.lower().startswith("suites:"):
-            found.update(active.partition(":")[2].split())
-    return bool(found - allowed)
+        match = re.match(
+            r"deb\s+(?:\[([^]]+)\]\s+)?(\S+)\s+(\S+)",
+            active,
+            flags=re.IGNORECASE,
+        )
+        if match is None:
+            continue
+        options, uri, suite = match.groups()
+        if options is not None and re.search(r"(?:^|\s)enabled\s*=\s*(?:no|false|0)(?:\s|$)", options, re.I):
+            continue
+        entries.append(_SourceEntry((uri,), (suite,)))
+    return tuple(entries)
+
+
+def _enabled_deb822_entries(content: str) -> tuple[_SourceEntry, ...]:
+    entries: list[_SourceEntry] = []
+    for stanza in re.split(r"\n\s*\n", content):
+        fields: dict[str, str] = {}
+        current: str | None = None
+        for line in stanza.splitlines():
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            if line[:1].isspace() and current is not None:
+                fields[current] += " " + line.strip()
+                continue
+            key, separator, value = line.partition(":")
+            if not separator:
+                current = None
+                continue
+            current = key.strip().lower()
+            fields[current] = value.strip()
+        if fields.get("enabled", "yes").lower() in {"no", "false", "0"}:
+            continue
+        if "deb" not in fields.get("types", "").split():
+            continue
+        uris = tuple(fields.get("uris", "").split())
+        suites = tuple(fields.get("suites", "").split())
+        if uris and suites:
+            entries.append(_SourceEntry(uris, suites))
+    return tuple(entries)
 
 
 def _filesystem_stats(target: Transport, path: str) -> tuple[str, int, int]:
@@ -416,16 +459,21 @@ def _filesystem_requirements(
     var_filesystem: str,
     cache_filesystem: str,
     *,
+    boot_filesystem: str | None,
     apt_download_bytes: int,
     installed_growth_bytes: int,
 ) -> dict[str, int]:
     requirements: dict[str, int] = {}
     for filesystem, required in (
-        (root_filesystem, _MINIMUM_ROOT_FREE + installed_growth_bytes),
+        (root_filesystem, _MINIMUM_ROOT_FREE),
         (var_filesystem, _MINIMUM_VAR_FREE),
         (cache_filesystem, max(_MINIMUM_CACHE_FREE, apt_download_bytes)),
     ):
         requirements[filesystem] = requirements.get(filesystem, 0) + required
+    for filesystem in {root_filesystem, var_filesystem}:
+        requirements[filesystem] += installed_growth_bytes
+    if boot_filesystem is not None:
+        requirements[boot_filesystem] = requirements.get(boot_filesystem, 0) + _MINIMUM_BOOT_FREE
     return requirements
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -281,10 +282,10 @@ def test_reboot_closes_pre_upgrade_gate_before_fresh_post_reboot_gate(
             assert requested == pair
             plan.update(updated)
 
-        def complete(self, requested: UpgradePair, action: UpgradeAction) -> None:
+        def complete(self, requested: UpgradePair, action: UpgradeAction, attempt_id: str) -> None:
             assert requested == pair
             assert action is UpgradeAction.REBOOT
-            state_holder[0] = state_holder[0].complete_active()
+            state_holder[0] = state_holder[0].complete_active(attempt_id)
 
     state_holder = [state]
 
@@ -404,6 +405,56 @@ def test_source_safe_abort_keeps_timers_inhibited_when_native_lock_is_owned(
         )
         is False
     )
+
+
+def test_failed_source_safe_timer_restore_records_durable_repair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transition = upgrade_manager._transitions(DEBIAN_RELEASES)[-1]
+    db = _Database()
+    vm = SimpleNamespace(name="box")
+    _install_release_probe(monkeypatch, DebianRelease.BOOKWORM)
+    monkeypatch.setattr(
+        upgrade_manager,
+        "_restore_apt_timers",
+        lambda *args: (_ for _ in ()).throw(StateError("restore failed")),
+    )
+
+    restored = upgrade_manager._restore_timers_or_record(
+        db,
+        vm,
+        _PackageStateTarget(),
+        {},
+        transition,
+    )
+
+    assert restored is False
+    assert len(db.events) == 1
+    assert db.events[0][1] == "debian_upgrade_repair_required"
+    assert json.loads(db.events[0][2] or "null")["stage"] == "source-safe-apt-timer-restore"
+
+
+def test_timer_restore_keeps_all_timers_stopped_until_configuration_succeeds() -> None:
+    commands: list[str] = []
+
+    class _Target:
+        def run(self, command: str, **kwargs: object) -> _CommandResult:
+            del kwargs
+            commands.append(command)
+            if command == "systemctl unmask apt-daily-upgrade.timer":
+                raise StateError("configuration failed")
+            return _CommandResult(0)
+
+    with pytest.raises(StateError):
+        upgrade_manager._restore_apt_timers(
+            _Target(),
+            {
+                "apt-daily.timer": ("enabled", "active"),
+                "apt-daily-upgrade.timer": ("enabled", "active"),
+            },
+        )
+
+    assert not any(command.startswith("systemctl start ") for command in commands)
 
 
 def test_wsl_target_health_uses_provider_kernel_instead_of_guest_kernel_package(

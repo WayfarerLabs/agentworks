@@ -7,7 +7,12 @@ import pytest
 
 from agentworks.errors import StateError
 from agentworks.vms.upgrade.preflight import PreflightIssue, UpgradePreflight
-from agentworks.vms.upgrade.probe import _is_third_party, _lines, _mentions_other_debian_suite
+from agentworks.vms.upgrade.probe import (
+    _is_third_party,
+    _lines,
+    _mentions_other_debian_suite,
+    target_source_hygiene_issues,
+)
 
 
 def _safe() -> UpgradePreflight:
@@ -17,6 +22,7 @@ def _safe() -> UpgradePreflight:
         architecture="amd64",
         kernel="6.1.0",
         kernel_metapackage="linux-image-amd64",
+        boot_filesystem="boot",
         boot_free_bytes=1024,
         boot_required_bytes=100,
         root_free_bytes=1024,
@@ -127,6 +133,66 @@ Components: main
     assert _mentions_other_debian_suite(content, ("trixie", "trixie-updates")) is True
 
 
+def test_target_source_hygiene_requires_each_suite_from_an_enabled_binary_stanza() -> None:
+    content = """\
+Types: deb
+URIs: https://deb.debian.org/debian
+Suites: trixie trixie-updates
+Components: main
+
+Types: deb
+URIs: https://security.debian.org/debian-security
+Suites: trixie-security
+Components: main
+Enabled: no
+"""
+
+    class _Target:
+        def run(self, command: str, **kwargs: object) -> object:
+            del command, kwargs
+            return SimpleNamespace(
+                ok=True,
+                stdout="AGW-SOURCE:/etc/apt/sources.list.d/debian.sources\n" + content,
+            )
+
+    issues = target_source_hygiene_issues(
+        _Target(),  # type: ignore[arg-type]
+        ("trixie", "trixie-updates", "trixie-security"),
+    )
+
+    assert issues == ("<missing-target-suite:trixie-security>",)
+
+
+def test_target_source_hygiene_accepts_complete_enabled_target_sources() -> None:
+    content = """\
+Types: deb
+URIs: https://deb.debian.org/debian
+Suites: trixie trixie-updates
+Components: main
+
+Types: deb
+URIs: https://security.debian.org/debian-security
+Suites: trixie-security
+Components: main
+"""
+
+    class _Target:
+        def run(self, command: str, **kwargs: object) -> object:
+            del command, kwargs
+            return SimpleNamespace(
+                ok=True,
+                stdout="AGW-SOURCE:/etc/apt/sources.list.d/debian.sources\n" + content,
+            )
+
+    assert (
+        target_source_hygiene_issues(
+            _Target(),  # type: ignore[arg-type]
+            ("trixie", "trixie-updates", "trixie-security"),
+        )
+        == ()
+    )
+
+
 def test_failed_empty_safety_probe_cannot_become_a_safe_empty_fact() -> None:
     class _Target:
         def run(self, command: str, **kwargs: object) -> object:
@@ -134,4 +200,4 @@ def test_failed_empty_safety_probe_cannot_become_a_safe_empty_fact() -> None:
             return SimpleNamespace(ok=False, stdout="")
 
     with pytest.raises(StateError):
-        _lines(_Target(), "dpkg --audit")
+        _lines(_Target(), "dpkg --audit")  # type: ignore[arg-type]

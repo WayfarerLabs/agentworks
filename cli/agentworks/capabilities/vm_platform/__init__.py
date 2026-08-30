@@ -26,11 +26,6 @@ from agentworks.capabilities.vm_platform.base import (
     ProvisionResult,
     VMPlatform,
 )
-from agentworks.capabilities.vm_platform.debian_release import (
-    code_owned_release_value,
-    operator_owned_release_value,
-    verify_provisioned_release,
-)
 from agentworks.capabilities.vm_platform.lima import LimaPlatform
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 
@@ -43,9 +38,6 @@ __all__ = [
     "LimaPlatform",
     "ProvisionRequest",
     "ProvisionResult",
-    "code_owned_release_value",
-    "operator_owned_release_value",
-    "verify_provisioned_release",
     "VMPlatform",
     "VMPlatformEntry",
     "WSL2Platform",

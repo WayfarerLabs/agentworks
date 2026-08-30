@@ -191,7 +191,8 @@ Before changing Debian sources, the command must:
 3. refuse active, broken, or unverifiable Agentworks sessions;
 4. verify package database health, package holds, architecture, kernel metapackage on platforms
    where the guest owns its kernel, APT pins, third-party and backports sources, modified package
-   conffiles, minimum `/boot` space, and sufficient package-cache/root-disk space;
+   conffiles, minimum `/boot` space, and sufficient aggregate space on each distinct filesystem
+   backing `/`, `/var`, the package cache, and `/boot`;
 5. enforce the source release's OpenSSH minimum needed for a reconnectable remote upgrade and run
    the pair-specific blocker checks captured from the target release's Debian release notes;
 6. show the preliminary packages apt plans to remove and every source Agentworks will disable or
@@ -232,8 +233,12 @@ APT work runs from a durable, root-owned remote state directory rather than `/tm
 mutation it records the attempt and active action; after success it advances a separate
 last-completed action. Its progress, outcome, script, and output survive an SSH interruption and
 reboot. Re-running `vm upgrade` inspects an interrupted active action rather than guessing that it
-succeeded. It never starts a second package manager, and it owns a bounded inhibit/restore lifecycle
-for Debian's automatic APT timers while also respecting apt/dpkg's native locks.
+succeeded. Every completion, failure, retry, and repeated reboot dispatch compares the attempt
+identity it observed with the still-active identity under the journal lock, so a stale coordinator
+cannot write over a newer attempt. The root, pair directories, lock, plan, and state reject
+symlinks, wrong ownership, and non-private modes. It never starts a second package manager, and it
+owns a bounded inhibit/restore lifecycle for Debian's automatic APT timers while also respecting
+apt/dpkg's native locks.
 
 Agentworks does not attempt an automatic distribution downgrade or provider rollback. Before the
 guest proves Trixie, the database retains its last verified release. Once a reconnecting probe
@@ -333,16 +338,24 @@ release through a controlled, recorded product lifecycle.
   reference whose limitations are explicit.
 - The final post-Bookworm-update plan is recomputed and confirmed before suite switching; a changed
   removal, source, conffile, blocker, or space fact cannot inherit the preliminary confirmation.
+- Target-release package simulation uses only the generated target sources and scratch package
+  state, not guest APT configuration fragments, hooks, preferences, or source files. Space floors
+  and estimated growth are aggregated conservatively for every distinct filesystem.
 - External apt/dpkg ownership blocks the operation. Automatic APT timers return to their exact prior
   state after a Bookworm-safe abort or verified healthy Trixie completion; they remain inhibited on
-  a mixed or unhealthy package state until forward repair or external restore.
+  a mixed or unhealthy package state until forward repair or external restore. A failed source-safe
+  timer restoration leaves all known timers stopped during reconfiguration and records a durable
+  repair-required VM event.
 - Killing the local CLI or dropping SSH during each package stage leaves one durable remote
   operation whose active attempt and last completed action a later invocation can resume or
   diagnose, including interruption inside an action rather than only between actions.
 - One fixed remote lock guards every journal claim and write, including reboot intent and dispatch,
-  so two invocations cannot own the same transition.
+  and attempt-identity compare-and-set prevents stale invocations from completing, failing,
+  retrying, or dispatching reboot again for a newer attempt. The fixed root and journal-owned files
+  reject unsafe links, ownership, and modes.
 - A successful upgrade reboots into Trixie, reconnects, records Trixie, reinitializes with Trixie
-  mappings, and leaves no enabled Bookworm Debian source.
+  mappings, and leaves every required Trixie suite covered with no enabled Bookworm or third-party
+  source.
 - A post-reboot health or reinit failure records the observed Trixie release and a repair-required
   outcome rather than reporting success or reverting the row to Bookworm.
 - VM backup and workspace copy pass large-archive tests on a Trixie guest with `/tmp` mounted as a

@@ -20,6 +20,7 @@ either phase to the same operator-facing outcome.
 from __future__ import annotations
 
 import sys
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -44,7 +45,7 @@ if TYPE_CHECKING:
     from typing import NoReturn
 
     from agentworks.config import Config
-    from agentworks.db import Database
+    from agentworks.db import Database, VMRow
     from agentworks.secrets.policy import TtyInteractionPolicy
 
 # NOTE on the initializer imports (``verify_tailscale_available``,
@@ -666,7 +667,8 @@ def reinit_vm(
     registry = load_request_registry(config, live_database=db)
 
     vm = _require_vm(db, name)
-    _warn_legacy_release(vm)
+    if vm.debian_release is not None:
+        _warn_legacy_release(vm)
 
     from agentworks.capabilities.base import OperationScope, ScopeLevel
     from agentworks.git_credentials.nodes import git_credential_node
@@ -833,6 +835,7 @@ def reinit_vm(
         try:
             try:
                 verified_release = _mgr.verified_vm_release(db, vm, ts_target)
+                _warn_newly_observed_legacy(vm, verified_release)
                 _mgr.run_initialization(
                     db,
                     config,
@@ -868,3 +871,9 @@ def reinit_vm(
         output.info(f"Log: {logger.display_path}")
     else:
         output.result(f"VM '{name}' reinitialized successfully!")
+
+
+def _warn_newly_observed_legacy(vm: VMRow, observed: DebianRelease) -> None:
+    """Warn after observation only when the command entered with an unknown row."""
+    if vm.debian_release is None:
+        _warn_legacy_release(replace(vm, debian_release=observed))

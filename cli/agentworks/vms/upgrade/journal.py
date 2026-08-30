@@ -14,6 +14,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -237,9 +238,10 @@ class JournalState:
             failure=None,
         )
 
-    def complete_active(self) -> JournalState:
+    def complete_active(self, expected_attempt_id: str) -> JournalState:
         if self.active_action is None:
             raise JournalError("no active upgrade action to complete")
+        self._require_attempt(expected_attempt_id)
         return JournalState(
             version=self.version,
             attempt_id=None,
@@ -251,9 +253,16 @@ class JournalState:
             failure=None,
         )
 
-    def fail_active(self, detail: str, *, repair_required: bool) -> JournalState:
+    def fail_active(
+        self,
+        expected_attempt_id: str,
+        detail: str,
+        *,
+        repair_required: bool,
+    ) -> JournalState:
         if self.active_action is None:
             raise JournalError("no active upgrade action to fail")
+        self._require_attempt(expected_attempt_id)
         detail = _bounded_detail(detail)
         return JournalState(
             version=self.version,
@@ -266,9 +275,10 @@ class JournalState:
             failure=detail,
         )
 
-    def retry_active(self) -> JournalState:
+    def retry_active(self, expected_attempt_id: str) -> JournalState:
         if self.active_action is None or self.outcome is not AttemptOutcome.FAILED:
             raise JournalError("only a failed active action can be retried")
+        self._require_attempt(expected_attempt_id)
         return JournalState(
             version=self.version,
             attempt_id=str(uuid.uuid4()),
@@ -280,7 +290,7 @@ class JournalState:
             failure=None,
         )
 
-    def redispatch_reboot(self, current_boot_id: str) -> JournalState:
+    def redispatch_reboot(self, current_boot_id: str, expected_attempt_id: str) -> JournalState:
         """Record another safe dispatch while the original boot is still running."""
         if (
             self.active_action is not UpgradeAction.REBOOT
@@ -288,6 +298,7 @@ class JournalState:
             or self.boot_id_before != current_boot_id
         ):
             raise JournalError("reboot can be redispatched only from the unchanged pre-reboot system")
+        self._require_attempt(expected_attempt_id)
         return JournalState(
             version=self.version,
             attempt_id=str(uuid.uuid4()),
@@ -298,6 +309,10 @@ class JournalState:
             outcome=AttemptOutcome.RUNNING,
             failure=None,
         )
+
+    def _require_attempt(self, expected_attempt_id: str) -> None:
+        if self.attempt_id != expected_attempt_id:
+            raise JournalError("active upgrade attempt identity changed")
 
     def to_mapping(self) -> dict[str, object]:
         data = asdict(self)
@@ -322,6 +337,7 @@ class JournalStore:
             raise JournalError(f"upgrade journal already exists: {pair.dirname}") from error
         directory.chmod(0o700)
         (directory / "lock").touch(mode=0o600, exist_ok=False)
+        (directory / "lock").chmod(0o600)
         _atomic_json(directory / "plan.json", dict(plan))
         state = JournalState.prepared()
         _atomic_json(directory / "state.json", state.to_mapping())
@@ -330,49 +346,36 @@ class JournalStore:
     def scan_incomplete(self, retained_pairs: Sequence[UpgradePair]) -> list[UpgradePair]:
         if not self.root.exists():
             return []
-        if not self.root.is_dir():
-            raise JournalError(f"upgrade journal root is not a directory: {self.root}")
+        _validate_directory(self.root, expected_mode=0o700)
         incomplete: list[UpgradePair] = []
         for entry in sorted(self.root.iterdir(), key=lambda item: item.name):
-            if not entry.is_dir():
+            entry_stat = entry.lstat()
+            if stat.S_ISLNK(entry_stat.st_mode):
+                raise JournalError(f"upgrade journal root contains a symlink: {entry}")
+            if not stat.S_ISDIR(entry_stat.st_mode):
                 continue
             pair = UpgradePair.parse(entry.name, retained_pairs=retained_pairs)
             if not self.load(pair).is_complete:
                 incomplete.append(pair)
         return incomplete
 
-    def select_incomplete(self, retained_pairs: Sequence[UpgradePair]) -> UpgradePair | None:
-        pairs = self.scan_incomplete(retained_pairs)
-        if len(pairs) > 1:
-            names = ", ".join(pair.dirname for pair in pairs)
-            raise JournalError(f"multiple incomplete Debian upgrade journals require repair: {names}")
-        return pairs[0] if pairs else None
-
     def load(self, pair: UpgradePair) -> JournalState:
-        path = self.path_for(pair) / "state.json"
-        try:
-            with path.open(encoding="utf-8") as stream:
-                value = json.load(stream)
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise JournalError(f"cannot read upgrade journal state: {path}") from error
+        path = self._journal_directory(pair) / "state.json"
+        value = _read_json(path, label="state")
         if not isinstance(value, dict):
             raise JournalError("state.json must contain a JSON object")
         return JournalState.from_mapping(value)
 
     def load_plan(self, pair: UpgradePair) -> dict[str, object]:
-        path = self.path_for(pair) / "plan.json"
-        try:
-            with path.open(encoding="utf-8") as stream:
-                value = json.load(stream)
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise JournalError(f"cannot read upgrade journal plan: {path}") from error
+        path = self._journal_directory(pair) / "plan.json"
+        value = _read_json(path, label="plan")
         if not isinstance(value, dict):
             raise JournalError("plan.json must contain a JSON object")
         return value
 
     def write_state(self, pair: UpgradePair, state: JournalState) -> None:
         state.validate()
-        _atomic_json(self.path_for(pair) / "state.json", state.to_mapping())
+        _atomic_json(self._journal_directory(pair) / "state.json", state.to_mapping())
 
     def path_for(self, pair: UpgradePair) -> Path:
         return self.root / pair.dirname
@@ -382,12 +385,19 @@ class JournalStore:
         """Take the journal's one non-blocking writer lock."""
         import fcntl
 
-        path = self.path_for(pair) / "lock"
+        path = self._journal_directory(pair) / "lock"
         try:
             descriptor = os.open(path, os.O_RDWR | getattr(os, "O_NOFOLLOW", 0))
         except OSError as error:
             raise JournalError(f"cannot open upgrade journal lock: {path}") from error
         try:
+            lock_stat = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(lock_stat.st_mode)
+                or lock_stat.st_uid != os.geteuid()
+                or stat.S_IMODE(lock_stat.st_mode) != 0o600
+            ):
+                raise JournalError(f"upgrade journal lock has unsafe ownership or mode: {path}")
             try:
                 fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as error:
@@ -397,8 +407,71 @@ class JournalStore:
             os.close(descriptor)
 
     def _ensure_root(self) -> None:
+        _reject_symlink_ancestors(self.root)
         self.root.mkdir(parents=True, mode=0o700, exist_ok=True)
+        _validate_directory(self.root)
         self.root.chmod(0o700)
+        _validate_directory(self.root, expected_mode=0o700)
+
+    def _journal_directory(self, pair: UpgradePair) -> Path:
+        _validate_directory(self.root, expected_mode=0o700)
+        directory = self.path_for(pair)
+        _validate_directory(directory, expected_mode=0o700)
+        return directory
+
+
+def _reject_symlink_ancestors(path: Path) -> None:
+    current = Path(path.anchor) if path.is_absolute() else Path()
+    for part in path.parts[1:] if path.is_absolute() else path.parts:
+        current /= part
+        try:
+            current_stat = current.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(current_stat.st_mode):
+            raise JournalError(f"upgrade journal path contains a symlink: {current}")
+
+
+def _validate_directory(path: Path, *, expected_mode: int | None = None) -> None:
+    try:
+        path_stat = path.lstat()
+    except OSError as error:
+        raise JournalError(f"cannot inspect upgrade journal directory: {path}") from error
+    if stat.S_ISLNK(path_stat.st_mode) or not stat.S_ISDIR(path_stat.st_mode):
+        raise JournalError(f"upgrade journal path is not a real directory: {path}")
+    if path_stat.st_uid != os.geteuid():
+        raise JournalError(f"upgrade journal directory has the wrong owner: {path}")
+    if expected_mode is not None and stat.S_IMODE(path_stat.st_mode) != expected_mode:
+        raise JournalError(f"upgrade journal directory has an unsafe mode: {path}")
+
+
+def _read_json(path: Path, *, label: str) -> object:
+    try:
+        _validate_private_file(path, label=label)
+        with path.open(encoding="utf-8") as stream:
+            return json.load(stream)
+    except JournalError:
+        raise
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise JournalError(f"cannot read upgrade journal {label}: {path}") from error
+
+
+def _validate_private_file(path: Path, *, label: str, missing_ok: bool = False) -> None:
+    try:
+        path_stat = path.lstat()
+    except FileNotFoundError:
+        if missing_ok:
+            return
+        raise
+    except OSError as error:
+        raise JournalError(f"cannot inspect upgrade journal {label}: {path}") from error
+    if (
+        stat.S_ISLNK(path_stat.st_mode)
+        or not stat.S_ISREG(path_stat.st_mode)
+        or path_stat.st_uid != os.geteuid()
+        or stat.S_IMODE(path_stat.st_mode) != 0o600
+    ):
+        raise JournalError(f"upgrade journal {label} has unsafe ownership or mode: {path}")
 
 
 def _required_str(value: Mapping[str, object], key: str) -> str:
@@ -432,7 +505,8 @@ def _bounded_detail(detail: str) -> str:
 
 
 def _atomic_json(path: Path, value: Mapping[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    _validate_directory(path.parent, expected_mode=0o700)
+    _validate_private_file(path, label=path.name, missing_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temporary = Path(temporary_name)
     try:
@@ -475,6 +549,7 @@ def _cli(argv: Sequence[str] | None = None) -> int:
 
     scan = subparsers.add_parser("scan")
     scan.add_argument("pairs", nargs="*")
+    subparsers.add_parser("ensure-root")
     initialize = subparsers.add_parser("initialize")
     initialize.add_argument("source")
     initialize.add_argument("target")
@@ -485,6 +560,8 @@ def _cli(argv: Sequence[str] | None = None) -> int:
         action_parser.add_argument("target")
         if command in {"claim", "complete", "fail"}:
             action_parser.add_argument("action")
+        if command in {"complete", "fail", "retry"}:
+            action_parser.add_argument("attempt_id")
         if command == "claim":
             action_parser.add_argument("--boot-id")
         if command == "fail":
@@ -500,9 +577,14 @@ def _cli(argv: Sequence[str] | None = None) -> int:
     redispatch.add_argument("source")
     redispatch.add_argument("target")
     redispatch.add_argument("boot_id")
+    redispatch.add_argument("attempt_id")
 
     args = parser.parse_args(argv)
     store = JournalStore(args.root)
+    if args.command == "ensure-root":
+        store._ensure_root()
+        _write_result({"ready": True})
+        return 0
     if args.command == "scan":
         retained = tuple(UpgradePair.parse(name) for name in args.pairs)
         _write_result([pair.dirname for pair in store.scan_incomplete(retained)])
@@ -529,7 +611,7 @@ def _cli(argv: Sequence[str] | None = None) -> int:
             )
     elif args.command == "redispatch-reboot":
         with store.locked(pair):
-            state = store.load(pair).redispatch_reboot(args.boot_id)
+            state = store.load(pair).redispatch_reboot(args.boot_id, args.attempt_id)
             if not _package_locks_quiescent():
                 raise JournalError("reboot cannot be redispatched while package-manager ownership is uncertain")
             store.write_state(pair, state)
@@ -548,13 +630,17 @@ def _cli(argv: Sequence[str] | None = None) -> int:
             elif args.command == "complete":
                 if state.active_action is not UpgradeAction(args.action):
                     raise JournalError("completion action does not match active action")
-                state = state.complete_active()
+                state = state.complete_active(args.attempt_id)
             elif args.command == "fail":
                 if state.active_action is not UpgradeAction(args.action):
                     raise JournalError("failure action does not match active action")
-                state = state.fail_active(args.detail, repair_required=args.repair_required)
+                state = state.fail_active(
+                    args.attempt_id,
+                    args.detail,
+                    repair_required=args.repair_required,
+                )
             elif args.command == "retry":
-                state = state.retry_active()
+                state = state.retry_active(args.attempt_id)
             elif args.command == "update-plan":
                 if (
                     state.last_completed
@@ -565,7 +651,7 @@ def _cli(argv: Sequence[str] | None = None) -> int:
                     or state.active_action is not None
                 ):
                     raise JournalError("plan cannot be updated at this upgrade stage")
-                _atomic_json(store.path_for(pair) / "plan.json", _decode_mapping(args.plan))
+                _atomic_json(store._journal_directory(pair) / "plan.json", _decode_mapping(args.plan))
             else:  # pragma: no cover - argparse owns the closed command set
                 raise AssertionError(args.command)
             store.write_state(pair, state)

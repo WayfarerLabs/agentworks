@@ -32,7 +32,7 @@ class RemoteJournal:
         try:
             self._target.copy_to(source, staging)
             command = (
-                f"install -d -m 0700 {shlex.quote(REMOTE_ROOT)} && "
+                f"python3 {shlex.quote(staging)} --root {shlex.quote(REMOTE_ROOT)} ensure-root && "
                 f"install -m 0700 {shlex.quote(staging)} {shlex.quote(_REMOTE_HELPER)}"
             )
             self._target.run(command, sudo=True)
@@ -55,21 +55,45 @@ class RemoteJournal:
         script = """
 import json
 import os
+import stat
 import sys
 
 root = sys.argv[1]
-if not os.path.exists(root):
+if not os.path.lexists(root):
     print("{}")
     raise SystemExit(0)
-if not os.path.isdir(root):
-    print("upgrade journal root is not a directory", file=sys.stderr)
+root_stat = os.lstat(root)
+if (
+    os.path.realpath(root) != root
+    or not stat.S_ISDIR(root_stat.st_mode)
+    or root_stat.st_uid != 0
+    or stat.S_IMODE(root_stat.st_mode) != 0o700
+):
+    print("upgrade journal root has unsafe ownership or mode", file=sys.stderr)
     raise SystemExit(2)
 inventory = {}
 for name in sorted(os.listdir(root)):
     directory = os.path.join(root, name)
-    if not os.path.isdir(directory):
+    directory_stat = os.lstat(directory)
+    if stat.S_ISLNK(directory_stat.st_mode):
+        print("upgrade journal root contains a symlink", file=sys.stderr)
+        raise SystemExit(2)
+    if not stat.S_ISDIR(directory_stat.st_mode):
         continue
-    with open(os.path.join(directory, "state.json"), encoding="utf-8") as stream:
+    if directory_stat.st_uid != 0 or stat.S_IMODE(directory_stat.st_mode) != 0o700:
+        print("upgrade journal directory has unsafe ownership or mode", file=sys.stderr)
+        raise SystemExit(2)
+    state_path = os.path.join(directory, "state.json")
+    state_stat = os.lstat(state_path)
+    if (
+        stat.S_ISLNK(state_stat.st_mode)
+        or not stat.S_ISREG(state_stat.st_mode)
+        or state_stat.st_uid != 0
+        or stat.S_IMODE(state_stat.st_mode) != 0o600
+    ):
+        print("upgrade journal state has unsafe ownership or mode", file=sys.stderr)
+        raise SystemExit(2)
+    with open(state_path, encoding="utf-8") as stream:
         inventory[name] = json.load(stream)
 print(json.dumps(inventory, separators=(",", ":"), sort_keys=True))
 """.strip()
@@ -117,30 +141,31 @@ print(json.dumps(inventory, separators=(",", ":"), sort_keys=True))
             args.extend(["--boot-id", boot_id_before])
         return self._state(*args)
 
-    def complete(self, pair: UpgradePair, action: UpgradeAction) -> JournalState:
-        return self._state("complete", pair.source, pair.target, action.value)
+    def complete(self, pair: UpgradePair, action: UpgradeAction, attempt_id: str) -> JournalState:
+        return self._state("complete", pair.source, pair.target, action.value, attempt_id)
 
     def fail(
         self,
         pair: UpgradePair,
         action: UpgradeAction,
+        attempt_id: str,
         detail: str,
         *,
         repair_required: bool,
     ) -> JournalState:
-        args = ["fail", pair.source, pair.target, action.value, detail]
+        args = ["fail", pair.source, pair.target, action.value, attempt_id, detail]
         if repair_required:
             args.append("--repair-required")
         return self._state(*args)
 
-    def retry(self, pair: UpgradePair) -> JournalState:
-        return self._state("retry", pair.source, pair.target)
+    def retry(self, pair: UpgradePair, attempt_id: str) -> JournalState:
+        return self._state("retry", pair.source, pair.target, attempt_id)
 
     def dispatch_reboot(self, pair: UpgradePair, boot_id: str) -> JournalState:
         return self._state("dispatch-reboot", pair.source, pair.target, boot_id)
 
-    def redispatch_reboot(self, pair: UpgradePair, boot_id: str) -> JournalState:
-        return self._state("redispatch-reboot", pair.source, pair.target, boot_id)
+    def redispatch_reboot(self, pair: UpgradePair, boot_id: str, attempt_id: str) -> JournalState:
+        return self._state("redispatch-reboot", pair.source, pair.target, boot_id, attempt_id)
 
     def update_plan(self, pair: UpgradePair, plan: Mapping[str, object]) -> JournalState:
         encoded = base64.urlsafe_b64encode(json.dumps(plan, sort_keys=True).encode()).decode("ascii")

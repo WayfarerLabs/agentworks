@@ -385,7 +385,9 @@ def _initialize_and_update_source(
         try:
             _inhibit_apt_timers(target)
         except Exception:
-            _restore_timers_after_source_safe_failure(
+            _restore_timers_or_record(
+                db,
+                vm,
                 target,
                 fresh.apt_timer_states,
                 transition,
@@ -400,13 +402,17 @@ def _initialize_and_update_source(
             execution = _execution(target, journal, transition)
             execution.install_script()
         except Exception:
-            _restore_timers_after_source_safe_failure(
+            _restore_timers_or_record(
+                db,
+                vm,
                 target,
                 fresh.apt_timer_states,
                 transition,
             )
             raise
         _advance_source_action(
+            db,
+            vm,
             journal,
             execution,
             transition,
@@ -454,9 +460,9 @@ def _resume_after_source_update(
             try:
                 _inhibit_apt_timers(target)
             except Exception:
-                _restore_timers_after_source_safe_failure(target, timers, transition)
+                _restore_timers_or_record(db, vm, target, timers, transition)
                 raise
-            _advance_source_action(journal, execution, transition, target, timers)
+            _advance_source_action(db, vm, journal, execution, transition, target, timers)
             state = journal.load(transition.pair)
 
         if state.last_completed is JournalProgress.SOURCE_CURRENT and state.active_action is None:
@@ -473,7 +479,9 @@ def _resume_after_source_update(
                 )
                 _require_safe_preflight(final, transition)
             except Exception:
-                _restore_timers_after_source_safe_failure(
+                _restore_timers_or_record(
+                    db,
+                    vm,
                     target,
                     timer_states,
                     transition,
@@ -494,7 +502,9 @@ def _resume_after_source_update(
             try:
                 _inhibit_apt_timers(target)
             except Exception:
-                _restore_timers_after_source_safe_failure(
+                _restore_timers_or_record(
+                    db,
+                    vm,
                     target,
                     timer_states,
                     transition,
@@ -507,7 +517,7 @@ def _resume_after_source_update(
             UpgradeAction.FULL_UPGRADE,
         ):
             state = journal.load(transition.pair)
-            if _action_pending(state, action):
+            if state.active_action is action or state.next_action is action:
                 _advance_action(journal, execution, transition.pair, action)
 
         state = journal.load(transition.pair)
@@ -521,7 +531,7 @@ def _resume_after_source_update(
             plan = journal.load_plan(transition.pair)
             plan["interface_predictions"] = predictions
             journal.update_plan(transition.pair, plan)
-        if _action_pending(state, UpgradeAction.REBOOT):
+        if state.active_action is UpgradeAction.REBOOT or state.next_action is UpgradeAction.REBOOT:
             _advance_reboot(journal, execution, transition.pair)
             reboot_state = journal.load(transition.pair)
             if reboot_state.boot_id_before is None:
@@ -587,7 +597,14 @@ def _finish_after_reboot(
             )
             if reconnected is None and _observed_boot_id(target) == prior_boot_id:
                 output.warn("The guest is still on the pre-reboot boot ID; safely redispatching reboot once.")
-                journal.redispatch_reboot(transition.pair, prior_boot_id)
+                reboot_state = journal.load(transition.pair)
+                if reboot_state.attempt_id is None:
+                    raise StateError("reboot journal is missing its active attempt identity")
+                journal.redispatch_reboot(
+                    transition.pair,
+                    prior_boot_id,
+                    reboot_state.attempt_id,
+                )
                 reconnected = _reconnect_after_reboot(
                     db,
                     config,
@@ -613,13 +630,15 @@ def _finish_after_reboot(
             target = reconnected
             journal = RemoteJournal(target)
             execution = _execution(target, journal, transition)
-            result = execution.inspect(UpgradeAction.REBOOT, journal.load(transition.pair))
+            reboot_state = journal.load(transition.pair)
+            result = execution.inspect(UpgradeAction.REBOOT, reboot_state)
             if result.disposition.value != "succeeded":
-                state = journal.load(transition.pair)
-                if state.active_action is UpgradeAction.REBOOT:
+                if reboot_state.active_action is UpgradeAction.REBOOT:
+                    assert reboot_state.attempt_id is not None
                     journal.fail(
                         transition.pair,
                         UpgradeAction.REBOOT,
+                        reboot_state.attempt_id,
                         "reboot did not change the guest boot ID",
                         repair_required=True,
                     )
@@ -628,7 +647,13 @@ def _finish_after_reboot(
                     entity_kind="vm",
                     entity_name=vm.name,
                 )
-            journal.complete(transition.pair, UpgradeAction.REBOOT)
+            if reboot_state.attempt_id is None:
+                raise StateError("reboot journal is missing its active attempt identity")
+            journal.complete(
+                transition.pair,
+                UpgradeAction.REBOOT,
+                reboot_state.attempt_id,
+            )
         else:
             journal = RemoteJournal(target)
 
@@ -663,6 +688,8 @@ def _advance_action(
 
 
 def _advance_source_action(
+    db: Database,
+    vm: VMRow,
     journal: RemoteJournal,
     execution: RemoteUpgradeExecution,
     transition: _Transition,
@@ -682,7 +709,7 @@ def _advance_source_action(
                 AttemptOutcome.FAILED,
                 AttemptOutcome.REPAIR_REQUIRED,
             }:
-                _restore_timers_after_source_safe_failure(target, timer_states, transition)
+                _restore_timers_or_record(db, vm, target, timer_states, transition)
         raise
 
 
@@ -693,18 +720,6 @@ def _advance_reboot(journal: RemoteJournal, execution: RemoteUpgradeExecution, p
     if state.next_action is not UpgradeAction.REBOOT:
         raise StateError("upgrade journal is not ready to reboot")
     execution.start(UpgradeAction.REBOOT, "reboot-dispatch")
-
-
-def _action_pending(state: JournalState, action: UpgradeAction) -> bool:
-    completed_order = list(JournalProgress)
-    action_progress = {
-        UpgradeAction.SOURCE_UPDATE: JournalProgress.SOURCE_CURRENT,
-        UpgradeAction.SWITCH_SOURCES: JournalProgress.SOURCES_SWITCHED,
-        UpgradeAction.MINIMAL_UPGRADE: JournalProgress.MINIMAL_UPGRADE_COMPLETE,
-        UpgradeAction.FULL_UPGRADE: JournalProgress.FULL_UPGRADE_COMPLETE,
-        UpgradeAction.REBOOT: JournalProgress.REBOOT_COMPLETE,
-    }[action]
-    return completed_order.index(state.last_completed) < completed_order.index(action_progress)
 
 
 def _probe(
@@ -897,6 +912,33 @@ def _restore_timers_after_source_safe_failure(
     return True
 
 
+def _restore_timers_or_record(
+    db: Database,
+    vm: VMRow,
+    target: Transport,
+    states: dict[str, tuple[str, str]],
+    transition: _Transition,
+) -> bool:
+    restored = _restore_timers_after_source_safe_failure(target, states, transition)
+    if restored:
+        return True
+    try:
+        db.insert_vm_event(
+            vm.name,
+            "debian_upgrade_repair_required",
+            json.dumps(
+                {
+                    "stage": "source-safe-apt-timer-restore",
+                    "target": transition.pair.target,
+                },
+                sort_keys=True,
+            ),
+        )
+    except Exception as error:
+        output.warn(f"Could not record the automatic APT timer repair requirement ({type(error).__name__}).")
+    return False
+
+
 def _source_state_is_safe_for_timer_restore(
     target: Transport,
     transition: _Transition,
@@ -911,8 +953,11 @@ def _source_state_is_safe_for_timer_restore(
 
 
 def _restore_apt_timers(target: Transport, states: dict[str, tuple[str, str]]) -> None:
-    for name, (enabled, active) in states.items():
-        q_name = shlex.quote(name)
+    quoted = {name: shlex.quote(name) for name in states}
+    for q_name in quoted.values():
+        target.run(f"systemctl stop {q_name}", sudo=True)
+    for name, (enabled, _active) in states.items():
+        q_name = quoted[name]
         target.run(f"systemctl unmask {q_name}", sudo=True)
         if enabled == "enabled":
             target.run(f"systemctl enable {q_name}", sudo=True)
@@ -924,10 +969,14 @@ def _restore_apt_timers(target: Transport, states: dict[str, tuple[str, str]]) -
             target.run(f"systemctl mask {q_name}", sudo=True)
         elif enabled == "masked-runtime":
             target.run(f"systemctl mask --runtime {q_name}", sudo=True)
+    for name, (enabled, active) in states.items():
+        q_name = quoted[name]
         if active == "active" and enabled not in {"masked", "masked-runtime"}:
             target.run(f"systemctl start {q_name}", sudo=True)
         else:
             target.run(f"systemctl stop {q_name}", sudo=True)
+    for name, (enabled, active) in states.items():
+        q_name = quoted[name]
         observed_enabled = target.run(f"systemctl is-enabled {q_name}", check=False).stdout.strip()
         observed_active = target.run(f"systemctl is-active {q_name}", check=False).stdout.strip()
         if (observed_enabled, observed_active) != (enabled, active):

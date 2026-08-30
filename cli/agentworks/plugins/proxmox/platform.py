@@ -409,11 +409,10 @@ class ProxmoxPlatform(VMPlatform):
                 )
                 observed_release = verify_provisioned_release(target, request.debian_release)
             except Exception:
-                # Re-raised unwrapped after the rollback: the manager's
-                # create arm wraps EVERY escaping exception in
-                # ProvisioningError (lifecycle.py), ProxmoxAPIError
-                # included, so wrapping here would only nest a redundant
-                # layer around the already-typed API error.
+                # Re-raised unwrapped after rollback: the manager preserves
+                # typed configuration/state failures and maps other backend
+                # exceptions at the create boundary, so wrapping here would
+                # only add a redundant provider layer.
                 output.detail("Cleaning up the partial VM...")
                 rollback_partial_create(self._api(ctx), node, newid, pending_upid=pending_upid)
                 raise

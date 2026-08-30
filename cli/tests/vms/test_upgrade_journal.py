@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, replace
+from pathlib import Path
 
 import pytest
 
@@ -68,12 +69,12 @@ class _StoreJournal:
             self.store.write_state(pair, state)
             return state
 
-    def complete(self, pair: UpgradePair, action: UpgradeAction) -> JournalState:
+    def complete(self, pair: UpgradePair, action: UpgradeAction, attempt_id: str) -> JournalState:
         with self.store.locked(pair):
             state = self.store.load(pair)
             if state.active_action is not action:
                 raise UpgradeActionError(action, "completion mismatch", repair_required=True)
-            state = state.complete_active()
+            state = state.complete_active(attempt_id)
             self.store.write_state(pair, state)
             return state
 
@@ -81,6 +82,7 @@ class _StoreJournal:
         self,
         pair: UpgradePair,
         action: UpgradeAction,
+        attempt_id: str,
         detail: str,
         *,
         repair_required: bool,
@@ -89,13 +91,13 @@ class _StoreJournal:
             state = self.store.load(pair)
             if state.active_action is not action:
                 raise UpgradeActionError(action, "failure mismatch", repair_required=True)
-            state = state.fail_active(detail, repair_required=repair_required)
+            state = state.fail_active(attempt_id, detail, repair_required=repair_required)
             self.store.write_state(pair, state)
             return state
 
-    def retry(self, pair: UpgradePair) -> JournalState:
+    def retry(self, pair: UpgradePair, attempt_id: str) -> JournalState:
         with self.store.locked(pair):
-            state = self.store.load(pair).retry_active()
+            state = self.store.load(pair).retry_active(attempt_id)
             self.store.write_state(pair, state)
             return state
 
@@ -130,15 +132,25 @@ def test_persisted_state_rejects_partial_attempt_fields(tmp_path, pair: UpgradeP
         store.load(pair)
 
 
-def test_multiple_incomplete_journals_fail_before_selection(tmp_path) -> None:
+def test_multiple_incomplete_remote_journals_fail_before_selection() -> None:
     first = UpgradePair("bookworm", "trixie")
     second = UpgradePair("trixie", "forky")
-    store = JournalStore(tmp_path)
-    store.initialize(first, {})
-    store.initialize(second, {})
+
+    class _Target:
+        def run(self, command: str, **kwargs: object) -> object:
+            del command, kwargs
+            inventory = {
+                first.dirname: JournalState.prepared().to_mapping(),
+                second.dirname: JournalState.prepared().to_mapping(),
+            }
+            return type(
+                "Result",
+                (),
+                {"ok": True, "stdout": json.dumps(inventory), "stderr": ""},
+            )()
 
     with pytest.raises(JournalError):
-        store.select_incomplete((first, second))
+        RemoteJournal(_Target()).select_incomplete((first, second))  # type: ignore[arg-type]
 
 
 def test_completed_historic_journal_does_not_block_new_pair(tmp_path) -> None:
@@ -149,11 +161,13 @@ def test_completed_historic_journal_does_not_block_new_pair(tmp_path) -> None:
     state = store.load(first)
     for action in UpgradeAction:
         boot_id = "boot-a" if action is UpgradeAction.REBOOT else None
-        state = state.claim(action, boot_id_before=boot_id).complete_active()
+        state = state.claim(action, boot_id_before=boot_id)
+        assert state.attempt_id is not None
+        state = state.complete_active(state.attempt_id)
     store.write_state(first, state)
     store.initialize(second, {})
 
-    assert store.select_incomplete((first, second)) == second
+    assert store.scan_incomplete((first, second)) == [second]
 
 
 def test_one_nonblocking_lock_excludes_every_other_writer(tmp_path, pair: UpgradePair) -> None:
@@ -187,6 +201,62 @@ def test_engine_records_intent_before_dispatch(tmp_path, pair: UpgradePair) -> N
     assert state.outcome is AttemptOutcome.RUNNING
 
 
+def test_stale_coordinator_cannot_complete_a_retried_attempt(tmp_path, pair: UpgradePair) -> None:
+    store = JournalStore(tmp_path)
+    store.initialize(pair, {})
+    original = store.load(pair).claim(UpgradeAction.SOURCE_UPDATE)
+    assert original.attempt_id is not None
+    failed = original.fail_active(original.attempt_id, "dispatch not observed", repair_required=False)
+    replacement = failed.retry_active(original.attempt_id)
+    store.write_state(pair, replacement)
+
+    with store.locked(pair), pytest.raises(JournalError):
+        store.load(pair).complete_active(original.attempt_id)
+
+    assert store.load(pair).attempt_id == replacement.attempt_id
+
+
+def test_journal_root_rejects_symlink_and_wrong_owner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    pair: UpgradePair,
+) -> None:
+    target = tmp_path / "target"
+    target.mkdir(mode=0o700)
+    symlink_root = tmp_path / "linked-root"
+    symlink_root.symlink_to(target, target_is_directory=True)
+    with pytest.raises(JournalError):
+        JournalStore(symlink_root).initialize(pair, {})
+
+    owned_root = tmp_path / "owned-root"
+    owned_root.mkdir(mode=0o700)
+    monkeypatch.setattr("agentworks.vms.upgrade.journal.os.geteuid", lambda: owned_root.stat().st_uid + 1)
+    with pytest.raises(JournalError):
+        JournalStore(owned_root).initialize(pair, {})
+
+
+def test_journal_load_rejects_a_symlinked_pair_directory(tmp_path, pair: UpgradePair) -> None:
+    store = JournalStore(tmp_path)
+    store.initialize(pair, {})
+    directory = store.path_for(pair)
+    moved = tmp_path / "moved-pair"
+    directory.rename(moved)
+    directory.symlink_to(moved, target_is_directory=True)
+
+    with pytest.raises(JournalError):
+        store.load(pair)
+
+
+def test_journal_write_rejects_an_unsafe_existing_state_file(tmp_path, pair: UpgradePair) -> None:
+    store = JournalStore(tmp_path)
+    store.initialize(pair, {})
+    state = store.load(pair)
+    (store.path_for(pair) / "state.json").chmod(0o644)
+
+    with pytest.raises(JournalError):
+        store.write_state(pair, state)
+
+
 def test_resume_proves_completed_active_action_without_replay(tmp_path, pair: UpgradePair) -> None:
     store = JournalStore(tmp_path)
     store.initialize(pair, {})
@@ -205,7 +275,8 @@ def test_repair_required_attempt_is_not_retried(tmp_path, pair: UpgradePair) -> 
     store = JournalStore(tmp_path)
     store.initialize(pair, {})
     state = store.load(pair).claim(UpgradeAction.SOURCE_UPDATE)
-    state = state.fail_active("manual package repair needed", repair_required=True)
+    assert state.attempt_id is not None
+    state = state.fail_active(state.attempt_id, "manual package repair needed", repair_required=True)
     store.write_state(pair, state)
     execution = _Execution(inspected=ActionDisposition.REPAIR_REQUIRED)
 
@@ -232,7 +303,9 @@ def test_state_rejects_pair_fields_at_persisted_boundary() -> None:
 def test_complete_state_cannot_retain_active_attempt() -> None:
     state = JournalState.prepared()
     for action in UpgradeAction:
-        state = state.claim(action, boot_id_before="old" if action is UpgradeAction.REBOOT else None).complete_active()
+        state = state.claim(action, boot_id_before="old" if action is UpgradeAction.REBOOT else None)
+        assert state.attempt_id is not None
+        state = state.complete_active(state.attempt_id)
     with pytest.raises(JournalError):
         replace(
             state,
@@ -252,15 +325,18 @@ def test_reboot_redispatch_requires_the_unchanged_recorded_boot() -> None:
         UpgradeAction.MINIMAL_UPGRADE,
         UpgradeAction.FULL_UPGRADE,
     ):
-        state = state.claim(action).complete_active()
+        state = state.claim(action)
+        assert state.attempt_id is not None
+        state = state.complete_active(state.attempt_id)
     state = state.claim(UpgradeAction.REBOOT, boot_id_before="boot-a")
+    assert state.attempt_id is not None
 
-    redispatched = state.redispatch_reboot("boot-a")
+    redispatched = state.redispatch_reboot("boot-a", state.attempt_id)
 
     assert redispatched.boot_id_before == "boot-a"
     assert redispatched.attempt_id != state.attempt_id
     with pytest.raises(JournalError):
-        state.redispatch_reboot("boot-b")
+        state.redispatch_reboot("boot-b", state.attempt_id)
 
 
 def test_absent_remote_journal_scan_is_read_only(pair: UpgradePair) -> None:
@@ -272,7 +348,7 @@ def test_absent_remote_journal_scan_is_read_only(pair: UpgradePair) -> None:
         def copy_to(self, *args: object, **kwargs: object) -> None:
             raise AssertionError("read-only scan attempted to install a helper")
 
-    assert RemoteJournal(_Target()).read_states((pair,)) == {}
+    assert RemoteJournal(_Target()).read_states((pair,)) == {}  # type: ignore[arg-type]
 
 
 def test_reboot_lock_proof_falls_back_to_lslocks_when_fuser_is_absent(
