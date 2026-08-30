@@ -713,15 +713,14 @@ This keeps capabilities independent of the resolution implementation. Each comma
 secret set from the node graph, resolves once, and exposes only declared values through
 `RunContext`. Capability instances never hold a resolver or another value source.
 
-There is one distinct seam for a domain-owned operation secret that is not platform configuration.
-The VM domain's template declares the Tailscale auth-key reference, the VM node contributes it to
-the operation union, and the VM manager resolves it once. Vm-platform contract version 2 then passes
-that value directly in the required `ProvisionRequest.tailscale_auth_key` field, alongside a
-value-free progress sink. A platform must not redeclare or claim that template-owned secret in its
-config model, read it from ambient state, or defer its use to a generic caller fallback. This narrow
-request field preserves ownership: platform-config secrets still use `ctx.secret(name)`, while the
-VM domain explicitly delivers the one operation input every platform must consume during
-complete-or-raise creation.
+A consuming domain can also own required operation values that every implementation must honor. The
+VM domain resolves its template's Tailscale auth-key reference once and selects the concrete Debian
+release from core policy. Vm-platform contract version 3 carries both through `ProvisionRequest`,
+alongside a value-free progress sink. A platform must not redeclare either value in its config, read
+a substitute from ambient state, or infer its own meaning of "current." It translates the requested
+release through a platform-owned artifact map, verifies the live guest before returning, and reports
+the observed release in `ProvisionResult`. Platform-config secrets still use `ctx.secret(name)`;
+domain-owned values follow the operation that consumes them.
 
 Both shipped capabilities are the reference: `git-credential-provider` (github, azdo) reads its
 token via `ctx.secret(name)` in `runup`, and `vm-platform/proxmox` reads its API token the same way

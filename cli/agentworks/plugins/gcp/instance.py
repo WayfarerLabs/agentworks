@@ -195,7 +195,7 @@ def insert_instance_reconciled(
             entity_name=str(instance.name),
             hint=(
                 "verify IAM, quota, and request prerequisites first; then verify that selected machine type "
-                f"'{selected_machine_type}' supports a CPU-only Debian 12 VM with a 'pd-balanced' boot disk, "
+                f"'{selected_machine_type}' supports a CPU-only Debian VM with a 'pd-balanced' boot disk, "
                 "or choose a compatible machine_types entry"
             ),
         )

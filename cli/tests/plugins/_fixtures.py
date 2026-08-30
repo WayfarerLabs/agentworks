@@ -89,7 +89,7 @@ class ConformingVMPlatform(VMPlatform):
     """A concrete ``VMPlatform``: the six abstract power ops implemented so
     the class is seatable. Subclasses add ``name`` / ``description``."""
 
-    contract_version = 2
+    contract_version = 3
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)

@@ -14,20 +14,19 @@ from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.config import capability_config_references, validate_capability_config
 from agentworks.capabilities.vm_platform import ProvisionRequest
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
+from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError
 from agentworks.plugins.azure.config import (
     _DEFAULT_VM_SIZES,
-    IMAGE_OFFER,
-    IMAGE_OS_DISK_FLOOR_GIB,
-    IMAGE_PUBLISHER,
-    IMAGE_SKU,
-    IMAGE_VERSION,
+    AZURE_IMAGES,
     AzureVMConfig,
     _select_vm_size,
     _size_catalog,
 )
 from agentworks.plugins.azure.platform import AzureVMPlatform
 from agentworks.schema import RefOwner
+
+pytestmark = pytest.mark.usefixtures("verified_debian_release")
 
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
@@ -170,6 +169,7 @@ class TestCreateProvisioningOutput:
     def _request(*, cpus: int, memory: int, disk: int = 50, swap: int = 4) -> ProvisionRequest:
         return ProvisionRequest(
             vm_name="dev",
+            debian_release=DebianRelease.TRIXIE,
             hostname="dev",
             system_slug=None,
             admin_username="agw",
@@ -241,7 +241,7 @@ class TestCreateProvisioningOutput:
 
 class TestCreateOSDiskClamp:
     """`create` clamps a below-floor vm-template disk up to the image's minimum
-    (IMAGE_OS_DISK_FLOOR_GIB) and warns, mirroring the cpu/memory round-up; an
+    (`AzureImage.os_disk_floor_gib`) and warns, mirroring the cpu/memory round-up; an
     at-or-above-floor disk passes through untouched with no warning (issue #322
     follow-up). The recorded OS-disk shape also pins ``delete_option`` (issue
     #334). The Azure clients are faked so the flow never touches Azure (same
@@ -286,6 +286,7 @@ class TestCreateOSDiskClamp:
         monkeypatch.setattr(EphemeralTailscaleBootstrap, "complete", lambda self, auth_key: "100.64.0.5")
         request = ProvisionRequest(
             vm_name="dev",
+            debian_release=DebianRelease.TRIXIE,
             hostname="dev",
             system_slug=None,
             admin_username="agw",
@@ -311,10 +312,9 @@ class TestCreateOSDiskClamp:
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
     ) -> None:
         vms = self._run(monkeypatch, disk_gib=10)
-        assert vms.disk_gib == IMAGE_OS_DISK_FLOOR_GIB
-        assert captured_output.warnings == [
-            f"Rounded up to {IMAGE_OS_DISK_FLOOR_GIB} GiB OS disk (image minimum) for requested 10 GiB."
-        ]
+        floor = AZURE_IMAGES[DebianRelease.TRIXIE].os_disk_floor_gib
+        assert vms.disk_gib == floor
+        assert captured_output.warnings == [f"Rounded up to {floor} GiB OS disk (image minimum) for requested 10 GiB."]
 
     def test_at_or_above_floor_unchanged_no_warning(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
@@ -337,16 +337,14 @@ class TestImageOSDiskFloorConstant:
     the image without revisiting the floor fails this test loudly."""
 
     def test_floor_matches_pinned_image(self) -> None:
-        # Debian 12 (12-gen2) ships a 30 GiB OS disk. If any part of the image
-        # identity changes (an offer bump to debian-13 is the likely one),
-        # confirm the new image's floor and update both together.
-        assert (IMAGE_PUBLISHER, IMAGE_OFFER, IMAGE_SKU, IMAGE_VERSION) == (
+        image = AZURE_IMAGES[DebianRelease.TRIXIE]
+        assert (image.publisher, image.offer, image.sku, image.version) == (
             "Debian",
-            "debian-12",
-            "12-gen2",
+            "debian-13",
+            "13-gen2",
             "latest",
         )
-        assert IMAGE_OS_DISK_FLOOR_GIB == 30
+        assert image.os_disk_floor_gib == 30
 
 
 #: The keys every azure-vm site needs, so the tests below can talk about

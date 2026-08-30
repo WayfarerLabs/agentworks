@@ -27,12 +27,16 @@ from agentworks.capabilities.vm_platform.lima import (
     _REBOOT_PENDING_MARKER,
     LimaPlatform,
 )
+from agentworks.debian import DebianRelease
 from agentworks.ssh import SSHError
+
+pytestmark = pytest.mark.usefixtures("verified_debian_release")
 
 
 def _request(*, tailscale_auth_key: str = "tskey-test") -> ProvisionRequest:
     return ProvisionRequest(
         vm_name="myvm",
+        debian_release=DebianRelease.TRIXIE,
         hostname="lima--myvm",
         system_slug=None,
         admin_username="agw",
@@ -180,6 +184,7 @@ def test_submitted_lima_configuration_never_contains_tailscale_key(
         _request(tailscale_auth_key=secret),
         RunContext(),
     )
+    assert result.debian_release is DebianRelease.TRIXIE
 
     assert result.tailscale_ip == "100.64.0.1"
     assert submitted and len(submitted) == 1

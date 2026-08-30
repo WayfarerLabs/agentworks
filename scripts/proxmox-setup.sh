@@ -4,17 +4,18 @@ set -euo pipefail
 # Agentworks Proxmox Setup
 #
 # One-time setup script that prepares a Proxmox VE host for agentworks:
-#   1. Creates a Debian 12 cloud-init VM template with qemu-guest-agent
+#   1. Creates a Debian cloud-init VM template with qemu-guest-agent
 #   2. Creates a resource pool for agentworks VMs
 #   3. Creates a least-privilege user, API token, custom roles, and ACLs
 #
 # Run on the Proxmox host as root:
-#   bash proxmox-setup.sh [VMID] [STORAGE] [BRIDGE]
+#   bash proxmox-setup.sh [VMID] [STORAGE] [BRIDGE] [RELEASE]
 #
 # Arguments (all optional with defaults):
 #   VMID    - Template VM ID (default: 9000)
 #   STORAGE - Storage volume for VM disks (default: local-lvm)
 #   BRIDGE  - Network bridge (default: vmbr0)
+#   RELEASE - Supported Debian release (default: trixie)
 #
 # Idempotent: safe to re-run. Skips resources that already exist.
 # To recreate the API token, answer 'y' when prompted.
@@ -22,19 +23,30 @@ set -euo pipefail
 VMID="${1:-9000}"
 STORAGE="${2:-local-lvm}"
 BRIDGE="${3:-vmbr0}"
+RELEASE="${4:-trixie}"
 POOL="agentworks"
 USER="agentworks@pam"
 TOKEN_NAME="agentworks"
 
-IMAGE_URL="https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2"
-IMAGE_FILE="/tmp/debian-12-generic-amd64.qcow2"
-TEMPLATE_NAME="debian-12-template"
+case "$RELEASE" in
+    trixie)
+        DEBIAN_VERSION="13"
+        ;;
+    *)
+        echo "Unsupported Debian release: $RELEASE (supported: trixie)" >&2
+        exit 2
+        ;;
+esac
+
+IMAGE_URL="https://cloud.debian.org/images/cloud/${RELEASE}/latest/debian-${DEBIAN_VERSION}-generic-amd64.qcow2"
+TEMPLATE_NAME="debian-${DEBIAN_VERSION}-template"
 
 echo "=== Agentworks Proxmox Setup ==="
 echo ""
 echo "  Template VMID: $VMID"
 echo "  Storage:       $STORAGE"
 echo "  Bridge:        $BRIDGE"
+echo "  Debian:        $RELEASE"
 echo "  Pool:          $POOL"
 echo "  User:          $USER"
 echo ""
@@ -48,13 +60,19 @@ echo "--- Step 1: VM Template ---"
 if qm status "$VMID" >/dev/null 2>&1; then
     echo "  Template VMID $VMID already exists, skipping."
 else
-    # Download cloud image
-    if [ -f "$IMAGE_FILE" ]; then
-        echo "  Using existing image: $IMAGE_FILE"
-    else
-        echo "  Downloading Debian 12 cloud image..."
-        wget -q --show-progress -O "$IMAGE_FILE" "$IMAGE_URL"
-    fi
+    # Keep the large cloud image in private, disk-backed staging and remove it
+    # on every exit, including failures and interrupts.
+    IMAGE_DIR="$(mktemp -d /var/tmp/agentworks-proxmox-setup.XXXXXXXXXX)"
+    IMAGE_FILE="${IMAGE_DIR}/debian-${DEBIAN_VERSION}-generic-amd64.qcow2"
+    cleanup_image() {
+        rm -f -- "$IMAGE_FILE"
+        rmdir -- "$IMAGE_DIR" 2>/dev/null || true
+    }
+    trap cleanup_image EXIT
+    chmod 700 "$IMAGE_DIR"
+
+    echo "  Downloading Debian ${DEBIAN_VERSION} cloud image..."
+    wget -q --show-progress -O "$IMAGE_FILE" "$IMAGE_URL"
 
     # Install qemu-guest-agent into the image
     echo "  Installing qemu-guest-agent into image..."
@@ -86,6 +104,9 @@ else
     echo "  Converting to template..."
     qm template "$VMID"
     echo "  Template created."
+
+    cleanup_image
+    trap - EXIT
 fi
 
 echo ""
@@ -221,7 +242,8 @@ echo "    platform_config:"
 echo "      api_url: \"https://${API_HOST}:8006\""
 echo "      node: \"${NODE}\""
 echo "      token_id: \"${TOKEN_ID}\""
-echo "      template_vmid: ${VMID}"
+echo "      template_vmids:"
+echo "        ${RELEASE}: ${VMID}"
 echo "      storage: \"${STORAGE}\""
 echo "      bridge: \"${BRIDGE}\""
 echo "      pool: \"${POOL}\""

@@ -63,7 +63,7 @@ PROXMOX_CONFIG = {
     "api_url": "https://pve:8006",
     "node": "pve1",
     "token_id": "agw@pam!agw",
-    "template_vmid": 9000,
+    "template_vmids": {"trixie": 9001},
 }
 EC2_CONFIG = {"region": "us-east-1", "auth": AMBIENT_AUTH}
 EC2_CREDS = {"mode": "access-key", "access_key_id": "AKIAEXAMPLE", "access_key_secret": "aws-secret"}
@@ -194,7 +194,7 @@ def test_aws_ec2_optional_subnet_id_is_shape_checked() -> None:
 
 
 def test_aws_ec2_rejects_the_removed_ami_override() -> None:
-    """There is no image knob: the fleet standardizes on Debian bookworm, so an
+    """There is no image knob: core selects Debian and the platform maps it, so an
     ``ami`` key is an unknown field, not a pin."""
     with pytest.raises(ConfigError, match="ami: unknown field"):
         _validate("aws-ec2", {**EC2_CONFIG, "ami": "ami-123"})
@@ -262,15 +262,10 @@ def test_proxmox_validation_errors() -> None:
 # -- The deliberate breaks ---------------------------------------------------
 
 
-def test_proxmox_no_longer_accepts_a_quoted_template_vmid() -> None:
-    """BREAKING, and taken knowingly: the shipped validator did
-    ``int(str(...))``, so a quoted number loaded. Strict mode does not
-    coerce, and a quoted number where an integer belongs is an operator
-    mistake rather than a value to convert."""
-    with pytest.raises(ConfigError, match="template_vmid: must be an integer"):
-        _validate("proxmox", {**PROXMOX_CONFIG, "template_vmid": "9000"})
-    with pytest.raises(ConfigError, match="template_vmid: must be an integer"):
-        _validate("proxmox", {**PROXMOX_CONFIG, "template_vmid": "not-a-number"})
+def test_proxmox_does_not_accept_a_quoted_template_map_vmid() -> None:
+    """Template VMIDs remain strict integers inside the release map."""
+    with pytest.raises(ConfigError, match=r"template_vmids\.trixie: must be an integer"):
+        _validate("proxmox", {**PROXMOX_CONFIG, "template_vmids": {"trixie": "9001"}})
 
 
 def test_proxmox_no_longer_reads_a_string_verify_ssl_as_true() -> None:

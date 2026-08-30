@@ -12,6 +12,7 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, ssh_exposure
 from agentworks.capabilities.vm_platform.tailscale_join import TAILSCALE_JOIN_STDIN_COMMAND
+from agentworks.debian import DebianRelease
 from agentworks.plugins.aws.network import EC2Error
 from agentworks.plugins.aws.platform import EC2Platform
 from agentworks.plugins.azure.network import AzureError
@@ -20,6 +21,8 @@ from agentworks.ssh import SSHError, SSHResult
 from agentworks.transports import SSHTransport
 from tests._aws_fakes import install_fakes as install_aws_fakes
 from tests._azure_platform_support import _install_fakes as install_azure_fakes
+
+pytestmark = pytest.mark.usefixtures("verified_debian_release")
 
 _SENTINEL = "tskey-boundary-'swordfish"
 _AZURE_CONFIG = {
@@ -39,6 +42,7 @@ def _stub_egress_detection(monkeypatch: pytest.MonkeyPatch) -> None:
 def _request() -> ProvisionRequest:
     return ProvisionRequest(
         vm_name="vm1",
+        debian_release=DebianRelease.TRIXIE,
         hostname="vm1",
         system_slug=None,
         admin_username="agentworks",

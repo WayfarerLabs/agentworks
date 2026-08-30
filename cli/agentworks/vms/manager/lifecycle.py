@@ -26,8 +26,10 @@ from agentworks import output
 from agentworks.capabilities.base import RunContext
 from agentworks.config import validate_admin_username
 from agentworks.db import SYSTEM_SLUG_KEY, InitStatus, ProvisioningStatus
+from agentworks.debian import CURRENT_DEBIAN_RELEASE
 from agentworks.errors import (
     AlreadyExistsError,
+    ConfigError,
     ExternalError,
     ProvisioningError,
     StateError,
@@ -36,6 +38,7 @@ from agentworks.errors import (
 from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
 
 from ._helpers import _require_vm
+from .boundary import _warn_legacy_release
 
 if TYPE_CHECKING:
     from typing import NoReturn
@@ -443,6 +446,7 @@ def create_vm(
             try:
                 request = ProvisionRequest(
                     vm_name=vm_name,
+                    debian_release=CURRENT_DEBIAN_RELEASE,
                     hostname=hostname,
                     system_slug=slug,
                     admin_username=resolved_admin_username,
@@ -489,6 +493,13 @@ def create_vm(
                 log.unwind()
                 output.warn(f"Log: {logger.display_path}")
                 raise
+            except (ConfigError, StateError):
+                # Release-map misses and live-release verification failures
+                # are already typed with their owning platform's remediation.
+                # A compliant platform has not mutated, or has rolled back,
+                # so only the provisional row remains to unwind.
+                log.unwind()
+                raise
             except Exception as e:
                 log.unwind()
                 raise ProvisioningError(
@@ -508,6 +519,22 @@ def create_vm(
             except BaseException:
                 render_overlay_outcome(overlay_outcome)
                 raise
+
+            if result.debian_release is not request.debian_release:
+                # This is the safety net for a nonconforming platform that
+                # returned success after creating the wrong guest. Keep the
+                # row and its just-persisted backend identifiers so vm delete
+                # can still reach the escaped backend resource.
+                db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
+                raise StateError(
+                    f"vm-platform/{platform_obj.name} created Debian "
+                    f"{result.debian_release.value} when {request.debian_release.value} was requested",
+                    entity_kind="vm",
+                    entity_name=vm_name,
+                    hint=f"Run 'agw vm delete {vm_name}' to remove the mismatched VM, then retry creation.",
+                )
+
+            db.update_vm_debian_release(vm_name, result.debian_release)
 
             # -- Phase A: record + verify connectivity (the tail of Provisioning) --
             # Past the unwind window: if anything below fails, the VM exists on
@@ -564,6 +591,7 @@ def create_vm(
                 logger,
                 git_tokens=git_tokens,
                 is_first_init=True,
+                debian_release=result.debian_release,
             )
         except (KeyboardInterrupt, UserAbort):
             _warn_init_cancel(vm_name)
@@ -625,6 +653,7 @@ def reinit_vm(
     registry = load_request_registry(config, live_database=db)
 
     vm = _require_vm(db, name)
+    _warn_legacy_release(vm)
 
     from agentworks.capabilities.base import OperationScope, ScopeLevel
     from agentworks.git_credentials.nodes import git_credential_node
@@ -790,6 +819,7 @@ def reinit_vm(
         # create / reinit and workspace create / rehome.
         try:
             try:
+                verified_release = _mgr.verified_vm_release(db, vm, ts_target)
                 _mgr.run_initialization(
                     db,
                     config,
@@ -803,6 +833,7 @@ def reinit_vm(
                     vm.admin_username,
                     logger,
                     git_tokens=git_tokens,
+                    debian_release=verified_release,
                 )
             except KeyboardInterrupt:
                 output.warn(

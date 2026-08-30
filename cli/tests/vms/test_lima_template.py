@@ -20,12 +20,19 @@ from typing import Any, cast
 import pytest
 import yaml
 
-from agentworks.capabilities.vm_platform.lima import LIMA_TEMPLATE
+from agentworks.capabilities.vm_platform.lima import _LIMA_IMAGE_BLOCKS, LIMA_TEMPLATE
+from agentworks.debian import DebianRelease
 
 
 def _render() -> dict[str, Any]:
     provision = "      #!/bin/bash\n      set -euo pipefail\n      echo provisioned"
-    rendered = LIMA_TEMPLATE.format(cpus=4, memory=8, disk=50, provision_script=provision)
+    rendered = LIMA_TEMPLATE.format(
+        images=_LIMA_IMAGE_BLOCKS[DebianRelease.TRIXIE],
+        cpus=4,
+        memory=8,
+        disk=50,
+        provision_script=provision,
+    )
     return cast("dict[str, Any]", yaml.safe_load(rendered))
 
 

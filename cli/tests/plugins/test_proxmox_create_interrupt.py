@@ -34,10 +34,13 @@ import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest
-from agentworks.errors import ProvisioningError
+from agentworks.debian import DebianRelease
+from agentworks.errors import ProvisioningError, StateError
 from agentworks.plugins.proxmox.api import ProxmoxAPIError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.transports import SSHTransport
+
+pytestmark = pytest.mark.usefixtures("verified_debian_release")
 
 if TYPE_CHECKING:
     from agentworks.db import VMRow
@@ -47,11 +50,11 @@ _CONFIG = {
     "api_url": "https://pve.example.com:8006",
     "node": "pve1",
     "token_id": "agw@pam!agw",
-    "template_vmid": 9000,
+    "template_vmids": {"trixie": 9001},
 }
 
 _NEWID = 100
-_TEMPLATE_VMID = 9000
+_TEMPLATE_VMID = 9001
 _CLONE_UPID = "UPID:pve1:clone"
 _START_UPID = "UPID:pve1:start"
 _SENTINEL = "tskey-proxmox-create-'sentinel"
@@ -223,6 +226,7 @@ def _request(*, tailscale: bool) -> ProvisionRequest:
     readiness waits."""
     return ProvisionRequest(
         vm_name="vm1",
+        debian_release=DebianRelease.TRIXIE,
         hostname="vm1",
         system_slug=None,
         admin_username="agentworks",
@@ -616,6 +620,24 @@ class TestTransportFailureDuringRollback:
 
 
 class TestPlainFailure:
+    def test_release_verification_failure_stays_inside_create_rollback(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        platform, fake = _platform_with_fake(monkeypatch)
+        failure = StateError("guest release mismatch")
+        monkeypatch.setattr(
+            "agentworks.plugins.proxmox.platform.verify_provisioned_release",
+            MagicMock(side_effect=failure),
+        )
+
+        with pytest.raises(StateError) as caught:
+            platform.create(_request(tailscale=False), RunContext())
+
+        assert caught.value is failure
+        assert ("delete_vm", "pve1", _NEWID) in fake.calls
+        _assert_template_untouched(fake)
+
     def test_failure_mid_create_cleans_up_and_reraises_the_typed_error(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
     ) -> None:
@@ -672,6 +694,7 @@ class TestProvisionResultTransport:
 
         result = platform.create(_request(tailscale=False), RunContext())
 
+        assert result.debian_release is DebianRelease.TRIXIE
         target = result.native_transport
         assert isinstance(target, SSHTransport)
         assert target.host == "100.64.0.7"

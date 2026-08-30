@@ -200,18 +200,19 @@ class ExampleCloudConfig(AgwModel):
 class ExampleCloudPlatform(VMPlatform):
     name: ClassVar[str] = "example-cloud"
     description: ClassVar[str] = "Example Cloud VMs (region-scoped)"
-    contract_version: ClassVar[int] = 2
+    contract_version: ClassVar[int] = 3
     config_model: ClassVar[type[AgwModel]] = ExampleCloudConfig
 ```
 
-For vm-platform contract version 2, `create()` receives a required Tailscale auth key and a
-value-free bootstrap-progress sink in `ProvisionRequest`. It must finish the Tailscale join before
-returning or raise after rolling back partial backend state. A successful `ProvisionResult` may omit
-the Tailscale IP only when join succeeded but IP discovery did not; the manager then performs
-IP-only rediscovery and Tailscale SSH verification. There is no older-contract adapter. The progress
-sink is structurally required on every v2 request: platforms exposing observable bootstrap steps or
-output report them through it, while opaque provider guest-agent paths and simple fixed-stdin join
-finishers may accept it without emitting a platform-specific transcript.
+For vm-platform contract version 3, `create()` receives a concrete core-selected Debian release, a
+required Tailscale auth key, and a value-free bootstrap-progress sink in `ProvisionRequest`. The
+platform resolves the release through a local artifact map before mutation, with no default or
+fallback. It must finish the Tailscale join, probe `/etc/os-release` while backend rollback remains
+available, and return the matching observed release in `ProvisionResult`. A missing code-owned map
+entry says that Agentworks or the plugin is out of date; an operator-owned catalog miss names the
+exact vm-site field. A successful result may omit the Tailscale IP only when join succeeded but IP
+discovery did not; the manager then performs IP-only rediscovery and Tailscale SSH verification.
+There is no older-contract adapter.
 
 A site then writes `platform: {name: example-cloud, region: us-west-2}`, and `api_token` resolves to
 the `example-cloud-token` secret because the field was omitted. An OMITTED reference field and an

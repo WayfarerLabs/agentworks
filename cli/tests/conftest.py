@@ -27,6 +27,18 @@ from agentworks.schema import CapabilityBlock
 pytest_plugins = ["tests.orchestrated_fixtures"]
 
 
+@pytest.fixture
+def verified_debian_release(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make offline provider creates observe the release they requested."""
+    from agentworks.capabilities.vm_platform import debian_release
+
+    monkeypatch.setattr(
+        debian_release,
+        "probe_debian_release",
+        lambda transport, expected=None: expected,
+    )
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _isolate_ssh_logs(tmp_path_factory: pytest.TempPathFactory) -> Generator[None, None, None]:
     """Keep default SSH logs in this worker's temporary directory."""

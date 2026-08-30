@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow, VMStatus
+    from agentworks.debian import DebianRelease
     from agentworks.transports import Transport
 
 
@@ -67,6 +68,9 @@ class ProvisionRequest:
     """
 
     vm_name: str
+    # Core owns release policy. Platforms translate this concrete value
+    # through their own artifact map and never infer "current" themselves.
+    debian_release: DebianRelease
     # The R11 hostname ({slug}-{vm_name} or {vm_name}), computed by the
     # manager and recorded in vms.hostname; platforms bake it via their
     # bootstrap paths and tailscaled picks it up as the node name.
@@ -101,6 +105,9 @@ class ProvisionResult:
     """
 
     native_transport: Transport
+    # The release observed from the live guest while the platform could still
+    # roll back its backend resources. Requested intent is not an observation.
+    debian_release: DebianRelease
     platform_metadata: dict[str, str] = field(default_factory=dict)
     tailscale_ip: str | None = None
 
@@ -220,6 +227,9 @@ class VMPlatform(Capability):
         - Complete create-time bootstrap, including the Tailscale join, before
           returning. A successful join may return without an IP when discovery
           failed; the manager retries only ``tailscale ip -4`` in that case.
+        - Verify the live guest matches ``request.debian_release`` before the
+          rollback window closes, and return that observation in
+          ``ProvisionResult.debian_release``.
         - Roll back partial backend state before letting a failure OR
           an operator interrupt (``KeyboardInterrupt``) propagate: the
           caller's unwind deletes only the DB row, so any backend

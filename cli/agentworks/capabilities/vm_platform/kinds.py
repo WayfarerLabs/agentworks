@@ -124,7 +124,7 @@ def _readiness(name: str, impl: Any) -> Readiness:
 
 VM_PLATFORM_DESCRIPTOR = CapabilityKindDescriptor(
     kind="vm-platform",
-    contract_version=2,
+    contract_version=3,
     implementation_contract=VMPlatform,
     registry=_registry,
     required_operations=frozenset(

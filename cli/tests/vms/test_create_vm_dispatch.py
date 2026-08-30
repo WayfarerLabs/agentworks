@@ -15,6 +15,7 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionResult
 from agentworks.config import load_config
+from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError, NotFoundError, ProvisioningError, StateError, ValidationError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
@@ -78,6 +79,7 @@ def test_create_vm_request_shape_and_row(
     config = make_config(manifests=[ManifestDoc("vm-template", "default", {"cpus": 2})])
     captured_request: list[ProvisionRequest] = []
     captured_platform: list[LimaPlatform] = []
+    initialized_release: list[DebianRelease] = []
     outcomes: list[OverlayOutcome] = []
     monkeypatch.setattr("agentworks.instance_specs.render_overlay_outcome", outcomes.append)
 
@@ -86,6 +88,7 @@ def test_create_vm_request_shape_and_row(
         captured_request.append(request)
         return ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
+            debian_release=DebianRelease.TRIXIE,
             platform_metadata={"instance_name": "dvm"},
             tailscale_ip="100.64.0.7",
         )
@@ -98,7 +101,15 @@ def test_create_vm_request_shape_and_row(
         "bootstrap_vm",
         lambda *a, **k: (SimpleNamespace(), "/home/agentworks"),
     )
-    monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
+
+    def _fake_init(*args: object, **kwargs: object) -> None:
+        del args
+        initialized_release.append(kwargs["debian_release"])  # type: ignore[arg-type]
+        observed = db.get_vm("dvm")
+        assert observed is not None
+        assert observed.debian_release is DebianRelease.TRIXIE
+
+    monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
 
     vm_manager.create_vm(
         db,
@@ -111,6 +122,7 @@ def test_create_vm_request_shape_and_row(
 
     (request,) = captured_request
     assert request.vm_name == "dvm"
+    assert request.debian_release is DebianRelease.TRIXIE
     assert request.hostname == "dvm"  # no slug: the bare name
     assert request.system_slug is None
     assert request.cpus == 6
@@ -124,7 +136,10 @@ def test_create_vm_request_shape_and_row(
     assert vm.site == "lima-local"
     assert vm.hostname == "dvm"
     assert vm.platform_metadata == {"instance_name": "dvm"}
+    assert vm.debian_release is DebianRelease.TRIXIE
+    assert vm.debian_release_observed_at is not None
     assert vm.operator_stopped is False
+    assert initialized_release == [DebianRelease.TRIXIE]
     stored = db.instance_state.get_desired_overlay("vm", "dvm")
     assert stored is not None and stored.payload.value == {
         "vm": {"cpus": 6},
@@ -186,6 +201,7 @@ def test_create_vm_metadata_failure_retains_owner_and_reports_once(
         "create",
         lambda *args, **kwargs: ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
+            debian_release=DebianRelease.TRIXIE,
             platform_metadata={"instance_name": "metadata-fail"},
             tailscale_ip="100.64.0.7",
         ),
@@ -213,6 +229,85 @@ def test_create_vm_metadata_failure_retains_owner_and_reports_once(
     ]
 
 
+@pytest.mark.parametrize(
+    "failure",
+    [
+        ConfigError("site has no Trixie template", hint="set template_vmids.trixie"),
+        StateError("plugin has no Trixie selector", hint="update the plugin"),
+    ],
+    ids=("operator-map", "code-map"),
+)
+def test_create_vm_preserves_typed_release_mapping_failure(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: object,
+    failure: ConfigError | StateError,
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    monkeypatch.setattr(
+        LimaPlatform,
+        "create",
+        lambda *args, **kwargs: (_ for _ in ()).throw(failure),
+    )
+
+    with pytest.raises(type(failure)) as caught:
+        vm_manager.create_vm(
+            db,
+            make_config(),
+            name="map-fail",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert caught.value is failure
+    assert db.get_vm("map-fail") is None
+
+
+def test_create_vm_returned_release_mismatch_retains_failed_addressable_row(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: object,
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.db import InitStatus, ProvisioningStatus
+
+    monkeypatch.setattr(
+        LimaPlatform,
+        "create",
+        lambda *args, **kwargs: ProvisionResult(
+            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
+            debian_release=DebianRelease.BOOKWORM,
+            platform_metadata={"instance_name": "wrong-release"},
+            tailscale_ip="100.64.0.7",
+        ),
+    )
+    monkeypatch.setattr(
+        vm_manager,
+        "bootstrap_vm",
+        lambda *args, **kwargs: pytest.fail("Phase A reached after a returned release mismatch"),
+    )
+
+    with pytest.raises(StateError) as caught:
+        vm_manager.create_vm(
+            db,
+            make_config(),
+            name="wrong-release",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert "bookworm" in str(caught.value)
+    assert "trixie" in str(caught.value)
+    assert "vm delete wrong-release" in (caught.value.hint or "")
+    row = db.get_vm("wrong-release")
+    assert row is not None
+    assert row.platform_metadata == {"instance_name": "wrong-release"}
+    assert row.provisioning_status == ProvisioningStatus.FAILED.value
+    assert row.init_status == InitStatus.PENDING.value
+    assert row.debian_release is None
+
+
 def test_create_vm_logger_close_failure_retains_owner_and_reports_once(
     db: Database,
     make_config,
@@ -231,6 +326,7 @@ def test_create_vm_logger_close_failure_retains_owner_and_reports_once(
         "create",
         lambda *args, **kwargs: ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
+            debian_release=DebianRelease.TRIXIE,
             platform_metadata={"instance_name": "close-fail"},
             tailscale_ip="100.64.0.7",
         ),
@@ -286,6 +382,7 @@ def test_create_vm_stores_and_provisions_selected_admin_template(
         captured.append(request)
         return ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
+            debian_release=DebianRelease.TRIXIE,
             platform_metadata={"instance_name": "wvm"},
             tailscale_ip="100.64.0.9",
         )
@@ -451,6 +548,7 @@ def test_create_vm_composes_r11_hostname_with_slug(
         captured.append(request)
         return ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
+            debian_release=DebianRelease.TRIXIE,
             platform_metadata={"instance_name": "team-a-svm"},
             tailscale_ip="100.64.0.8",
         )

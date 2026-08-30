@@ -14,8 +14,13 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.debian_release import (
+    code_owned_release_value,
+    verify_provisioned_release,
+)
 from agentworks.capabilities.vm_platform.wsl2_bootstrap import run_wsl2_bootstrap
 from agentworks.db import VMStatus
+from agentworks.debian import DebianRelease
 from agentworks.errors import StateError
 from agentworks.schema import AgwModel
 from agentworks.topics import TopicProse
@@ -189,8 +194,11 @@ def _ps_quote(path: Path | str) -> str:
 
 # Docker Hub OCI registry endpoints for the official Debian image
 _DOCKER_AUTH_URL = "https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/debian:pull"
-_DOCKER_MANIFESTS_URL = "https://registry-1.docker.io/v2/library/debian/manifests/bookworm"
+_DOCKER_MANIFESTS_URL = "https://registry-1.docker.io/v2/library/debian/manifests"
 _DOCKER_BLOBS_URL = "https://registry-1.docker.io/v2/library/debian/blobs"
+_DEBIAN_OCI_TAGS: dict[DebianRelease, str] = {
+    DebianRelease.TRIXIE: "trixie",
+}
 
 # Map Python's platform.machine() to OCI architecture names
 _ARCH_MAP = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}
@@ -262,10 +270,10 @@ def _powershell(script: str, *, check: bool = True, timeout: int = 120) -> str:
     return result.stdout
 
 
-def _download_debian_rootfs(tarball_path: Path) -> None:
+def _download_debian_rootfs(tarball_path: Path, *, tag: str) -> None:
     """Download the official Debian rootfs from Docker Hub OCI registry.
 
-    Pulls the rootfs layer from the official debian:bookworm image without
+    Pulls the rootfs layer from the selected official Debian image without
     requiring Docker to be installed. The layer is a tar.gz that works
     directly with ``wsl --import``.
     """
@@ -275,13 +283,13 @@ def _download_debian_rootfs(tarball_path: Path) -> None:
         token = json.loads(resp.read())["token"]
 
     # 2. Fetch image manifest to find the rootfs layer digest.
-    #    debian:bookworm is multi-arch, so we first get the manifest list
+    #    The Debian tag is multi-arch, so we first get the manifest list
     #    and resolve the platform-specific manifest for the host architecture.
-    output.detail("Fetching Debian bookworm image manifest...")
+    output.detail(f"Fetching Debian {tag} image manifest...")
     auth_header = {"Authorization": f"Bearer {token}"}
 
     req = urllib.request.Request(
-        _DOCKER_MANIFESTS_URL,
+        f"{_DOCKER_MANIFESTS_URL}/{tag}",
         headers={
             **auth_header,
             "Accept": (
@@ -305,7 +313,7 @@ def _download_debian_rootfs(tarball_path: Path) -> None:
             None,
         )
         if match is None:
-            raise RuntimeError(f"No {arch}/linux manifest found for debian:bookworm")
+            raise RuntimeError(f"No {arch}/linux manifest found for debian:{tag}")
         platform_digest = match["digest"]
         manifest_url = f"https://registry-1.docker.io/v2/library/debian/manifests/{platform_digest}"
         req = urllib.request.Request(
@@ -489,7 +497,7 @@ class Wsl2Config(AgwModel):
 class WSL2Platform(VMPlatform):
     """Runs VMs as WSL2 Debian distributions on Windows."""
 
-    contract_version: ClassVar[int] = 2
+    contract_version: ClassVar[int] = 3
     name: ClassVar[str] = "wsl2"
     description: ClassVar[str] = "WSL2 Debian distributions on Windows"
     config_model: ClassVar[type[Wsl2Config]] = Wsl2Config
@@ -581,6 +589,11 @@ class WSL2Platform(VMPlatform):
         return _keepalive(self._distro_name(vm))
 
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
+        image_tag = code_owned_release_value(
+            _DEBIAN_OCI_TAGS,
+            request.debian_release,
+            platform_name=self.name,
+        )
         # The platform owns the backend-side name; distro
         # names are the primary identifier, so a collision is an error.
         distro_name = f"{request.system_slug}-{request.vm_name}" if request.system_slug else request.vm_name
@@ -617,11 +630,11 @@ class WSL2Platform(VMPlatform):
 
                 # Download Debian rootfs if not cached
                 cache_dir = _cache_dir()
-                tarball = cache_dir / f"debian-bookworm-{_oci_arch()}-rootfs.tar.gz"
+                tarball = cache_dir / f"debian-{image_tag}-{_oci_arch()}-rootfs.tar.gz"
                 _powershell(f"New-Item -ItemType Directory -Force -Path {_ps_quote(cache_dir)}")
 
                 if not tarball.exists():
-                    _download_debian_rootfs(tarball)
+                    _download_debian_rootfs(tarball, tag=image_tag)
                 else:
                     output.detail("Using cached Debian rootfs.")
 
@@ -630,7 +643,7 @@ class WSL2Platform(VMPlatform):
                 _wsl(["--import", vm_name, str(install_path), str(tarball)])
 
                 # Strip Docker-image minimization hooks before we run any apt-get.
-                # The official debian:bookworm Docker rootfs ships /usr/sbin/policy-rc.d
+                # The official Debian Docker rootfs ships /usr/sbin/policy-rc.d
                 # that returns 101 to refuse all service starts during image build;
                 # without removing it, apt-installed daemons (e.g. tailscaled) never
                 # start, leaving us with an "installed but inert" service.
@@ -762,6 +775,7 @@ class WSL2Platform(VMPlatform):
                     progress=request.progress,
                 )
                 output.detail(f"Tailscale IP: {tailscale_ip}")
+                observed_release = verify_provisioned_release(native_transport, request.debian_release)
             except Exception:
                 # WSL2's error convention holds: the RuntimeErrors from
                 # _wsl / _powershell propagate unwrapped; the only new
@@ -776,6 +790,7 @@ class WSL2Platform(VMPlatform):
         output.detail(f"WSL2 VM '{vm_name}' provisioned.")
         return ProvisionResult(
             native_transport=native_transport,
+            debian_release=observed_release,
             platform_metadata={"distro_name": distro_name},
             tailscale_ip=tailscale_ip,
         )

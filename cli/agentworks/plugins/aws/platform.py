@@ -26,9 +26,14 @@ from agentworks import output
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
+from agentworks.capabilities.vm_platform.debian_release import (
+    code_owned_release_value,
+    verify_provisioned_release,
+)
 from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs, operator_ssh_prefixes
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
+from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError, NotFoundError, StateError, TokenRejectedError
 from agentworks.plugins.aws.auth import _build_access_key_session, _build_ambient_session
 from agentworks.plugins.aws.config import (
@@ -75,6 +80,9 @@ if TYPE_CHECKING:
 # stays internal: operators write the EC2 spelling in the catalog and
 # never see Debian's ``amd64``.
 _DEBIAN_ARCH_SEGMENT = {"x86_64": "amd64", "arm64": "arm64"}
+_DEBIAN_SSM_RELEASES: dict[DebianRelease, str] = {
+    DebianRelease.TRIXIE: "13",
+}
 
 # EC2 caps RunInstances user-data at 16 KiB in RAW form (before boto3's base64).
 # The payload is gzipped (cloud-init decompresses natively), so this bounds the
@@ -88,7 +96,7 @@ class EC2Platform(VMPlatform):
     services could plausibly back platforms of their own someday (the same
     one-service rationale ``azure-vm`` follows for Azure)."""
 
-    contract_version: ClassVar[int] = 2
+    contract_version: ClassVar[int] = 3
     name: ClassVar[str] = "aws-ec2"
     description: ClassVar[str] = "Amazon EC2 instances (region + optional VPC subnet)"
     config_model: ClassVar[type[AwsEC2Config]] = AwsEC2Config
@@ -99,9 +107,9 @@ class EC2Platform(VMPlatform):
         Omit the subnet to use the region's default VPC; naming one puts instances there
         and creates the security group in its VPC.
 
-        The image is always the current Debian 12 (bookworm) release for the instance
+        The image is the concrete Debian release requested by core for the instance
         type's architecture, resolved from the public SSM release parameter at create
-        time; there is no image override. Instance types come from a built-in Graviton
+        time; there is no image override or platform-local default. Instance types come from a built-in Graviton
         catalog unless the site overrides it, and `vm create` picks the smallest entry
         that satisfies the vm-template's request.
 
@@ -298,6 +306,11 @@ class EC2Platform(VMPlatform):
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
         region = self.config.region
         subnet_id = self.config.subnet_id
+        ssm_release = code_owned_release_value(
+            _DEBIAN_SSM_RELEASES,
+            request.debian_release,
+            platform_name=self.name,
+        )
 
         # Select the smallest EC2 instance type that satisfies the template's
         # compute/memory request (the standard cross-platform model); the
@@ -347,7 +360,7 @@ class EC2Platform(VMPlatform):
         # image. This is a pre-mutation verification, not inference.
         self._verify_instance_arch(ec2, selected)
 
-        ami = self._resolve_ami(ctx, region, selected.arch)
+        ami = self._resolve_ami(ctx, region, selected.arch, ssm_release=ssm_release)
         # The primary network interface carries a permanent auto-assigned public
         # IP (see the launch block); a network interface must live in a subnet,
         # so the launch subnet is always concrete: the configured one, or the
@@ -474,12 +487,15 @@ class EC2Platform(VMPlatform):
             # The provider-retained bootstrap installed Tailscale without a
             # credential. Wait for it, then join once over stdin.
             tailscale_ip = EphemeralTailscaleBootstrap(prov_transport).complete(request.tailscale_auth_key)
+            observed_release = verify_provisioned_release(prov_transport, request.debian_release)
         except KeyboardInterrupt:
             rollback_create_on_interrupt(ec2, region, backend_name, instance_id, security_group_id)
             raise
         except Exception as exc:
             output.detail("Cleaning up resources...")
             cleanup_partial(ec2, instance_id, security_group_id)
+            if isinstance(exc, StateError):
+                raise
             raise wrap_ec2_error(exc) from exc
 
         # Reached only when the guarded region completed (both except arms
@@ -497,6 +513,7 @@ class EC2Platform(VMPlatform):
         }
         return ProvisionResult(
             native_transport=prov_transport,
+            debian_release=observed_release,
             platform_metadata=metadata,
             tailscale_ip=tailscale_ip,
         )
@@ -782,15 +799,16 @@ class EC2Platform(VMPlatform):
                 hint=f"correct the arch on the '{selected.type}' entry in the site's instance_types",
             )
 
-    def _resolve_ami(self, ctx: RunContext, region: str, arch: str) -> str:
-        """The Debian 12 (bookworm) release AMI, resolved from the public SSM
-        release parameter for the selected arch. This is the ONLY image source:
-        agentworks standardizes on Debian bookworm across the fleet (matching
-        azure's debian-12 pin), so there is deliberately no operator image knob.
+    def _resolve_ami(self, ctx: RunContext, region: str, arch: str, *, ssm_release: str) -> str:
+        """Resolve the requested Debian release AMI from public SSM.
+
+        This is the only image source: core supplies the release and this
+        platform translates it to the official provider selector. There is no
+        operator image knob or platform-local default.
         An arbitrary AMI would break the provisioning contract mid-bootstrap
         rather than failing typed, so the platform does not accept one."""
         segment = _DEBIAN_ARCH_SEGMENT[arch]
-        parameter = f"/aws/service/debian/release/bookworm/latest/{segment}"
+        parameter = f"/aws/service/debian/release/{ssm_release}/latest/{segment}"
         ssm = self._client("ssm", region, ctx)
         try:
             result = ssm.get_parameter(Name=parameter)

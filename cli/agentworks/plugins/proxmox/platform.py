@@ -9,13 +9,18 @@ import urllib.parse
 import uuid
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
+from agentworks.capabilities.vm_platform.debian_release import (
+    operator_owned_release_value,
+    verify_provisioned_release,
+)
 from agentworks.db import VMStatus
+from agentworks.debian import DebianRelease
 from agentworks.errors import ProvisioningError, StateError
 from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError
 from agentworks.plugins.proxmox.teardown import (
@@ -23,7 +28,7 @@ from agentworks.plugins.proxmox.teardown import (
     rollback_partial_create,
     stop_and_delete_vm,
 )
-from agentworks.schema import AgwModel, NonEmptyStr, SecretRef
+from agentworks.schema import AgwModel, NonEmptyStr, PositiveInt, SecretRef
 from agentworks.topics import TopicProse
 from agentworks.transports import SSHTransport
 
@@ -60,9 +65,15 @@ class ProxmoxConfig(AgwModel):
     token_id: NonEmptyStr = Field(examples=["agentworks@pam!agw"])
     """The API token's id (``user@realm!tokenname``)."""
 
-    template_vmid: int = Field(examples=[9000])
-    """The VMID of the template new VMs clone from. Write it as an integer,
-    not a quoted number."""
+    template_vmids: dict[DebianRelease, PositiveInt] = Field(
+        default_factory=dict,
+        examples=[{"trixie": 9001}],
+    )
+    """Template VMIDs keyed by Debian release. Core chooses the release;
+    this site supplies the corresponding template."""
+
+    template_vmid: PositiveInt | None = Field(default=None, examples=[9000], exclude=True)
+    """Legacy Bookworm-only template scalar. Use ``template_vmids`` for creation."""
 
     token_secret: Annotated[
         NonEmptyStr,
@@ -85,11 +96,30 @@ class ProxmoxConfig(AgwModel):
     """Whether to verify the cluster's TLS certificate. Write booleans
     unquoted; quoted strings such as ``"no"`` are invalid."""
 
+    @model_validator(mode="before")
+    @classmethod
+    def _adapt_legacy_bookworm_template(cls, value: object) -> object:
+        """Normalize manifest keys and load the scalar as Bookworm only."""
+        if not isinstance(value, dict):
+            return value
+        adapted = dict(value)
+        raw_template_vmids = adapted.get("template_vmids") or {}
+        if isinstance(raw_template_vmids, dict):
+            releases_by_value = {release.value: release for release in DebianRelease}
+            template_vmids = {
+                releases_by_value.get(key, key) if isinstance(key, str) else key: vmid
+                for key, vmid in raw_template_vmids.items()
+            }
+            if "template_vmid" in adapted:
+                template_vmids.setdefault(DebianRelease.BOOKWORM, adapted["template_vmid"])
+            adapted["template_vmids"] = template_vmids
+        return adapted
+
 
 class ProxmoxPlatform(VMPlatform):
     """Runs VMs on a Proxmox VE cluster."""
 
-    contract_version: ClassVar[int] = 2
+    contract_version: ClassVar[int] = 3
     name: ClassVar[str] = "proxmox"
     description: ClassVar[str] = "Proxmox VE cluster VMs (clone + cloud-init)"
     config_model: ClassVar[type[ProxmoxConfig]] = ProxmoxConfig
@@ -97,7 +127,7 @@ class ProxmoxPlatform(VMPlatform):
         title="Proxmox VE",
         overview="""
         Clones a prepared template VM on a Proxmox VE cluster and configures it through
-        cloud-init. The template (`template_vmid`) has to exist on the node already;
+        cloud-init. The release-keyed template (`template_vmids.<release>`) has to exist on the node already;
         agentworks does not build it.
 
         The API token value is a secret, `proxmox-token` unless the site names another,
@@ -125,6 +155,11 @@ class ProxmoxPlatform(VMPlatform):
 
     def __init__(self, owner_name: str, config: Mapping[str, object]) -> None:
         super().__init__(owner_name, config)
+        if "template_vmid" in config:
+            output.warn(
+                f"vm-site/{owner_name} uses legacy template_vmid; it is Bookworm-only and cannot satisfy "
+                "current VM creation. Configure template_vmids.trixie."
+            )
         # The op client, built on FIRST need by :meth:`_api` and reused
         # for the instance's remaining ops.
         self._api_cached: ProxmoxAPI | None = None
@@ -258,7 +293,12 @@ class ProxmoxPlatform(VMPlatform):
 
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
         node = self.config.node
-        template_vmid = self.config.template_vmid
+        template_vmid = operator_owned_release_value(
+            self.config.template_vmids,
+            request.debian_release,
+            site_name=self.site_name,
+            field="template_vmids",
+        )
         pool = self.config.pool
         storage = self.config.storage
 
@@ -365,6 +405,14 @@ class ProxmoxPlatform(VMPlatform):
                 if not tailscale_ip:
                     raise ProvisioningError("Proxmox bootstrap did not return a Tailscale IP")
                 output.detail(f"Tailscale IP: {tailscale_ip}")
+
+                target = SSHTransport(
+                    host=tailscale_ip,
+                    user=request.admin_username,
+                    identity_file=request.ssh_private_key,
+                    force_tty=sys.platform == "win32",
+                )
+                observed_release = verify_provisioned_release(target, request.debian_release)
             except Exception:
                 # Re-raised unwrapped after the rollback: the manager's
                 # create arm wraps EVERY escaping exception in
@@ -378,15 +426,9 @@ class ProxmoxPlatform(VMPlatform):
             rollback_create_on_interrupt(self._api(ctx), node, newid, pending_upid=pending_upid)
             raise
 
-        target = SSHTransport(
-            host=tailscale_ip,
-            user=request.admin_username,
-            identity_file=request.ssh_private_key,
-            force_tty=sys.platform == "win32",
-        )
-
         return ProvisionResult(
             native_transport=target,
+            debian_release=observed_release,
             platform_metadata={"vmid": str(newid), "node": node},
             tailscale_ip=tailscale_ip,
         )

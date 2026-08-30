@@ -86,7 +86,7 @@ def test_gcp_is_seated_by_vendor_bundle() -> None:
     assert SYSTEM_PLUGINS["gcp"].capabilities == {"vm-platform": (GCEPlatform,)}
     assert SYSTEM_PLUGINS["gcp"].manifests == "agentworks.plugins.gcp"
     assert VM_PLATFORM_REGISTRY["gcp-gce"] is GCEPlatform
-    assert GCEPlatform.contract_version == 2
+    assert GCEPlatform.contract_version == 3
 
 
 def test_gcp_row_is_present_but_disabled_by_default(tmp_path: Path) -> None:

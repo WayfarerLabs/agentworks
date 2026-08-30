@@ -32,6 +32,7 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, ssh_exposure
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
+from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError, ConnectivityError
 from agentworks.plugins.azure import network as azure_network
 from agentworks.plugins.azure.network import (
@@ -55,6 +56,8 @@ from tests._azure_platform_support import (
 if TYPE_CHECKING:
     from agentworks.db import VMRow
     from tests.conftest import CapturedOutput
+
+pytestmark = pytest.mark.usefixtures("verified_debian_release")
 
 _CONFIG = {"subscription_id": "sub-A", "resource_group": "rg1", "region": "eastus", "auth": {"mode": "ambient"}}
 _DETECTED = "198.18.0.7"
@@ -175,6 +178,7 @@ class TestCreate:
     def _request(self) -> ProvisionRequest:
         return ProvisionRequest(
             vm_name="vm1",
+            debian_release=DebianRelease.TRIXIE,
             hostname="vm1",
             system_slug=None,
             admin_username="agentworks",
@@ -203,6 +207,7 @@ class TestCreate:
             self._request(),
             RunContext(config=_operator_config(["198.51.100.0/24"])),
         )
+        assert result.debian_release is DebianRelease.TRIXIE
 
         assert result.platform_metadata == {"resource_id": _RESOURCE_ID}
         assert network.public_ip_addresses.created == [("rg1", "vm1-ip")]

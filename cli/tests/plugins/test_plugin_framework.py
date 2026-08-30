@@ -173,7 +173,7 @@ class _NotAPlatform:
     nothing of the vm-platform contract. This is the class the old
     ``isinstance(impl, type)`` gate and ``cast`` waved through."""
 
-    contract_version = 2
+    contract_version = 3
     name = "not-a-platform"
     description = "has the metadata and none of the contract"
 
@@ -185,7 +185,7 @@ class _PlatformWithoutAConfigModel(ConformingVMPlatform):
 
     name = "no-config-model-platform"
     description = "declares no config model"
-    contract_version = 2
+    contract_version = 3
     config_model = None  # type: ignore[assignment]
 
 
@@ -193,7 +193,7 @@ class _AbstractPlatform(VMPlatform):
     """Derives from the contract but implements none of its power ops, so it
     can never be constructed."""
 
-    contract_version = 2
+    contract_version = 3
     name = "abstract-platform"
     description = "abstract: no power ops implemented"
 
@@ -235,7 +235,7 @@ class _BackendWithoutTtySupport:
 class _PlatformOnAnOldContract(ConformingVMPlatform):
     name = "old-contract-platform"
     description = "written against a contract this build no longer supports"
-    contract_version = 1
+    contract_version = 2
 
 
 class _HarnessOnAnOldContract(ConformingHarnessIntegration):
@@ -487,8 +487,8 @@ def test_registration_rejects_vm_platform_contract_v1_exactly() -> None:
 
     assert str(exc.value) == (
         "system plugin 'p' vm-platform impl '_PlatformOnAnOldContract' does not satisfy "
-        "the vm-platform capability contract: it declares contract_version 1, but this build "
-        "supports vm-platform contract version 2"
+        "the vm-platform capability contract: it declares contract_version 2, but this build "
+        "supports vm-platform contract version 3"
     )
 
 

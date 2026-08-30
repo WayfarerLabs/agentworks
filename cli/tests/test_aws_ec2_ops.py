@@ -17,12 +17,15 @@ from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
+from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError, StateError
 from agentworks.plugins.aws.network import EC2Error, poke_ssh_allow, remove_ssh_allow
 from agentworks.plugins.aws.platform import EC2Platform
 from agentworks.ssh import SSHError
 from agentworks.transports import SSHTransport
 from tests._aws_fakes import Controls, client_error, install_fakes, stub_egress, unreachable
+
+pytestmark = pytest.mark.usefixtures("verified_debian_release")
 
 if TYPE_CHECKING:
     from tests._aws_fakes import Recorder
@@ -81,6 +84,7 @@ def _request(
     defaults, and ``disk`` / ``swap`` here carry its values)."""
     return ProvisionRequest(
         vm_name="dev",
+        debian_release=DebianRelease.TRIXIE,
         hostname="dev",
         system_slug=None,
         admin_username="agw",
@@ -138,6 +142,7 @@ class TestCreate:
         }
         assert "allocation_id" not in result.platform_metadata
         assert "allocate_address" not in rec.methods("ec2")
+        assert result.debian_release is DebianRelease.TRIXIE
 
     def test_security_group_is_created_with_no_ingress(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A fresh EC2 security group IS the deny-all-inbound baseline, so
@@ -230,11 +235,11 @@ class TestCreate:
         assert "10-byte" in str(exc.value)
 
     def test_always_resolves_debian_ami_from_ssm_for_arch(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """SSM is the ONLY image source (no operator pin): the Debian bookworm
+        """SSM is the only image source: the requested Debian 13 release
         release parameter for the selected arch is always resolved at create."""
         rec = install_fakes(monkeypatch, Controls(ssm_ami="ami-from-ssm"))
         _platform().create(_request(), RunContext(config=_config()))
-        assert rec.kwargs_for("get_parameter")["Name"] == "/aws/service/debian/release/bookworm/latest/arm64"
+        assert rec.kwargs_for("get_parameter")["Name"] == "/aws/service/debian/release/13/latest/arm64"
         assert rec.kwargs_for("run_instances")["ImageId"] == "ami-from-ssm"
 
     def test_rejects_a_name_collision(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -299,6 +304,24 @@ class TestCreate:
 
 
 class TestCreateRollback:
+    def test_release_verification_failure_rolls_back_and_stays_typed(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        rec = install_fakes(monkeypatch)
+        failure = StateError("guest release mismatch")
+        monkeypatch.setattr(
+            "agentworks.plugins.aws.platform.verify_provisioned_release",
+            MagicMock(side_effect=failure),
+        )
+
+        with pytest.raises(StateError) as caught:
+            _platform().create(_request(), RunContext(config=_config()))
+
+        assert caught.value is failure
+        assert "terminate_instances" in rec.methods("ec2")
+        assert "delete_security_group" in rec.methods("ec2")
+
     def test_rolls_back_on_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A failure after the instance launches (here the bootstrap poke)
         sweeps the partial work: terminate the instance, delete the security

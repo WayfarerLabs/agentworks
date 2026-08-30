@@ -6,6 +6,7 @@ from typing import Annotated, Literal, NamedTuple
 
 from pydantic import Field
 
+from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError
 from agentworks.schema import AgwModel, NonBlankStr, PositiveInt, SecretRef
 
@@ -90,9 +91,11 @@ DEFAULT_MACHINE_TYPES: tuple[MachineTypeSelection, ...] = (
 )
 
 IMAGE_PROJECT = "debian-cloud"
-IMAGE_FAMILIES: dict[Literal["x86_64", "arm64"], str] = {
-    "x86_64": "debian-12",
-    "arm64": "debian-12-arm64",
+IMAGE_FAMILIES: dict[DebianRelease, dict[Literal["x86_64", "arm64"], str]] = {
+    DebianRelease.TRIXIE: {
+        "x86_64": "debian-13",
+        "arm64": "debian-13-arm64",
+    },
 }
 
 
@@ -119,8 +122,3 @@ def select_machine_type(
             hint=("shrink the vm-template's cpus/memory, or add a larger entry to the site's machine_types catalog"),
         )
     return min(fits, key=lambda entry: (entry.cpus, entry.memory_gib, entry.type, entry.arch))
-
-
-def image_family_for_arch(arch: Literal["x86_64", "arm64"]) -> str:
-    """Return the public Debian 12 image family for one catalog architecture."""
-    return IMAGE_FAMILIES[arch]

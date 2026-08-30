@@ -6,6 +6,7 @@ from typing import Annotated, Literal, NamedTuple
 
 from pydantic import Field
 
+from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError
 from agentworks.schema import AgwModel, NonBlankStr, NonEmptyStr, PositiveInt, SecretRef
 
@@ -134,10 +135,27 @@ def _select_vm_size(catalog: tuple[_VMSize, ...], *, cpus: int, memory_gib: int)
     return min(fits, key=lambda size: (size.cpus, size.memory_gib))
 
 
-IMAGE_PUBLISHER = "Debian"
-IMAGE_OFFER = "debian-12"
-IMAGE_SKU = "12-gen2"
-IMAGE_VERSION = "latest"
+class AzureImage(NamedTuple):
+    """One complete Azure Marketplace image selector and its disk floor."""
 
-# Azure rejects an OS disk smaller than the marketplace image's own disk.
-IMAGE_OS_DISK_FLOOR_GIB = 30
+    publisher: str
+    offer: str
+    sku: str
+    version: str
+    os_disk_floor_gib: int
+
+    @property
+    def urn(self) -> str:
+        """The provider's compact image identity."""
+        return f"{self.publisher}:{self.offer}:{self.sku}:{self.version}"
+
+
+AZURE_IMAGES: dict[DebianRelease, AzureImage] = {
+    DebianRelease.TRIXIE: AzureImage(
+        publisher="Debian",
+        offer="debian-13",
+        sku="13-gen2",
+        version="latest",
+        os_disk_floor_gib=30,
+    ),
+}

@@ -25,8 +25,13 @@ from agentworks.capabilities.vm_platform.bootstrap_script import (
     parse_bootstrap_output,
 )
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
+from agentworks.capabilities.vm_platform.debian_release import (
+    code_owned_release_value,
+    verify_provisioned_release,
+)
 from agentworks.capabilities.vm_platform.tailscale_join import TAILSCALE_JOIN_STDIN_COMMAND
 from agentworks.db import VMStatus
+from agentworks.debian import DebianRelease
 from agentworks.errors import ProvisioningError, StateError
 from agentworks.schema import AgwModel, NonEmptyStr
 from agentworks.ssh import SSHError, SSHTarget
@@ -57,14 +62,19 @@ _REMOTE_TEMPLATE_RANDOM_LENGTH = 10
 # swap, SSH key, and Tailscale installation) as a system-level provisioner
 # during limactl start. Lima retains this block in its instance YAML, so the
 # resolved Tailscale auth key crosses a separate post-start stdin boundary.
+_LIMA_IMAGE_BLOCKS: dict[DebianRelease, str] = {
+    DebianRelease.TRIXIE: """\
+  - location: https://cloud.debian.org/images/cloud/trixie/latest/debian-13-generic-amd64.qcow2
+    arch: x86_64
+  - location: https://cloud.debian.org/images/cloud/trixie/latest/debian-13-generic-arm64.qcow2
+    arch: aarch64""",
+}
+
 LIMA_TEMPLATE = """\
 # Agentworks Debian VM template for Lima
 arch: default
 images:
-  - location: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
-    arch: x86_64
-  - location: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-arm64.qcow2
-    arch: aarch64
+{images}
 cpus: {cpus}
 memory: {memory}GiB
 disk: {disk}GiB
@@ -153,7 +163,7 @@ class LimaConfig(AgwModel):
 class LimaPlatform(VMPlatform):
     """Runs VMs via limactl, locally or on a remote host over SSH."""
 
-    contract_version: ClassVar[int] = 2
+    contract_version: ClassVar[int] = 3
     name: ClassVar[str] = "lima"
     description: ClassVar[str] = "Lima VMs (local, or on a remote host via SSH)"
     config_model: ClassVar[type[LimaConfig]] = LimaConfig
@@ -296,6 +306,11 @@ class LimaPlatform(VMPlatform):
             )
 
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
+        images = code_owned_release_value(
+            _LIMA_IMAGE_BLOCKS,
+            request.debian_release,
+            platform_name=self.name,
+        )
         if not self.is_remote:
             # Preflight re-runs the same check at the composition root;
             # keeping it here too costs one PATH scan and keeps the op's
@@ -344,6 +359,7 @@ class LimaPlatform(VMPlatform):
         # Indent the provision script for YAML embedding (6 spaces)
         indented_script = textwrap.indent(provision_script, "      ")
         rendered = LIMA_TEMPLATE.format(
+            images=images,
             cpus=cpus,
             memory=memory,
             disk=disk,
@@ -398,6 +414,9 @@ class LimaPlatform(VMPlatform):
             except SSHError as e:
                 output.warn(f"could not retrieve Tailscale IP: {e}")
                 output.warn("Tailscale is joined; Phase A will retry IP discovery without the auth key.")
+
+            transport = self._transport_for(instance_name)
+            observed_release = verify_provisioned_release(transport, request.debian_release)
         except KeyboardInterrupt:
             self._rollback_create_on_interrupt(instance_name)
             raise
@@ -407,7 +426,8 @@ class LimaPlatform(VMPlatform):
             raise
 
         return ProvisionResult(
-            native_transport=self._transport_for(instance_name),
+            native_transport=transport,
+            debian_release=observed_release,
             platform_metadata={"instance_name": instance_name},
             tailscale_ip=tailscale_ip,
         )
@@ -515,7 +535,7 @@ class LimaPlatform(VMPlatform):
         """run_detached's file identity for this instance's create; the
         interrupt rollback derives the same path to kill the detached
         limactl before deleting the instance."""
-        return f"/tmp/agentworks-lima-{instance_name}"
+        return f"/var/tmp/agentworks-lima-{instance_name}"
 
     def _create_remote(
         self,

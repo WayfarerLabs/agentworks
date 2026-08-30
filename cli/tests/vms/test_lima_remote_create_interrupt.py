@@ -16,10 +16,13 @@ from agentworks.capabilities.vm_platform import ProvisionRequest
 from agentworks.capabilities.vm_platform import lima as lima_mod
 from agentworks.capabilities.vm_platform.bootstrap_script import REBOOT_SENTINEL_PATH
 from agentworks.capabilities.vm_platform.lima import _REBOOT_CLEAR_MARKER, LimaPlatform
+from agentworks.debian import DebianRelease
 from agentworks.errors import ProvisioningError, StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.ssh import SSHError
 from agentworks.vms import manager as vm_manager
+
+pytestmark = pytest.mark.usefixtures("verified_debian_release")
 
 if TYPE_CHECKING:
     from agentworks.db import Database
@@ -38,6 +41,7 @@ def _remote_ssh_success(command: str) -> SimpleNamespace:
 def _request(*, tailscale_auth_key: str = "tskey-test") -> ProvisionRequest:
     return ProvisionRequest(
         vm_name="myvm",
+        debian_release=DebianRelease.TRIXIE,
         hostname="lima--myvm",
         system_slug=None,
         admin_username="agw",
@@ -482,11 +486,11 @@ def test_remote_interrupt_kills_the_detached_limactl_before_deleting(
     assert exc.value is interrupt
     # The kill goes through run_detached's PID-file mechanism, and it
     # PRECEDES the delete.
-    kill_cmd = "kill $(cat /tmp/agentworks-lima-myvm.pid)"
+    kill_cmd = "kill $(cat /var/tmp/agentworks-lima-myvm.pid)"
     (kill_index,) = [i for i, (kind, cmd) in enumerate(events) if kind == "host" and kill_cmd in cmd]
     artifact_cleanup = (
-        "rm -f /tmp/agentworks-lima-myvm.out /tmp/agentworks-lima-myvm.sh "
-        "/tmp/agentworks-lima-myvm.pid /tmp/agentworks-lima-myvm.status"
+        "rm -f /var/tmp/agentworks-lima-myvm.out /var/tmp/agentworks-lima-myvm.sh "
+        "/var/tmp/agentworks-lima-myvm.pid /var/tmp/agentworks-lima-myvm.status"
     )
     (artifact_cleanup_index,) = [
         i for i, (kind, cmd) in enumerate(events) if kind == "host" and cmd == artifact_cleanup
@@ -717,7 +721,7 @@ def test_remote_exception_kills_cleans_artifacts_then_deletes_without_masking(
         LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}}).create(_request(), RunContext())
 
     assert caught.value is original
-    kill_cmd = "kill $(cat /tmp/agentworks-lima-myvm.pid)"
+    kill_cmd = "kill $(cat /var/tmp/agentworks-lima-myvm.pid)"
     (kill_index,) = [i for i, (kind, cmd) in enumerate(events) if kind == "host" and kill_cmd in cmd]
     (cleanup_index,) = [
         i

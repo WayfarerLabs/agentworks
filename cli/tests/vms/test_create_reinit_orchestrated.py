@@ -19,6 +19,7 @@ import pytest
 from agentworks.capabilities.vm_platform import ProvisionResult
 from agentworks.config import load_config
 from agentworks.db import VersionedPayload, VMStatus
+from agentworks.debian import DebianRelease
 from agentworks.errors import StateError
 from agentworks.output import Role
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -185,7 +186,11 @@ def test_create_admin_spec_credential_joins_graph_and_logger_redactions(
     def _create(self: LimaPlatform, request: ProvisionRequest, ctx: object) -> ProvisionResult:
         events.append("create")
         assert request.progress is loggers[0]
-        return ProvisionResult(native_transport=SimpleNamespace(), tailscale_ip="100.64.0.7")  # type: ignore[arg-type]
+        return ProvisionResult(  # type: ignore[arg-type]
+            native_transport=SimpleNamespace(),
+            debian_release=DebianRelease.TRIXIE,
+            tailscale_ip="100.64.0.7",
+        )
 
     monkeypatch.setattr(LimaPlatform, "create", _create)
 
@@ -339,6 +344,7 @@ def test_successful_create_propagates_fresh_logger_close_interrupt(
         "create",
         lambda self, request, ctx: ProvisionResult(  # noqa: ARG005
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
+            debian_release=DebianRelease.TRIXIE,
             tailscale_ip="100.64.0.7",
         ),
     )
@@ -527,6 +533,7 @@ def test_create_init_failure_keeps_the_row(
     def _fake_create(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
         return ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
+            debian_release=DebianRelease.TRIXIE,
             platform_metadata={},
             tailscale_ip="100.64.0.7",
         )
@@ -567,6 +574,7 @@ def test_create_phase_a_failure_maps_to_provisioning_error(
     def _fake_create(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
         return ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
+            debian_release=DebianRelease.TRIXIE,
             platform_metadata={},
             tailscale_ip="100.64.0.7",
         )
@@ -616,6 +624,7 @@ def test_create_phase_a_sync_failure_is_non_fatal(
     def _fake_create(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
         return ProvisionResult(
             native_transport=SimpleNamespace(describe=lambda: "lima:vm", logger=None),  # type: ignore[arg-type]
+            debian_release=DebianRelease.TRIXIE,
             platform_metadata={},
             tailscale_ip="100.64.0.7",
         )
@@ -675,6 +684,7 @@ def test_create_provisioning_section_ends_with_ssh_config_synced(
     def _fake_create(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
         return ProvisionResult(
             native_transport=SimpleNamespace(describe=lambda: "lima:vm", logger=None),  # type: ignore[arg-type]
+            debian_release=DebianRelease.TRIXIE,
             platform_metadata={},
             tailscale_ip="100.64.0.7",
         )
@@ -725,6 +735,16 @@ def _seed_provisioned_vm(db: Database) -> None:
     db.update_vm_provisioning_status("rvm", ProvisioningStatus.COMPLETE)
 
 
+@pytest.fixture(autouse=True)
+def _verified_reinit_release(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        vm_manager,
+        "verified_vm_release",
+        lambda db, vm, target: DebianRelease.TRIXIE,
+        raising=False,
+    )
+
+
 def test_reinit_runs_initialization_through_the_gate(
     make_config,
     db: Database,
@@ -739,6 +759,11 @@ def test_reinit_runs_initialization_through_the_gate(
 
     config = make_config(manifests=[GIT_CRED_GH, ManifestDoc("admin-template", "default", {"git_credentials": ["gh"]})])
     _seed_provisioned_vm(db)
+    legacy_checked: list[str] = []
+    monkeypatch.setattr(
+        "agentworks.vms.manager.lifecycle._warn_legacy_release",
+        lambda vm: legacy_checked.append(vm.name),
+    )
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
     holds: list[str] = []
 
@@ -768,10 +793,20 @@ def test_reinit_runs_initialization_through_the_gate(
 
     monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
 
+    observed_targets: list[object] = []
+
+    def _verified_release(db_: object, vm: object, target: object) -> DebianRelease:
+        del db_, vm
+        observed_targets.append(target)
+        return DebianRelease.BOOKWORM
+
+    monkeypatch.setattr(vm_manager, "verified_vm_release", _verified_release)
+
     def _fake_init(*args: object, **kwargs: object) -> None:
         captured["git_tokens"] = kwargs["git_tokens"]
         captured["providers"] = args[7]
         captured["held"] = list(holds)
+        captured["debian_release"] = kwargs["debian_release"]
 
     monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
     import agentworks.transports as transports
@@ -781,6 +816,9 @@ def test_reinit_runs_initialization_through_the_gate(
     vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
 
     assert captured["git_tokens"] == {"gh": "ghtok"}
+    assert captured["debian_release"] is DebianRelease.BOOKWORM
+    assert len(observed_targets) == 1
+    assert legacy_checked == ["rvm"]
     assert logger_redactions == [("ghtok",)]
     assert list(captured["providers"]) == ["gh"]  # type: ignore[call-overload]
     assert captured["held"] == ["open"]  # init ran inside the span

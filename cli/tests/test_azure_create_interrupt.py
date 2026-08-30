@@ -36,6 +36,8 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, ssh_exposure
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
+from agentworks.debian import DebianRelease
+from agentworks.errors import StateError
 from agentworks.plugins.azure.network import AzureError
 from agentworks.plugins.azure.platform import AzureVMPlatform
 from agentworks.ssh import SSHError
@@ -44,6 +46,8 @@ from tests._azure_platform_support import _install_fakes
 
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
+
+pytestmark = pytest.mark.usefixtures("verified_debian_release")
 
 _CONFIG = {"subscription_id": "sub-A", "resource_group": "rg1", "region": "eastus", "auth": {"mode": "ambient"}}
 _SENTINEL = "tskey-azure-readiness-'sentinel"
@@ -87,6 +91,7 @@ def _request(*, tailscale: bool) -> ProvisionRequest:
     """Use the sentinel for reflection checks, otherwise a regular required key."""
     return ProvisionRequest(
         vm_name="vm1",
+        debian_release=DebianRelease.TRIXIE,
         hostname="vm1",
         system_slug=None,
         admin_username="agentworks",
@@ -276,6 +281,27 @@ class TestFailureDuringInlineWait:
     full resource set back (closing the bootstrap ingress with it)
     instead of leaking a running VM. Readiness SSHError paths now raise
     typed too, keeping them in the same rollback window."""
+
+    def test_release_verification_failure_rolls_back_and_stays_typed(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        fakes = _install_fakes(monkeypatch, vm_exists_lookup=False)
+        failure = StateError("guest release mismatch")
+        monkeypatch.setattr(
+            "agentworks.plugins.azure.platform.verify_provisioned_release",
+            MagicMock(side_effect=failure),
+        )
+
+        with pytest.raises(StateError) as caught:
+            _platform().create(_request(tailscale=True), RunContext())
+
+        assert caught.value is failure
+        assert fakes.compute.virtual_machines.deleted == [("rg1", "vm1")]
+        assert fakes.network.network_interfaces.deleted == [("rg1", "vm1-nic")]
+        assert fakes.network.public_ip_addresses.deleted == [("rg1", "vm1-ip")]
+        assert fakes.network.network_security_groups.deleted == [("rg1", "vm1-nsg")]
+        assert fakes.network.virtual_networks.deleted == [("rg1", "vm1-vnet")]
 
     def test_non_ssh_error_escaping_the_wait_rolls_back_vm_first_and_wraps(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
