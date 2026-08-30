@@ -86,7 +86,7 @@ class WorkspaceDescription:
     workspace: WorkspaceDetailFacts
     sessions: tuple[WorkspaceSession, ...]
     agents: tuple[WorkspaceAgent, ...]
-    instance_state: InstanceStateDescription | None = None
+    instance_state: InstanceStateDescription
 
 
 def workspace_listing_data(listing: WorkspaceListing) -> JsonObject:
@@ -126,11 +126,10 @@ def workspace_description_data(description: WorkspaceDescription) -> JsonObject:
             "agents": [{"name": agent.name, "linux_user": agent.linux_user} for agent in description.agents],
         },
     }
-    if description.instance_state is not None:
-        from agentworks.instance_description import instance_state_data
+    from agentworks.instance_description import instance_state_data
 
-        workspace_data = cast("JsonObject", data["workspace"])
-        workspace_data["instance_state"] = instance_state_data(description.instance_state)
+    workspace_data = cast("JsonObject", data["workspace"])
+    workspace_data["instance_state"] = instance_state_data(description.instance_state)
     return data
 
 
@@ -378,10 +377,9 @@ def render_workspace_description(description: WorkspaceDescription) -> None:
     output.info(f"Path:       {ws.path}")
     output.info(f"Created:    {ws.created_at}")
 
-    if description.instance_state is not None:
-        from agentworks.instance_description import render_instance_state
+    from agentworks.instance_description import render_instance_state
 
-        render_instance_state(description.instance_state)
+    render_instance_state(description.instance_state)
 
     # Sessions
     sessions = description.sessions

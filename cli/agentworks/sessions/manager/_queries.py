@@ -69,7 +69,7 @@ class SessionDescription:
     created_at: str
     updated_at: str
     consoles: tuple[SessionConsole, ...]
-    instance_state: InstanceStateDescription | None = None
+    instance_state: InstanceStateDescription
 
 
 def session_listing_data(listing: SessionListing) -> JsonObject:
@@ -111,11 +111,10 @@ def session_description_data(description: SessionDescription) -> JsonObject:
             ],
         },
     }
-    if description.instance_state is not None:
-        from agentworks.instance_description import instance_state_data
+    from agentworks.instance_description import instance_state_data
 
-        session_data = cast("JsonObject", data["session"])
-        session_data["instance_state"] = instance_state_data(description.instance_state)
+    session_data = cast("JsonObject", data["session"])
+    session_data["instance_state"] = instance_state_data(description.instance_state)
     return data
 
 
@@ -587,10 +586,9 @@ def render_session_description(description: SessionDescription) -> None:
     output.info(f"Status:     {status_label}")
     output.info(f"Created:    {description.created_at}")
     output.info(f"Updated:    {description.updated_at}")
-    if description.instance_state is not None:
-        from agentworks.instance_description import render_instance_state
+    from agentworks.instance_description import render_instance_state
 
-        render_instance_state(description.instance_state)
+    render_instance_state(description.instance_state)
     output.info(f"\nConsoles ({len(description.consoles)}):")
     if description.consoles:
         for console in description.consoles:

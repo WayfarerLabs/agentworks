@@ -119,14 +119,12 @@ def test_workspace_and_agent_descriptions_include_current_final_layers(
     workspace = workspace_description(db, config, "work")
     agent = agent_description(db, config, name="dev")
 
-    assert workspace.instance_state is not None
     workspace_slot = workspace.instance_state.declarations[0]
     assert workspace_slot.instance_spec.status == "present"
     assert workspace_slot.current.status == "resolved"
     assert workspace_slot.current.spec["tmuxinator"] is False
     assert workspace.instance_state.applied_facts == ()
 
-    assert agent.instance_state is not None
     agent_slot = agent.instance_state.declarations[0]
     assert agent_slot.instance_spec.status == "present"
     assert agent_slot.current.status == "resolved"
@@ -146,7 +144,6 @@ def test_workspace_description_retains_unavailable_stored_spec(
 
     description = workspace_description(db, make_config(), "work")
 
-    assert description.instance_state is not None
     slot = description.instance_state.declarations[0]
     assert slot.instance_spec.status == "unavailable"
     assert slot.instance_spec.reason == "unsupported-version"

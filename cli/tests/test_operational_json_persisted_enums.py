@@ -19,6 +19,7 @@ from agentworks.db.projections import (
     project_vm_provisioning_status,
 )
 from agentworks.secrets.policy import TtyInteractionPolicy
+from tests.instance_state_support import stub_instance_state
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -226,6 +227,7 @@ def test_projection_boundaries_close_manual_invalid_facts() -> None:
         WorkspaceDetailFacts("ws", "box", None, "/srv/ws", "now"),
         (WorkspaceSession("s", "default", _RAW_TEXT, None),),
         (),
+        stub_instance_state("workspace"),
     )
     projected_workspace = cast("dict[str, object]", workspace_description_data(workspace)["workspace"])
     assert cast("list[dict[str, object]]", projected_workspace["sessions"])[0]["mode"] == "unknown"
@@ -234,6 +236,20 @@ def test_projection_boundaries_close_manual_invalid_facts() -> None:
     projected_list = cast("list[dict[str, object]]", session_listing_data(SessionListing((listed,)))["sessions"])[0]
     assert projected_list["mode"] == "unknown"
     assert projected_list["status"] == "unavailable"
-    description = SessionDescription("s", "ws", "box", "default", None, _RAW_TEXT, None, _RAW_TEXT, None, "c", "u", ())
+    description = SessionDescription(
+        "s",
+        "ws",
+        "box",
+        "default",
+        None,
+        _RAW_TEXT,
+        None,
+        _RAW_TEXT,
+        None,
+        "c",
+        "u",
+        (),
+        stub_instance_state("session"),
+    )
     projected_description = cast("dict[str, object]", session_description_data(description)["session"])
     assert projected_description["mode"] == projected_description["status"] == "unknown"

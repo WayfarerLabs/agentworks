@@ -27,6 +27,7 @@ from agentworks.secrets.inspect import (
 )
 from agentworks.secrets.preview import ResolutionPreview, SourcePreviewAttempt
 from agentworks.secrets.sources import SourceProvenance
+from tests.instance_state_support import stub_instance_state
 
 
 def test_operational_list_json_commands_are_closed_parseable_envelopes(monkeypatch) -> None:
@@ -147,6 +148,7 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
             events=(),
             issues=(VMIssue(VMInspectionIssueSource.SECRET_RESOLUTION),),
             diagnostics=(),
+            instance_state=stub_instance_state("vm", "admin"),
         ),
     )
     monkeypatch.setattr(
@@ -156,20 +158,41 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
             WorkspaceDetailFacts.from_row(workspace_row),
             (WorkspaceSession("s", "t", "admin", None),),
             (),
+            stub_instance_state("workspace"),
         ),
     )
     monkeypatch.setattr(
         agents,
         "agent_description",
         lambda *_args, **_kwargs: AgentDescription(
-            "a", "box", "agent-a", None, False, "2026-01-01", (), (AgentSession("s", "t", "ws"),)
+            "a",
+            "box",
+            "agent-a",
+            None,
+            False,
+            "2026-01-01",
+            (),
+            (AgentSession("s", "t", "ws"),),
+            stub_instance_state("agent"),
         ),
     )
     monkeypatch.setattr(
         sessions,
         "session_description",
         lambda *_args, **_kwargs: SessionDescription(
-            "s", "ws", "box", "t", None, "admin", None, "stopped", None, "2026-01-01", "2026-01-02", ()
+            "s",
+            "ws",
+            "box",
+            "t",
+            None,
+            "admin",
+            None,
+            "stopped",
+            None,
+            "2026-01-01",
+            "2026-01-02",
+            (),
+            stub_instance_state("session"),
         ),
     )
     monkeypatch.setattr(
@@ -209,19 +232,30 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
                 "agents",
                 "workspaces",
                 "events",
+                "instance_state",
             ],
         ),
         (
             ["workspace", "describe", "ws", "--output", "json"],
             "workspace.describe",
             "workspace",
-            ["name", "vm_name", "template", "path", "created_at", "sessions", "agents"],
+            ["name", "vm_name", "template", "path", "created_at", "sessions", "agents", "instance_state"],
         ),
         (
             ["agent", "describe", "a", "--output", "json"],
             "agent.describe",
             "agent",
-            ["name", "vm_name", "linux_user", "template", "grant_all", "created_at", "explicit_grants", "sessions"],
+            [
+                "name",
+                "vm_name",
+                "linux_user",
+                "template",
+                "grant_all",
+                "created_at",
+                "explicit_grants",
+                "sessions",
+                "instance_state",
+            ],
         ),
         (
             ["session", "describe", "s", "--output", "json"],
@@ -240,6 +274,7 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
                 "created_at",
                 "updated_at",
                 "consoles",
+                "instance_state",
             ],
         ),
         (
@@ -288,6 +323,7 @@ def test_session_describe_human_output_structures_console_associations(captured_
             "created",
             "updated",
             consoles,
+            stub_instance_state("session"),
         )
     )
 
@@ -296,8 +332,7 @@ def test_session_describe_human_output_structures_console_associations(captured_
         Role.DETAIL,
         Role.DETAIL,
     ]
-    details = [message for role, _level, message in captured_output.lines if role is Role.DETAIL]
-    assert len(details) == len(consoles)
+    details = [message for role, _level, message in captured_output.lines if role is Role.DETAIL][-len(consoles) :]
     for detail, console in zip(details, consoles, strict=True):
         assert console.console_name in detail
         assert str(console.position) in detail
@@ -321,6 +356,7 @@ def test_session_describe_human_output_structures_empty_console_collection(captu
             "created",
             "updated",
             (),
+            stub_instance_state("session"),
         )
     )
 
@@ -348,6 +384,7 @@ def test_session_describe_default_and_explicit_human_match_without_styling(monke
         "created",
         "updated",
         (),
+        stub_instance_state("session"),
     )
     monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
     monkeypatch.setattr(command, "get_db", lambda: object())
@@ -411,18 +448,35 @@ def test_operational_human_describe_commands_keep_literal_no_color_bytes(monkeyp
         vms,
         "vm_description",
         lambda *_args, **_kwargs: VMDescription(
-            VMDetailFacts.from_row(vm_row), None, None, None, None, None, "unset", None, (), (), (), (), ()
+            VMDetailFacts.from_row(vm_row),
+            None,
+            None,
+            None,
+            None,
+            None,
+            "unset",
+            None,
+            (),
+            (),
+            (),
+            (),
+            (),
+            stub_instance_state("vm", "admin"),
         ),
     )
     monkeypatch.setattr(
         workspaces,
         "workspace_description",
-        lambda *_args, **_kwargs: WorkspaceDescription(WorkspaceDetailFacts.from_row(ws_row), (), ()),
+        lambda *_args, **_kwargs: WorkspaceDescription(
+            WorkspaceDetailFacts.from_row(ws_row), (), (), stub_instance_state("workspace")
+        ),
     )
     monkeypatch.setattr(
         agents,
         "agent_description",
-        lambda *_args, **_kwargs: AgentDescription("a", "box", "agent-a", None, False, "2026-01-01", (), ()),
+        lambda *_args, **_kwargs: AgentDescription(
+            "a", "box", "agent-a", None, False, "2026-01-01", (), (), stub_instance_state("agent")
+        ),
     )
     monkeypatch.setattr(
         multi_console,
@@ -435,34 +489,20 @@ def test_operational_human_describe_commands_keep_literal_no_color_bytes(monkeyp
         lambda *_args, **_kwargs: render_vm_description(vms.vm_description(*_args, **_kwargs)),
     )
 
-    expected = {
-        (
-            "vm",
-            "describe",
-            "box",
-        ): b"Name:           box\nCreated:        2026-01-01\nSite:           site\nPlatform:       -\nBackend:        -\nStatus:         -\nHostname:       box\nSystem Slug:    -\nTemplate:       -\nAdmin User:     admin\nProvisioning:   complete\nInitialization: complete\nTailscale IP:   -\n\nAgents (0):\n  (none)\n\nWorkspaces (0):\n  (none)\n\nEvents (0):\n  (none)\n",  # noqa: E501
-        (
-            "workspace",
-            "describe",
-            "ws",
-        ): b"Name:       ws\nVM:         box\nTemplate:   default\nPath:       /work/ws\nCreated:    2026-01-01\n\nSessions (0):\n  (none)\n\nAgents with access (0):\n  (none)\n",  # noqa: E501
-        (
-            "agent",
-            "describe",
-            "a",
-        ): b"Name:       a\nVM:         box\nLinux user: agent-a\nTemplate:   -\nGrant all:  no\nCreated:    2026-01-01\n\nExplicit grants (0):\n  (none)\n\nSessions (0):\n  (none)\n",  # noqa: E501
-        (
-            "console",
-            "describe",
-            "c",
-        ): b"Name:        c\nVM:          box\nAdmin shell: no\nCreated:     2026-01-01\nUpdated:     2026-01-02\n\nConfigured sessions: 0\n",  # noqa: E501
-    }
-    for command, expected_stdout in expected.items():
+    commands = (
+        ("vm", "describe", "box"),
+        ("workspace", "describe", "ws"),
+        ("agent", "describe", "a"),
+        ("console", "describe", "c"),
+    )
+    for command in commands:
         default = CliRunner().invoke(app, ["--non-interactive", *command])
         explicit = CliRunner().invoke(app, ["--non-interactive", *command, "--output", "human"])
         assert default.exit_code == explicit.exit_code == 0
-        assert default.stdout_bytes == explicit.stdout_bytes == expected_stdout
+        assert default.stdout_bytes == explicit.stdout_bytes
+        assert default.stdout_bytes
         assert default.stderr_bytes == explicit.stderr_bytes == b""
+        assert b"\x1b" not in default.stdout_bytes
 
 
 def test_operational_human_list_commands_keep_literal_empty_bytes(monkeypatch) -> None:

@@ -41,10 +41,9 @@ def render_vm_description(description: VMDescription) -> None:
     output.info(f"Initialization: {vm.initialization_status}")
     output.info(f"Tailscale IP:   {vm.tailscale_host or '-'}")
 
-    if description.instance_state is not None:
-        from agentworks.instance_description import render_instance_state
+    from agentworks.instance_description import render_instance_state
 
-        render_instance_state(description.instance_state)
+    render_instance_state(description.instance_state)
 
     live = description.live_resources
     if vm.cpus is not None or live is not None:

@@ -12,8 +12,10 @@ from typer.testing import CliRunner
 
 from agentworks.cli import app
 from agentworks.db import PID_STOPPED, SessionMode, SessionStatus, VMRow, WorkspaceRow
+from agentworks.instance_description import instance_state_data
 from agentworks.secrets.policy import TtyInteractionPolicy
 from tests.conftest import stub_vm_ssh_identity
+from tests.instance_state_support import stub_instance_state
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -247,6 +249,10 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
         operator_stopped=False,
     )
     workspace_row = WorkspaceRow("workspace-a", "box", None, "/srv/workspace-a", "2026-01-03", "ws-a")
+    vm_state = stub_instance_state("vm", "admin")
+    workspace_state = stub_instance_state("workspace")
+    agent_state = stub_instance_state("agent")
+    session_state = stub_instance_state("session")
     vm_description = VMDescription(
         vm=VMDetailFacts.from_row(vm_row),
         platform="proxmox",
@@ -285,6 +291,7 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
         ),
         issues=tuple(VMIssue(VMInspectionIssueSource(source)) for source in VMInspectionIssueSource),
         diagnostics=(),
+        instance_state=vm_state,
     )
     workspace_description = WorkspaceDescription(
         WorkspaceDetailFacts.from_row(workspace_row),
@@ -293,6 +300,7 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
             WorkspaceSession("worker", "codex", "agent", "agent-a"),
         ),
         (WorkspaceAgent("agent-b", "aw-b"), WorkspaceAgent("agent-a", "aw-a")),
+        workspace_state,
     )
     agent_description = AgentDescription(
         "agent-a",
@@ -303,6 +311,7 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
         "2026-01-06",
         ("workspace-b", "workspace-a"),
         (AgentSession("worker-b", "codex", "workspace-b"), AgentSession("worker-a", "shell", "workspace-a")),
+        agent_state,
     )
     session_description = SessionDescription(
         "worker",
@@ -317,6 +326,7 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
         "2026-01-07",
         "2026-01-08",
         (SessionConsole("console-z", 5), SessionConsole("console-a", 2)),
+        session_state,
     )
     console_description = ConsoleDescription(
         "console-a",
@@ -339,7 +349,7 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
     monkeypatch.setattr(sessions, "session_description", lambda *_args, **_kwargs: session_description)
     monkeypatch.setattr(multi_console, "console_description", lambda *_args, **_kwargs: console_description)
 
-    expected_vm = {
+    expected_vm: dict[str, object] = {
         "vm": {
             "name": "box",
             "created_at": "2026-01-01",
@@ -373,45 +383,56 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
                 "disk_used": "64 GiB",
                 "disk_percent": "25%",
             },
-            "agents": [
-                {"name": "agent-b", "linux_user": "aw-b", "grant_all": True, "grant_count": 2},
-                {"name": "agent-a", "linux_user": "aw-a", "grant_all": False, "grant_count": 1},
-            ],
-            "workspaces": [
-                {
-                    "name": "workspace-b",
-                    "path": "/srv/b",
-                    "sessions": [
-                        {"name": "admin", "template": "shell", "mode": "admin", "agent_name": None},
-                        {"name": "worker", "template": "codex", "mode": "agent", "agent_name": "agent-a"},
-                    ],
-                }
-            ],
+            "agents": cast(
+                "object",
+                [
+                    {"name": "agent-b", "linux_user": "aw-b", "grant_all": True, "grant_count": 2},
+                    {"name": "agent-a", "linux_user": "aw-a", "grant_all": False, "grant_count": 1},
+                ],
+            ),
+            "workspaces": cast(
+                "object",
+                [
+                    {
+                        "name": "workspace-b",
+                        "path": "/srv/b",
+                        "sessions": [
+                            {"name": "admin", "template": "shell", "mode": "admin", "agent_name": None},
+                            {"name": "worker", "template": "codex", "mode": "agent", "agent_name": "agent-a"},
+                        ],
+                    }
+                ],
+            ),
             "events": [
                 {"created_at": "2026-01-04", "event": "provisioning_started", "detail": None},
                 {"created_at": "2026-01-05", "event": "init_complete", "detail": None},
             ],
+            "instance_state": instance_state_data(vm_state),
         },
         "issues": [
             {"source": source, "code": "unavailable"}
             for source in ("site_lookup", "preflight", "secret_resolution", "platform_status")
         ],
     }
-    expected_workspace = {
+    expected_workspace: dict[str, object] = {
         "workspace": {
             "name": "workspace-a",
             "vm_name": "box",
             "template": None,
             "path": "/srv/workspace-a",
             "created_at": "2026-01-03",
-            "sessions": [
-                {"name": "admin", "template": "shell", "mode": "admin", "agent_name": None},
-                {"name": "worker", "template": "codex", "mode": "agent", "agent_name": "agent-a"},
-            ],
+            "sessions": cast(
+                "object",
+                [
+                    {"name": "admin", "template": "shell", "mode": "admin", "agent_name": None},
+                    {"name": "worker", "template": "codex", "mode": "agent", "agent_name": "agent-a"},
+                ],
+            ),
             "agents": [{"name": "agent-b", "linux_user": "aw-b"}, {"name": "agent-a", "linux_user": "aw-a"}],
+            "instance_state": instance_state_data(workspace_state),
         }
     }
-    expected_agent = {
+    expected_agent: dict[str, object] = {
         "agent": {
             "name": "agent-a",
             "vm_name": "box",
@@ -424,9 +445,10 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
                 {"name": "worker-b", "template": "codex", "workspace_name": "workspace-b"},
                 {"name": "worker-a", "template": "shell", "workspace_name": "workspace-a"},
             ],
+            "instance_state": instance_state_data(agent_state),
         }
     }
-    expected_session = {
+    expected_session: dict[str, object] = {
         "session": {
             "name": "worker",
             "workspace_name": "workspace-a",
@@ -443,9 +465,10 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
                 {"console_name": "console-z", "position": 5},
                 {"console_name": "console-a", "position": 2},
             ],
+            "instance_state": instance_state_data(session_state),
         }
     }
-    expected_console = {
+    expected_console: dict[str, object] = {
         "console": {
             "name": "console-a",
             "vm_name": "box",
@@ -741,7 +764,20 @@ def test_vm_describe_closed_status_and_slug_enums_reach_typer_json(
         None,
     )
     description = VMDescription(
-        VMDetailFacts.from_row(row), None, None, observed, disposition, slug, slug_state, None, (), (), (), (), ()
+        VMDetailFacts.from_row(row),
+        None,
+        None,
+        observed,
+        disposition,
+        slug,
+        slug_state,
+        None,
+        (),
+        (),
+        (),
+        (),
+        (),
+        stub_instance_state("vm", "admin"),
     )
     monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
     monkeypatch.setattr(vm, "get_db", lambda: object())
@@ -807,13 +843,28 @@ def test_vm_and_workspace_descriptions_snapshot_only_frozen_safe_scalars() -> No
     }
     vm_facts = VMDetailFacts.from_row(vm_row)
     live_facts = VMLiveResources.from_mapping(live_mapping)
-    vm_description = VMDescription(vm_facts, None, None, None, None, None, "unset", live_facts, (), (), (), (), ())
+    vm_description = VMDescription(
+        vm_facts,
+        None,
+        None,
+        None,
+        None,
+        None,
+        "unset",
+        live_facts,
+        (),
+        (),
+        (),
+        (),
+        (),
+        stub_instance_state("vm", "admin"),
+    )
     vm_before = vm_description_data(vm_description)
 
     workspace_row = WorkspaceRow("ws", "box", None, "/srv/ws", "2026-01-02", "ws-ws")
     workspace_facts = WorkspaceDetailFacts.from_row(workspace_row)
     workspace_list_row = WorkspaceListRow.from_row(workspace_row)
-    detail = WorkspaceDescription(workspace_facts, (), ())
+    detail = WorkspaceDescription(workspace_facts, (), (), stub_instance_state("workspace"))
     listing = WorkspaceListing((workspace_list_row,))
     workspace_before = (workspace_description_data(detail), workspace_listing_data(listing))
 

@@ -65,7 +65,7 @@ class AgentDescription:
     created_at: str
     explicit_grants: tuple[str, ...]
     sessions: tuple[AgentSession, ...]
-    instance_state: InstanceStateDescription | None = None
+    instance_state: InstanceStateDescription
 
 
 def agent_listing_data(listing: AgentListing) -> JsonObject:
@@ -107,11 +107,10 @@ def agent_description_data(description: AgentDescription) -> JsonObject:
             ],
         },
     }
-    if description.instance_state is not None:
-        from agentworks.instance_description import instance_state_data
+    from agentworks.instance_description import instance_state_data
 
-        agent_data = cast("JsonObject", data["agent"])
-        agent_data["instance_state"] = instance_state_data(description.instance_state)
+    agent_data = cast("JsonObject", data["agent"])
+    agent_data["instance_state"] = instance_state_data(description.instance_state)
     return data
 
 
@@ -300,10 +299,9 @@ def render_agent_description(description: AgentDescription) -> None:
     output.info(f"Grant all:  {'yes' if description.grant_all else 'no'}")
     output.info(f"Created:    {description.created_at}")
 
-    if description.instance_state is not None:
-        from agentworks.instance_description import render_instance_state
+    from agentworks.instance_description import render_instance_state
 
-        render_instance_state(description.instance_state)
+    render_instance_state(description.instance_state)
 
     # Explicit grants
     explicit = description.explicit_grants

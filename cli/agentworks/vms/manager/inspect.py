@@ -229,7 +229,7 @@ class VMDescription:
     events: tuple[VMDetailEvent, ...]
     issues: tuple[VMIssue, ...]
     diagnostics: tuple[VMDiagnostic, ...]
-    instance_state: InstanceStateDescription | None = None
+    instance_state: InstanceStateDescription
 
 
 def vm_listing_data(listing: VMListing) -> JsonObject:
@@ -338,11 +338,10 @@ def vm_description_data(description: VMDescription) -> JsonObject:
         },
         "issues": [_project_vm_issue(issue) for issue in description.issues],
     }
-    if description.instance_state is not None:
-        from agentworks.instance_description import instance_state_data
+    from agentworks.instance_description import instance_state_data
 
-        vm_data = cast("JsonObject", data["vm"])
-        vm_data["instance_state"] = instance_state_data(description.instance_state)
+    vm_data = cast("JsonObject", data["vm"])
+    vm_data["instance_state"] = instance_state_data(description.instance_state)
     return data
 
 
