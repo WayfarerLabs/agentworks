@@ -117,7 +117,8 @@ remain hidden unless `--include-disabled` is requested.
   relationships: {dependencies: [edge...], dependents: [edge...]},
   used_by: [{kind, name}...] | null,
   diagnostics: [{name, status, message, hint}...],
-  declaration
+  declaration,
+  resolution?
 }}
 ```
 
@@ -140,6 +141,18 @@ capability's declaration is null. The declaration is normalized registry state: 
 comments, source key order, omitted-versus-defaulted distinctions, or an effective inheritance
 merge. Human mode retains loader advisories; JSON mode suppresses them and writes one envelope only
 after every focused fact has been assembled.
+
+`vm-template`, `admin-template`, `workspace-template`, `agent-template`, and `session-template`
+append `resolution`; other kinds omit it. The tagged resolved shape is
+`{status: "resolved", spec, provenance}`. `spec` is the complete effective JSON object after
+defaults and inheritance. `provenance` is an ordered array of
+`{path: [(string | integer)...], sources: [{role, resource_kind, resource_name}...]}`. String path
+segments name fields or map keys and integer segments name positions in the final effective list.
+Paths cover scalar leaves, empty collections, final list positions, and whole subtrees when one
+source still owns the complete subtree. A composite container assembled from multiple layers is
+represented by its truthful descendant paths instead of a misleading container source. Role is
+`defaulted`, `inherited`, `declared`, or `overlaid`. This projection can contain authored plaintext
+declaration values but never resolves a secret reference; treat its output as sensitive.
 
 `agw resource kinds --output json` uses command `resource.kinds` and data
 `{kinds: [{kind, category, resource_count, description}]}`. `category` is exactly `declarable` or
@@ -229,6 +242,30 @@ These frozen JSON v1 vocabularies do not expand when domain enums gain members. 
 projection, `unknown` is the stable sentinel for an invalid persisted value and never echoes that
 stored value.
 
+The VM, workspace, agent, and session description records append the optional JSON v1
+`instance_state` object:
+
+```text
+{
+  declarations: {SLOT: {selection: {kind, name}, instance_spec, current}...},
+  applied: {facts: [fact...]},
+  comparisons: [comparison...],
+  unconsumed_records: [record...],
+  issues: [issue...]
+}
+```
+
+`instance_spec` is tagged `absent`; `present` with `recorded_at` and the canonical partial `spec`;
+or `unavailable` with reason `malformed` or `unsupported-version`. `current` is the resolved shape
+documented for `resource show`, or `{status: "unresolved", selection: {kind, name}, reason}` where
+reason is `missing-selection` or `instance-spec-unavailable`. A fact is `{key, status}` with status
+`not-recorded` or `unavailable`, or status `recorded` plus `recorded_at`, `operation`, and a typed
+`value` object. Comparisons are `{key, state, differences?}`; differences are
+`{field, applied, current}`. Unconsumed records carry only safe type, key, version, and timestamp
+metadata. An issue contains a closed `code` plus optional `slot` or `record_key`. These explicit
+inspection commands can show authored plaintext declaration values, but never resolved secret
+values; handle their human and JSON output as sensitive.
+
 `agw vm describe NAME --output json` uses command `vm.describe` and data `{vm, issues}`. `vm` has
 this ordered shape:
 
@@ -236,7 +273,7 @@ this ordered shape:
 {name, created_at, site, platform, backend, observed_status, status_disposition,
  operator_stopped, hostname, system_slug, system_slug_state, template, admin_template,
  admin_username, provisioning_status, initialization_status, tailscale_host, last_seen_at,
- provisioned_resources, live_resources, agents, workspaces, events}
+ provisioned_resources, live_resources, agents, workspaces, events, instance_state?}
 ```
 
 `platform`, `backend`, `observed_status`, `status_disposition`, `system_slug`, `template`,
@@ -264,6 +301,10 @@ echoing them. These arrays retain database order. `issues[]` is `{source, code}`
 source is `site_lookup`, `preflight`, `secret_resolution`, or `platform_status`, and code is always
 `unavailable`. Issues do not carry backend text or exception details.
 
+VM instance state has `vm` and `admin` declaration slots. Its defined applied facts are
+`hardware-provenance` and `ssh-identity`; their comparisons use `not-recorded`, `unverifiable`,
+`match`, or `drift` only when the available evidence supports that state.
+
 ```bash
 agw vm list --output json
 agw vm describe build-vm --output json
@@ -275,8 +316,8 @@ agw vm describe build-vm --output json
 `{workspaces: [{name, vm_name, template, created_at}]}`. `template` is nullable and order remains
 workspace name order after filtering. `agw workspace describe NAME --output json` uses
 `workspace.describe` and `{workspace}`; workspace is
-`{name, vm_name, template, path, created_at, sessions, agents}`. Session entries are
-`{name, template, mode, agent_name}` and agent entries are `{name, linux_user}`. `template` and
+`{name, vm_name, template, path, created_at, sessions, agents, instance_state?}`. Session entries
+are `{name, template, mode, agent_name}` and agent entries are `{name, linux_user}`. `template` and
 `agent_name` are nullable, and mode is `admin`, `agent`, or `unknown`. An invalid persisted mode
 maps to `unknown` without exposing its raw value in this workspace JSON projection.
 
@@ -285,8 +326,8 @@ maps to `unknown` without exposing its raw value in this workspace JSON projecti
 boolean, and grant entries are `{workspace_name, grant_type}` where grant type is `explicit`,
 `implicit`, or `both`. Agents retain VM then agent name order.
 `agw agent describe NAME --output json` uses `agent.describe` and `{agent}`; agent is
-`{name, vm_name, linux_user, template, grant_all, created_at, explicit_grants, sessions}`, with
-nullable `template` and session entries `{name, template, workspace_name}`.
+`{name, vm_name, linux_user, template, grant_all, created_at, explicit_grants, sessions, instance_state?}`,
+with nullable `template` and session entries `{name, template, workspace_name}`.
 
 #### Session and console JSON schemas
 
@@ -302,7 +343,7 @@ Rows retain workspace then session name order. `agw session describe NAME --outp
 
 ```text
 {name, workspace_name, vm_name, template, harness_integration, mode, agent_name,
- status, pid, created_at, updated_at, consoles}
+ status, pid, created_at, updated_at, consoles, instance_state?}
 ```
 
 `pid` is a positive integer or null. Opaque harness state, socket paths, and boot identifiers are
@@ -325,7 +366,7 @@ is configured database state, never live tmux state.
 
 ```text
 {
-  groups: [{name, checks: [{name, status, message, hint, secret_preview?}]}],
+  groups: [{name, checks: [{name, status, message, hint, secret_preview?, instance_state?}]}],
   counts: {ok, info, warn, fail}
 }
 ```
@@ -339,7 +380,20 @@ for a result with a closed reason; and attempts retain source order as
 `{source, identifier, status, reason?}`. Non-secret checks omit the field. No secret value enters
 this projection. An indeterminate prompt that can receive terminal input uses reason
 `operator-input-required`; a provider lookup skipped because broader operator impact might be needed
-uses `operator-impact-limited`. A failing report is still written in full, then the command exits 1:
+uses `operator-impact-limited`.
+
+An instance-state check adds this optional value-free object:
+
+```text
+{fact_type, instance_kind, instance_name, record_type, record_key, payload_version,
+ recorded_at, comparison, owner_exists}
+```
+
+Nullable fields remain null when unsafe or irrelevant. `fact_type` is `applied-comparison`,
+`coverage`, `malformed-record`, `orphan-record`, or `unconsumed-record`. Doctor never includes
+record payloads or resolved secret values.
+
+A failing report is still written in full, then the command exits 1:
 
 ```bash
 agw doctor --output json

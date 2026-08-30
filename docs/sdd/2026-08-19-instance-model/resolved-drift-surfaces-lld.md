@@ -1,6 +1,6 @@
 # R5 Resolved Spec and Drift Surfaces: Low-Level Design
 
-- Status: Draft checkpoint
+- Status: Implemented; final verification in progress
 - Date: 2026-08-29
 - Requirements: R5 in `frd.md`
 - Architecture: `hla.md`, R5 resolved and applied projections
@@ -132,13 +132,15 @@ The projector serializes the resolved typed value in Pydantic JSON mode, omits o
 declarations. It includes nulls and empty maps or lists because they are material parts of the fully
 resolved spec.
 
-Every material path in the final value receives provenance. Projection walks the final value in
-model, map, and list order and uses the existing longest-prefix rule, so a replaced object
-attributes all surviving descendants to the replacement source while discarded descendants remain
-absent. The five inspection resolvers seed default provenance for every resolved top-level field
-except `name`, including nulls and empty collections. More-specific merge provenance continues to
-override those prefixes. This corrects an inspection gap without changing resolved values or merge
-policy.
+Every material value remains reachable through provenance. Projection walks the final value in
+model, map, and list order and emits scalar leaves, empty containers, final list positions, and a
+container path only when one exact provenance record still owns its whole surviving subtree. A map
+or list assembled from multiple layers is represented by its truthful descendant paths rather than
+by a misleading longest-prefix source for the composite container. A replaced object attributes all
+surviving descendants to the replacement source while discarded descendants remain absent. The five
+inspection resolvers seed default provenance for every resolved top-level field except `name`,
+including nulls and empty collections. More-specific merge provenance continues to override those
+prefixes. This corrects an inspection gap without changing resolved values or merge policy.
 
 Session inspection uses the ordinary use-view resolver, including the real shell default. The
 finalize-only total view remains an internal graph-building accommodation and is not operator
@@ -346,8 +348,8 @@ exposing arbitrary filters.
 - recognized desired overlays and applied slices, paired with owner-existence status;
 - unconsumed metadata: safe kind, owner, record type, record key, payload version, timestamp, and
   owner-existence status; and
-- malformed observations containing safe identity metadata and a bounded typed diagnostic, never
-  payload JSON.
+- malformed observations containing safe identity metadata and a closed value-free diagnostic, never
+  payload JSON, a decoder exception, or its traceback.
 
 Each row is decoded independently. A malformed row becomes one observation and does not abort the
 batch. Common envelope validation applies to every row. Current record types additionally enforce
@@ -358,10 +360,11 @@ violates its closed domain shape is malformed. Domain payload decoding stays out
 `agentworks.db`; the repository does not import VM or overlay codecs.
 
 Live describe projects future record metadata as the `unconsumed_records` sibling of `applied`,
-because a future record type does not necessarily describe applied state. Owner absence is an
-independent fact. An orphan can also be malformed or unconsumed, and doctor may report both. The
-read never exposes raw future payloads, adds a generic record API, or changes lossless partial
-replacement.
+because a future record type does not necessarily describe applied state. A focused describe has
+already established its owner and therefore does not project owner-existence or orphan facts. Fleet
+doctor treats owner absence as an independent fact, so an orphan can also be malformed or unconsumed
+and doctor may report both. The read never exposes raw future payloads, adds a generic record API,
+or changes lossless partial replacement.
 
 ## Doctor behavior
 

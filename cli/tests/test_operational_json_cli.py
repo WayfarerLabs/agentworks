@@ -562,6 +562,7 @@ def test_session_json_status_repairs_and_no_status_are_preserved(
 
 def test_session_describe_json_positive_and_stopped_pid_with_degraded_template(
     db: Database,
+    make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Describe repairs a positive PID, maps PID_STOPPED to null, and leaks no fallback error."""
@@ -574,7 +575,9 @@ def test_session_describe_json_positive_and_stopped_pid_with_degraded_template(
     db.add_console_session("zeta", "stopped", [])
     db.add_console_session("zeta", "live", [])
     db.add_console_session("alpha", "live", [])
-    config = object()
+    db._conn.execute("UPDATE sessions SET template = 'missing-template'")
+    db._conn.commit()
+    config = make_config()
     marker = "unresolvable-template-sensitive-error"
     monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: config)
     monkeypatch.setattr(command, "get_db", lambda: db)
@@ -618,6 +621,13 @@ def test_session_describe_json_positive_and_stopped_pid_with_degraded_template(
     )
     assert marker.encode() not in live.stdout_bytes
     assert b"secret-boot-describe" not in live.stdout_bytes
+    session_state = live_record["instance_state"]
+    assert session_state["declarations"]["session"]["current"] == {
+        "status": "unresolved",
+        "selection": {"kind": "session-template", "name": "missing-template"},
+        "reason": "missing-selection",
+    }
+    assert session_state["applied"] == {"facts": []}
     assert live_record["consoles"] == [
         {"console_name": "alpha", "position": 0},
         {"console_name": "zeta", "position": 1},
@@ -637,27 +647,24 @@ def test_session_describe_json_positive_and_stopped_pid_with_degraded_template(
 @pytest.mark.parametrize("failure", ["broken-registry", "unresolvable-template"])
 def test_session_list_and_describe_degrade_harness_integration_without_error_text(
     db: Database,
+    make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
     failure: str,
 ) -> None:
     """Both actual Typer projections use null for display-only config failures."""
     from agentworks.cli.commands import session as command
-    from agentworks.errors import ConfigError
     from agentworks.sessions import manager
 
     _seed_session_rows(db)
     marker = f"{failure}-sensitive-detail"
-    monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
+    config = make_config()
+    monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: config)
     monkeypatch.setattr(command, "get_db", lambda: db)
     if failure == "broken-registry":
         monkeypatch.setattr(manager, "_display_registry", lambda _config: None)
     else:
-        monkeypatch.setattr(manager, "_display_registry", lambda _config: object())
-
-        def cannot_resolve(*_args: object, **_kwargs: object) -> object:
-            raise ConfigError(marker)
-
-        monkeypatch.setattr("agentworks.sessions.templates.resolve_template", cannot_resolve)
+        db._conn.execute("UPDATE sessions SET template = 'missing-template'")
+        db._conn.commit()
 
     @contextlib.contextmanager
     def batch_boundary(*_args: object, **_kwargs: object) -> Iterator[None]:

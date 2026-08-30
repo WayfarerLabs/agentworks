@@ -25,8 +25,16 @@ re-encodes each known slice through its VM-domain codec before exporting it.
 
 Because the polymorphic table deliberately has no owner foreign key, a damaged or hand-edited
 database can contain identities that normal creation paths reject. Operator-facing errors retain a
-valid owner kind but include the owner name only when its representation is printable and bounded;
-persisted payload values and raw record keys are never used as diagnostic context.
+valid owner kind but include the owner name only when it is a bounded safe identifier. Persisted
+payload values and unsafe record keys are never used as diagnostic context.
+
+The closed `inspect_owner_state` and `inspect_all_instance_state` reads support live `describe` and
+fleet-wide doctor checks without exposing a generic record API. They decode each row independently,
+pair recognized records with sanitized metadata and owner-existence evidence, and return bounded
+value-free metadata for malformed or newer-release records. Malformed observations carry only a
+closed diagnostic code, never the decoder exception or traceback. The fleet read orders every row
+deterministically and computes owner existence in the same snapshot, without one query per owner.
+Domain payload codecs remain outside the database package.
 
 Desired overlays express current intent. Applied slices are evidence from a completed lifecycle
 operation. Applied slices use a repository-owned closed key type whose valid instance-kind/key pairs
@@ -35,6 +43,9 @@ are checked on writes and persisted reads. The current VM-only keys are `hardwar
 replaces only the supplied slice keys, with one operation and one timestamp, and preserves all
 unrelated facts. Empty replacement is a no-op. Existing instances have no synthesized records:
 absence means not recorded until a lifecycle operation establishes state.
+
+Applied operations use the same bounded lower-kebab grammar as applied keys. Inspection classifies
+an unsafe persisted operation as malformed instead of allowing it into human or machine output.
 
 The version-1 VM payloads are deliberately compact and non-secret:
 

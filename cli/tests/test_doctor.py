@@ -21,6 +21,8 @@ from agentworks.doctor import (
     HealthCheck,
     HealthGroup,
     HealthReport,
+    InstanceStateHealthFact,
+    InstanceStateHealthFactType,
     Status,
     _secret_check,
     health_report_data,
@@ -110,6 +112,48 @@ def test_machine_output_serializes_the_same_health_check_facts() -> None:
     assert check["message"] == "configuration did not load"
     assert check["hint"] == "fix the config"
     assert "note" not in check
+
+
+def test_machine_output_serializes_value_free_instance_state_fact() -> None:
+    report = HealthReport(
+        groups=[
+            HealthGroup(
+                "Database",
+                [
+                    HealthCheck(
+                        "VM 'box' SSH identity",
+                        Status.FAIL,
+                        "does not match recorded identity",
+                        instance_state=InstanceStateHealthFact(
+                            fact_type=InstanceStateHealthFactType.APPLIED_COMPARISON,
+                            instance_kind="vm",
+                            instance_name="box",
+                            record_type="applied-state",
+                            record_key="ssh-identity",
+                            payload_version=1,
+                            recorded_at="2026-08-29T12:00:00Z",
+                            comparison="drift",
+                            owner_exists=True,
+                        ),
+                    )
+                ],
+            )
+        ]
+    )
+
+    fact = cast("dict[str, object]", _first_projected_check(report)["instance_state"])
+
+    assert fact == {
+        "fact_type": "applied-comparison",
+        "instance_kind": "vm",
+        "instance_name": "box",
+        "record_type": "applied-state",
+        "record_key": "ssh-identity",
+        "payload_version": 1,
+        "recorded_at": "2026-08-29T12:00:00Z",
+        "comparison": "drift",
+        "owner_exists": True,
+    }
 
 
 def _resolution_preview(result: AggregatePreview) -> ResolutionPreview:

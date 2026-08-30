@@ -260,6 +260,7 @@ def _resolve_with_provenance(
         resolution_layers,
         run_layer_fold,
     )
+    from agentworks.resources.resolved_spec import resolved_spec_default_paths
     from agentworks.template_layers import merge_resolved_template_layer
 
     layers = [
@@ -280,7 +281,7 @@ def _resolve_with_provenance(
         ResolvedTemplate(name=name),
         layers,
         merge_resolved_template_layer,
-        default_paths=(("tmuxinator",),),
+        default_paths=resolved_spec_default_paths(ResolvedTemplate),
         default_resource_kind="workspace-template",
         default_name=name,
     )

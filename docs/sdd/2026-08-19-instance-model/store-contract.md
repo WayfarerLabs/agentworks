@@ -2,7 +2,7 @@
 
 - Status: Accepted and implemented by R2; desired-overlay policy extended by R4
 - Date: 2026-08-23
-- Revised: 2026-08-26
+- Revised: 2026-08-29
 - Requirements: R2 and the storage boundary required by R3 through R5 in `frd.md`
 - Basis: `database-assessment.md`
 
@@ -22,16 +22,16 @@ the physical envelope as a general-purpose bag.
 
 The additive `instance_records` table has this semantic shape:
 
-| Column            | Contract                                                                              |
-| ----------------- | ------------------------------------------------------------------------------------- |
-| `instance_kind`   | One of `vm`, `workspace`, `agent`, or `session`.                                      |
-| `instance_name`   | The stable name used by the owning instance table.                                    |
-| `record_type`     | A private repository discriminator, initially `desired-overlay` or `applied-state`.   |
-| `record_key`      | `spec` for the one desired declaration record, or an enumerated applied-slice key.    |
-| `payload_version` | A positive version selected by the consuming domain's codec.                          |
-| `value_json`      | Canonical JSON object encoding of the domain payload.                                 |
-| `recorded_at`     | UTC time at which this value became authoritative.                                    |
-| `operation`       | The lifecycle operation that established applied state; null for desired declaration. |
+| Column            | Contract                                                                                          |
+| ----------------- | ------------------------------------------------------------------------------------------------- |
+| `instance_kind`   | One of `vm`, `workspace`, `agent`, or `session`.                                                  |
+| `instance_name`   | The stable name used by the owning instance table.                                                |
+| `record_type`     | A private repository discriminator, initially `desired-overlay` or `applied-state`.               |
+| `record_key`      | `spec` for the one desired declaration record, or an enumerated applied-slice key.                |
+| `payload_version` | A positive version selected by the consuming domain's codec.                                      |
+| `value_json`      | Canonical JSON object encoding of the domain payload.                                             |
+| `recorded_at`     | UTC time at which this value became authoritative.                                                |
+| `operation`       | The lower-kebab lifecycle operation that established applied state; null for desired declaration. |
 
 The primary key is `(instance_kind, instance_name, record_type, record_key)`. An index beginning
 with `(instance_kind, record_type)` serves batch reads. The migration creates no rows. Existing VM
@@ -84,7 +84,7 @@ table while preserving lifecycle cleanup.
 
 ## Typed carriers
 
-The repository boundary uses three frozen value records:
+The repository boundary uses three frozen lifecycle value records:
 
 - `VersionedPayload(payload_version, value)` carries one already validated domain payload as a JSON
   object. The repository owns canonical encoding, not domain validation.
@@ -94,6 +94,16 @@ The repository boundary uses three frozen value records:
 - `AppliedStateSlice(instance_kind, instance_name, key, payload, operation, recorded_at)` is
   evidence established by one completed lifecycle operation. Its key uses the closed
   `AppliedStateKey` type. Its absence means not recorded.
+
+Inspection adds closed carriers without exposing a generic record API:
+
+- `InspectedDesiredOverlay` and `InspectedAppliedStateSlice` pair recognized typed records with
+  sanitized metadata, including owner-existence evidence.
+- `UnconsumedInstanceRecord` carries bounded, value-free metadata for a structurally valid future
+  record type or unknown well-formed applied key.
+- `MalformedInstanceRecord` carries bounded, value-free metadata and a closed value-free diagnostic
+  for one independently failed row. It never retains the decoder exception, traceback, or payload.
+- `InstanceStateInspection` groups those outcomes for one exact owner or the fleet.
 
 The repository validates persisted JSON and envelope invariants on every read. A missing row returns
 `None` or an empty tuple according to the named method. A present malformed row raises `StateError`;
@@ -118,6 +128,9 @@ get_applied_slices(instance_kind, instance_name) -> tuple[AppliedStateSlice, ...
 replace_applied_slices(instance_kind, instance_name, operation, slices: Mapping[AppliedStateKey, VersionedPayload]) -> tuple[AppliedStateSlice, ...]
 clear_applied_slice(instance_kind, instance_name, key: AppliedStateKey) -> None
 list_applied_slices(instance_kind) -> tuple[AppliedStateSlice, ...]
+
+inspect_owner_state(instance_kind, instance_name) -> InstanceStateInspection
+inspect_all_instance_state() -> InstanceStateInspection
 ```
 
 No public method accepts `record_type`, a caller-authored record key, raw JSON text, a SQL fragment,
@@ -147,6 +160,14 @@ deletes exactly that key for one instance. An already-absent key is a no-op. Thi
 removes evidence that a lifecycle knows became uncertain after a remote side effect. It does not
 accept unknown strings, expose record types, or turn absence into an applied state. Like
 replacement, it joins an enclosing lifecycle transaction.
+
+The two inspection operations are closed read shapes for live-instance description and doctor. The
+singular operation selects one exact typed owner. The fleet operation selects all rows once in
+deterministic kind, owner, record-type, and record-key order, and determines owner existence with
+bounded work in the same database snapshot. Every row is decoded independently. A malformed common
+envelope or recognized discriminator becomes one malformed observation without hiding siblings. A
+well-formed future record type or unknown applied key becomes unconsumed metadata. Inspection never
+returns raw future payload JSON, and domain payload codecs remain outside `agentworks.db`.
 
 ## Connection and transaction rules
 

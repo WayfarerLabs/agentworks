@@ -16,7 +16,9 @@ capability accepts.
 
 ## VM and SSH connectivity
 
-`agw vm describe NAME` shows the recorded power state, Tailscale address, and recent events.
+`agw vm describe NAME` shows the recorded power state, Tailscale address, recent events, current
+resolved declaration, applied facts, and structural drift. `agw doctor` reports SSH identity drift,
+orphaned instance records, malformed known records, and well-formed records from a newer release.
 `agw vm verify-connection NAME` tests the canonical admin connection without starting the VM. If
 that succeeds, `agw vm shell NAME` opens the Agentworks-managed SSH path.
 

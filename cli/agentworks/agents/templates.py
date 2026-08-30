@@ -216,6 +216,7 @@ def _resolve_with_provenance(
         resolution_layers,
         run_layer_fold,
     )
+    from agentworks.resources.resolved_spec import resolved_spec_default_paths
     from agentworks.template_layers import merge_resolved_template_layer
 
     layers = [
@@ -236,18 +237,7 @@ def _resolve_with_provenance(
         ResolvedAgentTemplate(name=name),
         layers,
         merge_resolved_template_layer,
-        default_paths=(
-            (field,)
-            for field in (
-                "shell",
-                "dotfiles_destination",
-                "dotfiles_install_cmd",
-                "mise_activate",
-                "mise_allow_unlocked",
-                "mise_install_before",
-                "mise_prune_on_reinit",
-            )
-        ),
+        default_paths=resolved_spec_default_paths(ResolvedAgentTemplate),
         default_resource_kind="agent-template",
         default_name=name,
     )

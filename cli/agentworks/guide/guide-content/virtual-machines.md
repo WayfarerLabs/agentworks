@@ -32,7 +32,10 @@ manifest with `agw resource edit vm-site/NAME`.
 ## Managed VMs
 
 `agw vm list` shows VMs Agentworks already manages. `agw vm describe NAME` owns the detailed site,
-power, resource, and recorded-state view for one VM. Use `--output json` when another tool or agent
+power, resource, and recorded-state view for one VM, plus its current VM/admin declarations, stored
+instance specs, recorded applied hardware and SSH identity facts, and any comparison drift. Use
+`agw resource show vm-template/NAME` or `agw resource show admin-template/NAME` to inspect fully
+resolved values and their provenance before creation. Use `--output json` when another tool or agent
 needs structured facts.
 
 `agw vm verify-connection NAME` performs an active SSH check without starting the VM. Creating,

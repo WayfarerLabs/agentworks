@@ -15,8 +15,11 @@ for live instances.
 `agw resource list --kind KIND --include-disabled` to inspect one kind, including its origin,
 enablement, and readiness. Use `agw resource show KIND/NAME` for the complete focused view of one
 loaded resource, including its direct relationships, current live uses, attributable diagnostics,
-and normalized declaration when it has one. Use `agw graph show KIND/NAME` for broader relationship
-traversal and `agw doctor` for installation-wide health.
+and normalized declaration when it has one. Selectable instance templates also include the fully
+resolved spec and where each value came from. Use the live kind's `describe` command for its current
+declaration, stored instance layer, recorded applied facts, and drift. Use
+`agw graph show KIND/NAME` for broader relationship traversal and `agw doctor` for installation-wide
+health.
 
 Use `--output json` when the result will be consumed programmatically.
 

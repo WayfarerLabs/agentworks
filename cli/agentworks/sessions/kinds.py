@@ -31,6 +31,8 @@ if TYPE_CHECKING:
 
     from agentworks.declared_resource import DeclaredResource
     from agentworks.resources.reference import ResourceReference
+    from agentworks.resources.registry import Registry
+    from agentworks.resources.resolved_spec import ResolvedSpec
 
 
 @dataclass(frozen=True)
@@ -65,6 +67,17 @@ class _SessionTemplateKind:
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
     category: Literal["declarable", "capability"] = "declarable"
     builtin_override: Literal["allow", "reserved"] = "reserved"
+
+    def resolve_for_show(self, registry: Registry, name: str) -> ResolvedSpec:
+        """Resolve one concrete session template for focused inspection."""
+        from agentworks.resources.access import ResourceIdentity
+        from agentworks.resources.resolved_spec import project_resolved_spec
+        from agentworks.sessions.templates import resolve_template_with_provenance
+
+        return project_resolved_spec(
+            resolve_template_with_provenance(registry, name),
+            ResourceIdentity(self.kind, name),
+        )
 
     def synthesize(
         self,

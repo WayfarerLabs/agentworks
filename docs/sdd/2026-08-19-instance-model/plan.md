@@ -2,7 +2,7 @@
 
 <!-- cspell:ignore sdds -->
 
-- Status: R1 through R4 and the merge-strategy correction merged; R5 in design
+- Status: R1-R4 and merge strategy merged; R5 implemented, final verification pending
 - Date: 2026-08-23
 - Last revised: 2026-08-29
 - Requirements: [frd.md](./frd.md)
@@ -338,31 +338,31 @@ current transport will present, and no password-protected-key path regresses.
 
 ## Phase 5: R5 resolved-spec and drift surfaces
 
-- [ ] Extend the focused `resource show` service with fully resolved template values and path, map
+- [x] Extend the focused `resource show` service with fully resolved template values and path, map
       key, or list-item provenance sufficient to distinguish declared, inherited, defaulted, and
       overlaid contributors truthfully.
-- [ ] Extend existing VM, workspace, agent, and session `describe` with current declared resolution,
+- [x] Extend existing VM, workspace, agent, and session `describe` with current declared resolution,
       applied slices, and explicit not recorded, match, drift, or unverifiable comparison state in
       one structural read snapshot.
-- [ ] Add doctor batch reads, owner-existence validation for orphaned records, visibility for
+- [x] Add doctor batch reads, owner-existence validation for orphaned records, visibility for
       unconsumed newer-release records, and structural SSH drift checks without opening a sidecar or
       repeating one query per instance.
-- [ ] Preserve JSON v1 fields and add only optional tagged data; keep human and JSON facts
+- [x] Preserve JSON v1 fields and add only optional tagged data; keep human and JSON facts
       reconciled without prose-policing tests.
-- [ ] Prove effective CPU, memory, disk, and swap are available before `vm create`; template and
+- [x] Prove effective CPU, memory, disk, and swap are available before `vm create`; template and
       instance provenance; applied/current comparison; batch query behavior; and no overlay ceremony
       in the simple case.
-- [ ] Update permanent resource, machine-output, doctor, command-reference, and guide collateral.
+- [x] Update permanent resource, machine-output, doctor, command-reference, and guide collateral.
 
 Definition of done: an operator or agent can inspect effective pre-mutation specs and honest
 post-apply drift, including visible ignorance, from the supported CLI surfaces.
 
 ## Phase 6: complete verification and closeout
 
-- [ ] Run focused tests after every phase and the full gate on the complete exact head.
-- [ ] Run equal-capability project review, independent fresh-eyes review, and the saga review
+- [x] Run focused tests after every phase and the full gate on the complete exact head.
+- [x] Run equal-capability project review, independent fresh-eyes review, and the saga review
       campaign scaled to the final blast radius; resolve every material finding.
-- [ ] Run isolated-home CLI acceptance for overlay declaration, resolved template and instance show,
+- [x] Run isolated-home CLI acceptance for overlay declaration, resolved template and instance show,
       doctor tri-state output, malformed state, and JSON v1 compatibility.
 - [ ] Run live VM validation for create-time capture, matching preflight, deliberate identity drift,
       password-protected OpenSSH keys, safe cleanup, and independent residue verification.

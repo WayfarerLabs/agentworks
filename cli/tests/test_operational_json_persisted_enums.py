@@ -78,7 +78,7 @@ def test_invalid_database_enums_are_closed_in_shared_facts(
     assert VMDetailFacts.from_row(vm_row).initialization_status == "unknown"
     vm_fact = vm_listing(db).vms[0]
     assert (vm_fact.provisioning_status, vm_fact.initialization_status) == ("unknown", "unknown")
-    assert workspace_description(db, "ws").sessions[0].mode == "unknown"
+    assert workspace_description(db, config, "ws").sessions[0].mode == "unknown"
     session_fact = session_listing(
         db,
         config,

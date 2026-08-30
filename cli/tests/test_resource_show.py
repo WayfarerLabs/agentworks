@@ -29,6 +29,7 @@ from agentworks.resources.graph_query import GraphEdge, GraphEdgeType, GraphIden
 from agentworks.resources.inspect import ResourceSummary
 from agentworks.resources.kind import InstanceRef
 from agentworks.resources.reference import RefRelationship
+from agentworks.resources.resolved_spec import ResolvedPathProvenance, ResolvedSpec, ResolvedValueSource
 from agentworks.resources.show import FocusedRelationships, ResourceShow, render_resource_show
 from tests.conftest import CapturedOutput, ManifestDoc, write_cfg, write_manifests
 
@@ -40,6 +41,7 @@ def _shown(
     *,
     declaration: JsonObject | None = None,
     diagnostics: tuple[HealthCheck, ...] = (),
+    resolution: ResolvedSpec | None = None,
 ) -> ResourceShow:
     return ResourceShow(
         summary=ResourceSummary(
@@ -58,6 +60,7 @@ def _shown(
         used_by=(),
         diagnostics=diagnostics,
         declaration=declaration,
+        resolution=resolution,
     )
 
 
@@ -82,6 +85,26 @@ def test_human_renderer_projects_complete_structural_facts_and_parseable_manifes
     assert all(value in "\n".join(nested[:3]) for value in ("false", "true", "backend unavailable"))
     declaration_lines = nested[-len(yaml.safe_dump(declaration, allow_unicode=False, sort_keys=False).splitlines()) :]
     assert yaml.safe_load("\n".join(declaration_lines)) == declaration
+
+
+def test_human_renderer_includes_resolved_values_and_provenance(
+    captured_output: CapturedOutput,
+) -> None:
+    resolution = ResolvedSpec(
+        spec={"cpus": 4},
+        provenance=(
+            ResolvedPathProvenance(
+                ("cpus",),
+                (ResolvedValueSource("defaulted", "vm-template", "dev"),),
+            ),
+        ),
+    )
+
+    render_resource_show(_shown(resolution=resolution))
+
+    nested = [message for role, level, message in captured_output.lines if role is Role.BODY and level == 1]
+    assert "cpus: 4" in nested
+    assert any("defaulted:vm-template/dev" in message for message in nested)
 
 
 def test_human_renderer_makes_disabled_capability_nulls_structural(

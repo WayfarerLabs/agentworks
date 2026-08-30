@@ -109,20 +109,25 @@ def agent_describe(
 ) -> None:
     """Show detailed information about an agent."""
     from agentworks.agents.manager import agent_description, render_agent_description
+    from agentworks.config import load_config
 
-    description = agent_description(get_db(), name=name)
+    config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
     if output_format is OutputFormat.JSON:
         from click import get_binary_stream
 
+        from agentworks import output
         from agentworks.agents.manager.inspect import agent_description_data
         from agentworks.machine_output import MachineOutputCommand, write_json_envelope
 
+        with output.suppress_presentation():
+            description = agent_description(get_db(), config, name=name)
         write_json_envelope(
             MachineOutputCommand.AGENT_DESCRIBE,
             agent_description_data(description),
             get_binary_stream("stdout"),
         )
         return
+    description = agent_description(get_db(), config, name=name)
     render_agent_description(description)
 
 

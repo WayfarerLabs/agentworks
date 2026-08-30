@@ -59,6 +59,12 @@ The relationship slice stops after the edges touching the row; use `graph show` 
 The focused diagnostics do not replace the fleet-wide `doctor` report. Capability resources have no
 declaration, so their declaration is null.
 
+For `vm-template`, `admin-template`, `workspace-template`, `agent-template`, and `session-template`,
+the focused view also shows the fully resolved spec and path-based provenance. Each surviving value
+is marked as defaulted, inherited, declared, or overlaid as applicable. Composite containers merged
+from several layers report their truthful child paths. This is the pre-mutation view to use when you
+need to know the effective VM CPU, memory, disk, or swap before creating it.
+
 The normalized declaration does not preserve source comments, source key order,
 omitted-versus-defaulted distinctions, or merge inheritance. Use `resource explain` for accepted
 fields, `resource edit` for the declaring file, and `secret describe` for secret-specific mapping
@@ -830,10 +836,12 @@ The read-only graph, resource, secret, and health commands also support `--outpu
 and `doctor`. Each successful response is one JSON document with `schema_version`, `command`, and
 `data` fields. The backend lists and reference arrays retain their operational precedence and graph
 order, and the secret views report only lookup prediction and metadata, never a secret value.
-`resource show` likewise exposes only value-free secret previews. Structural live-use facts come
-from the same finalized Registry snapshot as every other relationship, rather than from a second
-database scan. A supported row with no current users reports an empty array and a count of zero;
-kinds without the stable live-usage projection retain JSON null.
+`resource show` never resolves a secret value. Resolved template and live-instance inspection does
+show authored declaration values, including explicitly inline environment values, so treat its human
+and JSON output as sensitive. A configured secret remains a reference by name. Structural live-use
+facts come from the same finalized Registry snapshot as every other relationship, rather than from a
+second database scan. A supported row with no current users reports an empty array and a count of
+zero; kinds without the stable live-usage projection retain JSON null.
 
 `--output human` is the default and keeps the terminal-oriented rendering. `--names-only` remains
 reserved for shell completion, so it cannot be combined with JSON output. `agw doctor --output json`

@@ -6,7 +6,7 @@ The read-only half of the agents command layer.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from agentworks import output
 from agentworks.errors import NotFoundError
@@ -15,8 +15,12 @@ from agentworks.name_filters import validate_name_filters
 from ._common import MAX_AGENT_NAME_LENGTH, MAX_GRANTS_DISPLAY
 
 if TYPE_CHECKING:
-    from agentworks.db import Database
+    from agentworks.agents.template import AgentTemplate
+    from agentworks.config import Config
+    from agentworks.db import AgentRow, Database, InstanceStateInspection
+    from agentworks.instance_description import InstanceStateDescription
     from agentworks.machine_output import JsonObject
+    from agentworks.resources.registry import Registry
 
 # NAME-column truncation cap for ``agent list``, derived from the agent-name
 # cap so the two cannot drift: a valid name (<= 28) never truncates, and the
@@ -61,6 +65,7 @@ class AgentDescription:
     created_at: str
     explicit_grants: tuple[str, ...]
     sessions: tuple[AgentSession, ...]
+    instance_state: InstanceStateDescription | None = None
 
 
 def agent_listing_data(listing: AgentListing) -> JsonObject:
@@ -83,7 +88,7 @@ def agent_listing_data(listing: AgentListing) -> JsonObject:
 
 def agent_description_data(description: AgentDescription) -> JsonObject:
     """Project agent detail facts into the closed JSON v1 shape."""
-    return {
+    data: JsonObject = {
         "agent": {
             "name": description.name,
             "vm_name": description.vm_name,
@@ -102,6 +107,12 @@ def agent_description_data(description: AgentDescription) -> JsonObject:
             ],
         },
     }
+    if description.instance_state is not None:
+        from agentworks.instance_description import instance_state_data
+
+        agent_data = cast("JsonObject", data["agent"])
+        agent_data["instance_state"] = instance_state_data(description.instance_state)
+    return data
 
 
 def _grant_facts(db: Database, agent_name: str) -> tuple[AgentGrant, ...]:
@@ -216,33 +227,67 @@ def list_agents(
 
 def agent_description(
     db: Database,
+    config: Config,
     *,
     name: str,
 ) -> AgentDescription:
     """Collect ordered agent detail facts without presentation."""
-    agent = db.get_agent(name)
-    if agent is None:
-        raise NotFoundError(
-            f"agent '{name}' not found",
-            entity_kind="agent",
-            entity_name=name,
+    with db.snapshot():
+        agent = db.get_agent(name)
+        if agent is None:
+            raise NotFoundError(
+                f"agent '{name}' not found",
+                entity_kind="agent",
+                entity_name=name,
+            )
+        from agentworks.instance_description import load_instance_description_registry
+
+        registry = load_instance_description_registry(db, config, "agent", name)
+        inspection = db.instance_state.inspect_owner_state("agent", name)
+        instance_state = _agent_instance_state(registry, agent, inspection)
+
+        grants = _grant_facts(db, name)
+        sessions = tuple(
+            AgentSession(name=session.name, template=session.template, workspace_name=session.workspace_name)
+            for session in db.list_sessions()
+            if session.agent_name == name
+        )
+        return AgentDescription(
+            name=agent.name,
+            vm_name=agent.vm_name,
+            linux_user=agent.linux_user,
+            template=agent.template,
+            grant_all=agent.grant_all,
+            created_at=agent.created_at,
+            explicit_grants=tuple(grant.workspace_name for grant in grants if grant.grant_type in {"explicit", "both"}),
+            sessions=sessions,
+            instance_state=instance_state,
         )
 
-    grants = _grant_facts(db, name)
-    sessions = tuple(
-        AgentSession(name=session.name, template=session.template, workspace_name=session.workspace_name)
-        for session in db.list_sessions()
-        if session.agent_name == name
+
+def _agent_instance_state(
+    registry: Registry,
+    agent: AgentRow,
+    inspection: InstanceStateInspection,
+) -> InstanceStateDescription:
+    from agentworks.agents.templates import resolve_template_with_provenance
+    from agentworks.instance_description import single_declaration_instance_state
+    from agentworks.resources.access import ResourceIdentity
+
+    selection = ResourceIdentity(
+        "agent-template",
+        "default" if agent.template is None else agent.template,
     )
-    return AgentDescription(
-        name=agent.name,
-        vm_name=agent.vm_name,
-        linux_user=agent.linux_user,
-        template=agent.template,
-        grant_all=agent.grant_all,
-        created_at=agent.created_at,
-        explicit_grants=tuple(grant.workspace_name for grant in grants if grant.grant_type in {"explicit", "both"}),
-        sessions=sessions,
+    return single_declaration_instance_state(
+        instance_kind="agent",
+        selection=selection,
+        inspection=inspection,
+        resolve=lambda overlay: resolve_template_with_provenance(
+            registry,
+            agent.template,
+            overlay=cast("AgentTemplate | None", overlay),
+            instance_name=agent.name,
+        ),
     )
 
 
@@ -254,6 +299,11 @@ def render_agent_description(description: AgentDescription) -> None:
     output.info(f"Template:   {description.template or '-'}")
     output.info(f"Grant all:  {'yes' if description.grant_all else 'no'}")
     output.info(f"Created:    {description.created_at}")
+
+    if description.instance_state is not None:
+        from agentworks.instance_description import render_instance_state
+
+        render_instance_state(description.instance_state)
 
     # Explicit grants
     explicit = description.explicit_grants
@@ -274,6 +324,6 @@ def render_agent_description(description: AgentDescription) -> None:
         output.detail("(none)")
 
 
-def describe_agent(db: Database, *, name: str) -> None:
+def describe_agent(db: Database, config: Config, *, name: str) -> None:
     """Show detailed information about an agent."""
-    render_agent_description(agent_description(db, name=name))
+    render_agent_description(agent_description(db, config, name=name))

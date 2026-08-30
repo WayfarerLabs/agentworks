@@ -857,6 +857,7 @@ def test_describe_session_holds_across_the_probe(
     _record_holds(monkeypatch, events)
 
     def _probe(session: object, *, target: object) -> object:
+        assert db._tx_depth == 0  # noqa: SLF001
         events.append("probe")
         from agentworks.db import SessionStatus
 
@@ -869,6 +870,39 @@ def test_describe_session_holds_across_the_probe(
     assert events == ["hold-open:box", "probe", "hold-close:box"]
     assert resolve_counter == [["proxmox-token"]]
     assert any("Status:     stopped" in m for m in captured_output.info)
+
+
+def test_describe_session_derives_vm_from_its_structural_snapshot(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config()
+    _seed_singular(db)
+    _seed_vm(db, "moved", "100.64.0.10")
+    _reachable(monkeypatch, True)
+
+    def move_before_snapshot(session: object, *, target: object) -> object:
+        assert db._tx_depth == 0  # noqa: SLF001
+        db._conn.execute("UPDATE workspaces SET vm_name = 'moved' WHERE name = 'ws-box'")  # noqa: SLF001
+        db._conn.commit()  # noqa: SLF001
+        from agentworks.db import SessionStatus
+
+        return SessionStatus.STOPPED
+
+    monkeypatch.setattr(session_manager, "check_session_status", move_before_snapshot)
+
+    description = session_manager.session_description(
+        db,
+        config,
+        name="s1",
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    assert description.vm_name == "moved"
+    assert resolve_counter == [["proxmox-token"]]
 
 
 def test_describe_session_shows_harness_integration_line(
