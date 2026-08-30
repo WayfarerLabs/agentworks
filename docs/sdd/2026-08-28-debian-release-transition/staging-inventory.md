@@ -16,8 +16,7 @@ These size-bearing paths use `/var/tmp` and private `mktemp` names:
 - remote Lima host file relays; and
 - the Proxmox setup image download.
 
-Each runtime path cleans up on success and failure. The VM backup deliberately preserves its private
-archive directory after an error for operator recovery and reports that path.
+Each runtime path cleans up on success, failure, and interruption.
 
 ## Bounded `/tmp` use
 

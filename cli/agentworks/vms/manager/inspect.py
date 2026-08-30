@@ -21,7 +21,7 @@ from agentworks.errors import (
 from agentworks.naming import MAX_VM_NAME_LENGTH
 
 from ._helpers import _require_vm, _vm_scope
-from .boundary import _platform_ops_ctx
+from .boundary import _platform_ops_ctx, _warn_legacy_release
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -464,6 +464,7 @@ def vm_description(
     from agentworks.vms.sites import lookup_site
 
     vm = _require_vm(db, name)
+    _warn_legacy_release(vm)
     issues: list[VMIssue] = []
     diagnostics: list[VMDiagnostic] = []
     platform_name: str | None = None

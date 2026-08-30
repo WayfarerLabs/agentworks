@@ -247,6 +247,7 @@ def _archive_workspaces(
     q_tmp = shlex.quote(tmp_dir)
     archive = f"{tmp_dir}/workspaces.tar.zst"
     q_archive = shlex.quote(archive)
+    detached_dir: str | None = None
 
     try:
         # Verify workspace paths exist on the VM
@@ -388,12 +389,10 @@ def _archive_workspaces(
         output.detail("Transferring remote archive to local...")
         _transfer_with_progress(target, archive, local_archive, remote_size)
 
-    except Exception:
-        output.warn(f"Remote temp dir preserved for debugging: {tmp_dir}")
-        raise
-    else:
+    finally:
         target.run(f"rm -rf {q_tmp}", sudo=True, check=False)
-        target.run(f"rm -rf {shlex.quote(detached_dir)}", check=False)
+        if detached_dir is not None:
+            target.run(f"rm -rf {shlex.quote(detached_dir)}", check=False)
 
     return [ws.workspace_path for ws in valid], skipped
 

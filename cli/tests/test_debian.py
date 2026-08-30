@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from enum import StrEnum
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -11,6 +13,7 @@ from agentworks.debian import (
     DebianRelease,
     DebianReleaseProfile,
     DebianSupport,
+    DebianUpgradePolicy,
     classify_release,
     parse_os_release,
     probe_debian_release,
@@ -50,6 +53,31 @@ def test_current_and_support_derive_from_registry_order() -> None:
     assert CURRENT_DEBIAN_RELEASE is DEBIAN_RELEASES[-1].release
     assert classify_release(DebianRelease.TRIXIE) is DebianSupport.CURRENT
     assert classify_release(DebianRelease.BOOKWORM) is DebianSupport.PREVIOUS
+
+
+def test_appending_a_candidate_profile_reclassifies_older_releases() -> None:
+    class CandidateRelease(StrEnum):
+        FORKY = "forky"
+
+    forky = cast("DebianRelease", CandidateRelease.FORKY)
+    candidate_policy = DebianUpgradePolicy(
+        source=DebianRelease.TRIXIE,
+        target=forky,
+        source_suites=("trixie",),
+        target_suites=("forky",),
+        minimum_openssh_version="candidate",
+        documentation_urls=("https://www.debian.org/releases/forky/",),
+    )
+    candidate_profiles = validate_release_profiles(
+        (
+            *DEBIAN_RELEASES,
+            DebianReleaseProfile(forky, "14", upgrade_from_previous=candidate_policy),
+        )
+    )
+
+    assert classify_release(forky, candidate_profiles) is DebianSupport.CURRENT
+    assert classify_release(DebianRelease.TRIXIE, candidate_profiles) is DebianSupport.PREVIOUS
+    assert classify_release(DebianRelease.BOOKWORM, candidate_profiles) is DebianSupport.LEGACY
 
 
 def test_release_registry_requires_the_adjacent_policy() -> None:

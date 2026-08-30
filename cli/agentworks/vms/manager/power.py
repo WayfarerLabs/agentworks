@@ -19,7 +19,7 @@ from ._helpers import (
     _require_vm,
     _vm_scope,
 )
-from .boundary import _live_vm_boundary, _platform_ops_ctx
+from .boundary import _live_vm_boundary, _platform_ops_ctx, _warn_legacy_release
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -356,6 +356,7 @@ def rekey_vm(
 
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
+    _warn_legacy_release(vm)
 
     # The composition root: construct (registers the site's config
     # secrets), preflight both participating resources (the sweep

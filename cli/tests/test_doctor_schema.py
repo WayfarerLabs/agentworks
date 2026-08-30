@@ -12,9 +12,12 @@ from typing import cast
 
 import pytest
 
+from agentworks.config import Config
 from agentworks.db import LATEST_VERSION, Database, SessionMode
+from agentworks.debian import DebianRelease
 from agentworks.doctor import HealthGroup, Status
 from agentworks.doctor_state import (
+    _append_live_release_check,
     _live_resource_counts,
     _report_contents,
     append_vm_site_database_checks,
@@ -179,11 +182,50 @@ def test_doctor_database_errors_remain_shared_actionable_facts(monkeypatch: pyte
     system = check_system().checks[0]
     database = check_database().checks[0]
     sites = HealthGroup("VM sites")
-    append_vm_site_database_checks(sites, sites={}, not_ready={})
+    append_vm_site_database_checks(
+        sites,
+        config=cast("Config", object()),
+        sites={},
+        not_ready={},
+    )
 
     assert system.message == f"could not check the database: {marker}"
     assert database.message == marker
     assert sites.checks[0].message == f"could not check the database: {marker}"
+
+
+@pytest.mark.parametrize(
+    ("recorded", "observed", "expected_status"),
+    [
+        (DebianRelease.TRIXIE, DebianRelease.TRIXIE, Status.OK),
+        (DebianRelease.BOOKWORM, DebianRelease.TRIXIE, Status.FAIL),
+    ],
+)
+def test_doctor_compares_live_and_recorded_debian_release_without_writing(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    recorded: DebianRelease,
+    observed: DebianRelease,
+    expected_status: Status,
+) -> None:
+    db.insert_vm("box", site="lima-local", hostname="box")
+    db.update_vm_tailscale("box", "100.64.0.9")
+    db.update_vm_debian_release("box", recorded, observed_at="2026-08-29T00:00:00Z")
+    before = db.get_vm("box")
+    assert before is not None
+
+    sentinel = object()
+    monkeypatch.setattr("agentworks.transports.transport", lambda *_args, **_kwargs: sentinel)
+    monkeypatch.setattr(
+        "agentworks.debian.probe_debian_release",
+        lambda candidate: observed if candidate is sentinel else DebianRelease.BOOKWORM,
+    )
+    group = HealthGroup("VM sites")
+
+    _append_live_release_check(group, cast("Config", object()), before)
+
+    assert group.checks[0].status is expected_status
+    assert db.get_vm("box") == before
 
 
 def test_installed_doctor_reports_malformed_schema_in_human_and_json(tmp_path: Path) -> None:

@@ -10,6 +10,7 @@ from agentworks.path_rendering import format_host_path
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.doctor import HealthGroup
     from agentworks.vms.sites import VMSiteDecl
@@ -150,6 +151,7 @@ def _report_contents(group: HealthGroup, database: object) -> None:
 def append_vm_site_database_checks(
     group: HealthGroup,
     *,
+    config: Config,
     sites: dict[str, VMSiteDecl],
     not_ready: dict[str, str],
 ) -> None:
@@ -180,5 +182,41 @@ def append_vm_site_database_checks(
                         f"site '{vm.site}' is not declared",
                         hint=site_manifest_hint(vm.site),
                     )
+                else:
+                    _append_live_release_check(group, config, vm)
     except Exception as error:
         group.warn("VM sites", f"could not check the database: {error}", hint=getattr(error, "hint", None))
+
+
+def _append_live_release_check(group: HealthGroup, config: Config, vm: VMRow) -> None:
+    """Compare a reachable guest to persisted release state without writing it."""
+
+    if vm.tailscale_host is None:
+        group.info(f"VM '{vm.name}' Debian live", "not checked; no canonical Tailscale route is recorded")
+        return
+    try:
+        from agentworks.debian import probe_debian_release
+        from agentworks.transports import transport
+
+        observed = probe_debian_release(transport(vm, config, default_timeout=10))
+    except Exception as error:
+        group.warn(
+            f"VM '{vm.name}' Debian live",
+            f"could not observe the guest: {error}",
+            hint=getattr(error, "hint", None),
+        )
+        return
+
+    if vm.debian_release is None:
+        group.info(
+            f"VM '{vm.name}' Debian live",
+            f"guest reports {observed}; the database has no verified observation yet",
+        )
+    elif vm.debian_release is not observed:
+        group.fail(
+            f"VM '{vm.name}' Debian live",
+            f"database records {vm.debian_release}, but the guest reports {observed}",
+            hint=f"Run 'agw vm upgrade {vm.name}' to inspect an adjacent external upgrade.",
+        )
+    else:
+        group.ok(f"VM '{vm.name}' Debian live", observed.value)
