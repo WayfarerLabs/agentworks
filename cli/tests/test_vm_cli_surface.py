@@ -46,6 +46,19 @@ def test_vm_create_site_flag_forwards(monkeypatch: pytest.MonkeyPatch) -> None:
     assert captured["site"] == "azure-dev"
 
 
+def test_vm_upgrade_checkpoint_forwards(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+    result = _invoke(
+        monkeypatch,
+        ["vm", "upgrade", "box", "--checkpoint", "snapshot-17"],
+        "agentworks.vms.manager.upgrade_vm",
+        captured,
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["name"] == "box"
+    assert captured["checkpoint"] == "snapshot-17"
+
+
 def test_vm_create_admin_template_flag_forwards(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

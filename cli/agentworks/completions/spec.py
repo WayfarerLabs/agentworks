@@ -223,6 +223,7 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("vm.delete", "name"): "vms",
     ("vm.rekey", "name"): "vms",
     ("vm.backup", "name"): "vms",
+    ("vm.upgrade", "name"): "vms",
     ("vm.describe", "name"): "vms",
     ("vm.verify-connection", "name"): "vms",
     ("vm.reinit", "name"): "vms",

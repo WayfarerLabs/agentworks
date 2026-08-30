@@ -135,6 +135,31 @@ def vm_backup(
     backup_vm(get_db(), load_config(), name, interaction=interaction)
 
 
+@vm_app.command("upgrade")
+def vm_upgrade(
+    name: Annotated[str, typer.Argument(help="VM name")],
+    checkpoint: Annotated[
+        str | None,
+        typer.Option(
+            "--checkpoint",
+            help="Reference to an operator-created bootable recovery artifact",
+        ),
+    ] = None,
+) -> None:
+    """Upgrade a previous-release Debian VM to the current release."""
+    interaction = ordinary_tty_interaction_policy()
+    from agentworks.config import load_config
+    from agentworks.vms.manager import upgrade_vm
+
+    upgrade_vm(
+        get_db(),
+        load_config(),
+        name=name,
+        checkpoint=checkpoint,
+        interaction=interaction,
+    )
+
+
 @vm_app.command("describe")
 def vm_describe(
     name: Annotated[str, typer.Argument(help="VM name")],

@@ -69,6 +69,7 @@ def gated_vm_boundary(
     vm: VMRow,
     *,
     targets: Sequence[SecretTarget] = (),
+    secret_names: Sequence[str] = (),
     scope: OperationScope | None = None,
     interaction: TtyInteractionPolicy,
 ) -> Iterator[tuple[LiveVMNode, Resolver, RunContext]]:
@@ -78,7 +79,11 @@ def gated_vm_boundary(
     live VM node from its row (the site edge holds the bound
     platform), register the walk union AND the command's env-chain
     ``targets`` on the one resolver (site config secrets and runtime
-    env secrets are ONE prompt session), then open the ACTIVATION GATE
+    env secrets are ONE prompt session). ``secret_names`` adds narrow,
+    command-owned named secrets that are not part of an environment chain,
+    such as a credential an operation must retain across reconnect. It does
+    not expand the live node's declared capability surface. The boundary then
+    opens the ACTIVATION GATE
     before the
     preflight sweep (its just-in-time values seed the boundary
     resolver) and run the one boundary resolve inside it. Yields
@@ -125,6 +130,8 @@ def gated_vm_boundary(
     vm_node = live_vm_node(db, config, registry, vm)
     nodes = walk(vm_node)
     for secret_name in secret_union(nodes):
+        resolver.register_name(secret_name)
+    for secret_name in secret_names:
         resolver.register_name(secret_name)
     if targets:
         resolver.register_targets(targets, allow_transient_auto_declare=True)

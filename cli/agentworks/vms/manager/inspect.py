@@ -126,6 +126,10 @@ class VMEventName(StrEnum):
     BACKUP_STARTED = "backup_started"
     BACKUP_COMPLETED = "backup_completed"
     BACKUP_FAILED = "backup_failed"
+    DEBIAN_UPGRADE_STARTED = "debian_upgrade_started"
+    DEBIAN_UPGRADE_COMPLETE = "debian_upgrade_complete"
+    DEBIAN_UPGRADE_ADOPTED = "debian_upgrade_adopted"
+    DEBIAN_UPGRADE_REPAIR_REQUIRED = "debian_upgrade_repair_required"
     REKEY = "rekey"
     UNKNOWN = "unknown"
 

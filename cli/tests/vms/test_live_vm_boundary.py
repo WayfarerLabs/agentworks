@@ -146,3 +146,29 @@ def test_env_targets_join_the_site_secret_pass(
     ]
     assert resolver.get("api-key") == "k"
     assert resolver.get("proxmox-token") == "pve-token"
+
+
+def test_command_owned_named_secret_joins_the_boundary_pass(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-env command credential shares the existing resolve pass."""
+    from agentworks.bootstrap import build_registry
+
+    monkeypatch.setenv("AW_SECRET_RECONNECT_KEY", "key")
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
+    config = make_config(manifests=[ManifestDoc("secret", "reconnect-key", description="reconnect credential")])
+    registry = build_registry(config)
+    with vm_manager.gated_vm_boundary(
+        db,
+        config,
+        registry,
+        _seed_vm(db, "lima-local"),
+        secret_names=("reconnect-key",),
+        interaction=TtyInteractionPolicy.REFUSE,
+    ) as (_vm_node, resolver, _ops_ctx):
+        assert resolver.get("reconnect-key") == "key"
+
+    assert resolve_counter == [["reconnect-key"]]

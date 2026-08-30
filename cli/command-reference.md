@@ -260,14 +260,16 @@ record:
 `{name, path, sessions}` with session entries `{name, template, mode, agent_name}`. `events[]` is
 `{created_at, event, detail}`. Event is exactly `provisioning_started`, `provisioning_complete`,
 `provisioning_failed`, `init_started`, `init_complete`, `init_partial`, `init_failed`,
-`backup_started`, `backup_completed`, `backup_failed`, `rekey`, or `unknown`. Historical or future
-raw names outside that closed set project as `unknown` and never echo their stored text. `detail` is
-reserved and always JSON `null` in v1 because persisted event detail is unbounded diagnostic text;
-no non-null detail grammar exists. `agent_name` is nullable, and mode is `admin`, `agent`, or
-`unknown`. In this nested VM JSON projection, the sentinel closes invalid persisted modes without
-echoing them. These arrays retain database order. `issues[]` is `{source, code}` in encounter order:
-source is `site_lookup`, `preflight`, `secret_resolution`, or `platform_status`, and code is always
-`unavailable`. Issues do not carry backend text or exception details.
+`debian_upgrade_started`, `debian_upgrade_complete`, `debian_upgrade_adopted`,
+`debian_upgrade_repair_required`, `backup_started`, `backup_completed`, `backup_failed`, `rekey`, or
+`unknown`. Historical or future raw names outside that closed set project as `unknown` and never
+echo their stored text. `detail` is reserved and always JSON `null` in v1 because persisted event
+detail is unbounded diagnostic text; no non-null detail grammar exists. `agent_name` is nullable,
+and mode is `admin`, `agent`, or `unknown`. In this nested VM JSON projection, the sentinel closes
+invalid persisted modes without echoing them. These arrays retain database order. `issues[]` is
+`{source, code}` in encounter order: source is `site_lookup`, `preflight`, `secret_resolution`, or
+`platform_status`, and code is always `unavailable`. Issues do not carry backend text or exception
+details.
 
 ```bash
 agw vm list --output json
@@ -492,6 +494,7 @@ just a vm-site.
 | `agw vm start <name>`                               | Start a stopped VM and clear its manual-stop intent           |
 | `agw vm stop <name>`                                | Stop a VM and keep it stopped (no auto-start)                 |
 | `agw vm reinit <name>`                              | Re-run initialization on a provisioned VM                     |
+| `agw vm upgrade <name> [--checkpoint <ref>]`        | Upgrade the previous Debian release to the current release    |
 | `agw vm delete <name>`                              | Delete a VM (with confirmation)                               |
 | `agw vm backup <name>`                              | Back up a VM: metadata, agents, workspaces, and files         |
 | `agw vm rekey <name>`                               | Assign a new Tailscale auth key to a VM (logout + rejoin)     |
@@ -534,6 +537,16 @@ ask again. Non-interactive runs never prompt (a later interactive create still a
 `vm reinit` re-runs the initialization phase using the current config without reprovisioning the VM.
 Changes to config (new packages, different install commands, etc.) are picked up automatically. It
 consumes both stored VM and admin instance specs but cannot change or clear either one.
+
+`vm upgrade` is the supported in-place Debian release transition. It accepts only the release
+immediately before Agentworks' current release and has no target or force option. It completes local
+data and Debian-state backups, requires a reference to an operator-created checkpoint that can boot,
+brings the source suite current, shows a recomputed final plan, and asks again before switching
+suites. Package actions and reboot intent are durably recorded under
+`/var/lib/agentworks/debian-upgrades`, so rerunning the same command resumes or diagnoses the
+recorded transition instead of replaying work. See
+[Upgrading a Debian VM](../docs/guides/debian-vm-upgrades.md) for preflight, recovery, and
+platform-route details.
 
 `vm delete` requires `--force` if the VM has workspaces, agents, or sessions. The confirmation
 message shows what will be deleted. Pass `--yes` to skip the prompt.

@@ -531,6 +531,11 @@ refined by `--admin-spec`. `vm reinit` takes only the VM name and re-runs initia
 current config and both stored final layers. See
 [Instance specs](command-reference.md#instance-specs) for the exact create and agent-reinit surface.
 
+Debian distribution changes use the separate, resumable `agw vm upgrade <name>` workflow. It moves
+only from Agentworks' previous Debian release to its current release and requires an
+operator-created checkpoint that can boot. See
+[Upgrading a Debian VM](../docs/guides/debian-vm-upgrades.md).
+
 Non-fatal initialization failures (packages, dotfiles) produce a `partial` status rather than
 aborting. Fatal failures prompt for deletion or reinit. Use `vm describe` to view the full event
 log.
