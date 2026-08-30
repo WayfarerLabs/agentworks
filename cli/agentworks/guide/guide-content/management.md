@@ -17,9 +17,8 @@ enablement, and readiness. Use `agw resource show KIND/NAME` for the complete fo
 loaded resource, including its direct relationships, current live uses, attributable diagnostics,
 and normalized declaration when it has one. Selectable instance templates also include the fully
 resolved spec and where each value came from. Use the live kind's `describe` command for its current
-declaration, stored instance layer, recorded applied facts, and drift. Use
-`agw graph show KIND/NAME` for broader relationship traversal and `agw doctor` for installation-wide
-health.
+declaration, stored instance layer, lifecycle evidence, and drift. Use `agw graph show KIND/NAME`
+for broader relationship traversal and `agw doctor` for installation-wide health.
 
 Use `--output json` when the result will be consumed programmatically.
 

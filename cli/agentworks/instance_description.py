@@ -115,6 +115,7 @@ class InstanceStateIssueCode(StrEnum):
     INSTANCE_SPEC_UNSUPPORTED = "instance-spec-unsupported"
     CURRENT_DECLARATION_UNRESOLVED = "current-declaration-unresolved"
     REGISTRY_UNAVAILABLE = "registry-unavailable"
+    RECORD_MALFORMED = "record-malformed"
     APPLIED_RECORD_MALFORMED = "applied-record-malformed"
     APPLIED_RECORD_UNSUPPORTED = "applied-record-unsupported"
     LIFECYCLE_EVIDENCE_UNAVAILABLE = "lifecycle-evidence-unavailable"
@@ -206,8 +207,10 @@ def inspection_metadata_facts(
         record_key = metadata.record_key
         if metadata.record_type == "desired-overlay":
             code = InstanceStateIssueCode.INSTANCE_SPEC_MALFORMED
-        else:
+        elif metadata.record_type == "applied-state":
             code = InstanceStateIssueCode.APPLIED_RECORD_MALFORMED
+        else:
+            code = InstanceStateIssueCode.RECORD_MALFORMED
         issues.append(InstanceStateIssue(code, record_key=record_key))
     return tuple(unconsumed), tuple(issues)
 

@@ -417,7 +417,8 @@ def test_doctor_reports_each_database_backed_live_resource_count(
     for index in range(5):
         db.insert_console(f"console-{index}", "box")
 
-    counts = _live_resource_counts(db, db.list_vms())
+    vms = db.list_vms()
+    counts = _live_resource_counts(db, vms)
     assert set(counts) == LIVE_RESOURCE_KINDS
     assert counts == {
         "vm": 1,
@@ -430,7 +431,7 @@ def test_doctor_reports_each_database_backed_live_resource_count(
     warnings: list[str] = []
     monkeypatch.setattr("agentworks.output.warn", warnings.append)
     group = HealthGroup("Database")
-    _report_contents(group, db)
+    _report_contents(group, vms=vms, counts=counts)
 
     assert warnings == []
 

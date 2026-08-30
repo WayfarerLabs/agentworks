@@ -298,12 +298,13 @@ their existing issues. Session describe performs its existing status/PID observa
 PID refresh, before taking the authoritative structural snapshot used for the returned DTO. The
 runtime status remains explicitly observed state outside the structural snapshot.
 
-Workspace and agent describe loaders begin loading config and a registry because current resolution
-requires them. Expected operator-data failures while loading either input do not suppress the
-database-backed description, related rows, desired overlay, or empty lifecycle-evidence slots.
-Instead, the current declaration is unresolved with reason `registry-unavailable`, and an issue
-identifies the affected slot. Unexpected programming and infrastructure failures still propagate.
-This does not make either command contact a provider or resolve a secret.
+Workspace and agent describe commands load configuration before entering their tolerant manager
+path. After that succeeds, an expected `ConfigError` or `ValidationError` during registry
+construction does not suppress the database-backed description, related rows, desired overlay, or
+empty lifecycle-evidence slots. Instead, the current declaration is unresolved with reason
+`registry-unavailable`, and an issue identifies the affected slot. Configuration loading failures
+and unexpected programming or infrastructure failures still propagate. This does not make either
+command contact a provider or resolve a secret.
 
 ### VM lifecycle evidence and comparisons
 
@@ -374,6 +375,10 @@ version skew and unconsumed by this release. A recognized payload at a supported
 violates its closed domain shape is malformed. Domain payload decoding stays outside
 `agentworks.db`; the repository does not import VM or overlay codecs.
 
+Malformed metadata from a future record type projects the generic `record-malformed` issue. It is
+not labeled as malformed applied state and cannot change the status of a known lifecycle-evidence
+slot merely because its record key resembles a current applied-state key.
+
 Live describe projects future record metadata as the `unconsumed_records` sibling of
 `lifecycle_evidence`, because a future record type does not necessarily describe lifecycle evidence.
 A focused describe has already established its owner and therefore does not project owner-existence
@@ -434,6 +439,7 @@ commands retain their current failure boundaries.
 | Either accepted SSH identity is unverifiable | Unverifiable, never drift                                       |
 | Configured SSH key unreadable or invalid     | Bounded issue; comparison omitted                               |
 | Known supported payload malformed            | Database-damage issue; other rows retained                      |
+| Malformed future record type                 | Generic record-malformed issue; known slots remain independent  |
 | Known key uses unsupported version           | Visible version skew/unconsumed metadata                        |
 | Well-formed future key or record type        | Visible unconsumed metadata                                     |
 | Owner row absent                             | Orphan database-damage issue                                    |

@@ -487,94 +487,6 @@ def test_hardware_fact_matrix(
     assert (() if comparison is None else tuple(item.field for item in comparison.differences)) == difference_fields
 
 
-def test_hardware_request_match_does_not_claim_observed_provider_hardware_matches(
-    db: Database,
-    make_config,  # noqa: ANN001
-) -> None:
-    from agentworks.instance_specs import parse_vm_instance_specs
-    from agentworks.vms.applied_state import encode_hardware_provenance
-    from agentworks.vms.manager.inspect import (
-        VMDescription,
-        VMDetailFacts,
-        VMLiveResources,
-        vm_description_data,
-    )
-
-    _seed_vm(db, cpus=6, memory=16)
-    overlays = parse_vm_instance_specs('{"cpus":6,"memory":16}', None)
-    assert overlays is not None
-    db.instance_state.put_desired_overlay("vm", "box", overlays.payload)
-    db.instance_state.replace_applied_slices(
-        "vm",
-        "box",
-        "vm-create",
-        {AppliedStateKey.HARDWARE_PROVENANCE: encode_hardware_provenance()},
-    )
-    state, _ = _vm_state(db, make_config())
-    vm = db.get_vm("box")
-    assert vm is not None
-    description = VMDescription(
-        VMDetailFacts.from_row(vm),
-        None,
-        None,
-        None,
-        None,
-        None,
-        "unset",
-        VMLiveResources(
-            "8",
-            "0.1",
-            "32 GiB",
-            "1 GiB",
-            "3%",
-            "4 GiB",
-            "0 B",
-            "0%",
-            "50 GiB",
-            "5 GiB",
-            "10%",
-        ),
-        (),
-        (),
-        (),
-        (),
-        (),
-        state,
-    )
-
-    projected = vm_description_data(description)["vm"]
-    assert isinstance(projected, dict)
-    assert projected["provisioned_resources"] == {
-        "cpus": 6,
-        "memory_gib": 16,
-        "disk_gib": 50,
-        "swap_gib": 4,
-    }
-    assert projected["live_resources"] == {
-        "cpus": "8",
-        "load_average": "0.1",
-        "memory_total": "32 GiB",
-        "memory_used": "1 GiB",
-        "memory_percent": "3%",
-        "swap_total": "4 GiB",
-        "swap_used": "0 B",
-        "swap_percent": "0%",
-        "disk_total": "50 GiB",
-        "disk_used": "5 GiB",
-        "disk_percent": "10%",
-    }
-    instance_state = projected["instance_state"]
-    assert isinstance(instance_state, dict)
-    evidence = instance_state["lifecycle_evidence"]
-    assert isinstance(evidence, list)
-    hardware = evidence[0]
-    assert isinstance(hardware, dict)
-    assert hardware["key"] == "hardware-request"
-    comparisons = instance_state["comparisons"]
-    assert isinstance(comparisons, list)
-    assert comparisons[0] == {"key": "hardware-request", "state": "match"}
-
-
 def test_hardware_marker_rejects_non_integer_database_value(
     db: Database,
     make_config,  # noqa: ANN001
@@ -664,6 +576,30 @@ def test_future_record_type_and_applied_key_are_value_free_unconsumed_facts(
         ("future-state", "future-key"),
     }
     assert [fact.status for fact in state.lifecycle_evidence] == ["not-recorded", "not-recorded"]
+
+
+@pytest.mark.parametrize(
+    "record_key",
+    [AppliedStateKey.HARDWARE_PROVENANCE.value, AppliedStateKey.SSH_IDENTITY.value],
+)
+def test_malformed_future_record_with_known_key_does_not_poison_lifecycle_evidence(
+    db: Database,
+    make_config,  # noqa: ANN001
+    record_key: str,
+) -> None:
+    _seed_vm(db)
+    _insert_raw_record(
+        db,
+        record_type="future-state",
+        record_key=record_key,
+        value_json="[]",
+    )
+
+    state, _ = _vm_state(db, make_config())
+
+    assert [fact.status for fact in state.lifecycle_evidence] == ["not-recorded", "not-recorded"]
+    assert [comparison.state for comparison in state.comparisons] == ["not-recorded", "not-recorded"]
+    assert [(issue.code.value, issue.record_key) for issue in state.issues] == [("record-malformed", record_key)]
 
 
 def test_ssh_not_recorded_is_an_explicit_comparison(

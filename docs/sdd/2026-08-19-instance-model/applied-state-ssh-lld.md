@@ -514,8 +514,8 @@ archive restore consumer to update.
 
 ### Lifecycle and transaction tests
 
-- successful create writes the hardware-request marker and verified SSH slice with one operation and
-  timestamp;
+- successful create writes the `hardware-provenance` marker and verified SSH slice with one
+  operation and timestamp;
 - password-protected native OpenSSH create and reinit capture verified identity;
 - partial init after unrelated warnings still records proven slices;
 - successful reinit replaces SSH only and preserves hardware;

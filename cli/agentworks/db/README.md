@@ -69,10 +69,10 @@ different from `unverifiable`: it means no successful lifecycle checkpoint curre
 write. Ordinary canonical SSH operations refuse absent or drifted evidence before transport, while
 recorded-unverifiable evidence may proceed without inventing a match. VM reinit alone may establish
 an absent SSH slice; it still refuses known drift and replaces or clears only the SSH fact it can
-prove. VM create establishes both the hardware-request marker and, after a successful authorized-key
-write whose retained private identity remains readable and stable through the local checkpoint, the
-SSH slice. Recovery and cleanup roots such as rekey and VM delete remain available without this
-ordinary-operation proof.
+prove. VM create establishes both the `hardware-provenance` marker and, after a successful
+authorized-key write whose retained private identity remains readable and stable through the local
+checkpoint, the SSH slice. Recovery and cleanup roots such as rekey and VM delete remain available
+without this ordinary-operation proof.
 
 Both known applied payload codecs treat an unsupported payload version as version skew, distinct
 from a malformed supported-version payload. Version skew remains a strict `StateError` and directs

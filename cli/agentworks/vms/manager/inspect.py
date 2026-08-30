@@ -732,14 +732,18 @@ def _vm_instance_state(
             issues.append(InstanceStateIssue(InstanceStateIssueCode.CURRENT_DECLARATION_UNRESOLVED, slot="admin"))
 
     applied_by_key = {item.record.key: item.record for item in inspection.applied_slices}
-    malformed_keys = {item.metadata.record_key for item in inspection.malformed_records}
+    malformed_applied_keys = {
+        item.metadata.record_key
+        for item in inspection.malformed_records
+        if item.metadata.record_type == "applied-state"
+    }
     lifecycle_evidence: list[LifecycleEvidence] = []
     comparisons: list[InstanceComparison] = []
 
     hardware = applied_by_key.get(AppliedStateKey.HARDWARE_PROVENANCE)
     if hardware is None:
         status: Literal["not-recorded", "unavailable"] = (
-            "unavailable" if AppliedStateKey.HARDWARE_PROVENANCE.value in malformed_keys else "not-recorded"
+            "unavailable" if AppliedStateKey.HARDWARE_PROVENANCE.value in malformed_applied_keys else "not-recorded"
         )
         lifecycle_evidence.append(LifecycleEvidence(_HARDWARE_REQUEST_EVIDENCE_KEY, status))
         if status == "not-recorded":
@@ -822,7 +826,7 @@ def _vm_instance_state(
     ssh_applied: SSHAppliedState | None = None
     ssh_record = applied_by_key.get(AppliedStateKey.SSH_IDENTITY)
     if ssh_record is None:
-        status = "unavailable" if AppliedStateKey.SSH_IDENTITY.value in malformed_keys else "not-recorded"
+        status = "unavailable" if AppliedStateKey.SSH_IDENTITY.value in malformed_applied_keys else "not-recorded"
         lifecycle_evidence.append(LifecycleEvidence(AppliedStateKey.SSH_IDENTITY.value, status))
         if status == "not-recorded":
             comparisons.append(InstanceComparison(AppliedStateKey.SSH_IDENTITY.value, "not-recorded"))

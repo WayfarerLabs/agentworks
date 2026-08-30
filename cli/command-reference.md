@@ -264,7 +264,8 @@ reason is `missing-selection`, `instance-spec-unavailable`, or `registry-unavail
 operation's configuration-snapshot slice and may include evidence that its corresponding work
 succeeded. Comparisons are `{key, state, differences?}`; differences are
 `{field, recorded, current}`. Unconsumed records carry only safe type, key, version, and timestamp
-metadata. An issue contains a closed `code` plus optional `slot` or `record_key`. These explicit
+metadata. An issue contains a closed `code` plus optional `slot` or `record_key`; malformed future
+record types use `record-malformed` rather than an applied-state issue code. These explicit
 inspection commands can show authored plaintext declaration values, but never resolved secret
 values; handle their human and JSON output as sensitive. Human describe renders the complete current
 spec without the exhaustive per-leaf Value sources. JSON describe and both human and JSON template
@@ -339,10 +340,10 @@ boolean, and grant entries are `{workspace_name, grant_type}` where grant type i
 with nullable `template` and session entries `{name, template, workspace_name}`.
 
 Workspace and agent describe preserve their database-backed facts, including the stored instance
-spec, when configuration or registry construction fails with an expected operator-data error. In
-that degraded result, the current declaration is unresolved with reason `registry-unavailable` and
-the issue list names the affected declaration slot. Unexpected programming or infrastructure
-failures still fail the command.
+spec, when registry construction fails with an expected `ConfigError` or `ValidationError`. In that
+degraded result, the current declaration is unresolved with reason `registry-unavailable` and the
+issue list names the affected declaration slot. Configuration loading failures and unexpected
+programming or infrastructure failures still fail the command.
 
 #### Session and console JSON schemas
 

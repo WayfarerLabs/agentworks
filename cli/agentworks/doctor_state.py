@@ -83,7 +83,7 @@ def check_database(config: Config | None = None) -> HealthGroup:
                     vms = database.list_vms()
                     counts = _live_resource_counts(database, vms)
                     inspection = database.instance_state.inspect_all_instance_state()
-                _report_contents(group, database, vms=vms, counts=counts)
+                _report_contents(group, vms=vms, counts=counts)
                 _report_instance_state(group, config, vms, inspection)
             elif current < latest:
                 group.warn(
@@ -115,20 +115,14 @@ def _live_resource_counts(database: Database, vms: list[VMRow]) -> dict[str, int
 
 def _report_contents(
     group: HealthGroup,
-    database: object,
     *,
-    vms: list[VMRow] | None = None,
-    counts: dict[str, int] | None = None,
+    vms: list[VMRow],
+    counts: dict[str, int],
 ) -> None:
     """Report stored counts and flag VMs in non-complete states."""
-    from agentworks.db import Database, InitStatus
+    from agentworks.db import InitStatus
     from agentworks.ssh import LOG_DIR
 
-    assert isinstance(database, Database)
-    if vms is None:
-        vms = database.list_vms()
-    if counts is None:
-        counts = _live_resource_counts(database, vms)
     group.ok(
         "Contents",
         f"{counts['vm']} VMs, {counts['workspace']} workspaces, {counts['agent']} agents, "

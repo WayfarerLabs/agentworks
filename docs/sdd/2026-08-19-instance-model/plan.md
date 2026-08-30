@@ -291,9 +291,9 @@ behavior; and no database migration, payload-version change, or new operator syn
 - [x] Complete the authoritative OpenSSH research and low-level design in `prior-art-research.md`
       and `applied-state-ssh-lld.md`, including the password-protected-key, transaction,
       comparison-boundary, backup, and ssh-agent non-goal decisions.
-- [x] Add domain-owned versioned codecs for the row-backed successful hardware-request snapshot and
-      provisioned SSH identity slices, without storing secrets, private key bytes, passphrases, or
-      duplicate CPU, memory, disk, and swap values.
+- [x] Add domain-owned versioned codecs for row-backed hardware provenance and provisioned SSH
+      identity slices, without storing secrets, private key bytes, passphrases, or duplicate CPU,
+      memory, disk, and swap values.
 - [x] Parse the authoritative public blob directly from `openssh-key-v1` private files and derive
       the OpenSSH SHA-256 fingerprint without consulting an adjacent public key or spawning a
       passphrase prompt.
@@ -306,10 +306,9 @@ behavior; and no database migration, payload-version change, or new operator syn
 - [x] Validate the configured public/private pair on reinit after cheap declaration checks and
       before activation, secret resolution, or transport work, while retaining the fresh validation
       at the final remote write.
-- [x] Capture only successful configuration-snapshot slices whose required evidence is established
-      by VM create and reinit operations, remove stale SSH proof after an unproven remote write or
-      unstable final identity, and write lifecycle-row plus applied-state changes in one honest
-      transaction where they compose.
+- [x] Capture only slices proven by successful VM create and reinit operations, remove stale SSH
+      proof after an unproven remote write or unstable final identity, and write lifecycle-row plus
+      applied-state changes in one honest transaction where they compose.
 - [x] Document the one-time reinit required for historic VMs and emit cautious recovery guidance
       immediately when the final admin key write leaves SSH evidence unproven.
 - [x] Add preflight comparison before SSH transport and structural diagnostic facts for not
