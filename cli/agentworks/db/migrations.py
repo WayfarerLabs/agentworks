@@ -650,6 +650,15 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
         CREATE INDEX idx_instance_records_kind_type
             ON instance_records (instance_kind, record_type, instance_name, record_key);
     """,
+    # -- Last live Debian release observation. Both columns are nullable --
+    # -- for pre-observation VMs, but they must change as one fact. The ---
+    # -- release itself is intentionally not enumerated in SQL so future -
+    # -- registry profiles do not require another schema-shape migration. -
+    33: """
+        ALTER TABLE vms ADD COLUMN debian_release TEXT;
+        ALTER TABLE vms ADD COLUMN debian_release_observed_at TEXT
+            CHECK ((debian_release IS NULL) = (debian_release_observed_at IS NULL));
+    """,
 }
 
 LATEST_VERSION = max(MIGRATIONS)
@@ -758,6 +767,7 @@ _SCHEMA_SENTINEL_ADDITIONS: dict[int, dict[str, tuple[str, ...]]] = {
             "operation",
         )
     },
+    33: {"vms": ("debian_release", "debian_release_observed_at")},
 }
 
 _SCHEMA_SENTINEL_REMOVED_TABLES: dict[int, tuple[str, ...]] = {

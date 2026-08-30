@@ -229,7 +229,7 @@ def _archive_workspaces(
     and reports archive size periodically.
 
     The archive is created in a root-owned temp directory to avoid symlink
-    attacks and collisions in /tmp.
+    attacks and collisions in the disk-backed staging area.
 
     ``admin_username`` is the account the archive is chowned to so scp can
     read it. It comes from the VM row, which is where the value is
@@ -243,7 +243,7 @@ def _archive_workspaces(
     """
 
     # Create a secure temp directory (root-owned, mode 0700)
-    tmp_dir = target.run("mktemp -d /tmp/agentworks-backup-XXXXXX", sudo=True).stdout.strip()
+    tmp_dir = target.run("mktemp -d /var/tmp/agentworks-backup-XXXXXX", sudo=True).stdout.strip()
     q_tmp = shlex.quote(tmp_dir)
     archive = f"{tmp_dir}/workspaces.tar.zst"
     q_archive = shlex.quote(archive)

@@ -2,7 +2,7 @@
 # this optional catalog with `[plugins].system = ["apt"]`; they can override an
 # entry by declaring a same-named apt-source resource.
 #
-# The {arch} placeholder in `source` is resolved at install time via
+# The {arch} placeholder in `source` or `sources` is resolved at install time via
 # `dpkg --print-architecture` (amd64 or arm64).
 apiVersion: agentworks/v1
 kind: apt-source
@@ -24,7 +24,9 @@ spec:
   key_url: https://apt.releases.hashicorp.com/gpg
   key_path: /etc/apt/keyrings/hashicorp-archive-keyring.gpg
   key_dearmor: true
-  source: "deb [arch={arch} signed-by=/etc/apt/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com bookworm main"
+  sources:
+    bookworm: "deb [arch={arch} signed-by=/etc/apt/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com bookworm main"
+    trixie: "deb [arch={arch} signed-by=/etc/apt/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com trixie main"
   source_file: hashicorp.list
 ---
 apiVersion: agentworks/v1
@@ -48,7 +50,9 @@ spec:
   key_url: https://ngrok-agent.s3.amazonaws.com/ngrok.asc
   key_path: /etc/apt/keyrings/ngrok.gpg
   key_dearmor: true
-  source: "deb [arch={arch} signed-by=/etc/apt/keyrings/ngrok.gpg] https://ngrok-agent.s3.amazonaws.com bookworm main"
+  sources:
+    bookworm: "deb [arch={arch} signed-by=/etc/apt/keyrings/ngrok.gpg] https://ngrok-agent.s3.amazonaws.com bookworm main"
+    trixie: "deb [arch={arch} signed-by=/etc/apt/keyrings/ngrok.gpg] https://ngrok-agent.s3.amazonaws.com bookworm main"
   source_file: ngrok.list
 ---
 apiVersion: agentworks/v1
@@ -60,5 +64,7 @@ spec:
   key_url: https://dl.cloudsmith.io/public/tofuutils/tenv/gpg.8ACD4386ADD982F6.key
   key_path: /etc/apt/keyrings/tofuutils-tenv-archive-keyring.gpg
   key_dearmor: true
-  source: "deb [signed-by=/etc/apt/keyrings/tofuutils-tenv-archive-keyring.gpg] https://dl.cloudsmith.io/public/tofuutils/tenv/deb/debian bookworm main"
+  sources:
+    bookworm: "deb [signed-by=/etc/apt/keyrings/tofuutils-tenv-archive-keyring.gpg] https://dl.cloudsmith.io/public/tofuutils/tenv/deb/debian bookworm main"
+    trixie: "deb [signed-by=/etc/apt/keyrings/tofuutils-tenv-archive-keyring.gpg] https://dl.cloudsmith.io/public/tofuutils/tenv/deb/debian trixie main"
   source_file: tofuutils-tenv.list

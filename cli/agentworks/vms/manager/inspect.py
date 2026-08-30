@@ -13,6 +13,7 @@ from agentworks.db.projections import (
     project_vm_initialization_status,
     project_vm_provisioning_status,
 )
+from agentworks.debian import classify_release
 from agentworks.errors import (
     AgentworksError,
     UserAbort,
@@ -46,6 +47,9 @@ class VMListRow:
     session_count: int
     tailscale_host: str | None
     created_at: str
+    debian_release: str | None = None
+    debian_release_observed_at: str | None = None
+    debian_support: str | None = None
 
 
 @dataclass(frozen=True)
@@ -154,6 +158,9 @@ class VMDetailFacts:
     created_at: str
     last_seen_at: str | None
     operator_stopped: bool
+    debian_release: str | None = None
+    debian_release_observed_at: str | None = None
+    debian_support: str | None = None
 
     @classmethod
     def from_row(cls, vm: VMRow) -> VMDetailFacts:
@@ -175,6 +182,9 @@ class VMDetailFacts:
             created_at=vm.created_at,
             last_seen_at=vm.last_seen_at,
             operator_stopped=vm.operator_stopped,
+            debian_release=vm.debian_release.value if vm.debian_release is not None else None,
+            debian_release_observed_at=vm.debian_release_observed_at,
+            debian_support=classify_release(vm.debian_release).value if vm.debian_release is not None else None,
         )
 
 
@@ -243,6 +253,8 @@ def vm_listing_data(listing: VMListing) -> JsonObject:
                 "session_count": vm.session_count,
                 "tailscale_host": vm.tailscale_host,
                 "created_at": vm.created_at,
+                "debian_release": vm.debian_release,
+                "debian_release_observed_at": vm.debian_release_observed_at,
             }
             for vm in listing.vms
         ],
@@ -273,6 +285,8 @@ def vm_description_data(description: VMDescription) -> JsonObject:
             "initialization_status": project_vm_initialization_status(vm.initialization_status),
             "tailscale_host": vm.tailscale_host,
             "last_seen_at": vm.last_seen_at,
+            "debian_release": vm.debian_release,
+            "debian_release_observed_at": vm.debian_release_observed_at,
             "provisioned_resources": {
                 "cpus": vm.cpus,
                 "memory_gib": vm.memory_gib,
@@ -371,6 +385,9 @@ def vm_listing(db: Database) -> VMListing:
                 session_count=db.count_sessions_on_vm(vm.name),
                 tailscale_host=vm.tailscale_host,
                 created_at=vm.created_at,
+                debian_release=vm.debian_release.value if vm.debian_release is not None else None,
+                debian_release_observed_at=vm.debian_release_observed_at,
+                debian_support=classify_release(vm.debian_release).value if vm.debian_release is not None else None,
             )
             for vm in db.list_vms()
         )
@@ -405,7 +422,7 @@ def render_vm_listing(listing: VMListing, *, names_only: bool = False) -> None:
 
     header = (
         f"{'NAME':<{name_w}} {'SITE':<12} {'TEMPLATE':<12} {'PROV':<12} {'INIT':<12} "
-        f"{'WS/AG/SE':<10} {'TAILSCALE':<20} {'CREATED'}"
+        f"{'WS/AG/SE':<10} {'DEBIAN':<10} {'SUPPORT':<10} {'TAILSCALE':<20} {'CREATED'}"
     )
     output.info(header)
     output.info("-" * len(header))
@@ -414,7 +431,8 @@ def render_vm_listing(listing: VMListing, *, names_only: bool = False) -> None:
         output.info(
             f"{name:<{name_w}} {vm.site:<12} {vm.template or '-':<12} "
             f"{vm.provisioning_status:<12} {vm.initialization_status:<12} "
-            f"{counts:<10} {vm.tailscale_host or '-':<20} {vm.created_at}"
+            f"{counts:<10} {vm.debian_release or '-':<10} {vm.debian_support or '-':<10} "
+            f"{vm.tailscale_host or '-':<20} {vm.created_at}"
         )
 
 
@@ -621,6 +639,9 @@ def render_vm_description(description: VMDescription) -> None:
     output.info(f"Provisioning:   {vm.provisioning_status}")
     output.info(f"Initialization: {vm.initialization_status}")
     output.info(f"Tailscale IP:   {vm.tailscale_host or '-'}")
+    output.info(f"Debian:         {vm.debian_release or '-'}")
+    output.info(f"Release Tier:   {vm.debian_support or '-'}")
+    output.info(f"Release Seen:   {vm.debian_release_observed_at or '-'}")
 
     live = description.live_resources
 

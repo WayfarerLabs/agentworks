@@ -54,13 +54,12 @@ def test_an_unknown_key_names_the_fields_that_are_valid() -> None:
 
 def test_a_missing_required_field_says_it_is_required() -> None:
     """``apt-source`` is the kind with genuinely required fields: its
-    loader read all four through ``_require_field``, which raises on an
-    absent key."""
+    loader requires repository identity and destination fields. Source uses
+    the scalar-or-map semantic validator once those structural fields exist."""
     assert rejection("apt-source", "example", {}).splitlines() == [
-        "res.yaml:7: apt-source/example: 4 problems",
+        "res.yaml:7: apt-source/example: 3 problems",
         "  key_url: is required",
         "  key_path: is required",
-        "  source: is required",
         "  source_file: is required",
     ]
 

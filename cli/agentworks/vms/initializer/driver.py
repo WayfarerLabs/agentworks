@@ -64,6 +64,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database
+    from agentworks.debian import DebianRelease
     from agentworks.resources.registry import Registry
     from agentworks.vms.admin import AdminConfig
     from agentworks.vms.templates import ResolvedVMTemplate
@@ -237,6 +238,7 @@ def run_initialization(
     logger: SSHLogger,
     *,
     git_tokens: dict[str, str],
+    debian_release: DebianRelease,
     is_first_init: bool = False,
 ) -> None:
     """Run Phase B (initialization) with status tracking and event logging.
@@ -264,6 +266,7 @@ def run_initialization(
             admin_username,
             logger,
             git_tokens=git_tokens,
+            debian_release=debian_release,
             is_first_init=is_first_init,
         )
     except Exception as e:
@@ -351,6 +354,7 @@ def _phase_b_setup(
     logger: SSHLogger,
     *,
     git_tokens: dict[str, str],
+    debian_release: DebianRelease,
     is_first_init: bool = False,
 ) -> None:
     """Phase B: Setup (over Tailscale SSH). Non-fatal steps warn and continue.
@@ -455,7 +459,14 @@ def _phase_b_setup(
         _install_system_packages(ts_target, logger)
 
         # Non-fatal: apt sources required by selected apt_packages
-        _configure_apt_sources(ts_target, vm_template, apt_packages, apt_sources, logger)
+        _configure_apt_sources(
+            ts_target,
+            vm_template,
+            apt_packages,
+            apt_sources,
+            logger,
+            debian_release=debian_release,
+        )
 
         # Non-fatal: apt packages (direct list + apt-package entries)
         _install_apt_packages(ts_target, vm_template, apt_packages, logger)

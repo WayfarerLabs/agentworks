@@ -180,17 +180,14 @@ def _fetch_git(
     """Clone a git repo on the target and copy a file from it."""
     from agentworks.ssh import SSHError
 
-    tmp_dir = "/tmp/agentworks-source-ref"
+    tmp_dir = target.run("mktemp -d /var/tmp/agentworks-source-ref-XXXXXX").stdout.strip()
 
     try:
-        # Clean up any previous clone
-        target.run(f"rm -rf {tmp_dir}", check=False)
-
         # Shallow clone
         clone_cmd = "git clone --depth 1"
         if source.ref:
             clone_cmd += f" --branch {shlex.quote(source.ref)}"
-        clone_cmd += f" {shlex.quote(source.path)} {tmp_dir}"
+        clone_cmd += f" {shlex.quote(source.path)} {shlex.quote(tmp_dir)}"
 
         target.run(clone_cmd, timeout=60)
         if logger:
@@ -209,7 +206,7 @@ def _fetch_git(
     except SSHError as e:
         raise SourceRefError(f"failed to fetch from git source: {e}") from e
     finally:
-        target.run(f"rm -rf {tmp_dir}", check=False)
+        target.run(f"rm -rf {shlex.quote(tmp_dir)}", check=False)
 
 
 def fetch_dir(

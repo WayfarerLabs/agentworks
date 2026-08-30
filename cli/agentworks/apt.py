@@ -23,10 +23,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
 
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 
+from agentworks.debian import DEBIAN_RELEASES, DebianRelease
 from agentworks.declared_resource import DeclaredResource
 from agentworks.errors import ConfigError
 from agentworks.resource_loading import _require_field, _require_list
@@ -75,14 +76,27 @@ class AptSourceEntry(DeclaredResource):
     key_path: str = Field(examples=["/etc/apt/keyrings/my-repo.gpg"])
     """Absolute path the fetched key is installed to on the VM."""
 
-    source: str = Field(
+    source: str | None = Field(
+        default=None,
         examples=[
             "deb [arch={arch} signed-by=/etc/apt/keyrings/my-repo.gpg] https://apt.example.com/debian bookworm main"
-        ]
+        ],
     )
     """The apt source-list stanza, verbatim (``deb [signed-by=...] ...``).
 
-    ``{arch}`` stands for the VM's architecture (``amd64`` or ``arm64``)."""
+    ``{arch}`` stands for the VM's architecture (``amd64`` or ``arm64``).
+    Use this form only when the repository value is release-independent."""
+
+    sources: dict[DebianRelease, str] | None = Field(
+        default=None,
+        examples=[
+            {
+                "bookworm": "deb [arch={arch}] https://apt.example.com/debian bookworm main",
+                "trixie": "deb [arch={arch}] https://apt.example.com/debian trixie main",
+            }
+        ],
+    )
+    """Release-specific source-list stanzas keyed by Debian codename."""
 
     source_file: SimpleFilename = Field(examples=["my-repo.list"])
     """Name of the file under ``/etc/apt/sources.list.d/`` the stanza is
@@ -93,6 +107,43 @@ class AptSourceEntry(DeclaredResource):
     """Whether the fetched key is ASCII-armored and must be run through
     ``gpg --dearmor`` before installation. Write booleans unquoted;
     quoted strings such as ``"no"`` are invalid."""
+
+    @field_validator("sources", mode="before")
+    @classmethod
+    def _parse_release_keys(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        try:
+            return {DebianRelease(key) if isinstance(key, str) else key: source for key, source in value.items()}
+        except ValueError as exc:
+            raise ValueError("sources keys must be recognized Debian codenames") from exc
+
+    @model_validator(mode="after")
+    def _validate_source_shape(self) -> Self:
+        if (self.source is None) == (self.sources is None):
+            raise ValueError("exactly one of source or sources is required")
+        if self.source is not None:
+            tokens = set(re.findall(r"[A-Za-z0-9_-]+", self.source.casefold()))
+            codenames = {profile.release.value for profile in DEBIAN_RELEASES}
+            if tokens & codenames:
+                raise ValueError("a Debian-codename source must use the release-mapped sources field")
+        return self
+
+    def source_for(self, release: DebianRelease) -> str:
+        """Resolve the source stanza for a verified VM release."""
+
+        if self.source is not None:
+            return self.source
+        assert self.sources is not None
+        try:
+            return self.sources[release]
+        except KeyError:
+            raise ConfigError(
+                f"apt source '{self.name}' has no Debian {release} mapping",
+                entity_kind="apt-source",
+                entity_name=self.name,
+                hint=f"Add spec.sources.{release} to the apt-source manifest before retrying.",
+            ) from None
 
 
 class AptPackageEntry(DeclaredResource):
@@ -156,7 +207,8 @@ def _load_apt_sources(
             description=str(data["description"]) if "description" in data else None,
             key_url=str(_require_field(data, "key_url", ctx)),
             key_path=str(_require_field(data, "key_path", ctx)),
-            source=str(_require_field(data, "source", ctx)),
+            source=str(data["source"]) if "source" in data else None,
+            sources=data.get("sources"),
             source_file=source_file,
             key_dearmor=bool(data.get("key_dearmor", False)),
         )
@@ -216,6 +268,11 @@ class _AptSourceKind:
         An apt-source is a third-party apt repository: where to fetch its signing key,
         where to install that key, and the source-list stanza that points at it. VM init
         writes the key and the stanza before installing anything that needs them.
+
+        Declare exactly one source value shape. Use `source` for a repository whose stanza is
+        independent of the guest's Debian release. Use `sources` when the value varies, keyed by
+        every supported codename the source serves. A scalar containing a recognized Debian
+        codename is rejected so a future release cannot accidentally reuse an old suite.
 
         Apt packages reference a source by name; nothing installs a source on its own.
         In the stanza, `{arch}` stands for the VM's architecture (`amd64` or `arm64`).

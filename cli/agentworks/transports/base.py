@@ -260,19 +260,22 @@ class Transport(abc.ABC):
         local_path = Path(local_path)
         with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as f:
             tmp_path = Path(f.name)
+        remote_tmp: str | None = None
         try:
             with tarfile.open(tmp_path, "w:gz") as tar:
                 tar.add(local_path, arcname=".")
-            remote_tmp = f"/tmp/agentworks-copy-{tmp_path.name}"
-            self.copy_to(tmp_path, remote_tmp, timeout=timeout)
+            remote_tmp = self.run("mktemp /var/tmp/agentworks-copy-XXXXXX.tar.gz", timeout=timeout).stdout.strip()
+            try:
+                self.copy_to(tmp_path, remote_tmp, timeout=timeout)
+                if delete:
+                    self.run(f"rm -rf {remote_path} && mkdir -p {remote_path}", timeout=timeout)
+                else:
+                    self.run(f"mkdir -p {remote_path}", timeout=timeout)
+                self.run(f"tar -xzf {remote_tmp} -C {remote_path}", timeout=timeout)
+            finally:
+                self.run(f"rm -f {remote_tmp}", check=False, timeout=timeout)
         finally:
             tmp_path.unlink(missing_ok=True)
-
-        if delete:
-            self.run(f"rm -rf {remote_path} && mkdir -p {remote_path}", timeout=timeout)
-        else:
-            self.run(f"mkdir -p {remote_path}", timeout=timeout)
-        self.run(f"tar -xzf {remote_tmp} -C {remote_path} && rm -f {remote_tmp}", timeout=timeout)
 
     def write_file(
         self,

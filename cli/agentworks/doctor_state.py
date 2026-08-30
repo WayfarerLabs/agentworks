@@ -103,6 +103,7 @@ def _live_resource_counts(database: Database, vms: list[VMRow]) -> dict[str, int
 def _report_contents(group: HealthGroup, database: object) -> None:
     """Report stored counts and flag VMs in non-complete states."""
     from agentworks.db import Database, InitStatus
+    from agentworks.debian import DebianSupport, classify_release
     from agentworks.ssh import LOG_DIR
 
     assert isinstance(database, Database)
@@ -121,6 +122,23 @@ def _report_contents(group: HealthGroup, database: object) -> None:
         return f" Log: {format_host_path(logs[0])}" if logs else ""
 
     for vm in vms:
+        if vm.debian_release is None:
+            group.info(
+                f"VM '{vm.name}' Debian",
+                "not observed yet; a release-sensitive operation will verify the live guest",
+            )
+        else:
+            support = classify_release(vm.debian_release)
+            if support is DebianSupport.PREVIOUS:
+                group.warn(
+                    f"VM '{vm.name}' Debian",
+                    f"{vm.debian_release} is the previous release; 'agw vm upgrade {vm.name}' is available",
+                )
+            elif support is DebianSupport.LEGACY:
+                group.warn(
+                    f"VM '{vm.name}' Debian",
+                    f"{vm.debian_release} is legacy; ordinary operations are best effort and upgrade is unsupported",
+                )
         if vm.init_status == InitStatus.FAILED.value:
             group.warn(f"VM '{vm.name}'", f"failed state (only delete supported).{log_hint(vm.name)}")
         elif vm.init_status == InitStatus.PARTIAL.value:

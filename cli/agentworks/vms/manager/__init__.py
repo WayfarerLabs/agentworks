@@ -57,6 +57,7 @@ from .inspect import (
 )
 from .lifecycle import create_vm, reinit_vm
 from .power import delete_vm, rekey_vm, start_vm, stop_vm
+from .release import verified_vm_release
 from .tailscale import (
     _ensure_tailscale,
     _is_tailscale_reachable,
@@ -110,6 +111,7 @@ __all__ = [
     "validate_slug",
     "verify_vm_connection",
     "verify_tailscale_available",
+    "verified_vm_release",
     "VMConnectionVerification",
     "vm_description",
     "vm_listing",

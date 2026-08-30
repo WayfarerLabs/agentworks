@@ -5,7 +5,9 @@ from __future__ import annotations
 import contextlib
 from typing import TYPE_CHECKING
 
+from agentworks import output
 from agentworks.capabilities.base import RunContext
+from agentworks.debian import DebianSupport, classify_release
 
 from ._helpers import _vm_scope
 
@@ -45,6 +47,17 @@ def _platform_ops_ctx(
         config=config,
         operation_scope=scope,
         secrets=ScopedSecrets(resolver.values, vm_node.site.secret_refs()),
+    )
+
+
+def _warn_legacy_release(vm: VMRow) -> None:
+    """Warn without blocking before an ordinary operation touches a legacy VM."""
+
+    if vm.debian_release is None or classify_release(vm.debian_release) is not DebianSupport.LEGACY:
+        return
+    output.warn(
+        f"VM '{vm.name}' runs legacy Debian {vm.debian_release}; this operation is best effort. "
+        "Create a current VM and copy data rather than attempting a multi-release upgrade."
     )
 
 
@@ -96,6 +109,8 @@ def gated_vm_boundary(
     changes the composition's shape rather than adding a flag to it.
 
     """
+    _warn_legacy_release(vm)
+
     from agentworks.orchestration.activation import (
         activation_gate,
         gate_secret_resolver,
@@ -154,6 +169,8 @@ def _live_vm_boundary(
     exists to clean up), and describe only READS state (a status
     probe is its op; inspecting a stopped VM must never start it).
     """
+    _warn_legacy_release(vm)
+
     from agentworks.bootstrap import load_request_registry
     from agentworks.orchestration.readiness import preflight_all
     from agentworks.orchestration.secrets import secret_union

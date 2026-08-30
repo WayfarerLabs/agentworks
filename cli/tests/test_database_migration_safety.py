@@ -67,6 +67,23 @@ def _version(path: Path) -> int:
     return version
 
 
+def test_latest_schema_enforces_atomic_debian_release_observation(tmp_path: Path) -> None:
+    path = tmp_path / "state.db"
+    _build_schema(path, LATEST_VERSION)
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "INSERT INTO vms (name, site, hostname, template) VALUES (?, ?, ?, ?)",
+        ("release-witness", "lima-local", "lima--release-witness", None),
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        connection.execute(
+            "UPDATE vms SET debian_release = ? WHERE name = ?",
+            ("trixie", "release-witness"),
+        )
+    connection.close()
+
+
 def _serialized_open_worker(
     path: Path,
     plan: object,

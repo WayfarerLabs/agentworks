@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.apt import AptPackageEntry, AptSourceEntry
+    from agentworks.debian import DebianRelease
     from agentworks.install_commands import SystemInstallCommandEntry, UserInstallCommandEntry
     from agentworks.transports import Transport
     from agentworks.vms.templates import ResolvedVMTemplate
@@ -28,6 +29,8 @@ def _configure_apt_sources(
     apt_packages: Mapping[str, AptPackageEntry],
     apt_sources: Mapping[str, AptSourceEntry],
     logger: SSHLogger,
+    *,
+    debian_release: DebianRelease,
 ) -> None:
     """Configure apt sources required by selected apt_packages. Idempotent."""
     # Collect all apt sources needed by selected apt_packages
@@ -44,6 +47,10 @@ def _configure_apt_sources(
 
     if not required_sources:
         return
+
+    # Resolve the complete set before the first guest read or write. A missing
+    # release mapping therefore cannot leave a partially configured source set.
+    resolved_sources = {name: source.source_for(debian_release) for name, source in required_sources.items()}
 
     logger.step("Apt sources")
 
@@ -90,7 +97,7 @@ def _configure_apt_sources(
 
         # Always ensure the source list file has the correct content,
         # even when the key already existed (the source URL may have changed).
-        resolved_source = src.source.replace("{arch}", arch)
+        resolved_source = resolved_sources[name].replace("{arch}", arch)
         source_path = f"/etc/apt/sources.list.d/{src.source_file}"
         expected = resolved_source + "\n"
         current = target.run(f"cat {shlex.quote(source_path)}", check=False)

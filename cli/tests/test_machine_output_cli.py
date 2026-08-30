@@ -204,6 +204,8 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
                 "initialization_status",
                 "tailscale_host",
                 "last_seen_at",
+                "debian_release",
+                "debian_release_observed_at",
                 "provisioned_resources",
                 "live_resources",
                 "agents",
@@ -440,7 +442,7 @@ def test_operational_human_describe_commands_keep_literal_no_color_bytes(monkeyp
             "vm",
             "describe",
             "box",
-        ): b"Name:           box\nCreated:        2026-01-01\nSite:           site\nPlatform:       -\nBackend:        -\nStatus:         -\nHostname:       box\nSystem Slug:    -\nTemplate:       -\nAdmin User:     admin\nProvisioning:   complete\nInitialization: complete\nTailscale IP:   -\n\nAgents (0):\n  (none)\n\nWorkspaces (0):\n  (none)\n\nEvents (0):\n  (none)\n",  # noqa: E501
+        ): b"Name:           box\nCreated:        2026-01-01\nSite:           site\nPlatform:       -\nBackend:        -\nStatus:         -\nHostname:       box\nSystem Slug:    -\nTemplate:       -\nAdmin User:     admin\nProvisioning:   complete\nInitialization: complete\nTailscale IP:   -\nDebian:         -\nRelease Tier:   -\nRelease Seen:   -\n\nAgents (0):\n  (none)\n\nWorkspaces (0):\n  (none)\n\nEvents (0):\n  (none)\n",  # noqa: E501
         (
             "workspace",
             "describe",

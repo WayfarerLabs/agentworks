@@ -497,6 +497,11 @@ Reference entries by name from VM, admin, and agent templates. User-defined entr
 same-named plugin row. A custom apt package that keeps a shipped apt-source dependency still needs
 `apt` enabled, or must replace or remove that source dependency too.
 
+An `apt-source` uses either a release-independent `spec.source` scalar or a release-keyed
+`spec.sources` map. Use the map whenever a Debian codename appears in the stanza. Initialization
+selects the entry for the VM's verified Debian release and fails before source mutation when that
+mapping is absent.
+
 Prefer template `apt`, `apt_packages`, `snap`, or `mise_packages` fields over a custom install
 command. When an install command is necessary, its `command` is one logical shell invocation written
 as a single-line YAML scalar, either plain or quoted, normally one maintained package-manager or

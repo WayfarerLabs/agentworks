@@ -13,7 +13,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.apt import _load_apt_packages, _load_apt_sources
+from agentworks.apt import AptSourceEntry, _load_apt_packages, _load_apt_sources
+from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError
 from tests.conftest import ManifestDoc, write_manifests
 
@@ -57,6 +58,45 @@ def test_apt_source_requires_key_url() -> None:
 def test_apt_source_must_be_table() -> None:
     with pytest.raises(ConfigError, match="must be a table"):
         _load_apt_sources({"bad": "not-a-table"})
+
+
+def test_apt_source_resolves_a_release_map() -> None:
+    source = AptSourceEntry(
+        name="mapped",
+        key_url="https://example.com/key.gpg",
+        key_path="/etc/apt/keyrings/example.gpg",
+        sources={
+            DebianRelease.BOOKWORM: "deb https://example.com bookworm main",
+            DebianRelease.TRIXIE: "deb https://example.com trixie main",
+        },
+        source_file="example.list",
+    )
+
+    assert source.source_for(DebianRelease.BOOKWORM).split()[-2] == "bookworm"
+    assert source.source_for(DebianRelease.TRIXIE).split()[-2] == "trixie"
+
+
+@pytest.mark.parametrize(
+    ("source", "sources"),
+    [
+        (None, None),
+        ("deb https://example.com stable main", {DebianRelease.TRIXIE: "deb https://example.com trixie main"}),
+        ("deb https://example.com bookworm main", None),
+    ],
+)
+def test_apt_source_requires_one_release_safe_shape(
+    source: str | None,
+    sources: dict[DebianRelease, str] | None,
+) -> None:
+    with pytest.raises(ValueError):
+        AptSourceEntry(
+            name="bad",
+            key_url="https://example.com/key.gpg",
+            key_path="/etc/apt/keyrings/example.gpg",
+            source=source,
+            sources=sources,
+            source_file="example.list",
+        )
 
 
 # -- apt-package loader --------------------------------------------------------

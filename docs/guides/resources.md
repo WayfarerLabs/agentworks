@@ -618,6 +618,22 @@ spec:
 
 This section is the canonical operator contract for row precedence and dependency enablement.
 
+An `apt-source` declares exactly one of `spec.source` or `spec.sources`. Use the scalar form only
+for a vendor stanza that is independent of Debian release. Use `sources` for release-specific
+values, keyed by Debian codename. Agentworks selects the value from the VM's verified live release
+before writing any key or source file, and a missing mapping stops initialization before mutation.
+For example:
+
+```yaml
+spec:
+  key_url: https://apt.example.com/gpg
+  key_path: /etc/apt/keyrings/example.gpg
+  sources:
+    bookworm: deb [arch={arch}] https://apt.example.com/debian bookworm main
+    trixie: deb [arch={arch}] https://apt.example.com/debian trixie main
+  source_file: example.list
+```
+
 Built-in resources ship with the app and appear in `agw resource list --origin builtin`. Optional
 catalog rows carry the `system-plugin` origin. Override policy is per kind:
 
