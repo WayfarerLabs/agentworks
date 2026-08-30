@@ -1,6 +1,6 @@
 # Plan: Debian Release Transition
 
-- Status: Ready-triggered feedback round 2 correction in progress
+- Status: Ready-triggered feedback round 2 corrections complete; ready handoff pending
 - Date: 2026-08-28
 - Governing artifacts: `frd.md`, `hla.md`, `prior-art-research.md`, and `migration-strategy.md`
 
@@ -397,7 +397,7 @@ the product cannot ship consistently within the agreed scope.
       when the mapping is missing.
 - [x] Correct the governing HLA to record the operation-specific preflight seam and the Proxmox
       setup script's no-selector current-release behavior.
-- [ ] Reconcile current `main`, run the complete focused and repository gates, and obtain exact-head
+- [x] Reconcile current `main`, run the complete focused and repository gates, and obtain exact-head
       project, correctness, and complexity reviews before the signed round 2 of 4 ready handoff.
 
 - [ ] After live certification or an authenticated disposition, create `locked.md`, record the final
