@@ -419,7 +419,7 @@ the completed boxes remain the truthful record of the first round-three implemen
       Phase A or release persistence.
 - [x] Keep Proxmox's early QEMU-agent guard but remove its redundant post-bootstrap platform probe;
       core owns the final attestation for built-in and third-party platforms alike.
-- [ ] Run the complete focused and repository gates, then obtain exact-head project, correctness,
+- [x] Run the complete focused and repository gates, then obtain exact-head project, correctness,
       and complexity reviews before the signed round 3 of 4 ready handoff.
 
 - [ ] After live certification or an authenticated disposition, create `locked.md`, record the final
