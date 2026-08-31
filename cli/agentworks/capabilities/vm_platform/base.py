@@ -105,9 +105,6 @@ class ProvisionResult:
     """
 
     native_transport: Transport
-    # The release observed from the live guest while the platform could still
-    # roll back its backend resources. Requested intent is not an observation.
-    debian_release: DebianRelease
     platform_metadata: dict[str, str] = field(default_factory=dict)
     tailscale_ip: str | None = None
 
@@ -242,8 +239,9 @@ class VMPlatform(Capability):
           returning. A successful join may return without an IP when discovery
           failed; the manager retries only ``tailscale ip -4`` in that case.
         - Verify the live guest matches ``request.debian_release`` before the
-          rollback window closes, and return that observation in
-          ``ProvisionResult.debian_release``.
+          rollback window closes so a mismatch can be cleaned up locally.
+          Core independently repeats this verification over the returned
+          transport and owns the persisted observation.
         - Roll back partial backend state before letting a failure OR
           an operator interrupt (``KeyboardInterrupt``) propagate: the
           caller's unwind deletes only the DB row, so any backend

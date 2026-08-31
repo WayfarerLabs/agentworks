@@ -487,7 +487,7 @@ class EC2Platform(VMPlatform):
             # The provider-retained bootstrap installed Tailscale without a
             # credential. Wait for it, then join once over stdin.
             tailscale_ip = EphemeralTailscaleBootstrap(prov_transport).complete(request.tailscale_auth_key)
-            observed_release = verify_provisioned_release(prov_transport, request.debian_release)
+            verify_provisioned_release(prov_transport, request.debian_release)
         except KeyboardInterrupt:
             rollback_create_on_interrupt(ec2, region, backend_name, instance_id, security_group_id)
             raise
@@ -513,7 +513,6 @@ class EC2Platform(VMPlatform):
         }
         return ProvisionResult(
             native_transport=prov_transport,
-            debian_release=observed_release,
             platform_metadata=metadata,
             tailscale_ip=tailscale_ip,
         )

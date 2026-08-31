@@ -137,8 +137,9 @@ New VM creation validates the concrete core-selected release during preflight an
 command's secret-resolution phase or Proxmox API authentication when that mapping is missing. After
 cloning and starting the mapped template, Agentworks verifies the live guest's `/etc/os-release`
 through the QEMU guest agent before running its Debian-specific bootstrap. It checks again before
-creation succeeds. A missing, non-Debian, or wrong-release observation rolls the clone back; there
-is no configuration switch to skip either check.
+creation succeeds through core's returned-transport boundary. An early missing, non-Debian, or
+wrong-release observation rolls the clone back; a failed final check retains a failed VM row for
+explicit deletion. There is no configuration switch to skip either check.
 
 For 0.13 configuration migration, see [Upgrading to 0.14](upgrading-to-0.14.md).
 

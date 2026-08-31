@@ -105,15 +105,14 @@ shared; the domain knowledge remains local.
 
 ## Create pipeline
 
-### Common request and result
+### Common request, result, and core attestation
 
-Vm-platform contract version 3 adds required `debian_release: DebianRelease` fields to both
-`ProvisionRequest` and `ProvisionResult`. `create_vm` always supplies the final registry profile's
-release; no caller parameter reaches that assignment. The result value means the live guest release
-the platform verified before its create rollback window closed. Bumping the kind descriptor from
-contract version 2 to 3 makes every built-in and plugin implementation migrate as one hard cutover;
-exact registration conformance rejects a version-2 implementation and names the incompatible
-platform/plugin.
+Vm-platform contract version 3 adds required `debian_release: DebianRelease` to `ProvisionRequest`.
+`create_vm` always supplies the final registry profile's release; no caller parameter reaches that
+assignment. `ProvisionResult` carries transport and backend identity, not a platform-authored
+release proof. Bumping the kind descriptor from contract version 2 to 3 makes every built-in and
+plugin implementation migrate as one hard cutover; exact registration conformance rejects a
+version-2 implementation and names the incompatible platform/plugin.
 
 No platform defines or imports a platform-local current release. Core passes one concrete release to
 the pending create node and later uses that same value in `ProvisionRequest`. Before the command's
@@ -138,28 +137,28 @@ retain the existing `ProvisioningError` wrapper and durable log reference.
 
 Each platform calls one shared release probe with `request.debian_release` over the create-time
 transport it already controls. The probe runs after the guest boots and before the platform returns
-success. It returns the observed matching release or raises on mismatch, keeping that failure inside
-the platform's rollback window. A platform-specific bootstrap that cannot execute the probe is not
-current-release certified. Contract tests require `ProvisionResult.debian_release` to contain the
-probe's return; the manager persists that verified value rather than the requested intent.
+success. It raises on mismatch, keeping that failure inside the platform's rollback window. A
+platform-specific bootstrap that cannot execute the probe is not current-release certified. This
+platform-side check improves rollback behavior but is not core's source of truth.
 
 Proxmox has an earlier check because its template catalog is operator-owned. After clone and start
 make the QEMU guest agent available, but before the Agentworks bootstrap script runs, Proxmox reads
 `/etc/os-release` through one-shot guest-agent exec and compares it with `request.debian_release`. A
-missing, unreadable, non-Debian, or mismatched observation rolls back the clone. The final transport
-probe still runs after bootstrap and supplies the result observation. The early check protects the
-mutation boundary; the final check protects the success boundary. There is no
-`danger_skip_debian_check` or equivalent escape hatch.
+missing, unreadable, non-Debian, or mismatched observation rolls back the clone. Proxmox does not
+repeat the check after bootstrap. The early check protects the mutation boundary; core's final check
+protects the success boundary. There is no `danger_skip_debian_check` or equivalent escape hatch.
 
 The database row begins with a null observed release. After `platform.create` returns, the manager
 first persists the result's platform metadata so the backend remains addressable. It then
-defensively compares the result release with the request. A mismatch is a platform contract
-violation: the manager retains the row in failed, uninitialized state with its backend identifiers
-and returns a typed error naming the platform, requested release, observed release, and `vm delete`
-recovery. A compliant platform never reaches this safety net because its in-window verifier raises
-and rolls back. Only a matching result lets the manager write the release and observation timestamp
-before it begins Phase B. This ordering never persists requested intent as observed state and never
-deletes the only row capable of targeting a backend that escaped platform rollback.
+independently calls the shared release probe over `result.native_transport` with the requested
+release pinned before dispatch. Mutating the request cannot change what current means, and core does
+not accept a platform-authored release claim in the result. A mismatch, unreadable transport,
+malformed observation, or interrupt retains the row in failed, uninitialized state with its backend
+identifiers and `vm delete` recovery. Only core's matching live observation is written with the
+observation timestamp before Phase A begins. This is runtime conformance enforcement, not a security
+sandbox for in-process plugin code. The ordering never persists requested intent or a platform claim
+as observed state, and it never deletes the only row capable of targeting a backend that escaped
+platform rollback.
 
 ### Platform-owned selector maps
 

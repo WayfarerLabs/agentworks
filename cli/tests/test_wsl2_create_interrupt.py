@@ -138,7 +138,6 @@ def test_success_runs_primary_bootstrap_before_create_returns(monkeypatch: pytes
     result = WSL2Platform("wsl2", {}).create(request, RunContext())
 
     assert WSL2Platform.contract_version == 3
-    assert result.debian_release is DebianRelease.TRIXIE
     assert result.tailscale_ip == "100.64.0.7"
     bootstrap.assert_called_once()
     assert bootstrap.call_args.kwargs == {

@@ -299,14 +299,16 @@ Tailscale auth key, and a required value-free bootstrap-progress sink. The platf
 release through its local artifact map before backend mutation. A missing code-owned mapping names
 the out-of-date Agentworks build or plugin; a missing operator-owned mapping names the exact vm-site
 field. Neither has a fallback. Before its rollback window closes, the platform probes the live guest
-and returns the matching observed release. A successful `ProvisionResult` carries that
-`debian_release`, the native transport, an optional Tailscale IP, and `platform_metadata`. The
-metadata is written verbatim to `vms.platform_metadata` and read back only by the owning platform
-(Lima stores `instance_name`, WSL2 `distro_name`, Azure `resource_id`, Proxmox `vmid` + `node`, EC2
-`instance_id` + `security_group_id` + `region` + `backend_name`, and never the public IP, which it
-reads live). An omitted IP means discovery failed after a successful join, not that bootstrap is
-incomplete. Phase A retries only `tailscale ip -4` before it records the address and verifies
-Tailscale SSH.
+and raises after cleaning up a mismatch. A successful `ProvisionResult` carries the native
+transport, an optional Tailscale IP, and `platform_metadata`. Core treats the result as a runtime
+conformance boundary: after persisting the metadata, it independently probes the returned transport
+and persists only that live observation. This is not a security sandbox for in-process plugin code.
+The metadata is written verbatim to `vms.platform_metadata` and read back only by the owning
+platform (Lima stores `instance_name`, WSL2 `distro_name`, Azure `resource_id`, Proxmox `vmid` +
+`node`, EC2 `instance_id` + `security_group_id` + `region` + `backend_name`, and never the public
+IP, which it reads live). An omitted IP means discovery failed after a successful join, not that
+bootstrap is incomplete. Phase A retries only `tailscale ip -4` before it records the address and
+verifies Tailscale SSH.
 
 Before the create boundary resolves secrets, the pending VM node calls
 `validate_create_release(release)` with that same concrete core selection. The hook is pure and
@@ -317,9 +319,9 @@ requirement, so a legacy site can still load for operations on existing VMs.
 
 An operator-owned artifact is also untrusted until the live guest proves what it contains. When the
 backend exposes guest execution before Agentworks bootstrap, verify `/etc/os-release` there and roll
-back a mismatch before running the Debian-specific bootstrap. Keep the final live probe too; the
-early check guards mutation, while the final probe supplies the successful result observation. Do
-not add a configuration bypass for either check.
+back a mismatch before running the Debian-specific bootstrap. Core still performs the final live
+probe over the returned transport; the early check guards mutation, while core's check owns the
+persisted observation. Do not add a configuration bypass for either check.
 
 Add a platform-specific **input** by adding a field to `ProvisionRequest`, not by changing the
 protocol. But note the opposite pattern is also right: purely internal translation stays inside the
@@ -718,12 +720,12 @@ YAML block scalar, remote shell). Two traps that have already occurred:
 5. Only the transport and lifecycle hooks required by the backend override their defaults.
 6. An operator-owned release catalog overrides `validate_create_release(release)` with a pure
    lookup, while `create()` resolves `request.debian_release` again before mutation, completes
-   Tailscale bootstrap, verifies the live guest through the shared release probe, and returns the
-   observed release or raises after rollback. Use `bootstrap_script.py` / `cloud_init.py` for the
-   create-time payload instead of a platform-specific reinvention. Keep any provider-retained
-   payload credential-free and deliver the resolved key through the platform's ephemeral mechanism.
-   Return an optional IP only after a successful join; Phase A owns IP-only rediscovery and
-   Tailscale SSH verification.
+   Tailscale bootstrap, and verifies the live guest through the shared release probe or raises after
+   rollback. Core repeats the probe over the returned transport and owns the observation. Use
+   `bootstrap_script.py` / `cloud_init.py` for the create-time payload instead of a
+   platform-specific reinvention. Keep any provider-retained payload credential-free and deliver the
+   resolved key through the platform's ephemeral mechanism. Return an optional IP only after a
+   successful join; Phase A owns IP-only rediscovery and Tailscale SSH verification.
 7. Dispatch, idempotency, and, where applicable, template-render tests belong under
    `cli/tests/vms/`; the next section lists the existing references.
 8. The implementation is checked against the preceding platform-development considerations before it
@@ -746,7 +748,7 @@ The existing tests under `cli/tests/vms/` are the templates to copy from:
   (fatal) from a transient error (warn and continue unverified). The template for any platform with
   a credential to verify.
 - `test_create_vm_dispatch.py` and `test_create_reinit_orchestrated.py`: the `ProvisionRequest`
-  shape handed to the platform, the matching verified result, the persisted row, and the
+  shape handed to the platform, core's independent release attestation, the persisted row, and the
   orchestrated create/reinit graph including the `RealizationLog` unwind and the activation gate.
 - `test_lima_create_flow.py`: create-time provisioning wiring with mocked `limactl` and transport,
   the pattern for pinning platform create steps without a real VM.

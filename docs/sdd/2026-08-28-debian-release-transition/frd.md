@@ -98,24 +98,25 @@ platform, release, and need to update Agentworks or the providing plugin. If an 
 such as a Proxmox site's template map, lacks the key, the error instead names the site setting that
 must be supplied. Neither case falls back to another release.
 
-The required request and result fields change the vm-platform capability contract. Implementations
-written against the previous contract are rejected by exact contract-version conformance with a
-clear incompatibility error. A contract-current platform must verify `/etc/os-release` during its
-rollback-capable create window and return the observed release. A mismatch, missing release,
-non-Debian guest, unavailable official image, or missing Proxmox Trixie template fails creation
-before Agentworks reports success. New creation never falls back to Bookworm or an operator-supplied
+The required request field changes the vm-platform capability contract. Implementations written
+against the previous contract are rejected by exact contract-version conformance with a clear
+incompatibility error. A contract-current platform must verify `/etc/os-release` during its
+rollback-capable create window so it can clean up a mismatch. Core then independently probes the
+returned transport and persists only its own observation. A mismatch, missing release, non-Debian
+guest, unavailable official image, or missing Proxmox Trixie template fails creation before
+Agentworks reports success. New creation never falls back to Bookworm or an operator-supplied
 generic image.
 
 An operator-owned artifact requires an additional fail-closed boundary. Once the guest is live
 enough to inspect, the platform verifies its release before running Agentworks bootstrap. Proxmox
-does this through the QEMU guest agent after the clone starts, then repeats the ordinary live probe
-after bootstrap before returning success. The first check prevents Debian-specific mutation of a
-wrong template; the second attests the final handoff. Neither check has an operator bypass.
+does this through the QEMU guest agent after the clone starts. Core performs the ordinary final live
+probe after the platform returns. The first check prevents Debian-specific mutation of a wrong
+template; the core check attests the final handoff. Neither check has an operator bypass.
 
 The manager preserves the distinct code-owned and operator-owned missing-map errors, including their
 remediation hints, across its provisioning wrapper. A compliant platform rolls back a live release
-mismatch before it raises. As a defensive contract check, if a nonconforming platform instead
-returns a release that differs from the request, the manager persists its backend identifiers and
+mismatch before it raises. Core does not trust a platform's success claim: after persisting the
+returned backend identifiers, it independently verifies the returned transport. A failed core probe
 retains one failed, uninitialized VM row so `vm delete` can still address the backend; it does not
 report success or discard the only cleanup handle.
 

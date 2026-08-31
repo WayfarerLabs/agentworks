@@ -142,7 +142,6 @@ class TestCreate:
         }
         assert "allocation_id" not in result.platform_metadata
         assert "allocate_address" not in rec.methods("ec2")
-        assert result.debian_release is DebianRelease.TRIXIE
 
     def test_security_group_is_created_with_no_ingress(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A fresh EC2 security group IS the deny-all-inbound baseline, so

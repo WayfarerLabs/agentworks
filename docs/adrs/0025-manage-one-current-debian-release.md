@@ -23,9 +23,10 @@ parallel creation releases, or an arbitrary release-upgrade graph.
 Agentworks continues to support Debian as its one managed guest operating system. It has one ordered
 registry of recognized Debian release profiles, and the final profile is the sole current release
 for new VM creation. Core passes that concrete release through the vm-platform capability; each
-platform maps it to its own reviewed artifact and verifies the live guest before create succeeds.
-When the artifact catalog is operator-owned, the platform also verifies the live release before
-Agentworks bootstrap mutates the guest.
+platform maps it to its own reviewed artifact and verifies the live guest while it can still roll
+back a mismatch. Core independently probes the returned transport and persists only its own
+observation. When the artifact catalog is operator-owned, the platform also verifies the live
+release before Agentworks bootstrap mutates the guest.
 
 The database stores the last release observed from each live VM. Existing unknown rows are observed
 rather than guessed. A recognized release immediately before current is supported for an explicit

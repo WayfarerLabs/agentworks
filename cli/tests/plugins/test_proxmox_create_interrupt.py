@@ -679,25 +679,6 @@ class TestTransportFailureDuringRollback:
 
 
 class TestPlainFailure:
-    def test_release_verification_failure_stays_inside_create_rollback(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        platform, fake = _platform_with_fake(monkeypatch)
-        failure = StateError("guest release mismatch")
-        monkeypatch.setattr(
-            "agentworks.plugins.proxmox.platform.verify_provisioned_release",
-            MagicMock(side_effect=failure),
-        )
-
-        with pytest.raises(StateError) as caught:
-            platform.create(_request(tailscale=False), RunContext())
-
-        assert caught.value is failure
-        assert ("delete_vm", "pve1", _NEWID) in fake.calls
-        assert len(fake.file_payloads) == 1
-        _assert_template_untouched(fake)
-
     def test_failure_mid_create_cleans_up_and_reraises_the_typed_error(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
     ) -> None:
@@ -754,7 +735,6 @@ class TestProvisionResultTransport:
 
         result = platform.create(_request(tailscale=False), RunContext())
 
-        assert result.debian_release is DebianRelease.TRIXIE
         target = result.native_transport
         assert isinstance(target, SSHTransport)
         assert target.host == "100.64.0.7"

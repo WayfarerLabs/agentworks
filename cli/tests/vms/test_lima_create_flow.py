@@ -184,7 +184,6 @@ def test_submitted_lima_configuration_never_contains_tailscale_key(
         _request(tailscale_auth_key=secret),
         RunContext(),
     )
-    assert result.debian_release is DebianRelease.TRIXIE
 
     assert result.tailscale_ip == "100.64.0.1"
     assert submitted and len(submitted) == 1

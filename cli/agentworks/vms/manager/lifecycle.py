@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.capabilities.base import RunContext
+from agentworks.capabilities.vm_platform.debian_release import verify_provisioned_release
 from agentworks.config import validate_admin_username
 from agentworks.db import SYSTEM_SLUG_KEY, InitStatus, ProvisioningStatus
 from agentworks.debian import CURRENT_DEBIAN_RELEASE, DebianRelease
@@ -541,34 +542,35 @@ def create_vm(
                 render_overlay_outcome(overlay_outcome)
                 raise
 
-            if not isinstance(result.debian_release, DebianRelease):
-                # A third-party implementation can violate the annotated
-                # result shape at runtime. Keep its backend identifiers and
-                # the failed row addressable without rendering the untrusted
-                # value or leaking an AttributeError through the boundary.
+            # A platform's success return is not evidence about the guest. It
+            # may come from third-party code, so core independently observes
+            # the live release over the returned transport. Metadata is
+            # already durable: if attestation fails after the platform closed
+            # its rollback window, the failed row still addresses the backend
+            # for an explicit delete.
+            try:
+                observed_release = verify_provisioned_release(
+                    result.native_transport,
+                    creation_release,
+                )
+            except (KeyboardInterrupt, UserAbort):
+                db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
+                output.warn(
+                    f"VM '{vm_name}' exists but its Debian release was not verified; "
+                    f"run 'agw vm delete {vm_name}' to remove it."
+                )
+                raise
+            except Exception as e:
                 db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
                 raise StateError(
-                    f"vm-platform/{platform_obj.name} returned an invalid Debian release proof",
+                    f"Agentworks could not verify VM '{vm_name}' as Debian {creation_release.value} "
+                    f"after vm-platform/{platform_obj.name} returned success",
                     entity_kind="vm",
                     entity_name=vm_name,
                     hint=f"Run 'agw vm delete {vm_name}' to remove the unverified VM, then update the platform.",
-                )
+                ) from e
 
-            if result.debian_release is not request.debian_release:
-                # This is the safety net for a nonconforming platform that
-                # returned success after creating the wrong guest. Keep the
-                # row and its just-persisted backend identifiers so vm delete
-                # can still reach the escaped backend resource.
-                db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
-                raise StateError(
-                    f"vm-platform/{platform_obj.name} created Debian "
-                    f"{result.debian_release.value} when {request.debian_release.value} was requested",
-                    entity_kind="vm",
-                    entity_name=vm_name,
-                    hint=f"Run 'agw vm delete {vm_name}' to remove the mismatched VM, then retry creation.",
-                )
-
-            db.update_vm_debian_release(vm_name, result.debian_release)
+            db.update_vm_debian_release(vm_name, observed_release)
 
             # -- Phase A: record + verify connectivity (the tail of Provisioning) --
             # Past the unwind window: if anything below fails, the VM exists on
@@ -624,7 +626,7 @@ def create_vm(
                 resolved_admin_username,
                 logger,
                 git_tokens=git_tokens,
-                debian_release=result.debian_release,
+                debian_release=observed_release,
                 operation=_mgr.VMInitializationOperation.VM_CREATE,
             )
         except (KeyboardInterrupt, UserAbort):

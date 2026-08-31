@@ -718,9 +718,10 @@ VM domain resolves its template's Tailscale auth-key reference once and selects 
 release from core policy. Vm-platform contract version 3 carries both through `ProvisionRequest`,
 alongside a value-free progress sink. A platform must not redeclare either value in its config, read
 a substitute from ambient state, or infer its own meaning of "current." It translates the requested
-release through a platform-owned artifact map, verifies the live guest before returning, and reports
-the observed release in `ProvisionResult`. Platform-config secrets still use `ctx.secret(name)`;
-domain-owned values follow the operation that consumes them.
+release through a platform-owned artifact map and verifies the live guest before returning so it can
+roll back a mismatch. Core independently probes the returned transport and persists only that
+observation. Platform-config secrets still use `ctx.secret(name)`; domain-owned values follow the
+operation that consumes them.
 
 Both shipped capabilities are the reference: `git-credential-provider` (github, azdo) reads its
 token via `ctx.secret(name)` in `runup`, and `vm-platform/proxmox` reads its API token the same way

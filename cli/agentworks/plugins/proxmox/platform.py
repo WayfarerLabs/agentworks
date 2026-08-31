@@ -17,7 +17,6 @@ from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootst
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.debian_release import (
     operator_owned_release_value,
-    verify_provisioned_release,
 )
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease, verify_os_release
@@ -142,8 +141,8 @@ class ProxmoxPlatform(VMPlatform):
         Creation passes the required Tailscale key through a private guest-agent staging
         file. Before that bootstrap runs, the live guest must report the requested Debian
         release through the QEMU guest agent. Creation verifies removal of the staging file
-        and repeats the release check before returning success. A verification or bootstrap
-        failure rolls the cloned VM back before it propagates.
+        before returning a transport for core's final independent release check. An early
+        verification or bootstrap failure rolls the cloned VM back before it propagates.
 
         Ships as the opt-in `proxmox` system plugin, so a site stays not-ready until
         `[plugins] system` lists it.
@@ -421,7 +420,6 @@ class ProxmoxPlatform(VMPlatform):
                     identity_file=request.ssh_private_key,
                     force_tty=sys.platform == "win32",
                 )
-                observed_release = verify_provisioned_release(target, request.debian_release)
             except Exception:
                 # Re-raised unwrapped after rollback: the manager preserves
                 # typed configuration/state failures and maps other backend
@@ -436,7 +434,6 @@ class ProxmoxPlatform(VMPlatform):
 
         return ProvisionResult(
             native_transport=target,
-            debian_release=observed_release,
             platform_metadata={"vmid": str(newid), "node": node},
             tailscale_ip=tailscale_ip,
         )
@@ -503,7 +500,7 @@ class ProxmoxPlatform(VMPlatform):
         vmid: int,
         expected: DebianRelease,
         ctx: RunContext,
-    ) -> DebianRelease:
+    ) -> None:
         """Attest an operator-owned template through the live guest agent."""
         result = self._api(ctx).guest_agent_exec_wait(
             node,
@@ -518,7 +515,7 @@ class ProxmoxPlatform(VMPlatform):
         stdout = result.get("out-data")
         if not isinstance(stdout, str):
             raise ProvisioningError("Proxmox guest-agent Debian release check returned invalid output")
-        return verify_os_release(stdout, expected=expected)
+        verify_os_release(stdout, expected=expected)
 
     def _wait_for_cloud_init(self, node: str, vmid: int, ctx: RunContext, *, timeout: int = 300) -> None:
         """Wait for cloud-init to finish inside the VM."""

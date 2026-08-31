@@ -652,7 +652,7 @@ class AzureVMPlatform(VMPlatform):
                 # The provider-retained bootstrap installed Tailscale without
                 # a credential. Wait for it, then join once over stdin.
                 tailscale_ip = EphemeralTailscaleBootstrap(prov_transport).complete(tailscale_auth_key)
-                observed_release = verify_provisioned_release(prov_transport, request.debian_release)
+                verify_provisioned_release(prov_transport, request.debian_release)
             except Exception as exc:
                 output.detail("Cleaning up resources...")
                 # The teardown captures a VM-delete failure rather than
@@ -676,7 +676,6 @@ class AzureVMPlatform(VMPlatform):
         metadata = {"resource_id": resource_id} if resource_id else {}
         return ProvisionResult(
             native_transport=prov_transport,
-            debian_release=observed_release,
             platform_metadata=metadata,
             tailscale_ip=tailscale_ip,
         )

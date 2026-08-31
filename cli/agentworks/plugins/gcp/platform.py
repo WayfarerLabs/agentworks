@@ -423,7 +423,7 @@ class GCEPlatform(VMPlatform):
                 readiness_label=GCE_READINESS_LABEL,
             ).complete(request.tailscale_auth_key)
             request.progress.output("GCE credential-free bootstrap and Tailscale join completed")
-            observed_release = verify_provisioned_release(transport, request.debian_release)
+            verify_provisioned_release(transport, request.debian_release)
         except KeyboardInterrupt as primary:
             operator_interrupt = primary
         except Exception as primary:
@@ -471,7 +471,6 @@ class GCEPlatform(VMPlatform):
             metadata["subnet_url"] = network.subnet_url
         return ProvisionResult(
             native_transport=transport,
-            debian_release=observed_release,
             platform_metadata=metadata,
             tailscale_ip=tailscale_ip,
         )

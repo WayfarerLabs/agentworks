@@ -57,5 +57,5 @@ def operator_owned_release_value[T](
 
 
 def verify_provisioned_release(transport: Transport, expected: DebianRelease) -> DebianRelease:
-    """Verify a newly provisioned guest before its rollback window closes."""
+    """Verify a newly provisioned guest over its returned transport."""
     return probe_debian_release(transport, expected=expected)

@@ -234,7 +234,7 @@ before platform dispatch.
 The manager currently wraps every ordinary exception from `platform.create` as a
 `ProvisioningError`, which would discard a typed missing-map error's remediation hint. It also ends
 the create unwind window as soon as the platform returns and only then persists platform metadata. A
-defensive result mismatch detected at that point therefore needs a retained row with its cleanup
+defensive core probe failure detected at that point therefore needs a retained row with its cleanup
 identifiers, not row deletion that could orphan the returned backend. The plugin-author guide still
 advertises vm-platform contract version 2 and teaches the version 2 request.
 
@@ -242,8 +242,9 @@ Design consequence: add a nullable first-class VM column and a required internal
 passes its concrete current release; each platform resolves that value through its own map rather
 than inferring current. The vm-platform contract version changes so old plugins fail conformance,
 while a contract-current platform missing the requested key fails clearly before backend mutation.
-The manager preserves those focused errors. A returned mismatch retains backend metadata in a failed
-row, and the capability plus plugin-author documentation changes with the contract.
+The manager preserves those focused errors and independently probes the returned transport instead
+of trusting a platform-authored release result. A failed core probe retains backend metadata in a
+failed row, and the capability plus plugin-author documentation changes with the contract.
 
 Evidence: `cli/agentworks/db/models.py`, `cli/agentworks/db/converters.py`,
 `cli/agentworks/db/database.py`, `cli/agentworks/capabilities/vm_platform/base.py`,

@@ -416,7 +416,7 @@ class LimaPlatform(VMPlatform):
                 output.warn("Tailscale is joined; Phase A will retry IP discovery without the auth key.")
 
             transport = self._transport_for(instance_name)
-            observed_release = verify_provisioned_release(transport, request.debian_release)
+            verify_provisioned_release(transport, request.debian_release)
         except KeyboardInterrupt:
             self._rollback_create_on_interrupt(instance_name)
             raise
@@ -427,7 +427,6 @@ class LimaPlatform(VMPlatform):
 
         return ProvisionResult(
             native_transport=transport,
-            debian_release=observed_release,
             platform_metadata={"instance_name": instance_name},
             tailscale_ip=tailscale_ip,
         )

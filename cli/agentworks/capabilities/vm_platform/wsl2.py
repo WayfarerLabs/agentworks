@@ -775,7 +775,7 @@ class WSL2Platform(VMPlatform):
                     progress=request.progress,
                 )
                 output.detail(f"Tailscale IP: {tailscale_ip}")
-                observed_release = verify_provisioned_release(native_transport, request.debian_release)
+                verify_provisioned_release(native_transport, request.debian_release)
             except Exception:
                 # WSL2's error convention holds: the RuntimeErrors from
                 # _wsl / _powershell propagate unwrapped; the only new
@@ -790,7 +790,6 @@ class WSL2Platform(VMPlatform):
         output.detail(f"WSL2 VM '{vm_name}' provisioned.")
         return ProvisionResult(
             native_transport=native_transport,
-            debian_release=observed_release,
             platform_metadata={"distro_name": distro_name},
             tailscale_ip=tailscale_ip,
         )

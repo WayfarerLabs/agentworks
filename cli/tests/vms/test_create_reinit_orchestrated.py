@@ -30,6 +30,8 @@ from tests.conftest import ManifestDoc, write_manifests
 from tests.orchestrated_fixtures import proxmox_site
 from tests.ssh_fixtures import write_test_ssh_keypair
 
+pytestmark = pytest.mark.usefixtures("verified_debian_release")
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
@@ -188,7 +190,6 @@ def test_create_admin_spec_credential_joins_graph_and_logger_redactions(
         assert request.progress is loggers[0]
         return ProvisionResult(  # type: ignore[arg-type]
             native_transport=SimpleNamespace(),
-            debian_release=DebianRelease.TRIXIE,
             tailscale_ip="100.64.0.7",
         )
 
@@ -344,7 +345,6 @@ def test_successful_create_propagates_fresh_logger_close_interrupt(
         "create",
         lambda self, request, ctx: ProvisionResult(  # noqa: ARG005
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
-            debian_release=DebianRelease.TRIXIE,
             tailscale_ip="100.64.0.7",
         ),
     )
@@ -533,7 +533,6 @@ def test_create_init_failure_keeps_the_row(
     def _fake_create(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
         return ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
-            debian_release=DebianRelease.TRIXIE,
             platform_metadata={},
             tailscale_ip="100.64.0.7",
         )
@@ -574,7 +573,6 @@ def test_create_phase_a_failure_maps_to_provisioning_error(
     def _fake_create(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
         return ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
-            debian_release=DebianRelease.TRIXIE,
             platform_metadata={},
             tailscale_ip="100.64.0.7",
         )
@@ -624,7 +622,6 @@ def test_create_phase_a_sync_failure_is_non_fatal(
     def _fake_create(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
         return ProvisionResult(
             native_transport=SimpleNamespace(describe=lambda: "lima:vm", logger=None),  # type: ignore[arg-type]
-            debian_release=DebianRelease.TRIXIE,
             platform_metadata={},
             tailscale_ip="100.64.0.7",
         )
@@ -684,7 +681,6 @@ def test_create_provisioning_section_ends_with_ssh_config_synced(
     def _fake_create(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
         return ProvisionResult(
             native_transport=SimpleNamespace(describe=lambda: "lima:vm", logger=None),  # type: ignore[arg-type]
-            debian_release=DebianRelease.TRIXIE,
             platform_metadata={},
             tailscale_ip="100.64.0.7",
         )

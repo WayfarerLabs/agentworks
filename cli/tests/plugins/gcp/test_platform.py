@@ -406,7 +406,6 @@ def test_full_create_retains_secret_free_request_and_joins_once(
     ]
     assert GCE_READINESS_COMMAND in [command for command, _kwargs in transport.calls]
     assert result.tailscale_ip == "100.64.0.9"
-    assert result.debian_release is DebianRelease.TRIXIE
     assert "203.0.113.19" not in repr(result.platform_metadata)
     assert result.platform_metadata["allow_source_ranges"] == "198.18.0.7/32"
     assert _TAILSCALE_SENTINEL not in repr(progress.mock_calls)

@@ -207,7 +207,6 @@ class TestCreate:
             self._request(),
             RunContext(config=_operator_config(["198.51.100.0/24"])),
         )
-        assert result.debian_release is DebianRelease.TRIXIE
 
         assert result.platform_metadata == {"resource_id": _RESOURCE_ID}
         assert network.public_ip_addresses.created == [("rg1", "vm1-ip")]

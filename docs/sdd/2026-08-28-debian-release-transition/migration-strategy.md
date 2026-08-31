@@ -33,8 +33,8 @@ migration ladder.
 
 ### Population rules
 
-- New create writes the requested current release after the platform verifies the guest and before
-  Phase B starts.
+- New create writes the release that core independently observes over the platform's returned
+  transport before Phase A starts.
 - A release-sensitive operation probes an unknown existing row and records a recognized observation.
 - `vm list` and database open never probe the network.
 - A recorded/live mismatch blocks ordinary release-sensitive mutation.
@@ -57,7 +57,7 @@ before a release-sensitive mutation.
 
 ## 3. Creation cutover
 
-All platform selector maps, the vm-platform version 3 request/result contract, and create-time live
+All platform selector maps, the vm-platform version 3 request contract, and create-time live
 validation land before Trixie's certified profile is appended to the active registry. The commits
 remain independently green by using explicit candidate-profile test fixtures until the final cutover
 commit performs that one append. Before the append, a live Trixie guest is an unrecognized release
@@ -71,10 +71,10 @@ key reports that the platform or plugin is out of date; a missing operator-owned
 the exact vm-site setting. Neither failure chooses a different release.
 
 The manager's provisioning wrapper preserves those two typed errors and their remediation hints. A
-platform's live mismatch must raise while the platform can still roll back. If a nonconforming
-platform returns a mismatched release, the defensive manager check first retains the platform
-metadata, then leaves one failed, uninitialized row with delete/retry guidance. This keeps the
-backend addressable for cleanup instead of unwinding its only database handle.
+platform's live mismatch must raise while the platform can still roll back. After any platform
+returns success, core first retains the platform metadata and then independently probes the returned
+transport. A failed core probe leaves one failed, uninitialized row with delete/retry guidance. This
+keeps the backend addressable for cleanup instead of unwinding its only database handle.
 
 The release is not publishable until each platform's artifact lookup and create rollback behavior is
 certified. At runtime, a missing image or architecture produces a typed platform or configuration
@@ -84,10 +84,10 @@ upgrade certification uses prebuilt Bookworm fixtures rather than a hidden creat
 The contract change updates `cli/agentworks/capabilities/README.md`,
 `cli/agentworks/capabilities/vm_platform/README.md`, and `cli/agentworks/plugins/README.md` in the
 same implementation merge unit. The base guide explains the domain-owned request value and hard
-contract-version cutover. The specific guide documents release-map lookup, missing-key errors, live
-verification, result matching, and the tests required of built-in and plugin platforms. The plugin
-guide changes its example and create-contract teaching from version 2 to version 3. Topic prose and
-docstrings move with them.
+contract-version cutover. The specific guide documents release-map lookup, missing-key errors,
+platform rollback verification, core-owned final attestation, and the tests required of built-in and
+plugin platforms. The plugin guide changes its example and create-contract teaching from version 2
+to version 3. Topic prose and docstrings move with them.
 
 Existing VMs retain the platform metadata recorded at their original creation. Image mappings are
 used only to create a new backend VM; changing a map does not mutate or relabel an existing one.
@@ -264,8 +264,8 @@ The implementation lands in independently reviewable phases:
 1. ordered core release type, relative support classifier, database observation, release-keyed Phase
    B values, output, and no-selector contract as one merge unit;
 2. disk-backed staging corrections;
-3. vm-platform version 3 request/result contract, platform image maps, Proxmox transition,
-   capability READMEs, and Trixie create validation;
+3. vm-platform version 3 request contract, platform image maps, Proxmox transition, capability
+   READMEs, and Trixie create validation;
 4. the adjacent durable `vm upgrade` workflow and permanent recovery teaching;
 5. live platform certification, relative support teaching, superseding ADR, and release cutover.
 

@@ -408,6 +408,17 @@ the product cannot ship consistently within the agreed scope.
       bootstrap, retain the final post-bootstrap probe, and expose no verification bypass.
 - [x] Prove wrong, unreadable, and mismatched templates roll back before bootstrap while successful
       creation executes both attestation boundaries.
+
+The operator's core-boundary correction supersedes the platform-authored final observation above;
+the completed boxes remain the truthful record of the first round-three implementation.
+
+- [x] Remove the platform-authored release field from `ProvisionResult`; core independently probes
+      the returned transport against its pre-dispatch current release and persists only that live
+      observation, even if a plugin mutates its request object.
+- [x] Retain failed, addressable VM state when core attestation fails after platform success, before
+      Phase A or release persistence.
+- [x] Keep Proxmox's early QEMU-agent guard but remove its redundant post-bootstrap platform probe;
+      core owns the final attestation for built-in and third-party platforms alike.
 - [ ] Run the complete focused and repository gates, then obtain exact-head project, correctness,
       and complexity reviews before the signed round 3 of 4 ready handoff.
 

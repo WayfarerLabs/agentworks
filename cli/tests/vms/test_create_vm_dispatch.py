@@ -13,15 +13,17 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform import ProvisionResult
+from agentworks.capabilities.vm_platform import ProvisionRequest, ProvisionResult
 from agentworks.config import load_config
 from agentworks.debian import DebianRelease
-from agentworks.errors import ConfigError, NotFoundError, ProvisioningError, StateError, ValidationError
+from agentworks.errors import ConfigError, NotFoundError, ProvisioningError, StateError, UserAbort, ValidationError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from tests.conftest import ManifestDoc, write_manifests
 from tests.orchestrated_fixtures import proxmox_site
 from tests.ssh_fixtures import TEST_SSH_PUBLIC_KEY, write_test_ssh_keypair
+
+pytestmark = pytest.mark.usefixtures("verified_debian_release")
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -72,7 +74,6 @@ def test_create_vm_request_shape_and_row(
     hostname, null slug pre-Phase-4) and the returned platform_metadata
     persists verbatim. The request's cpus comes from the typed final
     instance layer, which also persists with the owner."""
-    from agentworks.capabilities.vm_platform import ProvisionRequest
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
     from agentworks.instance_specs import OverlayDisposition, OverlayOutcome
 
@@ -80,15 +81,26 @@ def test_create_vm_request_shape_and_row(
     captured_request: list[ProvisionRequest] = []
     captured_platform: list[LimaPlatform] = []
     initialized_release: list[DebianRelease] = []
+    attested_release: list[DebianRelease] = []
     outcomes: list[OverlayOutcome] = []
+    native_transport = SimpleNamespace()
     monkeypatch.setattr("agentworks.instance_specs.render_overlay_outcome", outcomes.append)
+
+    def _verify_release(transport: object, expected: DebianRelease) -> DebianRelease:
+        assert transport is native_transport
+        attested_release.append(expected)
+        return expected
+
+    monkeypatch.setattr(
+        "agentworks.vms.manager.lifecycle.verify_provisioned_release",
+        _verify_release,
+    )
 
     def _fake_create(self: LimaPlatform, request: ProvisionRequest, ctx: object) -> ProvisionResult:
         captured_platform.append(self)
         captured_request.append(request)
         return ProvisionResult(
-            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
-            debian_release=DebianRelease.TRIXIE,
+            native_transport=native_transport,  # type: ignore[arg-type]
             platform_metadata={"instance_name": "dvm"},
             tailscale_ip="100.64.0.7",
         )
@@ -139,6 +151,7 @@ def test_create_vm_request_shape_and_row(
     assert vm.debian_release is DebianRelease.TRIXIE
     assert vm.debian_release_observed_at is not None
     assert vm.operator_stopped is False
+    assert attested_release == [DebianRelease.TRIXIE]
     assert initialized_release == [DebianRelease.TRIXIE]
     stored = db.instance_state.get_desired_overlay("vm", "dvm")
     assert stored is not None and stored.payload.value == {
@@ -201,7 +214,6 @@ def test_create_vm_metadata_failure_retains_owner_and_reports_once(
         "create",
         lambda *args, **kwargs: ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
-            debian_release=DebianRelease.TRIXIE,
             platform_metadata={"instance_name": "metadata-fail"},
             tailscale_ip="100.64.0.7",
         ),
@@ -264,89 +276,82 @@ def test_create_vm_preserves_typed_release_mapping_failure(
     assert db.get_vm("map-fail") is None
 
 
-def test_create_vm_returned_release_mismatch_retains_failed_addressable_row(
+@pytest.mark.parametrize(
+    ("failure", "wrapped"),
+    [
+        pytest.param(StateError("guest release mismatch"), True, id="mismatch"),
+        pytest.param(RuntimeError("transport failed"), True, id="transport-failure"),
+        pytest.param(KeyboardInterrupt("stop"), False, id="interrupt"),
+        pytest.param(UserAbort("stop"), False, id="user-abort"),
+    ],
+)
+def test_create_vm_core_release_attestation_uses_core_release_and_retains_failed_row(
     db: Database,
     make_config,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: object,
+    failure: BaseException,
+    wrapped: bool,
 ) -> None:
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
     from agentworks.db import InitStatus, ProvisioningStatus
 
-    monkeypatch.setattr(
-        LimaPlatform,
-        "create",
-        lambda *args, **kwargs: ProvisionResult(
-            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
-            debian_release=DebianRelease.BOOKWORM,
-            platform_metadata={"instance_name": "wrong-release"},
+    native_transport = SimpleNamespace()
+
+    def _create_with_mutated_request(
+        _self: LimaPlatform,
+        request: ProvisionRequest,
+        _ctx: object,
+    ) -> ProvisionResult:
+        request.debian_release = DebianRelease.BOOKWORM
+        return ProvisionResult(
+            native_transport=native_transport,  # type: ignore[arg-type]
+            platform_metadata={"instance_name": "unverified"},
             tailscale_ip="100.64.0.7",
-        ),
-    )
-    monkeypatch.setattr(
-        vm_manager,
-        "bootstrap_vm",
-        lambda *args, **kwargs: pytest.fail("Phase A reached after a returned release mismatch"),
-    )
-
-    with pytest.raises(StateError) as caught:
-        vm_manager.create_vm(
-            db,
-            make_config(),
-            name="wrong-release",
-            interaction=TtyInteractionPolicy.REFUSE,
         )
-
-    assert caught.value.entity_kind == "vm"
-    assert caught.value.entity_name == "wrong-release"
-    row = db.get_vm("wrong-release")
-    assert row is not None
-    assert row.platform_metadata == {"instance_name": "wrong-release"}
-    assert row.provisioning_status == ProvisioningStatus.FAILED.value
-    assert row.init_status == InitStatus.PENDING.value
-    assert row.debian_release is None
-
-
-@pytest.mark.parametrize("invalid_release", ["trixie", None], ids=("string", "null"))
-def test_create_vm_invalid_release_proof_retains_failed_addressable_row(
-    db: Database,
-    make_config,
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output: object,
-    invalid_release: object,
-) -> None:
-    from agentworks.capabilities.vm_platform.lima import LimaPlatform
-    from agentworks.db import InitStatus, ProvisioningStatus
 
     monkeypatch.setattr(
         LimaPlatform,
         "create",
-        lambda *args, **kwargs: ProvisionResult(
-            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
-            debian_release=invalid_release,  # type: ignore[arg-type]
-            platform_metadata={"instance_name": "invalid-proof"},
-            tailscale_ip="100.64.0.7",
-        ),
+        _create_with_mutated_request,
+    )
+
+    def _fail_attestation(transport: object, expected: DebianRelease) -> DebianRelease:
+        assert transport is native_transport
+        assert expected is DebianRelease.TRIXIE
+        raise failure
+
+    monkeypatch.setattr(
+        "agentworks.vms.manager.lifecycle.verify_provisioned_release",
+        _fail_attestation,
     )
     monkeypatch.setattr(
         vm_manager,
         "bootstrap_vm",
-        lambda *args, **kwargs: pytest.fail("Phase A reached after an invalid release proof"),
+        lambda *args, **kwargs: pytest.fail("Phase A reached after core release attestation failed"),
     )
 
-    with pytest.raises(StateError) as caught:
+    def _create() -> None:
         vm_manager.create_vm(
             db,
             make_config(),
-            name="invalid-proof",
+            name="unverified",
             interaction=TtyInteractionPolicy.REFUSE,
         )
 
-    assert caught.value.entity_kind == "vm"
-    assert caught.value.entity_name == "invalid-proof"
-    row = db.get_vm("invalid-proof")
+    if wrapped:
+        with pytest.raises(StateError) as wrapped_caught:
+            _create()
+        assert wrapped_caught.value.entity_kind == "vm"
+        assert wrapped_caught.value.entity_name == "unverified"
+        assert wrapped_caught.value.__cause__ is failure
+    else:
+        with pytest.raises((KeyboardInterrupt, UserAbort)) as control_caught:
+            _create()
+        assert control_caught.value is failure
+    row = db.get_vm("unverified")
     assert row is not None
-    assert row.platform_metadata == {"instance_name": "invalid-proof"}
+    assert row.platform_metadata == {"instance_name": "unverified"}
     assert row.provisioning_status == ProvisioningStatus.FAILED.value
     assert row.init_status == InitStatus.PENDING.value
     assert row.debian_release is None
@@ -370,7 +375,6 @@ def test_create_vm_logger_close_failure_retains_owner_and_reports_once(
         "create",
         lambda *args, **kwargs: ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
-            debian_release=DebianRelease.TRIXIE,
             platform_metadata={"instance_name": "close-fail"},
             tailscale_ip="100.64.0.7",
         ),
@@ -405,7 +409,6 @@ def test_create_vm_stores_and_provisions_selected_admin_template(
     captured_output: object,
 ) -> None:
     """An admin final layer composes with an explicit non-default template."""
-    from agentworks.capabilities.vm_platform import ProvisionRequest
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
     (tmp_path / "resources").mkdir()
@@ -426,7 +429,6 @@ def test_create_vm_stores_and_provisions_selected_admin_template(
         captured.append(request)
         return ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
-            debian_release=DebianRelease.TRIXIE,
             platform_metadata={"instance_name": "wvm"},
             tailscale_ip="100.64.0.9",
         )
@@ -581,7 +583,6 @@ def test_create_vm_composes_r11_hostname_with_slug(
     """With a slug set, the hostname is {slug}-{name} and the slug
     rides the ProvisionRequest (no first-create prompt fires: the
     settings row exists)."""
-    from agentworks.capabilities.vm_platform import ProvisionRequest
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
     config = make_config()
@@ -592,7 +593,6 @@ def test_create_vm_composes_r11_hostname_with_slug(
         captured.append(request)
         return ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
-            debian_release=DebianRelease.TRIXIE,
             platform_metadata={"instance_name": "team-a-svm"},
             tailscale_ip="100.64.0.8",
         )
