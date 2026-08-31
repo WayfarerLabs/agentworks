@@ -441,7 +441,13 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
         },
         "issues": [
             {"source": source, "code": "unavailable"}
-            for source in ("site_lookup", "preflight", "secret_resolution", "platform_status")
+            for source in (
+                "site_lookup",
+                "preflight",
+                "secret_resolution",
+                "checkpoint_inventory",
+                "platform_status",
+            )
         ],
     }
     expected_workspace: dict[str, object] = {

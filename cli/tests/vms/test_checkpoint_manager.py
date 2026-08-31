@@ -285,6 +285,41 @@ def test_upgrade_checkpoint_preflight_rejects_orphaned_provider_artifact(
     assert platform.created == []
 
 
+def test_upgrade_checkpoint_preserves_create_failure_when_restart_also_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    db: Database,
+) -> None:
+    platform = _Platform()
+    _prepare(monkeypatch, db, platform)
+    platform.power = VMStatus.RUNNING
+    primary = StateError("provider checkpoint create failed")
+    monkeypatch.setattr(
+        platform,
+        "create_checkpoint",
+        lambda *args, **kwargs: (_ for _ in ()).throw(primary),
+    )
+    monkeypatch.setattr(
+        platform,
+        "start",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("restart failed")),
+    )
+
+    with pytest.raises(StateError) as caught:
+        checkpoints.create_upgrade_checkpoint(
+            db,
+            object(),
+            "box",
+            source_release=DebianRelease.BOOKWORM,
+            target_release=DebianRelease.TRIXIE,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert caught.value is primary
+    row = db.get_vm_checkpoint("box")
+    assert row is not None
+    assert row.state is VMCheckpointState.CREATING
+
+
 def test_upgrade_resume_never_replaces_a_missing_journaled_checkpoint(
     monkeypatch: pytest.MonkeyPatch,
     db: Database,
@@ -319,6 +354,12 @@ def test_destructive_checkpoint_commands_validate_before_confirmation(
         "agentworks.vms.manager.checkpoints.output.confirm",
         lambda *args, **kwargs: prompts.append((args, kwargs)),
     )
+    boundary_calls: list[object] = []
+    monkeypatch.setattr(
+        checkpoints,
+        "_live_vm_boundary",
+        lambda *args, **kwargs: boundary_calls.append((args, kwargs)),
+    )
 
     with pytest.raises(StateError):
         checkpoints.restore_checkpoint(
@@ -338,6 +379,7 @@ def test_destructive_checkpoint_commands_validate_before_confirmation(
         )
 
     assert prompts == []
+    assert boundary_calls == []
 
 
 def test_restore_uses_capture_release_after_target_was_observed(
@@ -420,6 +462,45 @@ def test_restore_refuses_desired_state_drift_before_provider_mutation(
         )
 
     assert platform.restored == []
+
+
+def test_restore_preserves_verification_failure_when_final_stop_also_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    db: Database,
+) -> None:
+    platform = _Platform()
+    _prepare(monkeypatch, db, platform)
+    checkpoints.create_checkpoint(
+        db,
+        object(),
+        "box",
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+    primary = StateError("restored Debian release did not match")
+    monkeypatch.setattr("agentworks.transports.native_transport", lambda *args, **kwargs: object())
+    monkeypatch.setattr(
+        "agentworks.debian.probe_debian_release",
+        lambda *args, **kwargs: (_ for _ in ()).throw(primary),
+    )
+    monkeypatch.setattr(
+        platform,
+        "stop",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("final stop failed")),
+    )
+
+    with pytest.raises(StateError) as caught:
+        checkpoints.restore_checkpoint(
+            db,
+            object(),
+            "box",
+            yes=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert caught.value is primary
+    row = db.get_vm_checkpoint("box")
+    assert row is not None
+    assert row.state is VMCheckpointState.RESTORING
 
 
 def test_interrupted_restore_reuses_its_persisted_operation_identity(
@@ -729,6 +810,66 @@ def test_force_delete_checkpoint_abandons_failed_provider_cleanup(
 
     assert db.get_vm_checkpoint("box") is None
     assert db.list_vm_events("box")[-1].event == "checkpoint_abandoned"
+
+
+def test_force_delete_checkpoint_abandons_raw_provider_cleanup_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    db: Database,
+) -> None:
+    platform = _Platform()
+    _prepare(monkeypatch, db, platform)
+    checkpoints.create_checkpoint(
+        db,
+        object(),
+        "box",
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+    monkeypatch.setattr(
+        platform,
+        "delete_checkpoint",
+        lambda *args, **kwargs: (_ for _ in ()).throw(PermissionError("provider artifact is read-only")),
+    )
+
+    checkpoints.delete_checkpoint(
+        db,
+        object(),
+        "box",
+        yes=True,
+        force=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    assert db.get_vm_checkpoint("box") is None
+    assert db.list_vm_events("box")[-1].event == "checkpoint_abandoned"
+
+
+def test_checkpoint_abandonment_rolls_back_when_audit_insert_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    db: Database,
+) -> None:
+    platform = _Platform()
+    _prepare(monkeypatch, db, platform)
+    created = checkpoints.create_checkpoint(
+        db,
+        object(),
+        "box",
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+    monkeypatch.setattr(
+        db,
+        "insert_vm_event",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("audit insert failed")),
+    )
+
+    with pytest.raises(RuntimeError):
+        checkpoints._abandon_checkpoint(
+            db,
+            "box",
+            error=StateError("provider cleanup failed"),
+            yes=True,
+        )
+
+    assert db.get_vm_checkpoint("box") == created
 
 
 def test_force_delete_checkpoint_abandons_ready_row_when_inventory_is_unavailable(

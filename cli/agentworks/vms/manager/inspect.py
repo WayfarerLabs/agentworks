@@ -7,7 +7,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Literal, cast
 
 from agentworks import output
-from agentworks.db import SYSTEM_SLUG_KEY, VMStatus
+from agentworks.db import SYSTEM_SLUG_KEY, VMCheckpointState, VMStatus
 from agentworks.db.projections import (
     project_session_mode,
     project_vm_initialization_status,
@@ -65,6 +65,7 @@ class VMInspectionIssueSource(StrEnum):
     SITE_LOOKUP = "site_lookup"
     PREFLIGHT = "preflight"
     SECRET_RESOLUTION = "secret_resolution"
+    CHECKPOINT_INVENTORY = "checkpoint_inventory"
     PLATFORM_STATUS = "platform_status"
 
 
@@ -561,6 +562,11 @@ def vm_description(
             for event in db.list_vm_events(name)
         )
         checkpoint_row = db.get_vm_checkpoint(name)
+        restore_status: str | None = None
+        checkpoint_inventory_proved = checkpoint_row is None or checkpoint_row.state not in {
+            VMCheckpointState.READY,
+            VMCheckpointState.RESTORING,
+        }
         if checkpoint_row is not None:
             from .checkpoints import checkpoint_restore_status
 
@@ -571,21 +577,6 @@ def vm_description(
                 vm,
                 checkpoint_row,
             ).value
-        checkpoint = (
-            None
-            if checkpoint_row is None
-            else VMDetailCheckpoint(
-                name=checkpoint_row.name,
-                provider_identifier=checkpoint_row.provider_identifier,
-                state=checkpoint_row.state.value,
-                restore_status=restore_status,
-                purpose=checkpoint_row.purpose,
-                capture_release=checkpoint_row.capture_release.value,
-                source_release=(None if checkpoint_row.source_release is None else checkpoint_row.source_release.value),
-                target_release=(None if checkpoint_row.target_release is None else checkpoint_row.target_release.value),
-                created_at=checkpoint_row.created_at,
-            )
-        )
         vm_facts = VMDetailFacts.from_row(vm)
 
     _warn_legacy_release(vm)
@@ -644,6 +635,23 @@ def vm_description(
                 else:
                     ops_ctx = _platform_ops_ctx(config, scope, vm_node, resolver)
                     platform = vm_node.site.platform
+                    if checkpoint_row is not None and checkpoint_row.state in {
+                        VMCheckpointState.READY,
+                        VMCheckpointState.RESTORING,
+                    }:
+                        from .checkpoint_listing import CheckpointRestoreStatus
+                        from .checkpoints import _reconcile_ready_checkpoint
+
+                        try:
+                            _reconcile_ready_checkpoint(platform, vm, ops_ctx, checkpoint_row)
+                            checkpoint_inventory_proved = True
+                        except UserAbort:
+                            raise
+                        except AgentworksError as exc:
+                            restore_status = CheckpointRestoreStatus.UNAVAILABLE.value
+                            issue = VMIssue(source=VMInspectionIssueSource.CHECKPOINT_INVENTORY)
+                            issues.append(issue)
+                            diagnostics.append(VMDiagnostic(issue=issue, error=exc))
                     try:
                         backend = platform.display_backend_name(vm)
                         observed = platform.status(vm, ops_ctx)
@@ -656,6 +664,27 @@ def vm_description(
                         issue = VMIssue(source=VMInspectionIssueSource.PLATFORM_STATUS)
                         issues.append(issue)
                         diagnostics.append(VMDiagnostic(issue=issue, error=exc))
+
+    if not checkpoint_inventory_proved:
+        from .checkpoint_listing import CheckpointRestoreStatus
+
+        restore_status = CheckpointRestoreStatus.UNAVAILABLE.value
+
+    if checkpoint_row is None:
+        checkpoint = None
+    else:
+        assert restore_status is not None
+        checkpoint = VMDetailCheckpoint(
+            name=checkpoint_row.name,
+            provider_identifier=checkpoint_row.provider_identifier,
+            state=checkpoint_row.state.value,
+            restore_status=restore_status,
+            purpose=checkpoint_row.purpose,
+            capture_release=checkpoint_row.capture_release.value,
+            source_release=(None if checkpoint_row.source_release is None else checkpoint_row.source_release.value),
+            target_release=(None if checkpoint_row.target_release is None else checkpoint_row.target_release.value),
+            created_at=checkpoint_row.created_at,
+        )
 
     # A platform-status diagnostic does not make the bounded resource helper
     # unsafe. Preserve the legacy best-effort facts unless the observation

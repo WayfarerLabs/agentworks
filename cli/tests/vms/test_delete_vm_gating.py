@@ -209,7 +209,7 @@ def test_force_delete_disowns_checkpoint_only_after_provider_cleanup_fails(
     monkeypatch.setattr(
         ProxmoxPlatform,
         "delete_checkpoint",
-        lambda *args, **kwargs: (_ for _ in ()).throw(StateError("provider cleanup failed")),
+        lambda *args, **kwargs: (_ for _ in ()).throw(PermissionError("provider cleanup failed")),
     )
     monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *args, **kwargs: None)
 

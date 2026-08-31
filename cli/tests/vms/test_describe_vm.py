@@ -43,6 +43,7 @@ class _Platform:
     def __init__(self, status: VMStatus, outside_snapshot=None) -> None:  # noqa: ANN001
         self._status = status
         self._outside_snapshot = outside_snapshot
+        self.checkpoints: tuple[object, ...] = ()
 
     def _check_boundary(self, operation: str) -> None:
         if self._outside_snapshot is not None:
@@ -59,6 +60,11 @@ class _Platform:
     def status(self, vm: VMRow, ctx: object) -> VMStatus:
         self._check_boundary("provider-status")
         return self._status
+
+    def list_checkpoints(self, vm: VMRow, ctx: object) -> tuple[object, ...]:
+        del vm, ctx
+        self._check_boundary("provider-checkpoints")
+        return self.checkpoints
 
 
 def _describe(
@@ -108,6 +114,50 @@ def test_running_vm_still_reads_live_resources(
 ) -> None:
     calls = _describe(db, config, monkeypatch, status=VMStatus.RUNNING)
     assert calls == ["dvm"]
+
+
+def test_vm_description_marks_missing_provider_checkpoint_unavailable(
+    db: Database,
+    config: Config,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.debian import DebianRelease
+    from agentworks.vms.manager.checkpoint_listing import CheckpointRestoreStatus
+    from agentworks.vms.manager.inspect import VMInspectionIssueSource
+
+    db.insert_vm("dvm", site="lima-local", hostname="dvm")
+    db.update_vm_debian_release("dvm", DebianRelease.BOOKWORM)
+    checkpoint = db.insert_vm_checkpoint(
+        vm_name="dvm",
+        name="agw-checkpoint",
+        operation_id="create-operation",
+        desired_state_fingerprint="a" * 64,
+        capture_release=DebianRelease.BOOKWORM,
+    )
+    assert db.complete_vm_checkpoint(
+        "dvm",
+        expected_state=checkpoint.state,
+        operation_id="create-operation",
+        provider_identifier="provider-checkpoint",
+    )
+    platform = _Platform(VMStatus.STOPPED)
+    monkeypatch.setattr("agentworks.vms.sites.resolve_site", lambda name, registry: platform)
+    monkeypatch.setattr(
+        "agentworks.vms.manager.checkpoints.checkpoint_desired_state_fingerprint",
+        lambda *args, **kwargs: "a" * 64,
+    )
+    monkeypatch.setattr(vm_manager, "_query_live_resources", lambda *args, **kwargs: None)
+
+    description = vm_manager.vm_description(
+        db,
+        config,
+        "dvm",
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    assert description.checkpoint is not None
+    assert description.checkpoint.restore_status == CheckpointRestoreStatus.UNAVAILABLE.value
+    assert VMInspectionIssueSource.CHECKPOINT_INVENTORY in {issue.source for issue in description.issues}
 
 
 def test_vm_description_closes_structural_snapshot_before_external_reads(

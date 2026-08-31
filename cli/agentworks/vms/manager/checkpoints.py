@@ -15,7 +15,7 @@ from agentworks.db import (
     VMCheckpointState,
     VMStatus,
 )
-from agentworks.errors import AgentworksError, AlreadyExistsError, StateError, UserAbort
+from agentworks.errors import AlreadyExistsError, StateError, UserAbort
 
 from ._helpers import _guard_failed_vm, _require_vm
 from .boundary import _live_vm_boundary
@@ -545,13 +545,25 @@ def _create_upgrade_checkpoint(
     )
     output.info(f"Stopping VM '{name}' for an offline managed checkpoint...")
     platform.stop(vm, ops_ctx)
+    primary_error: BaseException | None = None
     try:
         _require_stopped_vm(platform, vm, ops_ctx)
         output.info(f"Creating managed Debian {source_release.value} recovery checkpoint...")
         completed = _complete_create(db, platform, vm, ops_ctx, row, resume=resume)
+    except BaseException as error:
+        primary_error = error
+        raise
     finally:
         output.info(f"Restarting VM '{name}' after checkpoint capture...")
-        platform.start(vm, ops_ctx)
+        try:
+            platform.start(vm, ops_ctx)
+        except BaseException as restart_error:
+            if primary_error is None:
+                raise
+            _warn_secondary_cleanup_failure(
+                f"VM '{name}' could not be restarted after checkpoint capture failed: {restart_error}. "
+                "The original checkpoint failure is unchanged; inspect the platform power state before retrying."
+            )
     output.result(f"Managed upgrade checkpoint '{completed.name}' is ready.")
     return completed
 
@@ -574,7 +586,7 @@ def list_checkpoints(
     if names_only:
         for row in rows:
             output.info(row.name)
-        return [CheckpointListing(checkpoint=row, restore_status=None) for row in rows]
+        return []
     registry = load_request_registry(config, live_database=db)
     listings: list[CheckpointListing] = []
     for row in rows:
@@ -689,6 +701,7 @@ def restore_checkpoint(
         _require_stopped_vm(platform, vm, ops_ctx)
 
         attested = False
+        primary_error: BaseException | None = None
         try:
             output.info("Starting the restored VM for Debian release verification...")
             platform.start(vm, ops_ctx)
@@ -721,10 +734,21 @@ def restore_checkpoint(
                 ),
             )
             attested = True
+        except BaseException as error:
+            primary_error = error
+            raise
         finally:
             output.info("Stopping the restored VM after verification...")
-            platform.stop(vm, ops_ctx)
-            _require_stopped_vm(platform, vm, ops_ctx)
+            try:
+                platform.stop(vm, ops_ctx)
+                _require_stopped_vm(platform, vm, ops_ctx)
+            except BaseException as stop_error:
+                if primary_error is None:
+                    raise
+                _warn_secondary_cleanup_failure(
+                    f"VM '{name}' could not be proved stopped after restore verification failed: {stop_error}. "
+                    "The original verification failure is unchanged; stop the VM in the platform before retrying."
+                )
         if not attested:
             raise StateError(f"VM '{name}' checkpoint restore could not be attested")
         if not db.complete_vm_checkpoint(
@@ -755,11 +779,17 @@ def delete_checkpoint(
 
     with exclusive_vm_operation_guard(db, name, operation="delete checkpoint"):
         vm = _require_vm(db, name)
+        if db.get_vm_checkpoint(name) is None:
+            raise StateError(
+                f"VM '{name}' has no managed checkpoint",
+                entity_kind="vm",
+                entity_name=name,
+            )
         try:
             vm_node, ops_ctx = _live_vm_boundary(db, config, vm, interaction=interaction)
         except UserAbort:
             raise
-        except AgentworksError as error:
+        except Exception as error:
             if not force:
                 _raise_checkpoint_cleanup_failure(name, error)
             _abandon_checkpoint(db, name, error=error, yes=yes)
@@ -789,7 +819,7 @@ def _delete_checkpoint_with_boundary(
         _delete_checkpoint_reconciled(db, vm, platform, ops_ctx, yes=yes)
     except UserAbort:
         raise
-    except AgentworksError as error:
+    except Exception as error:
         if not force:
             _raise_checkpoint_cleanup_failure(vm.name, error)
         _abandon_checkpoint(db, vm.name, error=error, yes=yes)
@@ -905,8 +935,9 @@ def _delete_checkpoint_reconciled(
     output.result(f"Checkpoint '{row.name}' deleted for VM '{name}'.")
 
 
-def _raise_checkpoint_cleanup_failure(name: str, error: AgentworksError) -> None:
-    provider_hint = f"{error.hint} " if error.hint else ""
+def _raise_checkpoint_cleanup_failure(name: str, error: Exception) -> None:
+    error_hint = getattr(error, "hint", None)
+    provider_hint = f"{error_hint} " if error_hint else ""
     raise StateError(
         f"Managed checkpoint cleanup for VM '{name}' could not complete: {error}",
         entity_kind="vm",
@@ -943,27 +974,37 @@ def _abandon_checkpoint(
         default=False,
     ):
         raise UserAbort("checkpoint abandonment cancelled")
-    if not db.abandon_vm_checkpoint(
-        name,
-        expected_state=row.state,
-        expected_operation_id=row.operation_id,
-    ):
-        raise StateError(f"VM '{name}' checkpoint state changed before ownership was forgotten")
-    db.insert_vm_event(
-        name,
-        "checkpoint_abandoned",
-        json.dumps(
-            {
-                "checkpoint": row.name,
-                "provider_identifier": row.provider_identifier,
-                "state": row.state.value,
-            },
-            sort_keys=True,
-        ),
-    )
+    with db.transaction():
+        if not db.abandon_vm_checkpoint(
+            name,
+            expected_state=row.state,
+            expected_operation_id=row.operation_id,
+        ):
+            raise StateError(f"VM '{name}' checkpoint state changed before ownership was forgotten")
+        db.insert_vm_event(
+            name,
+            "checkpoint_abandoned",
+            json.dumps(
+                {
+                    "checkpoint": row.name,
+                    "provider_identifier": row.provider_identifier,
+                    "state": row.state.value,
+                },
+                sort_keys=True,
+            ),
+        )
     output.result(f"Agentworks forgot checkpoint '{row.name}' for VM '{name}'. Provider cleanup was not verified.")
 
 
 def _confirm_checkpoint_deletion(name: str, *, yes: bool) -> None:
     if not yes and not output.confirm(f"Delete the managed checkpoint for VM '{name}'?", default=False):
         raise UserAbort("checkpoint deletion cancelled")
+
+
+def _warn_secondary_cleanup_failure(message: str) -> None:
+    """Preserve an active primary error even if warning presentation fails."""
+
+    try:  # noqa: SIM105 - warning failures must not replace the active failure
+        output.warn(message)
+    except BaseException:
+        pass

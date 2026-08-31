@@ -58,10 +58,12 @@ agw vm delete-checkpoint build-1
 ```
 
 The checkpoint list separates provider lifecycle state from current restore eligibility. `ready`
-means the provider artifact completed. `available` means the current Agentworks declarations still
-match the captured state and managed restore is allowed. `declarations-changed` means restore is
-blocked until you restore the matching Agentworks database and declarations or replace the
-checkpoint. An interrupted restore reports `resume-required`.
+means the provider artifact completed. `available` means live provider inventory still proves that
+artifact, the current Agentworks declarations match the captured state, and managed restore is
+allowed. `declarations-changed` means restore is blocked until you restore the matching Agentworks
+database and declarations or replace the checkpoint. An interrupted restore reports
+`resume-required`. If provider evidence cannot be proved, `vm describe` reports `unavailable` with a
+diagnostic and ordinary checkpoint listing refuses the inconsistent inventory.
 
 An unrelated checkpoint blocks a fresh upgrade instead of being replaced. A checkpoint for the same
 release transition may be reused after a cancellation before package mutation or after an explicit

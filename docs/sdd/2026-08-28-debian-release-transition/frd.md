@@ -396,17 +396,20 @@ force. Create never replaces. Restore does not delete. Normal deletion releases 
 only after proving provider cleanup; explicit forced deletion can instead disown the local record
 under the exceptional rules below. List and describe distinguish provider lifecycle state from
 current restore eligibility. A completed provider artifact remains `ready`, while the derived
-restore value is `available`, `declarations-changed`, `resume-required`, or `unavailable`. The
-compact `vm list` gains no checkpoint column.
+restore value is `available`, `declarations-changed`, `resume-required`, or `unavailable`.
+`available` requires both a matching desired-state fingerprint and a proved live provider
+descriptor; an unavailable provider boundary or disagreeing inventory cannot be presented as
+restorable. The compact `vm list` gains no checkpoint column.
 
 Ordinary checkpoint deletion reconciles interrupted creation and proves provider absence before it
 releases the row. When provider access or cleanup cannot recover, explicit `--force` first attempts
 that same normal path and then, only on failure, asks the operator to disown Agentworks' record. The
 warning identifies the recorded provider artifact when available and explains that late, incomplete,
 emergency, or additional provider artifacts may remain and continue billing. Forced disowning
-records a distinct audit event. Forced VM deletion uses the same fallback only after its checkpoint
-cleanup attempt fails; ordinary VM deletion remains blocked. This escape does not make provider
-cleanup successful and does not bypass restore fingerprint checks.
+atomically releases the ownership row and records a distinct audit event. Forced VM deletion uses
+the same fallback only after its checkpoint cleanup attempt fails; ordinary VM deletion remains
+blocked. This escape does not make provider cleanup successful and does not bypass restore
+fingerprint checks.
 
 Restoration is explicit and destructive, never an automatic upgrade rollback. Before restore, all
 Agentworks sessions must be stopped and the VM must be stopped. The platform preserves a recoverable

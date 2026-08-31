@@ -11,7 +11,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import wsl2 as wsl2_mod
 from agentworks.capabilities.vm_platform.base import CheckpointDescriptor
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
-from agentworks.errors import StateError
+from agentworks.errors import ExternalError, StateError
 
 
 def _vm() -> object:
@@ -146,8 +146,10 @@ def test_wsl_failed_restore_retains_both_recovery_artifacts_for_replay(
     backend.contents = b"pre-restore-state"
     backend.fail_import = True
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ExternalError) as caught:
         platform.restore_checkpoint(vm, descriptor, ctx, operation_id="restore-1")  # type: ignore[arg-type]
+
+    assert isinstance(caught.value.__cause__, RuntimeError)
 
     checkpoint = wsl2_mod._checkpoint_root() / "agw-dev" / "agw-checkpoint-1.tar"
     emergency = wsl2_mod._checkpoint_root() / "agw-dev" / "agw-checkpoint-1.pre-restore.tar"
@@ -202,6 +204,32 @@ def test_wsl_incomplete_create_remains_listed_until_deleted(
 
     assert platform.list_checkpoints(vm, ctx) == ()  # type: ignore[arg-type]
     assert not partial.exists()
+
+
+def test_wsl_delete_normalizes_filesystem_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    backend = _WslBackend()
+    platform = _platform(monkeypatch, tmp_path, backend)
+    vm = _vm()
+    ctx = RunContext()
+    descriptor = _create_checkpoint(platform, vm, "agw-checkpoint-1", ctx)
+    artifact = wsl2_mod._checkpoint_root() / "agw-dev" / "agw-checkpoint-1.tar"
+    original_unlink = Path.unlink
+
+    def fail_artifact_unlink(path: Path, *args: object, **kwargs: object) -> None:
+        if path == artifact:
+            raise PermissionError("checkpoint artifact is read-only")
+        original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_artifact_unlink)
+
+    with pytest.raises(ExternalError) as caught:
+        platform.delete_checkpoint(vm, descriptor, ctx)  # type: ignore[arg-type]
+
+    assert isinstance(caught.value.__cause__, PermissionError)
+    assert artifact.exists()
 
 
 def test_wsl_partial_only_checkpoint_cannot_start_destructive_restore(

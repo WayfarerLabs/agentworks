@@ -497,11 +497,11 @@ incidental implementation work.
       operations; prove their ARM serialization shape with provider tests.
 - [x] Inventory provider checkpoints before claiming a fresh create row. Keep ordinary checkpoint
       and VM deletion reconciliation-first and blocking; add explicit forced disowning only after
-      cleanup failure, with confirmation, residue/billing warnings, compare-and-delete, and a
-      distinct audit event.
+      cleanup failure, with confirmation, residue/billing warnings, compare-and-delete, and an
+      atomically recorded distinct audit event.
 - [x] Separate provider lifecycle state from derived restore eligibility in list, describe, and JSON
-      output. Keep desired-state drift a hard restore refusal with no force bypass and preserve the
-      names-only fast path.
+      output, including live provider inventory proof. Keep desired-state drift a hard restore
+      refusal with no force bypass and preserve the names-only fast path.
 - [x] Run a read-only upgrade-checkpoint viability pass before creating backup artifacts, disclose a
       reused checkpoint's creation time, and name the retained billed checkpoint plus deletion
       command after successful upgrade.

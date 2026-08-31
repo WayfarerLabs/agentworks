@@ -29,7 +29,7 @@ class CheckpointListing:
     """One persisted checkpoint plus its current restore eligibility."""
 
     checkpoint: VMCheckpointRow
-    restore_status: CheckpointRestoreStatus | None
+    restore_status: CheckpointRestoreStatus
 
 
 def checkpoint_listing_data(listings: Sequence[CheckpointListing]) -> JsonObject:
@@ -38,7 +38,7 @@ def checkpoint_listing_data(listings: Sequence[CheckpointListing]) -> JsonObject
     return {
         "checkpoints": [
             {
-                "restore_status": (None if listing.restore_status is None else listing.restore_status.value),
+                "restore_status": listing.restore_status.value,
                 "vm_name": listing.checkpoint.vm_name,
                 "name": listing.checkpoint.name,
                 "provider_identifier": listing.checkpoint.provider_identifier,
@@ -77,9 +77,8 @@ def render_checkpoint_listing(listings: Sequence[CheckpointListing]) -> None:
             if row.source_release is None or row.target_release is None
             else f"{row.source_release.value}->{row.target_release.value}"
         )
-        restore_status = listing.restore_status.value if listing.restore_status is not None else "-"
         output.info(
             f"{output.truncate(row.vm_name, 20):<20} {row.name:<37} {row.state.value:<10} "
-            f"{restore_status:<21} {row.purpose:<15} {row.capture_release.value:<10} "
+            f"{listing.restore_status.value:<21} {row.purpose:<15} {row.capture_release.value:<10} "
             f"{transition:<20} {row.created_at}"
         )

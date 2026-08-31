@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import json
 import os
 import platform
@@ -11,7 +12,7 @@ import subprocess
 import sys
 import urllib.request
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import (
@@ -27,13 +28,13 @@ from agentworks.capabilities.vm_platform.debian_release import (
 from agentworks.capabilities.vm_platform.wsl2_bootstrap import run_wsl2_bootstrap
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
-from agentworks.errors import StateError
+from agentworks.errors import AgentworksError, ExternalError, StateError
 from agentworks.schema import AgwModel
 from agentworks.topics import TopicProse
 from agentworks.transports import WSL2Transport
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Callable, Iterator, Mapping
     from contextlib import AbstractContextManager
 
     from agentworks.capabilities.base import RunContext
@@ -64,6 +65,31 @@ _kernel32 = None
 _JOBOBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = None
 _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
 _JobObjectExtendedLimitInformation = 9
+
+
+def _checkpoint_errors[**CheckpointParams, CheckpointResult](
+    method: Callable[CheckpointParams, CheckpointResult],
+) -> Callable[CheckpointParams, CheckpointResult]:
+    """Normalize expected WSL process and filesystem checkpoint failures."""
+
+    @functools.wraps(method)
+    def wrapped(*args: CheckpointParams.args, **kwargs: CheckpointParams.kwargs) -> CheckpointResult:
+        try:
+            return method(*args, **kwargs)
+        except AgentworksError:
+            raise
+        except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+            vm = cast("VMRow", args[1])
+            operation = method.__name__.replace("_", " ")
+            raise ExternalError(
+                f"WSL2 {operation} failed for VM '{vm.name}': {error}",
+                entity_kind="vm",
+                entity_name=vm.name,
+                hint="Correct the Windows filesystem or WSL command failure, then retry.",
+            ) from error
+
+    return wrapped
+
 
 if sys.platform == "win32":
     try:
@@ -1010,6 +1036,7 @@ class WSL2Platform(VMPlatform):
             entity_name=vm.name,
         )
 
+    @_checkpoint_errors
     def create_checkpoint(
         self,
         vm: VMRow,
@@ -1035,6 +1062,7 @@ class WSL2Platform(VMPlatform):
             )
         return descriptor
 
+    @_checkpoint_errors
     def list_checkpoints(self, vm: VMRow, ctx: RunContext) -> tuple[CheckpointDescriptor, ...]:
         del ctx
         directory = self._checkpoint_dir(vm, create=False)
@@ -1062,6 +1090,7 @@ class WSL2Platform(VMPlatform):
             CheckpointDescriptor(name=name, identifier=self._checkpoint_identifier(vm, name)) for name in sorted(names)
         )
 
+    @_checkpoint_errors
     def restore_checkpoint(
         self,
         vm: VMRow,
@@ -1123,6 +1152,7 @@ class WSL2Platform(VMPlatform):
                 entity_name=vm.name,
             )
 
+    @_checkpoint_errors
     def delete_checkpoint(
         self,
         vm: VMRow,

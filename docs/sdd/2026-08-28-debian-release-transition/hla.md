@@ -275,9 +275,9 @@ version-33 database advancing to version 34. It never modifies migration 33 or p
 checkpoint and VM rows addressable; the restrictive foreign key is a final orphan guard, not the
 primary lifecycle mechanism. An explicit forced delete first attempts the same cleanup, then may
 compare-and-delete the lifecycle row only after warning that provider residue and billing can remain
-and recording a `checkpoint_abandoned` event. This is disowning, not provider cleanup. Database
-backup projection includes the checkpoint row so the local recovery record and VM state cannot
-silently diverge.
+and atomically recording a `checkpoint_abandoned` event. This is disowning, not provider cleanup.
+Database backup projection includes the checkpoint row so the local recovery record and VM state
+cannot silently diverge.
 
 ### Discovery and reconciliation
 
@@ -394,7 +394,10 @@ restarts it before continuing. Platforms verify completion, ownership, and sourc
 returning create success. Before a fresh row is inserted, core lists the live managed inventory and
 refuses an artifact with no database record rather than adopting or overwriting it. Stopped is the
 restore entry and exit invariant; a platform may temporarily start or reboot the VM when its
-provider requires that choreography, but it must stop and prove the final state before returning.
+provider requires that choreography, but it must stop and prove the final state before returning. If
+checkpoint creation or restore attestation has already failed, a secondary restart or stop failure
+is warned without replacing that primary failure; a cleanup failure remains the command failure when
+no earlier failure exists.
 
 The database row is inserted in `creating` with an operation identifier before provider mutation.
 Success stores the returned identifier, clears the operation identifier, and advances to `ready`. An
@@ -416,9 +419,9 @@ both lifecycle state and operation identifier.
 cleanup first and reaches the fallback only after boundary or provider failure. The fallback shows
 the known provider identifier when one exists, warns that late, incomplete, emergency, or duplicate
 artifacts may remain and continue billing, confirms separately unless `--yes` was supplied, removes
-the row by state-and-operation compare-and-delete, and records a distinct abandonment event. Forced
-VM deletion uses the same fallback only after checkpoint cleanup fails. Without force, both delete
-commands preserve the rows and return repair/retry guidance.
+the row by state-and-operation compare-and-delete, and records a distinct abandonment event in the
+same database transaction. Forced VM deletion uses the same fallback only after checkpoint cleanup
+fails. Without force, both delete commands preserve the rows and return repair/retry guidance.
 
 A narrow, private, per-VM shared/exclusive operation guard closes the race that database transitions
 alone cannot: another process must not start, delete, reinitialize, access, or resume a session on
@@ -480,11 +483,14 @@ cannot safely combine an older guest with newer declarations and directs the ope
 fresh checkpoint or restore the matching Agentworks database backup. There is no force bypass.
 
 List and describe project restore eligibility separately from provider lifecycle state. A completed
-provider artifact stays `ready`; its derived restore value is `available` only when the current
-fingerprint matches, `declarations-changed` when it does not, `resume-required` while one restore
-attempt is durable, and `unavailable` for other lifecycle states. The projection is read-only and
-does not relabel persisted state. Names-only listing short-circuits before provider or fingerprint
-work, preserving its fast completion contract.
+provider artifact stays `ready`; its derived restore value is `available` only when live inventory
+proves the recorded descriptor and the current fingerprint matches, `declarations-changed` when the
+fingerprint does not, `resume-required` while one restore attempt is durable, and `unavailable` when
+provider proof cannot be obtained or for other lifecycle states. Describe degrades a failed proof to
+that unavailable status plus a diagnostic; ordinary listing refuses the inconsistent inventory
+rather than returning a misleading row. The projection is read-only and does not relabel persisted
+state. Names-only listing short-circuits before provider or fingerprint work, preserving its fast
+completion contract.
 
 The canonical fingerprint includes the VM's stable desired specification and platform identity,
 workspace declarations, agent declarations and grants, session declarations and membership, console

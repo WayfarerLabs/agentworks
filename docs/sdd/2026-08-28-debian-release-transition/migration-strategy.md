@@ -53,8 +53,8 @@ target.
 
 Because migration 34 intentionally creates no ownership rows, fresh checkpoint creation inventories
 the provider before inserting one. An unrecorded managed artifact blocks adoption. List and describe
-keep persisted lifecycle state separate from restore eligibility derived from the current desired
-fingerprint; names-only listing performs neither live check.
+keep persisted lifecycle state separate from restore eligibility derived from both live provider
+inventory and the current desired fingerprint; names-only listing performs neither live check.
 
 ### Population rules
 
