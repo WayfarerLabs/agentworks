@@ -47,6 +47,7 @@ def render_vm_description(description: VMDescription) -> None:
     output.info(f"Checkpoint:     {checkpoint.name if checkpoint is not None else '-'}")
     if checkpoint is not None:
         output.info(f"Checkpoint State:   {checkpoint.state}")
+        output.info(f"Checkpoint Restore: {checkpoint.restore_status}")
         output.info(f"Checkpoint Purpose: {checkpoint.purpose}")
         output.info(f"Checkpoint Provider: {checkpoint.provider_identifier or '-'}")
         output.info(f"Checkpoint Debian:  {checkpoint.capture_release}")

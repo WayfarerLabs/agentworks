@@ -1261,6 +1261,22 @@ class Database:
         self._commit_unless_in_tx()
         return cursor.rowcount == 1
 
+    def abandon_vm_checkpoint(
+        self,
+        vm_name: str,
+        *,
+        expected_state: VMCheckpointState,
+        expected_operation_id: str | None,
+    ) -> bool:
+        """Forget one explicitly disowned checkpoint lifecycle attempt."""
+
+        cursor = self._conn.execute(
+            "DELETE FROM vm_checkpoints WHERE vm_name = ? AND state = ? AND operation_id IS ?",
+            (vm_name, expected_state.value, expected_operation_id),
+        )
+        self._commit_unless_in_tx()
+        return cursor.rowcount == 1
+
     def claim_materialized_vm_checkpoint_deletion(
         self,
         vm_name: str,

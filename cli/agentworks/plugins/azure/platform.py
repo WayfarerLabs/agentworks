@@ -82,7 +82,7 @@ class AzureVMPlatform(VMPlatform):
     one specific Azure service, and other Azure services could plausibly
     back platforms of their own someday."""
 
-    contract_version: ClassVar[int] = 4
+    contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "azure-vm"
     description: ClassVar[str] = "Azure Virtual Machines (subscription + resource group)"
     config_model: ClassVar[type[AzureVMConfig]] = AzureVMConfig

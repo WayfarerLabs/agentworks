@@ -301,11 +301,15 @@ def _delete_vm(
         # inside it.)
         raise
     except Exception as e:
-        if checkpoint_pending:
+        if checkpoint_pending and not force:
             # A managed checkpoint is an independently billed/recoverable
             # provider artifact. Keep both rows when its exact boundary cannot
             # be resolved; best-effort VM-row cleanup must not orphan it.
             raise
+        if checkpoint_pending:
+            from .checkpoints import _abandon_checkpoint
+
+            _abandon_checkpoint(db, name, error=e, yes=True)
         # Preflight or build failure (unreachable API, missing tool,
         # stranded site, unresolvable secret): warn and skip backend
         # cleanup; broken backends are what delete exists to clean up.
@@ -325,6 +329,7 @@ def _delete_vm(
                 platform,
                 ops_ctx,
                 yes=True,
+                force=force,
             )
         # Tailscale logout (best-effort, hold-only): the logout wants
         # the VM alive if it happens to be, but delete must NOT gate:

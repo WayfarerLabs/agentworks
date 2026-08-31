@@ -99,18 +99,19 @@ compatibility with existing VMs:
 
 A platform has no independent default or `current` constant. If its code-owned mapping does not
 contain the requested release, creation fails before backend mutation with an error that names the
-platform, release, and need to update Agentworks or the providing plugin. If an operator-owned map,
-such as a Proxmox site's template map, lacks the key, the error instead names the site setting that
-must be supplied. Neither case falls back to another release.
+platform, release, and need to update Agentworks. If an operator-owned map, such as a Proxmox site's
+template map, lacks the key, the error instead names the site setting that must be supplied. Neither
+case falls back to another release.
 
-The required request field changes the vm-platform capability contract. Implementations written
-against the previous contract are rejected by exact contract-version conformance with a clear
-incompatibility error. A contract-current platform must verify `/etc/os-release` during its
-rollback-capable create window so it can clean up a mismatch. Core then independently probes the
-returned transport and persists only its own observation. A mismatch, missing release, non-Debian
-guest, unavailable official image, or missing Proxmox Trixie template fails creation before
-Agentworks reports success. New creation never falls back to Bookworm or an operator-supplied
-generic image.
+The required request field expands the internal vm-platform capability contract. That complete
+contract remains version 1, and the descriptor plus all six bundled implementations mutate
+atomically. Exact contract-version conformance catches an inconsistent bundled implementation as a
+curation error; there is no external compatibility cutover or adapter. A conforming platform must
+verify `/etc/os-release` during its rollback-capable create window so it can clean up a mismatch.
+Core then independently probes the returned transport and persists only its own observation. A
+mismatch, missing release, non-Debian guest, unavailable official image, or missing Proxmox Trixie
+template fails creation before Agentworks reports success. New creation never falls back to Bookworm
+or an operator-supplied generic image.
 
 An operator-owned artifact requires an additional fail-closed boundary. Once the guest is live
 enough to inspect, the platform verifies its release before running Agentworks bootstrap. Proxmox
@@ -132,8 +133,8 @@ the provisioning phase has completed.
 The feature does not claim a platform until its real create, initialize, reboot, reconnect, backup,
 and delete path has passed the Trixie certification matrix for every architecture Agentworks exposes
 on that platform. The implementation updates the capability-model README, vm-platform README, and
-plugin-author README so capability and platform authors can predict this request, mapping, failure,
-verification, and contract-version behavior.
+system-plugin README so maintainers can predict this request, mapping, failure, verification, and
+contract-version behavior.
 
 ### R3: Persist the last verified guest release
 
@@ -218,10 +219,11 @@ Before changing Debian sources, the command must:
    the pair-specific blocker checks captured from the target release's Debian release notes;
 6. show the preliminary packages apt plans to remove and every source Agentworks will disable or
    replace;
-7. complete the ordinary Agentworks metadata/workspace backup and a local Debian recovery bundle
+7. check the checkpoint database slot and provider inventory without mutation, refusing an unusable
+   or disagreeing retained artifact before creating backup files;
+8. complete the ordinary Agentworks metadata/workspace backup and a local Debian recovery bundle
    containing `/etc`, dpkg and apt state, package selections, and the pre-upgrade source files; and
-8. create and verify one Agentworks-managed, offline VM checkpoint through the bound platform, after
-   proving that no other managed checkpoint already occupies the VM's single checkpoint slot.
+9. create and verify one Agentworks-managed, offline VM checkpoint through the bound platform.
 
 If the VM has named consoles, the fresh-upgrade preflight warns that the required reboot ends their
 live tmux state and any console-only shell processes. The persisted console definitions and session
@@ -279,8 +281,9 @@ Agentworks does not automatically restore a checkpoint or attempt a package-leve
 downgrade. Before the guest proves Trixie, the database retains its last verified release. Once a
 reconnecting probe proves Trixie, the row records Trixie even if a later initializer or health check
 needs attention, so the database does not call a Trixie guest Bookworm. The command and VM events
-distinguish `complete` from `Trixie observed, repair required`. The completed upgrade retains its
-checkpoint until the operator explicitly deletes it.
+distinguish `complete` from `Trixie observed, repair required`. The completed upgrade names its
+retained checkpoint, warns that provider storage charges may continue, and gives the exact deletion
+command. The checkpoint remains until the operator explicitly deletes it.
 
 ### R6: Support is relative to the current release
 
@@ -338,21 +341,21 @@ and machine-output contract explain:
 
 The permanent capability-model README explains that a consuming domain may pass a required,
 domain-owned value through an operation request. The vm-platform README specifies the concrete
-Debian release field, platform-local mapping, exact contract-version cutover, missing-release error,
-live verification, and tests required of every built-in or plugin platform. The plugin-author README
-moves its example and create/checkpoint-contract teaching to version 4 in the same merge unit. These
-updates ship with the contract implementation, not ahead of behavior.
+Debian release field, platform-local mapping, internal version-1 contract, missing-release error,
+live verification, and tests required of every bundled platform. The system-plugin README moves its
+example and create/checkpoint-contract teaching to version 1 in the same merge unit. These updates
+ship with the contract implementation, not ahead of behavior.
 
 ADR 0002 is superseded by a new ADR that retains Debian as the one guest OS while moving the fixed
 release through a controlled, recorded product lifecycle.
 
 ### R9: Managed VM checkpoints provide the recovery boundary
 
-Vm-platform contract version 4 adds four required operations over a small checkpoint descriptor:
+Vm-platform contract version 1 includes four required operations over a small checkpoint descriptor:
 create a core-named checkpoint, list the VM's Agentworks-managed checkpoints, restore one, and
-delete one. Every built-in and third-party platform implementation must move to the exact new
-contract. There is no optional capability flag and no default method that reports unsupported,
-because `vm upgrade` depends on this recovery boundary on every supported platform.
+delete one. The descriptor and all six bundled implementations move together. There is no optional
+capability flag, default method that reports unsupported, external compatibility promise, or version
+bridge, because `vm upgrade` depends on this recovery boundary on every supported platform.
 
 Core persists checkpoint ownership separately from VM platform metadata in a new forward database
 migration. The already-shipped migration that added Debian observations remains byte-for-byte
@@ -376,7 +379,8 @@ request. Restore receives a persisted restore-attempt identity: retrying the sam
 attempt converges, while a later explicit operator restore has a new identity and reapplies the
 checkpoint. Delete is replay-safe for the recorded descriptor. Provider implementations preserve the
 logical VM and its existing platform metadata even when restoration requires replacing a boot disk
-or reimporting a WSL distribution.
+or reimporting a WSL distribution. Before claiming a fresh create row, core checks the live managed
+provider inventory and refuses an unrecorded artifact instead of overwriting or adopting it.
 
 The operator-facing surface follows the existing flat second-object convention:
 
@@ -384,13 +388,25 @@ The operator-facing surface follows the existing flat second-object convention:
 agw vm create-checkpoint NAME
 agw vm list-checkpoints [--vm NAMES] [--names-only] [--output human|json]
 agw vm restore-checkpoint NAME [-y|--yes]
-agw vm delete-checkpoint NAME [-y|--yes]
+agw vm delete-checkpoint NAME [-y|--yes] [--force]
 ```
 
 Operators do not choose checkpoint names or select among checkpoints while the one-slot rule is in
-force. Create never replaces. Restore does not delete. Delete is the only successful path that
-releases an occupied slot. `vm describe` includes the checkpoint's name, state, derived purpose,
-provider identifier, and creation time; the compact `vm list` gains no checkpoint column.
+force. Create never replaces. Restore does not delete. Normal deletion releases an occupied slot
+only after proving provider cleanup; explicit forced deletion can instead disown the local record
+under the exceptional rules below. List and describe distinguish provider lifecycle state from
+current restore eligibility. A completed provider artifact remains `ready`, while the derived
+restore value is `available`, `declarations-changed`, `resume-required`, or `unavailable`. The
+compact `vm list` gains no checkpoint column.
+
+Ordinary checkpoint deletion reconciles interrupted creation and proves provider absence before it
+releases the row. When provider access or cleanup cannot recover, explicit `--force` first attempts
+that same normal path and then, only on failure, asks the operator to disown Agentworks' record. The
+warning identifies the recorded provider artifact when available and explains that late, incomplete,
+emergency, or additional provider artifacts may remain and continue billing. Forced disowning
+records a distinct audit event. Forced VM deletion uses the same fallback only after its checkpoint
+cleanup attempt fails; ordinary VM deletion remains blocked. This escape does not make provider
+cleanup successful and does not bypass restore fingerprint checks.
 
 Restoration is explicit and destructive, never an automatic upgrade rollback. Before restore, all
 Agentworks sessions must be stopped and the VM must be stopped. The platform preserves a recoverable
@@ -415,23 +431,26 @@ composes checkpoint deletion. Agentworks entry points that could concurrently ac
 VM take shared ownership, so ordinary compatible commands retain their existing concurrency.
 
 `vm upgrade` removes `--checkpoint` and every manual artifact prompt. A fresh transition refuses an
-unrelated existing checkpoint, then automatically creates its transition-owned checkpoint after both
-local backups succeed and immediately before the first source-release package mutation. It
-temporarily stops and restarts the VM around that offline capture. A same-pair checkpoint may be
-reused after a pre-mutation cancellation or an explicit restore when the live guest is still the
-recorded source and no remote journal conflicts. A resume with a journal requires the database,
-remote journal, and live provider descriptor to name the same checkpoint. A completed upgrade
-retains the checkpoint for explicit operator recovery; it does not silently trade recovery safety
-for a free slot.
+unrelated existing checkpoint. It checks the database slot and live provider inventory before
+creating either local backup, then automatically creates its transition-owned checkpoint after both
+backups succeed and immediately before the first source-release package mutation. It temporarily
+stops and restarts the VM around that offline capture. A same-pair checkpoint may be reused after a
+pre-mutation cancellation or an explicit restore when the live guest is still the recorded source
+and no remote journal conflicts; reuse output discloses its original creation time. A resume with a
+journal requires the database, remote journal, and live provider descriptor to name the same
+checkpoint. A completed upgrade retains the checkpoint for explicit operator recovery, names it,
+warns about continuing provider storage charges, and prints its delete command; it does not silently
+trade recovery safety for a free slot.
 
 ## Acceptance
 
 - A create caller cannot name an OS or release. The VM manager passes the core current release in
   every provision request, and every successful create on each certified platform returns a live
   guest whose `VERSION_CODENAME` matches that request (`trixie` at this cutover).
-- A previous-contract platform fails registration. A contract-current platform with no requested
-  release mapping fails before backend mutation with a clear platform-update or site-configuration
-  error and never falls back.
+- The vm-platform descriptor and all six bundled implementations declare internal contract version
+  1. An inconsistent bundled version or incomplete implementation fails registration. A conforming
+     platform with no requested release mapping fails before backend mutation with a clear
+     Agentworks-update or site-configuration error and never falls back.
 - The create exception boundary preserves both missing-map error kinds and their remediation hints.
   A platform-observed release mismatch rolls back inside its create window. After any platform
   returns, core independently probes the returned transport; a failed core probe never reports
@@ -448,7 +467,8 @@ for a free slot.
   CLI or schema change, and no current-2 direct or chained upgrade can start.
 - An incomplete journal is inspected before new-upgrade eligibility. It remains resumable under its
   recorded direct policy after a later profile append, and it blocks creation of a second journal.
-- No irreversible upgrade stage begins without completed local backups and a verified managed
+- Upgrade checkpoint viability is checked read-only before local backup artifacts are created. No
+  irreversible upgrade stage begins without completed local backups and a verified managed
   checkpoint whose database row and live platform descriptor agree.
 - The final post-Bookworm-update plan is recomputed and confirmed before suite switching; a changed
   removal, source, conffile, blocker, or space fact cannot inherit the preliminary confirmation.
@@ -474,23 +494,28 @@ for a free slot.
   outcome rather than reporting success or reverting the row to Bookworm.
 - Migration 34 creates checkpoint persistence without modifying migration 33. An already-migrated
   version-33 database advances normally and retains its Debian observations.
-- Every vm-platform version 4 implementation provides create/list/restore/delete. Core detects
-  missing, duplicate, or descriptor-disagreeing platform inventory, while each platform proves
-  completion, ownership, and VM binding. The one-checkpoint product limit is enforced by schema and
-  compare-and-set updates rather than documented only in prose. Operation identity and narrow
-  shared/exclusive per-VM exclusion prevent stale or concurrent lifecycle work from crossing
-  provider operations without serializing ordinary readers against each other.
+- Every bundled vm-platform version 1 implementation provides create/list/restore/delete. Core
+  checks fresh provider inventory before claiming a create row and detects missing, duplicate, or
+  descriptor-disagreeing platform inventory, while each platform proves completion, ownership, and
+  VM binding. The one-checkpoint product limit is enforced by schema and compare-and-set updates
+  rather than documented only in prose. Operation identity and narrow shared/exclusive per-VM
+  exclusion prevent stale or concurrent lifecycle work from crossing provider operations without
+  serializing ordinary readers against each other.
 - Restoring a checkpoint preserves the logical VM identity, re-attests and records the restored
   Debian release, marks initialization for reconciliation, leaves the checkpoint intact, and never
   rewrites desired declarations. It refuses before provider mutation if those declarations no longer
-  match the checkpoint's canonical desired-state fingerprint.
+  match the checkpoint's canonical desired-state fingerprint. List and describe expose that mismatch
+  as derived restore eligibility without relabeling the completed provider lifecycle state.
+- Ordinary checkpoint and VM deletion remain blocked when provider cleanup cannot be proved.
+  Explicit forced deletion first attempts normal reconciliation, then warns about provider residue
+  and billing, records a distinct disowning event, and releases only Agentworks' ownership record.
 - VM backup and workspace copy pass large-archive tests on a Trixie guest with `/tmp` mounted as a
   bounded tmpfs.
 - The live integration matrix exercises create and delete everywhere, plus an actual Bookworm to
   Trixie upgrade on each platform where the recovery prerequisite can be established.
-- The capability-model, vm-platform, and plugin-author READMEs describe the implemented
-  release-carrying contract and its failure behavior in the same change that bumps the capability
-  contract.
+- The capability-model, vm-platform, and system-plugin READMEs describe the implemented internal
+  version-1 release/checkpoint contract and its failure behavior in the same change as the bundled
+  implementations.
 
 ## Constraints and non-goals
 
@@ -523,10 +548,10 @@ for a free slot.
   vendor semantics.
 - `vm upgrade` is the primary migration path; fresh VM plus data copy is the documented fallback.
 - The first upgrade command creates one managed offline checkpoint through vm-platform contract
-  version 4 and retains it for explicit restore or deletion.
+  version 1 and retains it for explicit restore or deletion.
 - Support tiers derive from current, current-1, and current-2 position rather than dates.
-- Platforms never infer current. An old capability contract fails conformance; a missing requested
-  mapping fails clearly before backend mutation.
+- Platforms never infer current. An inconsistent bundled capability declaration fails conformance; a
+  missing requested mapping fails clearly before backend mutation.
 
 ## Open questions
 

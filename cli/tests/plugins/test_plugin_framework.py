@@ -176,7 +176,7 @@ class _NotAPlatform:
     nothing of the vm-platform contract. This is the class the old
     ``isinstance(impl, type)`` gate and ``cast`` waved through."""
 
-    contract_version = 4
+    contract_version = 1
     name = "not-a-platform"
     description = "has the metadata and none of the contract"
 
@@ -188,7 +188,7 @@ class _PlatformWithoutAConfigModel(ConformingVMPlatform):
 
     name = "no-config-model-platform"
     description = "declares no config model"
-    contract_version = 4
+    contract_version = 1
     config_model = None  # type: ignore[assignment]
 
 
@@ -196,7 +196,7 @@ class _AbstractPlatform(VMPlatform):
     """Derives from the contract but implements none of its power ops, so it
     can never be constructed."""
 
-    contract_version = 4
+    contract_version = 1
     name = "abstract-platform"
     description = "abstract: no power ops implemented"
 
@@ -235,9 +235,9 @@ class _BackendWithoutTtySupport:
         raise NotImplementedError
 
 
-class _PlatformOnAnOldContract(ConformingVMPlatform):
-    name = "old-contract-platform"
-    description = "written against a contract this build no longer supports"
+class _PlatformOnAnUnsupportedContract(ConformingVMPlatform):
+    name = "unsupported-contract-platform"
+    description = "declares a contract this build does not support"
     contract_version = 2
 
 
@@ -484,9 +484,9 @@ def test_a_non_layered_capability_does_not_acquire_the_schema_merge_contract(imp
     assert conformance_error(descriptor_for("vm-platform"), impl) is None
 
 
-def test_registration_rejects_previous_vm_platform_contract_without_writing() -> None:
+def test_registration_rejects_mismatched_vm_platform_contract_without_writing() -> None:
     before = _snapshot_registries()
-    plugin = Plugin(name="p", capabilities={"vm-platform": (_PlatformOnAnOldContract,)})
+    plugin = Plugin(name="p", capabilities={"vm-platform": (_PlatformOnAnUnsupportedContract,)})
 
     with pytest.raises(PluginError):
         register_plugin(plugin)

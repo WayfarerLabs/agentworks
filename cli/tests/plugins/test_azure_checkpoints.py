@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 from azure.core.exceptions import ResourceNotFoundError
+from azure.mgmt.compute.models import Disk, DiskUpdate, Snapshot, VirtualMachineUpdate
 
 from agentworks.errors import StateError
 from agentworks.plugins.azure import checkpoints
@@ -23,6 +24,7 @@ class _Poller:
 class _Snapshots:
     def __init__(self) -> None:
         self.resources: dict[str, Any] = {}
+        self.create_requests: list[Snapshot] = []
 
     def get(self, _group: str, name: str) -> Any:
         if name not in self.resources:
@@ -32,14 +34,15 @@ class _Snapshots:
     def list_by_resource_group(self, _group: str) -> list[Any]:
         return list(self.resources.values())
 
-    def begin_create_or_update(self, group: str, name: str, body: dict[str, Any]) -> _Poller:
+    def begin_create_or_update(self, group: str, name: str, body: Snapshot) -> _Poller:
+        self.create_requests.append(body)
         resource = SimpleNamespace(
             id=f"/subscriptions/sub/resourceGroups/{group}/providers/Microsoft.Compute/snapshots/{name}",
             unique_id="snapshot-uid",
             name=name,
-            location=body["location"],
-            creation_data=SimpleNamespace(source_resource_id=body["creation_data"]["source_resource_id"]),
-            tags=body["tags"],
+            location=body.location,
+            creation_data=SimpleNamespace(source_resource_id=body.creation_data.source_resource_id),
+            tags=body.tags,
             provisioning_state="Succeeded",
         )
         self.resources[name] = resource
@@ -52,6 +55,8 @@ class _Snapshots:
 
 class _Disks:
     def __init__(self) -> None:
+        self.create_requests: list[Disk] = []
+        self.update_requests: list[DiskUpdate] = []
         self.resources: dict[str, Any] = {
             "disk-original": SimpleNamespace(
                 id="/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/disks/disk-original",
@@ -71,20 +76,22 @@ class _Disks:
     def list_by_resource_group(self, _group: str) -> list[Any]:
         return list(self.resources.values())
 
-    def begin_create_or_update(self, group: str, name: str, body: dict[str, Any]) -> _Poller:
+    def begin_create_or_update(self, group: str, name: str, body: Disk) -> _Poller:
+        self.create_requests.append(body)
         resource = SimpleNamespace(
             id=f"/subscriptions/sub/resourceGroups/{group}/providers/Microsoft.Compute/disks/{name}",
             name=name,
-            location=body["location"],
-            tags=body["tags"],
+            location=body.location,
+            tags=body.tags,
             provisioning_state="Succeeded",
             managed_by=None,
         )
         self.resources[name] = resource
         return _Poller(resource)
 
-    def begin_update(self, _group: str, name: str, body: dict[str, Any]) -> _Poller:
-        self.resources[name].tags = body["tags"]
+    def begin_update(self, _group: str, name: str, body: DiskUpdate) -> _Poller:
+        self.update_requests.append(body)
+        self.resources[name].tags = body.tags
         return _Poller(self.resources[name])
 
     def begin_delete(self, _group: str, name: str) -> _Poller:
@@ -95,6 +102,7 @@ class _Disks:
 class _VMs:
     def __init__(self, disks: _Disks) -> None:
         self.disks = disks
+        self.update_requests: list[VirtualMachineUpdate] = []
         self.resource_id = "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm-a"
         self.vm = SimpleNamespace(
             id=self.resource_id,
@@ -112,9 +120,10 @@ class _VMs:
     def instance_view(self, _group: str, _name: str) -> Any:
         return SimpleNamespace(statuses=[SimpleNamespace(code="PowerState/deallocated")])
 
-    def begin_update(self, _group: str, _name: str, body: dict[str, Any]) -> _Poller:
+    def begin_update(self, _group: str, _name: str, body: VirtualMachineUpdate) -> _Poller:
+        self.update_requests.append(body)
         old_id = self.vm.storage_profile.os_disk.managed_disk.id
-        new_id = body["storage_profile"]["os_disk"]["managed_disk"]["id"]
+        new_id = body.storage_profile.os_disk.managed_disk.id
         old_name = old_id.rstrip("/").rsplit("/", 1)[-1]
         new_name = new_id.rstrip("/").rsplit("/", 1)[-1]
         self.disks.resources[old_name].managed_by = None
@@ -128,6 +137,44 @@ class _Compute:
         self.snapshots = _Snapshots()
         self.disks = _Disks()
         self.virtual_machines = _VMs(self.disks)
+
+
+def test_azure_checkpoint_requests_serialize_nested_sdk_models_for_arm() -> None:
+    compute = _Compute()
+    checkpoint = checkpoints.create_checkpoint(
+        compute,
+        resource_group="rg",
+        vm_name="vm-a",
+        name="upgrade-1",
+        operation_id="create-1",
+        resume=False,
+    )
+    checkpoints.restore_checkpoint(
+        compute,
+        resource_group="rg",
+        vm_name="vm-a",
+        checkpoint=checkpoint,
+        operation_id="restore-1",
+    )
+
+    snapshot_request = compute.snapshots.create_requests[0]
+    assert snapshot_request.as_dict()["properties"]["creationData"] == {
+        "createOption": "Copy",
+        "sourceResourceId": compute.disks.resources["disk-original"].id,
+    }
+
+    disk_request = compute.disks.create_requests[0]
+    assert disk_request.as_dict()["properties"]["creationData"] == {
+        "createOption": "Copy",
+        "sourceResourceId": next(iter(compute.snapshots.resources.values())).id,
+    }
+
+    vm_update = compute.virtual_machines.update_requests[0]
+    replacement_id = vm_update.as_dict()["properties"]["storageProfile"]["osDisk"]["managedDisk"]["id"]
+    assert replacement_id.rsplit("/", 1)[-1] in compute.disks.resources
+    assert replacement_id != compute.disks.resources["disk-original"].id
+    assert compute.disks.update_requests
+    assert all(isinstance(request, DiskUpdate) for request in compute.disks.update_requests)
 
 
 def test_azure_checkpoint_round_trip_is_replay_safe_and_retains_one_emergency_disk() -> None:

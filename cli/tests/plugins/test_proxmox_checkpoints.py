@@ -48,8 +48,8 @@ class _FakeAPI:
         self.snapshots = [entry for entry in self.snapshots if entry.get("name") != name]
         return "UPID:delete"
 
-    def wait_for_task(self, node: str, upid: str) -> None:
-        self.calls.append(("wait_for_task", node, upid))
+    def wait_for_task(self, node: str, upid: str, *, timeout: int = 300) -> None:
+        self.calls.append(("wait_for_task", node, upid, timeout))
 
     def vm_status(self, node: str, vmid: int) -> dict[str, str]:
         self.calls.append(("vm_status", node, vmid))
@@ -104,6 +104,7 @@ def test_create_is_replay_safe_and_lists_only_owned_snapshots(
     assert first == replay == CheckpointDescriptor(name="agw-123", identifier="agw-123")
     assert platform.list_checkpoints(vm, RunContext()) == (first,)
     assert [call[0] for call in fake.calls].count("create_snapshot") == 1
+    assert ("wait_for_task", "pve1", "UPID:create", 3600) in fake.calls
 
 
 def test_create_refuses_same_name_unmanaged_snapshot(
@@ -136,6 +137,28 @@ def test_create_waits_for_an_interrupted_snapshot_to_finish(
     assert checkpoint == CheckpointDescriptor("agw-123", "agw-123")
     assert [call[0] for call in fake.calls].count("create_snapshot") == 0
     assert [call[0] for call in fake.calls].count("list_snapshots") >= 3
+
+
+def test_incomplete_checkpoint_readiness_uses_the_checkpoint_timeout(
+    harness: tuple[ProxmoxPlatform, _FakeAPI, VMRow],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform, fake, vm = harness
+    fake.snapshots.append(
+        {
+            "name": "agw-123",
+            "description": platform._checkpoint_description(vm),  # noqa: SLF001
+            "snapstate": "prepare",
+        }
+    )
+    clock = iter((100.0, 3699.0, 3700.0))
+    monkeypatch.setattr("agentworks.plugins.proxmox.platform.time.monotonic", lambda: next(clock))
+    monkeypatch.setattr("agentworks.plugins.proxmox.platform.time.sleep", lambda _seconds: None)
+
+    with pytest.raises(StateError):
+        _create_checkpoint(platform, vm, "agw-123", resume=True)
+
+    assert [call[0] for call in fake.calls].count("list_snapshots") == 3
 
 
 def test_failed_incomplete_snapshot_cannot_be_restored_and_can_be_deleted(
@@ -174,6 +197,7 @@ def test_restore_requires_owned_checkpoint_and_stopped_vm(
     fake.running = False
     platform.restore_checkpoint(vm, checkpoint, RunContext(), operation_id="restore-1")
     assert ("rollback_snapshot", "pve1", 100, "agw-123") in fake.calls
+    assert ("wait_for_task", "pve1", "UPID:rollback", 3600) in fake.calls
     assert platform.status(vm, RunContext()) is VMStatus.STOPPED
 
 
@@ -188,3 +212,4 @@ def test_delete_is_replay_safe_and_proves_absence(
 
     assert platform.list_checkpoints(vm, RunContext()) == ()
     assert [call[0] for call in fake.calls].count("delete_snapshot") == 1
+    assert ("wait_for_task", "pve1", "UPID:delete", 3600) in fake.calls

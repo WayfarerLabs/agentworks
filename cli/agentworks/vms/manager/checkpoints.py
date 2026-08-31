@@ -15,11 +15,12 @@ from agentworks.db import (
     VMCheckpointState,
     VMStatus,
 )
-from agentworks.errors import AlreadyExistsError, StateError, UserAbort
+from agentworks.errors import AgentworksError, AlreadyExistsError, StateError, UserAbort
 
 from ._helpers import _guard_failed_vm, _require_vm
 from .boundary import _live_vm_boundary
 from .checkpoint_fingerprint import checkpoint_desired_state_fingerprint
+from .checkpoint_listing import CheckpointListing, CheckpointRestoreStatus
 from .operation_guard import exclusive_vm_operation_guard
 
 if TYPE_CHECKING:
@@ -30,7 +31,6 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMCheckpointRow, VMRow
     from agentworks.debian import DebianRelease
-    from agentworks.machine_output import JsonObject
     from agentworks.resources import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
 
@@ -83,8 +83,11 @@ def _reconcile_ready_checkpoint(
     vm: VMRow,
     ctx: RunContext,
     row: VMCheckpointRow,
+    *,
+    inventory: Sequence[CheckpointDescriptor] | None = None,
 ) -> CheckpointDescriptor:
-    inventory = platform.list_checkpoints(vm, ctx)
+    if inventory is None:
+        inventory = platform.list_checkpoints(vm, ctx)
     matching = [item for item in inventory if item.name == row.name]
     if len(inventory) != 1 or len(matching) != 1:
         raise StateError(
@@ -106,6 +109,95 @@ def _reconcile_ready_checkpoint(
             hint="Do not restore or delete the artifact until its ownership is repaired.",
         )
     return descriptor
+
+
+def checkpoint_restore_status(
+    db: Database,
+    config: Config,
+    registry: Registry,
+    vm: VMRow,
+    row: VMCheckpointRow,
+) -> CheckpointRestoreStatus:
+    """Derive whether the current declarations permit managed restore."""
+
+    if row.state not in {VMCheckpointState.READY, VMCheckpointState.RESTORING}:
+        return CheckpointRestoreStatus.UNAVAILABLE
+    fingerprint = checkpoint_desired_state_fingerprint(
+        db,
+        config,
+        registry,
+        vm,
+        capture_release=row.capture_release,
+    )
+    if fingerprint != row.desired_state_fingerprint:
+        return CheckpointRestoreStatus.DECLARATIONS_CHANGED
+    if row.state is VMCheckpointState.RESTORING:
+        return CheckpointRestoreStatus.RESUME_REQUIRED
+    return CheckpointRestoreStatus.AVAILABLE
+
+
+def _validate_upgrade_checkpoint_slot(
+    db: Database,
+    config: Config,
+    registry: Registry,
+    platform: VMPlatform,
+    vm: VMRow,
+    ctx: RunContext,
+    *,
+    source_release: DebianRelease,
+    target_release: DebianRelease,
+) -> VMCheckpointRow | None:
+    """Read and validate the one checkpoint slot without mutating it."""
+
+    row = db.get_vm_checkpoint(vm.name)
+    inventory = platform.list_checkpoints(vm, ctx)
+    if row is None:
+        if inventory:
+            raise StateError(
+                f"VM '{vm.name}' has an Agentworks-managed provider checkpoint with no database record",
+                entity_kind="vm",
+                entity_name=vm.name,
+                hint="Repair or remove the provider artifact before retrying the upgrade.",
+            )
+        return None
+    expected_pair = (source_release, target_release)
+    if (
+        row.state not in {VMCheckpointState.CREATING, VMCheckpointState.READY}
+        or row.capture_release is not source_release
+        or (row.source_release, row.target_release) != expected_pair
+    ):
+        raise AlreadyExistsError(
+            f"VM '{vm.name}' already has checkpoint '{row.name}' that cannot be reused for this upgrade",
+            entity_kind="vm",
+            entity_name=vm.name,
+            hint=f"Restore or delete it with 'agw vm delete-checkpoint {vm.name}' before retrying.",
+        )
+    expected_fingerprint = checkpoint_desired_state_fingerprint(
+        db,
+        config,
+        registry,
+        vm,
+        capture_release=row.capture_release,
+    )
+    if expected_fingerprint != row.desired_state_fingerprint:
+        raise StateError(
+            f"VM '{vm.name}' declarations changed after checkpoint '{row.name}' was claimed",
+            entity_kind="vm",
+            entity_name=vm.name,
+            hint=f"Delete it with 'agw vm delete-checkpoint {vm.name}' before retrying the upgrade.",
+        )
+    if row.state is VMCheckpointState.READY:
+        _reconcile_ready_checkpoint(platform, vm, ctx, row, inventory=inventory)
+        return row
+    matching = [item for item in inventory if item.name == row.name]
+    if inventory and (len(inventory) != 1 or len(matching) != 1):
+        raise StateError(
+            f"VM '{vm.name}' checkpoint inventory disagrees with the interrupted create",
+            entity_kind="vm",
+            entity_name=vm.name,
+            hint="Repair the provider inventory before retrying the upgrade.",
+        )
+    return row
 
 
 def _insert_or_resume_create(
@@ -255,6 +347,16 @@ def create_checkpoint(
         )
         platform = vm_node.site.platform
         _require_stopped_vm(platform, vm, ops_ctx)
+        if db.get_vm_checkpoint(name) is None:
+            output.info("Checking provider checkpoint support and inventory...")
+            inventory = platform.list_checkpoints(vm, ops_ctx)
+            if inventory:
+                raise StateError(
+                    f"VM '{name}' has an Agentworks-managed provider checkpoint with no database record",
+                    entity_kind="vm",
+                    entity_name=name,
+                    hint="Repair or remove the provider artifact before creating a checkpoint.",
+                )
         row, resume = _insert_or_resume_create(
             db,
             config,
@@ -351,6 +453,42 @@ def require_upgrade_checkpoint(
         return row
 
 
+def preflight_upgrade_checkpoint(
+    db: Database,
+    config: Config,
+    name: str,
+    *,
+    source_release: DebianRelease,
+    target_release: DebianRelease,
+    interaction: TtyInteractionPolicy,
+) -> None:
+    """Refuse an unusable checkpoint slot before creating backup artifacts."""
+
+    from agentworks.bootstrap import load_request_registry
+
+    vm = _require_vm(db, name)
+    registry = load_request_registry(config, live_database=db)
+    vm_node, ops_ctx = _live_vm_boundary(
+        db,
+        config,
+        vm,
+        registry=registry,
+        interaction=interaction,
+    )
+    output.info("Checking managed checkpoint availability...")
+    _validate_upgrade_checkpoint_slot(
+        db,
+        config,
+        registry,
+        vm_node.site.platform,
+        vm,
+        ops_ctx,
+        source_release=source_release,
+        target_release=target_release,
+    )
+    output.info("Managed checkpoint preflight complete.")
+
+
 def _create_upgrade_checkpoint(
     db: Database,
     config: Config,
@@ -375,30 +513,19 @@ def _create_upgrade_checkpoint(
         interaction=interaction,
     )
     platform = vm_node.site.platform
-    existing = db.get_vm_checkpoint(name)
+    existing = _validate_upgrade_checkpoint_slot(
+        db,
+        config,
+        registry,
+        platform,
+        vm,
+        ops_ctx,
+        source_release=source_release,
+        target_release=target_release,
+    )
     if existing is not None and existing.state is VMCheckpointState.READY:
-        if (
-            existing.capture_release is source_release
-            and existing.source_release is source_release
-            and existing.target_release is target_release
-        ):
-            expected = checkpoint_desired_state_fingerprint(
-                db,
-                config,
-                registry,
-                vm,
-                capture_release=existing.capture_release,
-            )
-            if expected == existing.desired_state_fingerprint:
-                _reconcile_ready_checkpoint(platform, vm, ops_ctx, existing)
-                output.info(f"Reusing managed upgrade checkpoint '{existing.name}'.")
-                return existing
-        raise AlreadyExistsError(
-            f"VM '{name}' already has checkpoint '{existing.name}' that cannot be reused for this upgrade",
-            entity_kind="vm",
-            entity_name=name,
-            hint=f"Restore or delete it with 'agw vm delete-checkpoint {name}' before retrying.",
-        )
+        output.info(f"Reusing managed upgrade checkpoint '{existing.name}' created at {existing.created_at}.")
+        return existing
 
     status = platform.status(vm, ops_ctx)
     if status is not VMStatus.RUNNING:
@@ -433,68 +560,41 @@ def list_checkpoints(
     db: Database,
     config: Config,
     *,
-    vm_names: Sequence[str] | None,
+    vm_names: str | list[str] | None,
     names_only: bool = False,
     interaction: TtyInteractionPolicy,
-) -> list[VMCheckpointRow]:
+) -> list[CheckpointListing]:
     """List persisted checkpoints after comparing each provider inventory."""
 
+    from agentworks.bootstrap import load_request_registry
     from agentworks.name_filters import validate_name_filters
 
-    validate_name_filters(db, vm_name=None if vm_names is None else list(vm_names))
-    rows = db.list_vm_checkpoints(vm_name=None if vm_names is None else list(vm_names))
+    validate_name_filters(db, vm_name=vm_names)
+    rows = db.list_vm_checkpoints(vm_name=vm_names)
     if names_only:
         for row in rows:
             output.info(row.name)
-        return rows
+        return [CheckpointListing(checkpoint=row, restore_status=None) for row in rows]
+    registry = load_request_registry(config, live_database=db)
+    listings: list[CheckpointListing] = []
     for row in rows:
         vm = _require_vm(db, row.vm_name)
-        vm_node, ops_ctx = _live_vm_boundary(db, config, vm, interaction=interaction)
-        if row.state is VMCheckpointState.READY:
+        vm_node, ops_ctx = _live_vm_boundary(
+            db,
+            config,
+            vm,
+            registry=registry,
+            interaction=interaction,
+        )
+        if row.state in {VMCheckpointState.READY, VMCheckpointState.RESTORING}:
             _reconcile_ready_checkpoint(vm_node.site.platform, vm, ops_ctx, row)
-    return rows
-
-
-def checkpoint_listing_data(rows: Sequence[VMCheckpointRow]) -> JsonObject:
-    """Project checkpoint rows into stable machine-output facts."""
-
-    return {
-        "checkpoints": [
-            {
-                "vm_name": row.vm_name,
-                "name": row.name,
-                "provider_identifier": row.provider_identifier,
-                "state": row.state.value,
-                "purpose": row.purpose,
-                "capture_release": row.capture_release.value,
-                "source_release": None if row.source_release is None else row.source_release.value,
-                "target_release": None if row.target_release is None else row.target_release.value,
-                "created_at": row.created_at,
-            }
-            for row in rows
-        ]
-    }
-
-
-def render_checkpoint_listing(rows: Sequence[VMCheckpointRow]) -> None:
-    """Render the compact human checkpoint table."""
-
-    if not rows:
-        output.info("No managed VM checkpoints found.")
-        return
-    header = f"{'VM':<20} {'CHECKPOINT':<37} {'STATE':<10} {'PURPOSE':<15} {'CAPTURE':<10} {'TRANSITION':<20} CREATED"
-    output.info(header)
-    output.info("-" * len(header))
-    for row in rows:
-        transition = (
-            "-"
-            if row.source_release is None or row.target_release is None
-            else f"{row.source_release.value}->{row.target_release.value}"
+        listings.append(
+            CheckpointListing(
+                checkpoint=row,
+                restore_status=checkpoint_restore_status(db, config, registry, vm, row),
+            )
         )
-        output.info(
-            f"{output.truncate(row.vm_name, 20):<20} {row.name:<37} {row.state.value:<10} "
-            f"{row.purpose:<15} {row.capture_release.value:<10} {transition:<20} {row.created_at}"
-        )
+    return listings
 
 
 def restore_checkpoint(
@@ -543,12 +643,14 @@ def restore_checkpoint(
         )
         if fingerprint != row.desired_state_fingerprint:
             raise StateError(
-                f"VM '{name}' desired state changed after checkpoint '{row.name}' was created",
+                f"VM '{name}' declarations no longer match checkpoint '{row.name}'",
                 entity_kind="vm",
                 entity_name=name,
                 hint=(
-                    "Restore the matching Agentworks database and declarations, or delete this checkpoint "
-                    "and create a new one. Managed restore has no unsafe force bypass."
+                    "The VM, workspace, agent, session, site, or authorized-key configuration changed "
+                    "after capture. Restore the matching Agentworks database and declarations, or delete "
+                    f"this checkpoint with 'agw vm delete-checkpoint {name}' and create a new one. "
+                    "Managed restore has no unsafe force bypass."
                 ),
             )
         vm_node, ops_ctx = _live_vm_boundary(
@@ -646,19 +748,29 @@ def delete_checkpoint(
     name: str,
     *,
     yes: bool,
+    force: bool = False,
     interaction: TtyInteractionPolicy,
 ) -> None:
     """Delete one provider checkpoint and release the VM's managed slot."""
 
     with exclusive_vm_operation_guard(db, name, operation="delete checkpoint"):
         vm = _require_vm(db, name)
-        vm_node, ops_ctx = _live_vm_boundary(db, config, vm, interaction=interaction)
+        try:
+            vm_node, ops_ctx = _live_vm_boundary(db, config, vm, interaction=interaction)
+        except UserAbort:
+            raise
+        except AgentworksError as error:
+            if not force:
+                _raise_checkpoint_cleanup_failure(name, error)
+            _abandon_checkpoint(db, name, error=error, yes=yes)
+            return
         _delete_checkpoint_with_boundary(
             db,
             vm,
             vm_node.site.platform,
             ops_ctx,
             yes=yes,
+            force=force,
         )
 
 
@@ -669,8 +781,29 @@ def _delete_checkpoint_with_boundary(
     ops_ctx: RunContext,
     *,
     yes: bool,
+    force: bool = False,
 ) -> None:
     """Delete a managed checkpoint through an already-resolved VM boundary."""
+
+    try:
+        _delete_checkpoint_reconciled(db, vm, platform, ops_ctx, yes=yes)
+    except UserAbort:
+        raise
+    except AgentworksError as error:
+        if not force:
+            _raise_checkpoint_cleanup_failure(vm.name, error)
+        _abandon_checkpoint(db, vm.name, error=error, yes=yes)
+
+
+def _delete_checkpoint_reconciled(
+    db: Database,
+    vm: VMRow,
+    platform: VMPlatform,
+    ops_ctx: RunContext,
+    *,
+    yes: bool,
+) -> None:
+    """Reconcile and delete a managed checkpoint without abandoning ownership."""
 
     name = vm.name
     row = db.get_vm_checkpoint(name)
@@ -770,6 +903,65 @@ def _delete_checkpoint_with_boundary(
         ),
     )
     output.result(f"Checkpoint '{row.name}' deleted for VM '{name}'.")
+
+
+def _raise_checkpoint_cleanup_failure(name: str, error: AgentworksError) -> None:
+    provider_hint = f"{error.hint} " if error.hint else ""
+    raise StateError(
+        f"Managed checkpoint cleanup for VM '{name}' could not complete: {error}",
+        entity_kind="vm",
+        entity_name=name,
+        hint=(
+            f"{provider_hint}Correct the provider problem and retry. If provider cleanup cannot be recovered, "
+            f"run 'agw vm delete-checkpoint {name} --force' to make Agentworks forget ownership; "
+            "provider artifacts may remain and continue billing."
+        ),
+    ) from error
+
+
+def _abandon_checkpoint(
+    db: Database,
+    name: str,
+    *,
+    error: BaseException,
+    yes: bool,
+) -> None:
+    """Explicitly forget ownership after provider cleanup could not be proved."""
+
+    row = db.get_vm_checkpoint(name)
+    if row is None:
+        raise StateError(f"VM '{name}' has no managed checkpoint to forget") from error
+    output.warn(f"Provider checkpoint cleanup could not be confirmed: {error}")
+    provider_identifier = row.provider_identifier or "not recorded"
+    output.warn(
+        f"Forgetting checkpoint '{row.name}' in Agentworks with provider identifier "
+        f"'{provider_identifier}'. Provider artifacts, including late or additional artifacts, "
+        "may remain and continue billing; inspect and clean them up with the provider's tools."
+    )
+    if not yes and not output.confirm(
+        f"Forget Agentworks ownership of checkpoint '{row.name}' for VM '{name}'?",
+        default=False,
+    ):
+        raise UserAbort("checkpoint abandonment cancelled")
+    if not db.abandon_vm_checkpoint(
+        name,
+        expected_state=row.state,
+        expected_operation_id=row.operation_id,
+    ):
+        raise StateError(f"VM '{name}' checkpoint state changed before ownership was forgotten")
+    db.insert_vm_event(
+        name,
+        "checkpoint_abandoned",
+        json.dumps(
+            {
+                "checkpoint": row.name,
+                "provider_identifier": row.provider_identifier,
+                "state": row.state.value,
+            },
+            sort_keys=True,
+        ),
+    )
+    output.result(f"Agentworks forgot checkpoint '{row.name}' for VM '{name}'. Provider cleanup was not verified.")
 
 
 def _confirm_checkpoint_deletion(name: str, *, yes: bool) -> None:

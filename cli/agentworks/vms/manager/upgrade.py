@@ -150,6 +150,17 @@ def _upgrade_vm(
             heading="Preliminary Debian upgrade plan",
         )
 
+        from .checkpoints import preflight_upgrade_checkpoint
+
+        preflight_upgrade_checkpoint(
+            db,
+            config,
+            name,
+            source_release=DebianRelease(entry.transition.pair.source),
+            target_release=DebianRelease(entry.transition.pair.target),
+            interaction=interaction,
+        )
+
         from agentworks.vms.backup import backup_vm
 
         ordinary_backup = backup_vm(db, config, name, interaction=interaction)
@@ -255,6 +266,10 @@ def _upgrade_vm(
             hint="Restore apt-daily.timer and apt-daily-upgrade.timer to their recorded states.",
         ) from error
     db.insert_vm_event(name, "debian_upgrade_complete", json.dumps({"target": target_release}, sort_keys=True))
+    output.warn(
+        f"Managed checkpoint '{checkpoint_ref}' is retained for recovery and may continue to incur "
+        f"provider storage charges. Delete it when no longer needed with 'agw vm delete-checkpoint {name}'."
+    )
     output.result(f"VM '{name}' upgraded to Debian {target_release}.")
 
 

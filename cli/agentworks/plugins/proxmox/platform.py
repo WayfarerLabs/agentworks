@@ -43,7 +43,7 @@ if TYPE_CHECKING:
     from agentworks.db import VMRow
 
 
-_CHECKPOINT_READY_TIMEOUT_SECONDS = 300.0
+_CHECKPOINT_TIMEOUT_SECONDS = 3600
 _CHECKPOINT_READY_POLL_SECONDS = 2.0
 
 
@@ -127,7 +127,7 @@ class ProxmoxConfig(AgwModel):
 class ProxmoxPlatform(VMPlatform):
     """Runs VMs on a Proxmox VE cluster."""
 
-    contract_version: ClassVar[int] = 4
+    contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "proxmox"
     description: ClassVar[str] = "Proxmox VE cluster VMs (clone + cloud-init)"
     config_model: ClassVar[type[ProxmoxConfig]] = ProxmoxConfig
@@ -500,7 +500,7 @@ class ProxmoxPlatform(VMPlatform):
     ) -> CheckpointDescriptor:
         node = self._vm_node(vm)
         vmid = self._vmid(vm)
-        deadline = time.monotonic() + _CHECKPOINT_READY_TIMEOUT_SECONDS
+        deadline = time.monotonic() + _CHECKPOINT_TIMEOUT_SECONDS
         while True:
             entry = next((item for item in self._api(ctx).list_snapshots(node, vmid) if item.get("name") == name), None)
             if entry is None:
@@ -592,7 +592,7 @@ class ProxmoxPlatform(VMPlatform):
             name,
             description=self._checkpoint_description(vm),
         )
-        self._api(ctx).wait_for_task(node, upid)
+        self._api(ctx).wait_for_task(node, upid, timeout=_CHECKPOINT_TIMEOUT_SECONDS)
         return self._wait_for_checkpoint_ready(vm, ctx, name=name)
 
     def list_checkpoints(self, vm: VMRow, ctx: RunContext) -> tuple[CheckpointDescriptor, ...]:
@@ -622,7 +622,7 @@ class ProxmoxPlatform(VMPlatform):
             )
         node = self._vm_node(vm)
         upid = self._api(ctx).rollback_snapshot(node, self._vmid(vm), checkpoint.name)
-        self._api(ctx).wait_for_task(node, upid)
+        self._api(ctx).wait_for_task(node, upid, timeout=_CHECKPOINT_TIMEOUT_SECONDS)
         if self.status(vm, ctx) is not VMStatus.STOPPED:
             raise StateError(
                 f"Proxmox checkpoint restore did not leave VM '{vm.name}' stopped",
@@ -641,7 +641,7 @@ class ProxmoxPlatform(VMPlatform):
             return
         node = self._vm_node(vm)
         upid = self._api(ctx).delete_snapshot(node, self._vmid(vm), checkpoint.name)
-        self._api(ctx).wait_for_task(node, upid)
+        self._api(ctx).wait_for_task(node, upid, timeout=_CHECKPOINT_TIMEOUT_SECONDS)
         if checkpoint in self.list_checkpoints(vm, ctx):
             raise StateError(
                 f"Proxmox checkpoint '{checkpoint.name}' still exists after deletion",

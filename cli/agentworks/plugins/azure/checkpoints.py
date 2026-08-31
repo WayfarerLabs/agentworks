@@ -41,11 +41,15 @@ def create_checkpoint(
     existing = _get_optional(compute.snapshots, resource_group, snapshot_name)
     del resume  # The deterministic resource name is the Azure replay boundary.
     tags = {**_tags(vm_id=vm_id, name=name), _CREATE_OPERATION_TAG: operation_id}
-    body = {
-        "location": _required_text(vm, "location", f"Azure VM '{vm_name}' has no location"),
-        "creation_data": {"create_option": "Copy", "source_resource_id": disk_id},
-        "tags": tags,
-    }
+    from azure.mgmt.compute.models import CreationData, Snapshot, SnapshotProperties
+
+    body = Snapshot(
+        location=_required_text(vm, "location", f"Azure VM '{vm_name}' has no location"),
+        properties=SnapshotProperties(
+            creation_data=CreationData(create_option="Copy", source_resource_id=disk_id),
+        ),
+        tags=tags,
+    )
     if existing is not None:
         _verify_snapshot_ownership(existing, vm_id=vm_id, name=name)
         if _resource_tags(existing).get(_CREATE_OPERATION_TAG) != operation_id:
@@ -147,19 +151,23 @@ def restore_checkpoint(
         )
     else:
         source_disk = _disk(compute, resource_group, current_disk_id)
-        body = {
-            "location": _required_text(snapshot, "location", f"Azure checkpoint '{checkpoint.name}' has no location"),
-            "creation_data": {"create_option": "Copy", "source_resource_id": snapshot_id},
-            "tags": {
+        from azure.mgmt.compute.models import CreationData, Disk, DiskProperties
+
+        body = Disk(
+            location=_required_text(snapshot, "location", f"Azure checkpoint '{checkpoint.name}' has no location"),
+            properties=DiskProperties(
+                creation_data=CreationData(create_option="Copy", source_resource_id=snapshot_id),
+            ),
+            tags={
                 **_tags(vm_id=vm_id, name=checkpoint.name),
                 _CHECKPOINT_TAG: snapshot_unique_id,
                 _ROLE_TAG: "restored",
                 _OPERATION_TAG: operation_id,
             },
-        }
+        )
         sku = getattr(source_disk, "sku", None)
         if sku is not None:
-            body["sku"] = sku
+            body.sku = sku
         try:
             existing_replacement = compute.disks.begin_create_or_update(
                 resource_group,
@@ -210,7 +218,24 @@ def restore_checkpoint(
             checkpoint_id=snapshot_unique_id,
             operation_id=operation_id,
         )
-    update = {"storage_profile": {"os_disk": {"managed_disk": {"id": replacement_id}}}}
+    from azure.mgmt.compute.models import (
+        ManagedDiskParameters,
+        OSDisk,
+        StorageProfile,
+        VirtualMachineProperties,
+        VirtualMachineUpdate,
+    )
+
+    update = VirtualMachineUpdate(
+        properties=VirtualMachineProperties(
+            storage_profile=StorageProfile(
+                os_disk=OSDisk(
+                    create_option="Attach",
+                    managed_disk=ManagedDiskParameters(id=replacement_id),
+                ),
+            ),
+        ),
+    )
     try:
         compute.virtual_machines.begin_update(resource_group, vm_name, update).result()
     except Exception as exc:
@@ -429,6 +454,12 @@ def _tags(*, vm_id: str, name: str) -> dict[str, str]:
     return {_MANAGED_TAG: _MANAGED_VALUE, _VM_ID_TAG: vm_id, _NAME_TAG: name}
 
 
+def _disk_tag_update(tags: Mapping[str, str]) -> Any:
+    from azure.mgmt.compute.models import DiskUpdate
+
+    return DiskUpdate(tags=dict(tags))
+
+
 def _artifact_name(prefix: str, *parts: str) -> str:
     digest = hashlib.sha256("\0".join(parts).encode()).hexdigest()
     return f"{prefix}-{digest[:32]}"
@@ -452,7 +483,7 @@ def _tag_emergency_disk(
     }
     disk_name = _required_text(disk, "name", "Azure OS disk has no name")
     try:
-        compute.disks.begin_update(resource_group, disk_name, {"tags": tags}).result()
+        compute.disks.begin_update(resource_group, disk_name, _disk_tag_update(tags)).result()
     except Exception as exc:
         raise wrap_azure_error(exc) from exc
 
@@ -477,7 +508,7 @@ def _tag_superseded_disk(
     }
     disk_name = _required_text(disk, "name", "Azure OS disk has no name")
     try:
-        compute.disks.begin_update(resource_group, disk_name, {"tags": tags}).result()
+        compute.disks.begin_update(resource_group, disk_name, _disk_tag_update(tags)).result()
     except Exception as exc:
         raise wrap_azure_error(exc) from exc
 
@@ -581,7 +612,7 @@ def _clear_checkpoint_tags(
         tags.pop(key, None)
     disk_name = _required_text(disk, "name", "Azure OS disk has no name")
     try:
-        compute.disks.begin_update(resource_group, disk_name, {"tags": tags}).result()
+        compute.disks.begin_update(resource_group, disk_name, _disk_tag_update(tags)).result()
     except Exception as exc:
         raise wrap_azure_error(exc) from exc
 

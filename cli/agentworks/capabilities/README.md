@@ -11,8 +11,8 @@ orchestration behind shared extension contracts. Operators can enable the implem
 without installing or configuring unrelated integrations, and new implementations reuse an existing
 kind's lifecycle and conformance checks.
 
-The plugin system lets third parties implement and distribute capabilities without changing the
-Agentworks repository.
+The system-plugin framework packages bundled, first-party capability implementations behind the same
+registration and conformance boundary as built-ins.
 
 ## Conceptual Model
 
@@ -28,8 +28,8 @@ its own interface, tuned for the specific type of capability it represents. Each
 concrete implementation of that interface, providing the actual functionality.
 
 Capability kinds are fixed by the core because each integrates with core orchestration. Capability
-resources are open-ended: they may be built in, supplied by opt-in **system plugins**, or provided
-by third-party **plugins**.
+resources may be built in or supplied by opt-in **system plugins** that ship with Agentworks. There
+is no separately distributed plugin API today.
 
 ## Currently Implemented Capabilities
 
@@ -49,12 +49,11 @@ infrastructure: `lima` and `wsl2` provide local VMs on macOS and Windows, while 
 `proxmox`, `aws-ec2`, and `gcp-gce` target cloud or datacenter capacity. Whatever the backend, each
 delivers the same foundation: a Debian VM with a passwordless-sudo admin login reachable over
 Tailscale, whose whole lifecycle (create, start, a cost-saving stop that resumes with state intact,
-delete) Agentworks drives through that one admin foothold. Contract version 4 also requires every
-platform, including third-party plugins, to create, list, restore, and delete Agentworks-managed VM
-checkpoints. Core uses that common offline recovery boundary for Debian upgrade and rejects an
-out-of-date platform before it can serve a vm-site. See
-[`vm_platform/README.md`](vm_platform/README.md) for what a platform must provide and the specifics
-of each.
+delete) Agentworks drives through that one admin foothold. Contract version 1 also requires every
+bundled platform to create, list, restore, and delete Agentworks-managed VM checkpoints. Core uses
+that common offline recovery boundary for Debian upgrade, and exact registration conformance keeps
+the bundled implementations synchronized. See [`vm_platform/README.md`](vm_platform/README.md) for
+what a platform must provide and the specifics of each.
 
 ### Harness Integration
 
@@ -313,8 +312,8 @@ When a capability config participates in template inheritance or an instance lay
 capability offers also owns the merge policy. A capability normally offers its `config_model`
 through the inherited `config_for()` hook; an override must return the model the other derived
 surfaces use too. The framework does not call capability code to combine two config blobs. This
-keeps core and third-party models on the same recursive contract and keeps merge callbacks out of
-registry finalization.
+keeps built-in and system-plugin models on the same recursive contract and keeps merge callbacks out
+of registry finalization.
 
 The defaults follow the schema shape: objects and mappings merge recursively by key, lists
 append-deduplicate atomic values in stable order, and scalars replace. A non-default field policy is
@@ -723,7 +722,7 @@ secret set from the node graph, resolves once, and exposes only declared values 
 
 A consuming domain can also own required operation values that every implementation must honor. The
 VM domain resolves its template's Tailscale auth-key reference once and selects the concrete Debian
-release from core policy. Vm-platform contract version 4 carries both through `ProvisionRequest`,
+release from core policy. Vm-platform contract version 1 carries both through `ProvisionRequest`,
 alongside a value-free progress sink. A platform must not redeclare either value in its config, read
 a substitute from ambient state, or infer its own meaning of "current." It translates the requested
 release through a platform-owned artifact map and verifies the live guest before returning so it can

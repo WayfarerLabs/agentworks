@@ -8,6 +8,7 @@ import pytest
 
 from agentworks.errors import StateError
 from agentworks.plugins.aws import checkpoints
+from agentworks.plugins.aws.network import EC2Error
 
 
 class _Waiter:
@@ -37,6 +38,9 @@ class _EC2:
         self.restore_calls: list[dict[str, Any]] = []
         self.snapshot_create_calls = 0
         self.snapshot_visibility_delay = 0
+        self.start_error: Exception | None = None
+        self.stop_error: Exception | None = None
+        self.stop_calls = 0
 
     def get_waiter(self, _name: str) -> _Waiter:
         return _Waiter()
@@ -73,9 +77,14 @@ class _EC2:
         return {"Snapshots": resources}
 
     def start_instances(self, **_kwargs: object) -> None:
+        if self.start_error is not None:
+            raise self.start_error
         self.instance["State"] = {"Name": "running"}
 
     def stop_instances(self, **_kwargs: object) -> None:
+        self.stop_calls += 1
+        if self.stop_error is not None:
+            raise self.stop_error
         self.instance["State"] = {"Name": "stopped"}
 
     def create_replace_root_volume_task(self, **kwargs: Any) -> dict[str, object]:
@@ -192,6 +201,42 @@ def test_ec2_restore_refuses_a_snapshot_retagged_to_another_instance() -> None:
         checkpoints.restore_checkpoint(ec2, instance_id="i-123", checkpoint=checkpoint, operation_id="restore-1")
 
     assert not ec2.restore_calls
+
+
+def test_ec2_start_failure_survives_a_failed_stop_cleanup() -> None:
+    ec2 = _EC2()
+    checkpoint = checkpoints.create_checkpoint(
+        ec2, instance_id="i-123", name="upgrade-1", operation_id="create-1", resume=False
+    )
+    start_failure = RuntimeError("start failed")
+    ec2.start_error = start_failure
+    ec2.stop_error = RuntimeError("stop failed")
+
+    with pytest.raises(EC2Error) as caught:
+        checkpoints.restore_checkpoint(ec2, instance_id="i-123", checkpoint=checkpoint, operation_id="restore-1")
+
+    assert caught.value.__cause__ is start_failure
+    assert ec2.stop_calls == 1
+
+
+def test_ec2_restore_failure_survives_a_failed_stop_cleanup(monkeypatch: pytest.MonkeyPatch) -> None:
+    ec2 = _EC2()
+    checkpoint = checkpoints.create_checkpoint(
+        ec2, instance_id="i-123", name="upgrade-1", operation_id="create-1", resume=False
+    )
+    restore_failure = StateError("restore failed")
+    ec2.stop_error = RuntimeError("stop failed")
+    monkeypatch.setattr(
+        checkpoints,
+        "_wait_for_restore_task",
+        lambda *args, **kwargs: (_ for _ in ()).throw(restore_failure),
+    )
+
+    with pytest.raises(StateError) as caught:
+        checkpoints.restore_checkpoint(ec2, instance_id="i-123", checkpoint=checkpoint, operation_id="restore-1")
+
+    assert caught.value is restore_failure
+    assert ec2.stop_calls == 1
 
 
 def test_ec2_create_replay_refuses_a_snapshot_from_another_root_volume() -> None:

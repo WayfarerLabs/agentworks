@@ -87,12 +87,12 @@ A vm-platform stands up a machine and hands Agentworks an administrative foothol
   VM's status; `create` **MUST** be collision-checked and either fail loudly on a name that already
   exists or pick and persist a new, collision-free backend name, never impacting an existing VM
   outside its control.
-- **MUST** implement contract version 4's managed checkpoint lifecycle: create a core-named offline
+- **MUST** implement contract version 1's managed checkpoint lifecycle: create a core-named offline
   checkpoint, list only Agentworks-owned checkpoints for the exact VM incarnation, restore the
   recorded descriptor while preserving the logical VM identity, and delete the artifact plus any
   retained emergency recovery intermediate. These operations are mandatory because Debian upgrade
-  depends on them. A version-3 or incomplete third-party platform is rejected as out of date before
-  it can serve a vm-site.
+  depends on them. Registration rejects an incomplete bundled platform before it can serve a
+  vm-site.
 - **MUST** provide a stop that preserves all system state for a later resume. Snapshotting and
   restoring running state is preferable, but a platform **MAY** implement stop as a full OS
   shutdown/restart, since Agentworks is built to be robust against restarts and the loss of running
@@ -227,13 +227,13 @@ and DB migration.
 - `status(vm, ctx) -> VMStatus` is a read-only query.
 - `display_backend_name(vm) -> str` is pure display and takes no `ctx`.
 
-The hard contract cutover is intentional. A third-party platform cannot claim version 4 while
-leaving checkpoint methods abstract. Exact registration conformance rejects an older contract or
-missing abstract implementation with an upgrade-the-plugin error. Returning unsupported or
-implementing a no-op still violates the version 4 contract and must be caught by plugin review and
-conformance testing; registration does not attempt to infer method semantics. Platform checkpoint
-state is provider-owned; core persists only the descriptor and lifecycle fence, compares every live
-list result with that record, and never asks a platform to interpret Debian's current release.
+Vm-platform is an internal capability API. Its complete bundled contract remains version 1, and all
+six implementations change atomically with the descriptor. Exact registration conformance rejects an
+inconsistent version or missing abstract implementation as a curation error. Returning unsupported
+or implementing a no-op still violates the contract and must be caught by review and provider tests;
+registration does not attempt to infer method semantics. Platform checkpoint state is
+provider-owned; core persists only the descriptor and lifecycle fence, compares every live list
+result with that record, and never asks a platform to interpret Debian's current release.
 
 **Transport and lifecycle hooks** (sensible defaults on `VMPlatform`; implementations override only
 what their backends need). All are entered by callers that gate first, so on entry the VM is running
@@ -318,9 +318,9 @@ process having warmed a credential cache.
 
 **Class-level contract**. `contract_version`, `config_model`, `name`, and `description` are all
 REQUIRED and none is defaulted, because a default would let an unmigrated implementation inherit a
-claim it never made; registration refuses an implementation missing any of them, naming the plugin.
+claim it never made; registration refuses an implementation missing any of them as a curation bug.
 `contract_version` must match exactly the version the vm-platform descriptor declares supported, so
-a contract change is a hard cutover rather than a silent re-certification.
+the descriptor and every bundled implementation must change atomically.
 
 - `config_model` declares what the platform's config IS (the keys a site writes beside `name` inside
   `spec.platform`), as an `AgwModel` carrying the platform's own name as a `Literal` tag plus one
@@ -331,22 +331,22 @@ a contract change is a hard cutover rather than a silent re-certification.
 - `legacy_platform_metadata(cls, row, legacy) -> dict[str, str]` maps pre-migration DB rows into the
   `platform_metadata` shape, consumed only by the one-shot DB migration.
 
-**Inputs and outputs** are uniform under vm-platform contract version 4. Every `create` receives the
+**Inputs and outputs** are uniform under vm-platform contract version 1. Every `create` receives the
 same `ProvisionRequest`, including the concrete core-selected `debian_release`, a required resolved
 Tailscale auth key, and a required value-free bootstrap-progress sink. The platform resolves the
 release through its local artifact map before backend mutation. A missing code-owned mapping names
-the out-of-date Agentworks build or plugin; a missing operator-owned mapping names the exact vm-site
-field. Neither has a fallback. Before its rollback window closes, the platform probes the live guest
-and raises after cleaning up a mismatch. A successful `ProvisionResult` carries the native
-transport, an optional Tailscale IP, and `platform_metadata`. Core treats the result as a runtime
-conformance boundary: after persisting the metadata, it independently probes the returned transport
-and persists only that live observation. This is not a security sandbox for in-process plugin code.
-The metadata is written verbatim to `vms.platform_metadata` and read back only by the owning
-platform (Lima stores `instance_name`, WSL2 `distro_name`, Azure `resource_id`, Proxmox `vmid` +
-`node`, EC2 `instance_id` + `security_group_id` + `region` + `backend_name`, and never the public
-IP, which it reads live). An omitted IP means discovery failed after a successful join, not that
-bootstrap is incomplete. Phase A retries only `tailscale ip -4` before it records the address and
-verifies Tailscale SSH.
+the out-of-date Agentworks build; a missing operator-owned mapping names the exact vm-site field.
+Neither has a fallback. Before its rollback window closes, the platform probes the live guest and
+raises after cleaning up a mismatch. A successful `ProvisionResult` carries the native transport, an
+optional Tailscale IP, and `platform_metadata`. Core treats the result as a runtime conformance
+boundary: after persisting the metadata, it independently probes the returned transport and persists
+only that live observation. This is not a security sandbox for in-process plugin code. The metadata
+is written verbatim to `vms.platform_metadata` and read back only by the owning platform (Lima
+stores `instance_name`, WSL2 `distro_name`, Azure `resource_id`, Proxmox `vmid` + `node`, EC2
+`instance_id` + `security_group_id` + `region` + `backend_name`, and never the public IP, which it
+reads live). An omitted IP means discovery failed after a successful join, not that bootstrap is
+incomplete. Phase A retries only `tailscale ip -4` before it records the address and verifies
+Tailscale SSH.
 
 Before the create boundary resolves secrets, the pending VM node calls
 `validate_create_release(release)` with that same concrete core selection. The hook is pure and

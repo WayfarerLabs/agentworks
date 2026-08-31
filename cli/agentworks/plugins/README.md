@@ -65,8 +65,7 @@ The guide has no plugin registration API. First-party packages inside `agentwork
 by placing one Markdown shell directly in a package-local `guide-content/` directory. The guide
 discovers those files only when requested; plugin registration and ordinary commands do not read
 them. A shell named `apt.md` becomes the global topic `concept-apt`, so filenames must be unique
-across the installed first-party package tree. Separately installed plugins are outside this
-discovery boundary.
+across the installed first-party package tree.
 
 Each shell has restricted frontmatter containing a single-line `description` and optional bounded
 `index-order`, followed by one unfenced level-1 heading and ordinary reviewed Markdown. The optional
@@ -156,9 +155,9 @@ The complete version-1 secret-backend authoring contract, including exact result
 ownership, core flow, lifecycle, TTY broker rules, value containment, and a conforming example,
 lives in the [secret-backend capability README](../capabilities/secret_backend/README.md).
 Secret-backend version `2` shipped in Agentworks 0.14.0 and 0.14.1, when plugins could already
-contribute this capability; there are no known third-party implementations. Agentworks 0.15
-intentionally renumbers the incompatible complete contract to exact version `1`, with no adapter.
-Backend authors must migrate the complete client and tagged-result API before registration.
+contribute this capability, but every implementation was bundled. Agentworks 0.15 intentionally
+renumbers the incompatible complete contract to exact version `1`, with no adapter. Bundled backends
+must migrate the complete client and tagged-result API before registration.
 
 ## Declaring config
 
@@ -200,32 +199,33 @@ class ExampleCloudConfig(AgwModel):
 class ExampleCloudPlatform(VMPlatform):
     name: ClassVar[str] = "example-cloud"
     description: ClassVar[str] = "Example Cloud VMs (region-scoped)"
-    contract_version: ClassVar[int] = 4
+    contract_version: ClassVar[int] = 1
     config_model: ClassVar[type[AgwModel]] = ExampleCloudConfig
 ```
 
-For vm-platform contract version 4, `create()` receives a concrete core-selected Debian release, a
+For vm-platform contract version 1, `create()` receives a concrete core-selected Debian release, a
 required Tailscale auth key, and a value-free bootstrap-progress sink in `ProvisionRequest`. The
 platform resolves the release through a local artifact map before mutation, with no default or
 fallback. It must finish the Tailscale join, probe `/etc/os-release` while backend rollback remains
 available, and raise after cleaning up a mismatch. Core independently repeats that probe over the
-returned transport and persists its own observation rather than trusting a plugin result field. A
-missing code-owned map entry says that Agentworks or the plugin is out of date; an operator-owned
-catalog miss names the exact vm-site field. A successful result may omit the Tailscale IP only when
-join succeeded but IP discovery did not; the manager then performs IP-only rediscovery and Tailscale
-SSH verification. There is no older-contract adapter.
+returned transport and persists its own observation rather than trusting a platform result field. A
+missing code-owned map entry says that Agentworks is out of date; an operator-owned catalog miss
+names the exact vm-site field. A successful result may omit the Tailscale IP only when join
+succeeded but IP discovery did not; the manager then performs IP-only rediscovery and Tailscale SSH
+verification.
 
-Version 4 also requires `create_checkpoint`, `list_checkpoints`, `restore_checkpoint`, and
+Version 1 also requires `create_checkpoint`, `list_checkpoints`, `restore_checkpoint`, and
 `delete_checkpoint`. They are not optional capability probes. Creation is offline and replay-safe by
 the core-generated `agw-*` name plus the keyword-only `operation_id` and `resume` inputs; listing
 returns only Agentworks-owned artifacts bound to the exact VM incarnation, including incomplete
 create artifacts that still require cleanup. Restore receives its own keyword-only `operation_id`,
 preserves the logical VM identity, replays only that attempt, and returns it stopped; deletion
-proves the artifact and any retained emergency intermediate are absent. Registration rejects a
-plugin that still declares version 3 or leaves a required method abstract. A concrete method that
-reports checkpoints unsupported still violates the contract, but registration cannot infer that
-semantic failure; plugin conformance tests must exercise the lifecycle. The full descriptor and
-destructive-restore rules are in
+proves the artifact and any retained emergency intermediate are absent. Vm-platform is internal, so
+the descriptor and every bundled implementation mutate together without an older-contract adapter.
+Registration rejects an inconsistent bundled implementation or a required method left abstract. A
+concrete method that reports checkpoints unsupported still violates the contract, but registration
+cannot infer that semantic failure; provider tests must exercise the lifecycle. The full descriptor
+and destructive-restore rules are in
 [`../capabilities/vm_platform/README.md`](../capabilities/vm_platform/README.md).
 
 An operator-owned release catalog also overrides the pure `validate_create_release(release)` hook.

@@ -204,6 +204,34 @@ def test_wsl_incomplete_create_remains_listed_until_deleted(
     assert not partial.exists()
 
 
+def test_wsl_partial_only_checkpoint_cannot_start_destructive_restore(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    backend = _WslBackend()
+    platform = _platform(monkeypatch, tmp_path, backend)
+    vm = _vm()
+    ctx = RunContext()
+    descriptor = CheckpointDescriptor(name="agw-checkpoint-1", identifier="wsl2:agw-dev:agw-checkpoint-1")
+    checkpoint, emergency = platform._checkpoint_paths(  # noqa: SLF001
+        vm,  # type: ignore[arg-type]
+        descriptor.name,
+        create_dir=True,
+    )
+    partial = checkpoint.with_name(checkpoint.name + ".partial")
+    partial.write_bytes(b"interrupted-export")
+
+    assert platform.list_checkpoints(vm, ctx) == (descriptor,)  # type: ignore[arg-type]
+    with pytest.raises(StateError):
+        platform.restore_checkpoint(vm, descriptor, ctx, operation_id="restore-1")  # type: ignore[arg-type]
+
+    assert backend.registered
+    assert backend.exports == []
+    assert backend.imports == []
+    assert partial.exists()
+    assert not emergency.exists()
+
+
 def test_wsl_checkpoint_create_refuses_running_distro_before_export(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

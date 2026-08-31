@@ -1148,6 +1148,46 @@ def test_fresh_upgrade_requires_interactive_authorization_before_preflight(
         upgrade_manager._upgrade_vm(object(), object(), "box", interaction=object())
 
 
+def test_checkpoint_preflight_refuses_before_backup_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.vms.manager import checkpoints
+
+    vm = SimpleNamespace(name="box")
+    transition = upgrade_manager._transitions(DEBIAN_RELEASES)[-1]
+    entry = SimpleNamespace(
+        adoption=False,
+        journal_pair=None,
+        preflight=object(),
+        transition=transition,
+        platform_name="lima",
+        tailscale_auth_key="ts-key",
+    )
+    monkeypatch.setattr(upgrade_manager, "_require_vm", lambda *args: vm)
+    monkeypatch.setattr(upgrade_manager, "_guard_failed_vm", lambda candidate: None)
+    monkeypatch.setattr(upgrade_manager, "_inspect_entry", lambda *args, **kwargs: entry)
+    monkeypatch.setattr(upgrade_manager, "_require_safe_preflight", lambda *args: None)
+    monkeypatch.setattr(upgrade_manager, "_render_plan", lambda *args, **kwargs: None)
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
+    monkeypatch.setattr(
+        checkpoints,
+        "preflight_upgrade_checkpoint",
+        lambda *args, **kwargs: (_ for _ in ()).throw(StateError("checkpoint unavailable")),
+    )
+    monkeypatch.setattr(
+        "agentworks.vms.backup.backup_vm",
+        lambda *args, **kwargs: pytest.fail("backup ran before checkpoint preflight"),
+    )
+    monkeypatch.setattr(
+        upgrade_manager,
+        "_create_recovery_bundle",
+        lambda *args, **kwargs: pytest.fail("recovery bundle ran before checkpoint preflight"),
+    )
+
+    with pytest.raises(StateError):
+        upgrade_manager._upgrade_vm(object(), object(), "box", interaction=object())
+
+
 def test_external_adoption_requires_interactive_authorization_before_confirmation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

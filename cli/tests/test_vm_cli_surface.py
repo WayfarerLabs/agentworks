@@ -78,11 +78,15 @@ def test_vm_checkpoint_commands_forward_vm_name(
     argv = ["vm", command, "box"]
     if command != "create-checkpoint":
         argv.append("--yes")
+    if command == "delete-checkpoint":
+        argv.append("--force")
     result = _invoke(monkeypatch, argv, target, captured)
     assert result.exit_code == 0, result.output
     assert captured["_args"][2] == "box"
     if command != "create-checkpoint":
         assert captured["yes"] is True
+    if command == "delete-checkpoint":
+        assert captured["force"] is True
 
 
 def test_vm_list_checkpoints_names_only_forwards_csv_filter(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -114,6 +118,7 @@ def test_vm_list_checkpoints_json_uses_machine_envelope(monkeypatch: pytest.Monk
 def test_vm_list_checkpoints_json_projects_checkpoint_fields(monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks.db import VMCheckpointRow, VMCheckpointState
     from agentworks.debian import DebianRelease
+    from agentworks.vms.manager import CheckpointListing, CheckpointRestoreStatus
 
     row = VMCheckpointRow(
         vm_name="box",
@@ -129,7 +134,10 @@ def test_vm_list_checkpoints_json_projects_checkpoint_fields(monkeypatch: pytest
     )
     monkeypatch.setattr("agentworks.cli.commands.vm.get_db", lambda: object())
     monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
-    monkeypatch.setattr("agentworks.vms.manager.list_checkpoints", lambda *_args, **_kwargs: [row])
+    monkeypatch.setattr(
+        "agentworks.vms.manager.list_checkpoints",
+        lambda *_args, **_kwargs: [CheckpointListing(checkpoint=row, restore_status=CheckpointRestoreStatus.AVAILABLE)],
+    )
 
     result = CliRunner().invoke(app, ["vm", "list-checkpoints", "--output", "json"])
 
@@ -141,6 +149,7 @@ def test_vm_list_checkpoints_json_projects_checkpoint_fields(monkeypatch: pytest
                 "name": "agw-checkpoint",
                 "provider_identifier": "snapshot-123",
                 "state": "ready",
+                "restore_status": "available",
                 "purpose": "debian-upgrade",
                 "capture_release": "bookworm",
                 "source_release": "bookworm",

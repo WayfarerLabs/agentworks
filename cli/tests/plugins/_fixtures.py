@@ -100,7 +100,7 @@ class ConformingVMPlatform(VMPlatform):
     Subclasses add ``name`` / ``description``.
     """
 
-    contract_version = 4
+    contract_version = 1
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)

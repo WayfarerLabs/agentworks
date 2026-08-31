@@ -17,11 +17,12 @@ The transition has six cooperating parts:
 1. `agentworks.debian` defines one ordered release-profile registry, derives current from its final
    profile, classifies relative support, parses `/etc/os-release`, and attaches each direct upgrade
    policy to its target profile.
-2. Vm-platform contract version 4 retains the concrete core-selected release in `ProvisionRequest`
-   and adds required create/list/restore/delete checkpoint operations. Platform-local maps turn
-   releases into provider image selectors, while provider-native snapshots, boot-disk copies, and
-   exports remain behind the common checkpoint descriptor. Old contract implementations fail
-   conformance; missing release mappings fail clearly before backend mutation.
+2. Internal vm-platform contract version 1 retains the concrete core-selected release in
+   `ProvisionRequest` and includes required create/list/restore/delete checkpoint operations.
+   Platform-local maps turn releases into provider image selectors, while provider-native snapshots,
+   boot-disk copies, and exports remain behind the common checkpoint descriptor. The descriptor and
+   all six bundled implementations mutate atomically; missing release mappings fail clearly before
+   backend mutation.
 3. `vms.debian_release` and `vms.debian_release_observed_at` retain the last verified observation.
    Legacy rows begin unknown and are populated by a live probe.
 4. A release value resolver chooses platform and APT values from explicit maps. The selected VM
@@ -111,14 +112,13 @@ shared; the domain knowledge remains local.
 
 ### Common request, result, and core attestation
 
-Vm-platform contract version 4 retains required `debian_release: DebianRelease` in
-`ProvisionRequest`. `create_vm` always supplies the final registry profile's release; no caller
-parameter reaches that assignment. `ProvisionResult` carries transport and backend identity, not a
-platform-authored release proof. Bumping the kind descriptor from contract version 3 to 4 makes
-every built-in and plugin implementation migrate as one hard cutover; exact registration conformance
-rejects an older implementation and names the incompatible platform/plugin. Version 4 includes the
-release-carrying create contract introduced by version 3; there is no compatibility shim that can
-drop either the release or checkpoint requirements.
+Vm-platform contract version 1 requires `debian_release: DebianRelease` in `ProvisionRequest`.
+`create_vm` always supplies the final registry profile's release; no caller parameter reaches that
+assignment. `ProvisionResult` carries transport and backend identity, not a platform-authored
+release proof. Vm-platform is an internal API, so the descriptor and all six bundled implementations
+mutate together while retaining version 1. Exact registration conformance catches an inconsistent
+bundled declaration or incomplete implementation as a curation error. There is no external
+compatibility cutover or adapter that can drop either the release or checkpoint requirements.
 
 No platform defines or imports a platform-local current release. Core passes one concrete release to
 the pending create node and later uses that same value in `ProvisionRequest`. Before the command's
@@ -131,7 +131,7 @@ lookup as its first create action, so every mapping is enforced before backend m
 A shared resolver shapes two missing-key failures:
 
 - a missing code-owned selector raises a typed state error naming `vm-platform/<name>`, the
-  requested codename, and the need to update Agentworks or the plugin; and
+  requested codename, and the need to update Agentworks; and
 - a missing operator-owned selector raises a typed configuration error naming the vm-site and exact
   release-keyed field, such as `template_vmids.trixie`.
 
@@ -162,9 +162,9 @@ not accept a platform-authored release claim in the result. A mismatch, unreadab
 malformed observation, or interrupt retains the row in failed, uninitialized state with its backend
 identifiers and `vm delete` recovery. Only core's matching live observation is written with the
 observation timestamp before Phase A begins. This is runtime conformance enforcement, not a security
-sandbox for in-process plugin code. The ordering never persists requested intent or a platform claim
-as observed state, and it never deletes the only row capable of targeting a backend that escaped
-platform rollback.
+sandbox for in-process platform code. The ordering never persists requested intent or a platform
+claim as observed state, and it never deletes the only row capable of targeting a backend that
+escaped platform rollback.
 
 ### Platform-owned selector maps
 
@@ -271,10 +271,13 @@ release. Releases remain text validated by the running registry rather than an S
 migration updates the exact schema sentinels and proves both a fresh migration ladder and a
 version-33 database advancing to version 34. It never modifies migration 33 or probes a provider.
 
-`vm delete` owns checkpoint cleanup before backend VM deletion. A failed checkpoint deletion keeps
-both the checkpoint and VM rows addressable; the restrictive foreign key is a final orphan guard,
-not the primary lifecycle mechanism. Database backup projection includes the checkpoint row so the
-local recovery record and VM state cannot silently diverge.
+`vm delete` owns checkpoint cleanup before backend VM deletion. Ordinary failure keeps both the
+checkpoint and VM rows addressable; the restrictive foreign key is a final orphan guard, not the
+primary lifecycle mechanism. An explicit forced delete first attempts the same cleanup, then may
+compare-and-delete the lifecycle row only after warning that provider residue and billing can remain
+and recording a `checkpoint_abandoned` event. This is disowning, not provider cleanup. Database
+backup projection includes the checkpoint row so the local recovery record and VM state cannot
+silently diverge.
 
 ### Discovery and reconciliation
 
@@ -341,7 +344,7 @@ path.
 
 ### Platform API and ownership
 
-Contract version 4 adds one frozen value and four mandatory operations:
+Internal contract version 1 includes one frozen value and four mandatory operations:
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -375,8 +378,9 @@ and proves its absence.
 
 The API is plural because providers can contain duplicate or interrupted artifacts even though the
 product permits one. Checkpoints are not capabilities separate from vm-platform, optional methods,
-resource graph nodes, manifests, or fields inside `vms.platform_metadata`. Exact contract
-conformance makes incomplete version-4 plugins fail at registration.
+resource graph nodes, manifests, or fields inside `vms.platform_metadata`. The descriptor and every
+bundled platform retain version 1 and mutate atomically. Exact contract conformance catches an
+incomplete or inconsistently declared bundled implementation before it is seated.
 
 ### Consistency, state transitions, and command exclusion
 
@@ -387,9 +391,10 @@ recognized persisted release observation under the exclusive guard and fails wit
 observe-and-stop guidance when it is absent. Upgrade is the one composition that uses its fresh
 pre-stop release observation, temporarily stops the already-active VM, captures its checkpoint, and
 restarts it before continuing. Platforms verify completion, ownership, and source binding before
-returning create success. Stopped is the restore entry and exit invariant; a platform may
-temporarily start or reboot the VM when its provider requires that choreography, but it must stop
-and prove the final state before returning.
+returning create success. Before a fresh row is inserted, core lists the live managed inventory and
+refuses an artifact with no database record rather than adopting or overwriting it. Stopped is the
+restore entry and exit invariant; a platform may temporarily start or reboot the VM when its
+provider requires that choreography, but it must stop and prove the final state before returning.
 
 The database row is inserted in `creating` with an operation identifier before provider mutation.
 Success stores the returned identifier, clears the operation identifier, and advances to `ready`. An
@@ -406,6 +411,14 @@ operation identifier and passes it to the platform; a `restoring` retry reuses t
 identity until post-restore core attestation returns the row to `ready`. Delete follows the same
 claim rule and removes the row only after provider absence is proved. Every terminal update compares
 both lifecycle state and operation identifier.
+
+`delete-checkpoint --force` never skips that reconciliation. It attempts the ordinary provider
+cleanup first and reaches the fallback only after boundary or provider failure. The fallback shows
+the known provider identifier when one exists, warns that late, incomplete, emergency, or duplicate
+artifacts may remain and continue billing, confirms separately unless `--yes` was supplied, removes
+the row by state-and-operation compare-and-delete, and records a distinct abandonment event. Forced
+VM deletion uses the same fallback only after checkpoint cleanup fails. Without force, both delete
+commands preserve the rows and return repair/retry guidance.
 
 A narrow, private, per-VM shared/exclusive operation guard closes the race that database transitions
 alone cannot: another process must not start, delete, reinitialize, access, or resume a session on
@@ -439,14 +452,14 @@ agent, session, and console resources remains separate work.
 
 All built-ins preserve the same logical VM and existing `platform_metadata`:
 
-| Platform | Managed checkpoint and restore                                                                                                                                                                                                                                                                                                                                             |
-| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Lima     | `limactl snapshot create/list/apply/delete` with the generated tag on the placement host. Unsupported Lima drivers fail clearly before upgrade mutation.                                                                                                                                                                                                                   |
-| WSL2     | A stopped-distro export under the Agentworks WSL storage root. Restore first exports the current distro as an emergency intermediate, unregisters/imports under the same name and install path, and keeps both artifacts if recovery cannot be proved.                                                                                                                     |
-| AWS EC2  | A tagged root-volume EBS snapshot. Restore enters stopped, temporarily starts the instance, submits the replacement task with a stable checkpoint-derived client token, survives its provider reboot, then stops and proves the same instance stopped. Replay discovers the task rather than submitting another; `failed-detached` remains restoring with repair guidance. |
-| Azure VM | A tagged managed-OS-disk snapshot. Restore creates a replacement managed disk, swaps it onto the same VM, and retains the displaced disk until the swap and core attestation are recoverable.                                                                                                                                                                              |
-| GCP GCE  | A labeled boot-disk snapshot. Restore creates a replacement zonal disk, swaps it onto the same stopped instance, and retains the displaced disk until recovery is proved.                                                                                                                                                                                                  |
-| Proxmox  | A generated QEMU snapshot name with `vmstate=0`, task waiting, exact inventory checks, rollback, and deletion on the same VMID/node. Unsupported storage fails clearly.                                                                                                                                                                                                    |
+| Platform | Managed checkpoint and restore                                                                                                                                                                                                                                                                                                                                                     |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Lima     | `limactl snapshot create/list/apply/delete` with the generated tag on the placement host. Unsupported Lima drivers fail clearly before upgrade mutation.                                                                                                                                                                                                                           |
+| WSL2     | A stopped-distro export under the Agentworks WSL storage root. Restore refuses a partial export before unregistering anything, first exports the current distro as an emergency intermediate, unregisters/imports under the same name and install path, and keeps both artifacts if recovery cannot be proved.                                                                     |
+| AWS EC2  | A tagged root-volume EBS snapshot. Restore enters stopped, announces and temporarily starts the instance, submits the replacement task with a stable checkpoint-derived client token, survives its provider reboot, then stops and proves the same instance stopped. Stop cleanup never masks the primary restore error; replay discovers the task rather than submitting another. |
+| Azure VM | A tagged managed-OS-disk snapshot. Snapshot, disk, update, and tag requests use typed Azure SDK models. Restore creates a replacement managed disk, swaps it onto the same VM, and retains the displaced disk until the swap and core attestation are recoverable.                                                                                                                 |
+| GCP GCE  | A labeled boot-disk snapshot. Restore creates a replacement zonal disk, swaps it onto the same stopped instance, and retains the displaced disk until recovery is proved.                                                                                                                                                                                                          |
+| Proxmox  | A generated QEMU snapshot name with `vmstate=0`, a 3600-second checkpoint task timeout, exact inventory checks, rollback, and deletion on the same VMID/node. Unsupported storage fails clearly.                                                                                                                                                                                   |
 
 Provider-specific intermediate resources use deterministic names/tags tied to the checkpoint and are
 retained as one pre-first-restore emergency artifact until checkpoint deletion. A later restore
@@ -465,6 +478,13 @@ claiming `restoring`, core recomputes the desired-state fingerprint and refuses 
 effective desired declarations changed after capture. The error explains that whole-VM restore
 cannot safely combine an older guest with newer declarations and directs the operator to create a
 fresh checkpoint or restore the matching Agentworks database backup. There is no force bypass.
+
+List and describe project restore eligibility separately from provider lifecycle state. A completed
+provider artifact stays `ready`; its derived restore value is `available` only when the current
+fingerprint matches, `declarations-changed` when it does not, `resume-required` while one restore
+attempt is durable, and `unavailable` for other lifecycle states. The projection is read-only and
+does not relabel persisted state. Names-only listing short-circuits before provider or fingerprint
+work, preserving its fast completion contract.
 
 The canonical fingerprint includes the VM's stable desired specification and platform identity,
 workspace declarations, agent declarations and grants, session declarations and membership, console
@@ -674,7 +694,13 @@ or other fragments therefore cannot execute during this read-only plan.
 
 ### Backup and recovery gate
 
-Before source mutation the workflow completes two local artifacts:
+Before creating either local artifact, the workflow performs a read-only checkpoint viability pass.
+It validates the database slot, current desired-state fingerprint, transition pair, lifecycle state,
+and live provider inventory. An empty healthy slot proceeds; a reusable same-pair row or resumable
+create proceeds; an unrelated, stale, missing, duplicate, or unrecorded provider artifact fails
+before backup storage and time are consumed.
+
+Before source mutation the workflow then completes two local artifacts:
 
 1. the existing `vm backup`, which protects Agentworks metadata and workspace files; and
 2. a compact release-upgrade bundle containing `/etc`, `/var/lib/dpkg`,
@@ -693,12 +719,14 @@ records the descriptor in the guest plan and the checkpoint event before the fir
 An unrelated checkpoint already occupying the slot blocks a fresh transition with exact
 restore/delete guidance. A matching same-pair checkpoint can be reused when no journal exists and a
 live probe still proves the recorded source, covering cancellation before mutation and an explicit
-restore. If a journal exists, resume requires database, journal, and provider inventory to agree
-exactly.
+restore. Reuse output includes the checkpoint's original creation time. If a journal exists, resume
+requires database, journal, and provider inventory to agree exactly.
 
 The UI distinguishes local data-recovery artifacts from the managed bootable checkpoint and never
 claims an automatic rollback. Provider costs, unsupported snapshot storage, missing permissions, or
-insufficient WSL export space fail before package mutation.
+insufficient WSL export space fail before package mutation. Successful upgrade names the retained
+checkpoint, warns that its provider storage can continue billing, and prints the exact
+`agw vm delete-checkpoint NAME` cleanup command.
 
 ### Durable remote state machine
 
@@ -850,6 +878,11 @@ inventory view. `vm describe` shows the last verified release, observation times
 nullable `debian_release` and `debian_release_observed_at` fields; the command reference defines
 recognized-codename and null semantics. Support position remains derived rather than persisted.
 
+`vm list-checkpoints` and the checkpoint section of `vm describe` expose provider lifecycle state
+and derived restore eligibility as separate facts. Human and JSON output do not call a completed
+artifact unusable merely because declarations later changed, and names-only output skips the live
+inventory and fingerprint derivation.
+
 The completion spec maps `vm.upgrade`'s `name` operand to VM names. `vm upgrade` itself has no JSON
 mode in this first interactive release. Durable logs and recovery artifacts are file outputs, while
 human progress uses the ordinary output facade.
@@ -918,8 +951,8 @@ semantics.
   profile append that changes positions without adding a codename-specific schema or
   public-interface field;
 - no operator-facing schema or CLI accepts a release/image selection;
-- vm-platform implementations older than version 4 fail exact registration conformance after the
-  checkpoint cutover;
+- the vm-platform descriptor and all six bundled implementations declare version 1, while an
+  inconsistent version or incomplete implementation fails exact registration conformance;
 - version-33 databases advance through a separate migration 34 without changing migration 33;
   checkpoint schema constraints, converters, backup projection, operation identity, desired-state
   fingerprinting, and compare-and-set state changes enforce one slot and replay-safe lifecycle
@@ -955,13 +988,18 @@ semantics.
 - atomic progress/attempt transitions, interruption inside every action, the same lock around every
   journal write/reboot dispatch, attempt-identity fencing of stale coordinators, private non-symlink
   journal ownership, and no duplicate apt work;
-- both local backup gates, provider-owned checkpoint creation/inventory agreement, and the first
-  mutation confirmation before source mutation;
+- read-only checkpoint viability and provider inventory refusal before local backup creation, both
+  local backup gates, provider-owned checkpoint creation/inventory agreement, and the first mutation
+  confirmation before source mutation;
 - every platform's offline create/list/restore/delete contract, including ownership/source binding,
   interrupted-operation replay, retained destructive-restore intermediates, and logical VM identity;
-- checkpoint CLI cardinality, confirmations, VM filtering, names-only/JSON output, describe
-  projection, automatic upgrade acquisition, resume matching, narrow shared/exclusive per-VM
-  operation exclusion, and explicit retention after success;
+- Azure request-model serialization, WSL partial-export refusal before unregister, AWS temporary
+  start/stop choreography with primary-error preservation, and Proxmox's one-hour checkpoint task
+  timeout;
+- checkpoint CLI cardinality, confirmations, VM filtering, names-only/JSON output, lifecycle versus
+  restore-eligibility projection, automatic upgrade acquisition, resume matching, narrow
+  shared/exclusive per-VM operation exclusion, reuse-time disclosure, explicit retention and billing
+  cleanup guidance after success, and forced disowning only after ordinary provider cleanup fails;
 - restore-time desired-state fingerprint refusal, release attestation, backward observation
   reconciliation, pending initialization that blocks convergence-dependent operations until reinit,
   retained checkpoint, and unchanged desired declarations;
@@ -973,13 +1011,13 @@ semantics.
 - Bookworm interface inventory, Trixie-rule prediction refusal before reboot, and stable-name
   post-reboot verification.
 
-The contract-version merge unit updates `cli/agentworks/capabilities/README.md`,
+The contract merge unit updates `cli/agentworks/capabilities/README.md`,
 `cli/agentworks/capabilities/vm_platform/README.md`, and `cli/agentworks/plugins/README.md`. The
-plugin example advertises version 4 and teaches the required release request, release-keyed lookup,
-platform-local live verification, returned transport, core-owned matching observation, and managed
-checkpoint contract. Review checks all three documents without tests that assert on authored prose.
-The kind's published topic prose and the `VMPlatform` operation docstrings change in that same merge
-unit so generated capability teaching does not retain the version 3 contract.
+system-plugin example advertises internal vm-platform version 1 and teaches the required release
+request, release-keyed lookup, platform-local live verification, returned transport, core-owned
+matching observation, and managed checkpoint contract. Review checks all three documents without
+tests that assert on authored prose. The kind's published topic prose and the `VMPlatform` operation
+docstrings change in that same merge unit.
 
 ### Live certification
 
@@ -1004,5 +1042,5 @@ Closeout searches active code and current documentation for unaccounted register
 platform-local current defaults, scalar release-sensitive values, claims that VM backup is bootable,
 unbounded guest `/tmp` staging, and an operator OS selector. It updates the new superseding ADR,
 platform guides, resource guide, CLI reference, generated schema/sample collateral, relative support
-teaching, and upgrade/recovery runbook in the same implementation series. The contract authoring
-surfaces move once to version 4 and do not retain version-3 checkpoint exceptions.
+teaching, and upgrade/recovery runbook in the same implementation series. The internal vm-platform
+contract and every bundled implementation remain version 1 with one complete surface.

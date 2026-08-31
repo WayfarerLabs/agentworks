@@ -245,13 +245,17 @@ def vm_restore_checkpoint(
 def vm_delete_checkpoint(
     name: Annotated[str, typer.Argument(help="VM name")],
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Forget the checkpoint if provider cleanup cannot complete"),
+    ] = False,
 ) -> None:
     """Delete the VM's managed recovery checkpoint."""
     interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config
     from agentworks.vms.manager import delete_checkpoint
 
-    delete_checkpoint(get_db(), load_config(), name, yes=yes, interaction=interaction)
+    delete_checkpoint(get_db(), load_config(), name, yes=yes, force=force, interaction=interaction)
 
 
 @vm_app.command("describe")

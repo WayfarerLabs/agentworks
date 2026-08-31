@@ -51,13 +51,19 @@ from .boundary import (
     gated_vm_platform_recovery_boundary,
     require_vm_ssh_boundary,
 )
-from .checkpoints import (
+from .checkpoint_listing import (
+    CheckpointListing,
+    CheckpointRestoreStatus,
     checkpoint_listing_data,
+    render_checkpoint_listing,
+)
+from .checkpoints import (
+    checkpoint_restore_status,
     create_checkpoint,
     create_upgrade_checkpoint,
     delete_checkpoint,
     list_checkpoints,
-    render_checkpoint_listing,
+    preflight_upgrade_checkpoint,
     require_upgrade_checkpoint,
     restore_checkpoint,
 )
@@ -105,7 +111,10 @@ __all__ = [
     "_vm_secret_target",
     "_warned_tailscale_missing",
     "bootstrap_vm",
+    "CheckpointListing",
+    "CheckpointRestoreStatus",
     "checkpoint_listing_data",
+    "checkpoint_restore_status",
     "create_checkpoint",
     "create_vm",
     "create_upgrade_checkpoint",
@@ -118,6 +127,7 @@ __all__ = [
     "list_vms",
     "list_checkpoints",
     "port_forward_vm",
+    "preflight_upgrade_checkpoint",
     "reinit_vm",
     "rejoin_tailscale",
     "rekey_vm",

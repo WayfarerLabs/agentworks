@@ -6,6 +6,7 @@ import hashlib
 import time
 from typing import TYPE_CHECKING, Any, cast
 
+from agentworks import output
 from agentworks.capabilities.vm_platform.base import CheckpointDescriptor
 from agentworks.errors import StateError
 from agentworks.plugins.aws.network import error_code, first_instance_state, wrap_ec2_error
@@ -148,11 +149,19 @@ def restore_checkpoint(
             operation_id=operation_id,
         )
     token = _restore_token(instance_id, checkpoint.identifier, operation_id)
+    primary_error: BaseException | None = None
+    temporary_start_submitted = False
     try:
         state = first_instance_state({"Reservations": [{"Instances": [original]}]})
         if state != "running":
-            ec2.start_instances(InstanceIds=[instance_id])
-            ec2.get_waiter("instance_running").wait(InstanceIds=[instance_id])
+            output.info(f"Temporarily starting EC2 instance '{instance_id}' for checkpoint restore...")
+            temporary_start_submitted = True
+            try:
+                ec2.start_instances(InstanceIds=[instance_id])
+                ec2.get_waiter("instance_running").wait(InstanceIds=[instance_id])
+            except Exception as exc:
+                raise wrap_ec2_error(exc) from exc
+        output.info(f"Replacing the EC2 root volume from checkpoint '{checkpoint.name}'...")
         try:
             response = ec2.create_replace_root_volume_task(
                 InstanceId=instance_id,
@@ -190,15 +199,12 @@ def restore_checkpoint(
             checkpoint_id=checkpoint.identifier,
             operation_id=operation_id,
         )
+    except BaseException as exc:
+        primary_error = exc
+        raise
     finally:
-        try:
-            ec2.stop_instances(InstanceIds=[instance_id])
-            ec2.get_waiter("instance_stopped").wait(InstanceIds=[instance_id])
-        except Exception as exc:
-            raise StateError(
-                f"EC2 could not prove instance '{instance_id}' stopped after checkpoint restore",
-                hint="stop the instance in EC2 before retrying or performing recovery",
-            ) from wrap_ec2_error(exc)
+        if temporary_start_submitted:
+            _stop_after_restore(ec2, instance_id=instance_id, primary_error=primary_error)
     _delete_superseded_volumes(
         ec2,
         instance_id=instance_id,
@@ -337,6 +343,34 @@ def _tags(*, instance_id: str, name: str) -> list[dict[str, str]]:
 def _restore_token(instance_id: str, snapshot_id: str, operation_id: str) -> str:
     digest = hashlib.sha256(f"{instance_id}\0{snapshot_id}\0{operation_id}".encode()).hexdigest()
     return f"agw-checkpoint-{digest[:48]}"
+
+
+def _stop_after_restore(ec2: Any, *, instance_id: str, primary_error: BaseException | None) -> None:
+    """Return a temporarily started instance to stopped without masking restore failure."""
+    output.info(f"Stopping EC2 instance '{instance_id}' after checkpoint restore...")
+    try:
+        ec2.stop_instances(InstanceIds=[instance_id])
+        ec2.get_waiter("instance_stopped").wait(InstanceIds=[instance_id])
+    except BaseException as exc:
+        if primary_error is not None:
+            _warn_stop_cleanup_failure(instance_id)
+            return
+        if not isinstance(exc, Exception):
+            raise
+        raise StateError(
+            f"EC2 could not prove instance '{instance_id}' stopped after checkpoint restore",
+            hint="stop the instance in EC2 before retrying or performing recovery",
+        ) from wrap_ec2_error(exc)
+
+
+def _warn_stop_cleanup_failure(instance_id: str) -> None:
+    try:  # noqa: SIM105 - warning failures must not replace the active restore failure
+        output.warn(
+            f"could not prove EC2 instance '{instance_id}' stopped after the restore failed; "
+            "the original failure is unchanged; stop the instance in EC2 before retrying or recovering"
+        )
+    except BaseException:
+        pass
 
 
 def _wait_for_restore_task(

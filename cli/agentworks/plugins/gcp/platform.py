@@ -181,7 +181,7 @@ class _VMIdentity:
 class GCEPlatform(VMPlatform):
     """Runs VMs on Google Compute Engine with provider-ID-owned cleanup."""
 
-    contract_version: ClassVar[int] = 4
+    contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "gcp-gce"
     description: ClassVar[str] = "Google Compute Engine (project + zone)"
     config_model: ClassVar[type[GcpGCEConfig]] = GcpGCEConfig

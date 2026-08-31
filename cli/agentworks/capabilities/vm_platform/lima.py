@@ -174,7 +174,7 @@ class LimaConfig(AgwModel):
 class LimaPlatform(VMPlatform):
     """Runs VMs via limactl, locally or on a remote host over SSH."""
 
-    contract_version: ClassVar[int] = 4
+    contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "lima"
     description: ClassVar[str] = "Lima VMs (local, or on a remote host via SSH)"
     config_model: ClassVar[type[LimaConfig]] = LimaConfig

@@ -511,7 +511,7 @@ class Wsl2Config(AgwModel):
 class WSL2Platform(VMPlatform):
     """Runs VMs as WSL2 Debian distributions on Windows."""
 
-    contract_version: ClassVar[int] = 4
+    contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "wsl2"
     description: ClassVar[str] = "WSL2 Debian distributions on Windows"
     config_model: ClassVar[type[Wsl2Config]] = Wsl2Config
@@ -1080,6 +1080,13 @@ class WSL2Platform(VMPlatform):
                 entity_name=vm.name,
             )
         artifact, emergency = self._checkpoint_paths(vm, name, create_dir=False)
+        if not self._complete_export(artifact):
+            raise StateError(
+                f"WSL2 checkpoint '{name}' has no complete export to restore",
+                entity_kind="vm",
+                entity_name=vm.name,
+                hint="Delete the incomplete checkpoint and create it again before restoring.",
+            )
         distro_name = self._distro_name(vm)
         if self._distro_exists(distro_name):
             self._require_checkpoint_vm_stopped(vm, ctx)

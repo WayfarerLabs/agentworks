@@ -12,6 +12,7 @@ from agentworks.debian import DebianRelease
 from agentworks.errors import AlreadyExistsError, StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms.manager import checkpoints
+from agentworks.vms.manager.checkpoint_listing import CheckpointListing, CheckpointRestoreStatus
 
 
 class _Platform:
@@ -149,9 +150,30 @@ def test_create_refuses_unrelated_provider_inventory_before_mutation(
         )
 
     assert platform.created == []
-    row = db.get_vm_checkpoint("box")
-    assert row is not None
-    assert row.state is VMCheckpointState.CREATING
+    assert db.get_vm_checkpoint("box") is None
+
+
+def test_create_provider_inventory_failure_leaves_checkpoint_slot_empty(
+    monkeypatch: pytest.MonkeyPatch,
+    db: Database,
+) -> None:
+    platform = _Platform()
+    _prepare(monkeypatch, db, platform)
+    monkeypatch.setattr(
+        platform,
+        "list_checkpoints",
+        lambda *args, **kwargs: (_ for _ in ()).throw(StateError("inventory unavailable")),
+    )
+
+    with pytest.raises(StateError):
+        checkpoints.create_checkpoint(
+            db,
+            object(),
+            "box",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert db.get_vm_checkpoint("box") is None
 
 
 def test_checkpoint_listing_is_available_without_an_operation_guard(
@@ -180,7 +202,45 @@ def test_checkpoint_listing_is_available_without_an_operation_guard(
         interaction=TtyInteractionPolicy.REFUSE,
     )
 
-    assert rows == [created]
+    assert rows == [
+        CheckpointListing(
+            checkpoint=created,
+            restore_status=CheckpointRestoreStatus.AVAILABLE,
+        )
+    ]
+
+
+def test_checkpoint_listing_reports_drift_and_accepts_one_vm_name(
+    monkeypatch: pytest.MonkeyPatch,
+    db: Database,
+) -> None:
+    platform = _Platform()
+    _prepare(monkeypatch, db, platform)
+    created = checkpoints.create_checkpoint(
+        db,
+        object(),
+        "box",
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+    monkeypatch.setattr(
+        checkpoints,
+        "checkpoint_desired_state_fingerprint",
+        lambda *args, **kwargs: "b" * 64,
+    )
+
+    listings = checkpoints.list_checkpoints(
+        db,
+        object(),
+        vm_names="box",
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    assert listings == [
+        CheckpointListing(
+            checkpoint=created,
+            restore_status=CheckpointRestoreStatus.DECLARATIONS_CHANGED,
+        )
+    ]
 
 
 def test_upgrade_checkpoint_running_precondition_leaves_slot_empty(
@@ -201,6 +261,28 @@ def test_upgrade_checkpoint_running_precondition_leaves_slot_empty(
         )
 
     assert db.get_vm_checkpoint("box") is None
+
+
+def test_upgrade_checkpoint_preflight_rejects_orphaned_provider_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+    db: Database,
+) -> None:
+    platform = _Platform()
+    _prepare(monkeypatch, db, platform)
+    platform.inventory = (CheckpointDescriptor("agw-orphan", "provider-orphan"),)
+
+    with pytest.raises(StateError):
+        checkpoints.preflight_upgrade_checkpoint(
+            db,
+            object(),
+            "box",
+            source_release=DebianRelease.BOOKWORM,
+            target_release=DebianRelease.TRIXIE,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert db.get_vm_checkpoint("box") is None
+    assert platform.created == []
 
 
 def test_upgrade_resume_never_replaces_a_missing_journaled_checkpoint(
@@ -584,3 +666,97 @@ def test_delete_interrupted_create_retains_row_when_provider_inventory_disagrees
 
     assert db.get_vm_checkpoint("box") is not None
     assert platform.deleted == []
+
+
+def test_force_delete_checkpoint_abandons_failed_interrupted_create(
+    monkeypatch: pytest.MonkeyPatch,
+    db: Database,
+) -> None:
+    platform = _Platform()
+    _prepare(monkeypatch, db, platform)
+    db.insert_vm_checkpoint(
+        vm_name="box",
+        name="agw-interrupted",
+        operation_id="create-operation",
+        desired_state_fingerprint="a" * 64,
+        capture_release=DebianRelease.BOOKWORM,
+    )
+    monkeypatch.setattr(
+        platform,
+        "create_checkpoint",
+        lambda *args, **kwargs: (_ for _ in ()).throw(StateError("provider create failed")),
+    )
+
+    checkpoints.delete_checkpoint(
+        db,
+        object(),
+        "box",
+        yes=True,
+        force=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    assert db.get_vm_checkpoint("box") is None
+    assert db.list_vm_events("box")[-1].event == "checkpoint_abandoned"
+
+
+def test_force_delete_checkpoint_abandons_failed_provider_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+    db: Database,
+) -> None:
+    platform = _Platform()
+    _prepare(monkeypatch, db, platform)
+    checkpoints.create_checkpoint(
+        db,
+        object(),
+        "box",
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+    monkeypatch.setattr(
+        platform,
+        "delete_checkpoint",
+        lambda *args, **kwargs: (_ for _ in ()).throw(StateError("provider delete failed")),
+    )
+
+    checkpoints.delete_checkpoint(
+        db,
+        object(),
+        "box",
+        yes=True,
+        force=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    assert db.get_vm_checkpoint("box") is None
+    assert db.list_vm_events("box")[-1].event == "checkpoint_abandoned"
+
+
+def test_force_delete_checkpoint_abandons_ready_row_when_inventory_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    db: Database,
+) -> None:
+    platform = _Platform()
+    _prepare(monkeypatch, db, platform)
+    checkpoints.create_checkpoint(
+        db,
+        object(),
+        "box",
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+    monkeypatch.setattr(
+        platform,
+        "list_checkpoints",
+        lambda *args, **kwargs: (_ for _ in ()).throw(StateError("inventory unavailable")),
+    )
+
+    checkpoints.delete_checkpoint(
+        db,
+        object(),
+        "box",
+        yes=True,
+        force=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    assert db.get_vm_checkpoint("box") is None
+    assert db.list_vm_events("box")[-1].event == "checkpoint_abandoned"

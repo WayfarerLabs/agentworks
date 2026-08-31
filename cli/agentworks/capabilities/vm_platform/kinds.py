@@ -54,7 +54,7 @@ class _VMPlatformKind:
         A vm-platform knows how to create, start, stop, and delete VMs on one backend,
         and how to reach them over SSH once they exist.
 
-        Contract version 4 receives core's concrete current Debian release, resolves it
+        Contract version 1 receives core's concrete current Debian release, resolves it
         to a platform-owned artifact, and verifies the live guest while backend rollback
         is still possible. Missing mappings fail before backend mutation; a platform
         completes its Tailscale join before returning transport and backend identity,
@@ -131,7 +131,7 @@ def _readiness(name: str, impl: Any) -> Readiness:
 
 VM_PLATFORM_DESCRIPTOR = CapabilityKindDescriptor(
     kind="vm-platform",
-    contract_version=4,
+    contract_version=1,
     implementation_contract=VMPlatform,
     registry=_registry,
     required_operations=frozenset(

@@ -181,6 +181,50 @@ def test_delete_with_checkpoint_uses_one_boundary_for_both_provider_artifacts(
     assert db.get_vm("dvm") is None
 
 
+def test_force_delete_disowns_checkpoint_only_after_provider_cleanup_fails(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed(db)
+    counts = _fake_backend(monkeypatch)
+    checkpoint = db.insert_vm_checkpoint(
+        vm_name="dvm",
+        name="agw-checkpoint",
+        operation_id="create-op",
+        desired_state_fingerprint="a" * 64,
+        capture_release=DebianRelease.BOOKWORM,
+    )
+    assert db.complete_vm_checkpoint(
+        "dvm",
+        expected_state=checkpoint.state,
+        operation_id="create-op",
+        provider_identifier="agw-checkpoint",
+    )
+    monkeypatch.setattr(
+        ProxmoxPlatform,
+        "list_checkpoints",
+        lambda self, row, ctx: (CheckpointDescriptor("agw-checkpoint", "agw-checkpoint"),),
+    )
+    monkeypatch.setattr(
+        ProxmoxPlatform,
+        "delete_checkpoint",
+        lambda *args, **kwargs: (_ for _ in ()).throw(StateError("provider cleanup failed")),
+    )
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *args, **kwargs: None)
+
+    vm_manager.delete_vm(
+        db,
+        make_config(),
+        "dvm",
+        force=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    assert counts["delete"] == 1
+    assert db.get_vm("dvm") is None
+
+
 def test_delete_removes_only_its_workspace_artifacts(
     db: Database,
     tmp_path: Path,

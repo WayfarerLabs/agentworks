@@ -1,6 +1,6 @@
 # Plan: Debian Release Transition
 
-- Status: Operator-directed feedback round 3 implementation complete; full review pending
+- Status: Integration feedback round 1 implementation in progress
 - Date: 2026-08-28
 - Governing artifacts: `frd.md`, `hla.md`, `prior-art-research.md`, and `migration-strategy.md`
 
@@ -171,6 +171,12 @@ reviews pass; the unchecked certification items below are deliberate.
 - [x] Trixie tmpfs behavior cannot break large Agentworks transfers.
 
 ## Phase 3: Platform current-release creation
+
+> **Supersession (2026-08-31):** The completed version 2 to 3 and later version 4 boxes below record
+> truthful intermediate work, but their compatibility-cutover design is superseded. Vm-platform is
+> internal, so the shipping descriptor and all six bundled implementations retain one complete
+> contract at version 1 and mutate atomically. Completed references to external or third-party
+> vm-platform implementations are superseded by that same internal-only boundary.
 
 ### Shared contract
 
@@ -480,9 +486,30 @@ incidental implementation work.
       upgrade guide, schema/sample, completion, topic, and release-note collateral in the same merge
       unit. Do not add a checkpoint resource kind, operator name/selector, arbitrary retention
       engine, clone API, automatic rollback, or general cross-resource locking framework.
+
+### Operator-directed integration feedback round 1
+
+- [x] Renumber the internal vm-platform descriptor, all six bundled implementations, fixtures,
+      focused tests, topic prose, permanent capability docs, and current SDD to one complete version
+      1 contract. Preserve the completed intermediate boxes above as history and add no external
+      compatibility adapter.
+- [x] Use typed Azure SDK request models for snapshot, replacement-disk, VM-update, and disk-tag
+      operations; prove their ARM serialization shape with provider tests.
+- [x] Inventory provider checkpoints before claiming a fresh create row. Keep ordinary checkpoint
+      and VM deletion reconciliation-first and blocking; add explicit forced disowning only after
+      cleanup failure, with confirmation, residue/billing warnings, compare-and-delete, and a
+      distinct audit event.
+- [x] Separate provider lifecycle state from derived restore eligibility in list, describe, and JSON
+      output. Keep desired-state drift a hard restore refusal with no force bypass and preserve the
+      names-only fast path.
+- [x] Run a read-only upgrade-checkpoint viability pass before creating backup artifacts, disclose a
+      reused checkpoint's creation time, and name the retained billed checkpoint plus deletion
+      command after successful upgrade.
+- [x] Reject partial WSL exports before destructive restore, announce AWS's required temporary start
+      while preserving a primary restore error across stop cleanup, and use a 3600-second Proxmox
+      checkpoint task timeout.
 - [ ] Run focused provider/manager/migration tests, full unit/static/docs/generated gates,
-      exact-head implementation/project/complexity review, and the draft/ready handoff cycle. Keep
-      PR #702 draft until the operator's next ready instruction.
+      exact-head implementation/project/complexity review, and the signed ready handoff cycle.
 
 - [ ] After live certification or an authenticated disposition, create `locked.md`, record the final
       evidence, and leave the exact green reviewed head ready to merge.
@@ -515,14 +542,14 @@ transitions, tests, docs, and error guidance without reopening the FRD.
 | Requirement                   | Primary phases | Proof                                          |
 | ----------------------------- | -------------- | ---------------------------------------------- |
 | R1 ordered Debian model       | 1, 3, 5        | registry-tail and schema/CLI absence tests     |
-| R2 current-release creation   | 3, 5           | v4 request/selector plus live create matrix    |
+| R2 current-release creation   | 3, 5           | v1 request/selector plus live create matrix    |
 | R3 persisted observation      | 1, 3, 4        | migration/parser/reconciliation/create tests   |
 | R4 release maps               | 1, 3, 5        | apt/platform mapping and selector contracts    |
 | R5 safe `vm upgrade`          | 4, 5           | preflight, interruption/resume, real upgrades  |
 | R6 relative release support   | 1, 4, 5        | classifier, warnings, adjacent-only upgrade    |
 | R7 Trixie operations          | 2, 5           | tmpfs, SSH, PAM, sysctl, NIC, deb822 proofs    |
 | R8 operator recovery teaching | 4, 5           | CLI/docs review and failure-stage runbook      |
-| R9 managed VM checkpoints     | 3, 4, 5        | v4 contract, migration 34, lifecycle/live test |
+| R9 managed VM checkpoints     | 3, 4, 5        | v1 contract, migration 34, lifecycle/live test |
 
 ## Research disposition
 

@@ -57,10 +57,17 @@ agw vm list-checkpoints --vm build-1
 agw vm delete-checkpoint build-1
 ```
 
+The checkpoint list separates provider lifecycle state from current restore eligibility. `ready`
+means the provider artifact completed. `available` means the current Agentworks declarations still
+match the captured state and managed restore is allowed. `declarations-changed` means restore is
+blocked until you restore the matching Agentworks database and declarations or replace the
+checkpoint. An interrupted restore reports `resume-required`.
+
 An unrelated checkpoint blocks a fresh upgrade instead of being replaced. A checkpoint for the same
 release transition may be reused after a cancellation before package mutation or after an explicit
 restore, provided the guest, database, upgrade journal, provider artifact, and captured desired
-state still agree.
+state still agree. Reuse output includes the original creation time so the operator can judge the
+age of the retained recovery point.
 
 ### Provider prerequisites
 
@@ -86,9 +93,10 @@ provider charges until `agw vm delete-checkpoint NAME` succeeds.
 
 The workflow has two authorization points:
 
-1. It completes the ordinary VM backup and Debian recovery bundle, creates and verifies the managed
-   offline checkpoint, then asks permission to bring the source release fully current without
-   changing suites.
+1. It first checks the database checkpoint slot and live provider checkpoint inventory. After that
+   read-only check passes, it completes the ordinary VM backup and Debian recovery bundle, creates
+   and verifies the managed offline checkpoint, then asks permission to bring the source release
+   fully current without changing suites.
 2. It reopens the VM operation boundary, repeats the complete preflight, highlights material drift,
    shows the final plan, and asks permission to switch Debian suites.
 
@@ -120,7 +128,8 @@ provider kernel, systemd, sshd, Tailscale, and Agentworks identities before reru
 VM initialization. Automatic APT timers are restored to their prior states only after the healthy
 target and initialization complete. A source-safe early failure also attempts restoration. If that
 restoration cannot be verified, all known timers remain stopped during reconfiguration and the VM
-gets a durable repair-required event.
+gets a durable repair-required event. Successful completion names the retained checkpoint, warns
+that provider storage charges may continue, and shows the command that deletes it.
 
 ## Resume and recovery
 
@@ -162,6 +171,15 @@ captured with the checkpoint. It then restores the provider artifact, briefly st
 attest and record the live Debian release, marks initialization for reconciliation, and returns the
 VM to stopped state. Run `agw vm reinit build-1` before relying on guest convergence. Restore
 retains the checkpoint; only `vm delete-checkpoint` frees the slot.
+
+Checkpoint deletion normally proves provider cleanup before Agentworks releases the slot. If
+provider inventory or cleanup remains unavailable, `agw vm delete-checkpoint NAME --force`
+explicitly makes Agentworks forget the checkpoint so the VM is not permanently trapped in a failed
+lifecycle. This does not prove or perform provider cleanup. The command warns with the known
+provider identifier when one was recorded; late, incomplete, emergency, or additional provider
+artifacts may remain and continue billing. Inspect and remove them with the provider's native tools.
+Ordinary deletion never takes this escape path. `agw vm delete NAME --force` uses it only after its
+checkpoint cleanup attempt fails, then continues the already-explicit forced VM deletion.
 
 A target release already proved by the guest remains recorded even when later health checks or
 initialization still need repair.

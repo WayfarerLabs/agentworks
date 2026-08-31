@@ -43,10 +43,18 @@ database through the complete ordered ladder.
 Migration 34 performs no provider discovery and creates no checkpoint rows. Its VM primary key
 enforces one managed checkpoint per VM; future support for multiple checkpoints requires a
 deliberate forward migration and CLI selection design. The checkpoint table is included in database
-backup/restore projection. `vm delete` removes the provider artifact and row before deleting the VM,
-while the foreign key refuses an orphan-producing database delete. A schema check requires every
-upgrade checkpoint's immutable capture release to equal its source release; converter and lifecycle
-tests cover that invariant and a restore comparison after the VM records the upgrade target.
+backup/restore projection. `vm delete` normally removes the provider artifact and row before
+deleting the VM, while the foreign key refuses an orphan-producing database delete. Explicit forced
+checkpoint or VM deletion first tries normal reconciliation, then may disown the row with a distinct
+audit event and provider residue/billing warnings when cleanup cannot be proved. A schema check
+requires every upgrade checkpoint's immutable capture release to equal its source release; converter
+and lifecycle tests cover that invariant and a restore comparison after the VM records the upgrade
+target.
+
+Because migration 34 intentionally creates no ownership rows, fresh checkpoint creation inventories
+the provider before inserting one. An unrecorded managed artifact blocks adoption. List and describe
+keep persisted lifecycle state separate from restore eligibility derived from the current desired
+fingerprint; names-only listing performs neither live check.
 
 ### Population rules
 
@@ -74,18 +82,20 @@ before a release-sensitive mutation.
 
 ## 3. Creation cutover
 
-All platform selector maps, the vm-platform version 4 release/checkpoint contract, and create-time
-live validation land before Trixie's certified profile is appended to the active registry. The
-commits remain independently green by using explicit candidate-profile test fixtures until the final
-cutover commit performs that one append. Before the append, a live Trixie guest is an unrecognized
-release and release-sensitive mutation refuses with guidance to use a supporting Agentworks build;
-there is no separate ahead-of-current tier.
+All platform selector maps, the internal vm-platform version 1 release/checkpoint contract, and
+create-time live validation land before Trixie's certified profile is appended to the active
+registry. The commits remain independently green by using explicit candidate-profile test fixtures
+until the final cutover commit performs that one append. Before the append, a live Trixie guest is
+an unrecognized release and release-sensitive mutation refuses with guidance to use a supporting
+Agentworks build; there is no separate ahead-of-current tier.
 
 The VM manager supplies the concrete current release in every `ProvisionRequest`; platforms do not
-infer it. Exact capability conformance rejects an installed pre-version-4 platform before use. A
-version-4 platform resolves the request through its own map before backend mutation. A missing
-code-owned key reports that the platform or plugin is out of date; a missing operator-owned Proxmox
-key names the exact vm-site setting. Neither failure chooses a different release.
+infer it. Vm-platform remains an internal version-1 API, so its descriptor and all six bundled
+implementations mutate in the same green change. Exact capability conformance catches an
+inconsistent declaration or incomplete implementation. A conforming platform resolves the request
+through its own map before backend mutation. A missing code-owned key reports that Agentworks is out
+of date; a missing operator-owned Proxmox key names the exact vm-site setting. Neither failure
+chooses a different release.
 
 The manager's provisioning wrapper preserves those two typed errors and their remediation hints. A
 platform's live mismatch must raise while the platform can still roll back. After any platform
@@ -101,11 +111,10 @@ upgrade certification uses prebuilt Bookworm fixtures rather than a hidden creat
 The contract change updates `cli/agentworks/capabilities/README.md`,
 `cli/agentworks/capabilities/vm_platform/README.md`, and `cli/agentworks/plugins/README.md` in the
 same implementation merge unit. The base guide explains the domain-owned request value and hard
-contract-version cutover. The specific guide documents release-map lookup, missing-key errors,
-platform rollback verification, core-owned final attestation, and the tests required of built-in and
-plugin platforms. The plugin guide changes its example and create-contract teaching from version 2
-to version 4, including the mandatory managed checkpoint lifecycle. Topic prose and docstrings move
-with them.
+internal contract. The specific guide documents release-map lookup, missing-key errors, platform
+rollback verification, core-owned final attestation, and the tests required of bundled platforms.
+The system-plugin guide keeps its vm-platform example at version 1 while adding the mandatory
+managed checkpoint lifecycle. Topic prose and docstrings move with them.
 
 Existing VMs retain the platform metadata recorded at their original creation. Image mappings are
 used only to create a new backend VM; changing a map does not mutate or relabel an existing one.
@@ -203,10 +212,12 @@ upgrade journal. Exactly one journal resumes or diagnoses its validated adjacent
 eligibility is considered; multiple journals fail with repair guidance. Only without a journal does
 the command prove that the observed release is current-1 and select the final target profile's
 upgrade-from-previous policy. It performs the HLA preflight, updates no Debian suites, and shows a
-preliminary plan. It then creates the Agentworks backup and Debian recovery bundle, claims the VM's
-single checkpoint slot, temporarily stops the VM, creates and verifies the managed provider
-checkpoint, restarts the VM, and separately receives confirmation to bring the source release
-current within its existing suite.
+preliminary plan. It next validates the checkpoint row, transition identity, fingerprint, and live
+provider inventory without mutation. Only after that viability pass does it create the Agentworks
+backup and Debian recovery bundle, claim or resume the VM's single checkpoint slot, temporarily stop
+the VM, create and verify the managed provider checkpoint, restart the VM, and separately receive
+confirmation to bring the source release current within its existing suite. Reusing a matching
+checkpoint discloses its original creation time.
 
 After that update it closes and reopens the VM operation boundary, reruns the complete preflight and
 simulation, shows every material difference, and receives a second mutation confirmation before
@@ -245,7 +256,8 @@ the remaining outcome; remote progress does not duplicate Trixie observation or 
 Selected Agentworks APT sources are recreated from target mappings. Unmanaged sources remain
 disabled and are listed for manual review. Old source backups and upgrade logs remain until the
 operator completes the documented cleanup after validating the VM and deciding whether to retain or
-delete its managed checkpoint.
+delete its managed checkpoint. Successful output names that retained checkpoint, warns about
+continuing provider storage charges, and supplies the exact deletion command.
 
 ## 8. Fresh-VM fallback
 
@@ -284,8 +296,8 @@ The implementation lands in independently reviewable phases:
 1. ordered core release type, relative support classifier, database observation, release-keyed Phase
    B values, output, and no-selector contract as one merge unit;
 2. disk-backed staging corrections;
-3. vm-platform version 4 release/checkpoint contract, platform image maps, Proxmox transition,
-   capability READMEs, and Trixie create validation;
+3. internal vm-platform version 1 release/checkpoint contract, platform image maps, Proxmox
+   transition, capability READMEs, and Trixie create validation;
 4. the adjacent durable `vm upgrade` workflow and permanent recovery teaching;
 5. live platform certification, relative support teaching, superseding ADR, and release cutover.
 
