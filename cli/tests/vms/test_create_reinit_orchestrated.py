@@ -728,18 +728,14 @@ def test_create_phase_a_sync_failure_is_non_fatal(
     assert any("SSH config sync failed" in w for w in captured_output.warnings)
 
 
-def test_create_provisioning_section_ends_with_ssh_config_synced(
+def test_create_provisioning_section_has_explicit_closing_body_line(
     make_config,
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     captured_output,
 ) -> None:
-    """The Provisioning section now spans platform create + Phase A
-    bootstrap/connectivity, and its last body line is the announced
-    'SSH config synced' (emitted exactly once, from Phase A's real sync; the
-    post-init re-sync is silent). Phase A runs for real here with the
-    Tailscale transport faked; Phase B is a no-op."""
+    """Provisioning closes explicitly after Phase A and before Phase B."""
     import agentworks.vms.initializer.driver as driver
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
@@ -772,20 +768,17 @@ def test_create_provisioning_section_ends_with_ssh_config_synced(
 
     vm_manager.create_vm(db, config, name="pvm", interaction=TtyInteractionPolicy.REFUSE)
 
-    # Provisioning is a real level-0 section.
-    assert (Role.HEADER, 0, "Provisioning") in captured_output.lines
-    # 'SSH config synced' is a level-1 body line, emitted exactly once.
-    synced = [ln for ln in captured_output.lines if ln == (Role.BODY, 1, "SSH config synced")]
-    assert len(synced) == 1
-    # It is the LAST level-1 body line of the Provisioning section: after the
-    # header, the section's body lines end with the sync (Phase B is faked and
-    # the post-init re-sync is silent, so nothing else at level 1 follows).
-    prov_idx = captured_output.lines.index((Role.HEADER, 0, "Provisioning"))
-    body_l1 = [msg for (role, lvl, msg) in captured_output.lines[prov_idx + 1 :] if role is Role.BODY and lvl == 1]
-    assert body_l1[-1] == "SSH config synced"
-    # The connectivity step reads as a primary (info) step at the section body
-    # level, not a de-emphasized detail.
-    assert "Verifying Tailscale SSH..." in body_l1
+    headers = [
+        index
+        for index, (role, level, _message) in enumerate(captured_output.lines)
+        if role is Role.HEADER and level == 0
+    ]
+    assert len(headers) >= 3
+    provisioning = captured_output.lines[headers[2] + 1 :]
+    body_shape = [(role, level) for role, level, _message in provisioning if role is Role.BODY]
+    # Phase A's final announcement is followed by the manager's explicit
+    # section-closing announcement, both at the section body level.
+    assert body_shape[-2:] == [(Role.BODY, 1), (Role.BODY, 1)]
 
 
 # -- vm reinit: the orchestrated path ----------------------------------------

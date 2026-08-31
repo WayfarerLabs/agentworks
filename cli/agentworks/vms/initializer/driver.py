@@ -104,7 +104,7 @@ def bootstrap_vm(
     Runs over the provisioning transport after platform-owned bootstrap:
     optional Tailscale IP rediscovery, Tailscale-SSH verification, the
     post-Tailscale-ready hook plus reconnect wait, and finally the SSH-config
-    sync (the last line of the caller's ``Provisioning`` section). Only the
+    sync before the caller's explicit provisioning-complete line. Only the
     IP discovery or verification is fatal to provisioning: a failure there means the VM is
     unreachable, so it marks provisioning ``failed``, records the
     ``provisioning_failed`` event, secures the kept VM via the platform's
@@ -222,8 +222,8 @@ def bootstrap_vm(
         wait_for_reconnect(ts_target)
 
     # Sync the operator's SSH config now that connectivity is verified. This is
-    # the last step of Phase A (and the last line of the caller's Provisioning
-    # section): the VM's Tailscale IP is recorded and the connection is
+    # the last step of Phase A before the caller announces completion: the VM's
+    # Tailscale IP is recorded and the connection is
     # confirmed, so operator-facing ``ssh awvm--<name>`` aliases are in place
     # before Phase B's many SSH calls. Non-fatal: a local ``~/.ssh/config``
     # write failure (permissions, read-only home) has nothing to do with VM

@@ -497,7 +497,7 @@ def create_vm(
                 # The primary provisioning step: promoted to info so it sits at
                 # the section body level (the platform's own sub-steps render as
                 # detail one notch deeper).
-                output.info(f"Creating VM '{vm_name}' on vm-site '{site}'...")
+                output.info(f"Creating VM '{vm_name}' on vm-site '{site}' ({creation_release.value})...")
             except BaseException:
                 log.unwind()
                 raise
@@ -557,6 +557,7 @@ def create_vm(
             # its rollback window, the failed row still addresses the backend
             # for an explicit delete.
             try:
+                output.info(f"Confirming Debian release {creation_release.value}...")
                 observed_release = verify_provisioned_release(
                     result.native_transport,
                     creation_release,
@@ -585,8 +586,8 @@ def create_vm(
             # the remote host and is kept (debuggable, reinit-able). The hold is
             # entered here so it spans Phase A and Phase B; the row exists (the
             # insert above), so no power-state convergence is threaded, only the
-            # hold-span. Phase A closes the Provisioning section with the
-            # announced "SSH config synced" line.
+            # hold-span. The manager closes the Provisioning section explicitly
+            # after Phase A returns.
             init_row = db.get_vm(vm_name)
             assert init_row is not None, "create_vm inserted the row before init"
             try:
@@ -606,6 +607,7 @@ def create_vm(
                     tailscale_ip=result.tailscale_ip,
                     on_tailscale_ready=_on_tailscale_ready,
                 )
+                output.info("Provisioning complete.")
             except (KeyboardInterrupt, UserAbort):
                 # An operator abort must never downgrade to a
                 # Provisioning/External error; re-raise as itself after the
@@ -645,8 +647,8 @@ def create_vm(
             _raise_init_failure(db, vm_name, e)
 
     # -- Post-init: SSH config re-sync --
-    # Phase A already synced and announced "SSH config synced" as the last
-    # line of Provisioning; this re-sync captures any state Phase B changed
+    # Phase A already synced and announced the first SSH-config update before
+    # Provisioning completed; this re-sync captures any state Phase B changed
     # (nothing today) and stays silent (announce=False) to avoid a duplicate
     # line.
     try:

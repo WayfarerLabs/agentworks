@@ -602,11 +602,15 @@ restart instead of applying Debian udev naming rules to them.
 
 ## CLI, diagnostics, and machine output
 
-`vm list` gains release and relative support columns after its names-only short circuit.
-`vm describe` shows the last verified release, observation timestamp, derived `current`, `previous`,
-or `legacy` status, and relevant upgrade events. JSON v1 gains additive nullable `debian_release`
-and `debian_release_observed_at` fields; the command reference defines recognized-codename and null
-semantics. Support position remains derived rather than persisted.
+`vm create` includes the selected codename in its opening provisioning line, announces the core
+release-attestation step, and closes the provisioning section explicitly after Phase A succeeds.
+
+`vm list` gains a release column after its names-only short circuit. It omits the relative support
+column because that value is entirely derived from the release and would duplicate it in the compact
+inventory view. `vm describe` shows the last verified release, observation timestamp, derived
+`current`, `previous`, or `legacy` status, and relevant upgrade events. JSON v1 gains additive
+nullable `debian_release` and `debian_release_observed_at` fields; the command reference defines
+recognized-codename and null semantics. Support position remains derived rather than persisted.
 
 The completion spec maps `vm.upgrade`'s `name` operand to VM names. `vm upgrade` itself has no JSON
 mode in this first interactive release. Durable logs and recovery artifacts are file outputs, while

@@ -120,6 +120,10 @@ returned backend identifiers, it independently verifies the returned transport. 
 retains one failed, uninitialized VM row so `vm delete` can still address the backend; it does not
 report success or discard the only cleanup handle.
 
+The provisioning section identifies the selected Debian release in its opening creation line,
+announces core's independent release confirmation, and emits an explicit completion line only after
+the provisioning phase has completed.
+
 The feature does not claim a platform until its real create, initialize, reboot, reconnect, backup,
 and delete path has passed the Trixie certification matrix for every architecture Agentworks exposes
 on that platform. The implementation updates the capability-model README, vm-platform README, and
@@ -140,11 +144,12 @@ have upgraded by hand.
 
 `vm list`, `vm describe`, and JSON v1 expose the recognized Debian codename or `null`. `null` means
 no live observation has established the fact. It is not rendered as Bookworm and is not treated as
-drift. Adding a future recognized release does not require a database schema migration. Where a live
-probe disagrees with the last verified row, the release-sensitive operation stops and reports both
-values before changing the guest or database. `vm upgrade` owns the one reconciliation path: it can
-validate and adopt an already-current guest after explicit operator confirmation rather than strand
-a VM that was upgraded outside Agentworks. Trixie is the first current target.
+drift. The compact list renders only the codename; `vm describe` also renders the derived relative
+support tier. Adding a future recognized release does not require a database schema migration. Where
+a live probe disagrees with the last verified row, the release-sensitive operation stops and reports
+both values before changing the guest or database. `vm upgrade` owns the one reconciliation path: it
+can validate and adopt an already-current guest after explicit operator confirmation rather than
+strand a VM that was upgraded outside Agentworks. Trixie is the first current target.
 
 ### R4: Every release-specific value is selected from a release map
 

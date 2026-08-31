@@ -52,7 +52,6 @@ class VMListRow:
     created_at: str
     debian_release: str | None = None
     debian_release_observed_at: str | None = None
-    debian_support: str | None = None
 
 
 @dataclass(frozen=True)
@@ -401,7 +400,6 @@ def vm_listing(db: Database) -> VMListing:
                 created_at=vm.created_at,
                 debian_release=vm.debian_release.value if vm.debian_release is not None else None,
                 debian_release_observed_at=vm.debian_release_observed_at,
-                debian_support=classify_release(vm.debian_release).value if vm.debian_release is not None else None,
             )
             for vm in db.list_vms()
         )
@@ -436,7 +434,7 @@ def render_vm_listing(listing: VMListing, *, names_only: bool = False) -> None:
 
     header = (
         f"{'NAME':<{name_w}} {'SITE':<12} {'TEMPLATE':<12} {'PROV':<12} {'INIT':<12} "
-        f"{'WS/AG/SE':<10} {'DEBIAN':<10} {'SUPPORT':<10} {'TAILSCALE':<20} {'CREATED'}"
+        f"{'WS/AG/SE':<10} {'DEBIAN':<10} {'TAILSCALE':<20} {'CREATED'}"
     )
     output.info(header)
     output.info("-" * len(header))
@@ -445,8 +443,7 @@ def render_vm_listing(listing: VMListing, *, names_only: bool = False) -> None:
         output.info(
             f"{name:<{name_w}} {vm.site:<12} {vm.template or '-':<12} "
             f"{vm.provisioning_status:<12} {vm.initialization_status:<12} "
-            f"{counts:<10} {vm.debian_release or '-':<10} {vm.debian_support or '-':<10} "
-            f"{vm.tailscale_host or '-':<20} {vm.created_at}"
+            f"{counts:<10} {vm.debian_release or '-':<10} {vm.tailscale_host or '-':<20} {vm.created_at}"
         )
 
 
